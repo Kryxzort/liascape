@@ -28,6 +28,7 @@ public partial class MainWindow : Window
 
     // Playlist drag state
     private WallpaperCardViewModel? _dragCard;
+    private Visual? _dragSourceVisual;
     private bool _isDragging;
     private Point _dragStartPos;
 
@@ -171,6 +172,7 @@ public partial class MainWindow : Window
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, PlaylistScrollViewer);
             if (card == null) return;
             _dragCard = card;
+            _dragSourceVisual = FindAncestor<Border>(source, PlaylistScrollViewer);
             _isDragging = false;
             _dragStartPos = e.GetPosition(this);
         }
@@ -203,7 +205,11 @@ public partial class MainWindow : Window
             if (dx * dx + dy * dy < 36) return; // 6px threshold
 
             _isDragging = true;
-            DragPreviewImage.Source = _dragCard.ThumbnailSource;
+            DragPreviewBorder.Background = new Avalonia.Media.VisualBrush
+            {
+                Visual = _dragSourceVisual,
+                Stretch = Avalonia.Media.Stretch.Fill
+            };
             DragPreviewCanvas.IsVisible = true;
         }
 
@@ -228,6 +234,7 @@ public partial class MainWindow : Window
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
         _dragCard = null;
+        _dragSourceVisual = null;
         _isDragging = false;
     }
 
@@ -256,6 +263,7 @@ public partial class MainWindow : Window
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
         _dragCard = null;
+        _dragSourceVisual = null;
         _isDragging = false;
     }
 
@@ -300,6 +308,16 @@ public partial class MainWindow : Window
             v = v.GetVisualParent();
         }
         return false;
+    }
+
+    private static T? FindAncestor<T>(Visual? v, Visual? stopAt = null) where T : Visual
+    {
+        while (v != null && v != stopAt)
+        {
+            if (v is T match) return match;
+            v = v.GetVisualParent();
+        }
+        return null;
     }
 
     private static T? FindAncestorDataContext<T>(Visual? v, Visual? stopAt = null) where T : class

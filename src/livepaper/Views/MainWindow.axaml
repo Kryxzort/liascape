@@ -1297,14 +1297,10 @@
                 IsHitTestVisible="False"
                 IsVisible="False">
             <Border x:Name="DragPreviewBorder"
-                    Width="50" Height="45"
+                    Width="100" Height="90"
                     CornerRadius="4"
                     ClipToBounds="True"
-                    Opacity="0.85">
-                <asyncImageLoader:AdvancedImage x:Name="DragPreviewImage"
-                    Stretch="UniformToFill"
-                    Width="50" Height="45"/>
-            </Border>
+                    Opacity="0.85"/>
         </Canvas>
 
     </Grid>
