@@ -16,6 +16,21 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
+    <Window.Resources>
+        <ControlTemplate x:Key="ThumbnailDisplay" TargetType="TemplatedControl">
+            <Panel x:DataType="vm:WallpaperCardViewModel">
+                <asyncImageLoader:AdvancedImage
+                    Source="{Binding ThumbnailSource}"
+                    Stretch="UniformToFill"
+                    RenderOptions.BitmapInterpolationMode="LowQuality"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                <Viewbox IsVisible="{Binding IsGifActive}" Stretch="UniformToFill">
+                    <gif:GifImage Source="{Binding ActiveGifSource}"/>
+                </Viewbox>
+            </Panel>
+        </ControlTemplate>
+    </Window.Resources>
+
     <Grid RowDefinitions="*,Auto">
 
             <TabControl Grid.Row="0" x:Name="MainTabControl">
@@ -150,13 +165,17 @@
                                                         Command="{Binding $parent[Window].DataContext.DownloadCommand}"
                                                         CommandParameter="{Binding}"/>
 
-                                                <!-- Selection overlay -->
-                                                <Border Grid.RowSpan="3"
-                                                        IsVisible="{Binding IsSelected}"
-                                                        BorderBrush="{DynamicResource Accent}"
-                                                        BorderThickness="2.5"
-                                                        CornerRadius="10"
-                                                        IsHitTestVisible="False"/>
+                                                <!-- State overlays -->
+                                                <Panel Grid.RowSpan="3" IsHitTestVisible="False">
+                                                    <Border Classes="library-hover-outline"
+                                                            BorderBrush="{DynamicResource Accent}"
+                                                            BorderThickness="2.5"
+                                                            CornerRadius="10"/>
+                                                    <Border IsVisible="{Binding IsSelected}"
+                                                            BorderBrush="{DynamicResource Accent}"
+                                                            BorderThickness="2.5"
+                                                            CornerRadius="10"/>
+                                                </Panel>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -481,13 +500,21 @@
                                                                 CommandParameter="{Binding}"/>
                                                     </Grid>
 
-                                                    <!-- Selection overlay -->
-                                                    <Border Grid.RowSpan="3"
-                                                            IsVisible="{Binding IsSelected}"
-                                                            BorderBrush="{DynamicResource Accent}"
-                                                            BorderThickness="2.5"
-                                                            CornerRadius="10"
-                                                            IsHitTestVisible="False"/>
+                                                    <!-- State overlays -->
+                                                    <Panel Grid.RowSpan="3" IsHitTestVisible="False">
+                                                        <Border Classes="library-hover-outline"
+                                                                BorderBrush="{DynamicResource Accent}"
+                                                                BorderThickness="2.5"
+                                                                CornerRadius="10"/>
+                                                        <Border IsVisible="{Binding IsSelected}"
+                                                                BorderBrush="{DynamicResource Accent}"
+                                                                BorderThickness="2.5"
+                                                                CornerRadius="10"/>
+                                                        <Border IsVisible="{Binding HasCrashed}"
+                                                                BorderBrush="{DynamicResource Danger}"
+                                                                BorderThickness="2.5"
+                                                                CornerRadius="10"/>
+                                                    </Panel>
 
                                                 </Grid>
                                             </Border>
