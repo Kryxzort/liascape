@@ -42,7 +42,9 @@ public static class DownloadHelper
 
         if (!string.IsNullOrEmpty(thumbnailUrl))
         {
-            thumbPath = Path.Combine(LibraryPath, safeTitle + ".jpg");
+            string thumbExt = Path.GetExtension(thumbnailUrl);
+            if (string.IsNullOrEmpty(thumbExt)) thumbExt = ".jpg";
+            thumbPath = Path.Combine(LibraryPath, safeTitle + thumbExt);
             try
             {
                 if (File.Exists(thumbnailUrl))

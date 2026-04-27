@@ -24,7 +24,8 @@
                     Source="{Binding ThumbnailSource}"
                     Stretch="UniformToFill"
                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-                <Viewbox IsVisible="{Binding IsGifActive}" Stretch="UniformToFill">
+                <Viewbox IsVisible="{Binding IsGifActive}" Stretch="Uniform"
+                         HorizontalAlignment="Center" VerticalAlignment="Center">
                     <gif:GifImage Source="{Binding ActiveGifSource}"/>
                 </Viewbox>
             </Panel>
