@@ -15,14 +15,20 @@ namespace livepaper.Views;
 
 public partial class MainWindow : Window
 {
+    // Layout constants
+    private const double MinCardWidthLandscape = 250;
+    private const double MinCardWidthPortrait = 160;
+    private const double CardHorizontalMargin = 8;
+    private const double PlaylistItemWidth = 100;
+    private const double PlaylistItemSpacing = 6;
+    private const double PlaylistItemStride = PlaylistItemWidth + PlaylistItemSpacing;
+
+    private double _lastRepeaterWidth;
+
     // Playlist drag state
     private WallpaperCardViewModel? _dragCard;
     private bool _isDragging;
     private Point _dragStartPos;
-
-    private const double PlaylistItemWidth = 100;
-    private const double PlaylistItemSpacing = 6;
-    private const double PlaylistItemStride = PlaylistItemWidth + PlaylistItemSpacing;
 
     public MainWindow()
     {
@@ -30,6 +36,13 @@ public partial class MainWindow : Window
         BrowseScrollViewer.ScrollChanged += OnBrowseScrollChanged;
         DataContextChanged += OnDataContextChanged;
         KeyDown += OnKeyDown;
+        Loaded += (_, _) =>
+        {
+            BrowseItemsRepeater.SizeChanged += (_, _) => UpdateCardThumbnailHeight();
+            LibraryItemsRepeater.SizeChanged += (_, _) => UpdateCardThumbnailHeight();
+            if (Vm != null) Vm.CardLayoutChanged = UpdateCardThumbnailHeight;
+            UpdateCardThumbnailHeight();
+        };
 
         this.AddHandler(PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -311,6 +324,34 @@ public partial class MainWindow : Window
 
         if (BrowseScrollViewer.Extent.Height <= BrowseScrollViewer.Viewport.Height)
             vm.LoadMoreCommand.Execute(null);
+    }
+
+    private void UpdateCardThumbnailHeight()
+    {
+        if (Vm == null) return;
+        var width = BrowseItemsRepeater.Bounds.Width > 0
+            ? BrowseItemsRepeater.Bounds.Width
+            : LibraryItemsRepeater.Bounds.Width;
+        if (width > 0) _lastRepeaterWidth = width;
+        else width = _lastRepeaterWidth;
+        if (width <= 0) return;
+        (double minCardWidth, double ratio) = Vm.ThumbnailAspect switch
+        {
+            "1:1"  => (MinCardWidthPortrait,  1.0),
+            "16:9" => (MinCardWidthLandscape, 9.0 / 16.0),
+            _      => (210.0,                 150.0 / 210.0),
+        };
+        double sizeMultiplier = Vm.CardSize switch
+        {
+            "Small" => 0.65,
+            "Large" => 1.5,
+            _       => 1.0,
+        };
+        minCardWidth *= sizeMultiplier;
+        Vm.CardMinWidth = minCardWidth;
+        int cols = Math.Max(1, (int)Math.Floor(width / minCardWidth));
+        double cardWidth = width / cols - CardHorizontalMargin;
+        Vm.CardThumbnailHeight = Math.Round(cardWidth * ratio);
     }
 
     private void OnBrowseScrollChanged(object? sender, ScrollChangedEventArgs e)

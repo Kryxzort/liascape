@@ -108,27 +108,29 @@
                         <!-- Wallpaper grid -->
                         <ScrollViewer x:Name="BrowseScrollViewer"
                                       Padding="12,12,12,0">
-                            <ItemsControl ItemsSource="{Binding BrowseWallpapers}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Margin="0,0,0,32"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
+                            <ItemsRepeater x:Name="BrowseItemsRepeater"
+                                           ItemsSource="{Binding BrowseWallpapers}"
+                                           Margin="10,0,0,0"
+                                           VerticalCacheLength="1">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="{Binding $parent[Window].DataContext.CardMinWidth}" ItemsStretch="Fill"/>
+                                </ItemsRepeater.Layout>
+                                <ItemsRepeater.ItemTemplate>
                                     <DataTemplate x:DataType="vm:WallpaperCardViewModel">
-                                        <Border Width="210" Margin="6" CornerRadius="10"
+                                        <Border Margin="6" CornerRadius="10"
                                                 ClipToBounds="True"
                                                 Background="{DynamicResource BgBase}">
-                                            <Grid RowDefinitions="150,*,Auto">
+                                            <Grid RowDefinitions="Auto,*,Auto">
 
                                                 <Button Grid.Row="0" Padding="0"
                                                         Background="Transparent" BorderThickness="0"
+                                                        HorizontalAlignment="Stretch"
+                                                        Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                         Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                         CommandParameter="{Binding}">
                                                     <asyncImageLoader:AdvancedImage
                                                         Source="{Binding ThumbnailSource}"
-                                                        Stretch="UniformToFill"
-                                                        Width="210" Height="150"/>
+                                                        Stretch="UniformToFill"/>
                                                 </Button>
 
                                                 <TextBlock Grid.Row="1"
@@ -157,8 +159,8 @@
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                                </ItemsRepeater.ItemTemplate>
+                            </ItemsRepeater>
                         </ScrollViewer>
 
                     </DockPanel>
@@ -403,15 +405,16 @@
 
                             <!-- Library grid -->
                             <ScrollViewer x:Name="LibraryScrollViewer" Padding="12,12,12,0">
-                                <ItemsControl ItemsSource="{Binding FilteredLibraryWallpapers}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel Margin="0,0,0,32"/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
+                                <ItemsRepeater x:Name="LibraryItemsRepeater"
+                                               ItemsSource="{Binding FilteredLibraryWallpapers}"
+                                               Margin="10,0,0,0"
+                                               VerticalCacheLength="1">
+                                    <ItemsRepeater.Layout>
+                                        <UniformGridLayout MinItemWidth="{Binding $parent[Window].DataContext.CardMinWidth}" ItemsStretch="Fill"/>
+                                    </ItemsRepeater.Layout>
+                                    <ItemsRepeater.ItemTemplate>
                                         <DataTemplate x:DataType="vm:WallpaperCardViewModel">
-                                            <Border Width="210" Margin="6" CornerRadius="10"
+                                            <Border Margin="6" CornerRadius="10"
                                                     ClipToBounds="True"
                                                     Background="{DynamicResource BgBase}">
                                                 <Border.ContextMenu>
@@ -420,18 +423,19 @@
                                                                   Command="{Binding AddToPlaylistCommand}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
-                                                <Grid RowDefinitions="150,*,Auto">
+                                                <Grid RowDefinitions="Auto,*,Auto">
 
-                                                    <!-- Thumbnail + checkmark -->
-                                                    <Grid Grid.Row="0">
+                                                    <!-- Thumbnail + badges -->
+                                                    <Grid Grid.Row="0"
+                                                          Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}">
                                                         <Button Padding="0"
                                                                 Background="Transparent" BorderThickness="0"
+                                                                HorizontalAlignment="Stretch"
                                                                 Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                                 CommandParameter="{Binding}">
                                                             <asyncImageLoader:AdvancedImage
                                                                 Source="{Binding ThumbnailSource}"
-                                                                Stretch="UniformToFill"
-                                                                Width="210" Height="150"/>
+                                                                Stretch="UniformToFill"/>
                                                         </Button>
 
                                                         <!-- Checkmark badge -->
@@ -485,8 +489,8 @@
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                    </ItemsRepeater.ItemTemplate>
+                                </ItemsRepeater>
                             </ScrollViewer>
 
                         </DockPanel>
@@ -584,7 +588,7 @@
 
                 <!-- ── Settings ── -->
                 <TabItem Header="Settings">
-                    <ScrollViewer>
+                    <ScrollViewer x:Name="SettingsScrollViewer">
                         <StackPanel Margin="28" Spacing="20">
 
                             <TextBlock Text="Playback"

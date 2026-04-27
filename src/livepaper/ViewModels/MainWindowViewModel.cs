@@ -22,6 +22,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty] private AppTheme _selectedTheme = ThemeService.Default;
 
+    public string[] ThumbnailAspectOptions { get; } = ["Default", "16:9", "1:1"];
+    public string[] CardSizeOptions { get; } = ["Small", "Medium", "Large"];
+    public Action? CardLayoutChanged { get; set; }
+
     public List<IBgsProvider> Sources { get; } =
     [
         new MotionBgsService(),
@@ -141,6 +145,10 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private int _demuxerMaxBytes;
     [ObservableProperty] private int _demuxerMaxBackBytes;
     [ObservableProperty] private string _hwDec = "";
+    [ObservableProperty] private double _cardThumbnailHeight = 150;
+    [ObservableProperty] private double _cardMinWidth = 210;
+    [ObservableProperty] private string _thumbnailAspect = "Default";
+    [ObservableProperty] private string _cardSize = "Medium";
     [ObservableProperty] private int _volume;
     [ObservableProperty] private string _mpvOptionsPreview = "";
     [ObservableProperty] private bool _autoMute;
@@ -529,12 +537,21 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnDemuxerMaxBytesChanged(int value) => SaveAndRebuild();
     partial void OnDemuxerMaxBackBytesChanged(int value) => SaveAndRebuild();
     partial void OnHwDecChanged(string value) => SaveAndRebuild();
+<<<<<<< HEAD
     partial void OnSelectedThemeChanged(AppTheme value)
     {
         ThemeService.Apply(value);
         _settings.Theme = value.Name;
         SettingsService.Save(_settings);
     }
+=======
+<<<<<<< HEAD
+=======
+    partial void OnVideoScaleChanged(string value) { Task.Run(() => PlayerHelper.SetVideoScale(value)); SaveAndRebuild(); }
+    partial void OnThumbnailAspectChanged(string value) { CardLayoutChanged?.Invoke(); }
+    partial void OnCardSizeChanged(string value) { CardLayoutChanged?.Invoke(); }
+>>>>>>> c0a4438 (Add responsive card grid with ItemsRepeater and UniformGridLayout)
+>>>>>>> 26c8287 (Add responsive card grid with ItemsRepeater and UniformGridLayout)
     partial void OnVolumeChanged(int value)
     {
         Task.Run(() => PlayerHelper.SetVolume(value));
