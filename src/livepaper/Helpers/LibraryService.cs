@@ -97,6 +97,8 @@ public static class LibraryService
             string? workshopId = ParseWorkshopId(sourceId, mp4, idFile);
             bool hasCrashed = File.Exists(Path.ChangeExtension(mp4, ".crashed"));
             bool isWhitelisted = File.Exists(Path.ChangeExtension(mp4, ".whitelist"));
+            int? volumeOverride = ReadVolumeOverride(mp4);
+            double? speedOverride = ReadSpeedOverride(mp4);
             var fi = new FileInfo(mp4);
 
             items.Add(new LibraryItem
@@ -108,6 +110,8 @@ public static class LibraryService
                 WorkshopId = workshopId,
                 HasCrashed = hasCrashed,
                 IsWhitelisted = isWhitelisted,
+                VolumeOverride = volumeOverride,
+                SpeedOverride = speedOverride,
                 AddedAt = fi.CreationTime
             });
         }
@@ -122,6 +126,8 @@ public static class LibraryService
             try { workshopId = File.ReadAllText(scene).Trim(); } catch { }
             bool hasCrashed = File.Exists(Path.ChangeExtension(scene, ".crashed"));
             bool isWhitelisted = File.Exists(Path.ChangeExtension(scene, ".whitelist"));
+            int? volumeOverride = ReadVolumeOverride(scene);
+            double? speedOverride = ReadSpeedOverride(scene);
             var fi = new FileInfo(scene);
 
             items.Add(new LibraryItem
@@ -134,6 +140,8 @@ public static class LibraryService
                 WorkshopId = workshopId,
                 HasCrashed = hasCrashed,
                 IsWhitelisted = isWhitelisted,
+                VolumeOverride = volumeOverride,
+                SpeedOverride = speedOverride,
                 AddedAt = fi.CreationTime
             });
         }

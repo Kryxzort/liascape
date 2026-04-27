@@ -949,6 +949,11 @@ public static class PlayerHelper
     public static void SetVolume(int volume) =>
         SendCommand("set_property", "volume", (double)volume);
 
+    public static void SetSpeed(double speed)
+    {
+        SendCommand("set_property", "speed", speed);
+    }
+
     // Adjust volume by `delta` (clamped 0-100). Updates the persisted setting
     // so subsequent launches and the GUI slider reflect the change, and also
     // pushes to the running mpv via IPC for an immediate effect.

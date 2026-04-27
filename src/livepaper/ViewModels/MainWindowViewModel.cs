@@ -369,6 +369,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Models.AppSettings _settings;
     private CancellationTokenSource? _volumeSaveCts;
     private CancellationTokenSource? _playlistSaveCts;
+    private bool _isSyncingVolume;
+    private bool _isSyncingSpeed;
 
     private static string PlaylistStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -468,6 +470,8 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnVolumeChanged(int value)
     {
         Task.Run(() => PlayerHelper.SetVolume(value));
+        foreach (var c in LibraryWallpapers)
+            c.UpdateGlobalVolume(value);
 
         _volumeSaveCts?.Cancel();
         _volumeSaveCts?.Dispose();
@@ -1249,10 +1253,44 @@ public partial class MainWindowViewModel : ViewModelBase
             LibraryWallpapers.Add(MakeLibraryCard(item));
     }
 
+    private void SyncSelectedVolume(WallpaperCardViewModel source, int? volume)
+    {
+        if (_isSyncingVolume || !source.IsSelected) return;
+        _isSyncingVolume = true;
+        try
+        {
+            foreach (var c in LibraryWallpapers.Where(c => c.IsSelected && c != source))
+            {
+                if (volume.HasValue) c.SliderVolume = volume.Value;
+                else c.SyncToGlobalCommand.Execute(null);
+            }
+        }
+        finally { _isSyncingVolume = false; }
+    }
+
+    private void SyncSelectedSpeed(WallpaperCardViewModel source, double? speed)
+    {
+        if (_isSyncingSpeed || !source.IsSelected) return;
+        _isSyncingSpeed = true;
+        try
+        {
+            foreach (var c in LibraryWallpapers.Where(c => c.IsSelected && c != source))
+            {
+                if (speed.HasValue) c.SliderSpeed = speed.Value;
+                else c.SyncSpeedToGlobalCommand.Execute(null);
+            }
+        }
+        finally { _isSyncingSpeed = false; }
+    }
+
     private WallpaperCardViewModel MakeLibraryCard(LibraryItem item)
     {
         var card = new WallpaperCardViewModel(item);
         card.OnTogglePlaylist = c => ToggleInPlaylistCommand.Execute(c);
+        card.OnVolumeChanged = (c, v) => SyncSelectedVolume(c, v);
+        card.UpdateGlobalVolume(Volume);
+        card.OnSpeedChanged = (c, v) => SyncSelectedSpeed(c, v);
+        card.UpdateGlobalSpeed(1.0);
         return card;
     }
 

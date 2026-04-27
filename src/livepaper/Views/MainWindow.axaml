@@ -1020,14 +1020,83 @@
             <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="16"
                     MaxWidth="860" MaxHeight="600"
                     HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Grid RowDefinitions="*,Auto">
+                <Grid RowDefinitions="*,Auto,Auto,Auto">
 
                     <asyncImageLoader:AdvancedImage Grid.Row="0"
                         Source="{Binding PreviewCard.ThumbnailSource}"
                         Stretch="Uniform"
                         MaxWidth="828" MaxHeight="500"/>
 
-                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
+                    <!-- Per-wallpaper volume override -->
+                    <Border Grid.Row="1"
+                            IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            Background="{StaticResource BgCrust}"
+                            CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                            <TextBlock Grid.Column="0"
+                                       Text="Volume"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextColor}"
+                                       Width="56"/>
+                            <Slider Grid.Column="1"
+                                    Minimum="0" Maximum="100"
+                                    TickFrequency="1" IsSnapToTickEnabled="True"
+                                    Value="{Binding PreviewCard.SliderVolume}"
+                                    VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding PreviewCard.SliderVolume}"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource Subtext}"
+                                       Width="30" TextAlignment="Right"
+                                       Margin="8,0,0,0"/>
+                            <Button Grid.Column="3"
+                                    Content="↺ Global"
+                                    Classes="ghost"
+                                    FontSize="11"
+                                    Padding="10,6"
+                                    Margin="8,0,0,0"
+                                    IsVisible="{Binding !PreviewCard.IsVolumeSynced}"
+                                    ToolTip.Tip="Reset to global volume"
+                                    Command="{Binding PreviewCard.SyncToGlobalCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Per-wallpaper speed override -->
+                    <Border Grid.Row="2"
+                            IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            Background="{StaticResource BgCrust}"
+                            CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                            <TextBlock Grid.Column="0"
+                                       Text="Speed"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextColor}"
+                                       Width="56"/>
+                            <Slider Grid.Column="1"
+                                    Minimum="0.1" Maximum="4"
+                                    TickFrequency="0.1"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding PreviewCard.SliderSpeed}"
+                                    VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding PreviewCard.SliderSpeed, StringFormat='{}{0:F1}x'}"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource Subtext}"
+                                       Width="36" TextAlignment="Right"
+                                       Margin="8,0,0,0"/>
+                            <Button Grid.Column="3"
+                                    Content="↺ Global"
+                                    Classes="ghost"
+                                    FontSize="11"
+                                    Padding="10,6"
+                                    Margin="8,0,0,0"
+                                    IsVisible="{Binding !PreviewCard.IsSpeedSynced}"
+                                    ToolTip.Tip="Reset to global speed"
+                                    Command="{Binding PreviewCard.SyncSpeedToGlobalCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
                         <TextBlock Grid.Column="0"
                                    Text="{Binding PreviewCard.Title}"
                                    VerticalAlignment="Center"
