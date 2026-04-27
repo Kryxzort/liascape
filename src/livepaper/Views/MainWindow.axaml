@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:asyncImageLoader="clr-namespace:AsyncImageLoader;assembly=AsyncImageLoader.Avalonia"
+        xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
         x:Class="livepaper.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -208,9 +209,7 @@
                                                               CommandParameter="5"/>
                                                 </MenuFlyout>
                                             </Button.Flyout>
-                                            <TextBlock Text="⇅" FontSize="16"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                            <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>
                                         </Button>
                                         <TextBox Text="{Binding LibrarySearchQuery}"
                                                  PlaceholderText="Search…"
