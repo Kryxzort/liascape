@@ -962,6 +962,12 @@ public static class PlayerHelper
         SendCommand("set_property", "speed", speed);
     }
 
+    public static void SetVideoScale(string scale)
+    {
+        double panscan = scale == "fill" ? 1.0 : 0.0;
+        SendCommand("set_property", "panscan", panscan);
+    }
+
     // Adjust volume by `delta` (clamped 0-100). Updates the persisted setting
     // so subsequent launches and the GUI slider reflect the change, and also
     // pushes to the running mpv via IPC for an immediate effect.

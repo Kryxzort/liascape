@@ -783,14 +783,22 @@
                                        Foreground="{DynamicResource Muted}"
                                        LetterSpacing="2"/>
                             <Border Background="{DynamicResource BgBase}" CornerRadius="10" Padding="16">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Grid.Column="0"
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,12,Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0"
                                                Text="Hardware decoding"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextColor}"/>
-                                    <ComboBox Grid.Column="1"
+                                    <ComboBox Grid.Row="0" Grid.Column="1"
                                               ItemsSource="{Binding HwDecOptions}"
                                               SelectedItem="{Binding HwDec}"
+                                              Width="130"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0"
+                                               Text="Video scale"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextColor}"/>
+                                    <ComboBox Grid.Row="2" Grid.Column="1"
+                                              ItemsSource="{Binding VideoScaleOptions}"
+                                              SelectedItem="{Binding VideoScale}"
                                               Width="130"/>
                                 </Grid>
                             </Border>
