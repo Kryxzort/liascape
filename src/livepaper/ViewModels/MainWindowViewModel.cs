@@ -183,6 +183,28 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private decimal _globalIntervalSeconds;
     [ObservableProperty] private bool _globalAdvanceOnVideoEnd = true;
 
+    // Display proxies: show global values when override is off, per-playlist when on
+    public decimal DisplayIntervalHours
+    {
+        get => OverrideGlobalSettings ? IntervalHours : GlobalIntervalHours;
+        set { if (OverrideGlobalSettings) IntervalHours = value; }
+    }
+    public decimal DisplayIntervalMinutes
+    {
+        get => OverrideGlobalSettings ? IntervalMinutes : GlobalIntervalMinutes;
+        set { if (OverrideGlobalSettings) IntervalMinutes = value; }
+    }
+    public decimal DisplayIntervalSeconds
+    {
+        get => OverrideGlobalSettings ? IntervalSeconds : GlobalIntervalSeconds;
+        set { if (OverrideGlobalSettings) IntervalSeconds = value; }
+    }
+    public bool DisplayAdvanceOnVideoEnd
+    {
+        get => OverrideGlobalSettings ? AdvanceOnVideoEnd : GlobalAdvanceOnVideoEnd;
+        set { if (OverrideGlobalSettings) AdvanceOnVideoEnd = value; }
+    }
+
     partial void OnAutoMuteChanged(bool value)
     {
         _settings.AutoMute = value;
@@ -319,15 +341,23 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     partial void OnPlaylistShuffleChanged(bool value) { SavePlaylistStateDebounced(); ApplyTimedSettingsIfRunning(); }
-    partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnAdvanceOnVideoEndChanged(bool value) => SavePlaylistStateDebounced();
-    partial void OnOverrideGlobalSettingsChanged(bool value) { SavePlaylistStateDebounced(); ApplyTimedSettingsIfRunning(); }
-    partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) => SaveGlobalRotationSettings();
+    partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
+    partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
+    partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
+    partial void OnAdvanceOnVideoEndChanged(bool value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
+    partial void OnOverrideGlobalSettingsChanged(bool value)
+    {
+        SavePlaylistStateDebounced();
+        ApplyTimedSettingsIfRunning();
+        OnPropertyChanged(nameof(DisplayIntervalHours));
+        OnPropertyChanged(nameof(DisplayIntervalMinutes));
+        OnPropertyChanged(nameof(DisplayIntervalSeconds));
+        OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd));
+    }
+    partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
+    partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
+    partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
+    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
 
     private void SaveGlobalRotationSettings()
     {
