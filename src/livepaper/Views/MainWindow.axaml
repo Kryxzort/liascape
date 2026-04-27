@@ -331,14 +331,6 @@
                                                     <Border Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
                                                             Background="{DynamicResource BgBase}">
-                                                        <Border.Styles>
-                                                            <Style Selector="Border Button.playlist-remove">
-                                                                <Setter Property="Opacity" Value="0"/>
-                                                            </Style>
-                                                            <Style Selector="Border:pointerover Button.playlist-remove">
-                                                                <Setter Property="Opacity" Value="1"/>
-                                                            </Style>
-                                                        </Border.Styles>
                                                         <Grid Height="90">
                                                             <asyncImageLoader:AdvancedImage
                                                                 Source="{Binding ThumbnailSource}"
@@ -352,15 +344,20 @@
                                                                            Foreground="White"
                                                                            TextTrimming="CharacterEllipsis"/>
                                                             </Border>
-                                                            <Button Classes="ghost playlist-remove"
-                                                                    HorizontalAlignment="Right"
+                                                            <Button HorizontalAlignment="Right"
                                                                     VerticalAlignment="Top"
-                                                                    Width="20" Height="20"
-                                                                    Padding="0" Margin="2"
-                                                                    FontSize="10"
+                                                                    Margin="0,5,5,0"
+                                                                    Width="24" Height="24"
+                                                                    CornerRadius="12" Padding="0"
+                                                                    BorderThickness="0"
+                                                                    Background="{DynamicResource BgCrust}"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
-                                                                <TextBlock Text="✕"/>
+                                                                <TextBlock Text="−"
+                                                                           FontSize="12" FontWeight="Bold"
+                                                                           Foreground="{DynamicResource Accent}"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center"/>
                                                             </Button>
                                                         </Grid>
                                                     </Border>
