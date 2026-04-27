@@ -587,7 +587,7 @@
                                         <Grid ColumnDefinitions="Auto,Auto,Auto">
                                             <TextBlock Grid.Column="0" Text="Restart mpvpaper every"
                                                        VerticalAlignment="Center"
-                                                       Foreground="{StaticResource TextColor}"
+                                                       Foreground="{DynamicResource TextColor}"
                                                        Margin="0,0,12,0"/>
                                             <NumericUpDown Grid.Column="1"
                                                            Value="{Binding RestartIntervalSeconds}"
@@ -595,13 +595,31 @@
                                                            FormatString="0" Width="108"/>
                                             <TextBlock Grid.Column="2" Text="s"
                                                        VerticalAlignment="Center"
-                                                       Foreground="{StaticResource Subtext}"
+                                                       Foreground="{DynamicResource Subtext}"
                                                        Margin="8,0,0,0"/>
                                         </Grid>
                                         <TextBlock Text="Kills and relaunches mpvpaper periodically to prevent memory leaks"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource Muted}"/>
+                                                   Foreground="{DynamicResource Muted}"/>
                                     </StackPanel>
+                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
+                                        <TextBlock Grid.Column="0" Text="Speed"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextColor}"
+                                                   Width="80"/>
+                                        <Slider Grid.Column="1"
+                                                Minimum="0.1" Maximum="4"
+                                                TickFrequency="0.1"
+                                                IsSnapToTickEnabled="True"
+                                                Value="{Binding Speed}"
+                                                VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Speed, StringFormat='{}{0:F1}x'}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   Width="36" TextAlignment="Right"
+                                                   Margin="8,0,0,0"/>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
@@ -1030,13 +1048,13 @@
                     <!-- Per-wallpaper volume override -->
                     <Border Grid.Row="1"
                             IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Background="{StaticResource BgCrust}"
+                            Background="{DynamicResource BgCrust}"
                             CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
                         <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                             <TextBlock Grid.Column="0"
                                        Text="Volume"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource TextColor}"
+                                       Foreground="{DynamicResource TextColor}"
                                        Width="56"/>
                             <Slider Grid.Column="1"
                                     Minimum="0" Maximum="100"
@@ -1046,7 +1064,7 @@
                             <TextBlock Grid.Column="2"
                                        Text="{Binding PreviewCard.SliderVolume}"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource Subtext}"
+                                       Foreground="{DynamicResource Subtext}"
                                        Width="30" TextAlignment="Right"
                                        Margin="8,0,0,0"/>
                             <Button Grid.Column="3"
@@ -1064,13 +1082,13 @@
                     <!-- Per-wallpaper speed override -->
                     <Border Grid.Row="2"
                             IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Background="{StaticResource BgCrust}"
+                            Background="{DynamicResource BgCrust}"
                             CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
                         <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                             <TextBlock Grid.Column="0"
                                        Text="Speed"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource TextColor}"
+                                       Foreground="{DynamicResource TextColor}"
                                        Width="56"/>
                             <Slider Grid.Column="1"
                                     Minimum="0.1" Maximum="4"
@@ -1081,7 +1099,7 @@
                             <TextBlock Grid.Column="2"
                                        Text="{Binding PreviewCard.SliderSpeed, StringFormat='{}{0:F1}x'}"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource Subtext}"
+                                       Foreground="{DynamicResource Subtext}"
                                        Width="36" TextAlignment="Right"
                                        Margin="8,0,0,0"/>
                             <Button Grid.Column="3"

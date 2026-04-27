@@ -142,6 +142,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private int _demuxerMaxBackBytes;
     [ObservableProperty] private string _hwDec = "";
     [ObservableProperty] private int _volume;
+    [ObservableProperty] private double _speed;
     [ObservableProperty] private string _mpvOptionsPreview = "";
     [ObservableProperty] private bool _autoMute;
     [ObservableProperty] private decimal _autoMuteDelayMs;
@@ -390,6 +391,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _hwDec = _settings.HwDec;
         _selectedTheme = ThemeService.Find(_settings.Theme) ?? ThemeService.Default;
         _volume = _settings.Volume;
+        _speed = _settings.Speed;
         _autoMute = _settings.AutoMute;
         _autoMuteDelayMs = _settings.AutoMuteDelayMs;
         _autoUnmuteDelayMs = _settings.AutoUnmuteDelayMs;
@@ -481,7 +483,8 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     partial void OnVolumeChanged(int value)
     {
-        Task.Run(() => PlayerHelper.SetVolume(value));
+        if (LibraryWallpapers.FirstOrDefault(c => c.IsCurrentlyPlaying)?.VolumeOverride == null)
+            Task.Run(() => PlayerHelper.SetVolume(value));
         foreach (var c in LibraryWallpapers)
             c.UpdateGlobalVolume(value);
 
@@ -494,6 +497,16 @@ public partial class MainWindowViewModel : ViewModelBase
         }, TaskScheduler.Default);
     }
 
+    partial void OnSpeedChanged(double value)
+    {
+        if (LibraryWallpapers.FirstOrDefault(c => c.IsCurrentlyPlaying)?.SpeedOverride == null)
+            Task.Run(() => PlayerHelper.SetSpeed(value));
+        foreach (var c in LibraryWallpapers)
+            c.UpdateGlobalSpeed(value);
+        _settings.Speed = value;
+        SettingsService.Save(_settings);
+    }
+
     private void SaveAndRebuild()
     {
         _settings.Loop = Loop;
@@ -503,6 +516,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.DemuxerMaxBackBytes = DemuxerMaxBackBytes;
         _settings.HwDec = HwDec;
         _settings.Volume = Volume;
+        _settings.Speed = Speed;
         MpvOptionsPreview = _settings.BuildMpvOptions();
         SettingsService.Save(_settings);
     }
@@ -518,6 +532,7 @@ public partial class MainWindowViewModel : ViewModelBase
         DemuxerMaxBackBytes = d.DemuxerMaxBackBytes;
         HwDec = d.HwDec;
         Volume = d.Volume;
+        Speed = d.Speed;
         AutoMute = d.AutoMute;
         AutoMuteDelayMs = d.AutoMuteDelayMs;
         AutoUnmuteDelayMs = d.AutoUnmuteDelayMs;
@@ -1302,7 +1317,7 @@ public partial class MainWindowViewModel : ViewModelBase
         card.OnVolumeChanged = (c, v) => SyncSelectedVolume(c, v);
         card.UpdateGlobalVolume(Volume);
         card.OnSpeedChanged = (c, v) => SyncSelectedSpeed(c, v);
-        card.UpdateGlobalSpeed(1.0);
+        card.UpdateGlobalSpeed(Speed);
         return card;
     }
 

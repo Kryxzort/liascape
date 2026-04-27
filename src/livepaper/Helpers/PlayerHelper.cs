@@ -667,8 +667,10 @@ public static class PlayerHelper
             OnWallpaperChanged?.Invoke(path);
             var volOverride = ReadVolumeOverride(path);
             var speedOverride = ReadSpeedOverride(path);
-            if (volOverride.HasValue) Task.Run(() => SetVolume(volOverride.Value));
-            if (speedOverride.HasValue) Task.Run(() => SetSpeed(speedOverride.Value));
+            var settings = SettingsService.Load();
+            int vol = volOverride ?? settings.Volume;
+            double spd = speedOverride ?? settings.Speed;
+            Task.Run(() => { SetVolume(vol); SetSpeed(spd); });
         }
         else
         {

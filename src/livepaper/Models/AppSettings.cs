@@ -17,6 +17,12 @@ public class AppSettings
         get => _volume;
         set => _volume = Math.Clamp(value, 0, 100);
     }
+    private double _speed = 1.0;
+    public double Speed
+    {
+        get => _speed;
+        set => _speed = Math.Clamp(value, 0.1, 4.0);
+    }
     public string WallpaperEnginePath { get; set; } = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".local/share/Steam/steamapps/workshop/content/431960");
@@ -43,6 +49,7 @@ public class AppSettings
         if (Loop) parts.Add("loop");
         if (NoAudio) parts.Add("--no-audio");
         else parts.Add($"--volume={Volume}");
+        if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
         if (DisableCache) parts.Add("--cache=no");
         if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
         if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
@@ -62,6 +69,7 @@ public class AppSettings
         var parts = new List<string>();
         if (NoAudio) parts.Add("--no-audio");
         else parts.Add($"--volume={Volume}");
+        if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
         if (DisableCache) parts.Add("--cache=no");
         if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
         if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
