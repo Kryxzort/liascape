@@ -353,6 +353,59 @@ public partial class MainWindowViewModel : ViewModelBase
         if (secs > 0) PlayerHelper.UpdateTimedSettings(PlaylistShuffle, secs);
     }
 
+    // ── Library filter ────────────────────────────────────────────────────
+
+    [ObservableProperty] private string _librarySearchQuery = "";
+    [ObservableProperty] private List<WallpaperCardViewModel> _filteredLibraryWallpapers = [];
+    private string _activeSearchQuery = "";
+    private CancellationTokenSource? _searchDebounceCts;
+
+    private void UpdateFilteredLibrary()
+    {
+        FilteredLibraryWallpapers = ApplyLibraryFilter(LibraryWallpapers, _activeSearchQuery, 5).ToList();
+    }
+
+    partial void OnLibrarySearchQueryChanged(string value)
+    {
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts = new CancellationTokenSource();
+        var token = _searchDebounceCts.Token;
+        var trimmed = value.Trim();
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(200, token);
+                _activeSearchQuery = trimmed;
+                await Dispatcher.UIThread.InvokeAsync(UpdateFilteredLibrary);
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private static IEnumerable<WallpaperCardViewModel> ApplyLibraryFilter(
+        IEnumerable<WallpaperCardViewModel> source, string query, int sortIndex)
+    {
+        var filtered = string.IsNullOrEmpty(query)
+            ? source
+            : source.Where(c =>
+                c.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                (c.LibraryItem?.WorkshopId != null &&
+                 c.LibraryItem.WorkshopId.Contains(query, StringComparison.OrdinalIgnoreCase)));
+
+        return sortIndex switch
+        {
+            1 => filtered.OrderByDescending(c => c.Title),
+            2 => filtered.OrderBy(c => c.IsScene).ThenBy(c => c.Title),
+            3 => filtered.OrderByDescending(c => c.IsScene).ThenBy(c => c.Title),
+            4 => filtered.OrderByDescending(c =>
+                c.LibraryItem != null ? c.LibraryItem.AddedAt : DateTime.MinValue),
+            5 => filtered.OrderBy(c =>
+                c.LibraryItem != null ? c.LibraryItem.AddedAt : DateTime.MaxValue),
+            _ => filtered.OrderBy(c => c.Title),
+        };
+    }
+
     private int _lastSelectedIndex = -1;
     private int _lastBrowseSelectedIndex = -1;
 
@@ -423,6 +476,7 @@ public partial class MainWindowViewModel : ViewModelBase
             if (e.OldItems != null)
                 foreach (WallpaperCardViewModel c in e.OldItems) c.PropertyChanged -= OnLibraryCardChanged;
             LibrarySelectedCount = LibraryWallpapers.Count(c => c.IsSelected);
+            UpdateFilteredLibrary();
         };
 
         PlaylistItems.CollectionChanged += (_, _) =>
@@ -435,6 +489,7 @@ public partial class MainWindowViewModel : ViewModelBase
             Dispatcher.UIThread.Post(() => StatusMessage = "");
 
         LoadLibrary();
+        UpdateFilteredLibrary();
         RestorePlaylistState();
 
         var s = _settings.LastSession;
@@ -870,8 +925,8 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void SelectAll()
     {
-        foreach (var c in LibraryWallpapers) c.IsSelected = true;
-        _lastSelectedIndex = LibraryWallpapers.Count - 1;
+        foreach (var c in FilteredLibraryWallpapers) c.IsSelected = true;
+        _lastSelectedIndex = FilteredLibraryWallpapers.Count - 1;
     }
 
     [RelayCommand]
@@ -916,7 +971,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void SelectCard(WallpaperCardViewModel card, bool shiftHeld, bool ctrlHeld = false)
     {
-        int idx = LibraryWallpapers.IndexOf(card);
+        var displayed = FilteredLibraryWallpapers.ToList();
+        int idx = displayed.IndexOf(card);
         if (idx < 0) return;
 
         if (ctrlHeld)
@@ -929,12 +985,12 @@ public partial class MainWindowViewModel : ViewModelBase
             int from = Math.Min(_lastSelectedIndex, idx);
             int to = Math.Max(_lastSelectedIndex, idx);
             for (int i = from; i <= to; i++)
-                LibraryWallpapers[i].IsSelected = true;
+                displayed[i].IsSelected = true;
         }
         else
         {
-            bool wasOnlySelected = card.IsSelected && LibraryWallpapers.Count(c => c.IsSelected) == 1;
-            foreach (var c in LibraryWallpapers) c.IsSelected = false;
+            bool wasOnlySelected = card.IsSelected && displayed.Count(c => c.IsSelected) == 1;
+            foreach (var c in displayed) c.IsSelected = false;
             if (!wasOnlySelected)
             {
                 card.IsSelected = true;
@@ -1114,6 +1170,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 var item = await DownloadHelper.DownloadAsync(detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles);
                 var libCard = MakeLibraryCard(item);
                 LibraryWallpapers.Add(libCard);
+                UpdateFilteredLibrary();
 
                 if (target == applyTarget && !applied) { ApplyAndSave(item.VideoPath); applied = true; }
                 StatusMessage = $"Applied: {target.Title}";

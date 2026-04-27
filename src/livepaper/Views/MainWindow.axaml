@@ -183,6 +183,10 @@
                                                 Orientation="Horizontal"
                                                 Spacing="10"
                                                 HorizontalAlignment="Right">
+                                        <TextBox Text="{Binding LibrarySearchQuery}"
+                                                 PlaceholderText="Search…"
+                                                 Width="220"
+                                                 VerticalAlignment="Center"/>
                                         <CheckBox Content="Shuffle"
                                                   IsChecked="{Binding ShuffleLibrary}"
                                                   VerticalAlignment="Center"
@@ -371,7 +375,7 @@
 
                             <!-- Library grid -->
                             <ScrollViewer x:Name="LibraryScrollViewer" Padding="12,12,12,0">
-                                <ItemsControl ItemsSource="{Binding LibraryWallpapers}">
+                                <ItemsControl ItemsSource="{Binding FilteredLibraryWallpapers}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <WrapPanel Margin="0,0,0,32"/>
