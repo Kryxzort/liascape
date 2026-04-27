@@ -31,6 +31,9 @@ public static class PlayerHelper
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
     private static readonly object _lock = new();
     private static CancellationTokenSource? _daemonCts;
+    private static bool _waitForVideoEnd;
+    private static bool _waitingForVideoEnd;
+    private static CancellationTokenSource? _waitCts;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
     public static bool IsPlaying => File.Exists(IpcSocket) && Process.GetProcessesByName("mpvpaper").Length > 0;
@@ -386,7 +389,8 @@ public static class PlayerHelper
         List<string> Paths, int Index,
         string Options, bool Shuffle, int IntervalSeconds,
         List<string> History, int HistoryIndex,
-        bool TimerPaused = false, bool TimerStopped = false, long RemainingMs = 0);
+        bool TimerPaused = false, bool TimerStopped = false, long RemainingMs = 0,
+        bool WaitForVideoEnd = false);
 
     private static void SaveTimedState()
     {
@@ -397,7 +401,8 @@ public static class PlayerHelper
                 _timedPaths, _timedIndex,
                 _timedOptions, _timedShuffle, (int)_timedInterval.TotalSeconds,
                 _history, _historyIndex,
-                _timedTimerPaused, _timedTimerStopped, _timedRemainingMs);
+                _timedTimerPaused, _timedTimerStopped, _timedRemainingMs,
+                _waitForVideoEnd);
             var path = TimedStatePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, JsonSerializer.Serialize(state));
@@ -466,6 +471,7 @@ public static class PlayerHelper
             _timedTimerPaused = state.TimerPaused;
             _timedTimerStopped = state.TimerStopped;
             _timedRemainingMs = state.RemainingMs > 0 ? state.RemainingMs : (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = state.WaitForVideoEnd;
             return true;
         }
         catch { return false; }
@@ -512,7 +518,7 @@ public static class PlayerHelper
         UpdateRestartTimer();
     }
 
-    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds)
+    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd = false)
     {
         lock (_lock)
         {
@@ -529,6 +535,7 @@ public static class PlayerHelper
             _timedTimerPaused = false;
             _timedTimerStopped = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = waitForVideoEnd;
             _history = [ordered[0]];
             _historyIndex = 0;
             SwitchToFile(ordered[0], mpvOptions);
@@ -638,9 +645,33 @@ public static class PlayerHelper
                 return;
             }
 
-            _timedRemainingMs -= elapsedMs;
-            if (_timedRemainingMs <= 0)
-                AdvanceAndLaunch();
+            if (!_waitingForVideoEnd)
+                _timedRemainingMs -= elapsedMs;
+
+            if (_timedRemainingMs <= 0 && !_waitingForVideoEnd)
+            {
+                if (_waitForVideoEnd)
+                {
+                    var next = AdvanceToNext();
+                    if (next != null)
+                    {
+                        _waitingForVideoEnd = true;
+                        _waitCts = new CancellationTokenSource();
+                        var opts = _timedOptions;
+                        var intervalMs = (long)_timedInterval.TotalMilliseconds;
+                        var cts = _waitCts;
+                        Task.Run(() => DoVideoEndWait(next, opts, intervalMs, cts.Token));
+                    }
+                    else
+                    {
+                        AdvanceAndLaunch();
+                    }
+                }
+                else
+                {
+                    AdvanceAndLaunch();
+                }
+            }
 
             _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
         }
@@ -707,14 +738,65 @@ public static class PlayerHelper
         }
     }
 
+    private static double? TryQueryTimeRemaining()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "time-remaining" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
+                return data.GetDouble();
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static async Task DoVideoEndWait(string next, string opts, long intervalMs, CancellationToken ct)
+    {
+        var remaining = TryQueryTimeRemaining();
+        if (remaining is > 0.1)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(remaining.Value), ct); }
+            catch (OperationCanceledException) { return; }
+        }
+
+        lock (_lock)
+        {
+            if (!_waitingForVideoEnd) return; // cancelled by manual action
+            _waitingForVideoEnd = false;
+            _waitCts = null;
+            SwitchToFile(next, opts);
+            _timedRemainingMs = intervalMs;
+            SaveTimedState();
+        }
+    }
+
+    private static void CancelVideoEndWait()
+    {
+        _waitCts?.Cancel();
+        _waitCts = null;
+        _waitingForVideoEnd = false;
+    }
+
     private static void AdvanceAndLaunch()
     {
+        CancelVideoEndWait();
         var next = AdvanceToNext();
         if (next != null) LaunchAndReset(next);
     }
 
     private static void StepBackAndLaunch()
     {
+        CancelVideoEndWait();
         if (_history == null || _historyIndex <= 0) return;
         _historyIndex--;
         LaunchAndReset(_history[_historyIndex]);
@@ -817,7 +899,7 @@ public static class PlayerHelper
         return true;
     }
 
-    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds)
+    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds, bool waitForVideoEnd = false)
     {
         lock (_lock)
         {
@@ -825,6 +907,7 @@ public static class PlayerHelper
             _timedShuffle = shuffle;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = waitForVideoEnd;
             SaveTimedState();
         }
     }
@@ -899,7 +982,7 @@ public static class PlayerHelper
                 var paths = session.Shuffle
                     ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
                     : session.Paths;
-                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds);
+                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, settings.PlaylistWaitForVideoEnd);
             }
         }
         WriteTimerDaemonPid();
@@ -1059,6 +1142,9 @@ public static class PlayerHelper
     // IPC-switch the existing mpvpaper instead of killing it.
     private static void TeardownTimer()
     {
+        _waitCts?.Cancel();
+        _waitCts = null;
+        _waitingForVideoEnd = false;
         _playlistTimer?.Dispose();
         _playlistTimer = null;
         StopRestartTimer();

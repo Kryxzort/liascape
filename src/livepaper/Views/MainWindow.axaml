@@ -536,6 +536,10 @@
                                         </StackPanel>
                                     </StackPanel>
 
+                                    <CheckBox Content="Wait for video to end before switching"
+                                              IsChecked="{Binding PlaylistWaitForVideoEnd}"
+                                              Foreground="{StaticResource TextColor}"/>
+
                                     <Button Content="Close"
                                             Classes="ghost"
                                             HorizontalAlignment="Right"
