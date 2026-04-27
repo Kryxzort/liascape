@@ -462,6 +462,8 @@ public partial class MainWindowViewModel : ViewModelBase
         _demuxerMaxBackBytes = _settings.DemuxerMaxBackBytes;
         _hwDec = _settings.HwDec;
         _selectedTheme = ThemeService.Find(_settings.Theme) ?? ThemeService.Default;
+        _thumbnailAspect = _settings.ThumbnailAspect;
+        _cardSize = _settings.CardSize;
         _librarySortIndex = _settings.LibrarySortIndex;
         _volume = _settings.Volume;
         _autoMute = _settings.AutoMute;
@@ -537,21 +539,24 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnDemuxerMaxBytesChanged(int value) => SaveAndRebuild();
     partial void OnDemuxerMaxBackBytesChanged(int value) => SaveAndRebuild();
     partial void OnHwDecChanged(string value) => SaveAndRebuild();
-<<<<<<< HEAD
     partial void OnSelectedThemeChanged(AppTheme value)
     {
         ThemeService.Apply(value);
         _settings.Theme = value.Name;
         SettingsService.Save(_settings);
     }
-=======
-<<<<<<< HEAD
-=======
-    partial void OnVideoScaleChanged(string value) { Task.Run(() => PlayerHelper.SetVideoScale(value)); SaveAndRebuild(); }
-    partial void OnThumbnailAspectChanged(string value) { CardLayoutChanged?.Invoke(); }
-    partial void OnCardSizeChanged(string value) { CardLayoutChanged?.Invoke(); }
->>>>>>> c0a4438 (Add responsive card grid with ItemsRepeater and UniformGridLayout)
->>>>>>> 26c8287 (Add responsive card grid with ItemsRepeater and UniformGridLayout)
+    partial void OnThumbnailAspectChanged(string value)
+    {
+        CardLayoutChanged?.Invoke();
+        _settings.ThumbnailAspect = value;
+        SettingsService.Save(_settings);
+    }
+    partial void OnCardSizeChanged(string value)
+    {
+        CardLayoutChanged?.Invoke();
+        _settings.CardSize = value;
+        SettingsService.Save(_settings);
+    }
     partial void OnVolumeChanged(int value)
     {
         Task.Run(() => PlayerHelper.SetVolume(value));

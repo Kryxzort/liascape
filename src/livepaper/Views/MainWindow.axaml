@@ -853,6 +853,31 @@
                                 </StackPanel>
                             </Border>
 
+                            <TextBlock Text="APPEARANCE"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Muted}"
+                                       LetterSpacing="2"/>
+                            <Border Background="{StaticResource BgBase}" CornerRadius="10" Padding="16">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,12,Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0"
+                                               Text="Thumbnail aspect"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextColor}"/>
+                                    <ComboBox Grid.Row="0" Grid.Column="1"
+                                              ItemsSource="{Binding ThumbnailAspectOptions}"
+                                              SelectedItem="{Binding ThumbnailAspect}"
+                                              Width="130"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0"
+                                               Text="Card size"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextColor}"/>
+                                    <ComboBox Grid.Row="2" Grid.Column="1"
+                                              ItemsSource="{Binding CardSizeOptions}"
+                                              SelectedItem="{Binding CardSize}"
+                                              Width="130"/>
+                                </Grid>
+                            </Border>
+
                             <TextBlock Text="COMMAND PREVIEW"
                                        FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource Muted}"
