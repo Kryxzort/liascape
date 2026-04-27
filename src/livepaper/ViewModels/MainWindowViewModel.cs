@@ -973,6 +973,18 @@ public partial class MainWindowViewModel : ViewModelBase
         _lastBrowseSelectedIndex = BrowseWallpapers.Count - 1;
     }
 
+    public void DeselectAllLibrary()
+    {
+        foreach (var c in FilteredLibraryWallpapers) c.IsSelected = false;
+        _lastSelectedIndex = -1;
+    }
+
+    public void DeselectAllBrowse()
+    {
+        foreach (var c in BrowseWallpapers) c.IsSelected = false;
+        _lastBrowseSelectedIndex = -1;
+    }
+
     public void SelectBrowseCard(WallpaperCardViewModel card, bool shiftHeld, bool ctrlHeld = false)
     {
         int idx = BrowseWallpapers.IndexOf(card);

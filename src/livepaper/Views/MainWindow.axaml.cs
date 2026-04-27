@@ -178,14 +178,14 @@ public partial class MainWindow : Window
         {
             if (IsWithinButton(source, LibraryScrollViewer)) return;
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, LibraryScrollViewer);
-            if (card == null) return;
+            if (card == null) { Vm?.DeselectAllLibrary(); return; }
             Vm?.SelectCard(card, shift, ctrl);
         }
         else if (IsWithin(source, BrowseScrollViewer))
         {
             if (IsWithinButton(source, BrowseScrollViewer)) return;
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, BrowseScrollViewer);
-            if (card == null) return;
+            if (card == null) { Vm?.DeselectAllBrowse(); return; }
             Vm?.SelectBrowseCard(card, shift, ctrl);
         }
     }
