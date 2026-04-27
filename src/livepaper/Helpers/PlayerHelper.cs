@@ -32,6 +32,10 @@ public static class PlayerHelper
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
     private static readonly object _lock = new();
     private static CancellationTokenSource? _daemonCts;
+    private static bool _waitForVideoEnd;
+    private static bool _waitingForVideoEnd;
+    private static CancellationTokenSource? _waitCts;
+    private static CancellationTokenSource? _prelaunchCts;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
     public static bool IsPlaying =>
@@ -695,39 +699,114 @@ public static class PlayerHelper
         SaveTimedState();
     }
 
-    // Switch mpv to a single video. If mpvpaper is alive we replace the file
-    // in place over IPC (no kill→launch flicker, decoder context preserved).
-    // Otherwise we cold-start with the given mpv options. Persistent mpv
-    // properties (loop-file, loop-playlist) are explicitly set so the
-    // session behaves as a single looping file regardless of what mpv was
-    // doing previously (e.g., transitioning from Play All).
+    // Switch to the next wallpaper.
+    //
+    // Video→video: IPC loadfile replace (seamless, no flash). Falls back to
+    // cold-start (kill old → launch new) if mpvpaper is not alive.
+    //
+    // Any transition involving a scene: pre-launch — the new process starts
+    // first, and the old one is killed only after the new one signals
+    // readiness (mpvpaper: AV: line; LWE: SceneTransitionDelayMs).
     private static void SwitchToFile(string path, string mpvOptions)
     {
-        if (IsScenePath(path))
+        // Cancel any in-flight pre-launch transition from a previous switch.
+        _prelaunchCts?.Cancel();
+        _prelaunchCts = null;
+
+        bool nextIsScene = IsScenePath(path);
+        bool prevIsScene = IsLweRunning;
+
+        // ── Transition involving a scene ──────────────────────────────────────
+        if (nextIsScene || prevIsScene)
         {
-            KillCurrentProcess(); // kill mpvpaper if running
-            var settings = SettingsService.Load();
-            if (!settings.AllowScenes || !IsLweAvailable()) return;
-            var workshopId = File.ReadAllText(path).Trim();
-            int lweCount = LaunchScene(workshopId, settings);
-            if (lweCount > 0)
+            if (nextIsScene)
             {
-                var volOverride = ReadVolumeOverride(path);
+                var settings = SettingsService.Load();
+                if (!settings.AllowScenes || !IsLweAvailable())
+                {
+                    KillCurrentProcess();
+                    return;
+                }
+                var workshopId = File.ReadAllText(path).Trim();
+
+                // Capture old processes before launching new ones.
+                var oldMpvProcs = Process.GetProcessesByName("mpvpaper");
+                var oldLwePids = ReadCurrentLwePids();
+
+                // Launch new LWE without killing old yet.
+                var newPids = SpawnLweProcesses(workshopId, settings);
+                OnWallpaperChanged?.Invoke(path);
+
+                if (newPids.Length > 0)
+                {
+                    var volOverride = ReadVolumeOverride(path);
+                    var count = newPids.Length;
+                    _ = Task.Run(async () =>
+                    {
+                        for (int i = 0; i < 60; i++)
+                        {
+                            if (GetLweSinkInputIds().Count >= count) break;
+                            await Task.Delay(50);
+                        }
+                        ApplyLweMute(AudioMonitor.IsMuted);
+                        if (volOverride.HasValue) ApplyLweVolume(volOverride.Value);
+                    });
+                }
+
+                var cts = _prelaunchCts = new CancellationTokenSource();
+                var delayMs = settings.SceneTransitionDelayMs;
+                var capturedMpv = oldMpvProcs;
+                var capturedLwePids = oldLwePids;
                 _ = Task.Run(async () =>
                 {
-                    for (int i = 0; i < 60; i++)
+                    try { await Task.Delay(delayMs, cts.Token); }
+                    catch { return; }
+                    foreach (var proc in capturedMpv)
+                        using (proc) { try { proc.Kill(entireProcessTree: true); } catch { } }
+                    if (capturedMpv.Length > 0)
                     {
-                        if (GetLweSinkInputIds().Count >= lweCount) break;
-                        await Task.Delay(50);
+                        lock (_lock) { _current = null; }
+                        var sock = IpcSocket;
+                        try { if (File.Exists(sock)) File.Delete(sock); } catch { }
                     }
-                    ApplyLweMute(AudioMonitor.IsMuted);
-                    if (volOverride.HasValue) ApplyLweVolume(volOverride.Value);
+                    KillPids(capturedLwePids);
+                });
+            }
+            else // scene→video: launch mpvpaper first, kill LWE after AV: fires
+            {
+                var oldLwePids = ReadCurrentLwePids();
+                KillMpvPaperOnly(); // safety: clear any stray mpvpaper + socket
+
+                var readyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _current = Launch(BakeSpeedOverride(BakeVolumeOverride(mpvOptions, path), path), path, readyTcs);
+                OnWallpaperChanged?.Invoke(path);
+
+                var settings = SettingsService.Load();
+                var volOverride = ReadVolumeOverride(path);
+                var speedOverride = ReadSpeedOverride(path);
+                int vol = volOverride ?? settings.Volume;
+                double spd = speedOverride ?? settings.Speed;
+                Task.Run(() => { SetVolume(vol); SetSpeed(spd); });
+
+                var cts = _prelaunchCts = new CancellationTokenSource();
+                var capturedPids = oldLwePids;
+                _ = Task.Run(async () =>
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                    linked.CancelAfter(3000); // fallback: kill LWE after 3s even without AV:
+                    try { await readyTcs.Task.WaitAsync(linked.Token); }
+                    catch (OperationCanceledException) { }
+                    if (!cts.Token.IsCancellationRequested)
+                    {
+                        KillPids(capturedPids);
+                        try { if (File.Exists(LwePidPath)) File.Delete(LwePidPath); } catch { }
+                    }
                 });
             }
             return;
         }
 
-        KillLweProcess(); // switching away from a scene if one was running
+        // ── Video→video: existing seamless approach ───────────────────────────
         bool mpvAlive = File.Exists(IpcSocket) && Process.GetProcessesByName("mpvpaper").Length > 0;
         if (mpvAlive && TryIpcSwitchToFile(path))
         {
@@ -1072,7 +1151,7 @@ public static class PlayerHelper
         return path;
     }
 
-    private static Process? Launch(string mpvOptions, string file)
+    private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
     {
         var socketPath = IpcSocket;
         Directory.CreateDirectory(Path.GetDirectoryName(socketPath)!);
@@ -1091,8 +1170,16 @@ public static class PlayerHelper
         psi.ArgumentList.Add("*");
         psi.ArgumentList.Add(file);
         var process = Process.Start(psi);
-        process?.BeginOutputReadLine();
-        process?.BeginErrorReadLine();
+        if (process != null)
+        {
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (readyTcs != null && e.Data != null && e.Data.StartsWith("AV:"))
+                    readyTcs.TrySetResult(true);
+            };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
         return process;
     }
 
@@ -1152,6 +1239,11 @@ public static class PlayerHelper
     // IPC-switch the existing mpvpaper instead of killing it.
     private static void TeardownTimer()
     {
+        _waitCts?.Cancel();
+        _waitCts = null;
+        _waitingForVideoEnd = false;
+        _prelaunchCts?.Cancel();
+        _prelaunchCts = null;
         _playlistTimer?.Dispose();
         _playlistTimer = null;
         StopRestartTimer();
@@ -1198,10 +1290,11 @@ public static class PlayerHelper
         return !s.AllowScenes || !IsLweAvailable();
     }
 
-    // Spawns one linux-wallpaperengine process per monitor. Returns the number of processes started.
-    private static int LaunchScene(string workshopId, AppSettings settings)
+    // Spawns one linux-wallpaperengine process per monitor, writes new PIDs to
+    // LwePidPath, and returns the new PID strings. Does NOT kill any existing
+    // LWE processes — callers are responsible for killing old ones.
+    private static string[] SpawnLweProcesses(string workshopId, AppSettings settings)
     {
-        KillLweProcess(); // kill any existing LWE before spawning new ones
         var pids = new List<string>();
         bool anyPrimary = settings.LweMonitors.Any(m => m.IsPrimary);
 
@@ -1251,7 +1344,39 @@ public static class PlayerHelper
             File.WriteAllLines(LwePidPath, pids);
         }
         catch { }
-        return pids.Count;
+        return [.. pids];
+    }
+
+    private static int LaunchScene(string workshopId, AppSettings settings)
+    {
+        KillLweProcess();
+        return SpawnLweProcesses(workshopId, settings).Length;
+    }
+
+    private static string[] ReadCurrentLwePids()
+    {
+        try { return File.Exists(LwePidPath) ? File.ReadAllLines(LwePidPath) : []; }
+        catch { return []; }
+    }
+
+    private static void KillPids(string[] pids)
+    {
+        foreach (var pidStr in pids)
+        {
+            if (!int.TryParse(pidStr.Trim(), out int pid)) continue;
+            try { using var p = Process.GetProcessById(pid); p.Kill(entireProcessTree: true); } catch { }
+        }
+    }
+
+    // Kills only mpvpaper processes without touching LWE — used in pre-launch
+    // transitions where LWE is being kept alive until the new process is ready.
+    private static void KillMpvPaperOnly()
+    {
+        foreach (var proc in Process.GetProcessesByName("mpvpaper"))
+            using (proc) { try { proc.Kill(entireProcessTree: true); } catch { } }
+        _current = null;
+        var socketPath = IpcSocket;
+        try { if (File.Exists(socketPath)) File.Delete(socketPath); } catch { }
     }
 
     private static List<int> GetLweSinkInputIds()
