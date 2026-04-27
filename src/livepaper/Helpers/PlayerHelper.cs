@@ -381,6 +381,7 @@ public static class PlayerHelper
     }
 
     public static Action? OnTimedPlaylistStopped;
+    public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
         List<string> Paths, int Index,
@@ -663,12 +664,17 @@ public static class PlayerHelper
     {
         if (IsPlaying && TryIpcSwitchToFile(path))
         {
-            // _current still references the existing process; nothing to update.
+            OnWallpaperChanged?.Invoke(path);
+            var volOverride = ReadVolumeOverride(path);
+            var speedOverride = ReadSpeedOverride(path);
+            if (volOverride.HasValue) Task.Run(() => SetVolume(volOverride.Value));
+            if (speedOverride.HasValue) Task.Run(() => SetSpeed(speedOverride.Value));
         }
         else
         {
             KillCurrentProcess();
-            _current = Launch(mpvOptions, path);
+            _current = Launch(BakeSpeedOverride(BakeVolumeOverride(mpvOptions, path), path), path);
+            OnWallpaperChanged?.Invoke(path);
         }
     }
 
@@ -1080,5 +1086,53 @@ public static class PlayerHelper
     {
         TeardownTimer();
         KillCurrentProcess();
+    }
+
+    private static int? ReadVolumeOverride(string path)
+    {
+        var sidecar = Path.ChangeExtension(path, ".volume");
+        if (!File.Exists(sidecar)) return null;
+        try { return int.TryParse(File.ReadAllText(sidecar).Trim(), out int v) ? v : null; }
+        catch { return null; }
+    }
+
+    private static double? ReadSpeedOverride(string path)
+    {
+        var sidecar = Path.ChangeExtension(path, ".speed");
+        if (!File.Exists(sidecar)) return null;
+        try { return double.TryParse(File.ReadAllText(sidecar).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : null; }
+        catch { return null; }
+    }
+
+    private static string BakeVolumeOverride(string options, string path)
+    {
+        var vol = ReadVolumeOverride(path);
+        if (!vol.HasValue) return options;
+        if (options.Contains("--no-audio")) return options;
+        const string prefix = "--volume=";
+        int idx = options.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            int end = idx + prefix.Length;
+            while (end < options.Length && char.IsDigit(options[end])) end++;
+            return options[..idx] + prefix + vol.Value + options[end..];
+        }
+        return options + $" {prefix}{vol.Value}";
+    }
+
+    private static string BakeSpeedOverride(string options, string path)
+    {
+        var speed = ReadSpeedOverride(path);
+        if (!speed.HasValue) return options;
+        string val = speed.Value.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+        const string prefix = "--speed=";
+        int idx = options.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            int end = idx + prefix.Length;
+            while (end < options.Length && (char.IsDigit(options[end]) || options[end] == '.')) end++;
+            return options[..idx] + prefix + val + options[end..];
+        }
+        return options + $" {prefix}{val}";
     }
 }
