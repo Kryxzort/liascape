@@ -191,6 +191,9 @@
                                                 Classes="ghost"
                                                 IsEnabled="{Binding !IsImporting}"
                                                 Command="{Binding OpenImportCommand}"/>
+                                        <Button Content="Stop"
+                                                Classes="danger"
+                                                Command="{Binding StopCommand}"/>
                                         <Button Content="Play All"
                                                 Classes="accent"
                                                 Command="{Binding PlayLibraryCommand}"/>
