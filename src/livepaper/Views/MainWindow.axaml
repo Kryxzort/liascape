@@ -314,11 +314,11 @@
                                                HorizontalAlignment="Center"/>
 
                                     <!-- Playlist thumbnails -->
-                                    <Grid IsVisible="{Binding !IsPlaylistEmpty}"
-                                          ClipToBounds="True">
+                                    <Grid IsVisible="{Binding !IsPlaylistEmpty}">
                                         <ScrollViewer x:Name="PlaylistScrollViewer"
                                                       HorizontalScrollBarVisibility="Auto"
-                                                      VerticalScrollBarVisibility="Disabled">
+                                                      VerticalScrollBarVisibility="Disabled"
+                                                      AllowAutoHide="False">
                                         <ItemsControl x:Name="PlaylistItemsControl"
                                                       ItemsSource="{Binding PlaylistItems}">
                                             <ItemsControl.ItemsPanel>
@@ -328,15 +328,14 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:WallpaperCardViewModel">
-                                                    <Border Classes="playlist-item"
-                                                            Width="100" CornerRadius="6"
+                                                    <Border Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
                                                             Background="{DynamicResource BgBase}">
                                                         <Border.Styles>
-                                                            <Style Selector="Border.playlist-item Grid.play-overlay">
+                                                            <Style Selector="Border Button.playlist-remove">
                                                                 <Setter Property="Opacity" Value="0"/>
                                                             </Style>
-                                                            <Style Selector="Border.playlist-item:pointerover Grid.play-overlay">
+                                                            <Style Selector="Border:pointerover Button.playlist-remove">
                                                                 <Setter Property="Opacity" Value="1"/>
                                                             </Style>
                                                         </Border.Styles>
@@ -345,15 +344,6 @@
                                                                 Source="{Binding ThumbnailSource}"
                                                                 Stretch="UniformToFill"
                                                                 Width="100" Height="90"/>
-                                                            <Grid Classes="play-overlay"
-                                                                  Background="#80000000"
-                                                                  IsHitTestVisible="False">
-                                                                <TextBlock Text="▶"
-                                                                           FontSize="28"
-                                                                           Foreground="White"
-                                                                           HorizontalAlignment="Center"
-                                                                           VerticalAlignment="Center"/>
-                                                            </Grid>
                                                             <Border Background="#99000000"
                                                                     VerticalAlignment="Bottom"
                                                                     Padding="4,2">
@@ -362,20 +352,15 @@
                                                                            Foreground="White"
                                                                            TextTrimming="CharacterEllipsis"/>
                                                             </Border>
-                                                            <Button HorizontalAlignment="Right"
+                                                            <Button Classes="ghost playlist-remove"
+                                                                    HorizontalAlignment="Right"
                                                                     VerticalAlignment="Top"
-                                                                    Margin="0,5,5,0"
-                                                                    Width="24" Height="24"
-                                                                    CornerRadius="12" Padding="0"
-                                                                    BorderThickness="0"
-                                                                    Background="{DynamicResource BgCrust}"
+                                                                    Width="20" Height="20"
+                                                                    Padding="0" Margin="2"
+                                                                    FontSize="10"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
-                                                                <TextBlock Text="−"
-                                                                           FontSize="12" FontWeight="Bold"
-                                                                           Foreground="{DynamicResource Accent}"
-                                                                           HorizontalAlignment="Center"
-                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Text="✕"/>
                                                             </Button>
                                                         </Grid>
                                                     </Border>
