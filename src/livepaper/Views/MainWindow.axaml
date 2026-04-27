@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:asyncImageLoader="clr-namespace:AsyncImageLoader;assembly=AsyncImageLoader.Avalonia"
         xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:gif="clr-namespace:Avalonia.Labs.Gif;assembly=Avalonia.Labs.Gif"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
         x:Class="livepaper.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -15,6 +16,20 @@
     <Design.DataContext>
         <vm:MainWindowViewModel/>
     </Design.DataContext>
+
+    <Window.Resources>
+        <ControlTemplate x:Key="ThumbnailDisplay" TargetType="TemplatedControl">
+            <Panel x:DataType="vm:WallpaperCardViewModel">
+                <asyncImageLoader:AdvancedImage
+                    Source="{Binding ThumbnailSource}"
+                    Stretch="UniformToFill"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                <Viewbox IsVisible="{Binding IsGifActive}" Stretch="UniformToFill">
+                    <gif:GifImage Source="{Binding ActiveGifSource}"/>
+                </Viewbox>
+            </Panel>
+        </ControlTemplate>
+    </Window.Resources>
 
     <Grid RowDefinitions="*,Auto">
 
@@ -120,18 +135,19 @@
                                     <DataTemplate x:DataType="vm:WallpaperCardViewModel">
                                         <Border Margin="6" CornerRadius="10"
                                                 ClipToBounds="True"
-                                                Background="{DynamicResource BgBase}">
+                                                Background="{DynamicResource BgBase}"
+                                                PointerEntered="OnCardPointerEntered"
+                                                PointerExited="OnCardPointerExited">
                                             <Grid RowDefinitions="Auto,*,Auto">
 
                                                 <Button Grid.Row="0" Padding="0"
                                                         Background="Transparent" BorderThickness="0"
                                                         HorizontalAlignment="Stretch"
+                                                        CornerRadius="10,10,0,0" ClipToBounds="True"
                                                         Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                         Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                         CommandParameter="{Binding}">
-                                                    <asyncImageLoader:AdvancedImage
-                                                        Source="{Binding ThumbnailSource}"
-                                                        Stretch="UniformToFill"/>
+                                                    <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
                                                 </Button>
 
                                                 <TextBlock Grid.Row="1"
@@ -419,7 +435,9 @@
                                         <DataTemplate x:DataType="vm:WallpaperCardViewModel">
                                             <Border Margin="6" CornerRadius="10"
                                                     ClipToBounds="True"
-                                                    Background="{DynamicResource BgBase}">
+                                                    Background="{DynamicResource BgBase}"
+                                                    PointerEntered="OnCardPointerEntered"
+                                                    PointerExited="OnCardPointerExited">
                                                 <Border.ContextMenu>
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
@@ -434,11 +452,10 @@
                                                         <Button Padding="0"
                                                                 Background="Transparent" BorderThickness="0"
                                                                 HorizontalAlignment="Stretch"
+                                                                CornerRadius="10,10,0,0" ClipToBounds="True"
                                                                 Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                                 CommandParameter="{Binding}">
-                                                            <asyncImageLoader:AdvancedImage
-                                                                Source="{Binding ThumbnailSource}"
-                                                                Stretch="UniformToFill"/>
+                                                            <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
                                                         </Button>
 
                                                         <!-- Checkmark badge -->
@@ -1090,10 +1107,19 @@
                     HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid RowDefinitions="*,Auto">
 
-                    <asyncImageLoader:AdvancedImage Grid.Row="0"
-                        Source="{Binding PreviewCard.ThumbnailSource}"
-                        Stretch="Uniform"
-                        MaxWidth="828" MaxHeight="500"/>
+                    <Panel Grid.Row="0" DataContext="{Binding PreviewCard}"
+                           x:DataType="vm:WallpaperCardViewModel"
+                           MaxWidth="828" MaxHeight="500">
+                        <asyncImageLoader:AdvancedImage
+                            IsVisible="{Binding !IsGifThumbnail}"
+                            Source="{Binding ThumbnailSource}"
+                            Stretch="Uniform"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Viewbox IsVisible="{Binding IsGifThumbnail}" Stretch="Uniform"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <gif:GifImage Source="{Binding GifSource}"/>
+                        </Viewbox>
+                    </Panel>
 
                     <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
                         <TextBlock Grid.Column="0"

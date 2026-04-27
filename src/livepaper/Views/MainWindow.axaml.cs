@@ -331,6 +331,18 @@ public partial class MainWindow : Window
             vm.LoadMoreCommand.Execute(null);
     }
 
+    private void OnCardPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+            card.IsGifActive = true;
+    }
+
+    private void OnCardPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+            card.IsGifActive = false;
+    }
+
     private void UpdateCardThumbnailHeight()
     {
         if (Vm == null) return;
