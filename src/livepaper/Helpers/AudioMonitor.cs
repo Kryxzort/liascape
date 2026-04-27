@@ -65,6 +65,7 @@ public static class AudioMonitor
 
     private static CancellationTokenSource? _cts;
     private static volatile bool _isMuted;
+    public static bool IsMuted => _isMuted;
     private static int _aboveThresholdCount;
 
     // Entry point for the detached `livepaper --monitor` daemon process.
@@ -336,6 +337,7 @@ public static class AudioMonitor
         {
             if (block.Contains("application.process.binary = \"mpv\"")) continue;
             if (block.Contains("application.name = \"mpv\"")) continue;
+            if (block.Contains("application.name = \"SDL Application\"")) continue;
             var firstLine = block.Split('\n')[0].Trim();
             if (uint.TryParse(firstLine, out uint id))
                 result.Add(id);

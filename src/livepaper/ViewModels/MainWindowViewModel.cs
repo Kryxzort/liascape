@@ -133,6 +133,16 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _wallpaperEnginePath = "";
     [ObservableProperty] private bool _weCopyFiles;
     [ObservableProperty] private bool _resumeFromLast;
+    [ObservableProperty] private bool _allowScenes;
+    [ObservableProperty] private decimal _sceneTransitionDelayMs;
+
+    // LWE monitor management
+    [ObservableProperty] private ObservableCollection<LweMonitorViewModel> _lweMonitors = [];
+    [ObservableProperty] private LweMonitorViewModel? _selectedLweMonitor;
+    [ObservableProperty] private decimal _selectedMonitorFps = 30;
+    [ObservableProperty] private bool _selectedMonitorIsPrimary;
+    [ObservableProperty] private bool _isAddingMonitor;
+    [ObservableProperty] private string _newMonitorName = "";
 
     // mpvpaper settings
     [ObservableProperty] private bool _loop;
@@ -228,6 +238,131 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _settings.ResumeFromLast = value;
         SettingsService.Save(_settings);
+    }
+
+    partial void OnAllowScenesChanged(bool value)
+    {
+        _settings.AllowScenes = value;
+        ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).AllowScenes = value;
+        if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
+        if (value && !PlayerHelper.IsLweAvailable())
+            StatusMessage = "linux-wallpaperengine not found in PATH — install it to use scenes";
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnSceneTransitionDelayMsChanged(decimal value)
+    {
+        _settings.SceneTransitionDelayMs = (int)value;
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnSelectedLweMonitorChanged(LweMonitorViewModel? value)
+    {
+        if (value == null) return;
+        SelectedMonitorFps = value.Fps;
+        SelectedMonitorIsPrimary = value.IsPrimary;
+    }
+
+    partial void OnSelectedMonitorFpsChanged(decimal value)
+    {
+        if (SelectedLweMonitor == null) return;
+        SelectedLweMonitor.Fps = (int)value;
+        SaveLweMonitors();
+    }
+
+    partial void OnSelectedMonitorIsPrimaryChanged(bool value)
+    {
+        if (SelectedLweMonitor == null) return;
+        if (value)
+        {
+            foreach (var m in LweMonitors)
+                m.IsPrimary = false;
+            SelectedLweMonitor.IsPrimary = true;
+            SaveLweMonitors();
+        }
+        else
+        {
+            if (LweMonitors.Count <= 1)
+            {
+                // Can't deselect the only monitor — defer revert so binding completes first
+                Dispatcher.UIThread.Post(() => SelectedMonitorIsPrimary = true);
+                return;
+            }
+            // Auto-promote the next monitor in the list
+            SelectedLweMonitor.IsPrimary = false;
+            var idx = LweMonitors.IndexOf(SelectedLweMonitor);
+            var next = LweMonitors[(idx + 1) % LweMonitors.Count];
+            next.IsPrimary = true;
+            SaveLweMonitors();
+        }
+    }
+
+    private void AddMonitor(string name)
+    {
+        var saved = _settings.LweMonitors.FirstOrDefault(m => m.Name == name);
+        var vm = new LweMonitorViewModel(name, LweMonitors.Count)
+        {
+            Fps = saved?.Fps ?? 30,
+            IsPrimary = saved?.IsPrimary ?? LweMonitors.Count == 0
+        };
+        LweMonitors.Add(vm);
+        UpdateMonitorIndices();
+        SaveLweMonitors();
+    }
+
+    private void UpdateMonitorIndices()
+    {
+        for (int i = 0; i < LweMonitors.Count; i++)
+            LweMonitors[i].Index = i;
+    }
+
+    private void SaveLweMonitors()
+    {
+        _settings.LweMonitors = LweMonitors
+            .Select(m => new Models.LweMonitorSettings { Name = m.Name, Fps = m.Fps, IsPrimary = m.IsPrimary })
+            .ToList();
+        SettingsService.Save(_settings);
+    }
+
+    [RelayCommand]
+    private void StartAddMonitor()
+    {
+        NewMonitorName = "";
+        IsAddingMonitor = true;
+    }
+
+    [RelayCommand]
+    private void ConfirmAddMonitor()
+    {
+        var name = NewMonitorName.Trim();
+        if (!string.IsNullOrEmpty(name))
+            AddMonitor(name);
+        IsAddingMonitor = false;
+        NewMonitorName = "";
+    }
+
+    [RelayCommand]
+    private void CancelAddMonitor()
+    {
+        IsAddingMonitor = false;
+        NewMonitorName = "";
+    }
+
+    [RelayCommand]
+    private void RemoveSelectedMonitor()
+    {
+        if (SelectedLweMonitor == null) return;
+        bool wasPrimary = SelectedLweMonitor.IsPrimary;
+        LweMonitors.Remove(SelectedLweMonitor);
+        UpdateMonitorIndices();
+        SelectedLweMonitor = LweMonitors.Count > 0 ? LweMonitors[0] : null;
+        // Ensure there's always a primary
+        if (wasPrimary && LweMonitors.Count > 0 && !LweMonitors.Any(m => m.IsPrimary))
+        {
+            LweMonitors[0].IsPrimary = true;
+            if (SelectedLweMonitor != null) SelectedMonitorIsPrimary = LweMonitors[0].IsPrimary;
+        }
+        SaveLweMonitors();
     }
 
     [RelayCommand]
@@ -401,8 +536,23 @@ public partial class MainWindowViewModel : ViewModelBase
         _wallpaperEnginePath = _settings.WallpaperEnginePath;
         _weCopyFiles = _settings.WeCopyFiles;
         _resumeFromLast = _settings.ResumeFromLast;
+        _allowScenes = _settings.AllowScenes;
+        _sceneTransitionDelayMs = _settings.SceneTransitionDelayMs;
+        foreach (var m in _settings.LweMonitors)
+        {
+            var vm = new LweMonitorViewModel(m.Name, _lweMonitors.Count) { Fps = m.Fps, IsPrimary = m.IsPrimary };
+            _lweMonitors.Add(vm);
+        }
+        if (_lweMonitors.Count > 0)
+        {
+            _selectedLweMonitor = _lweMonitors[0];
+            _selectedMonitorFps = _lweMonitors[0].Fps;
+            _selectedMonitorIsPrimary = _lweMonitors[0].IsPrimary;
+        }
         _mpvOptionsPreview = _settings.BuildMpvOptions();
-        ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).WorkshopPath = _settings.WallpaperEnginePath;
+        var weService = (WallpaperEngineService)Sources.First(s => s is WallpaperEngineService);
+        weService.WorkshopPath = _settings.WallpaperEnginePath;
+        weService.AllowScenes = _settings.AllowScenes;
 #pragma warning restore MVVMTK0034
 
         if (_settings.AutoMute)
@@ -433,6 +583,19 @@ public partial class MainWindowViewModel : ViewModelBase
 
         PlayerHelper.OnTimedPlaylistStopped = () =>
             Dispatcher.UIThread.Post(() => StatusMessage = "");
+
+        PlayerHelper.OnSceneCrashed = path => Dispatcher.UIThread.Post(() =>
+        {
+            var card = LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == path);
+            if (card == null) return;
+            LibraryService.MarkCrashed(path);
+            card.HasCrashed = true;
+            if (!card.IsWhitelisted && card.IsInPlaylist)
+            {
+                PlaylistItems.Remove(card);
+                card.IsInPlaylist = false;
+            }
+        });
 
         LoadLibrary();
         RestorePlaylistState();
@@ -595,15 +758,21 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (GetEffectiveAdvanceOnVideoEnd())
         {
-            PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle);
+            var mpvPaths = paths.Where(p => !p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (mpvPaths.Count == 0)
+            {
+                StatusMessage = "No video wallpapers in playlist (scenes require timed playlist)";
+                return;
+            }
+            PlayerHelper.ApplyPlaylist(mpvPaths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle);
             _settings.LastSession = new LastSession
             {
                 IsPlaylist = true,
-                Paths = paths,
+                Paths = mpvPaths,
                 Shuffle = PlaylistShuffle
             };
             SettingsService.Save(_settings);
-            StatusMessage = $"Playing playlist ({paths.Count} wallpapers, advancing on video end)";
+            StatusMessage = $"Playing playlist ({mpvPaths.Count} wallpapers, advancing on video end)";
             return;
         }
 
@@ -1108,7 +1277,9 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     Title = target.Title,
                     ThumbnailUrl = target.ThumbnailSource,
-                    PageUrl = target.PageUrl
+                    PageUrl = target.PageUrl,
+                    IsScene = target.IsScene,
+                    WorkshopId = target.WorkshopId
                 });
                 var progressReporter = new Progress<double>(p => DownloadProgress = p);
                 var item = await DownloadHelper.DownloadAsync(detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles);
@@ -1191,10 +1362,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
             if (_settings.GlobalAdvanceOnVideoEnd)
             {
-                PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), ShuffleLibrary);
-                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = ShuffleLibrary };
+                var mpvPaths = paths.Where(p => !p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase)).ToList();
+                if (mpvPaths.Count == 0)
+                {
+                    StatusMessage = "No video wallpapers in library (scenes require timed playlist)";
+                    return;
+                }
+                PlayerHelper.ApplyPlaylist(mpvPaths, _settings.BuildMpvPlaylistOptions(), ShuffleLibrary);
+                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = mpvPaths, Shuffle = ShuffleLibrary };
                 SettingsService.Save(_settings);
-                StatusMessage = $"Playing {paths.Count} wallpapers, advancing on video end{(ShuffleLibrary ? " (shuffled)" : "")}";
+                StatusMessage = $"Playing {mpvPaths.Count} wallpapers, advancing on video end{(ShuffleLibrary ? " (shuffled)" : "")}";
                 return;
             }
 

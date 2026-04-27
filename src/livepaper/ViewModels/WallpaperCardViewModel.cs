@@ -1,6 +1,7 @@
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using livepaper.Helpers;
 using livepaper.Models;
 
 namespace livepaper.ViewModels;
@@ -12,9 +13,18 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public string PageUrl { get; }
     public string? Resolution { get; }
     public LibraryItem? LibraryItem { get; }
+    public bool IsScene { get; }
+    public string? WorkshopId { get; }
 
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
+    [ObservableProperty] private bool _hasCrashed;
+    [ObservableProperty] private bool _isWhitelisted;
+
+    partial void OnIsWhitelistedChanged(bool value)
+    {
+        if (LibraryItem != null) LibraryService.SetWhitelisted(LibraryItem.VideoPath, value);
+    }
 
     public string CheckmarkText => IsInPlaylist ? "−" : "+";
 
@@ -31,6 +41,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
         ThumbnailSource = result.ThumbnailUrl;
         PageUrl = result.PageUrl;
         Resolution = result.Resolution;
+        IsScene = result.IsScene;
+        WorkshopId = result.WorkshopId;
     }
 
     public WallpaperCardViewModel(LibraryItem item)
@@ -39,5 +51,11 @@ public partial class WallpaperCardViewModel : ViewModelBase
         ThumbnailSource = item.ThumbnailPath ?? "";
         PageUrl = item.VideoPath;
         LibraryItem = item;
+        IsScene = item.IsScene;
+        WorkshopId = item.WorkshopId;
+#pragma warning disable MVVMTK0034
+        _hasCrashed = item.HasCrashed;
+        _isWhitelisted = item.IsWhitelisted;
+#pragma warning restore MVVMTK0034
     }
 }

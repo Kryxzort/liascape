@@ -17,8 +17,29 @@ public static class DownloadHelper
         Directory.CreateDirectory(LibraryPath);
 
         string safeTitle = SanitizeName(detail.Title);
+
+        if (detail.IsScene)
+        {
+            string scenePath = Path.Combine(LibraryPath, safeTitle + ".scene");
+            await File.WriteAllTextAsync(scenePath, detail.WorkshopId ?? Path.GetFileName(detail.DownloadUrl));
+            string? thumbPath = await SaveThumbnailAsync(thumbnailUrl, safeTitle, copyLocalFiles);
+            if (!string.IsNullOrEmpty(sourceId))
+                await File.WriteAllTextAsync(Path.ChangeExtension(scenePath, ".id"), sourceId);
+            progress?.Report(1.0);
+            return new LibraryItem
+            {
+                Title = detail.Title,
+                VideoPath = scenePath,
+                ThumbnailPath = thumbPath,
+                SourceId = sourceId,
+                IsScene = true,
+                WorkshopId = detail.WorkshopId,
+                AddedAt = System.DateTime.Now
+            };
+        }
+
         string videoPath = Path.Combine(LibraryPath, safeTitle + ".mp4");
-        string? thumbPath = null;
+        string? thumbPathVideo = null;
 
         if (File.Exists(detail.DownloadUrl))
         {
@@ -42,25 +63,25 @@ public static class DownloadHelper
 
         if (!string.IsNullOrEmpty(thumbnailUrl))
         {
-            thumbPath = Path.Combine(LibraryPath, safeTitle + ".jpg");
+            thumbPathVideo = Path.Combine(LibraryPath, safeTitle + ".jpg");
             try
             {
                 if (File.Exists(thumbnailUrl))
                 {
-                    bool sameThumb = Path.GetFullPath(thumbnailUrl) == Path.GetFullPath(thumbPath);
-                    if (!sameThumb && File.Exists(thumbPath)) File.Delete(thumbPath);
+                    bool sameThumb = Path.GetFullPath(thumbnailUrl) == Path.GetFullPath(thumbPathVideo);
+                    if (!sameThumb && File.Exists(thumbPathVideo)) File.Delete(thumbPathVideo);
                     if (!sameThumb)
                     {
                         if (copyLocalFiles)
-                            await Task.Run(() => File.Copy(thumbnailUrl, thumbPath));
+                            await Task.Run(() => File.Copy(thumbnailUrl, thumbPathVideo));
                         else
-                            File.CreateSymbolicLink(thumbPath, thumbnailUrl);
+                            File.CreateSymbolicLink(thumbPathVideo, thumbnailUrl);
                     }
                 }
                 else
-                    await DownloadFileAsync(thumbnailUrl, thumbPath, null);
+                    await DownloadFileAsync(thumbnailUrl, thumbPathVideo, null);
             }
-            catch { thumbPath = null; }
+            catch { thumbPathVideo = null; }
         }
 
         if (!string.IsNullOrEmpty(sourceId))
@@ -70,9 +91,34 @@ public static class DownloadHelper
         {
             Title = detail.Title,
             VideoPath = videoPath,
-            ThumbnailPath = thumbPath,
-            SourceId = sourceId
+            ThumbnailPath = thumbPathVideo,
+            SourceId = sourceId,
+            WorkshopId = detail.WorkshopId,
+            AddedAt = System.DateTime.Now
         };
+    }
+
+    private static async Task<string?> SaveThumbnailAsync(string? thumbnailUrl, string safeTitle, bool copyLocalFiles)
+    {
+        if (string.IsNullOrEmpty(thumbnailUrl)) return null;
+        string ext = Path.GetExtension(thumbnailUrl);
+        if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+        string thumbPath = Path.Combine(LibraryPath, safeTitle + ext);
+        try
+        {
+            if (File.Exists(thumbnailUrl))
+            {
+                if (File.Exists(thumbPath)) File.Delete(thumbPath);
+                if (copyLocalFiles)
+                    await Task.Run(() => File.Copy(thumbnailUrl, thumbPath));
+                else
+                    File.CreateSymbolicLink(thumbPath, thumbnailUrl);
+            }
+            else
+                await DownloadFileAsync(thumbnailUrl, thumbPath, null);
+            return thumbPath;
+        }
+        catch { return null; }
     }
 
     private static async Task DownloadFileAsync(string url, string dest, string? referrer, IProgress<double>? progress = null)

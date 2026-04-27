@@ -9,7 +9,7 @@ namespace livepaper.Scrapers;
 
 public static class WallpaperEngineScraper
 {
-    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath)
+    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath, bool allowScenes = false)
     {
         var results = new List<WallpaperResult>();
 
@@ -19,10 +19,34 @@ public static class WallpaperEngineScraper
         // WE workshop layout: <workshopPath>/<wallpaperId>/{project.json, <video>, preview.*, ...}
         // Drive discovery from project.json so we pick up any video format
         // mpv supports (mp4, webm, mov, mkv, ...) while filtering out
-        // non-video wallpaper types ("scene", "web", "application").
+        // non-video wallpaper types ("web", "application").
         foreach (var dir in Directory.EnumerateDirectories(workshopPath))
         {
             var info = await ReadProjectAsync(dir);
+            string workshopId = Path.GetFileName(dir);
+            string title = (info != null && !string.IsNullOrEmpty(info.Title))
+                ? info.Title : workshopId;
+            string? thumbnail = FindThumbnail(dir);
+
+            // Scene detection: type == "scene" OR scene.pkg present
+            bool hasScene = File.Exists(Path.Combine(dir, "scene.pkg"));
+            bool isScene = (info != null && string.Equals(info.Type, "scene", StringComparison.OrdinalIgnoreCase))
+                || (info == null && hasScene);
+
+            if (isScene)
+            {
+                if (!allowScenes) continue;
+                results.Add(new WallpaperResult
+                {
+                    Title = title,
+                    ThumbnailUrl = thumbnail ?? "",
+                    PageUrl = dir,
+                    IsScene = true,
+                    WorkshopId = workshopId
+                });
+                continue;
+            }
+
             if (info == null) continue;
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrEmpty(info.File)) continue;
@@ -32,9 +56,10 @@ public static class WallpaperEngineScraper
 
             results.Add(new WallpaperResult
             {
-                Title = string.IsNullOrEmpty(info.Title) ? Path.GetFileName(dir) : info.Title,
-                ThumbnailUrl = FindThumbnail(dir) ?? "",
-                PageUrl = videoPath
+                Title = title,
+                ThumbnailUrl = thumbnail ?? "",
+                PageUrl = videoPath,
+                WorkshopId = workshopId
             });
         }
 
