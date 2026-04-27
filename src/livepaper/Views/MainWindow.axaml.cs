@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using livepaper.ViewModels;
@@ -36,6 +37,10 @@ public partial class MainWindow : Window
         BrowseScrollViewer.ScrollChanged += OnBrowseScrollChanged;
         DataContextChanged += OnDataContextChanged;
         KeyDown += OnKeyDown;
+        new SmoothScroller(BrowseScrollViewer);
+        new SmoothScroller(LibraryScrollViewer);
+        new SmoothScroller(SettingsScrollViewer);
+        new SmoothScroller(PlaylistScrollViewer);
         Loaded += (_, _) =>
         {
             BrowseItemsRepeater.SizeChanged += (_, _) => UpdateCardThumbnailHeight();
@@ -362,5 +367,77 @@ public partial class MainWindow : Window
 
         if (sv.Extent.Height - sv.Offset.Y - sv.Viewport.Height < 300)
             vm.LoadMoreCommand.Execute(null);
+    }
+
+    private sealed class SmoothScroller
+    {
+        private readonly ScrollViewer _sv;
+        private double _velocity;
+        private bool _animating;
+        private TimeSpan? _lastTime;
+        private const double Impulse = 80.0;
+        private const double Friction = 0.85;
+        private const double StopThreshold = 0.1;
+        private const double MaxVelocity = 2500.0;
+
+        public SmoothScroller(ScrollViewer sv)
+        {
+            _sv = sv;
+            sv.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
+        }
+
+        private void OnWheel(object? sender, PointerWheelEventArgs e)
+        {
+            double delta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
+            _velocity = Math.Clamp(_velocity - delta * Impulse, -MaxVelocity, MaxVelocity);
+            e.Handled = true;
+
+            if (!_animating)
+            {
+                _animating = true;
+                _lastTime = null;
+                TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnFrame);
+            }
+        }
+
+        private void OnFrame(TimeSpan time)
+        {
+            if (!_animating) return;
+
+            double dt = _lastTime.HasValue
+                ? Math.Min((time - _lastTime.Value).TotalMilliseconds, 64)
+                : 16.0;
+            _lastTime = time;
+
+            _velocity *= Math.Pow(Friction, dt / 16.0);
+
+            if (Math.Abs(_velocity) < StopThreshold)
+            {
+                _animating = false;
+                _velocity = 0;
+                return;
+            }
+
+            var currentOffset = _sv.Offset;
+            bool isHorizontal = _sv.HorizontalScrollBarVisibility != ScrollBarVisibility.Disabled &&
+                               _sv.VerticalScrollBarVisibility == ScrollBarVisibility.Disabled;
+
+            if (isHorizontal)
+            {
+                var maxX = Math.Max(0, _sv.Extent.Width - _sv.Viewport.Width);
+                var newX = Math.Clamp(currentOffset.X + _velocity * (dt / 16.0), 0, maxX);
+                if (newX <= 0 || newX >= maxX) _velocity = 0;
+                _sv.Offset = new Vector(newX, currentOffset.Y);
+            }
+            else
+            {
+                var maxY = Math.Max(0, _sv.Extent.Height - _sv.Viewport.Height);
+                var newY = Math.Clamp(currentOffset.Y + _velocity * (dt / 16.0), 0, maxY);
+                if (newY <= 0 || newY >= maxY) _velocity = 0;
+                _sv.Offset = new Vector(currentOffset.X, newY);
+            }
+
+            TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnFrame);
+        }
     }
 }
