@@ -174,6 +174,34 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private decimal _globalIntervalMinutes;
     [ObservableProperty] private decimal _globalIntervalSeconds;
     [ObservableProperty] private bool _globalAdvanceOnVideoEnd = true;
+    [ObservableProperty] private bool _globalWaitForVideoEnd;
+
+    // Display proxies: show global values when override is off, per-playlist when on
+    public decimal DisplayIntervalHours
+    {
+        get => OverrideGlobalSettings ? IntervalHours : GlobalIntervalHours;
+        set { if (OverrideGlobalSettings) IntervalHours = value; }
+    }
+    public decimal DisplayIntervalMinutes
+    {
+        get => OverrideGlobalSettings ? IntervalMinutes : GlobalIntervalMinutes;
+        set { if (OverrideGlobalSettings) IntervalMinutes = value; }
+    }
+    public decimal DisplayIntervalSeconds
+    {
+        get => OverrideGlobalSettings ? IntervalSeconds : GlobalIntervalSeconds;
+        set { if (OverrideGlobalSettings) IntervalSeconds = value; }
+    }
+    public bool DisplayAdvanceOnVideoEnd
+    {
+        get => OverrideGlobalSettings ? AdvanceOnVideoEnd : GlobalAdvanceOnVideoEnd;
+        set { if (OverrideGlobalSettings) AdvanceOnVideoEnd = value; }
+    }
+    public bool DisplayWaitForVideoEnd
+    {
+        get => OverrideGlobalSettings ? PlaylistWaitForVideoEnd : GlobalWaitForVideoEnd;
+        set { if (OverrideGlobalSettings) PlaylistWaitForVideoEnd = value; }
+    }
 
     partial void OnAutoMuteChanged(bool value)
     {
@@ -311,7 +339,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     partial void OnPlaylistShuffleChanged(bool value) { SavePlaylistStateDebounced(); ApplyTimedSettingsIfRunning(); }
-    partial void OnPlaylistWaitForVideoEndChanged(bool value) { _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); ApplyTimedSettingsIfRunning(); }
+    partial void OnPlaylistWaitForVideoEndChanged(bool value) { _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); }
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
     partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
@@ -324,16 +352,19 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(DisplayIntervalMinutes));
         OnPropertyChanged(nameof(DisplayIntervalSeconds));
         OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd));
+        OnPropertyChanged(nameof(DisplayWaitForVideoEnd));
     }
     partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
     partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
     partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
     partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
+    partial void OnGlobalWaitForVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); } }
 
     private void SaveGlobalRotationSettings()
     {
         _settings.GlobalIntervalSeconds = (int)GlobalIntervalHours * 3600 + (int)GlobalIntervalMinutes * 60 + (int)GlobalIntervalSeconds;
         _settings.GlobalAdvanceOnVideoEnd = GlobalAdvanceOnVideoEnd;
+        _settings.GlobalWaitForVideoEnd = GlobalWaitForVideoEnd;
         SettingsService.Save(_settings);
     }
 
@@ -354,13 +385,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private bool GetEffectiveAdvanceOnVideoEnd() =>
         OverrideGlobalSettings ? AdvanceOnVideoEnd : _settings.GlobalAdvanceOnVideoEnd;
+
+    private bool GetEffectiveWaitForVideoEnd() =>
+        OverrideGlobalSettings ? PlaylistWaitForVideoEnd : _settings.GlobalWaitForVideoEnd;
     partial void OnCurrentPlaylistNameChanged(string? value) => SavePlaylistStateDebounced();
 
     private void ApplyTimedSettingsIfRunning()
     {
         if (_settings.LastSession?.IsTimedPlaylist != true || !PlayerHelper.IsPlaying) return;
         int secs = GetEffectiveIntervalSeconds();
-        if (secs > 0) PlayerHelper.UpdateTimedSettings(PlaylistShuffle, secs, _settings.PlaylistWaitForVideoEnd);
+        if (secs > 0) PlayerHelper.UpdateTimedSettings(PlaylistShuffle, secs, GetEffectiveWaitForVideoEnd());
     }
 
     private int _lastSelectedIndex = -1;
@@ -408,6 +442,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _globalIntervalMinutes = (gSecs % 3600) / 60;
         _globalIntervalSeconds = gSecs % 60;
         _globalAdvanceOnVideoEnd = _settings.GlobalAdvanceOnVideoEnd;
+        _globalWaitForVideoEnd = _settings.GlobalWaitForVideoEnd;
         _playlistWaitForVideoEnd = _settings.PlaylistWaitForVideoEnd;
         _wallpaperEnginePath = _settings.WallpaperEnginePath;
         _weCopyFiles = _settings.WeCopyFiles;
@@ -625,7 +660,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
         var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, _settings.PlaylistWaitForVideoEnd);
+        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, GetEffectiveWaitForVideoEnd());
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
@@ -674,7 +709,7 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        PlayerHelper.ApplyTimedPlaylist(paths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, _settings.PlaylistWaitForVideoEnd);
+        PlayerHelper.ApplyTimedPlaylist(paths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, GetEffectiveWaitForVideoEnd());
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
@@ -1216,7 +1251,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
             var playPaths = ShuffleLibrary ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-            PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), ShuffleLibrary, intervalSecs, _settings.PlaylistWaitForVideoEnd);
+            PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), ShuffleLibrary, intervalSecs, _settings.GlobalWaitForVideoEnd);
             _settings.LastSession = new LastSession
             {
                 IsTimedPlaylist = true,
