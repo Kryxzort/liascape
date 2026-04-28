@@ -339,11 +339,11 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     partial void OnPlaylistShuffleChanged(bool value) { SavePlaylistStateDebounced(); ApplyTimedSettingsIfRunning(); }
-    partial void OnPlaylistWaitForVideoEndChanged(bool value) { _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); }
+    partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); }
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
     partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
-    partial void OnAdvanceOnVideoEndChanged(bool value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
+    partial void OnAdvanceOnVideoEndChanged(bool value) { if (value) PlaylistWaitForVideoEnd = false; SavePlaylistStateDebounced(); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
     partial void OnOverrideGlobalSettingsChanged(bool value)
     {
         SavePlaylistStateDebounced();
@@ -357,8 +357,8 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } }
     partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } }
     partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyTimedSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } }
-    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
-    partial void OnGlobalWaitForVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); } }
+    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { if (value) GlobalWaitForVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); }
+    partial void OnGlobalWaitForVideoEndChanged(bool value) { if (value) GlobalAdvanceOnVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyTimedSettingsIfRunning(); } }
 
     private void SaveGlobalRotationSettings()
     {
