@@ -18,27 +18,27 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public string? WorkshopId { get; }
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
 
-    private Avalonia.Labs.Gif.IGifSource? _gifSource;
-    public Avalonia.Labs.Gif.IGifSource? GifSource => _gifSource ??= LoadGifSource();
+    private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
+    public AnimatedImage.Avalonia.AnimatedImageSource? GifSource => _gifSource ??= LoadGifSource();
 
     [ObservableProperty] private bool _isGifActive;
     partial void OnIsGifActiveChanged(bool value) => OnPropertyChanged(nameof(ActiveGifSource));
-    public Avalonia.Labs.Gif.IGifSource? ActiveGifSource => IsGifActive ? GifSource : null;
+    public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
 
-    private Avalonia.Labs.Gif.IGifSource? LoadGifSource()
+    private AnimatedImage.Avalonia.AnimatedImageSource? LoadGifSource()
     {
         if (!IsGifThumbnail) return null;
         try
         {
             if (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                return Avalonia.Labs.Gif.GifStreamSource.FromUriString(ThumbnailSource);
+                return new AnimatedImage.Avalonia.AnimatedImageSourceUri { UriSource = new Uri(ThumbnailSource, UriKind.Absolute) };
 
             string path = ThumbnailSource;
             if (path.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
                 path = path.Substring(7);
 
             if (File.Exists(path))
-                return Avalonia.Labs.Gif.GifStreamSource.FromStream(File.OpenRead(path));
+                return new AnimatedImage.Avalonia.AnimatedImageSourceStream(File.OpenRead(path));
         }
         catch { }
         return null;
