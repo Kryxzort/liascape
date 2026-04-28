@@ -1045,12 +1045,7 @@
                                         </Button>
                                         <Border IsHitTestVisible="False" CornerRadius="6"
                                                 IsVisible="{Binding IsGifActive}"
-                                                Opacity="0.45"
                                                 BorderBrush="{DynamicResource Accent}"
-                                                BorderThickness="1.5"/>
-                                        <Border IsHitTestVisible="False" CornerRadius="6"
-                                                IsVisible="{Binding IsCurrentlyPlaying}"
-                                                BorderBrush="{DynamicResource Success}"
                                                 BorderThickness="1.5"/>
                                     </Grid>
                                 </Border>
