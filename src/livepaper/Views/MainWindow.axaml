@@ -1305,7 +1305,7 @@
                 IsHitTestVisible="False"
                 IsVisible="False">
             <Border x:Name="DragPreviewBorder"
-                    Width="100" Height="90"
+                    Width="67" Height="60"
                     CornerRadius="4"
                     ClipToBounds="True"
                     Opacity="0.85"/>

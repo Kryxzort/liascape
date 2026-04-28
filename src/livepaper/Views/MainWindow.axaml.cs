@@ -215,8 +215,8 @@ public partial class MainWindow : Window
             DragPreviewCanvas.IsVisible = true;
         }
 
-        Canvas.SetLeft(DragPreviewBorder, windowPos.X - 25);
-        Canvas.SetTop(DragPreviewBorder, windowPos.Y - 22);
+        Canvas.SetLeft(DragPreviewBorder, windowPos.X - 17);
+        Canvas.SetTop(DragPreviewBorder, windowPos.Y - 15);
 
         var svPos = e.GetPosition(PlaylistScrollViewer);
         if (svPos.X >= 0 && svPos.X <= PlaylistScrollViewer.Bounds.Width
