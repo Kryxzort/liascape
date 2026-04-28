@@ -57,15 +57,7 @@
                                     <TextBox Text="{Binding SearchQuery}"
                                              PlaceholderText="Search…"
                                              Width="220"
-                                             IsEnabled="{Binding SelectedSource.SupportsSearch}">
-                                        <TextBox.KeyBindings>
-                                            <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}"/>
-                                        </TextBox.KeyBindings>
-                                    </TextBox>
-                                    <Button Content="Search"
-                                            Classes="ghost"
-                                            Command="{Binding SearchCommand}"
-                                            IsEnabled="{Binding SelectedSource.SupportsSearch}"/>
+                                             IsEnabled="{Binding SelectedSource.SupportsSearch}"/>
                                     <Button Classes="ghost"
                                             Width="28" Height="28" Padding="0"
                                             IsVisible="{Binding SelectedSource.SupportsSorting}"
@@ -81,6 +73,18 @@
                                                 <MenuItem Header="Name Z–A"
                                                           Command="{Binding SetBrowseSortCommand}"
                                                           CommandParameter="2"/>
+                                                <MenuItem Header="Videos first"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="3"/>
+                                                <MenuItem Header="Scenes first"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="4"/>
+                                                <MenuItem Header="Newest added"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="5"/>
+                                                <MenuItem Header="Oldest added"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="6"/>
                                             </MenuFlyout>
                                         </Button.Flyout>
                                         <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>

@@ -414,20 +414,50 @@ public partial class MainWindowViewModel : ViewModelBase
         if (int.TryParse(index, out int i)) LibrarySortIndex = i;
     }
 
-    // ── Browse sort ───────────────────────────────────────────────────────
+    // ── Browse sort / auto-search ─────────────────────────────────────────
 
     [ObservableProperty] private int _browseSortIndex = 0;
+    private CancellationTokenSource? _browseSearchDebounceCts;
 
     partial void OnBrowseSortIndexChanged(int value)
     {
         if (SelectedSource.SupportsSorting)
-            _ = LoadWallpapersAsync();
+        {
+            if (_isSearchMode && !string.IsNullOrWhiteSpace(SearchQuery))
+                _ = SearchAsync();
+            else
+                _ = LoadWallpapersAsync();
+        }
     }
 
     [RelayCommand]
     private void SetBrowseSort(string index)
     {
         if (int.TryParse(index, out int i)) BrowseSortIndex = i;
+    }
+
+    partial void OnSearchQueryChanged(string value)
+    {
+        if (!SelectedSource.SupportsSearch) return;
+        _browseSearchDebounceCts?.Cancel();
+        _browseSearchDebounceCts = new CancellationTokenSource();
+        var token = _browseSearchDebounceCts.Token;
+        var trimmed = value.Trim();
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(200, token);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (string.IsNullOrEmpty(trimmed))
+                        _ = LoadWallpapersAsync();
+                    else
+                        _ = SearchAsync();
+                });
+            }
+            catch (OperationCanceledException) { }
+        });
     }
 
     private static IEnumerable<WallpaperCardViewModel> ApplyLibraryFilter(
