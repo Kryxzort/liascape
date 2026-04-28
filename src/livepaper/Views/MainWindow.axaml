@@ -981,9 +981,20 @@
         <Border Grid.Row="1"
                 Background="{DynamicResource BgCrust}"
                 Padding="16,6">
-            <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="{DynamicResource Muted}"
-                       FontSize="11"/>
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Content="Undo"
+                        IsVisible="{Binding CanUndo}"
+                        Command="{Binding UndoDeleteCommand}"
+                        Classes="ghost"
+                        Padding="10,2"
+                        FontSize="11"
+                        Margin="8,0,0,0"/>
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="{DynamicResource Muted}"
+                           FontSize="11"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
         </Border>
 
         <!-- Download progress modal -->

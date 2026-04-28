@@ -156,6 +156,11 @@ public partial class MainWindow : Window
             Vm.DeleteSelectedCommand.Execute(null);
             e.Handled = true;
         }
+        if (e.Key == Key.Z && e.KeyModifiers == KeyModifiers.Control && Vm?.CanUndo == true)
+        {
+            Vm.UndoDeleteCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
