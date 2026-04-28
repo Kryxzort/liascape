@@ -762,10 +762,11 @@ public static class PlayerHelper
 
     private static async Task DoVideoEndWait(string next, string opts, long intervalMs, CancellationToken ct)
     {
+        const double EarlyMs = 0.05; // switch 50ms before end to beat thread-scheduling jitter
         var remaining = TryQueryTimeRemaining();
-        if (remaining is > 0.1)
+        if (remaining is > EarlyMs)
         {
-            try { await Task.Delay(TimeSpan.FromSeconds(remaining.Value), ct); }
+            try { await Task.Delay(TimeSpan.FromSeconds(remaining.Value - EarlyMs), ct); }
             catch (OperationCanceledException) { return; }
         }
 
