@@ -762,17 +762,67 @@ public static class PlayerHelper
 
     private static async Task DoVideoEndWait(string next, string opts, long intervalMs, CancellationToken ct)
     {
-        const double EarlyMs = 0.05; // switch 50ms before end to beat thread-scheduling jitter
-        var remaining = TryQueryTimeRemaining();
-        if (remaining is > EarlyMs)
+        // For video→video: disable loop on current, append next to mpv's playlist so
+        // the transition happens inside mpv (no blank gap), then restore loop after.
+        // Falls back to an immediate SwitchToFile for scene transitions or when IPC is unavailable.
+        bool nextIsScene = IsScenePath(next);
+        bool prevIsScene = IsLweRunning;
+
+        if (!nextIsScene && !prevIsScene)
         {
-            try { await Task.Delay(TimeSpan.FromSeconds(remaining.Value - EarlyMs), ct); }
-            catch (OperationCanceledException) { return; }
+            var remaining = TryQueryTimeRemaining();
+            if (remaining != null)
+            {
+                TrySendCommand("set", "loop-file", "no");
+                TrySendCommand("loadfile", next, "append");
+
+                var sleepMs = Math.Max(0, (int)(remaining.Value * 1000)) + 2000;
+                try { await Task.Delay(sleepMs, ct); }
+                catch (OperationCanceledException) { return; }
+
+                lock (_lock)
+                {
+                    if (!_waitingForVideoEnd) return;
+                    _waitingForVideoEnd = false;
+                    _waitCts = null;
+
+                    var settings = SettingsService.Load();
+                    TrySendCommand("set", "loop-file", settings.Loop ? "inf" : "no");
+                    TrySendCommand("playlist-clear");
+
+                    OnWallpaperChanged?.Invoke(next);
+                    var volOverride = ReadVolumeOverride(next);
+                    var speedOverride = ReadSpeedOverride(next);
+                    Task.Run(() => { SetVolume(volOverride ?? settings.Volume); SetSpeed(speedOverride ?? settings.Speed); });
+
+                    _timedRemainingMs = intervalMs;
+                    SaveTimedState();
+                }
+                return;
+            }
         }
 
+        // Video→scene: launch LWE SceneTransitionDelayMs before the video ends so the
+        // scene is already rendering when mpvpaper is killed (matches normal transition behaviour).
+        if (nextIsScene && !prevIsScene)
+        {
+            var remaining = TryQueryTimeRemaining();
+            if (remaining != null)
+            {
+                var delayMs = SettingsService.Load().SceneTransitionDelayMs;
+                var sleepMs = Math.Max(0, (int)(remaining.Value * 1000) - delayMs);
+                if (sleepMs > 0)
+                {
+                    try { await Task.Delay(sleepMs, ct); }
+                    catch (OperationCanceledException) { return; }
+                }
+            }
+        }
+
+        // Scene→video and scene→scene: remaining is null (LWE has no mpv socket) — switch immediately.
         lock (_lock)
         {
-            if (!_waitingForVideoEnd) return; // cancelled by manual action
+            if (!_waitingForVideoEnd) return;
             _waitingForVideoEnd = false;
             _waitCts = null;
             SwitchToFile(next, opts);
@@ -786,6 +836,10 @@ public static class PlayerHelper
         _waitCts?.Cancel();
         _waitCts = null;
         _waitingForVideoEnd = false;
+        // Restore loop so the current video doesn't advance to the queued file
+        // in the gap between cancel and the following SwitchToFile call.
+        // TryIpcSwitchToFile will set the correct value immediately after.
+        TrySendCommand("set", "loop-file", "inf");
     }
 
     private static void AdvanceAndLaunch()
