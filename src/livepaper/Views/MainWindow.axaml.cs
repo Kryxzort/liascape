@@ -210,6 +210,12 @@ public partial class MainWindow : Window
                 Visual = _dragSourceVisual,
                 Stretch = Avalonia.Media.Stretch.Fill
             };
+            var dragGif = _dragCard!.IsGifThumbnail ? _dragCard.GifSource : null;
+            if (dragGif != null)
+            {
+                AnimatedImage.Avalonia.ImageBehavior.SetAnimatedSource(DragPreviewGifImage, dragGif);
+                DragPreviewGifImage.IsVisible = true;
+            }
             DragPreviewCanvas.IsVisible = true;
         }
 
@@ -233,6 +239,7 @@ public partial class MainWindow : Window
     {
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
+        DragPreviewGifImage.IsVisible = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
@@ -262,6 +269,7 @@ public partial class MainWindow : Window
 
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
+        DragPreviewGifImage.IsVisible = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
