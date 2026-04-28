@@ -982,7 +982,7 @@ public static class PlayerHelper
                 var paths = session.Shuffle
                     ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
                     : session.Paths;
-                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, settings.GlobalWaitForVideoEnd);
+                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd);
             }
         }
         WriteTimerDaemonPid();

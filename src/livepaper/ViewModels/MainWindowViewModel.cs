@@ -660,13 +660,15 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
         var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, GetEffectiveWaitForVideoEnd());
+        var waitForVideoEnd = GetEffectiveWaitForVideoEnd();
+        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, waitForVideoEnd);
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
             Paths = paths,
             Shuffle = PlaylistShuffle,
-            TimedIntervalSeconds = intervalSecs
+            TimedIntervalSeconds = intervalSecs,
+            WaitForVideoEnd = waitForVideoEnd
         };
         SettingsService.Save(_settings);
         StatusMessage = $"Playing playlist ({paths.Count} wallpapers, switching every {GetEffectiveIntervalDisplay()})";
@@ -709,13 +711,15 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        PlayerHelper.ApplyTimedPlaylist(paths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, GetEffectiveWaitForVideoEnd());
+        var waitForVideoEnd = GetEffectiveWaitForVideoEnd();
+        PlayerHelper.ApplyTimedPlaylist(paths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, waitForVideoEnd);
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
             Paths = allPaths,
             Shuffle = PlaylistShuffle,
-            TimedIntervalSeconds = intervalSecs
+            TimedIntervalSeconds = intervalSecs,
+            WaitForVideoEnd = waitForVideoEnd
         };
         SettingsService.Save(_settings);
         StatusMessage = $"Playing from: {card.Title}";
@@ -1257,7 +1261,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 IsTimedPlaylist = true,
                 Paths = paths,
                 Shuffle = ShuffleLibrary,
-                TimedIntervalSeconds = intervalSecs
+                TimedIntervalSeconds = intervalSecs,
+                WaitForVideoEnd = _settings.GlobalWaitForVideoEnd
             };
             SettingsService.Save(_settings);
             StatusMessage = $"Playing {paths.Count} wallpapers, switching every {FormatInterval(intervalSecs)}{(ShuffleLibrary ? " (shuffled)" : "")}";
