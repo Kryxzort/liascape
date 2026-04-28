@@ -120,7 +120,7 @@ public static class WallpaperEngineScraper
         return (null, null);
     }
 
-    private static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
+    internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
     {
         try
         {

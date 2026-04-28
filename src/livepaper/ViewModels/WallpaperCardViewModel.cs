@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using livepaper.Models;
+using livepaper.Scrapers;
 
 namespace livepaper.ViewModels;
 
@@ -17,7 +18,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public bool IsScene { get; }
     public string? WorkshopId { get; }
     // Static JPG extracted from GIF for non-animated display. ThumbnailSource stays as the GIF path.
-    public string? StaticThumbnailSource { get; }
+    [ObservableProperty] private string? _staticThumbnailSource;
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
@@ -66,7 +67,9 @@ public partial class WallpaperCardViewModel : ViewModelBase
         if (result.AnimatedThumbnailUrl != null)
         {
             ThumbnailSource = result.AnimatedThumbnailUrl;
-            StaticThumbnailSource = result.ThumbnailUrl;
+#pragma warning disable MVVMTK0034
+            _staticThumbnailSource = result.ThumbnailUrl;
+#pragma warning restore MVVMTK0034
         }
         else
         {
@@ -82,5 +85,36 @@ public partial class WallpaperCardViewModel : ViewModelBase
         ThumbnailSource = item.ThumbnailPath ?? "";
         PageUrl = item.VideoPath;
         LibraryItem = item;
+        IsScene = item.IsScene;
+        WorkshopId = item.WorkshopId;
+
+        // Pre-populate StaticThumbnailSource from WE cache if thumbnail is a GIF
+        if (IsGifThumbnail && item.WorkshopId != null)
+        {
+            string cached = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".cache", "livepaper", "we_thumbs", $"{item.WorkshopId}.jpg");
+            if (File.Exists(cached))
+                _staticThumbnailSource = cached;
+        }
+    }
+
+    private static string GifThumbCacheDir => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "livepaper", "we_thumbs");
+
+    public void LoadStaticThumbnailAsync()
+    {
+        if (!IsGifThumbnail || StaticThumbnailSource != null || WorkshopId == null) return;
+        string gifPath = ThumbnailSource;
+        string cacheDir = GifThumbCacheDir;
+        string outputPath = Path.Combine(cacheDir, $"{WorkshopId}.jpg");
+        Task.Run(async () =>
+        {
+            Directory.CreateDirectory(cacheDir);
+            await WallpaperEngineScraper.ExtractGifStaticFrameAsync(gifPath, outputPath);
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
+                Dispatcher.UIThread.Post(() => StaticThumbnailSource = outputPath);
+        });
     }
 }
