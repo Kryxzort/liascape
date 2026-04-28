@@ -16,6 +16,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public LibraryItem? LibraryItem { get; }
     public bool IsScene { get; }
     public string? WorkshopId { get; }
+    // Static JPG extracted from GIF for non-animated display. ThumbnailSource stays as the GIF path.
+    public string? StaticThumbnailSource { get; }
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
@@ -59,7 +61,17 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public WallpaperCardViewModel(WallpaperResult result)
     {
         Title = result.Title;
-        ThumbnailSource = result.ThumbnailUrl;
+        // When a static JPG was extracted from a GIF, ThumbnailSource stays as the GIF (for hover)
+        // and StaticThumbnailSource holds the JPG (for the non-animated display).
+        if (result.AnimatedThumbnailUrl != null)
+        {
+            ThumbnailSource = result.AnimatedThumbnailUrl;
+            StaticThumbnailSource = result.ThumbnailUrl;
+        }
+        else
+        {
+            ThumbnailSource = result.ThumbnailUrl;
+        }
         PageUrl = result.PageUrl;
         Resolution = result.Resolution;
     }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using livepaper.Models;
@@ -9,7 +11,7 @@ namespace livepaper.Scrapers;
 
 public static class WallpaperEngineScraper
 {
-    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath)
+    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath, bool allowScenes = false, string query = "", int sortIndex = 0)
     {
         var results = new List<WallpaperResult>();
 
@@ -23,6 +25,13 @@ public static class WallpaperEngineScraper
         foreach (var dir in Directory.EnumerateDirectories(workshopPath))
         {
             var info = await ReadProjectAsync(dir);
+
+            string workshopId = Path.GetFileName(dir);
+            string title = (info != null && !string.IsNullOrEmpty(info.Title))
+                ? info.Title : workshopId;
+            var (thumbnail, animatedGif) = await FindThumbnailAsync(dir);
+
+
             if (info == null) continue;
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrEmpty(info.File)) continue;
@@ -32,11 +41,23 @@ public static class WallpaperEngineScraper
 
             results.Add(new WallpaperResult
             {
-                Title = string.IsNullOrEmpty(info.Title) ? Path.GetFileName(dir) : info.Title,
-                ThumbnailUrl = FindThumbnail(dir) ?? "",
-                PageUrl = videoPath
+                Title = title,
+                ThumbnailUrl = thumbnail ?? "",
+                AnimatedThumbnailUrl = animatedGif,
+                PageUrl = videoPath,
+                WorkshopId = workshopId
             });
         }
+
+        if (!string.IsNullOrEmpty(query))
+            results = results.FindAll(r => r.Title.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+        results = sortIndex switch
+        {
+            1 => [.. results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
+            2 => [.. results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)],
+            _ => results
+        };
 
         return results;
     }
@@ -65,17 +86,71 @@ public static class WallpaperEngineScraper
         }
     }
 
-    private static string? FindThumbnail(string dir)
-    {
-        // prefer preview.jpg, then any image file
-        string preview = Path.Combine(dir, "preview.jpg");
-        if (File.Exists(preview)) return preview;
+    private static string GifThumbCacheDir => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "livepaper", "we_thumbs");
 
-        foreach (string ext in new[] { "*.gif", "*.png", "*.jpg", "*.jpeg" })
+    // Returns (staticPath, animatedGifPath). animatedGifPath is non-null only when
+    // the source thumbnail is a GIF and a static frame was extracted from it.
+    private static async Task<(string? Static, string? AnimatedGif)> FindThumbnailAsync(string dir)
+    {
+        string preview = Path.Combine(dir, "preview.jpg");
+        if (File.Exists(preview)) return (preview, null);
+
+        string? gifPath = Directory.GetFiles(dir, "*.gif", SearchOption.TopDirectoryOnly).FirstOrDefault();
+
+        if (gifPath != null)
+        {
+            string workshopId = Path.GetFileName(dir);
+            string cacheDir = GifThumbCacheDir;
+            Directory.CreateDirectory(cacheDir);
+            string staticCache = Path.Combine(cacheDir, $"{workshopId}.jpg");
+
+            if (!File.Exists(staticCache))
+                await ExtractGifStaticFrameAsync(gifPath, staticCache);
+            return File.Exists(staticCache) ? (staticCache, gifPath) : (gifPath, null);
+        }
+
+        foreach (string ext in new[] { "*.png", "*.jpg", "*.jpeg" })
         {
             var files = Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly);
-            if (files.Length > 0) return files[0];
+            if (files.Length > 0) return (files[0], null);
         }
-        return null;
+
+        return (null, null);
+    }
+
+    private static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
+    {
+        try
+        {
+            // First non-black/white frame (YAVG between 30 and 225)
+            await RunFfmpeg($"-i \"{gifPath}\" -vf \"signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less\" -frames:v 1 \"{outputPath}\" -y");
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+
+            // Fallback: frame 1
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            await RunFfmpeg($"-i \"{gifPath}\" -vf \"select=eq(n\\,1)\" -frames:v 1 \"{outputPath}\" -y");
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+
+            // Fallback: frame 0
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            await RunFfmpeg($"-i \"{gifPath}\" -frames:v 1 \"{outputPath}\" -y");
+        }
+        catch { }
+    }
+
+    private static async Task RunFfmpeg(string args)
+    {
+        var psi = new ProcessStartInfo("ffmpeg", args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = Process.Start(psi);
+        if (proc == null) return;
+        await proc.WaitForExitAsync();
     }
 }
