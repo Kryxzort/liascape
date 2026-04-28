@@ -844,6 +844,9 @@ public static class PlayerHelper
     public static void Restore()
     {
         var settings = SettingsService.Load();
+        if (settings.AutoMute)
+            AudioMonitor.SpawnDetachedMonitor();
+
         var session = settings.LastSession;
         if (session == null) return;
 
