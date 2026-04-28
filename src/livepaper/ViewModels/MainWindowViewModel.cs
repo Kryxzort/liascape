@@ -1350,6 +1350,9 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _shuffleLibrary;
 
     [RelayCommand]
+    private void Stop() { PlayerHelper.Stop(); AudioMonitor.KillDetachedMonitor(); StatusMessage = ""; }
+
+    [RelayCommand]
     private void PlayLibrary()
     {
         try
