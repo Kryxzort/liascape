@@ -983,13 +983,18 @@
                 Padding="16,6">
             <DockPanel>
                 <Button DockPanel.Dock="Right"
-                        Content="Undo"
                         IsVisible="{Binding CanUndo}"
                         Command="{Binding UndoDeleteCommand}"
-                        Classes="ghost"
-                        Padding="10,2"
+                        Classes="accent"
+                        Padding="10,3"
                         FontSize="11"
-                        Margin="8,0,0,0"/>
+                        FontWeight="SemiBold"
+                        Margin="8,0,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <mi:MaterialIcon Kind="Undo" Width="13" Height="13"/>
+                        <TextBlock Text="Undo"/>
+                    </StackPanel>
+                </Button>
                 <TextBlock Text="{Binding StatusMessage}"
                            Foreground="{DynamicResource Muted}"
                            FontSize="11"
