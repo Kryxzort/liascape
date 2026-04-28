@@ -985,11 +985,42 @@
                 <Button DockPanel.Dock="Right"
                         IsVisible="{Binding CanUndo}"
                         Command="{Binding UndoDeleteCommand}"
-                        Classes="accent"
-                        Padding="10,3"
+                        Classes="ghost"
+                        Padding="10,2"
                         FontSize="11"
-                        FontWeight="SemiBold"
                         Margin="8,0,0,0">
+                    <Button.Styles>
+                        <Style Selector="Button[IsVisible=true]">
+                            <Style.Animations>
+                                <Animation Duration="0:0:0.6" FillMode="None">
+                                    <KeyFrame Cue="0%">
+                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                    <KeyFrame Cue="12%">
+                                        <Setter Property="BorderBrush" Value="White"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                    <KeyFrame Cue="38%">
+                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                    <KeyFrame Cue="50%">
+                                        <Setter Property="BorderBrush" Value="White"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                    <KeyFrame Cue="76%">
+                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                    <KeyFrame Cue="100%">
+                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="1.5"/>
+                                    </KeyFrame>
+                                </Animation>
+                            </Style.Animations>
+                        </Style>
+                    </Button.Styles>
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <mi:MaterialIcon Kind="Undo" Width="13" Height="13"/>
                         <TextBlock Text="Undo"/>
