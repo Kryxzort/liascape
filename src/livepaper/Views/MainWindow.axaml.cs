@@ -205,17 +205,13 @@ public partial class MainWindow : Window
             if (dx * dx + dy * dy < 36) return; // 6px threshold
 
             _isDragging = true;
+            if (_dragCard!.IsGifThumbnail)
+                _dragCard.IsGifActive = true;
             DragPreviewBorder.Background = new Avalonia.Media.VisualBrush
             {
                 Visual = _dragSourceVisual,
                 Stretch = Avalonia.Media.Stretch.Fill
             };
-            var dragGif = _dragCard!.IsGifThumbnail ? _dragCard.GifSource : null;
-            if (dragGif != null)
-            {
-                AnimatedImage.Avalonia.ImageBehavior.SetAnimatedSource(DragPreviewGifImage, dragGif);
-                DragPreviewGifImage.IsVisible = true;
-            }
             DragPreviewCanvas.IsVisible = true;
         }
 
@@ -239,7 +235,7 @@ public partial class MainWindow : Window
     {
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
-        DragPreviewGifImage.IsVisible = false;
+        if (_dragCard != null) _dragCard.IsGifActive = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
@@ -269,7 +265,7 @@ public partial class MainWindow : Window
 
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
-        DragPreviewGifImage.IsVisible = false;
+        if (_dragCard != null) _dragCard.IsGifActive = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
@@ -365,7 +361,7 @@ public partial class MainWindow : Window
 
     private void OnCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
             card.IsGifActive = false;
     }
 
