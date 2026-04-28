@@ -116,7 +116,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ConfirmClearLibrary()
     {
         if (!ClearLibraryReady) return;
-        foreach (var b in _undoBatches) { b.PurgeCts.Cancel(); LibraryService.PurgeBatch(b.BatchDir); }
+        foreach (var b in _undoBatches) LibraryService.PurgeBatch(b.BatchDir);
         _undoBatches.Clear();
         CanUndo = false;
         LibraryService.DeleteAll();
@@ -363,7 +363,6 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         public required string BatchDir;
         public required List<(WallpaperCardViewModel Card, bool WasInPlaylist)> Items;
-        public required CancellationTokenSource PurgeCts;
     }
     private readonly List<UndoBatch> _undoBatches = [];
     [ObservableProperty] private bool _canUndo;
@@ -1194,22 +1193,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (deleted > 0)
         {
-            var cts = new CancellationTokenSource();
-            var batch = new UndoBatch { BatchDir = batchDir, Items = batchItems, PurgeCts = cts };
-            _undoBatches.Add(batch);
+            _undoBatches.Add(new UndoBatch { BatchDir = batchDir, Items = batchItems });
             CanUndo = true;
-
-            Task.Delay(TimeSpan.FromMinutes(10), cts.Token).ContinueWith(t =>
-            {
-                if (t.IsCanceled) return;
-                LibraryService.PurgeBatch(batchDir);
-                Dispatcher.UIThread.Post(() =>
-                {
-                    _undoBatches.Remove(batch);
-                    CanUndo = _undoBatches.Count > 0;
-                });
-            }, TaskContinuationOptions.None);
-
             StatusMessage = deleted > 1 ? $"Deleted {deleted} wallpapers (Ctrl+Z to undo)" : $"Deleted: {targets[0].Title} (Ctrl+Z to undo)";
         }
     }
@@ -1220,7 +1205,6 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_undoBatches.Count == 0) return;
         var batch = _undoBatches[^1];
         _undoBatches.RemoveAt(_undoBatches.Count - 1);
-        batch.PurgeCts.Cancel();
         CanUndo = _undoBatches.Count > 0;
 
         LibraryService.RestoreBatch(batch.BatchDir);
@@ -1234,6 +1218,13 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
         StatusMessage = batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}";
+    }
+
+    public void PurgeTrash()
+    {
+        foreach (var b in _undoBatches) LibraryService.PurgeBatch(b.BatchDir);
+        _undoBatches.Clear();
+        CanUndo = false;
     }
 
     [ObservableProperty] private bool _shuffleLibrary;

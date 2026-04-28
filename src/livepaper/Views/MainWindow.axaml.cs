@@ -37,6 +37,12 @@ public partial class MainWindow : Window
         this.AddHandler(PointerCaptureLostEvent, OnPointerCaptureLost, RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        Vm?.PurgeTrash();
+        base.OnClosed(e);
+    }
+
     private MainWindowViewModel? Vm => DataContext as MainWindowViewModel;
     private MainWindowViewModel? _boundVm;
 
