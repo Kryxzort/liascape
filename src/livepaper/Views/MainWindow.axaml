@@ -503,13 +503,16 @@
 
                                     <!-- Interval (per-playlist override) -->
                                     <StackPanel Spacing="8" IsEnabled="{Binding OverrideGlobalSettings}">
+                                        <CheckBox Content="Switch when video ends"
+                                                  IsChecked="{Binding DisplayAdvanceOnVideoEnd}"
+                                                  Foreground="{DynamicResource TextColor}"/>
+                                        <CheckBox Content="Wait for video to end after interval fires before switching"
+                                                  IsChecked="{Binding DisplayWaitForVideoEnd}"
+                                                  Foreground="{DynamicResource TextColor}"/>
                                         <TextBlock Text="SWITCH EVERY"
                                                    FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}"
                                                    LetterSpacing="2"/>
-                                        <CheckBox Content="Switch when video ends"
-                                                  IsChecked="{Binding AdvanceOnVideoEnd}"
-                                                  Foreground="{DynamicResource TextColor}"/>
                                         <StackPanel Orientation="Horizontal" Spacing="12"
                                                     IsEnabled="{Binding !AdvanceOnVideoEnd}">
                                             <StackPanel Spacing="6">
@@ -535,10 +538,6 @@
                                             </StackPanel>
                                         </StackPanel>
                                     </StackPanel>
-
-                                    <CheckBox Content="Wait for video to end before switching"
-                                              IsChecked="{Binding DisplayWaitForVideoEnd}"
-                                              Foreground="{DynamicResource TextColor}"/>
 
                                     <Button Content="Close"
                                             Classes="ghost"
@@ -618,7 +617,7 @@
                                     <CheckBox Content="Switch when video ends"
                                               IsChecked="{Binding GlobalAdvanceOnVideoEnd}"
                                               Foreground="{DynamicResource TextColor}"/>
-                                    <CheckBox Content="Wait for video to end before switching"
+                                    <CheckBox Content="Wait for video to end after interval fires before switching"
                                               IsChecked="{Binding GlobalWaitForVideoEnd}"
                                               Foreground="{DynamicResource TextColor}"/>
                                     <StackPanel Spacing="6"
