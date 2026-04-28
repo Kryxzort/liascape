@@ -328,7 +328,9 @@
                                                     <Border Classes="playlist-item"
                                                             Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
-                                                            Background="{DynamicResource BgBase}">
+                                                            Background="{DynamicResource BgBase}"
+                                                            PointerEntered="OnCardPointerEntered"
+                                                            PointerExited="OnCardPointerExited">
                                                         <Border.Styles>
                                                             <Style Selector="Border.playlist-item Grid.play-overlay">
                                                                 <Setter Property="Opacity" Value="0"/>
@@ -338,10 +340,16 @@
                                                             </Style>
                                                         </Border.Styles>
                                                         <Grid Height="90">
-                                                            <asyncImageLoader:AdvancedImage
-                                                                Source="{Binding ThumbnailSource}"
-                                                                Stretch="UniformToFill"
-                                                                Width="100" Height="90"/>
+                                                            <Panel>
+                                                                <asyncImageLoader:AdvancedImage
+                                                                    Source="{Binding ThumbnailSource}"
+                                                                    Stretch="UniformToFill"
+                                                                    Width="100" Height="90"/>
+                                                                <Image IsVisible="{Binding IsGifActive}"
+                                                                       aimg:ImageBehavior.AnimatedSource="{Binding ActiveGifSource}"
+                                                                       Stretch="UniformToFill"
+                                                                       Width="100" Height="90"/>
+                                                            </Panel>
                                                             <Grid Classes="play-overlay"
                                                                   Background="#80000000"
                                                                   IsHitTestVisible="False">
