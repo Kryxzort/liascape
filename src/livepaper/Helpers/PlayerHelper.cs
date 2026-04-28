@@ -648,7 +648,7 @@ public static class PlayerHelper
 
             // If the current scene crashed, signal and advance immediately
             if (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count &&
-                IsScenePath(_history[_historyIndex]) && !IsLweRunning)
+                IsScenePath(_history[_historyIndex]) && !IsSkippedPath(_history[_historyIndex]) && !IsLweRunning)
             {
                 OnSceneCrashed?.Invoke(_history[_historyIndex]);
                 _timedRemainingMs = 0;
