@@ -414,6 +414,22 @@ public partial class MainWindowViewModel : ViewModelBase
         if (int.TryParse(index, out int i)) LibrarySortIndex = i;
     }
 
+    // ── Browse sort ───────────────────────────────────────────────────────
+
+    [ObservableProperty] private int _browseSortIndex = 0;
+
+    partial void OnBrowseSortIndexChanged(int value)
+    {
+        if (SelectedSource.SupportsSorting)
+            _ = LoadWallpapersAsync();
+    }
+
+    [RelayCommand]
+    private void SetBrowseSort(string index)
+    {
+        if (int.TryParse(index, out int i)) BrowseSortIndex = i;
+    }
+
     private static IEnumerable<WallpaperCardViewModel> ApplyLibraryFilter(
         IEnumerable<WallpaperCardViewModel> source, string query, int sortIndex)
     {
@@ -1102,6 +1118,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = 1;
         SearchQuery = "";
         _isSearchMode = false;
+        BrowseSortIndex = 0;
         _ = LoadWallpapersAsync();
     }
 
@@ -1121,6 +1138,9 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+
+        if (SelectedSource is WallpaperEngineService weService)
+            weService.SortIndex = BrowseSortIndex;
 
         try
         {
@@ -1155,6 +1175,9 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+
+        if (SelectedSource is WallpaperEngineService weServiceSearch)
+            weServiceSearch.SortIndex = BrowseSortIndex;
 
         try
         {
