@@ -1020,8 +1020,16 @@ public static class PlayerHelper
         psi.ArgumentList.Add("*");
         psi.ArgumentList.Add(file);
         var process = Process.Start(psi);
-        process?.BeginOutputReadLine();
-        process?.BeginErrorReadLine();
+        if (process != null)
+        {
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (readyTcs != null && e.Data != null && (e.Data.StartsWith("AV:") || e.Data.StartsWith("V:")))
+                    readyTcs.TrySetResult(true);
+            };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
         return process;
     }
 
