@@ -1127,28 +1127,34 @@ public static class PlayerHelper
         var p = _timedPaths;
         if (p == null) return null;
 
-        _timedIndex++;
-        if (_timedIndex >= p.Count)
+        for (int attempt = 0; attempt < p.Count; attempt++)
         {
-            if (_timedShuffle)
+            _timedIndex++;
+            if (_timedIndex >= p.Count)
             {
-                var last = p[p.Count - 1];
-                List<string> reshuffled;
-                do { reshuffled = p.OrderBy(_ => Guid.NewGuid()).ToList(); }
-                while (p.Count > 1 && reshuffled[0] == last);
-                _timedPaths = p = reshuffled;
+                if (_timedShuffle)
+                {
+                    var last = p[p.Count - 1];
+                    List<string> reshuffled;
+                    do { reshuffled = p.OrderBy(_ => Guid.NewGuid()).ToList(); }
+                    while (p.Count > 1 && reshuffled[0] == last);
+                    _timedPaths = p = reshuffled;
+                }
+                _timedIndex = 0;
             }
-            _timedIndex = 0;
+
+            var path = p[_timedIndex];
+            if (_history != null)
+            {
+                _history.Add(path);
+                if (_history.Count > 100) _history.RemoveAt(0);
+                _historyIndex = _history.Count - 1;
+            }
+
+            if (!IsSkippedPath(path)) return path;
         }
 
-        var path = p[_timedIndex];
-        if (_history != null)
-        {
-            _history.Add(path);
-            if (_history.Count > 100) _history.RemoveAt(0);
-            _historyIndex = _history.Count - 1;
-        }
-        return path;
+        return null;
     }
 
     private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
