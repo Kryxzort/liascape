@@ -120,15 +120,29 @@
                                                 Background="{DynamicResource BgBase}">
                                             <Grid RowDefinitions="150,*,Auto">
 
-                                                <Button Grid.Row="0" Padding="0"
-                                                        Background="Transparent" BorderThickness="0"
-                                                        Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
-                                                        CommandParameter="{Binding}">
-                                                    <asyncImageLoader:AdvancedImage
-                                                        Source="{Binding ThumbnailSource}"
-                                                        Stretch="UniformToFill"
-                                                        Width="210" Height="150"/>
-                                                </Button>
+                                                <Panel Grid.Row="0">
+                                                    <Button Padding="0"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
+                                                            CommandParameter="{Binding}">
+                                                        <asyncImageLoader:AdvancedImage
+                                                            Source="{Binding ThumbnailSource}"
+                                                            Stretch="UniformToFill"
+                                                            Width="210" Height="150"/>
+                                                    </Button>
+                                                    <!-- SCENE badge -->
+                                                    <Border HorizontalAlignment="Left"
+                                                            VerticalAlignment="Top"
+                                                            Margin="5,5,0,0"
+                                                            IsVisible="{Binding IsScene}"
+                                                            Background="{DynamicResource Accent}"
+                                                            CornerRadius="4" Padding="4,2"
+                                                            IsHitTestVisible="False">
+                                                        <TextBlock Text="SCENE"
+                                                                   FontSize="9" FontWeight="Bold"
+                                                                   Foreground="{DynamicResource AccentFg}"/>
+                                                    </Border>
+                                                </Panel>
 
                                                 <TextBlock Grid.Row="1"
                                                            Text="{Binding Title}"
