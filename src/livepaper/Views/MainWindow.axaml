@@ -992,24 +992,24 @@
                     <Button.Styles>
                         <Style Selector="Button[IsVisible=true]">
                             <Style.Animations>
-                                <Animation Duration="0:0:0.6" FillMode="None">
+                                <Animation Duration="0:0:1.8" FillMode="None">
                                     <KeyFrame Cue="0%">
                                         <Setter Property="BorderBrush" Value="Transparent"/>
                                         <Setter Property="BorderThickness" Value="1.5"/>
                                     </KeyFrame>
-                                    <KeyFrame Cue="12%">
+                                    <KeyFrame Cue="18%">
                                         <Setter Property="BorderBrush" Value="White"/>
                                         <Setter Property="BorderThickness" Value="1.5"/>
                                     </KeyFrame>
-                                    <KeyFrame Cue="38%">
+                                    <KeyFrame Cue="36%">
                                         <Setter Property="BorderBrush" Value="Transparent"/>
                                         <Setter Property="BorderThickness" Value="1.5"/>
                                     </KeyFrame>
-                                    <KeyFrame Cue="50%">
+                                    <KeyFrame Cue="54%">
                                         <Setter Property="BorderBrush" Value="White"/>
                                         <Setter Property="BorderThickness" Value="1.5"/>
                                     </KeyFrame>
-                                    <KeyFrame Cue="76%">
+                                    <KeyFrame Cue="78%">
                                         <Setter Property="BorderBrush" Value="Transparent"/>
                                         <Setter Property="BorderThickness" Value="1.5"/>
                                     </KeyFrame>
