@@ -369,6 +369,10 @@
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
+                                                        <Border IsVisible="{Binding IsCurrentlyPlaying}"
+                                                                BorderBrush="{DynamicResource Success}"
+                                                                BorderThickness="2.5"
+                                                                CornerRadius="10"/>
                                                         <Border IsVisible="{Binding IsSelected}"
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
@@ -1039,6 +1043,15 @@
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center"/>
                                         </Button>
+                                        <Border IsHitTestVisible="False" CornerRadius="6"
+                                                IsVisible="{Binding IsGifActive}"
+                                                Opacity="0.45"
+                                                BorderBrush="{DynamicResource Accent}"
+                                                BorderThickness="1.5"/>
+                                        <Border IsHitTestVisible="False" CornerRadius="6"
+                                                IsVisible="{Binding IsCurrentlyPlaying}"
+                                                BorderBrush="{DynamicResource Success}"
+                                                BorderThickness="1.5"/>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
