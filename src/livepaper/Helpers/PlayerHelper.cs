@@ -385,6 +385,7 @@ public static class PlayerHelper
     }
 
     public static Action? OnTimedPlaylistStopped;
+    public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
         List<string> Paths, int Index,
@@ -740,6 +741,248 @@ public static class PlayerHelper
         catch
         {
             return false;
+        }
+    }
+
+    private static string? TryQueryCurrentPath()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "path" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String)
+                return data.GetString();
+            return null;
+        }
+        catch { return null; }
+    }
+
+    // Switch from timed-interval mode to advance-on-end without restarting mpvpaper.
+    // Tears down the timer, appends remaining paths to mpv's in-memory playlist, and
+    // sets loop-playlist so mpv advances naturally when each file ends.
+    public static void SwitchFromTimedToAdvanceOnEnd(IReadOnlyList<string> allPaths, bool shuffle)
+    {
+        lock (_lock)
+        {
+            var currentPath = (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
+                ? _history[_historyIndex]
+                : null;
+
+            TeardownTimer();
+            ClearTimedStateFile();
+
+            var rest = allPaths.Where(p => p != currentPath).ToList();
+            if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+            TrySendCommand("set", "loop-file", "no");
+            foreach (var p in rest)
+                TrySendCommand("loadfile", p, "append");
+            TrySendCommand("set", "loop-playlist", "inf");
+        }
+    }
+
+    // Switch from advance-on-end mode to timed-interval without restarting mpvpaper.
+    // Converts mpv to single-file loop mode, then starts the livepaper timer.
+    public static void SwitchFromAdvanceOnEndToTimed(IReadOnlyList<string> allPaths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd)
+    {
+        lock (_lock)
+        {
+            if (allPaths.Count == 0) return;
+
+            var currentPath = TryQueryCurrentPath();
+
+            TrySendCommand("set", "loop-file", "inf");
+            TrySendCommand("playlist-clear");
+            TrySendCommand("set", "loop-playlist", "no");
+
+            var ordered = new List<string>(allPaths);
+            _timedPaths = ordered;
+            _timedOptions = mpvOptions;
+            _timedShuffle = shuffle;
+            _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
+            _timedTimerPaused = false;
+            _timedTimerStopped = false;
+            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = waitForVideoEnd;
+
+            var startPath = currentPath ?? ordered[0];
+            var idx = ordered.IndexOf(startPath);
+            if (idx < 0) idx = 0;
+            _timedIndex = idx;
+            _history = [startPath];
+            _historyIndex = 0;
+
+            SaveTimedState();
+
+            if (ordered.Count > 1 && intervalSeconds > 0)
+                StartTimedTimer();
+        }
+    }
+
+    // Reorders the active playlist in real time without restarting mpvpaper or resetting the timer countdown.
+    // Sequential: positions the current wallpaper at index 0, then appends the rest in original order
+    //             starting from current+1 (wrapping). Shuffled: same but randomises the tail.
+    public static void ReorderPlaylist(IReadOnlyList<string> originalPaths, bool isTimedPlaylist, bool shuffle)
+    {
+        lock (_lock)
+        {
+            if (originalPaths.Count <= 1) return;
+
+            if (isTimedPlaylist)
+            {
+                if (_timedPaths == null && !LoadTimedState()) return;
+
+                var currentPath = (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
+                    ? _history[_historyIndex]
+                    : null;
+
+                int currentIdx = -1;
+                for (int i = 0; i < originalPaths.Count; i++)
+                    if (originalPaths[i] == currentPath) { currentIdx = i; break; }
+
+                var rest = new List<string>();
+                if (currentIdx >= 0)
+                {
+                    for (int i = currentIdx + 1; i < originalPaths.Count; i++) rest.Add(originalPaths[i]);
+                    for (int i = 0; i < currentIdx; i++) rest.Add(originalPaths[i]);
+                }
+                else
+                {
+                    rest.AddRange(originalPaths);
+                }
+
+                if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+                List<string> newPaths;
+                int newTimedIndex;
+                if (currentIdx >= 0 && currentPath != null)
+                {
+                    // Current is still in the playlist — place it at index 0 so next advance
+                    // increments to index 1 (first of rest).
+                    newPaths = new List<string>([currentPath]);
+                    newPaths.AddRange(rest);
+                    newTimedIndex = 0;
+                }
+                else
+                {
+                    // Current was removed — let it finish but don't replay it.
+                    // Setting _timedIndex to the last slot makes the next advance wrap to 0.
+                    newPaths = rest;
+                    newTimedIndex = newPaths.Count - 1;
+                }
+
+                _timedShuffle = shuffle;
+                _timedPaths = newPaths;
+                _timedIndex = newTimedIndex;
+                _history = currentPath != null ? [currentPath] : [newPaths[0]];
+                _historyIndex = 0;
+                // Intentionally preserve _timedRemainingMs — don't reset the countdown
+                SaveTimedState();
+            }
+            else
+            {
+                // Advance-on-end: rebuild mpv's playlist from the current position
+                var currentPath = TryQueryCurrentPath();
+                if (currentPath == null) return; // IPC not ready — skip to avoid corrupting the queue
+
+                int currentIdx = -1;
+                for (int i = 0; i < originalPaths.Count; i++)
+                    if (originalPaths[i] == currentPath) { currentIdx = i; break; }
+
+                var rest = new List<string>();
+                if (currentIdx >= 0)
+                {
+                    for (int i = currentIdx + 1; i < originalPaths.Count; i++) rest.Add(originalPaths[i]);
+                    for (int i = 0; i < currentIdx; i++) rest.Add(originalPaths[i]);
+                }
+                else
+                {
+                    rest.AddRange(originalPaths); // current was removed; all new paths (none duplicate current)
+                }
+
+                if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+                TrySendCommand("playlist-clear");
+                foreach (var p in rest)
+                    TrySendCommand("loadfile", p, "append");
+                TrySendCommand("set", "loop-playlist", "inf");
+            }
+        }
+    }
+
+    // Syncs the advance-on-end (mpv-native) playlist to the new path list.
+    // For pure additions without shuffle, just appends the new items to mpv's existing
+    // queue (preserving the current playback order). Everything else does a full rebuild.
+    public static void SyncAdvanceOnEndPlaylist(IReadOnlyList<string> oldPaths, IReadOnlyList<string> newPaths, bool shuffle)
+    {
+        lock (_lock)
+        {
+            if (newPaths.Count == 0) return;
+
+            var currentPath = TryQueryCurrentPath();
+            if (currentPath == null) return;
+
+            var added = newPaths.Except(oldPaths).ToHashSet();
+            var removed = oldPaths.Except(newPaths).ToHashSet();
+
+            // Add-only without shuffle: append new items to the END of mpv's current queue.
+            // This preserves the existing playback order (items that were next stay next)
+            // and slots new items in AFTER the full current cycle.
+            if (!shuffle && added.Count > 0 && removed.Count == 0)
+            {
+                // Verify the non-added items are in the same order (no reorder happened)
+                var existingInNew = newPaths.Where(p => !added.Contains(p)).ToList();
+                var existingInOld = oldPaths.Where(p => !added.Contains(p)).ToList();
+                if (existingInNew.SequenceEqual(existingInOld))
+                {
+                    foreach (var p in newPaths.Where(p => added.Contains(p)))
+                        TrySendCommand("loadfile", p, "append");
+                    return;
+                }
+            }
+
+            // Full rebuild for removes, reorders, or adds-with-shuffle
+            int currentIdx = -1;
+            for (int i = 0; i < newPaths.Count; i++)
+                if (newPaths[i] == currentPath) { currentIdx = i; break; }
+
+            var rest = new List<string>();
+            if (currentIdx >= 0)
+            {
+                for (int i = currentIdx + 1; i < newPaths.Count; i++) rest.Add(newPaths[i]);
+                for (int i = 0; i < currentIdx; i++) rest.Add(newPaths[i]);
+            }
+            else
+            {
+                // Current was removed. Map its old position into newPaths so the item that
+                // "replaced" it positionally plays next instead of restarting from index 0.
+                int oldCurrentIdx = -1;
+                for (int i = 0; i < oldPaths.Count; i++)
+                    if (oldPaths[i] == currentPath) { oldCurrentIdx = i; break; }
+
+                int startIdx = oldCurrentIdx >= 0
+                    ? Math.Min(oldCurrentIdx, newPaths.Count - 1)
+                    : 0;
+
+                for (int i = startIdx; i < newPaths.Count; i++) rest.Add(newPaths[i]);
+                for (int i = 0; i < startIdx; i++) rest.Add(newPaths[i]);
+            }
+
+            if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+            TrySendCommand("playlist-clear");
+            foreach (var p in rest)
+                TrySendCommand("loadfile", p, "append");
+            TrySendCommand("set", "loop-playlist", "inf");
         }
     }
 
@@ -1100,6 +1343,12 @@ public static class PlayerHelper
 
     public static void SetPlaylistShuffle(bool shuffle) =>
         TrySendCommand(shuffle ? "playlist-shuffle" : "playlist-unshuffle");
+
+    public static void SetVideoScale(string scale)
+    {
+        double panscan = scale == "fill" ? 1.0 : 0.0;
+        SendCommand("set_property", "panscan", panscan);
+    }
 
     private static void StartPlaylistObserver(IReadOnlyList<string> videoPaths)
     {
