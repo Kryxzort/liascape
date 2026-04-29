@@ -322,8 +322,9 @@ public static class AudioMonitor
             };
             using var proc = Process.Start(psi);
             if (proc == null) return false;
+            var output = proc.StandardOutput.ReadToEnd().Trim();
             proc.WaitForExit(500);
-            return proc.ExitCode == 0;
+            return string.Equals(output, "Playing", StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
