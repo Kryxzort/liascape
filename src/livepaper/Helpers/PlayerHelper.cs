@@ -853,7 +853,10 @@ public static class PlayerHelper
         if (session.IsTimedPlaylist && session.Paths.Count > 0)
             SpawnTimerDaemon();
         else if (session.IsPlaylist && session.Paths.Count > 0)
+        {
             ApplyPlaylist(session.Paths, settings.BuildMpvPlaylistOptions(), session.Shuffle);
+            SpawnTimerDaemon();
+        }
         else if (session.Paths.Count > 0)
             Apply(session.Paths[0], settings.BuildMpvOptions());
 
