@@ -20,6 +20,22 @@ public partial class WallpaperCardViewModel : ViewModelBase
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _hasCrashed;
     [ObservableProperty] private bool _isWhitelisted;
+    [ObservableProperty] private int _sliderVolume;
+    [ObservableProperty] private double _sliderSpeed;
+
+    private int? _volumeOverride;
+    private int _globalVolume;
+    private bool _suppressSliderChange;
+
+    private double? _speedOverride;
+    private double _globalSpeed;
+    private bool _suppressSpeedChange;
+
+    public bool IsSpeedSliderVisible => LibraryItem != null && !IsScene;
+    public bool IsVolumeSynced => _volumeOverride == null;
+    public int? VolumeOverride => _volumeOverride;
+    public bool IsSpeedSynced => _speedOverride == null;
+    public double? SpeedOverride => _speedOverride;
 
     partial void OnIsWhitelistedChanged(bool value)
     {

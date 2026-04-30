@@ -10,6 +10,8 @@ sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        PlayerHelper.LoadUserMuteState();
+
         if (args.Contains("--kill"))
         {
             PlayerHelper.Stop();
@@ -28,7 +30,7 @@ sealed class Program
             switch (action)
             {
                 case "toggle-mute":
-                    PlayerHelper.SendCommand("cycle", "mute");
+                    PlayerHelper.SetUserMute(!PlayerHelper.IsUserMuted);
                     break;
                 case "toggle-pause":
                     PlayerHelper.TogglePause();

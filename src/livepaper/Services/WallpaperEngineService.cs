@@ -19,6 +19,7 @@ public class WallpaperEngineService : IBgsProvider
     public string Name => "Wallpaper Engine (Local)";
     public bool SupportsSearch => false;
     public bool SupportsPagination => false;
+    public bool SupportsSorting => false;
 
     public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
         => WallpaperEngineScraper.GetAllAsync(WorkshopPath, AllowScenes);

@@ -17,6 +17,7 @@ public class AppSettings
         get => _volume;
         set => _volume = Math.Clamp(value, 0, 100);
     }
+    public double Speed { get; set; } = 1.0;
     public string WallpaperEnginePath { get; set; } = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".local/share/Steam/steamapps/workshop/content/431960");
@@ -40,6 +41,8 @@ public class AppSettings
         get => _restartIntervalSeconds;
         set => _restartIntervalSeconds = Math.Clamp(value, 5, 3600);
     }
+    public bool GlobalWaitForVideoEnd { get; set; } = false;
+    public int LibrarySortIndex { get; set; } = 5;
     public LastSession? LastSession { get; set; }
 
     public string BuildMpvOptions()

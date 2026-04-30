@@ -34,8 +34,14 @@ public static class PlayerHelper
     private static CancellationTokenSource? _daemonCts;
     private static bool _waitForVideoEnd;
     private static bool _waitingForVideoEnd;
+    private static bool _advanceOnVideoEnd;
+    private static double _currentSpeed = 1.0;
     private static CancellationTokenSource? _waitCts;
     private static CancellationTokenSource? _prelaunchCts;
+    private static bool _isMuted;
+    private static bool _userMuted;
+    private static volatile TaskCompletionSource<bool>? _speedChangeTcs;
+    private static CancellationTokenSource? _observerCts;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
     public static bool IsPlaying =>
@@ -59,6 +65,9 @@ public static class PlayerHelper
             catch { return false; }
         }
     }
+
+    public static bool IsTimedModeActive { get { lock (_lock) { return _timedPaths != null; } } }
+    public static bool IsUserMuted => _userMuted;
 
     // Stale-tolerant check that survives the brief gap during a timed-playlist
     // switch where mpvpaper has been killed but the next instance hasn't launched.
@@ -107,6 +116,10 @@ public static class PlayerHelper
     private static string GuiTimerPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".config", "livepaper", "gui_timer.pid");
+
+    private static string UserMuteStatePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".config", "livepaper", "user_mute.state");
 
     private static string PendingActionPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -411,6 +424,8 @@ public static class PlayerHelper
 
     public static Action? OnTimedPlaylistStopped;
     public static Action<string>? OnSceneCrashed;
+    public static Action<string?>? OnWallpaperChanged;
+    public static bool IsMuted => _isMuted;
 
     private record TimedState(
         List<string> Paths, int Index,
@@ -449,6 +464,23 @@ public static class PlayerHelper
             _timedTimerStopped = state.TimerStopped;
             _timedTimerPaused = state.TimerPaused;
         }
+        catch { }
+        // Sync user mute state from file so CLI toggle-mute updates reach the running daemon.
+        try
+        {
+            bool fileMuted = File.Exists(UserMuteStatePath);
+            if (fileMuted != _userMuted)
+            {
+                _userMuted = fileMuted;
+                _isMuted = fileMuted;
+            }
+        }
+        catch { }
+    }
+
+    public static void LoadUserMuteState()
+    {
+        try { _userMuted = _isMuted = File.Exists(UserMuteStatePath); }
         catch { }
     }
 
@@ -520,17 +552,33 @@ public static class PlayerHelper
         UpdateRestartTimer();
     }
 
-    public static void ApplyPlaylist(IReadOnlyList<string> videoPaths, string mpvOptions, bool shuffle = false)
+    public static void ApplyPlaylist(IReadOnlyList<string> videoPaths, string mpvOptions, bool shuffle = false, int intervalSeconds = 0)
     {
         if (videoPaths.Count == 0) return;
         lock (_lock)
         {
+            _advanceOnVideoEnd = false;
             KillAll();
             ClearTimedStateFile();
 
-            if (videoPaths.Count == 1)
+            var paths = shuffle
+                ? videoPaths.OrderBy(_ => Guid.NewGuid()).ToArray()
+                : videoPaths.ToArray();
+
+            var settings = SettingsService.Load();
+            if (settings.AllowScenes && IsLweAvailable() && paths.Any(IsScenePath))
             {
-                _current = Launch(mpvOptions, videoPaths[0]);
+                var secs = intervalSeconds > 0 ? intervalSeconds : settings.GlobalIntervalSeconds;
+                ApplyTimedPlaylist(paths, mpvOptions, shuffle, secs, waitForVideoEnd: true, advanceOnVideoEnd: true);
+                return;
+            }
+
+            paths = paths.Where(p => !IsScenePath(p)).ToArray();
+            if (paths.Length == 0) return;
+
+            if (paths.Length == 1)
+            {
+                _current = Launch(mpvOptions, paths[0]);
             }
             else
             {
@@ -540,17 +588,17 @@ public static class PlayerHelper
                 Directory.CreateDirectory(cacheDir);
 
                 var playlistPath = Path.Combine(cacheDir, "playlist.txt");
-                File.WriteAllLines(playlistPath, videoPaths.Take(videoPaths.Count - 1));
+                File.WriteAllLines(playlistPath, paths.Take(paths.Length - 1));
 
                 var shuffleFlag = shuffle ? " --shuffle" : "";
                 var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf{shuffleFlag}";
-                _current = Launch(options, videoPaths[videoPaths.Count - 1]);
+                _current = Launch(options, paths[paths.Length - 1]);
             }
         }
         UpdateRestartTimer();
     }
 
-    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds)
+    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd = false, bool advanceOnVideoEnd = false)
     {
         lock (_lock)
         {
@@ -567,9 +615,24 @@ public static class PlayerHelper
             _timedTimerPaused = false;
             _timedTimerStopped = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = waitForVideoEnd;
+            _advanceOnVideoEnd = advanceOnVideoEnd;
+            _currentSpeed = SettingsService.Load().Speed;
             _history = [ordered[0]];
             _historyIndex = 0;
             SwitchToFile(ordered[0], mpvOptions);
+
+            if (_advanceOnVideoEnd && !IsScenePath(ordered[0]) && ordered.Count > 1)
+            {
+                var next = AdvanceToNext();
+                if (next != null)
+                {
+                    _waitingForVideoEnd = true;
+                    var cts = _waitCts = new CancellationTokenSource();
+                    Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+                }
+            }
+
             SaveTimedState();
 
             if (ordered.Count > 1 && intervalSeconds > 0)
@@ -646,8 +709,12 @@ public static class PlayerHelper
             RefreshSignals();
             if (_timedPaths == null) return;
 
-            // If the current scene crashed, signal and advance immediately
-            if (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count &&
+            // If the current scene crashed, signal and advance immediately.
+            // Skip while _waitingForVideoEnd: in advance-on-end mode history is pre-fetched
+            // one step ahead, so _history[_historyIndex] may point to a scene that isn't
+            // playing yet — checking it here would be a false positive.
+            if (!_waitingForVideoEnd &&
+                _history != null && _historyIndex >= 0 && _historyIndex < _history.Count &&
                 IsScenePath(_history[_historyIndex]) && !IsSkippedPath(_history[_historyIndex]) && !IsLweRunning)
             {
                 OnSceneCrashed?.Invoke(_history[_historyIndex]);
@@ -684,9 +751,36 @@ public static class PlayerHelper
                 return;
             }
 
-            _timedRemainingMs -= elapsedMs;
-            if (_timedRemainingMs <= 0)
-                AdvanceAndLaunch();
+            if (!_waitingForVideoEnd && (!_advanceOnVideoEnd || IsLweRunning))
+            {
+                // Scale by playback speed so the timer counts video-time, not wall-clock.
+                // At 2x speed the interval expires in half the wall-clock time, which is
+                // correct: 15 real minutes = 30 minutes of video content. Scenes run at 1x.
+                var speedFactor = IsLweRunning ? 1.0 : _currentSpeed;
+                _timedRemainingMs -= (long)(elapsedMs * speedFactor);
+            }
+
+            if (_timedRemainingMs <= 0 && !_waitingForVideoEnd)
+            {
+                if (_waitForVideoEnd)
+                {
+                    var next = AdvanceToNext();
+                    if (next != null)
+                    {
+                        _waitingForVideoEnd = true;
+                        var cts = _waitCts = new CancellationTokenSource();
+                        Task.Run(() => DoVideoEndWait(next, cts.Token));
+                    }
+                    else
+                    {
+                        AdvanceAndLaunch();
+                    }
+                }
+                else
+                {
+                    AdvanceAndLaunch();
+                }
+            }
 
             _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
         }
@@ -694,8 +788,21 @@ public static class PlayerHelper
 
     private static void LaunchAndReset(string path)
     {
-        SwitchToFile(path, _timedOptions);
-        _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+        SwitchToFile(path, SettingsService.Load().BuildMpvOptions());
+        if (_advanceOnVideoEnd && !IsScenePath(path))
+        {
+            var next = AdvanceToNext();
+            if (next != null)
+            {
+                _waitingForVideoEnd = true;
+                var cts = _waitCts = new CancellationTokenSource();
+                Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+            }
+        }
+        else
+        {
+            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+        }
         SaveTimedState();
     }
 
@@ -741,6 +848,7 @@ public static class PlayerHelper
                 {
                     var volOverride = ReadVolumeOverride(path);
                     var count = newPids.Length;
+                    bool capturedMute = _isMuted;
                     _ = Task.Run(async () =>
                     {
                         for (int i = 0; i < 60; i++)
@@ -748,7 +856,7 @@ public static class PlayerHelper
                             if (GetLweSinkInputIds().Count >= count) break;
                             await Task.Delay(50);
                         }
-                        ApplyLweMute(AudioMonitor.IsMuted);
+                        ApplyLweMute(capturedMute || AudioMonitor.IsMuted);
                         if (volOverride.HasValue) ApplyLweVolume(volOverride.Value);
                     });
                 }
@@ -777,16 +885,21 @@ public static class PlayerHelper
                 var oldLwePids = ReadCurrentLwePids();
                 KillMpvPaperOnly(); // safety: clear any stray mpvpaper + socket
 
+                var settings = SettingsService.Load();
                 var readyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _current = Launch(BakeSpeedOverride(BakeVolumeOverride(mpvOptions, path), path), path, readyTcs);
+                // Use fresh settings so volume/speed changes made while the previous
+                // video was playing carry over — _timedOptions is built at playlist
+                // start and is stale if the user adjusted global volume or speed.
+                var freshOpts = settings.BuildMpvOptions();
+                _current = Launch(BakeSpeedOverride(BakeVolumeOverride(freshOpts, path), path), path, readyTcs);
                 OnWallpaperChanged?.Invoke(path);
 
-                var settings = SettingsService.Load();
                 var volOverride = ReadVolumeOverride(path);
                 var speedOverride = ReadSpeedOverride(path);
                 int vol = volOverride ?? settings.Volume;
                 double spd = speedOverride ?? settings.Speed;
-                Task.Run(() => { SetVolume(vol); SetSpeed(spd); });
+                bool muted = _isMuted;
+                Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (muted) SetMute(true); });
 
                 var cts = _prelaunchCts = new CancellationTokenSource();
                 var capturedPids = oldLwePids;
@@ -815,7 +928,10 @@ public static class PlayerHelper
         else
         {
             KillCurrentProcess();
-            _current = Launch(mpvOptions, path);
+            var opts = BakeSpeedOverride(BakeVolumeOverride(mpvOptions, path), path);
+            if (_isMuted && !opts.Contains("--no-audio")) opts += " --mute=yes";
+            _current = Launch(opts, path);
+            OnWallpaperChanged?.Invoke(path);
         }
     }
 
@@ -854,25 +970,551 @@ public static class PlayerHelper
         }
     }
 
+    private static string? TryQueryCurrentPath()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "path" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String)
+                return data.GetString();
+            return null;
+        }
+        catch { return null; }
+    }
+
+    // Switch from timed-interval mode to advance-on-end without restarting mpvpaper.
+    // Tears down the timer, appends remaining paths to mpv's in-memory playlist, and
+    // sets loop-playlist so mpv advances naturally when each file ends.
+    public static void SwitchFromTimedToAdvanceOnEnd(IReadOnlyList<string> allPaths, bool shuffle)
+    {
+        lock (_lock)
+        {
+            var currentPath = (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
+                ? _history[_historyIndex]
+                : null;
+
+            TeardownTimer();
+            ClearTimedStateFile();
+
+            var rest = allPaths.Where(p => p != currentPath).ToList();
+            if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+            TrySendCommand("set", "loop-file", "no");
+            foreach (var p in rest)
+                TrySendCommand("loadfile", p, "append");
+            TrySendCommand("set", "loop-playlist", "inf");
+        }
+    }
+
+    // Switch from advance-on-end mode to timed-interval without restarting mpvpaper.
+    // Converts mpv to single-file loop mode, then starts the livepaper timer.
+    public static void SwitchFromAdvanceOnEndToTimed(IReadOnlyList<string> allPaths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd)
+    {
+        lock (_lock)
+        {
+            if (allPaths.Count == 0) return;
+
+            var currentPath = TryQueryCurrentPath();
+
+            TrySendCommand("set", "loop-file", "inf");
+            TrySendCommand("playlist-clear");
+            TrySendCommand("set", "loop-playlist", "no");
+
+            var ordered = new List<string>(allPaths);
+            _timedPaths = ordered;
+            _timedOptions = mpvOptions;
+            _timedShuffle = shuffle;
+            _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
+            _timedTimerPaused = false;
+            _timedTimerStopped = false;
+            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            _waitForVideoEnd = waitForVideoEnd;
+            _advanceOnVideoEnd = false;
+
+            var startPath = currentPath ?? ordered[0];
+            var idx = ordered.IndexOf(startPath);
+            if (idx < 0) idx = 0;
+            _timedIndex = idx;
+            _history = [startPath];
+            _historyIndex = 0;
+
+            SaveTimedState();
+
+            if (ordered.Count > 1 && intervalSeconds > 0)
+                StartTimedTimer();
+        }
+    }
+
+    // Reorders the active playlist in real time without restarting mpvpaper or resetting the timer countdown.
+    // Sequential: positions the current wallpaper at index 0, then appends the rest in original order
+    //             starting from current+1 (wrapping). Shuffled: same but randomises the tail.
+    public static void ReorderPlaylist(IReadOnlyList<string> originalPaths, bool isTimedPlaylist, bool shuffle)
+    {
+        lock (_lock)
+        {
+            if (originalPaths.Count == 0) return;
+
+            // Mixed advance-on-end playlists use the timed machinery even when the
+            // caller passes isTimedPlaylist=false (it only knows about native-mpv mode).
+            if (!isTimedPlaylist && _timedPaths != null)
+                isTimedPlaylist = true;
+
+            if (isTimedPlaylist)
+            {
+                if (_timedPaths == null && !LoadTimedState()) return;
+
+                // In advance-on-end mode, _historyIndex is pre-fetched one step ahead of the
+                // playing item. Use the actual playing item as the reorder anchor.
+                bool preIsFetched = _waitingForVideoEnd
+                    && _history != null && _historyIndex > 0 && _historyIndex < _history.Count;
+                int playingHistIdx = preIsFetched ? _historyIndex - 1 : _historyIndex;
+                var currentPath = (_history != null && playingHistIdx >= 0 && playingHistIdx < _history.Count)
+                    ? _history[playingHistIdx]
+                    : null;
+
+                int currentIdx = -1;
+                for (int i = 0; i < originalPaths.Count; i++)
+                    if (originalPaths[i] == currentPath) { currentIdx = i; break; }
+
+                var rest = new List<string>();
+                if (currentIdx >= 0)
+                {
+                    for (int i = currentIdx + 1; i < originalPaths.Count; i++) rest.Add(originalPaths[i]);
+                    for (int i = 0; i < currentIdx; i++) rest.Add(originalPaths[i]);
+                }
+                else
+                {
+                    rest.AddRange(originalPaths);
+                }
+
+                if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+                List<string> newPaths;
+                int newTimedIndex;
+                if (currentIdx >= 0 && currentPath != null)
+                {
+                    // Current is still in the playlist — place it at index 0 so next advance
+                    // increments to index 1 (first of rest).
+                    newPaths = new List<string>([currentPath]);
+                    newPaths.AddRange(rest);
+                    newTimedIndex = 0;
+                }
+                else
+                {
+                    // Current was removed — let it finish but don't replay it.
+                    // Setting _timedIndex to the last slot makes the next advance wrap to 0.
+                    newPaths = rest;
+                    newTimedIndex = newPaths.Count - 1;
+                }
+
+                _timedShuffle = shuffle;
+                _timedPaths = newPaths;
+                _timedIndex = newTimedIndex;
+                _history = currentPath != null ? [currentPath] : [newPaths[0]];
+                _historyIndex = 0;
+                // Intentionally preserve _timedRemainingMs — don't reset the countdown
+
+                // In advance-on-end mode the in-flight DoVideoEndWait holds a reference to the
+                // old path list. Cancel it and re-chain from the (now playing) current item.
+                if (_advanceOnVideoEnd)
+                {
+                    if (_waitingForVideoEnd)
+                    {
+                        _waitCts?.Cancel();
+                        _waitCts = null;
+                        _waitingForVideoEnd = false;
+                        TrySendCommand("set", "loop-file", "inf");
+                    }
+                    var playingPath = _history != null && _historyIndex >= 0 && _historyIndex < _history!.Count
+                        ? _history[_historyIndex]
+                        : null;
+                    if (playingPath != null && !IsScenePath(playingPath) && newPaths.Count > 1)
+                    {
+                        var nextPath = AdvanceToNext();
+                        if (nextPath != null)
+                        {
+                            _waitingForVideoEnd = true;
+                            var cts = _waitCts = new CancellationTokenSource();
+                            Task.Run(() => DoVideoEndWait(nextPath, cts.Token, prevIsVideo: true));
+                        }
+                    }
+                }
+
+                SaveTimedState();
+            }
+            else
+            {
+                // Advance-on-end: rebuild mpv's playlist from the current position
+                var currentPath = TryQueryCurrentPath();
+                if (currentPath == null) return; // IPC not ready — skip to avoid corrupting the queue
+
+                int currentIdx = -1;
+                for (int i = 0; i < originalPaths.Count; i++)
+                    if (originalPaths[i] == currentPath) { currentIdx = i; break; }
+
+                var rest = new List<string>();
+                if (currentIdx >= 0)
+                {
+                    for (int i = currentIdx + 1; i < originalPaths.Count; i++) rest.Add(originalPaths[i]);
+                    for (int i = 0; i < currentIdx; i++) rest.Add(originalPaths[i]);
+                }
+                else
+                {
+                    rest.AddRange(originalPaths); // current was removed; all new paths (none duplicate current)
+                }
+
+                if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+                TrySendCommand("playlist-clear");
+                foreach (var p in rest)
+                    TrySendCommand("loadfile", p, "append");
+                TrySendCommand("set", "loop-playlist", "inf");
+            }
+        }
+    }
+
+    // Syncs the advance-on-end (mpv-native) playlist to the new path list.
+    // For pure additions without shuffle, just appends the new items to mpv's existing
+    // queue (preserving the current playback order). Everything else does a full rebuild.
+    public static void SyncAdvanceOnEndPlaylist(IReadOnlyList<string> oldPaths, IReadOnlyList<string> newPaths, bool shuffle)
+    {
+        lock (_lock)
+        {
+            if (newPaths.Count == 0) return;
+
+            // Mixed advance-on-end playlists use the timed machinery — IPC playlist ops are useless here.
+            if (_timedPaths != null)
+            {
+                ReorderPlaylist(newPaths, true, shuffle);
+                return;
+            }
+
+            var currentPath = TryQueryCurrentPath();
+            if (currentPath == null) return;
+
+            var added = newPaths.Except(oldPaths).ToHashSet();
+            var removed = oldPaths.Except(newPaths).ToHashSet();
+
+            // Add-only without shuffle: append new items to the END of mpv's current queue.
+            // This preserves the existing playback order (items that were next stay next)
+            // and slots new items in AFTER the full current cycle.
+            if (!shuffle && added.Count > 0 && removed.Count == 0)
+            {
+                // Verify the non-added items are in the same order (no reorder happened)
+                var existingInNew = newPaths.Where(p => !added.Contains(p)).ToList();
+                var existingInOld = oldPaths.Where(p => !added.Contains(p)).ToList();
+                if (existingInNew.SequenceEqual(existingInOld))
+                {
+                    foreach (var p in newPaths.Where(p => added.Contains(p)))
+                        TrySendCommand("loadfile", p, "append");
+                    return;
+                }
+            }
+
+            // Full rebuild for removes, reorders, or adds-with-shuffle
+            int currentIdx = -1;
+            for (int i = 0; i < newPaths.Count; i++)
+                if (newPaths[i] == currentPath) { currentIdx = i; break; }
+
+            var rest = new List<string>();
+            if (currentIdx >= 0)
+            {
+                for (int i = currentIdx + 1; i < newPaths.Count; i++) rest.Add(newPaths[i]);
+                for (int i = 0; i < currentIdx; i++) rest.Add(newPaths[i]);
+            }
+            else
+            {
+                // Current was removed. Map its old position into newPaths so the item that
+                // "replaced" it positionally plays next instead of restarting from index 0.
+                int oldCurrentIdx = -1;
+                for (int i = 0; i < oldPaths.Count; i++)
+                    if (oldPaths[i] == currentPath) { oldCurrentIdx = i; break; }
+
+                int startIdx = oldCurrentIdx >= 0
+                    ? Math.Min(oldCurrentIdx, newPaths.Count - 1)
+                    : 0;
+
+                for (int i = startIdx; i < newPaths.Count; i++) rest.Add(newPaths[i]);
+                for (int i = 0; i < startIdx; i++) rest.Add(newPaths[i]);
+            }
+
+            if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+
+            TrySendCommand("playlist-clear");
+            foreach (var p in rest)
+                TrySendCommand("loadfile", p, "append");
+            TrySendCommand("set", "loop-playlist", "inf");
+        }
+    }
+
+    private static double? TryQueryTimeRemaining()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            // playtime-remaining = time-remaining / speed (wall-clock seconds, not video seconds).
+            // Using time-remaining here would oversleep at speed > 1, causing B to loop multiple times
+            // before we transition to the next file.
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "playtime-remaining" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
+                return data.GetDouble();
+            return null;
+        }
+        catch { return null; }
+    }
+
+    // prevIsVideo: caller asserts the currently-playing item is a video (not a scene).
+    // Used when spawning a chain immediately after SwitchToFile(video) so prevIsScene is
+    // correctly false even when the async LWE kill hasn't completed yet.
+    private static async Task DoVideoEndWait(string next, CancellationToken ct, bool prevIsVideo = false)
+    {
+        // For video→video: disable loop on current, append next to mpv's playlist so
+        // the transition happens inside mpv (no blank gap), then restore loop after.
+        // Falls back to an immediate SwitchToFile for scene transitions or when IPC is unavailable.
+        bool nextIsScene = IsScenePath(next);
+        bool prevIsScene = !prevIsVideo && IsLweRunning;
+
+        if (!nextIsScene && !prevIsScene)
+        {
+            // In advance-on-end mode the first DoVideoEndWait fires immediately after launch;
+            // wait up to 5s for the mpv socket before querying.
+            double? remaining = TryQueryTimeRemaining();
+            if (remaining == null && _advanceOnVideoEnd)
+            {
+                for (int i = 0; i < 50 && remaining == null && !ct.IsCancellationRequested; i++)
+                {
+                    try { await Task.Delay(100, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { return; }
+                    remaining = TryQueryTimeRemaining();
+                }
+            }
+            if (remaining != null)
+            {
+                TrySendCommand("set", "loop-file", "no");
+                TrySendCommand("loadfile", next, "append");
+
+                try
+                {
+                    while (true)
+                    {
+                        _speedChangeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        var rem2 = TryQueryTimeRemaining();
+                        if (rem2 == null) break;
+                        // Sleep for rem2 only — the +300ms buffer lives outside the loop so
+                        // speed/volume can fire between them (at A's end, not 300ms after).
+                        var sleepMs = Math.Max(0, (int)(rem2.Value * 1000));
+                        var delayTask = Task.Delay(sleepMs, ct);
+                        var done = await Task.WhenAny(delayTask, _speedChangeTcs.Task).ConfigureAwait(false);
+                        if (ct.IsCancellationRequested) return;
+                        if (done == delayTask)
+                        {
+                            try { await delayTask; }
+                            catch (OperationCanceledException) { return; }
+                            break;
+                        }
+                        // Speed changed — wait for mpv to process the IPC command before re-querying.
+                        // Without this, playtime-remaining still reflects the old speed and we compute
+                        // a sleep that's too short, causing the lock block to fire while A is still
+                        // playing (loop-file=inf lands on A, playlist-clear removes B, A replays).
+                        try { await Task.Delay(100, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { return; }
+                    }
+                }
+                finally { _speedChangeTcs = null; }
+
+                // A has just ended. Apply B's speed/volume now — before the 300ms buffer —
+                // so B inherits the correct values from its first frame rather than from A.
+                // Fresh reads cover mid-sleep changes to global or per-video overrides.
+                // SetSpeed/SetVolume must be called outside _lock (they acquire it internally).
+                {
+                    var transSettings = SettingsService.Load();
+                    var transVol = ReadVolumeOverride(next) ?? transSettings.Volume;
+                    var transSpeed = ReadSpeedOverride(next) ?? transSettings.Speed;
+                    SetVolume(transVol);
+                    SetSpeed(transSpeed);
+                }
+
+                // 300ms buffer: let mpv complete the A→B playlist advance before the lock
+                // block sends loop-file=inf (arriving during the transition re-loops A).
+                try { await Task.Delay(300, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+
+                lock (_lock)
+                {
+                    if (!_waitingForVideoEnd || ct.IsCancellationRequested) return;
+                    _waitingForVideoEnd = false;
+                    _waitCts = null;
+
+                    var settings = SettingsService.Load();
+                    TrySendCommand("set", "loop-file", settings.Loop ? "inf" : "no");
+                    TrySendCommand("playlist-clear");
+
+                    OnWallpaperChanged?.Invoke(next);
+
+                    if (_advanceOnVideoEnd && !IsScenePath(next))
+                    {
+                        var nextNext = AdvanceToNext();
+                        if (nextNext != null)
+                        {
+                            _waitingForVideoEnd = true;
+                            var cts2 = _waitCts = new CancellationTokenSource();
+                            Task.Run(() => DoVideoEndWait(nextNext, cts2.Token, prevIsVideo: true));
+                        }
+                    }
+                    else
+                    {
+                        _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+                    }
+                    SaveTimedState();
+                }
+                return;
+            }
+        }
+
+        // Video→scene: launch LWE SceneTransitionDelayMs before the video ends so the
+        // scene is already rendering when mpvpaper is killed (matches normal transition behaviour).
+        if (nextIsScene && !prevIsScene)
+        {
+            var remaining = TryQueryTimeRemaining();
+            // Same socket-not-ready retry as the video→video path: in advance-on-end mode
+            // this task may fire immediately after SwitchToFile(video) before mpv is up.
+            if (remaining == null && _advanceOnVideoEnd)
+            {
+                for (int i = 0; i < 50 && remaining == null && !ct.IsCancellationRequested; i++)
+                {
+                    try { await Task.Delay(100, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { return; }
+                    remaining = TryQueryTimeRemaining();
+                    // Socket is up but no file is playing (e.g. a short video ended before we
+                    // got here due to the transition buffer). Switch to the scene immediately.
+                    // Require at least 5 retries (500ms) before breaking — the socket can appear
+                    // within ~100ms of launch while playtime-remaining is still null because the
+                    // file hasn't finished loading yet. Without the minimum, a fresh [video, scene]
+                    // playlist breaks on the very first iteration and transitions immediately.
+                    if (remaining == null && File.Exists(IpcSocket) && i >= 5) break;
+                }
+            }
+            if (remaining != null)
+            {
+                try
+                {
+                    while (true)
+                    {
+                        _speedChangeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        var rem2 = TryQueryTimeRemaining();
+                        if (rem2 == null) break; // video already ended, launch scene now
+                        var delayMs = SettingsService.Load().SceneTransitionDelayMs;
+                        var sleepMs = Math.Max(0, (int)(rem2.Value * 1000) - delayMs);
+                        if (sleepMs <= 0) break;
+                        var delayTask = Task.Delay(sleepMs, ct);
+                        var done = await Task.WhenAny(delayTask, _speedChangeTcs.Task).ConfigureAwait(false);
+                        if (ct.IsCancellationRequested) return;
+                        if (done == delayTask)
+                        {
+                            try { await delayTask; }
+                            catch (OperationCanceledException) { return; }
+                            break;
+                        }
+                        // Speed changed — wait for mpv to process the IPC command before re-querying.
+                        try { await Task.Delay(100, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { return; }
+                    }
+                }
+                finally { _speedChangeTcs = null; }
+            }
+        }
+
+        // Scene→video and scene→scene: remaining is null (LWE has no mpv socket) — switch immediately.
+        lock (_lock)
+        {
+            if (!_waitingForVideoEnd || ct.IsCancellationRequested) return;
+            _waitingForVideoEnd = false;
+            _waitCts = null;
+            SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
+            if (_advanceOnVideoEnd && !IsScenePath(next))
+            {
+                var nextNext = AdvanceToNext();
+                if (nextNext != null)
+                {
+                    _waitingForVideoEnd = true;
+                    var cts2 = _waitCts = new CancellationTokenSource();
+                    Task.Run(() => DoVideoEndWait(nextNext, cts2.Token, prevIsVideo: true));
+                }
+            }
+            else
+            {
+                _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            }
+            SaveTimedState();
+        }
+    }
+
+    private static void CancelVideoEndWait()
+    {
+        _waitCts?.Cancel();
+        _waitCts = null;
+        _waitingForVideoEnd = false;
+        // Restore loop so the current video doesn't advance to the queued file
+        // in the gap between cancel and the following SwitchToFile call.
+        // TryIpcSwitchToFile will set the correct value immediately after.
+        TrySendCommand("set", "loop-file", "inf");
+    }
+
     private static void AdvanceAndLaunch()
     {
-        var next = AdvanceToNext();
+        // When _waitingForVideoEnd is true (both advance-on-end and wait-for-video-end
+        // modes), _historyIndex is already pre-fetched one step ahead of the
+        // currently-playing item. Use it directly; calling AdvanceToNext() would skip it.
+        bool preIsFetched = _waitingForVideoEnd
+            && _history != null && _historyIndex >= 0 && _historyIndex < _history.Count;
+        CancelVideoEndWait();
+        string? next = preIsFetched ? _history![_historyIndex] : AdvanceToNext();
         if (next != null) LaunchAndReset(next);
     }
 
     private static void StepBackAndLaunch()
     {
+        // When _waitingForVideoEnd is true, _historyIndex is pre-fetched one step ahead.
+        // A single decrement undoes the pre-fetch; a second reaches the actual previous.
+        bool preIsFetched = _waitingForVideoEnd;
+        CancelVideoEndWait();
         if (_history == null || _historyIndex <= 0) return;
-        _historyIndex--;
+        _historyIndex--;                          // undo pre-fetch (or go to prev in normal mode)
+        if (preIsFetched && _historyIndex > 0)
+            _historyIndex--;                      // go one further to the actual previous item
         LaunchAndReset(_history[_historyIndex]);
     }
 
     private static void RandomAndLaunch()
     {
         if (_timedPaths == null || _timedPaths.Count == 0) return;
-        var current = _history != null && _historyIndex >= 0 && _historyIndex < _history.Count
-            ? _history[_historyIndex]
+        // In advance-on-end mode _historyIndex is pre-fetched; use the item before it
+        // as "current" so we don't accidentally exclude the pending-next item.
+        int playingIdx = (_waitingForVideoEnd && _historyIndex > 0)
+            ? _historyIndex - 1 : _historyIndex;
+        var current = _history != null && playingIdx >= 0 && playingIdx < _history.Count
+            ? _history[playingIdx]
             : null;
+        CancelVideoEndWait();
         var pick = PickRandomExcluding(_timedPaths, current);
         if (_history != null)
         {
@@ -964,14 +1606,49 @@ public static class PlayerHelper
         return true;
     }
 
-    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds)
+    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds, bool waitForVideoEnd = false, bool advanceOnVideoEnd = false)
     {
         lock (_lock)
         {
             if (_timedPaths == null && !LoadTimedState()) return;
             _timedShuffle = shuffle;
+            var oldIntervalMs = (long)_timedInterval.TotalMilliseconds;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
-            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            var newIntervalMs = (long)_timedInterval.TotalMilliseconds;
+            var elapsed = oldIntervalMs - _timedRemainingMs;
+            _timedRemainingMs = elapsed >= newIntervalMs ? newIntervalMs : newIntervalMs - elapsed;
+
+            bool advanceChanged = _advanceOnVideoEnd != advanceOnVideoEnd;
+            bool waitChanged = _waitForVideoEnd != waitForVideoEnd;
+            _waitForVideoEnd = waitForVideoEnd;
+
+            // If advance-on-end is toggling, or waitForVideoEnd toggles while a
+            // DoVideoEndWait is already in-flight, cancel and re-arm as needed.
+            if (advanceChanged || (waitChanged && _waitingForVideoEnd))
+            {
+                // _historyIndex is pre-fetched one step ahead when _waitingForVideoEnd is true.
+                // Step back to the actual playing item so AdvanceToNext() re-fetches correctly.
+                if (_waitingForVideoEnd && _historyIndex > 0)
+                    _historyIndex--;
+                CancelVideoEndWait();
+                _advanceOnVideoEnd = advanceOnVideoEnd;
+
+                if (advanceOnVideoEnd && !IsLweRunning && _timedPaths!.Count > 1)
+                {
+                    var next = AdvanceToNext();
+                    if (next != null)
+                    {
+                        _waitingForVideoEnd = true;
+                        var cts = _waitCts = new CancellationTokenSource();
+                        Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+                    }
+                }
+            }
+            else
+            {
+                _advanceOnVideoEnd = advanceOnVideoEnd;
+            }
+
             SaveTimedState();
         }
     }
@@ -1090,8 +1767,28 @@ public static class PlayerHelper
         }
     }
 
+    // Automute-driven mute. Blocked from unmuting if user has explicitly muted via keybind.
     public static void SetMute(bool mute)
     {
+        if (!mute && _userMuted) return;
+        _isMuted = mute;
+        SendCommand("set_property", "mute", mute);
+        if (IsLweRunning) ApplyLweMute(mute);
+    }
+
+    // User-initiated mute (keybind, UI toggle). Always applies; sets _userMuted so automute can't undo it.
+    public static void SetUserMute(bool mute)
+    {
+        _userMuted = mute;
+        _isMuted = mute;
+        try
+        {
+            var path = UserMuteStatePath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            if (mute) File.WriteAllText(path, "true");
+            else if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
         SendCommand("set_property", "mute", mute);
         if (IsLweRunning) ApplyLweMute(mute);
     }
@@ -1101,6 +1798,93 @@ public static class PlayerHelper
         SendCommand("set_property", "volume", (double)volume);
         if (IsLweRunning) ApplyLweVolume(volume);
     }
+
+    public static void SetSpeed(double speed)
+    {
+        SendCommand("set_property", "speed", speed);
+        lock (_lock) { _currentSpeed = speed; }
+        _speedChangeTcs?.TrySetResult(true);
+    }
+
+    public static void SetLoop(bool loop) =>
+        TrySendCommand("set", "loop-file", loop ? "inf" : "no");
+
+    public static void SetPlaylistShuffle(bool shuffle) =>
+        TrySendCommand(shuffle ? "playlist-shuffle" : "playlist-unshuffle");
+
+    private static void StartPlaylistObserver(IReadOnlyList<string> videoPaths)
+    {
+        _observerCts?.Cancel();
+        _observerCts?.Dispose();
+        var cts = _observerCts = new CancellationTokenSource();
+        var paths = videoPaths.ToArray();
+        Task.Run(() => ObservePathAsync(paths, cts.Token));
+    }
+
+    private static void StopPlaylistObserver()
+    {
+        _observerCts?.Cancel();
+        _observerCts?.Dispose();
+        _observerCts = null;
+    }
+
+    private static async Task ObservePathAsync(string[] videoPaths, CancellationToken ct)
+    {
+        var socketPath = IpcSocket;
+        for (int i = 0; i < 50 && !File.Exists(socketPath) && !ct.IsCancellationRequested; i++)
+        {
+            try { await Task.Delay(100, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+        if (ct.IsCancellationRequested || !File.Exists(socketPath)) return;
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            using var ns = new NetworkStream(socket, ownsSocket: false);
+            using var reader = new StreamReader(ns, Encoding.UTF8);
+            using var writer = new StreamWriter(ns, Encoding.UTF8) { AutoFlush = true };
+            using var reg = ct.Register(() => { try { socket.Close(); } catch { } });
+
+            await writer.WriteLineAsync("{\"command\":[\"observe_property\",1,\"playlist-pos\"]}").ConfigureAwait(false);
+
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line == null) break;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("event", out var ev) || ev.GetString() != "property-change") continue;
+                    if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Number) continue;
+                    var pos = data.GetInt32();
+                    if (pos >= 0 && pos < videoPaths.Length)
+                        ApplyOverridesForPath(videoPaths[pos]);
+                }
+                catch { }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+    }
+
+    private static void ApplyOverridesForPath(string path)
+    {
+        var settings = SettingsService.Load();
+        var vol = ReadVolumeOverride(path) ?? settings.Volume;
+        var spd = ReadSpeedOverride(path) ?? settings.Speed;
+        SetVolume(vol);
+        SetSpeed(spd);
+    }
+
+    public static void SetVideoScale(string scale)
+    {
+        double panscan = scale == "fill" ? 1.0 : 0.0;
+        SendCommand("set_property", "panscan", panscan);
+    }
+
 
     // Adjust volume by `delta` (clamped 0-100). Updates the persisted setting
     // so subsequent launches and the GUI slider reflect the change, and also
@@ -1250,6 +2034,7 @@ public static class PlayerHelper
         _waitCts?.Cancel();
         _waitCts = null;
         _waitingForVideoEnd = false;
+        _advanceOnVideoEnd = false;
         _prelaunchCts?.Cancel();
         _prelaunchCts = null;
         _playlistTimer?.Dispose();
@@ -1458,5 +2243,45 @@ public static class PlayerHelper
         if (!File.Exists(sidecar)) return null;
         try { return int.TryParse(File.ReadAllText(sidecar).Trim(), out int v) ? v : null; }
         catch { return null; }
+    }
+
+    private static double? ReadSpeedOverride(string path)
+    {
+        var sidecar = Path.ChangeExtension(path, ".speed");
+        if (!File.Exists(sidecar)) return null;
+        try { return double.TryParse(File.ReadAllText(sidecar).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : null; }
+        catch { return null; }
+    }
+
+    private static string BakeVolumeOverride(string options, string path)
+    {
+        var vol = ReadVolumeOverride(path);
+        if (!vol.HasValue) return options;
+        if (options.Contains("--no-audio")) return options;
+        const string prefix = "--volume=";
+        int idx = options.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            int end = idx + prefix.Length;
+            while (end < options.Length && char.IsDigit(options[end])) end++;
+            return options[..idx] + prefix + vol.Value + options[end..];
+        }
+        return options + $" {prefix}{vol.Value}";
+    }
+
+    private static string BakeSpeedOverride(string options, string path)
+    {
+        var speed = ReadSpeedOverride(path);
+        if (!speed.HasValue) return options;
+        string val = speed.Value.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+        const string prefix = "--speed=";
+        int idx = options.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            int end = idx + prefix.Length;
+            while (end < options.Length && (char.IsDigit(options[end]) || options[end] == '.')) end++;
+            return options[..idx] + prefix + val + options[end..];
+        }
+        return options + $" {prefix}{val}";
     }
 }
