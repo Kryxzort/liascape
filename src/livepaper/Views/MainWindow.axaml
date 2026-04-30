@@ -349,7 +349,13 @@
                                                         <Grid Height="90">
                                                             <Panel>
                                                                 <asyncImageLoader:AdvancedImage
+                                                                    Source="{Binding StaticThumbnailSource}"
+                                                                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                                    Stretch="UniformToFill"
+                                                                    Width="100" Height="90"/>
+                                                                <asyncImageLoader:AdvancedImage
                                                                     Source="{Binding ThumbnailSource}"
+                                                                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNullOrEmpty}}"
                                                                     Stretch="UniformToFill"
                                                                     Width="100" Height="90"/>
                                                                 <Image IsVisible="{Binding IsGifActive}"
