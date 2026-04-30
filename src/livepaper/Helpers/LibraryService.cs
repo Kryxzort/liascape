@@ -33,7 +33,9 @@ public static class LibraryService
         // Videos use .mp4; imported still images use .png. Both conventions
         // share the same .jpg-thumbnail / .id-sidecar layout.
         var mediaFiles = Directory.GetFiles(DownloadHelper.LibraryPath, "*.mp4")
-            .Concat(Directory.GetFiles(DownloadHelper.LibraryPath, "*.png"));
+            .Concat(Directory.GetFiles(DownloadHelper.LibraryPath, "*.png")
+                .Where(f => !File.Exists(Path.ChangeExtension(f, ".scene"))
+                         && !File.Exists(Path.ChangeExtension(f, ".mp4"))));
 
         foreach (var media in mediaFiles)
         {
