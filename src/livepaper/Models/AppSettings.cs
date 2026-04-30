@@ -27,7 +27,7 @@ public class AppSettings
     public bool LweSilent { get; set; } = false;
     public int LweVolume { get; set; } = 100;
     public List<LweMonitorSettings> LweMonitors { get; set; } = [];
-    public int SceneTransitionDelayMs { get; set; } = 400;
+    public int SceneTransitionDelayMs { get; set; } = 1000;
     public bool AutoMute { get; set; } = false;
     public int AutoMuteDelayMs { get; set; } = 200;
     public int AutoUnmuteDelayMs { get; set; } = 2000;
