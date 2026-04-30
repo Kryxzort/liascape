@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using livepaper.Models;
 
 namespace livepaper.Helpers;
@@ -31,6 +32,7 @@ public static class PlayerHelper
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
     private static readonly object _lock = new();
     private static CancellationTokenSource? _daemonCts;
+    private static CancellationTokenSource? _observerCts;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
     public static bool IsPlaying => File.Exists(IpcSocket) && Process.GetProcessesByName("mpvpaper").Length > 0;
@@ -66,6 +68,10 @@ public static class PlayerHelper
     private static string TimedStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".config", "livepaper", "timed_state.json");
+
+    private static string PlaylistObserverPathsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "livepaper", "playlist_observer_paths.json");
 
     private static string TimerDaemonPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -490,6 +496,7 @@ public static class PlayerHelper
         {
             KillAll();
             ClearTimedStateFile();
+            ClearPlaylistObserverPaths();
 
             if (videoPaths.Count == 1)
             {
@@ -508,6 +515,8 @@ public static class PlayerHelper
                 var shuffleFlag = shuffle ? " --shuffle" : "";
                 var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf{shuffleFlag}";
                 _current = Launch(options, videoPaths[videoPaths.Count - 1]);
+                try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(videoPaths.ToList())); } catch { }
+                StartPlaylistObserver(videoPaths);
             }
         }
         UpdateRestartTimer();
@@ -843,6 +852,7 @@ public static class PlayerHelper
         {
             KillAll();
             SignalTimerStop();
+            ClearPlaylistObserverPaths();
         }
         KillRestartDaemon();
     }
@@ -896,20 +906,39 @@ public static class PlayerHelper
         _daemonMode = true;
         var settings = SettingsService.Load();
         var session = settings.LastSession;
-        if (session?.IsTimedPlaylist != true || session.Paths.Count == 0) return;
+        if (session == null || session.Paths.Count == 0) return;
 
-        bool started = IsPlaying && ResumeTimedTimer();
-        if (!started)
+        if (session.IsTimedPlaylist)
         {
-            if (settings.ResumeFromLast && RestoreTimedPlaylist()) { }
-            else
+            bool started = IsPlaying && ResumeTimedTimer();
+            if (!started)
             {
-                var paths = session.Shuffle
-                    ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
-                    : session.Paths;
-                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds);
+                if (settings.ResumeFromLast && RestoreTimedPlaylist()) { }
+                else
+                {
+                    var paths = session.Shuffle
+                        ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
+                        : session.Paths;
+                    ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds);
+                }
             }
         }
+        else if (session.IsPlaylist)
+        {
+            // Reconnect the playlist-pos observer to the already-running mpvpaper
+            // so per-video volume/speed overrides keep firing after GUI close.
+            // Use the saved observer paths (post-shuffle order) if available.
+            List<string> observerPaths = session.Paths;
+            try
+            {
+                if (File.Exists(PlaylistObserverPathsPath))
+                    observerPaths = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(PlaylistObserverPathsPath)) ?? session.Paths;
+            }
+            catch { }
+            StartPlaylistObserver(observerPaths);
+        }
+        else return;
+
         WriteTimerDaemonPid();
         try { DaemonToken.WaitHandle.WaitOne(); }
         finally { DeleteTimerDaemonPid(); }
@@ -1043,6 +1072,7 @@ public static class PlayerHelper
 
     private static void KillCurrentProcess()
     {
+        StopPlaylistObserver();
         foreach (var proc in Process.GetProcessesByName("mpvpaper"))
         {
             using (proc)
@@ -1058,6 +1088,78 @@ public static class PlayerHelper
     private static void ClearTimedStateFile()
     {
         try { File.Delete(TimedStatePath); } catch { }
+    }
+
+    private static void ClearPlaylistObserverPaths()
+    {
+        try { File.Delete(PlaylistObserverPathsPath); } catch { }
+    }
+
+    private static void StartPlaylistObserver(IReadOnlyList<string> videoPaths)
+    {
+        _observerCts?.Cancel();
+        _observerCts?.Dispose();
+        var cts = _observerCts = new CancellationTokenSource();
+        var paths = videoPaths.ToArray();
+        Task.Run(() => ObservePathAsync(paths, cts.Token));
+    }
+
+    private static void StopPlaylistObserver()
+    {
+        _observerCts?.Cancel();
+        _observerCts?.Dispose();
+        _observerCts = null;
+    }
+
+    private static async Task ObservePathAsync(string[] videoPaths, CancellationToken ct)
+    {
+        var socketPath = IpcSocket;
+        for (int i = 0; i < 50 && !File.Exists(socketPath) && !ct.IsCancellationRequested; i++)
+        {
+            try { await Task.Delay(100, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+        if (ct.IsCancellationRequested || !File.Exists(socketPath)) return;
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            using var ns = new NetworkStream(socket, ownsSocket: false);
+            using var reader = new StreamReader(ns, Encoding.UTF8);
+            using var writer = new StreamWriter(ns, Encoding.UTF8) { AutoFlush = true };
+            using var reg = ct.Register(() => { try { socket.Close(); } catch { } });
+
+            await writer.WriteLineAsync("{\"command\":[\"observe_property\",1,\"playlist-pos\"]}").ConfigureAwait(false);
+
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line == null) break;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("event", out var ev) || ev.GetString() != "property-change") continue;
+                    if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Number) continue;
+                    var pos = data.GetInt32();
+                    if (pos >= 0 && pos < videoPaths.Length)
+                        ApplyOverridesForPath(videoPaths[pos]);
+                }
+                catch { }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+    }
+
+    private static void ApplyOverridesForPath(string path)
+    {
+        var settings = SettingsService.Load();
+        var vol = ReadVolumeOverride(path) ?? settings.Volume;
+        var spd = ReadSpeedOverride(path) ?? settings.Speed;
+        SetVolume(vol);
+        SetSpeed(spd);
     }
 
     private static void SignalTimerStop()
