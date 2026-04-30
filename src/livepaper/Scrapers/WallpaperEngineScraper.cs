@@ -125,30 +125,31 @@ public static class WallpaperEngineScraper
         try
         {
             // First non-black/white frame (YAVG between 30 and 225)
-            await RunFfmpeg($"-i \"{gifPath}\" -vf \"signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less\" -frames:v 1 \"{outputPath}\" -y");
+            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", outputPath, "-y");
             if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
 
             // Fallback: frame 1
             if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg($"-i \"{gifPath}\" -vf \"select=eq(n\\,1)\" -frames:v 1 \"{outputPath}\" -y");
+            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", outputPath, "-y");
             if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
 
             // Fallback: frame 0
             if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg($"-i \"{gifPath}\" -frames:v 1 \"{outputPath}\" -y");
+            await RunFfmpeg("-i", gifPath, "-frames:v", "1", outputPath, "-y");
         }
         catch { }
     }
 
-    private static async Task RunFfmpeg(string args)
+    private static async Task RunFfmpeg(params string[] args)
     {
-        var psi = new ProcessStartInfo("ffmpeg", args)
+        var psi = new ProcessStartInfo("ffmpeg")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
         using var proc = Process.Start(psi);
         if (proc == null) return;
         await proc.WaitForExitAsync();
