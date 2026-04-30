@@ -1401,7 +1401,10 @@ public static class PlayerHelper
                     if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Number) continue;
                     var pos = data.GetInt32();
                     if (pos >= 0 && pos < videoPaths.Length)
+                    {
                         ApplyOverridesForPath(videoPaths[pos]);
+                        OnWallpaperChanged?.Invoke(videoPaths[pos]);
+                    }
                 }
                 catch { }
             }

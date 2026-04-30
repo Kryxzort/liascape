@@ -712,7 +712,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 Shuffle = PlaylistShuffle
             };
             SettingsService.Save(_settings);
-            RefreshPlayingStatus();
+            RefreshPlayingStatusSoon();
             return;
         }
 
@@ -734,7 +734,7 @@ public partial class MainWindowViewModel : ViewModelBase
             WaitForVideoEnd = waitForVideoEnd
         };
         SettingsService.Save(_settings);
-        RefreshPlayingStatus();
+        RefreshPlayingStatusSoon();
     }
 
     [RelayCommand]
@@ -763,7 +763,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 Shuffle = PlaylistShuffle
             };
             SettingsService.Save(_settings);
-            RefreshPlayingStatus();
+            RefreshPlayingStatusSoon();
             return;
         }
 
@@ -785,7 +785,7 @@ public partial class MainWindowViewModel : ViewModelBase
             WaitForVideoEnd = waitForVideoEnd
         };
         SettingsService.Save(_settings);
-        RefreshPlayingStatus();
+        RefreshPlayingStatusSoon();
     }
 
     public void MovePlaylistItem(int from, int insertionIndex)
@@ -1416,6 +1416,18 @@ public partial class MainWindowViewModel : ViewModelBase
         if (m > 0) parts.Add($"{m}m");
         if (s > 0 || parts.Count == 0) parts.Add($"{s}s");
         return string.Join(" ", parts);
+    }
+
+    private void RefreshPlayingStatusSoon()
+    {
+        if (PlayerHelper.IsPlaying) { RefreshPlayingStatus(); return; }
+        Task.Run(async () =>
+        {
+            for (int i = 0; i < 50 && !PlayerHelper.IsPlaying; i++)
+                await Task.Delay(100).ConfigureAwait(false);
+            if (PlayerHelper.IsPlaying)
+                Dispatcher.UIThread.Post(RefreshPlayingStatus);
+        });
     }
 
     private void RefreshPlayingStatus()
