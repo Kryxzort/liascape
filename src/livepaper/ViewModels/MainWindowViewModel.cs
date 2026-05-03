@@ -1472,8 +1472,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (s?.IsTimedPlaylist == true && s.Paths.Count > 1)
         {
-            int secs = GetEffectiveIntervalSeconds();
-            string desc = $"{s.Paths.Count} wallpapers, every {FormatInterval(secs)}";
+            string desc = s.AdvanceOnVideoEnd
+                ? $"{s.Paths.Count} wallpapers, on video end"
+                : $"{s.Paths.Count} wallpapers, every {FormatInterval(GetEffectiveIntervalSeconds())}";
             if (PlaylistShuffle) desc += " (shuffled)";
             if (_currentlyPlayingCard != null) desc += $" → {_currentlyPlayingCard.Title}";
             parts.Add(desc);
