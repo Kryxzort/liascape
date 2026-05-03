@@ -322,9 +322,12 @@ public static class AudioMonitor
             };
             using var proc = Process.Start(psi);
             if (proc == null) return false;
-            var output = proc.StandardOutput.ReadToEnd().Trim();
             if (!proc.WaitForExit(500))
+            {
                 try { proc.Kill(); } catch { }
+                return false;
+            }
+            var output = proc.StandardOutput.ReadToEnd().Trim();
             return output
                 .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
                 .Any(line => string.Equals(line.Trim(), "Playing", StringComparison.OrdinalIgnoreCase));
