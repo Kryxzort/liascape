@@ -340,15 +340,16 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     partial void OnPlaylistShuffleChanged(bool value) { SavePlaylistStateDebounced(); ApplyShuffleOrderIfRunning(value); RefreshPlayingStatus(); }
-    partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshPlayingStatus(); }
-    partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshPlayingStatus(); }
-    partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshPlayingStatus(); }
-    partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshPlayingStatus(); }
-    partial void OnAdvanceOnVideoEndChanged(bool value) { if (value) PlaylistWaitForVideoEnd = false; SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshPlayingStatus(); }
+    partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnAdvanceOnVideoEndChanged(bool value) { if (value) PlaylistWaitForVideoEnd = false; SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnOverrideGlobalSettingsChanged(bool value)
     {
         SavePlaylistStateDebounced();
         ApplyEffectivePlaylistSettingsIfRunning();
+        RefreshLastSessionFromSettingsIfIdle();
         OnPropertyChanged(nameof(DisplayIntervalHours));
         OnPropertyChanged(nameof(DisplayIntervalMinutes));
         OnPropertyChanged(nameof(DisplayIntervalSeconds));
@@ -356,11 +357,11 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(DisplayWaitForVideoEnd));
         RefreshPlayingStatus();
     }
-    partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshPlayingStatus(); }
-    partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshPlayingStatus(); }
-    partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshPlayingStatus(); }
-    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { if (value) GlobalWaitForVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshPlayingStatus(); }
-    partial void OnGlobalWaitForVideoEndChanged(bool value) { if (value) GlobalAdvanceOnVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshPlayingStatus(); }
+    partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { if (value) GlobalWaitForVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalWaitForVideoEndChanged(bool value) { if (value) GlobalAdvanceOnVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
 
     private void SaveGlobalRotationSettings()
     {
@@ -431,6 +432,45 @@ public partial class MainWindowViewModel : ViewModelBase
         SettingsService.Save(_settings);
     }
 
+    // Refresh LastSession when settings change while nothing is playing.
+    // Mirrors ApplyEffectivePlaylistSettingsIfRunning's role for the idle case.
+    private void RefreshLastSessionFromSettingsIfIdle()
+    {
+        if (PlayerHelper.IsPlaying) return;
+        var s = _settings.LastSession;
+        if (s == null) return;
+        if (!s.IsTimedPlaylist && !s.IsPlaylist) return;
+
+        bool useOverride = s.OverrideGlobalSettings;
+        var currentPaths = PlaylistItems
+            .Where(c => c.LibraryItem != null)
+            .Select(c => c.LibraryItem!.VideoPath)
+            .ToList();
+        bool matchesStrip = currentPaths.Count > 0 && currentPaths.SequenceEqual(s.Paths);
+
+        if (useOverride && !matchesStrip) return;
+        if (matchesStrip) useOverride = OverrideGlobalSettings;
+
+        int newSecs = useOverride ? GetIntervalSeconds() : _settings.GlobalIntervalSeconds;
+        bool newAdvance = useOverride ? AdvanceOnVideoEnd : _settings.GlobalAdvanceOnVideoEnd;
+        bool newWait = useOverride ? PlaylistWaitForVideoEnd : _settings.GlobalWaitForVideoEnd;
+
+        bool hasScenes = s.Paths.Any(p => p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase));
+        bool isPlaylist = newAdvance && !hasScenes;
+
+        _settings.LastSession = new LastSession
+        {
+            IsPlaylist = isPlaylist,
+            IsTimedPlaylist = !isPlaylist,
+            Paths = s.Paths,
+            Shuffle = s.Shuffle,
+            TimedIntervalSeconds = newSecs,
+            WaitForVideoEnd = newWait,
+            AdvanceOnVideoEnd = newAdvance,
+            OverrideGlobalSettings = useOverride
+        };
+        SettingsService.Save(_settings);
+    }
 
     private void ApplyShuffleOrderIfRunning(bool shuffle)
     {
