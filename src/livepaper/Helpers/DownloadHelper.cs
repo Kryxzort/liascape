@@ -21,7 +21,21 @@ public static class DownloadHelper
         if (detail.IsScene)
         {
             string scenePath = Path.Combine(LibraryPath, safeTitle + ".scene");
-            await File.WriteAllTextAsync(scenePath, detail.WorkshopId ?? Path.GetFileName(detail.DownloadUrl));
+            string? copiedSceneDir = null;
+            string sceneContent;
+
+            if (copyLocalFiles && Directory.Exists(detail.DownloadUrl))
+            {
+                copiedSceneDir = Path.Combine(LibraryPath, safeTitle);
+                await Task.Run(() => CopyDirectory(detail.DownloadUrl, copiedSceneDir));
+                sceneContent = copiedSceneDir;
+            }
+            else
+            {
+                sceneContent = detail.WorkshopId ?? Path.GetFileName(detail.DownloadUrl);
+            }
+
+            await File.WriteAllTextAsync(scenePath, sceneContent);
             string? thumbPath = await SaveThumbnailAsync(thumbnailUrl, safeTitle, copyLocalFiles);
             if (!string.IsNullOrEmpty(sourceId))
                 await File.WriteAllTextAsync(Path.ChangeExtension(scenePath, ".id"), sourceId);
@@ -34,6 +48,7 @@ public static class DownloadHelper
                 SourceId = sourceId,
                 IsScene = true,
                 WorkshopId = detail.WorkshopId,
+                CopiedSceneDir = copiedSceneDir,
                 AddedAt = System.DateTime.Now
             };
         }
@@ -146,6 +161,15 @@ public static class DownloadHelper
             if (total.HasValue)
                 progress?.Report((double)bytesRead / total.Value);
         }
+    }
+
+    private static void CopyDirectory(string src, string dest)
+    {
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.GetFiles(src))
+            File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
+        foreach (var dir in Directory.GetDirectories(src))
+            CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
     }
 
     private static string SanitizeName(string name)

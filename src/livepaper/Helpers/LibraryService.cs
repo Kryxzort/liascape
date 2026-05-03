@@ -8,6 +8,49 @@ namespace livepaper.Helpers;
 
 public static class LibraryService
 {
+    public static string TrashPath => Path.Combine(DownloadHelper.LibraryPath, ".trash");
+
+    public static void Trash(LibraryItem item, string batchDir)
+    {
+        Directory.CreateDirectory(batchDir);
+        MoveIfExists(item.VideoPath, batchDir);
+        if (item.ThumbnailPath != null) MoveIfExists(item.ThumbnailPath, batchDir);
+        foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg", ".id", ".crashed", ".whitelist", ".volume", ".speed" })
+            MoveIfExists(Path.ChangeExtension(item.VideoPath, ext), batchDir);
+        if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
+            Directory.Move(item.CopiedSceneDir, Path.Combine(batchDir, Path.GetFileName(item.CopiedSceneDir)));
+    }
+
+    public static void RestoreBatch(string batchDir)
+    {
+        if (!Directory.Exists(batchDir)) return;
+        foreach (var file in Directory.GetFiles(batchDir))
+            File.Move(file, Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(file)), overwrite: true);
+        foreach (var dir in Directory.GetDirectories(batchDir))
+            Directory.Move(dir, Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(dir)));
+        try { Directory.Delete(batchDir); } catch { }
+    }
+
+    public static void PurgeBatch(string batchDir)
+    {
+        try { Directory.Delete(batchDir, recursive: true); } catch { }
+    }
+
+    public static void CleanTrash()
+    {
+        if (!Directory.Exists(TrashPath)) return;
+        foreach (var dir in Directory.GetDirectories(TrashPath))
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    private static void MoveIfExists(string src, string destDir)
+    {
+        if (File.Exists(src))
+            File.Move(src, Path.Combine(destDir, Path.GetFileName(src)));
+    }
+
     public static void DeleteAll()
     {
         if (!Directory.Exists(DownloadHelper.LibraryPath)) return;
@@ -33,6 +76,9 @@ public static class LibraryService
             var f = Path.ChangeExtension(item.VideoPath, ext);
             if (File.Exists(f)) File.Delete(f);
         }
+
+        if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
+            Directory.Delete(item.CopiedSceneDir, recursive: true);
     }
 
     public static void MarkCrashed(string videoPath)
@@ -104,7 +150,21 @@ public static class LibraryService
             string idFile = Path.ChangeExtension(scene, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
             string? workshopId = null;
-            try { workshopId = File.ReadAllText(scene).Trim(); } catch { }
+            string? copiedSceneDir = null;
+            try
+            {
+                var raw = File.ReadAllText(scene).Trim();
+                if (Path.IsPathRooted(raw))
+                {
+                    copiedSceneDir = raw;
+                    workshopId = ParseWorkshopId(sourceId, scene, idFile);
+                }
+                else
+                {
+                    workshopId = raw;
+                }
+            }
+            catch { }
             bool hasCrashed = File.Exists(Path.ChangeExtension(scene, ".crashed"));
             bool isWhitelisted = File.Exists(Path.ChangeExtension(scene, ".whitelist"));
             var fi = new FileInfo(scene);
@@ -117,6 +177,7 @@ public static class LibraryService
                 SourceId = sourceId,
                 IsScene = true,
                 WorkshopId = workshopId,
+                CopiedSceneDir = copiedSceneDir,
                 HasCrashed = hasCrashed,
                 IsWhitelisted = isWhitelisted,
                 AddedAt = fi.CreationTime
