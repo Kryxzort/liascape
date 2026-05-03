@@ -121,6 +121,16 @@
                                         <Border Margin="6" CornerRadius="10"
                                                 ClipToBounds="True"
                                                 Background="{DynamicResource BgBase}">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Open Page"
+                                                              Command="{Binding OpenPageCommand}"
+                                                              IsVisible="{Binding !IsLocalSource}"/>
+                                                    <MenuItem Header="Open in File Manager"
+                                                              Command="{Binding OpenInFileManagerCommand}"
+                                                              IsVisible="{Binding IsLocalSource}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <Grid RowDefinitions="Auto,*,Auto">
 
                                                 <Button Grid.Row="0" Padding="0"

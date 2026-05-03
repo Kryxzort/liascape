@@ -16,6 +16,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public LibraryItem? LibraryItem { get; }
 
     public bool IsScene { get; }
+    public bool IsLocalSource => !PageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _isCurrentlyPlaying;
@@ -28,6 +29,14 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     [RelayCommand]
     private void AddToPlaylist() => OnTogglePlaylist?.Invoke(this);
+
+    [RelayCommand]
+    private void OpenPage()
+    {
+        if (string.IsNullOrEmpty(PageUrl)) return;
+        try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { PageUrl }, UseShellExecute = false }); }
+        catch { }
+    }
 
     [RelayCommand]
     private void OpenInFileManager()
