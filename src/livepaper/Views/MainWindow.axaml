@@ -424,6 +424,8 @@
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
                                                                   Command="{Binding AddToPlaylistCommand}"/>
+                                                        <MenuItem Header="Open in File Manager"
+                                                                  Command="{Binding OpenInFileManagerCommand}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
                                                 <Grid RowDefinitions="Auto,*,Auto">
