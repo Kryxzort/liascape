@@ -1274,9 +1274,17 @@ public static class PlayerHelper
             socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
             var buf = new byte[4096];
             int n = socket.Receive(buf);
-            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
-            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
-                return data.GetDouble();
+            var str = Encoding.UTF8.GetString(buf, 0, n);
+            foreach (var line in str.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
+                        return data.GetDouble();
+                }
+                catch { }
+            }
             return null;
         }
         catch { return null; }
