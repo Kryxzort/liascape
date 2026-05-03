@@ -407,31 +407,28 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         else if (advanceOnEnd && s.IsPlaylist)
         {
-            // Shuffle order changes are handled by ApplyShuffleOrderIfRunning; nothing else to do here
+            // Pure mpv-native advance-on-end — shuffle order handled by ApplyShuffleOrderIfRunning
+            return;
+        }
+
+        // Mode changed — switch in place via IPC (no mpvpaper restart)
+        var paths = s.Paths;
+        if (paths.Count == 0) return;
+        if (advanceOnEnd)
+        {
+            PlayerHelper.SwitchFromTimedToAdvanceOnEnd(paths, PlaylistShuffle);
+            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
         }
         else
         {
-            // Mode changed — switch in place via IPC (no mpvpaper restart)
-            var paths = s.Paths;
-            if (paths.Count == 0) return;
-            if (advanceOnEnd)
-            {
-                var mpvPaths = paths.Where(p => !p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase)).ToList();
-                if (mpvPaths.Count == 0) return;
-                PlayerHelper.SwitchFromTimedToAdvanceOnEnd(mpvPaths, PlaylistShuffle);
-                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = mpvPaths, Shuffle = PlaylistShuffle };
-            }
-            else
-            {
-                int secs = GetEffectiveIntervalSeconds();
-                if (secs == 0) return;
-                bool waitForVideoEnd = GetEffectiveWaitForVideoEnd();
-                var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : new List<string>(paths);
-                PlayerHelper.SwitchFromAdvanceOnEndToTimed(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, secs, waitForVideoEnd);
-                _settings.LastSession = new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, TimedIntervalSeconds = secs, WaitForVideoEnd = waitForVideoEnd };
-            }
-            SettingsService.Save(_settings);
+            int secs = GetEffectiveIntervalSeconds();
+            if (secs == 0) return;
+            bool waitForVideoEnd = GetEffectiveWaitForVideoEnd();
+            var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : new List<string>(paths);
+            PlayerHelper.SwitchFromAdvanceOnEndToTimed(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, secs, waitForVideoEnd);
+            _settings.LastSession = new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, TimedIntervalSeconds = secs, WaitForVideoEnd = waitForVideoEnd, AdvanceOnVideoEnd = false, OverrideGlobalSettings = OverrideGlobalSettings };
         }
+        SettingsService.Save(_settings);
     }
 
 
@@ -705,12 +702,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (GetEffectiveAdvanceOnVideoEnd())
         {
             PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle);
-            _settings.LastSession = new LastSession
-            {
-                IsPlaylist = true,
-                Paths = paths,
-                Shuffle = PlaylistShuffle
-            };
+            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
             SettingsService.Save(_settings);
             RefreshPlayingStatusSoon();
             return;
@@ -731,7 +723,9 @@ public partial class MainWindowViewModel : ViewModelBase
             Paths = paths,
             Shuffle = PlaylistShuffle,
             TimedIntervalSeconds = intervalSecs,
-            WaitForVideoEnd = waitForVideoEnd
+            WaitForVideoEnd = waitForVideoEnd,
+            AdvanceOnVideoEnd = false,
+            OverrideGlobalSettings = OverrideGlobalSettings
         };
         SettingsService.Save(_settings);
         RefreshPlayingStatusSoon();
@@ -756,12 +750,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             // Pre-arranged order; pass shuffle=false so mpv plays the clicked card first.
             PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), shuffle: false);
-            _settings.LastSession = new LastSession
-            {
-                IsPlaylist = true,
-                Paths = allPaths,
-                Shuffle = PlaylistShuffle
-            };
+            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = allPaths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
             SettingsService.Save(_settings);
             RefreshPlayingStatusSoon();
             return;
@@ -782,7 +771,9 @@ public partial class MainWindowViewModel : ViewModelBase
             Paths = allPaths,
             Shuffle = PlaylistShuffle,
             TimedIntervalSeconds = intervalSecs,
-            WaitForVideoEnd = waitForVideoEnd
+            WaitForVideoEnd = waitForVideoEnd,
+            AdvanceOnVideoEnd = false,
+            OverrideGlobalSettings = OverrideGlobalSettings
         };
         SettingsService.Save(_settings);
         RefreshPlayingStatusSoon();
@@ -1334,7 +1325,7 @@ public partial class MainWindowViewModel : ViewModelBase
             if (_settings.GlobalAdvanceOnVideoEnd)
             {
                 PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), ShuffleLibrary);
-                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = ShuffleLibrary };
+                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = ShuffleLibrary, AdvanceOnVideoEnd = true, OverrideGlobalSettings = false };
                 SettingsService.Save(_settings);
                 RefreshPlayingStatus();
                 return;
@@ -1354,7 +1345,9 @@ public partial class MainWindowViewModel : ViewModelBase
                 Paths = paths,
                 Shuffle = ShuffleLibrary,
                 TimedIntervalSeconds = intervalSecs,
-                WaitForVideoEnd = _settings.GlobalWaitForVideoEnd
+                WaitForVideoEnd = _settings.GlobalWaitForVideoEnd,
+                AdvanceOnVideoEnd = false,
+                OverrideGlobalSettings = false
             };
             SettingsService.Save(_settings);
             RefreshPlayingStatus();
