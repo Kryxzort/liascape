@@ -68,6 +68,7 @@ public static class PlayerHelper
 
     public static bool IsTimedModeActive { get { lock (_lock) { return _timedPaths != null; } } }
     public static bool IsUserMuted => _userMuted;
+    public static bool IsMuted => _isMuted;
 
     // Stale-tolerant check that survives the brief gap during a timed-playlist
     // switch where mpvpaper has been killed but the next instance hasn't launched.
@@ -891,15 +892,16 @@ public static class PlayerHelper
                 // video was playing carry over — _timedOptions is built at playlist
                 // start and is stale if the user adjusted global volume or speed.
                 var freshOpts = settings.BuildMpvOptions();
-                _current = Launch(BakeSpeedOverride(BakeVolumeOverride(freshOpts, path), path), path, readyTcs);
+                var launchOpts = BakeSpeedOverride(BakeVolumeOverride(freshOpts, path), path);
+                if (_isMuted && !launchOpts.Contains("--no-audio")) launchOpts += " --mute=yes";
+                _current = Launch(launchOpts, path, readyTcs);
                 OnWallpaperChanged?.Invoke(path);
 
                 var volOverride = ReadVolumeOverride(path);
                 var speedOverride = ReadSpeedOverride(path);
                 int vol = volOverride ?? settings.Volume;
                 double spd = speedOverride ?? settings.Speed;
-                bool muted = _isMuted;
-                Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (muted) SetMute(true); });
+                Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SetMute(true); });
 
                 var cts = _prelaunchCts = new CancellationTokenSource();
                 var capturedPids = oldLwePids;
