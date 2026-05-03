@@ -26,9 +26,13 @@ public partial class WallpaperCardViewModel : ViewModelBase
     partial void OnIsInPlaylistChanged(bool value) => OnPropertyChanged(nameof(CheckmarkText));
 
     public Action<WallpaperCardViewModel>? OnTogglePlaylist { get; set; }
+    public Action<WallpaperCardViewModel>? OnOpenSettings { get; set; }
 
     [RelayCommand]
     private void AddToPlaylist() => OnTogglePlaylist?.Invoke(this);
+
+    [RelayCommand]
+    private void OpenSettings() => OnOpenSettings?.Invoke(this);
 
     [RelayCommand]
     private void OpenPage()

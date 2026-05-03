@@ -322,6 +322,16 @@
                                                             Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
                                                             Background="{DynamicResource BgBase}">
+                                                        <Border.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Remove from Playlist"
+                                                                          Command="{Binding AddToPlaylistCommand}"/>
+                                                                <MenuItem Header="Open in File Manager"
+                                                                          Command="{Binding OpenInFileManagerCommand}"/>
+                                                                <MenuItem Header="Settings"
+                                                                          Command="{Binding OpenSettingsCommand}"/>
+                                                            </ContextMenu>
+                                                        </Border.ContextMenu>
                                                         <Border.Styles>
                                                             <Style Selector="Border.playlist-item Grid.play-overlay">
                                                                 <Setter Property="Opacity" Value="0"/>
@@ -436,6 +446,8 @@
                                                                   Command="{Binding AddToPlaylistCommand}"/>
                                                         <MenuItem Header="Open in File Manager"
                                                                   Command="{Binding OpenInFileManagerCommand}"/>
+                                                        <MenuItem Header="Settings"
+                                                                  Command="{Binding OpenSettingsCommand}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
                                                 <Grid RowDefinitions="Auto,*,Auto">
