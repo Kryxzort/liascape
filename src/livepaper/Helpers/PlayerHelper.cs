@@ -33,6 +33,7 @@ public static class PlayerHelper
     private static readonly object _lock = new();
     private static CancellationTokenSource? _daemonCts;
     private static bool _waitForVideoEnd;
+    private static bool _advanceOnVideoEnd;
     private static bool _waitingForVideoEnd;
     private static CancellationTokenSource? _waitCts;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
@@ -392,7 +393,7 @@ public static class PlayerHelper
         string Options, bool Shuffle, int IntervalSeconds,
         List<string> History, int HistoryIndex,
         bool TimerPaused = false, bool TimerStopped = false, long RemainingMs = 0,
-        bool WaitForVideoEnd = false);
+        bool WaitForVideoEnd = false, bool AdvanceOnVideoEnd = false, bool WaitingForVideoEnd = false);
 
     private static void SaveTimedState()
     {
@@ -404,7 +405,7 @@ public static class PlayerHelper
                 _timedOptions, _timedShuffle, (int)_timedInterval.TotalSeconds,
                 _history, _historyIndex,
                 _timedTimerPaused, _timedTimerStopped, _timedRemainingMs,
-                _waitForVideoEnd);
+                _waitForVideoEnd, _advanceOnVideoEnd, _waitingForVideoEnd);
             var path = TimedStatePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, JsonSerializer.Serialize(state));
@@ -474,6 +475,8 @@ public static class PlayerHelper
             _timedTimerStopped = state.TimerStopped;
             _timedRemainingMs = state.RemainingMs > 0 ? state.RemainingMs : (long)_timedInterval.TotalMilliseconds;
             _waitForVideoEnd = state.WaitForVideoEnd;
+            _advanceOnVideoEnd = state.AdvanceOnVideoEnd;
+            _waitingForVideoEnd = state.WaitingForVideoEnd;
             return true;
         }
         catch { return false; }
@@ -524,7 +527,7 @@ public static class PlayerHelper
         UpdateRestartTimer();
     }
 
-    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd = false)
+    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd = false, bool advanceOnVideoEnd = false)
     {
         lock (_lock)
         {
@@ -542,6 +545,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
             _waitForVideoEnd = waitForVideoEnd;
+            _advanceOnVideoEnd = advanceOnVideoEnd;
             _history = [ordered[0]];
             _historyIndex = 0;
             SwitchToFile(ordered[0], mpvOptions);
@@ -551,6 +555,27 @@ public static class PlayerHelper
                 StartTimedTimer();
         }
         UpdateRestartTimer();
+    }
+
+    // Re-arms DoVideoEndWait after state is loaded from disk (daemon resume/restore).
+    // When _waitingForVideoEnd=true, _historyIndex already points to the pre-fetched next item —
+    // use it directly rather than calling AdvanceToNext() again (which would skip one item).
+    // Must be called inside _lock.
+    private static void RearmAdvanceOnVideoEnd()
+    {
+        if (!_advanceOnVideoEnd || IsLweRunning) return;
+        if (_timedPaths == null || _timedPaths.Count <= 1 || _history == null) return;
+
+        string? next;
+        if (_waitingForVideoEnd && _historyIndex >= 0 && _historyIndex < _history.Count)
+            next = _history[_historyIndex];
+        else
+            next = AdvanceToNext();
+
+        if (next == null) return;
+        _waitingForVideoEnd = true;
+        var cts = _waitCts = new CancellationTokenSource();
+        Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
     }
 
     public static bool RestoreTimedPlaylist()
@@ -566,12 +591,16 @@ public static class PlayerHelper
             _timedTimerPaused = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
 
-            SwitchToFile(_history[_historyIndex], _timedOptions);
+            // When WaitingForVideoEnd=true the saved _historyIndex is pre-fetched one step ahead;
+            // restore to the actually-playing item (one step back).
+            var playingHistIdx = (_waitingForVideoEnd && _historyIndex > 0) ? _historyIndex - 1 : _historyIndex;
+            SwitchToFile(_history[playingHistIdx], _timedOptions);
             SaveTimedState();
 
             if (_timedPaths.Count > 1 && _timedInterval.TotalSeconds > 0)
                 StartTimedTimer();
 
+            RearmAdvanceOnVideoEnd();
             ok = true;
         }
         if (ok) UpdateRestartTimer();
@@ -594,6 +623,7 @@ public static class PlayerHelper
             if (_timedPaths.Count > 1 && _timedInterval.TotalSeconds > 0)
                 StartTimedTimer();
 
+            RearmAdvanceOnVideoEnd();
             ok = true;
         }
         if (ok) UpdateRestartTimer();
@@ -1283,7 +1313,7 @@ public static class PlayerHelper
                 var paths = session.Shuffle
                     ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
                     : session.Paths;
-                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd);
+                ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd, session.AdvanceOnVideoEnd);
             }
         }
         WriteTimerDaemonPid();
