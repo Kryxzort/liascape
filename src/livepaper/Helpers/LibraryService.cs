@@ -24,10 +24,17 @@ public static class LibraryService
     public static void RestoreBatch(string batchDir)
     {
         if (!Directory.Exists(batchDir)) return;
-        foreach (var file in Directory.GetFiles(batchDir))
-            File.Move(file, Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(file)), overwrite: true);
-        foreach (var dir in Directory.GetDirectories(batchDir))
-            Directory.Move(dir, Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(dir)));
+        var fileMoves = Directory.GetFiles(batchDir)
+            .Select(f => (Src: f, Dest: Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(f))))
+            .ToList();
+        var dirMoves = Directory.GetDirectories(batchDir)
+            .Select(d => (Src: d, Dest: Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(d))))
+            .ToList();
+        // Bail if any destination already exists — avoids clobbering newly added items
+        if (fileMoves.Any(m => File.Exists(m.Dest)) || dirMoves.Any(m => Directory.Exists(m.Dest)))
+            return;
+        foreach (var m in fileMoves) File.Move(m.Src, m.Dest);
+        foreach (var m in dirMoves) Directory.Move(m.Src, m.Dest);
         try { Directory.Delete(batchDir); } catch { }
     }
 
@@ -191,9 +198,11 @@ public static class LibraryService
     {
         string dir = Path.GetDirectoryName(mediaPath) ?? "";
         string name = Path.GetFileNameWithoutExtension(mediaPath);
+        string fullMedia = Path.GetFullPath(mediaPath);
         foreach (var file in Directory.EnumerateFiles(dir, name + ".*"))
         {
-            string ext = Path.GetExtension(file).ToLower();
+            if (Path.GetFullPath(file) == fullMedia) continue;
+            string ext = Path.GetExtension(file).ToLowerInvariant();
             if (ext == ".jpg" || ext == ".png" || ext == ".gif" || ext == ".jpeg")
                 return file;
         }
@@ -239,7 +248,7 @@ public static class LibraryService
     private static void CleanOrphan(string mp4Path)
     {
         try { File.Delete(mp4Path); } catch { }
-        try { File.Delete(Path.ChangeExtension(mp4Path, ".jpg")); } catch { }
-        try { File.Delete(Path.ChangeExtension(mp4Path, ".id")); } catch { }
+        foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg", ".id", ".scene", ".crashed", ".whitelist", ".volume", ".speed" })
+            try { File.Delete(Path.ChangeExtension(mp4Path, ext)); } catch { }
     }
 }

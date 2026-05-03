@@ -123,11 +123,15 @@ public static class DownloadHelper
         {
             if (File.Exists(thumbnailUrl))
             {
-                if (File.Exists(thumbPath)) File.Delete(thumbPath);
-                if (copyLocalFiles)
-                    await Task.Run(() => File.Copy(thumbnailUrl, thumbPath));
-                else
-                    File.CreateSymbolicLink(thumbPath, thumbnailUrl);
+                bool sameThumb = Path.GetFullPath(thumbnailUrl) == Path.GetFullPath(thumbPath);
+                if (!sameThumb && File.Exists(thumbPath)) File.Delete(thumbPath);
+                if (!sameThumb)
+                {
+                    if (copyLocalFiles)
+                        await Task.Run(() => File.Copy(thumbnailUrl, thumbPath));
+                    else
+                        File.CreateSymbolicLink(thumbPath, thumbnailUrl);
+                }
             }
             else
                 await DownloadFileAsync(thumbnailUrl, thumbPath, null);

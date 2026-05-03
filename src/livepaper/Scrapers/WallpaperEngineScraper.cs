@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using livepaper.Models;
 
@@ -28,10 +30,10 @@ public static class WallpaperEngineScraper
                 ? info.Title : workshopId;
             string? thumbnail = FindThumbnail(dir);
 
-            // Scene detection: type == "scene" OR scene.pkg present
+            // Scene detection: scene.pkg present OR type == "scene"
             bool hasScene = File.Exists(Path.Combine(dir, "scene.pkg"));
-            bool isScene = (info != null && string.Equals(info.Type, "scene", StringComparison.OrdinalIgnoreCase))
-                || (info == null && hasScene);
+            bool isScene = hasScene
+                || (info != null && string.Equals(info.Type, "scene", StringComparison.OrdinalIgnoreCase));
 
             if (isScene)
             {
@@ -102,5 +104,44 @@ public static class WallpaperEngineScraper
             if (files.Length > 0) return files[0];
         }
         return null;
+    }
+
+    internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
+    {
+        try
+        {
+            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", outputPath, "-y");
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", outputPath, "-y");
+            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            await RunFfmpeg("-i", gifPath, "-frames:v", "1", outputPath, "-y");
+        }
+        catch { }
+    }
+
+    private static async Task RunFfmpeg(params string[] args)
+    {
+        var psi = new ProcessStartInfo("ffmpeg")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        try
+        {
+            using var proc = Process.Start(psi);
+            if (proc == null) return;
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await proc.WaitForExitAsync(cts.Token);
+        }
+        catch { }
     }
 }

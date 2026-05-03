@@ -13,4 +13,6 @@ public class LastSession
     // legacy session files written before this property existed.
     public int TimedIntervalSeconds { get; set; } = 1800;
     public bool WaitForVideoEnd { get; set; }
+    public bool AdvanceOnVideoEnd { get; set; }
+    public bool OverrideGlobalSettings { get; set; }
 }
