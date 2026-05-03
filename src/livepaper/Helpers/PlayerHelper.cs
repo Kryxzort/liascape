@@ -708,6 +708,32 @@ public static class PlayerHelper
         }
     }
 
+    public static string? QueryCurrentPath() => TryQueryCurrentPath();
+
+    public static string? QueryCurrentSceneWorkshopId() => null;
+
+    private static string? TryQueryCurrentPath()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "path" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String)
+                return data.GetString();
+            return null;
+        }
+        catch { return null; }
+    }
+
     private static void AdvanceAndLaunch()
     {
         var next = AdvanceToNext();

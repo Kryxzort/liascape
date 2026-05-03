@@ -581,11 +581,24 @@ public partial class MainWindowViewModel : ViewModelBase
         var s = _settings.LastSession;
         if (s != null && PlayerHelper.IsPlaying)
         {
-            if (s.IsTimedPlaylist && PlayerHelper.ResumeTimedTimer())
-                StatusMessage = $"Playing playlist ({s.Paths.Count} wallpapers, switching every {FormatInterval(s.TimedIntervalSeconds)})";
-            else if (s.IsPlaylist)
-                StatusMessage = $"Playing playlist ({s.Paths.Count} wallpapers)";
-            PlayerHelper.UpdateRestartTimer();
+            if (s.IsTimedPlaylist) PlayerHelper.ResumeTimedTimer();
+            // Restore green border for wallpaper already playing before GUI opened
+            var currentPath = s.Paths.Count == 1 ? s.Paths[0] : PlayerHelper.QueryCurrentPath();
+            WallpaperCardViewModel? playing = null;
+            if (currentPath != null)
+                playing = LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == currentPath);
+            if (playing == null)
+            {
+                var workshopId = PlayerHelper.QueryCurrentSceneWorkshopId();
+                if (workshopId != null)
+                    playing = LibraryWallpapers.FirstOrDefault(c => c.WorkshopId == workshopId);
+            }
+            if (playing != null)
+            {
+                playing.IsCurrentlyPlaying = true;
+                _currentlyPlayingCard = playing;
+            }
+            RefreshPlayingStatus();
         }
     }
 
