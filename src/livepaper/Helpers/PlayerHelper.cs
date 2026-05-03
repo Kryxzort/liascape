@@ -1406,11 +1406,12 @@ public static class PlayerHelper
                     remaining = TryQueryTimeRemaining();
                     // Socket is up but no file is playing (e.g. a short video ended before we
                     // got here due to the transition buffer). Switch to the scene immediately.
-                    // Require at least 5 retries (500ms) before breaking — the socket can appear
+                    // Require at least 30 retries (3s) before breaking — the socket can appear
                     // within ~100ms of launch while playtime-remaining is still null because the
-                    // file hasn't finished loading yet. Without the minimum, a fresh [video, scene]
-                    // playlist breaks on the very first iteration and transitions immediately.
-                    if (remaining == null && File.Exists(IpcSocket) && i >= 5) break;
+                    // file hasn't finished loading yet (Launch's readyTcs waits up to 2s for the
+                    // first valid reading). Breaking too early causes a premature scene switch
+                    // that makes the video appear to play for only a fraction of a second.
+                    if (remaining == null && File.Exists(IpcSocket) && i >= 30) break;
                 }
             }
             if (remaining != null)
