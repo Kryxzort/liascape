@@ -9,5 +9,6 @@ public class LibraryItem
     public string? ThumbnailPath { get; init; }
     public string? SourceId { get; init; }
     public string? WorkshopId { get; init; }
+    public bool IsScene { get; init; }
     public DateTime AddedAt { get; init; }
 }
