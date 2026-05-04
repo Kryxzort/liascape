@@ -1123,11 +1123,22 @@
                             <TextBlock Text="{Binding PreviewCard.Title}"
                                        Foreground="{DynamicResource TextColor}"
                                        FontSize="13" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Text="{Binding PreviewCard.WorkshopId, StringFormat='Workshop ID: {0}'}"
-                                       IsVisible="{Binding PreviewCard.WorkshopId, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                       Foreground="{DynamicResource Subtext}"
-                                       FontSize="11"
-                                       Margin="0,2,0,0"/>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="6"
+                                        IsVisible="{Binding PreviewCard.WorkshopId, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                        Margin="0,2,0,0">
+                                <TextBlock Text="{Binding PreviewCard.WorkshopId, StringFormat='Workshop ID: {0}'}"
+                                           Foreground="{DynamicResource Subtext}"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                                <Button Classes="ghost"
+                                        Width="18" Height="18" Padding="0"
+                                        ToolTip.Tip="Copy"
+                                        Command="{Binding CopyTextCommand}"
+                                        CommandParameter="{Binding PreviewCard.WorkshopId}">
+                                    <mi:MaterialIcon Kind="ContentCopy" Width="11" Height="11"/>
+                                </Button>
+                            </StackPanel>
                         </StackPanel>
                         <Button Grid.Column="1"
                                 Content="Download &amp; Apply"
