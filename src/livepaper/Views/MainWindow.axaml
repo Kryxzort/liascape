@@ -107,7 +107,8 @@
 
                         <!-- Wallpaper grid -->
                         <ScrollViewer x:Name="BrowseScrollViewer"
-                                      Padding="12,12,12,0">
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      AllowAutoHide="False">
                             <ItemsRepeater x:Name="BrowseItemsRepeater"
                                            ItemsSource="{Binding BrowseWallpapers}"
                                            Margin="10,0,0,0"
@@ -186,37 +187,6 @@
                                                 Orientation="Horizontal"
                                                 Spacing="10"
                                                 HorizontalAlignment="Right">
-                                        <Button Classes="ghost"
-                                                Width="32" Height="32" Padding="0"
-                                                ToolTip.Tip="Sort">
-                                            <Button.Flyout>
-                                                <MenuFlyout>
-                                                    <MenuItem Header="Name A→Z"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="0"/>
-                                                    <MenuItem Header="Name Z→A"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="1"/>
-                                                    <MenuItem Header="Videos first"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="2"/>
-                                                    <MenuItem Header="Scenes first"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="3"/>
-                                                    <MenuItem Header="Newest first"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="4"/>
-                                                    <MenuItem Header="Oldest first"
-                                                              Command="{Binding SetLibrarySortCommand}"
-                                                              CommandParameter="5"/>
-                                                </MenuFlyout>
-                                            </Button.Flyout>
-                                            <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>
-                                        </Button>
-                                        <TextBox Text="{Binding LibrarySearchQuery}"
-                                                 PlaceholderText="Search…"
-                                                 Width="220"
-                                                 VerticalAlignment="Center"/>
                                         <CheckBox Content="Shuffle"
                                                   IsChecked="{Binding ShuffleLibrary}"
                                                   VerticalAlignment="Center"
@@ -231,6 +201,37 @@
                                         <Button Content="Play All"
                                                 Classes="accent"
                                                 Command="{Binding PlayLibraryCommand}"/>
+                                        <TextBox Text="{Binding LibrarySearchQuery}"
+                                                 PlaceholderText="Search…"
+                                                 Width="220"
+                                                 VerticalAlignment="Center"/>
+                                        <Button Classes="ghost"
+                                                Width="28" Height="28" Padding="0"
+                                                ToolTip.Tip="Sort">
+                                            <Button.Flyout>
+                                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                    <MenuItem Header="Name A–Z"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="0"/>
+                                                    <MenuItem Header="Name Z–A"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="1"/>
+                                                    <MenuItem Header="Videos first"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="2"/>
+                                                    <MenuItem Header="Scenes first"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="3"/>
+                                                    <MenuItem Header="Newest added"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="4"/>
+                                                    <MenuItem Header="Oldest added"
+                                                              Command="{Binding SetLibrarySortCommand}"
+                                                              CommandParameter="5"/>
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                            <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>
+                                        </Button>
                                     </StackPanel>
                                 </DockPanel>
                             </Border>
@@ -404,7 +405,9 @@
                             </Border>
 
                             <!-- Library grid -->
-                            <ScrollViewer x:Name="LibraryScrollViewer" Padding="12,12,12,0">
+                            <ScrollViewer x:Name="LibraryScrollViewer"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          AllowAutoHide="False">
                                 <ItemsRepeater x:Name="LibraryItemsRepeater"
                                                ItemsSource="{Binding FilteredLibraryWallpapers}"
                                                Margin="10,0,0,0"
@@ -588,7 +591,8 @@
 
                 <!-- ── Settings ── -->
                 <TabItem Header="Settings">
-                    <ScrollViewer x:Name="SettingsScrollViewer">
+                    <ScrollViewer x:Name="SettingsScrollViewer"
+                                  HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="28" Spacing="20">
 
                             <TextBlock Text="Playback"
