@@ -29,8 +29,6 @@ public static class WallpaperEngineScraper
             string workshopId = Path.GetFileName(dir);
             string title = (info != null && !string.IsNullOrEmpty(info.Title))
                 ? info.Title : workshopId;
-            var (thumbnail, animatedGif) = await FindThumbnailAsync(dir);
-
 
             if (info == null) continue;
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
@@ -38,6 +36,8 @@ public static class WallpaperEngineScraper
 
             var videoPath = Path.Combine(dir, info.File);
             if (!File.Exists(videoPath)) continue;
+
+            var (thumbnail, animatedGif) = await FindThumbnailAsync(dir);
 
             results.Add(new WallpaperResult
             {
