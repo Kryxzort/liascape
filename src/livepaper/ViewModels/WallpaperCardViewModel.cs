@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using livepaper.Models;
@@ -43,7 +44,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void OpenInFileManager()
+    private async Task OpenInFileManager()
     {
         string? dir = null;
         string? filePath = null;
@@ -75,7 +76,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
         if (dir == null || !Directory.Exists(dir)) return;
 
-        if (filePath != null && File.Exists(filePath) && TryShowItem(filePath))
+        if (filePath != null && File.Exists(filePath) && await Task.Run(() => TryShowItem(filePath)))
             return;
 
         Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir }, UseShellExecute = false });
