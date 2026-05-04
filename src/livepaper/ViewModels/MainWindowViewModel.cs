@@ -119,7 +119,7 @@ public partial class MainWindowViewModel : ViewModelBase
         foreach (var b in _undoBatches) LibraryService.PurgeBatch(b.BatchDir);
         _undoBatches.Clear();
         CanUndo = false;
-        Stop();
+        PlayerHelper.Stop();
         LibraryService.DeleteAll();
         LibraryWallpapers.Clear();
         PlaylistItems.Clear();
@@ -1177,7 +1177,6 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 LibraryService.Trash(target.LibraryItem, batchDir);
                 LibraryWallpapers.Remove(target);
-                if (target == _currentlyPlayingCard) _currentlyPlayingCard = null;
                 if (wasInPlaylist)
                 {
                     PlaylistItems.Remove(target);

@@ -1021,10 +1021,7 @@
                             </Style.Animations>
                         </Style>
                     </Button.Styles>
-                    <StackPanel Orientation="Horizontal" Spacing="5">
-                        <mi:MaterialIcon Kind="Undo" Width="13" Height="13"/>
-                        <TextBlock Text="Undo"/>
-                    </StackPanel>
+                    Undo
                 </Button>
                 <TextBlock Text="{Binding StatusMessage}"
                            Foreground="{DynamicResource Muted}"
