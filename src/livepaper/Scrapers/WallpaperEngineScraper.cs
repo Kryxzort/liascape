@@ -144,8 +144,8 @@ public static class WallpaperEngineScraper
     {
         var psi = new ProcessStartInfo("ffmpeg")
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false,
             UseShellExecute = false,
             CreateNoWindow = true
         };
