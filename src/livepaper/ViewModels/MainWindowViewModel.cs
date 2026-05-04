@@ -654,12 +654,8 @@ public partial class MainWindowViewModel : ViewModelBase
         if (GetEffectiveAdvanceOnVideoEnd())
         {
             // Pre-arranged order; pass shuffle=false so mpv plays the clicked card first.
-            int effectiveSecsFromCard = GetEffectiveIntervalSeconds();
-            PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), shuffle: false, effectiveSecsFromCard);
-            if (PlayerHelper.IsTimedPlaylistActive())
-                _settings.LastSession = new LastSession { IsTimedPlaylist = true, Paths = allPaths, Shuffle = PlaylistShuffle, TimedIntervalSeconds = effectiveSecsFromCard, WaitForVideoEnd = true };
-            else
-                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = allPaths, Shuffle = PlaylistShuffle };
+            PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), shuffle: false);
+            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = allPaths, Shuffle = PlaylistShuffle };
             SettingsService.Save(_settings);
             StatusMessage = $"Playing from: {card.Title}";
             return;
