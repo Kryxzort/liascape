@@ -14,6 +14,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public LibraryItem? LibraryItem { get; }
 
     public bool IsScene { get; }
+    public string? WorkshopId { get; }
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _isCurrentlyPlaying;
@@ -33,6 +34,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
         ThumbnailSource = result.ThumbnailUrl;
         PageUrl = result.PageUrl;
         Resolution = result.Resolution;
+        IsScene = result.IsScene;
+        WorkshopId = result.WorkshopId;
     }
 
     public WallpaperCardViewModel(LibraryItem item)
