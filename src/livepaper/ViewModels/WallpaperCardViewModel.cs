@@ -106,10 +106,11 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     public void LoadStaticThumbnailAsync()
     {
-        if (!IsGifThumbnail || StaticThumbnailSource != null || WorkshopId == null) return;
+        if (!IsGifThumbnail || StaticThumbnailSource != null) return;
         string gifPath = ThumbnailSource;
         string cacheDir = GifThumbCacheDir;
-        string outputPath = Path.Combine(cacheDir, $"{WorkshopId}.jpg");
+        string cacheKey = WorkshopId ?? Path.GetFileNameWithoutExtension(gifPath);
+        string outputPath = Path.Combine(cacheDir, $"{cacheKey}.jpg");
         Task.Run(async () =>
         {
             Directory.CreateDirectory(cacheDir);

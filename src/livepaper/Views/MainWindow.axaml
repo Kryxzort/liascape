@@ -151,6 +151,8 @@
                                                 <Button Grid.Row="0" Padding="0"
                                                         Background="Transparent" BorderThickness="0"
                                                         HorizontalAlignment="Stretch"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        VerticalContentAlignment="Stretch"
                                                         CornerRadius="10,10,0,0" ClipToBounds="True"
                                                         Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                         Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
@@ -474,6 +476,8 @@
                                                         <Button Padding="0"
                                                                 Background="Transparent" BorderThickness="0"
                                                                 HorizontalAlignment="Stretch"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                VerticalContentAlignment="Stretch"
                                                                 CornerRadius="10,10,0,0" ClipToBounds="True"
                                                                 Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                                 CommandParameter="{Binding}">

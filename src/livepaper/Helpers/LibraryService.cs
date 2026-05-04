@@ -48,8 +48,6 @@ public static class LibraryService
             }
 
             string title = Path.GetFileNameWithoutExtension(media);
-            string jpg = Path.ChangeExtension(media, ".jpg");
-
             string idFile = Path.ChangeExtension(media, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
 
@@ -58,13 +56,26 @@ public static class LibraryService
             {
                 Title = title,
                 VideoPath = media,
-                ThumbnailPath = File.Exists(jpg) ? jpg : null,
+                ThumbnailPath = FindLibraryThumbnail(media),
                 SourceId = sourceId,
                 WorkshopId = workshopId,
                 AddedAt = File.GetCreationTimeUtc(media)
             });
         }
         return items;
+    }
+
+    private static string? FindLibraryThumbnail(string mediaPath)
+    {
+        string dir = Path.GetDirectoryName(mediaPath) ?? "";
+        string name = Path.GetFileNameWithoutExtension(mediaPath);
+        foreach (var file in Directory.EnumerateFiles(dir, name + ".*"))
+        {
+            string ext = Path.GetExtension(file).ToLower();
+            if (ext == ".jpg" || ext == ".png" || ext == ".gif" || ext == ".jpeg")
+                return file;
+        }
+        return null;
     }
 
     private static bool IsSymlink(string path)
