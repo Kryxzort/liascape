@@ -44,5 +44,6 @@ public partial class WallpaperCardViewModel : ViewModelBase
         ThumbnailSource = item.ThumbnailPath ?? "";
         PageUrl = item.VideoPath;
         LibraryItem = item;
+        WorkshopId = item.WorkshopId;
     }
 }
