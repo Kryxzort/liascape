@@ -565,6 +565,7 @@ public partial class MainWindowViewModel : ViewModelBase
             IsPlaylistEmpty = PlaylistItems.Count == 0;
             SavePlaylistStateDebounced();
             SyncPlaylistToPlayerIfRunning();
+            RefreshPlayingStatus();
         };
 
         PlayerHelper.OnTimedPlaylistStopped = () =>
@@ -1470,18 +1471,19 @@ public partial class MainWindowViewModel : ViewModelBase
         var parts = new List<string>();
         var s = _settings.LastSession;
 
+        int playlistCount = PlaylistItems.Count > 0 ? PlaylistItems.Count : s?.Paths.Count ?? 0;
         if (s?.IsTimedPlaylist == true && s.Paths.Count > 1)
         {
             string desc = s.AdvanceOnVideoEnd
-                ? $"{s.Paths.Count} wallpapers, on video end"
-                : $"{s.Paths.Count} wallpapers, every {FormatInterval(GetEffectiveIntervalSeconds())}";
+                ? $"{playlistCount} wallpapers, on video end"
+                : $"{playlistCount} wallpapers, every {FormatInterval(GetEffectiveIntervalSeconds())}";
             if (PlaylistShuffle) desc += " (shuffled)";
             if (_currentlyPlayingCard != null) desc += $" → {_currentlyPlayingCard.Title}";
             parts.Add(desc);
         }
         else if (s?.IsPlaylist == true)
         {
-            string desc = $"{s.Paths.Count} wallpapers, on video end";
+            string desc = $"{playlistCount} wallpapers, on video end";
             if (PlaylistShuffle) desc += " (shuffled)";
             if (_currentlyPlayingCard != null) desc += $" → {_currentlyPlayingCard.Title}";
             parts.Add(desc);
