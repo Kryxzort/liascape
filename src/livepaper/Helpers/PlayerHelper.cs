@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using livepaper.Models;
 
 namespace livepaper.Helpers;
@@ -563,7 +564,7 @@ public static class PlayerHelper
     // Must be called inside _lock.
     private static void RearmAdvanceOnVideoEnd()
     {
-        if (!_advanceOnVideoEnd || IsLweRunning) return;
+        if (!_advanceOnVideoEnd) return;
         if (_timedPaths == null || _timedPaths.Count <= 1 || _history == null) return;
 
         string? next;
@@ -575,7 +576,9 @@ public static class PlayerHelper
         if (next == null) return;
         _waitingForVideoEnd = true;
         var cts = _waitCts = new CancellationTokenSource();
-        Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+        var opts = _timedOptions;
+        var intervalMs = (long)_timedInterval.TotalMilliseconds;
+        Task.Run(() => DoVideoEndWait(next, opts, intervalMs, cts.Token));
     }
 
     public static bool RestoreTimedPlaylist()
@@ -1042,60 +1045,37 @@ public static class PlayerHelper
     {
         // For video→video: disable loop on current, append next to mpv's playlist so
         // the transition happens inside mpv (no blank gap), then restore loop after.
-        // Falls back to an immediate SwitchToFile for scene transitions or when IPC is unavailable.
-        bool nextIsScene = IsScenePath(next);
-        bool prevIsScene = IsLweRunning;
-
-        if (!nextIsScene && !prevIsScene)
+        // Falls back to an immediate SwitchToFile when IPC is unavailable.
+        var remaining = TryQueryTimeRemaining();
+        if (remaining != null)
         {
-            var remaining = TryQueryTimeRemaining();
-            if (remaining != null)
+            TrySendCommand("set", "loop-file", "no");
+            TrySendCommand("loadfile", next, "append");
+
+            var sleepMs = Math.Max(0, (int)(remaining.Value * 1000)) + 2000;
+            try { await Task.Delay(sleepMs, ct); }
+            catch (OperationCanceledException) { return; }
+
+            lock (_lock)
             {
-                TrySendCommand("set", "loop-file", "no");
-                TrySendCommand("loadfile", next, "append");
+                if (!_waitingForVideoEnd) return;
+                _waitingForVideoEnd = false;
+                _waitCts = null;
 
-                var sleepMs = Math.Max(0, (int)(remaining.Value * 1000)) + 2000;
-                try { await Task.Delay(sleepMs, ct); }
-                catch (OperationCanceledException) { return; }
+                var settings = SettingsService.Load();
+                TrySendCommand("set", "loop-file", settings.Loop ? "inf" : "no");
+                TrySendCommand("playlist-clear");
 
-                lock (_lock)
-                {
-                    if (!_waitingForVideoEnd) return;
-                    _waitingForVideoEnd = false;
-                    _waitCts = null;
+                OnWallpaperChanged?.Invoke(next);
+                Task.Run(() => SetVolume(settings.Volume));
 
-                    var settings = SettingsService.Load();
-                    TrySendCommand("set", "loop-file", settings.Loop ? "inf" : "no");
-                    TrySendCommand("playlist-clear");
-
-                    OnWallpaperChanged?.Invoke(next);
-                    Task.Run(() => SetVolume(settings.Volume));
-
-                    _timedRemainingMs = intervalMs;
-                    SaveTimedState();
-                }
-                return;
+                _timedRemainingMs = intervalMs;
+                SaveTimedState();
             }
+            return;
         }
 
-        // Video→scene: launch LWE SceneTransitionDelayMs before the video ends so the
-        // scene is already rendering when mpvpaper is killed (matches normal transition behaviour).
-        if (nextIsScene && !prevIsScene)
-        {
-            var remaining = TryQueryTimeRemaining();
-            if (remaining != null)
-            {
-                var delayMs = SettingsService.Load().SceneTransitionDelayMs;
-                var sleepMs = Math.Max(0, (int)(remaining.Value * 1000) - delayMs);
-                if (sleepMs > 0)
-                {
-                    try { await Task.Delay(sleepMs, ct); }
-                    catch (OperationCanceledException) { return; }
-                }
-            }
-        }
-
-        // Scene→video and scene→scene: remaining is null (LWE has no mpv socket) — switch immediately.
+        // IPC unavailable — switch immediately.
         lock (_lock)
         {
             if (!_waitingForVideoEnd) return;
