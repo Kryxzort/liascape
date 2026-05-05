@@ -847,7 +847,8 @@ public static class PlayerHelper
             var timePos = TryQueryTimePos();
             long fullMs = (long)_timedInterval.TotalMilliseconds;
             long elapsedMs = timePos.HasValue ? (long)(timePos.Value * 1000) : 0;
-            _timedRemainingMs = elapsedMs < fullMs ? fullMs - elapsedMs : fullMs;
+            bool instantAdvance = elapsedMs >= fullMs;
+            _timedRemainingMs = instantAdvance ? fullMs : fullMs - elapsedMs;
             _waitForVideoEnd = waitForVideoEnd;
 
             var startPath = currentPath ?? ordered[0];
@@ -860,7 +861,10 @@ public static class PlayerHelper
             SaveTimedState();
 
             if (ordered.Count > 1 && intervalSeconds > 0)
+            {
                 StartTimedTimer();
+                if (instantAdvance) AdvanceAndLaunch();
+            }
         }
     }
 
@@ -1243,8 +1247,16 @@ public static class PlayerHelper
             _timedShuffle = shuffle;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            bool cancelWait = _waitForVideoEnd && !waitForVideoEnd && _waitingForVideoEnd;
             _waitForVideoEnd = waitForVideoEnd;
             SaveTimedState();
+            if (cancelWait)
+            {
+                _waitCts?.Cancel();
+                _waitCts = null;
+                _waitingForVideoEnd = false;
+                AdvanceAndLaunch();
+            }
         }
     }
 
