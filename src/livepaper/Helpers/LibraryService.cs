@@ -87,7 +87,8 @@ public static class LibraryService
     private static void CleanOrphan(string mp4Path)
     {
         try { File.Delete(mp4Path); } catch { }
-        try { File.Delete(Path.ChangeExtension(mp4Path, ".jpg")); } catch { }
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".gif" })
+            try { File.Delete(Path.ChangeExtension(mp4Path, ext)); } catch { }
         try { File.Delete(Path.ChangeExtension(mp4Path, ".id")); } catch { }
     }
 }
