@@ -844,7 +844,10 @@ public static class PlayerHelper
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
             _timedTimerPaused = false;
             _timedTimerStopped = false;
-            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+            var timePos = TryQueryTimePos();
+            long fullMs = (long)_timedInterval.TotalMilliseconds;
+            long elapsedMs = timePos.HasValue ? (long)(timePos.Value * 1000) : 0;
+            _timedRemainingMs = elapsedMs < fullMs ? fullMs - elapsedMs : fullMs;
             _waitForVideoEnd = waitForVideoEnd;
 
             var startPath = currentPath ?? ordered[0];
@@ -1017,6 +1020,28 @@ public static class PlayerHelper
                 TrySendCommand("loadfile", p, "append");
             TrySendCommand("set", "loop-playlist", "inf");
         }
+    }
+
+    private static double? TryQueryTimePos()
+    {
+        var socketPath = IpcSocket;
+        if (!File.Exists(socketPath)) return null;
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.SendTimeout = 500;
+            socket.ReceiveTimeout = 500;
+            socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+            var cmd = JsonSerializer.Serialize(new { command = new object[] { "get_property", "time-pos" } });
+            socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
+            var buf = new byte[4096];
+            int n = socket.Receive(buf);
+            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
+                return data.GetDouble();
+            return null;
+        }
+        catch { return null; }
     }
 
     private static double? TryQueryTimeRemaining()
