@@ -393,11 +393,21 @@ public partial class MainWindowViewModel : ViewModelBase
         OverrideGlobalSettings ? PlaylistWaitForVideoEnd : _settings.GlobalWaitForVideoEnd;
     partial void OnCurrentPlaylistNameChanged(string? value) => SavePlaylistStateDebounced();
 
+    private bool IsRunningCustomPlaylist(IReadOnlyList<string> sessionPaths)
+    {
+        var customPaths = new HashSet<string>(PlaylistItems
+            .Where(c => c.LibraryItem != null)
+            .Select(c => c.LibraryItem!.VideoPath));
+        return customPaths.Count > 0 && customPaths.Count == sessionPaths.Count
+            && sessionPaths.All(p => customPaths.Contains(p));
+    }
+
     private void ApplyEffectivePlaylistSettingsIfRunning()
     {
         if (!PlayerHelper.IsPlaying) return;
         var s = _settings.LastSession;
         if (s == null || (!s.IsTimedPlaylist && !s.IsPlaylist)) return;
+        if (!IsRunningCustomPlaylist(s.Paths)) return;
 
         bool advanceOnEnd = GetEffectiveAdvanceOnVideoEnd();
 
@@ -477,6 +487,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!PlayerHelper.IsPlaying) return;
         var s = _settings.LastSession;
         if (s == null || (!s.IsTimedPlaylist && !s.IsPlaylist)) return;
+        if (!IsRunningCustomPlaylist(s.Paths)) return;
         if (s.Paths.Count <= 1) return;
         var paths = s.Paths; // canonical unshuffled order
         Task.Run(() => PlayerHelper.ReorderPlaylist(paths, s.IsTimedPlaylist, shuffle));
