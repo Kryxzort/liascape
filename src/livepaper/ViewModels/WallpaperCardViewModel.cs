@@ -66,6 +66,12 @@ public partial class WallpaperCardViewModel : ViewModelBase
     private void AddToPlaylist() => OnTogglePlaylist?.Invoke(this);
 
     [RelayCommand]
+    private void SyncToGlobal() { _volumeOverride = null; OnPropertyChanged(nameof(IsVolumeSynced)); }
+
+    [RelayCommand]
+    private void SyncSpeedToGlobal() { _speedOverride = null; OnPropertyChanged(nameof(IsSpeedSynced)); }
+
+    [RelayCommand]
     private void OpenSettings() => OnOpenSettings?.Invoke(this);
 
     [RelayCommand]

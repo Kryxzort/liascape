@@ -184,6 +184,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private decimal _globalIntervalMinutes;
     [ObservableProperty] private decimal _globalIntervalSeconds;
     [ObservableProperty] private bool _globalAdvanceOnVideoEnd = true;
+    [ObservableProperty] private bool _globalWaitForVideoEnd;
 
     partial void OnAutoMuteChanged(bool value)
     {
