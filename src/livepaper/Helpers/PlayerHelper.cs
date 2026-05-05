@@ -806,8 +806,10 @@ public static class PlayerHelper
     {
         lock (_lock)
         {
-            var currentPath = (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
-                ? _history[_historyIndex]
+            // When WaitingForVideoEnd is true, _historyIndex points to the prefetched next item.
+            int playingHistIdx = (_waitingForVideoEnd && _historyIndex > 0) ? _historyIndex - 1 : _historyIndex;
+            var currentPath = (_history != null && playingHistIdx >= 0 && playingHistIdx < _history.Count)
+                ? _history[playingHistIdx]
                 : null;
 
             TeardownTimer();
@@ -1349,7 +1351,9 @@ public static class PlayerHelper
                 var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
                 if (state == null) return;
                 var updated = state with { TimerPaused = !state.TimerPaused, TimerStopped = false };
-                File.WriteAllText(TimedStatePath, JsonSerializer.Serialize(updated));
+                var tmp = TimedStatePath + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(updated));
+                File.Move(tmp, TimedStatePath, overwrite: true);
             }
             catch { }
         }
@@ -1561,15 +1565,20 @@ public static class PlayerHelper
 
     private static void SignalTimerStop()
     {
-        try
+        lock (_lock)
         {
-            if (!File.Exists(TimedStatePath)) return;
-            var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
-            if (state == null) return;
-            var updated = state with { TimerStopped = true };
-            File.WriteAllText(TimedStatePath, JsonSerializer.Serialize(updated));
+            try
+            {
+                if (!File.Exists(TimedStatePath)) return;
+                var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
+                if (state == null) return;
+                var updated = state with { TimerStopped = true };
+                var tmp = TimedStatePath + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(updated));
+                File.Move(tmp, TimedStatePath, overwrite: true);
+            }
+            catch { }
         }
-        catch { }
     }
 
     // State-only teardown (timer state, history, pending action). Does NOT
