@@ -514,25 +514,25 @@
                                                    Foreground="{DynamicResource Muted}"
                                                    LetterSpacing="2"/>
                                         <StackPanel Orientation="Horizontal" Spacing="12"
-                                                    IsEnabled="{Binding !AdvanceOnVideoEnd}">
+                                                    IsEnabled="{Binding !DisplayAdvanceOnVideoEnd}">
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Hours" FontSize="12"
                                                            Foreground="{DynamicResource Subtext}"/>
-                                                <NumericUpDown Value="{Binding IntervalHours}"
+                                                <NumericUpDown Value="{Binding DisplayIntervalHours}"
                                                                Minimum="0" Maximum="99"
                                                                FormatString="0" Width="108"/>
                                             </StackPanel>
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Minutes" FontSize="12"
                                                            Foreground="{DynamicResource Subtext}"/>
-                                                <NumericUpDown Value="{Binding IntervalMinutes}"
+                                                <NumericUpDown Value="{Binding DisplayIntervalMinutes}"
                                                                Minimum="0" Maximum="59"
                                                                FormatString="0" Width="108"/>
                                             </StackPanel>
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Seconds" FontSize="12"
                                                            Foreground="{DynamicResource Subtext}"/>
-                                                <NumericUpDown Value="{Binding IntervalSeconds}"
+                                                <NumericUpDown Value="{Binding DisplayIntervalSeconds}"
                                                                Minimum="0" Maximum="59"
                                                                FormatString="0" Width="108"/>
                                             </StackPanel>
