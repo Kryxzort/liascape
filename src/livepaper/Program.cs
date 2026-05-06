@@ -30,7 +30,12 @@ sealed class Program
             switch (action)
             {
                 case "toggle-mute":
-                    PlayerHelper.SetUserMute(!PlayerHelper.IsUserMuted);
+                    if (PlayerHelper.IsUserMuted)
+                        PlayerHelper.SetUserMute(false);
+                    else if (PlayerHelper.IsMuted)
+                        PlayerHelper.SetMute(false);
+                    else
+                        PlayerHelper.SetUserMute(true);
                     break;
                 case "toggle-pause":
                     PlayerHelper.TogglePause();
