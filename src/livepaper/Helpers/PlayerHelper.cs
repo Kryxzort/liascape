@@ -2245,7 +2245,7 @@ public static class PlayerHelper
         try { if (File.Exists(socketPath)) File.Delete(socketPath); } catch { }
     }
 
-    private static HashSet<string> GetLweClientObjectIds()
+    internal static HashSet<string> GetLweClientObjectIds()
     {
         var psi = new ProcessStartInfo("pactl")
         {

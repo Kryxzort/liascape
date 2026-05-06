@@ -349,11 +349,12 @@ public static class AudioMonitor
         {
             var output = await proc.StandardOutput.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
-            return ParseNonMpvStreamIds(output);
+            var lweClientIds = PlayerHelper.GetLweClientObjectIds();
+            return ParseNonMpvStreamIds(output, lweClientIds);
         }
     }
 
-    private static List<uint> ParseNonMpvStreamIds(string output)
+    private static List<uint> ParseNonMpvStreamIds(string output, HashSet<string>? lweClientIds = null)
     {
         var result = new List<uint>();
         var blocks = output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries);
@@ -363,6 +364,20 @@ public static class AudioMonitor
             if (block.Contains("application.name = \"mpv\"")) continue;
             if (block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
             if (block.Contains("application.name = \"linux-wallpaperengine\"")) continue;
+            if (lweClientIds != null)
+            {
+                string? clientId = null;
+                foreach (var line in block.Split('\n'))
+                {
+                    var t = line.Trim();
+                    if (t.StartsWith("client.id = \""))
+                    {
+                        clientId = t.Substring("client.id = \"".Length).TrimEnd('"');
+                        break;
+                    }
+                }
+                if (clientId != null && lweClientIds.Contains(clientId)) continue;
+            }
             var firstLine = block.Split('\n')[0].Trim();
             if (uint.TryParse(firstLine, out uint id))
                 result.Add(id);
