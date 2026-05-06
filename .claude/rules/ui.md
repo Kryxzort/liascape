@@ -11,7 +11,8 @@ The app has three tabs:
 ### Browse Tab
 - Source selector (pill-style): motionbgs.com, moewalls.com, Desktophut, Wallpaper Engine local
 - Grid of wallpaper cards (`ItemsRepeater + UniformGridLayout`, responsive columns); thumbnail + title; clicking thumbnail opens fullscreen preview modal
-- Search box (enabled only for sources that support it)
+- **Auto-search**: search box triggers debounced (200ms) load — no Search button
+- **Sort button** (WE local only, `SupportsSorting`): Name A–Z/Z–A, Newest/Oldest added
 - Refresh button and loading bar (thin strip below top bar, no layout shift)
 - Per-card "Download & Apply" downloads + applies that card only
 - **Selection toolbar** docks at bottom when ≥1 selected (Shift/Ctrl-click, Ctrl+A): "N selected", `Download` (no apply), `Cancel`
