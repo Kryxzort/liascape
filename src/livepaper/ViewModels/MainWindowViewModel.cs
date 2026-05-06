@@ -141,6 +141,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private LweMonitorViewModel? _selectedLweMonitor;
     [ObservableProperty] private decimal _selectedMonitorFps = 30;
     [ObservableProperty] private bool _selectedMonitorIsPrimary;
+    private bool _suppressPrimaryChanged;
     [ObservableProperty] private bool _isAddingMonitor;
     [ObservableProperty] private string _newMonitorName = "";
 
@@ -261,8 +262,10 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnSelectedLweMonitorChanged(LweMonitorViewModel? value)
     {
         if (value == null) return;
+        _suppressPrimaryChanged = true;
         SelectedMonitorFps = value.Fps;
         SelectedMonitorIsPrimary = value.IsPrimary;
+        _suppressPrimaryChanged = false;
     }
 
     partial void OnSelectedMonitorFpsChanged(decimal value)
@@ -274,6 +277,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnSelectedMonitorIsPrimaryChanged(bool value)
     {
+        if (_suppressPrimaryChanged) return;
         if (SelectedLweMonitor == null) return;
         if (value)
         {
@@ -301,6 +305,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void AddMonitor(string name)
     {
+        if (LweMonitors.Any(m => m.Name == name)) return;
         var saved = _settings.LweMonitors.FirstOrDefault(m => m.Name == name);
         var vm = new LweMonitorViewModel(name, LweMonitors.Count)
         {

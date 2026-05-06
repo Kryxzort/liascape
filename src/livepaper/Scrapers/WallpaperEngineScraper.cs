@@ -108,19 +108,34 @@ public static class WallpaperEngineScraper
 
     internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
     {
+        string tmp = outputPath + ".tmp";
         try
         {
-            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", outputPath, "-y");
-            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            {
+                File.Move(tmp, outputPath, overwrite: true);
+                return;
+            }
 
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", outputPath, "-y");
-            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+            if (File.Exists(tmp)) File.Delete(tmp);
+            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            {
+                File.Move(tmp, outputPath, overwrite: true);
+                return;
+            }
 
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg("-i", gifPath, "-frames:v", "1", outputPath, "-y");
+            if (File.Exists(tmp)) File.Delete(tmp);
+            await RunFfmpeg("-i", gifPath, "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                File.Move(tmp, outputPath, overwrite: true);
         }
         catch { }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+        }
     }
 
     private static async Task RunFfmpeg(params string[] args)
@@ -133,15 +148,21 @@ public static class WallpaperEngineScraper
             CreateNoWindow = true
         };
         foreach (var arg in args) psi.ArgumentList.Add(arg);
+        using var proc = Process.Start(psi);
+        if (proc == null) return;
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try
         {
-            using var proc = Process.Start(psi);
-            if (proc == null) return;
-            proc.BeginOutputReadLine();
-            proc.BeginErrorReadLine();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await proc.WaitForExitAsync(cts.Token);
+            if (proc.ExitCode != 0) throw new InvalidOperationException($"ffmpeg exited with code {proc.ExitCode}");
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            await proc.WaitForExitAsync();
+            throw;
+        }
     }
 }

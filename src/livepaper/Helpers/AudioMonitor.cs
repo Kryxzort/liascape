@@ -362,6 +362,7 @@ public static class AudioMonitor
             if (block.Contains("application.process.binary = \"mpv\"")) continue;
             if (block.Contains("application.name = \"mpv\"")) continue;
             if (block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
+            if (block.Contains("application.name = \"linux-wallpaperengine\"")) continue;
             var firstLine = block.Split('\n')[0].Trim();
             if (uint.TryParse(firstLine, out uint id))
                 result.Add(id);

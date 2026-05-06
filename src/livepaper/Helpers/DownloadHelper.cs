@@ -26,7 +26,8 @@ public static class DownloadHelper
 
             if (copyLocalFiles && Directory.Exists(detail.DownloadUrl))
             {
-                copiedSceneDir = Path.Combine(LibraryPath, safeTitle);
+                string dirKey = string.IsNullOrEmpty(detail.WorkshopId) ? safeTitle : $"{safeTitle}_{detail.WorkshopId}";
+                copiedSceneDir = Path.Combine(LibraryPath, dirKey);
                 await Task.Run(() => CopyDirectory(detail.DownloadUrl, copiedSceneDir));
                 sceneContent = copiedSceneDir;
             }
@@ -116,7 +117,8 @@ public static class DownloadHelper
     private static async Task<string?> SaveThumbnailAsync(string? thumbnailUrl, string safeTitle, bool copyLocalFiles)
     {
         if (string.IsNullOrEmpty(thumbnailUrl)) return null;
-        string ext = Path.GetExtension(thumbnailUrl);
+        string urlPath = Uri.TryCreate(thumbnailUrl, UriKind.Absolute, out var uri) ? uri.AbsolutePath : thumbnailUrl;
+        string ext = Path.GetExtension(urlPath);
         if (string.IsNullOrEmpty(ext)) ext = ".jpg";
         string thumbPath = Path.Combine(LibraryPath, safeTitle + ext);
         try

@@ -2018,8 +2018,8 @@ public static class PlayerHelper
         var psi = new ProcessStartInfo("setsid")
         {
             UseShellExecute = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
         psi.ArgumentList.Add("mpvpaper");
         psi.ArgumentList.Add("-o");
@@ -2027,6 +2027,8 @@ public static class PlayerHelper
         psi.ArgumentList.Add("*");
         psi.ArgumentList.Add(file);
         var process = Process.Start(psi);
+        process?.BeginOutputReadLine();
+        process?.BeginErrorReadLine();
         if (readyTcs != null)
         {
             Task.Run(async () =>
@@ -2247,6 +2249,9 @@ public static class PlayerHelper
     {
         try
         {
+            var lwePids = new HashSet<string>(ReadCurrentLwePids().Select(p => p.Trim()));
+            if (lwePids.Count == 0) return new List<int>();
+
             var psi = new ProcessStartInfo("pactl")
             {
                 Arguments = "list sink-inputs",
@@ -2259,24 +2264,27 @@ public static class PlayerHelper
             proc.WaitForExit();
 
             var ids = new List<int>();
-            int currentId = -1;
-            foreach (var line in output.Split('\n'))
+            foreach (var block in output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries))
             {
-                var trimmed = line.Trim();
-                if (trimmed.StartsWith("Sink Input #"))
+                if (!block.Contains("application.name = \"SDL Application\"")) continue;
+                string? pid = null;
+                foreach (var line in block.Split('\n'))
                 {
-                    if (int.TryParse(trimmed.Substring("Sink Input #".Length), out int id))
-                        currentId = id;
+                    var t = line.Trim();
+                    if (t.StartsWith("application.process.id = \""))
+                    {
+                        pid = t.Substring("application.process.id = \"".Length).TrimEnd('"');
+                        break;
+                    }
                 }
-                else if (trimmed.Contains("application.name = \"SDL Application\"") && currentId >= 0)
-                {
-                    ids.Add(currentId);
-                    currentId = -1;
-                }
+                if (pid == null || !lwePids.Contains(pid)) continue;
+                var firstLine = block.Split('\n')[0].Trim();
+                if (int.TryParse(firstLine, out int id))
+                    ids.Add(id);
             }
             return ids;
         }
-        catch { return []; }
+        catch { return new List<int>(); }
     }
 
     private static void ApplyLweVolume(int volume)
