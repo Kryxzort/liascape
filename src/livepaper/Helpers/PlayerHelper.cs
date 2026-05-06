@@ -2249,9 +2249,6 @@ public static class PlayerHelper
     {
         try
         {
-            var lwePids = new HashSet<string>(ReadCurrentLwePids().Select(p => p.Trim()));
-            if (lwePids.Count == 0) return new List<int>();
-
             var psi = new ProcessStartInfo("pactl")
             {
                 Arguments = "list sink-inputs",
@@ -2266,18 +2263,9 @@ public static class PlayerHelper
             var ids = new List<int>();
             foreach (var block in output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!block.Contains("application.name = \"SDL Application\"")) continue;
-                string? pid = null;
-                foreach (var line in block.Split('\n'))
-                {
-                    var t = line.Trim();
-                    if (t.StartsWith("application.process.id = \""))
-                    {
-                        pid = t.Substring("application.process.id = \"".Length).TrimEnd('"');
-                        break;
-                    }
-                }
-                if (pid == null || !lwePids.Contains(pid)) continue;
+                if (!block.Contains("application.process.binary = \"linux-wallpaperengine\"") &&
+                    !block.Contains("application.name = \"linux-wallpaperengine\""))
+                    continue;
                 var firstLine = block.Split('\n')[0].Trim();
                 if (int.TryParse(firstLine, out int id))
                     ids.Add(id);
