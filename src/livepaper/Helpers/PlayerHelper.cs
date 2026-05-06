@@ -2263,9 +2263,7 @@ public static class PlayerHelper
             var ids = new List<int>();
             foreach (var block in output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!block.Contains("application.process.binary = \"linux-wallpaperengine\"") &&
-                    !block.Contains("application.name = \"linux-wallpaperengine\""))
-                    continue;
+                if (!block.Contains("application.name = \"SDL Application\"")) continue;
                 var firstLine = block.Split('\n')[0].Trim();
                 if (int.TryParse(firstLine, out int id))
                     ids.Add(id);
