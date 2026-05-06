@@ -2245,10 +2245,43 @@ public static class PlayerHelper
         try { if (File.Exists(socketPath)) File.Delete(socketPath); } catch { }
     }
 
+    private static HashSet<string> GetLweClientObjectIds()
+    {
+        var psi = new ProcessStartInfo("pactl")
+        {
+            Arguments = "list clients",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var proc = Process.Start(psi)!;
+        var output = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit();
+
+        var ids = new HashSet<string>();
+        foreach (var block in output.Split("Client #", StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
+            foreach (var line in block.Split('\n'))
+            {
+                var t = line.Trim();
+                if (t.StartsWith("object.id = \""))
+                {
+                    ids.Add(t.Substring("object.id = \"".Length).TrimEnd('"'));
+                    break;
+                }
+            }
+        }
+        return ids;
+    }
+
     private static List<int> GetLweSinkInputIds()
     {
         try
         {
+            var lweClientIds = GetLweClientObjectIds();
+            if (lweClientIds.Count == 0) return new List<int>();
+
             var psi = new ProcessStartInfo("pactl")
             {
                 Arguments = "list sink-inputs",
@@ -2263,7 +2296,17 @@ public static class PlayerHelper
             var ids = new List<int>();
             foreach (var block in output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!block.Contains("application.name = \"SDL Application\"")) continue;
+                string? clientId = null;
+                foreach (var line in block.Split('\n'))
+                {
+                    var t = line.Trim();
+                    if (t.StartsWith("client.id = \""))
+                    {
+                        clientId = t.Substring("client.id = \"".Length).TrimEnd('"');
+                        break;
+                    }
+                }
+                if (clientId == null || !lweClientIds.Contains(clientId)) continue;
                 var firstLine = block.Split('\n')[0].Trim();
                 if (int.TryParse(firstLine, out int id))
                     ids.Add(id);
