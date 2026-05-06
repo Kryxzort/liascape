@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using livepaper.Models;
 
@@ -34,6 +35,9 @@ public static class WallpaperEngineScraper
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrEmpty(info.File)) continue;
 
+            if (!string.IsNullOrEmpty(query) && !title.Contains(query, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             var videoPath = Path.Combine(dir, info.File);
             if (!File.Exists(videoPath)) continue;
 
@@ -48,9 +52,6 @@ public static class WallpaperEngineScraper
                 WorkshopId = workshopId
             });
         }
-
-        if (!string.IsNullOrEmpty(query))
-            results = results.FindAll(r => r.Title.Contains(query, StringComparison.OrdinalIgnoreCase));
 
         results = sortIndex switch
         {
@@ -122,36 +123,64 @@ public static class WallpaperEngineScraper
 
     internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
     {
+        string tmp = outputPath + ".tmp";
         try
         {
             // First non-black/white frame (YAVG between 30 and 225)
-            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", outputPath, "-y");
-            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            {
+                File.Move(tmp, outputPath, overwrite: true);
+                return;
+            }
 
             // Fallback: frame 1
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", outputPath, "-y");
-            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0) return;
+            if (File.Exists(tmp)) File.Delete(tmp);
+            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            {
+                File.Move(tmp, outputPath, overwrite: true);
+                return;
+            }
 
             // Fallback: frame 0
-            if (File.Exists(outputPath)) File.Delete(outputPath);
-            await RunFfmpeg("-i", gifPath, "-frames:v", "1", outputPath, "-y");
+            if (File.Exists(tmp)) File.Delete(tmp);
+            await RunFfmpeg("-i", gifPath, "-frames:v", "1", tmp, "-y");
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                File.Move(tmp, outputPath, overwrite: true);
         }
         catch { }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+        }
     }
 
     private static async Task RunFfmpeg(params string[] args)
     {
         var psi = new ProcessStartInfo("ffmpeg")
         {
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
         foreach (var arg in args) psi.ArgumentList.Add(arg);
         using var proc = Process.Start(psi);
         if (proc == null) return;
-        await proc.WaitForExitAsync();
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await proc.WaitForExitAsync(cts.Token);
+            if (proc.ExitCode != 0) throw new InvalidOperationException($"ffmpeg exited with code {proc.ExitCode}");
+        }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            await proc.WaitForExitAsync();
+            throw;
+        }
     }
 }
