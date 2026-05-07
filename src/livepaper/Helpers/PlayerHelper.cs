@@ -853,7 +853,9 @@ public static class PlayerHelper
                     KillCurrentProcess();
                     return;
                 }
-                var workshopId = File.ReadAllText(path).Trim();
+                string workshopId;
+                try { workshopId = File.ReadAllText(path).Trim(); }
+                catch { KillCurrentProcess(); return; }
 
                 // Capture old processes before launching new ones.
                 var oldMpvProcs = Process.GetProcessesByName("mpvpaper");
@@ -921,7 +923,7 @@ public static class PlayerHelper
                 var speedOverride = ReadSpeedOverride(path);
                 int vol = volOverride ?? settings.Volume;
                 double spd = speedOverride ?? settings.Speed;
-                Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SetMute(true); });
+                Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SendCommand("set_property", "mute", true); });
 
                 var cts = _prelaunchCts = new CancellationTokenSource();
                 var capturedPids = oldLwePids;

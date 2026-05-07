@@ -65,6 +65,10 @@ public static class LibraryService
         {
             try { File.Delete(file); } catch { }
         }
+        foreach (var dir in Directory.GetDirectories(DownloadHelper.LibraryPath))
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
     }
 
     public static void Delete(LibraryItem item)

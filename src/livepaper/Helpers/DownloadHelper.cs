@@ -20,13 +20,26 @@ public static class DownloadHelper
 
         if (detail.IsScene)
         {
-            string scenePath = Path.Combine(LibraryPath, safeTitle + ".scene");
+            string baseSceneTitle = safeTitle;
+            string sceneTitle = baseSceneTitle;
+            string scenePath = "";
+            for (int attempt = 0; ; attempt++)
+            {
+                sceneTitle = attempt == 0 ? baseSceneTitle : $"{baseSceneTitle} ({attempt})";
+                scenePath = Path.Combine(LibraryPath, sceneTitle + ".scene");
+                if (!File.Exists(scenePath)) break;
+                string existingId = "";
+                string idFile = Path.ChangeExtension(scenePath, ".id");
+                try { if (File.Exists(idFile)) existingId = File.ReadAllText(idFile).Trim(); } catch { }
+                if (existingId == sourceId) break;
+                if (attempt > 1000) break;
+            }
             string? copiedSceneDir = null;
             string sceneContent;
 
             if (copyLocalFiles && Directory.Exists(detail.DownloadUrl))
             {
-                string dirKey = string.IsNullOrEmpty(detail.WorkshopId) ? safeTitle : $"{safeTitle}_{detail.WorkshopId}";
+                string dirKey = string.IsNullOrEmpty(detail.WorkshopId) ? sceneTitle : $"{sceneTitle}_{detail.WorkshopId}";
                 copiedSceneDir = Path.Combine(LibraryPath, dirKey);
                 await Task.Run(() => CopyDirectory(detail.DownloadUrl, copiedSceneDir));
                 sceneContent = copiedSceneDir;
@@ -37,7 +50,7 @@ public static class DownloadHelper
             }
 
             await File.WriteAllTextAsync(scenePath, sceneContent);
-            string? thumbPath = await SaveThumbnailAsync(thumbnailUrl, safeTitle, copyLocalFiles);
+            string? thumbPath = await SaveThumbnailAsync(thumbnailUrl, sceneTitle, copyLocalFiles);
             if (!string.IsNullOrEmpty(sourceId))
                 await File.WriteAllTextAsync(Path.ChangeExtension(scenePath, ".id"), sourceId);
             progress?.Report(1.0);

@@ -455,12 +455,12 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnAdvanceOnVideoEndChanged(bool value) => SavePlaylistStateDebounced();
+    partial void OnAdvanceOnVideoEndChanged(bool value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnOverrideGlobalSettingsChanged(bool value) { SavePlaylistStateDebounced(); ApplyTimedSettingsIfRunning(); }
     partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
-    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) => SaveGlobalRotationSettings();
+    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
 
     private void SaveGlobalRotationSettings()
     {
