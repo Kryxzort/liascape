@@ -127,29 +127,40 @@ public static class WallpaperEngineScraper
         try
         {
             // First non-black/white frame (YAVG between 30 and 225)
-            await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", tmp, "-y");
-            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            try
             {
-                File.Move(tmp, outputPath, overwrite: true);
-                return;
+                await RunFfmpeg("-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less", "-frames:v", "1", tmp, "-y");
+                if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                {
+                    File.Move(tmp, outputPath, overwrite: true);
+                    return;
+                }
             }
+            catch { }
 
             // Fallback: frame 1
             if (File.Exists(tmp)) File.Delete(tmp);
-            await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", tmp, "-y");
-            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+            try
             {
-                File.Move(tmp, outputPath, overwrite: true);
-                return;
+                await RunFfmpeg("-i", gifPath, "-vf", "select=eq(n\\,1)", "-frames:v", "1", tmp, "-y");
+                if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                {
+                    File.Move(tmp, outputPath, overwrite: true);
+                    return;
+                }
             }
+            catch { }
 
             // Fallback: frame 0
             if (File.Exists(tmp)) File.Delete(tmp);
-            await RunFfmpeg("-i", gifPath, "-frames:v", "1", tmp, "-y");
-            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
-                File.Move(tmp, outputPath, overwrite: true);
+            try
+            {
+                await RunFfmpeg("-i", gifPath, "-frames:v", "1", tmp, "-y");
+                if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                    File.Move(tmp, outputPath, overwrite: true);
+            }
+            catch { }
         }
-        catch { }
         finally
         {
             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
