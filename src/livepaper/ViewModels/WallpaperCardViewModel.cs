@@ -79,7 +79,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
         if (filePath != null && File.Exists(filePath) && await Task.Run(() => TryShowItem(filePath)))
             return;
 
-        Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir }, UseShellExecute = false });
+        try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir }, UseShellExecute = false }); }
+        catch { }
     }
 
     private static bool TryShowItem(string path)
