@@ -172,7 +172,8 @@ public partial class MainWindow : Window
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, PlaylistScrollViewer);
             if (card == null) return;
             _dragCard = card;
-            _dragSourceVisual = FindAncestor<Border>(source, PlaylistScrollViewer);
+            _dragSourceVisual = FindAncestor<Border>(source, PlaylistScrollViewer, b => b.Classes.Contains("playlist-item"))
+                                       ?? FindAncestor<Border>(source, PlaylistScrollViewer);
             _isDragging = false;
             _dragStartPos = e.GetPosition(this);
         }
@@ -319,6 +320,16 @@ public partial class MainWindow : Window
         while (v != null && v != stopAt)
         {
             if (v is T match) return match;
+            v = v.GetVisualParent();
+        }
+        return null;
+    }
+
+    private static T? FindAncestor<T>(Visual? v, Visual? stopAt, Func<T, bool> predicate) where T : Visual
+    {
+        while (v != null && v != stopAt)
+        {
+            if (v is T match && predicate(match)) return match;
             v = v.GetVisualParent();
         }
         return null;
