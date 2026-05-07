@@ -42,6 +42,7 @@ public static class PlayerHelper
     private static CancellationTokenSource? _prelaunchCts;
     private static string[]? _prelaunchPidsToKill;
     private static bool _isMuted;
+    private static bool _autoMuted;
     private static bool _userMuted;
     private static volatile TaskCompletionSource<bool>? _speedChangeTcs;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
@@ -478,7 +479,7 @@ public static class PlayerHelper
             if (fileMuted != _userMuted)
             {
                 _userMuted = fileMuted;
-                _isMuted = fileMuted;
+                _isMuted = fileMuted || _autoMuted;
             }
         }
         catch { }
@@ -486,7 +487,7 @@ public static class PlayerHelper
 
     public static void LoadUserMuteState()
     {
-        try { _userMuted = _isMuted = File.Exists(UserMuteStatePath); }
+        try { _userMuted = File.Exists(UserMuteStatePath); _isMuted = _userMuted || _autoMuted; }
         catch { }
     }
 
@@ -1837,16 +1838,17 @@ public static class PlayerHelper
     public static void SetMute(bool mute)
     {
         if (!mute && _userMuted) return;
-        _isMuted = mute;
-        SendCommand("set_property", "mute", mute);
-        if (IsLweRunning) ApplyLweMute(mute);
+        _autoMuted = mute;
+        _isMuted = mute || _userMuted;
+        SendCommand("set_property", "mute", _isMuted);
+        if (IsLweRunning) ApplyLweMute(_isMuted);
     }
 
     // User-initiated mute (keybind, UI toggle). Always applies; sets _userMuted so automute can't undo it.
     public static void SetUserMute(bool mute)
     {
         _userMuted = mute;
-        _isMuted = mute;
+        _isMuted = mute || _autoMuted;
         try
         {
             var path = UserMuteStatePath;
