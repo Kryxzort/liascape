@@ -461,11 +461,13 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
     partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
+    partial void OnGlobalWaitForVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) ApplyTimedSettingsIfRunning(); }
 
     private void SaveGlobalRotationSettings()
     {
         _settings.GlobalIntervalSeconds = (int)GlobalIntervalHours * 3600 + (int)GlobalIntervalMinutes * 60 + (int)GlobalIntervalSeconds;
         _settings.GlobalAdvanceOnVideoEnd = GlobalAdvanceOnVideoEnd;
+        _settings.GlobalWaitForVideoEnd = GlobalWaitForVideoEnd;
         SettingsService.Save(_settings);
     }
 
@@ -718,6 +720,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _globalIntervalMinutes = (gSecs % 3600) / 60;
         _globalIntervalSeconds = gSecs % 60;
         _globalAdvanceOnVideoEnd = _settings.GlobalAdvanceOnVideoEnd;
+        _globalWaitForVideoEnd = _settings.GlobalWaitForVideoEnd;
         _wallpaperEnginePath = _settings.WallpaperEnginePath;
         _weCopyFiles = _settings.WeCopyFiles;
         _resumeFromLast = _settings.ResumeFromLast;
