@@ -53,12 +53,15 @@ public static class LibraryService
             string idFile = Path.ChangeExtension(media, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
 
+            string? workshopId = sourceId != null && sourceId.Length > 0 && sourceId.All(char.IsDigit) ? sourceId : null;
             items.Add(new LibraryItem
             {
                 Title = title,
                 VideoPath = media,
                 ThumbnailPath = File.Exists(jpg) ? jpg : null,
-                SourceId = sourceId
+                SourceId = sourceId,
+                WorkshopId = workshopId,
+                AddedAt = File.GetCreationTimeUtc(media)
             });
         }
         return items;
