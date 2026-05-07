@@ -440,6 +440,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (!SelectedSource.SupportsSearch) return;
         _browseSearchDebounceCts?.Cancel();
+        _browseSearchDebounceCts?.Dispose();
         _browseSearchDebounceCts = new CancellationTokenSource();
         var token = _browseSearchDebounceCts.Token;
         var trimmed = value.Trim();
@@ -450,6 +451,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 await Task.Delay(200, token);
                 Dispatcher.UIThread.Post(() =>
                 {
+                    if (token.IsCancellationRequested) return;
                     if (string.IsNullOrEmpty(trimmed))
                         _ = LoadWallpapersAsync();
                     else
@@ -1120,8 +1122,14 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         else if (shiftHeld && _lastSelectedIndex >= 0)
         {
-            int from = Math.Min(_lastSelectedIndex, idx);
-            int to = Math.Max(_lastSelectedIndex, idx);
+            if (_lastSelectedIndex >= displayed.Count)
+            {
+                _lastSelectedIndex = idx;
+                card.IsSelected = true;
+                return;
+            }
+            int from = Math.Max(0, Math.Min(_lastSelectedIndex, idx));
+            int to = Math.Min(displayed.Count - 1, Math.Max(_lastSelectedIndex, idx));
             for (int i = from; i <= to; i++)
                 displayed[i].IsSelected = true;
         }
