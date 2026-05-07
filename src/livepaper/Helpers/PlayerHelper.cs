@@ -597,8 +597,7 @@ public static class PlayerHelper
                 var playlistPath = Path.Combine(cacheDir, "playlist.txt");
                 File.WriteAllLines(playlistPath, paths.Take(paths.Length - 1));
 
-                var shuffleFlag = shuffle ? " --shuffle" : "";
-                var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf{shuffleFlag}";
+                var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf";
                 _current = Launch(options, paths[paths.Length - 1]);
             }
         }
