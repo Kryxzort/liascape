@@ -877,7 +877,7 @@ public static class PlayerHelper
                             await Task.Delay(50);
                         }
                         ApplyLweMute(capturedMute || AudioMonitor.IsMuted);
-                        if (volOverride.HasValue) ApplyLweVolume(volOverride.Value);
+                        ApplyLweVolume(volOverride ?? settings.Volume);
                     });
                 }
 
