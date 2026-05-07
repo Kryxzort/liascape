@@ -48,6 +48,10 @@ public partial class MainWindow : Window
             LibraryItemsRepeater.SizeChanged += (_, _) => UpdateCardThumbnailHeight();
             if (Vm != null) Vm.CardLayoutChanged = UpdateCardThumbnailHeight;
             UpdateCardThumbnailHeight();
+            BrowseItemsRepeater.ElementPrepared += OnRepeaterElementPrepared;
+            BrowseItemsRepeater.ElementClearing += OnRepeaterElementClearing;
+            LibraryItemsRepeater.ElementPrepared += OnRepeaterElementPrepared;
+            LibraryItemsRepeater.ElementClearing += OnRepeaterElementClearing;
         };
 
         this.AddHandler(PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -206,8 +210,6 @@ public partial class MainWindow : Window
             if (dx * dx + dy * dy < 36) return; // 6px threshold
 
             _isDragging = true;
-            if (_dragCard!.IsGifThumbnail)
-                _dragCard.IsGifActive = true;
             DragPreviewBorder.Background = new Avalonia.Media.VisualBrush
             {
                 Visual = _dragSourceVisual,
@@ -236,7 +238,7 @@ public partial class MainWindow : Window
     {
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
-        if (_dragCard != null) _dragCard.IsGifActive = false;
+        if (_dragCard != null && !_dragCard.IsGifThumbnail) _dragCard.IsGifActive = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
@@ -266,7 +268,7 @@ public partial class MainWindow : Window
 
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
-        if (_dragCard != null) _dragCard.IsGifActive = false;
+        if (_dragCard != null && !_dragCard.IsGifThumbnail) _dragCard.IsGifActive = false;
         _dragCard = null;
         _dragSourceVisual = null;
         _isDragging = false;
@@ -364,6 +366,18 @@ public partial class MainWindow : Window
             vm.LoadMoreCommand.Execute(null);
     }
 
+    private static void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
+    {
+        if (e.Element is StyledElement se && se.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
+            card.IsGifActive = true;
+    }
+
+    private static void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
+    {
+        if (e.Element is StyledElement se && se.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
+            card.IsGifActive = false;
+    }
+
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
     {
         if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
@@ -372,7 +386,7 @@ public partial class MainWindow : Window
 
     private void OnCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard && !card.IsGifThumbnail)
             card.IsGifActive = false;
     }
 
