@@ -23,30 +23,49 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
-    public AnimatedImage.Avalonia.AnimatedImageSource? GifSource => _gifSource ??= LoadGifSource();
+    private Stream? _gifStream;
+    public AnimatedImage.Avalonia.AnimatedImageSource? GifSource => _gifSource ??= LoadGifSource(out _gifStream);
 
     [ObservableProperty] private bool _isGifActive;
     partial void OnIsGifActiveChanged(bool value)
     {
-        if (!value) _gifSource = null;
+        if (!value) ReleaseGifSource();
         OnPropertyChanged(nameof(ActiveGifSource));
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
-    public void RestartGif() { _gifSource = null; OnPropertyChanged(nameof(ActiveGifSource)); }
+    public void RestartGif() { ReleaseGifSource(); OnPropertyChanged(nameof(ActiveGifSource)); }
+
+    private void ReleaseGifSource()
+    {
+        (_gifSource as IDisposable)?.Dispose();
+        _gifStream?.Dispose();
+        _gifSource = null;
+        _gifStream = null;
+    }
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _playlistGifSource;
+    private Stream? _playlistGifStream;
     [ObservableProperty] private bool _isPlaylistGifActive;
     partial void OnIsPlaylistGifActiveChanged(bool value)
     {
-        if (!value) _playlistGifSource = null;
+        if (!value) ReleasePlaylistGifSource();
         OnPropertyChanged(nameof(PlaylistActiveGifSource));
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? PlaylistActiveGifSource =>
-        IsPlaylistGifActive ? (_playlistGifSource ??= LoadGifSource()) : null;
-    public void RestartPlaylistGif() { _playlistGifSource = null; OnPropertyChanged(nameof(PlaylistActiveGifSource)); }
+        IsPlaylistGifActive ? (_playlistGifSource ??= LoadGifSource(out _playlistGifStream)) : null;
+    public void RestartPlaylistGif() { ReleasePlaylistGifSource(); OnPropertyChanged(nameof(PlaylistActiveGifSource)); }
 
-    private AnimatedImage.Avalonia.AnimatedImageSource? LoadGifSource()
+    private void ReleasePlaylistGifSource()
     {
+        (_playlistGifSource as IDisposable)?.Dispose();
+        _playlistGifStream?.Dispose();
+        _playlistGifSource = null;
+        _playlistGifStream = null;
+    }
+
+    private AnimatedImage.Avalonia.AnimatedImageSource? LoadGifSource(out Stream? stream)
+    {
+        stream = null;
         if (!IsGifThumbnail) return null;
         try
         {
@@ -58,7 +77,10 @@ public partial class WallpaperCardViewModel : ViewModelBase
                 path = path.Substring(7);
 
             if (File.Exists(path))
-                return new AnimatedImage.Avalonia.AnimatedImageSourceStream(File.OpenRead(path));
+            {
+                stream = File.OpenRead(path);
+                return new AnimatedImage.Avalonia.AnimatedImageSourceStream(stream);
+            }
         }
         catch { }
         return null;
@@ -129,10 +151,14 @@ public partial class WallpaperCardViewModel : ViewModelBase
         string outputPath = Path.Combine(cacheDir, $"{cacheKey}.jpg");
         Task.Run(async () =>
         {
-            Directory.CreateDirectory(cacheDir);
-            await WallpaperEngineScraper.ExtractGifStaticFrameAsync(gifPath, outputPath);
-            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
-                Dispatcher.UIThread.Post(() => StaticThumbnailSource = outputPath);
+            try
+            {
+                Directory.CreateDirectory(cacheDir);
+                await WallpaperEngineScraper.ExtractGifStaticFrameAsync(gifPath, outputPath);
+                if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
+                    Dispatcher.UIThread.Post(() => StaticThumbnailSource = outputPath);
+            }
+            catch { }
         });
     }
 }
