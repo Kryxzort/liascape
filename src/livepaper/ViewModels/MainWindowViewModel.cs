@@ -380,6 +380,7 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnLibrarySearchQueryChanged(string value)
     {
         _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
         _searchDebounceCts = new CancellationTokenSource();
         var token = _searchDebounceCts.Token;
         var trimmed = value.Trim();
@@ -860,7 +861,8 @@ public partial class MainWindowViewModel : ViewModelBase
             if (playlist == null) return;
             var byPath = LibraryWallpapers
                 .Where(c => c.LibraryItem != null)
-                .ToDictionary(c => c.LibraryItem!.VideoPath);
+                .GroupBy(c => c.LibraryItem!.VideoPath)
+                .ToDictionary(g => g.Key, g => g.First());
             foreach (var videoPath in playlist.VideoPaths)
             {
                 if (byPath.TryGetValue(videoPath, out var libCard))
@@ -964,7 +966,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
             var byPath = LibraryWallpapers
                 .Where(c => c.LibraryItem != null)
-                .ToDictionary(c => c.LibraryItem!.VideoPath);
+                .GroupBy(c => c.LibraryItem!.VideoPath)
+                .ToDictionary(g => g.Key, g => g.First());
             foreach (var videoPath in playlist.VideoPaths)
             {
                 if (byPath.TryGetValue(videoPath, out var libCard))
