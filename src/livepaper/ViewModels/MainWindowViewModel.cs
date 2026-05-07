@@ -1013,7 +1013,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void DeselectAllLibrary()
     {
-        foreach (var c in FilteredLibraryWallpapers) c.IsSelected = false;
+        foreach (var c in LibraryWallpapers) c.IsSelected = false;
         _lastSelectedIndex = -1;
     }
 
