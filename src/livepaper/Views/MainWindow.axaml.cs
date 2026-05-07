@@ -53,13 +53,15 @@ public partial class MainWindow : Window
             LibraryItemsRepeater.ElementPrepared += OnRepeaterElementPrepared;
             LibraryItemsRepeater.ElementClearing += OnRepeaterElementClearing;
             // Activate GIF cards already prepared before Loaded fired
-            if (Vm != null)
+            if (Vm?.AutoPlayGifs == true)
             {
                 foreach (var c in Vm.LibraryWallpapers) ActivateGifCard(c);
                 foreach (var c in Vm.BrowseWallpapers) ActivateGifCard(c);
+                foreach (var c in Vm.PlaylistItems) ActivatePlaylistGifCard(c);
             }
             LibraryScrollViewer.ScrollChanged += OnLibraryScrollGif;
             BrowseScrollViewer.ScrollChanged += OnBrowseScrollGif;
+            PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
         };
 
         this.AddHandler(PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -364,6 +366,13 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(CheckFillViewport, DispatcherPriority.Background);
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.AutoPlayGifs)
+            && sender is MainWindowViewModel vm2 && vm2.AutoPlayGifs)
+        {
+            foreach (var c in vm2.LibraryWallpapers) ActivateGifCard(c);
+            foreach (var c in vm2.BrowseWallpapers) ActivateGifCard(c);
+            foreach (var c in vm2.PlaylistItems) ActivatePlaylistGifCard(c);
+        }
     }
 
     private void CheckFillViewport()
@@ -377,13 +386,13 @@ public partial class MainWindow : Window
 
     private void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (Vm == null) return;
+        if (Vm?.AutoPlayGifs != true) return;
         Dispatcher.UIThread.Post(() =>
         {
             var cards = MainTabControl.SelectedIndex == 0
                 ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>)Vm.BrowseWallpapers
                 : MainTabControl.SelectedIndex == 1
-                    ? Vm.LibraryWallpapers
+                    ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>)Vm.LibraryWallpapers
                     : System.Array.Empty<WallpaperCardViewModel>();
             foreach (var c in cards)
             {
@@ -394,8 +403,9 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private static void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
+    private void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
     {
+        if (Vm?.AutoPlayGifs != true) return;
         if (e.Element is not StyledElement se) return;
         if (se.DataContext is WallpaperCardViewModel card)
             ActivateGifCard(card);
@@ -403,11 +413,12 @@ public partial class MainWindow : Window
             se.DataContextChanged += OnElementDataContextChanged;
     }
 
-    private static void OnElementDataContextChanged(object? sender, EventArgs e)
+    private void OnElementDataContextChanged(object? sender, EventArgs e)
     {
         if (sender is not StyledElement se) return;
         se.DataContextChanged -= OnElementDataContextChanged;
-        if (se.DataContext is WallpaperCardViewModel card) ActivateGifCard(card);
+        if (Vm?.AutoPlayGifs == true && se.DataContext is WallpaperCardViewModel card)
+            ActivateGifCard(card);
     }
 
     private static void ActivateGifCard(WallpaperCardViewModel card)
@@ -417,7 +428,7 @@ public partial class MainWindow : Window
         else card.IsGifActive = true;
     }
 
-    private static void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
+    private void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
     {
         if (e.Element is StyledElement se)
         {
@@ -435,8 +446,9 @@ public partial class MainWindow : Window
 
     private void OnCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard && !card.IsGifThumbnail)
-            card.IsGifActive = false;
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
+            if (!card.IsGifThumbnail || Vm?.AutoPlayGifs == false)
+                card.IsGifActive = false;
     }
 
     private void UpdateCardThumbnailHeight()
@@ -469,6 +481,7 @@ public partial class MainWindow : Window
 
     private void OnLibraryScrollGif(object? sender, ScrollChangedEventArgs e)
     {
+        if (Vm?.AutoPlayGifs != true) return;
         foreach (var child in LibraryItemsRepeater.Children)
             if (child is StyledElement se && se.DataContext is WallpaperCardViewModel c && !c.IsGifActive)
                 ActivateGifCard(c);
@@ -476,9 +489,47 @@ public partial class MainWindow : Window
 
     private void OnBrowseScrollGif(object? sender, ScrollChangedEventArgs e)
     {
+        if (Vm?.AutoPlayGifs != true) return;
         foreach (var child in BrowseItemsRepeater.Children)
             if (child is StyledElement se && se.DataContext is WallpaperCardViewModel c && !c.IsGifActive)
                 ActivateGifCard(c);
+    }
+
+    private void OnPlaylistScrollGif(object? sender, ScrollChangedEventArgs e)
+    {
+        if (Vm?.AutoPlayGifs != true) return;
+        var offset = PlaylistScrollViewer.Offset.X;
+        var viewportWidth = PlaylistScrollViewer.Viewport.Width;
+        if (viewportWidth <= 0) return;
+        for (int i = 0; i < Vm.PlaylistItems.Count; i++)
+        {
+            var card = Vm.PlaylistItems[i];
+            if (!card.IsGifThumbnail) continue;
+            double left = i * PlaylistItemStride;
+            bool inView = left + PlaylistItemWidth > offset && left < offset + viewportWidth;
+            if (inView && !card.IsPlaylistGifActive) ActivatePlaylistGifCard(card);
+            else if (!inView && card.IsPlaylistGifActive) card.IsPlaylistGifActive = false;
+        }
+    }
+
+    private void OnPlaylistCardPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+            card.IsPlaylistGifActive = true;
+    }
+
+    private void OnPlaylistCardPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
+            if (!card.IsGifThumbnail || Vm?.AutoPlayGifs == false)
+                card.IsPlaylistGifActive = false;
+    }
+
+    private static void ActivatePlaylistGifCard(WallpaperCardViewModel card)
+    {
+        if (!card.IsGifThumbnail) return;
+        if (card.IsPlaylistGifActive) card.RestartPlaylistGif();
+        else card.IsPlaylistGifActive = true;
     }
 
     private void OnBrowseScrollChanged(object? sender, ScrollChangedEventArgs e)

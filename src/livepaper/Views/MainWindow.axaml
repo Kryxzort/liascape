@@ -338,8 +338,8 @@
                                                             Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
                                                             Background="{DynamicResource BgBase}"
-                                                            PointerEntered="OnCardPointerEntered"
-                                                            PointerExited="OnCardPointerExited">
+                                                            PointerEntered="OnPlaylistCardPointerEntered"
+                                                            PointerExited="OnPlaylistCardPointerExited">
                                                         <Border.Styles>
                                                             <Style Selector="Border.playlist-item Grid.play-overlay">
                                                                 <Setter Property="Opacity" Value="0"/>
@@ -360,8 +360,8 @@
                                                                     IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNullOrEmpty}}"
                                                                     Stretch="UniformToFill"
                                                                     Width="100" Height="90"/>
-                                                                <Image IsVisible="{Binding IsGifActive}"
-                                                                       aimg:ImageBehavior.AnimatedSource="{Binding ActiveGifSource}"
+                                                                <Image IsVisible="{Binding IsPlaylistGifActive}"
+                                                                       aimg:ImageBehavior.AnimatedSource="{Binding PlaylistActiveGifSource}"
                                                                        Stretch="UniformToFill"
                                                                        Width="100" Height="90"/>
                                                             </Panel>
@@ -905,7 +905,7 @@
                                        Foreground="{StaticResource Muted}"
                                        LetterSpacing="2"/>
                             <Border Background="{StaticResource BgBase}" CornerRadius="10" Padding="16">
-                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,12,Auto">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,12,Auto,12,Auto">
                                     <TextBlock Grid.Row="0" Grid.Column="0"
                                                Text="Thumbnail aspect"
                                                VerticalAlignment="Center"
@@ -922,6 +922,10 @@
                                               ItemsSource="{Binding CardSizeOptions}"
                                               SelectedItem="{Binding CardSize}"
                                               Width="130"/>
+                                    <CheckBox Grid.Row="4" Grid.ColumnSpan="2"
+                                              Content="Autoplay GIF thumbnails"
+                                              IsChecked="{Binding AutoPlayGifs}"
+                                              Foreground="{StaticResource TextColor}"/>
                                 </Grid>
                             </Border>
 

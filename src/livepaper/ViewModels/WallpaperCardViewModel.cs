@@ -32,12 +32,18 @@ public partial class WallpaperCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(ActiveGifSource));
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
+    public void RestartGif() { _gifSource = null; OnPropertyChanged(nameof(ActiveGifSource)); }
 
-    public void RestartGif()
+    private AnimatedImage.Avalonia.AnimatedImageSource? _playlistGifSource;
+    [ObservableProperty] private bool _isPlaylistGifActive;
+    partial void OnIsPlaylistGifActiveChanged(bool value)
     {
-        _gifSource = null;
-        OnPropertyChanged(nameof(ActiveGifSource));
+        if (!value) _playlistGifSource = null;
+        OnPropertyChanged(nameof(PlaylistActiveGifSource));
     }
+    public AnimatedImage.Avalonia.AnimatedImageSource? PlaylistActiveGifSource =>
+        IsPlaylistGifActive ? (_playlistGifSource ??= LoadGifSource()) : null;
+    public void RestartPlaylistGif() { _playlistGifSource = null; OnPropertyChanged(nameof(PlaylistActiveGifSource)); }
 
     private AnimatedImage.Avalonia.AnimatedImageSource? LoadGifSource()
     {

@@ -28,6 +28,7 @@ public class AppSettings
     public double AutoMuteThresholdDb { get; set; } = -70.0;
     public string ThumbnailAspect { get; set; } = "Default";
     public string CardSize { get; set; } = "Medium";
+    public bool AutoPlayGifs { get; set; } = false;
     public int LibrarySortIndex { get; set; } = 5;
     public int GlobalIntervalSeconds { get; set; } = 1800;
     public bool GlobalAdvanceOnVideoEnd { get; set; } = true;
