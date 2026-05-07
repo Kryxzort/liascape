@@ -389,8 +389,13 @@ public partial class MainWindowViewModel : ViewModelBase
             try
             {
                 await Task.Delay(200, token);
-                _activeSearchQuery = trimmed;
-                await Dispatcher.UIThread.InvokeAsync(UpdateFilteredLibrary);
+                if (token.IsCancellationRequested) return;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (token.IsCancellationRequested) return;
+                    _activeSearchQuery = trimmed;
+                    UpdateFilteredLibrary();
+                });
             }
             catch (OperationCanceledException) { }
         });
