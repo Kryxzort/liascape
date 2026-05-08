@@ -190,7 +190,8 @@ public static class WallpaperEngineScraper
         catch (OperationCanceledException)
         {
             try { proc.Kill(entireProcessTree: true); } catch { }
-            await proc.WaitForExitAsync();
+            using var killCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try { await proc.WaitForExitAsync(killCts.Token); } catch { }
             throw;
         }
     }
