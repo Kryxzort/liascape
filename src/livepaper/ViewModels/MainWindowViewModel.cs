@@ -655,7 +655,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             // Pre-arranged order; pass shuffle=false so mpv plays the clicked card first.
             PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), shuffle: false);
-            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = allPaths, Shuffle = PlaylistShuffle };
+            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle };
             SettingsService.Save(_settings);
             StatusMessage = $"Playing from: {card.Title}";
             return;

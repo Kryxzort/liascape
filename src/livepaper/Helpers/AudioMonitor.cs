@@ -283,7 +283,7 @@ public static class AudioMonitor
                 belowCount = 0;
                 if (aboveCount >= muteTicksNeeded)
                 {
-                    if (!_onlyIfMprisActive || IsAnyMprisPlayerActive())
+                    if (!_onlyIfMprisActive || await IsAnyMprisPlayerActiveAsync(ct))
                     {
                         PlayerHelper.SetMute(true);
                         _isMuted = true;
@@ -310,7 +310,7 @@ public static class AudioMonitor
         }
     }
 
-    private static bool IsAnyMprisPlayerActive()
+    private static async Task<bool> IsAnyMprisPlayerActiveAsync(CancellationToken ct = default)
     {
         try
         {
@@ -323,15 +323,23 @@ public static class AudioMonitor
             };
             using var proc = Process.Start(psi);
             if (proc == null) return false;
-            if (!proc.WaitForExit(500))
+            using var cts = new CancellationTokenSource(500);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cts.Token);
+            try
+            {
+                var stdoutTask = proc.StandardOutput.ReadToEndAsync(linked.Token);
+                var stderrTask = proc.StandardError.ReadToEndAsync(linked.Token);
+                await proc.WaitForExitAsync(linked.Token);
+                var output = (await stdoutTask).Trim();
+                return output
+                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                    .Any(line => string.Equals(line.Trim(), "Playing", StringComparison.OrdinalIgnoreCase));
+            }
+            catch (OperationCanceledException)
             {
                 try { proc.Kill(); } catch { }
                 return false;
             }
-            var output = proc.StandardOutput.ReadToEnd().Trim();
-            return output
-                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .Any(line => string.Equals(line.Trim(), "Playing", StringComparison.OrdinalIgnoreCase));
         }
         catch { return false; }
     }
