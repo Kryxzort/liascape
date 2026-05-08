@@ -1198,21 +1198,8 @@ public static class PlayerHelper
         KillCurrentProcess();
     }
 
-    private static int? ReadVolumeOverride(string path)
-    {
-        var sidecar = Path.ChangeExtension(path, ".volume");
-        if (!File.Exists(sidecar)) return null;
-        try { return int.TryParse(File.ReadAllText(sidecar).Trim(), out int v) ? v : null; }
-        catch { return null; }
-    }
-
-    private static double? ReadSpeedOverride(string path)
-    {
-        var sidecar = Path.ChangeExtension(path, ".speed");
-        if (!File.Exists(sidecar)) return null;
-        try { return double.TryParse(File.ReadAllText(sidecar).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : null; }
-        catch { return null; }
-    }
+    private static int? ReadVolumeOverride(string path) => LibraryService.ReadVolumeOverride(path);
+    private static double? ReadSpeedOverride(string path) => LibraryService.ReadSpeedOverride(path);
 
     private static string BakeVolumeOverride(string options, string path)
     {

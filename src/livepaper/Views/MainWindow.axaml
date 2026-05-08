@@ -1083,7 +1083,7 @@
                                     Margin="8,0,0,0"
                                     IsVisible="{Binding !PreviewCard.IsVolumeSynced}"
                                     ToolTip.Tip="Reset to global volume"
-                                    Command="{Binding PreviewCard.SyncToGlobalCommand}"/>
+                                    Command="{Binding PreviewCard.SyncVolumeToGlobalCommand}"/>
                         </Grid>
                     </Border>
 

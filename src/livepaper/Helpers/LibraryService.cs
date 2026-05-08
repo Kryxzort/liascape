@@ -112,7 +112,7 @@ public static class LibraryService
                 IsWhitelisted = isWhitelisted,
                 VolumeOverride = volumeOverride,
                 SpeedOverride = speedOverride,
-                AddedAt = fi.CreationTime
+                AddedAt = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime
             });
         }
 
@@ -142,7 +142,7 @@ public static class LibraryService
                 IsWhitelisted = isWhitelisted,
                 VolumeOverride = volumeOverride,
                 SpeedOverride = speedOverride,
-                AddedAt = fi.CreationTime
+                AddedAt = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime
             });
         }
 
@@ -192,7 +192,7 @@ public static class LibraryService
         return null;
     }
 
-    private static int? ReadVolumeOverride(string mediaPath)
+    public static int? ReadVolumeOverride(string mediaPath)
     {
         var path = Path.ChangeExtension(mediaPath, ".volume");
         if (!File.Exists(path)) return null;
@@ -200,7 +200,7 @@ public static class LibraryService
         catch { return null; }
     }
 
-    private static double? ReadSpeedOverride(string mediaPath)
+    public static double? ReadSpeedOverride(string mediaPath)
     {
         var path = Path.ChangeExtension(mediaPath, ".speed");
         if (!File.Exists(path)) return null;

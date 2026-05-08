@@ -55,7 +55,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SyncToGlobal()
+    private void SyncVolumeToGlobal()
     {
         if (LibraryItem == null) return;
         _volumeOverride = null;
@@ -156,7 +156,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
         _hasCrashed = item.HasCrashed;
         _isWhitelisted = item.IsWhitelisted;
         _volumeOverride = item.VolumeOverride;
-        _sliderVolume = item.VolumeOverride ?? 0;
+        _sliderVolume = item.VolumeOverride ?? SettingsService.Load().Volume;
         _speedOverride = item.SpeedOverride;
         _sliderSpeed = item.SpeedOverride ?? 1.0;
 #pragma warning restore MVVMTK0034

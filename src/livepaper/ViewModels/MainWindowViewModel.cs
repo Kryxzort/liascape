@@ -1295,7 +1295,7 @@ public partial class MainWindowViewModel : ViewModelBase
             foreach (var c in LibraryWallpapers.Where(c => c.IsSelected && c != source))
             {
                 if (volume.HasValue) c.SliderVolume = volume.Value;
-                else c.SyncToGlobalCommand.Execute(null);
+                else c.SyncVolumeToGlobalCommand.Execute(null);
             }
         }
         finally { _isSyncingVolume = false; }
