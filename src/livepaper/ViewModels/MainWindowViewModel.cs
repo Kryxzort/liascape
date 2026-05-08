@@ -339,7 +339,18 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    partial void OnPlaylistShuffleChanged(bool value) { SavePlaylistStateDebounced(); ApplyShuffleOrderIfRunning(value); RefreshPlayingStatus(); }
+    partial void OnPlaylistShuffleChanged(bool value)
+    {
+        var s = _settings.LastSession;
+        if (s != null && PlayerHelper.IsPlaying && IsRunningCustomPlaylist(s.Paths))
+        {
+            s.Shuffle = value;
+            SettingsService.Save(_settings);
+        }
+        SavePlaylistStateDebounced();
+        ApplyShuffleOrderIfRunning(value);
+        RefreshPlayingStatus();
+    }
     partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
@@ -581,6 +592,14 @@ public partial class MainWindowViewModel : ViewModelBase
 
         PlayerHelper.OnTimedPlaylistStopped = () =>
             Dispatcher.UIThread.Post(() => StatusMessage = "");
+
+        PlayerHelper.OnWallpaperChanged = path =>
+            Dispatcher.UIThread.Post(() =>
+            {
+                _currentlyPlayingCard = path == null ? null
+                    : LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == path);
+                RefreshPlayingStatus();
+            });
 
 
 
