@@ -576,8 +576,11 @@ public static class PlayerHelper
             if (settings.AllowScenes && IsLweAvailable() && paths.Any(IsScenePath))
             {
                 var secs = intervalSeconds > 0 ? intervalSeconds : settings.GlobalIntervalSeconds;
-                ApplyTimedPlaylist(paths, mpvOptions, shuffle, secs, waitForVideoEnd: true, advanceOnVideoEnd: true);
-                return;
+                if (secs > 0)
+                {
+                    ApplyTimedPlaylist(paths, mpvOptions, shuffle, secs, waitForVideoEnd: true, advanceOnVideoEnd: true);
+                    return;
+                }
             }
 
             paths = paths.Where(p => !IsScenePath(p)).ToArray();
@@ -599,6 +602,8 @@ public static class PlayerHelper
 
                 var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf";
                 _current = Launch(options, paths[paths.Length - 1]);
+                StartPlaylistObserver(paths);
+                try { File.WriteAllText(PlaylistObserverPathsPath, System.Text.Json.JsonSerializer.Serialize(paths)); } catch { }
             }
         }
         UpdateRestartTimer();
@@ -1792,7 +1797,6 @@ public static class PlayerHelper
             _daemonCts = new CancellationTokenSource();
             StartPlaylistObserver(observerPaths);
         }
-        else return;
 
         WriteTimerDaemonPid();
         try { DaemonToken.WaitHandle.WaitOne(); }
@@ -1858,8 +1862,8 @@ public static class PlayerHelper
             else if (File.Exists(path)) File.Delete(path);
         }
         catch { }
-        SendCommand("set_property", "mute", mute);
-        if (IsLweRunning) ApplyLweMute(mute);
+        SendCommand("set_property", "mute", _isMuted);
+        if (IsLweRunning) ApplyLweMute(_isMuted);
     }
 
     public static void SetVolume(int volume)
