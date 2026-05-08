@@ -15,6 +15,7 @@ The app has three tabs:
 - Refresh button and loading bar (thin strip below top bar, no layout shift)
 - Per-card "Download & Apply" downloads + applies that card only
 - **Selection toolbar** docks at bottom when ≥1 selected (Shift/Ctrl-click, Ctrl+A): "N selected", `Download` (no apply), `Cancel`
+- **Right-click card**: web sources → "Open Page" (`xdg-open PageUrl`); WE local → "Open in File Manager" (D-Bus `ShowItems`, fallback `xdg-open dir`). Driven by `IsLocalSource` (`PageUrl` not http).
 
 ### Library Tab
 - Grid of downloaded wallpapers (`ItemsRepeater + UniformGridLayout`, responsive columns); circular badge top-right: `+`/`−` playlist toggle. Always visible.
@@ -22,11 +23,13 @@ The app has three tabs:
 - "Import": file picker (`.mp4`/`.webm`/`.mov`/`.mkv`/`.avi`/`.gif`); title modal copies to library, ffmpeg 320px thumbnail at 1s. `.id` holds `import:<source-path>`.
 - "Play All" + "Shuffle" toggle — follows global Settings → PLAYLIST
 - Per-card: Apply, Delete
+- **Right-click card**: "Add to Playlist", "Open in File Manager" (D-Bus `ShowItems`; scenes use `CopiedSceneDir` or WE workshop dir; symlinks resolved), "Settings" (opens preview modal)
 - **Selection toolbar** above playlist strip when ≥1 selected: `Add to Playlist`, `Remove from Playlist`, `Delete`, `Cancel`
 - **Playlist strip** (always visible at bottom): horizontal small thumbnails; `−` badge; hover → dim + ▶ overlay; drag to reorder; click plays
   - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval and AdvanceOnVideoEnd)
   - 📂/💾 load/save named playlists → `~/.local/share/livepaper/playlists/<name>.json`
   - ▶ Play; auto-state saved to `~/.config/livepaper/playlist_state.json`
+  - **Right-click item**: "Remove from Playlist", "Open in File Manager", "Settings"
 
 ### Settings Tab
 - **Playback**: Loop, Mute audio, Disable cache, Volume (0–100, live IPC)
@@ -37,6 +40,9 @@ The app has three tabs:
 - **Wallpaper Engine**: workshop folder picker, Copy files toggle
 - **Appearance**: Theme selector (31 built-in), Thumbnail aspect (Default/16:9/1:1), Card size (Small/Medium/Large)
 - Live mpv options preview; Reset to Defaults; keybind snippets for `--action=…`
+
+### Context Menu Callback Pattern
+Context menus are outside the visual tree — `$parent[Window]` doesn't work inside `<ContextMenu>`. Use action callbacks on `WallpaperCardViewModel` instead (e.g. `OnTogglePlaylist`, `OnOpenSettings`), wired in `MainWindowViewModel.CreateLibraryCard`. Commands on the VM itself work fine.
 
 ## Key NuGet Packages
 
