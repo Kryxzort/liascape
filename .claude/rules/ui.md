@@ -10,7 +10,7 @@ The app has three tabs:
 
 ### Browse Tab
 - Source selector (pill-style): motionbgs.com, moewalls.com, Desktophut, Wallpaper Engine local
-- Grid of wallpaper cards (`ItemsRepeater + UniformGridLayout`, responsive columns); thumbnail + title; clicking thumbnail opens fullscreen preview modal
+- Grid of wallpaper cards (`ItemsRepeater + UniformGridLayout`, responsive columns); thumbnail + title; clicking thumbnail opens fullscreen preview modal; GIF thumbnails animate on hover
 - Search box (enabled only for sources that support it)
 - Refresh button and loading bar (thin strip below top bar, no layout shift)
 - Per-card "Download & Apply" downloads + applies that card only
@@ -27,6 +27,7 @@ The app has three tabs:
   - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval and AdvanceOnVideoEnd)
   - 📂/💾 load/save named playlists → `~/.local/share/livepaper/playlists/<name>.json`
   - ▶ Play; auto-state saved to `~/.config/livepaper/playlist_state.json`
+  - GIF hover in playlist strip
 
 ### Settings Tab
 - **Playback**: Loop, Mute audio, Disable cache, Volume (0–100, live IPC)
@@ -44,6 +45,7 @@ The app has three tabs:
 - `Avalonia.Controls.ItemsRepeater` — `ItemsRepeater` for Browse and Library grids
 - `AsyncImageLoader.Avalonia` — `AdvancedImage` for HTTP image loading (bind `Source` to string URL)
 - `Material.Icons.Avalonia` — `<mi:MaterialIcon Kind="..."/>`
+- `AnimatedImage.Avalonia` — animated GIF; use `aimg:ImageBehavior.AnimatedSource` (not `Source`)
 - `CommunityToolkit.Mvvm` — `[ObservableProperty]`, `[RelayCommand]`, source generators
 - `HtmlAgilityPack` — HTML parsing for scrapers
 - `System.Text.Json` — JSON for `project.json` and settings
@@ -55,6 +57,7 @@ The app has three tabs:
 - **Window-level pointer handler**: `this.AddHandler(PointerPressedEvent, handler, RoutingStrategies.Bubble, handledEventsToo: true)`. Use `IsWithin(source, scrollViewer)` to scope by area; `IsWithinButton(source, stopAt)` with `stopAt` boundary to avoid walking past the container.
 - **`StaticResource` vs `DynamicResource`**: themes require `DynamicResource` — `StaticResource` won't update on theme swap. All color brush bindings use `DynamicResource`.
 - **Library grid binds to `FilteredLibraryWallpapers`**, not `LibraryWallpapers`. During bulk `LoadLibrary()`, `_suppressFilterUpdate = true`; `UpdateFilteredLibrary()` called once after.
+- **Animated GIF cards**: three-layer `Panel` — static JPG (`StaticThumbnailSource`) → static image (`ThumbnailSource`) → animated GIF (`ActiveGifSource`, non-null only when `IsGifActive`). Toggle `IsGifActive` from `PointerEntered/Exited` in code-behind. `AnimatedImageSource` lazy-loaded on first hover.
 
 ## Theme System
 
