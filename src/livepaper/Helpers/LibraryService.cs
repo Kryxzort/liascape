@@ -22,7 +22,11 @@ public static class LibraryService
     {
         if (!Directory.Exists(batchDir)) return;
         foreach (var file in Directory.GetFiles(batchDir))
-            File.Move(file, Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(file)), overwrite: true);
+        {
+            var dest = Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(file));
+            if (!File.Exists(dest))
+                File.Move(file, dest);
+        }
         try { Directory.Delete(batchDir); } catch { }
     }
 

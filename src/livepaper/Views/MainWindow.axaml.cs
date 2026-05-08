@@ -157,6 +157,8 @@ public partial class MainWindow : Window
                 Vm?.SelectAllCommand.Execute(null);
             e.Handled = true;
         }
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox)
+            return;
         if (e.Key == Key.Delete && MainTabControl.SelectedIndex == 1 && Vm?.AnyLibrarySelected == true)
         {
             Vm.DeleteSelectedCommand.Execute(null);

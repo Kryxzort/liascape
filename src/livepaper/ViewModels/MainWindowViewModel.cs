@@ -1195,7 +1195,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _undoBatches.Add(new UndoBatch { BatchDir = batchDir, Items = batchItems });
             CanUndo = true;
-            StatusMessage = deleted > 1 ? $"Deleted {deleted} wallpapers (Ctrl+Z to undo)" : $"Deleted: {targets[0].Title} (Ctrl+Z to undo)";
+            StatusMessage = deleted > 1 ? $"Deleted {deleted} wallpapers (Ctrl+Z to undo)" : $"Deleted: {batchItems[0].Card.Title} (Ctrl+Z to undo)";
         }
     }
 
@@ -1204,10 +1204,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (_undoBatches.Count == 0) return;
         var batch = _undoBatches[^1];
+        LibraryService.RestoreBatch(batch.BatchDir);
         _undoBatches.RemoveAt(_undoBatches.Count - 1);
         CanUndo = _undoBatches.Count > 0;
-
-        LibraryService.RestoreBatch(batch.BatchDir);
         foreach (var (card, wasInPlaylist) in batch.Items)
         {
             LibraryWallpapers.Add(card);
