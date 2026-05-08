@@ -966,13 +966,15 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
         var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs);
+        bool waitForVideoEnd = GetEffectiveWaitForVideoEnd();
+        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, waitForVideoEnd: waitForVideoEnd);
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
             Paths = paths,
             Shuffle = PlaylistShuffle,
-            TimedIntervalSeconds = intervalSecs
+            TimedIntervalSeconds = intervalSecs,
+            WaitForVideoEnd = waitForVideoEnd
         };
         SettingsService.Save(_settings);
         StatusMessage = $"Playing playlist ({paths.Count} wallpapers, switching every {GetEffectiveIntervalDisplay()})";
@@ -1607,13 +1609,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
             var playPaths = ShuffleLibrary ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-            PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), ShuffleLibrary, intervalSecs);
+            PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), ShuffleLibrary, intervalSecs, waitForVideoEnd: _settings.GlobalWaitForVideoEnd);
             _settings.LastSession = new LastSession
             {
                 IsTimedPlaylist = true,
                 Paths = paths,
                 Shuffle = ShuffleLibrary,
-                TimedIntervalSeconds = intervalSecs
+                TimedIntervalSeconds = intervalSecs,
+                WaitForVideoEnd = _settings.GlobalWaitForVideoEnd
             };
             SettingsService.Save(_settings);
             StatusMessage = $"Playing {paths.Count} wallpapers, switching every {FormatInterval(intervalSecs)}{(ShuffleLibrary ? " (shuffled)" : "")}";
