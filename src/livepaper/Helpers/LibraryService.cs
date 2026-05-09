@@ -136,7 +136,7 @@ public static class LibraryService
 
             string idFile = Path.ChangeExtension(media, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
-            string? workshopId = ParseWorkshopId(sourceId, media, idFile);
+            string? workshopId = ParseWorkshopId(sourceId);
             bool hasCrashed = File.Exists(Path.ChangeExtension(media, ".crashed"));
             bool isWhitelisted = File.Exists(Path.ChangeExtension(media, ".whitelist"));
             var fi = new FileInfo(media);
@@ -168,7 +168,7 @@ public static class LibraryService
                 if (Path.IsPathRooted(raw))
                 {
                     copiedSceneDir = raw;
-                    workshopId = ParseWorkshopId(sourceId, scene, idFile);
+                    workshopId = ParseWorkshopId(sourceId);
                 }
                 else
                 {
@@ -213,7 +213,7 @@ public static class LibraryService
         return null;
     }
 
-    private static string? ParseWorkshopId(string? sourceId, string mp4, string idFile)
+    private static string? ParseWorkshopId(string? sourceId)
     {
         if (sourceId == null) return null;
         if (long.TryParse(sourceId, out _)) return sourceId;
@@ -225,20 +225,13 @@ public static class LibraryService
         {
             if ((parts[i] == "431960" || parts[i].Equals("workshop", StringComparison.OrdinalIgnoreCase))
                 && long.TryParse(parts[i + 1], out _))
-            {
-                string id = parts[i + 1];
-                try { File.WriteAllText(idFile, id); } catch { }
-                return id;
-            }
+                return parts[i + 1];
         }
         // Fallback: any purely numeric 8+ digit segment
         foreach (var part in parts)
         {
             if (part.Length >= 8 && long.TryParse(part, out _))
-            {
-                try { File.WriteAllText(idFile, part); } catch { }
                 return part;
-            }
         }
         return null;
     }
