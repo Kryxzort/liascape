@@ -6,7 +6,11 @@ paths:
 
 ## Player
 
-`PlayerHelper` is the single entry point for mpvpaper. Kills all existing mpvpaper processes before starting a new one. **stdout/stderr are NOT redirected** for mpvpaper or LWE — `RedirectStandardOutput/Error = false`. Do not add `BeginOutputReadLine/ErrorReadLine` calls.
+`PlayerHelper` is the single entry point for mpvpaper. Kills all existing mpvpaper processes before starting a new one.
+
+**stdout/stderr redirection:**
+- **mpvpaper** (`Launch`), **timer daemon** (`SpawnTimerDaemon`), **restart daemon** (`SpawnRestartDaemon`): `RedirectStandardOutput/Error = true`, `BeginOutputReadLine/BeginErrorReadLine` called — required to drain pipes and prevent deadlock.
+- **LWE** (`SpawnLweProcesses`): `RedirectStandardOutput/Error = false` — do NOT add `BeginOutputReadLine/ErrorReadLine` here.
 
 **IPC readiness**: after spawning mpvpaper, `Launch` polls `TryQueryTimeRemaining()` up to 40 × 50 ms (2 s total). `TryQueryTimeRemaining` splits the raw socket buffer on `\n` and tries to parse each line as JSON — mpv sometimes sends multiple responses in one read.
 

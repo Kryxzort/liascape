@@ -873,7 +873,6 @@ public static class PlayerHelper
                 {
                     var volOverride = ReadVolumeOverride(path);
                     var count = newPids.Length;
-                    bool capturedMute = _isMuted;
                     _ = Task.Run(async () =>
                     {
                         for (int i = 0; i < 60; i++)
@@ -881,7 +880,7 @@ public static class PlayerHelper
                             if (GetLweSinkInputIds().Count >= count) break;
                             await Task.Delay(50);
                         }
-                        ApplyLweMute(capturedMute || AudioMonitor.IsMuted);
+                        ApplyLweMute(_isMuted || AudioMonitor.IsMuted);
                         ApplyLweVolume(volOverride ?? settings.Volume);
                     });
                 }
@@ -1012,9 +1011,17 @@ public static class PlayerHelper
             socket.Send(Encoding.UTF8.GetBytes(cmd + "\n"));
             var buf = new byte[4096];
             int n = socket.Receive(buf);
-            using var doc = JsonDocument.Parse(buf.AsMemory(0, n));
-            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String)
-                return data.GetString();
+            foreach (var line in Encoding.UTF8.GetString(buf, 0, n).Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String)
+                        return data.GetString();
+                }
+                catch { }
+            }
             return null;
         }
         catch { return null; }
@@ -1839,12 +1846,12 @@ public static class PlayerHelper
         }
     }
 
-    // Automute-driven mute. Blocked from unmuting if user has explicitly muted via keybind.
+    // Automute-driven mute. Updates _autoMuted always; blocked from sending unmute if user has explicitly muted.
     public static void SetMute(bool mute)
     {
-        if (!mute && _userMuted) return;
         _autoMuted = mute;
         _isMuted = mute || _userMuted;
+        if (!mute && _userMuted) return;
         SendCommand("set_property", "mute", _isMuted);
         if (IsLweRunning) ApplyLweMute(_isMuted);
     }
@@ -2002,14 +2009,15 @@ public static class PlayerHelper
             }
 
             var path = p[_timedIndex];
+            if (IsSkippedPath(path)) continue;
+
             if (_history != null)
             {
                 _history.Add(path);
                 if (_history.Count > 100) _history.RemoveAt(0);
                 _historyIndex = _history.Count - 1;
             }
-
-            if (!IsSkippedPath(path)) return path;
+            return path;
         }
 
         return null;
