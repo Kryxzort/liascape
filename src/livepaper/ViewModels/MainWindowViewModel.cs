@@ -1609,6 +1609,7 @@ public partial class MainWindowViewModel : ViewModelBase
         card.OnSpeedChanged = (c, v) => SyncSelectedSpeed(c, v);
         card.UpdateGlobalSpeed(Speed);
         if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
+        card.OnOpenSettings = c => OpenPreview(c);
         return card;
     }
 

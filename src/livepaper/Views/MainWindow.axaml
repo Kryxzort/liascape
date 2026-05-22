@@ -169,6 +169,16 @@
                                                 Background="{DynamicResource BgBase}"
                                                 PointerEntered="OnCardPointerEntered"
                                                 PointerExited="OnCardPointerExited">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Open Page"
+                                                              Command="{Binding OpenPageCommand}"
+                                                              IsVisible="{Binding !IsLocalSource}"/>
+                                                    <MenuItem Header="Open in File Manager"
+                                                              Command="{Binding OpenInFileManagerCommand}"
+                                                              IsVisible="{Binding IsLocalSource}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <Grid RowDefinitions="Auto,*,Auto">
 
                                                 <Button Grid.Row="0" Padding="0"
@@ -363,6 +373,16 @@
                                                             Background="{DynamicResource BgBase}"
                                                             PointerEntered="OnPlaylistCardPointerEntered"
                                                             PointerExited="OnPlaylistCardPointerExited">
+                                                        <Border.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Remove from Playlist"
+                                                                          Command="{Binding AddToPlaylistCommand}"/>
+                                                                <MenuItem Header="Open in File Manager"
+                                                                          Command="{Binding OpenInFileManagerCommand}"/>
+                                                                <MenuItem Header="Settings"
+                                                                          Command="{Binding OpenSettingsCommand}"/>
+                                                            </ContextMenu>
+                                                        </Border.ContextMenu>
                                                         <Border.Styles>
                                                             <Style Selector="Border.playlist-item Grid.play-overlay">
                                                                 <Setter Property="Opacity" Value="0"/>
@@ -489,6 +509,10 @@
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
                                                                   Command="{Binding AddToPlaylistCommand}"/>
+                                                        <MenuItem Header="Open in File Manager"
+                                                                  Command="{Binding OpenInFileManagerCommand}"/>
+                                                        <MenuItem Header="Settings"
+                                                                  Command="{Binding OpenSettingsCommand}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
                                                 <Grid RowDefinitions="Auto,*,Auto">
