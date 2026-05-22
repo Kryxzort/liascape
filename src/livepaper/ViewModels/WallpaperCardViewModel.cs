@@ -86,6 +86,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
         catch { }
         return null;
     }
+
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _hasCrashed;

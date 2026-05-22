@@ -80,17 +80,40 @@
                                     <TextBox Text="{Binding SearchQuery}"
                                              PlaceholderText="Search…"
                                              Width="220"
-                                             IsEnabled="{Binding SelectedSource.SupportsSearch}">
-                                        <TextBox.KeyBindings>
-                                            <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}"/>
-                                        </TextBox.KeyBindings>
-                                    </TextBox>
-                                    <Button Content="Search"
-                                            Classes="ghost"
-                                            Command="{Binding SearchCommand}"
-                                            IsEnabled="{Binding SelectedSource.SupportsSearch}"/>
-                                    <Button Content="↺"
-                                            Classes="ghost"
+                                             IsEnabled="{Binding SelectedSource.SupportsSearch}"/>
+                                    <Button Classes="ghost"
+                                            Width="28" Height="28" Padding="0"
+                                            IsVisible="{Binding SelectedSource.SupportsSorting}"
+                                            ToolTip.Tip="Sort">
+                                        <Button.Flyout>
+                                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                <MenuItem Header="Default"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="0"/>
+                                                <MenuItem Header="Name A–Z"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="1"/>
+                                                <MenuItem Header="Name Z–A"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="2"/>
+                                                <MenuItem Header="Videos first"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="3"/>
+                                                <MenuItem Header="Scenes first"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="4"/>
+                                                <MenuItem Header="Newest added"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="5"/>
+                                                <MenuItem Header="Oldest added"
+                                                          Command="{Binding SetBrowseSortCommand}"
+                                                          CommandParameter="6"/>
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                        <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>
+                                    </Button>
+                                    <Button Classes="ghost"
+                                            Width="28" Height="28" Padding="0"
                                             Command="{Binding LoadWallpapersCommand}"
                                             ToolTip.Tip="Refresh"/>
                                 </StackPanel>
@@ -1291,11 +1314,27 @@
                     </Border>
 
                     <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
-                        <TextBlock Grid.Column="0"
-                                   Text="{Binding PreviewCard.Title}"
-                                   VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextColor}"
-                                   FontSize="13" TextTrimming="CharacterEllipsis"/>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding PreviewCard.Title}"
+                                       Foreground="{DynamicResource TextColor}"
+                                       FontSize="13" TextTrimming="CharacterEllipsis"/>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="6"
+                                        IsVisible="{Binding PreviewCard.WorkshopId, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                        Margin="0,2,0,0">
+                                <TextBlock Text="{Binding PreviewCard.WorkshopId, StringFormat='Workshop ID: {0}'}"
+                                           Foreground="{DynamicResource Subtext}"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                                <Button Classes="ghost"
+                                        Width="18" Height="18" Padding="0"
+                                        ToolTip.Tip="Copy"
+                                        Command="{Binding CopyTextCommand}"
+                                        CommandParameter="{Binding PreviewCard.WorkshopId}">
+                                    <mi:MaterialIcon Kind="ContentCopy" Width="11" Height="11"/>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
                         <Button Grid.Column="1"
                                 Content="Download &amp; Apply"
                                 Classes="accent"

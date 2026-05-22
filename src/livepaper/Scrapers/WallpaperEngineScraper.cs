@@ -30,6 +30,27 @@ public static class WallpaperEngineScraper
             string workshopId = Path.GetFileName(dir);
             string title = (info != null && !string.IsNullOrEmpty(info.Title))
                 ? info.Title : workshopId;
+            var addedAt = Directory.GetCreationTime(dir);
+
+            // Scene detection: type == "scene" OR scene.pkg present
+            bool hasScene = File.Exists(Path.Combine(dir, "scene.pkg"));
+            bool isScene = (info != null && string.Equals(info.Type, "scene", StringComparison.OrdinalIgnoreCase))
+                || (info == null && hasScene);
+
+            if (isScene)
+            {
+                if (!allowScenes) continue;
+                results.Add(new WallpaperResult
+                {
+                    Title = title,
+                    ThumbnailUrl = FindThumbnail(dir) ?? "",
+                    PageUrl = dir,
+                    IsScene = true,
+                    WorkshopId = workshopId,
+                    AddedAt = addedAt
+                });
+                continue;
+            }
 
             if (info == null) continue;
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
@@ -49,14 +70,20 @@ public static class WallpaperEngineScraper
                 ThumbnailUrl = thumbnail ?? "",
                 AnimatedThumbnailUrl = animatedGif,
                 PageUrl = videoPath,
-                WorkshopId = workshopId
+                WorkshopId = workshopId,
+                AddedAt = addedAt
             });
         }
+
 
         results = sortIndex switch
         {
             1 => [.. results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
             2 => [.. results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)],
+            3 => [.. results.OrderBy(r => r.IsScene).ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
+            4 => [.. results.OrderByDescending(r => r.IsScene).ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
+            5 => [.. results.OrderByDescending(r => r.AddedAt ?? DateTime.MinValue)],
+            6 => [.. results.OrderBy(r => r.AddedAt ?? DateTime.MaxValue)],
             _ => results
         };
 
@@ -119,6 +146,19 @@ public static class WallpaperEngineScraper
         }
 
         return (null, null);
+    }
+
+    private static string? FindThumbnail(string dir)
+    {
+        string preview = Path.Combine(dir, "preview.jpg");
+        if (File.Exists(preview)) return preview;
+
+        foreach (string ext in new[] { "*.gif", "*.png", "*.jpg", "*.jpeg" })
+        {
+            var files = Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly);
+            if (files.Length > 0) return files[0];
+        }
+        return null;
     }
 
     internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)

@@ -11,7 +11,8 @@ The app has three tabs:
 ### Browse Tab
 - Source selector (pill-style): motionbgs.com, moewalls.com, Desktophut, Wallpaper Engine local
 - Grid of wallpaper cards (`ItemsRepeater + UniformGridLayout`, responsive columns); thumbnail + title; clicking thumbnail opens fullscreen preview modal; GIF thumbnails animate on hover
-- Search box (enabled only for sources that support it)
+- **Auto-search**: search box triggers debounced (200ms) load — no Search button
+- **Sort button** (WE local only, `SupportsSorting`): Name A–Z/Z–A, Newest/Oldest added
 - Refresh button and loading bar (thin strip below top bar, no layout shift)
 - Per-card "Download & Apply" downloads + applies that card only
 - **Selection toolbar** docks at bottom when ≥1 selected (Shift/Ctrl-click, Ctrl+A): "N selected", `Download` (no apply), `Cancel`
@@ -22,7 +23,7 @@ The app has three tabs:
 - "Import": file picker (`.mp4`/`.webm`/`.mov`/`.mkv`/`.avi`/`.gif`); title modal copies to library, ffmpeg 320px thumbnail at 1s. `.id` holds `import:<source-path>`.
 - "Play All" + "Shuffle" toggle — follows global Settings → PLAYLIST
 - Per-card: Apply, Delete (soft-delete → `.trash/`; **Delete** key also triggers; **Ctrl+Z** undo)
-- **Preview modal** (click thumbnail): per-wallpaper volume slider (0–100, "↺ Global"); per-wallpaper speed slider (0.1–4×)
+- **Preview modal** (click thumbnail): title, workshop ID (copy button); per-wallpaper volume slider (0–100, "↺ Global"); per-wallpaper speed slider (0.1–4×)
 - **Selection toolbar** above playlist strip when ≥1 selected: `Add to Playlist`, `Remove from Playlist`, `Delete`, `Cancel`
 - **Playlist strip** (always visible at bottom): horizontal small thumbnails; `−` badge; hover → dim + ▶ overlay; drag to reorder; click plays
   - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval and AdvanceOnVideoEnd)

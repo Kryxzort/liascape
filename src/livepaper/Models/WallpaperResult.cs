@@ -1,3 +1,5 @@
+using System;
+
 namespace livepaper.Models;
 
 public class WallpaperResult
@@ -9,4 +11,5 @@ public class WallpaperResult
     public string? Resolution { get; init; }
     public bool IsScene { get; init; }
     public string? WorkshopId { get; init; }
+    public DateTime? AddedAt { get; init; }
 }
