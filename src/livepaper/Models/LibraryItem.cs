@@ -1,3 +1,5 @@
+using System;
+
 namespace livepaper.Models;
 
 public class LibraryItem
@@ -12,5 +14,5 @@ public class LibraryItem
     public bool IsWhitelisted { get; init; }
     public int? VolumeOverride { get; init; }
     public double? SpeedOverride { get; init; }
-    public System.DateTime AddedAt { get; init; }
+    public DateTime AddedAt { get; init; }
 }
