@@ -1273,6 +1273,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var shuffle = PlaylistShuffle;
         var secs = GetIntervalSeconds();
         var advance = AdvanceOnVideoEnd;
+        var wait = PlaylistWaitForVideoEnd;
         var overrideGlobal = OverrideGlobalSettings;
         var name = CurrentPlaylistName;
 
@@ -1281,7 +1282,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var cts = _playlistSaveCts = new CancellationTokenSource();
         Task.Delay(200, cts.Token).ContinueWith(t =>
         {
-            if (!t.IsCanceled) SavePlaylistState(paths, shuffle, secs, advance, overrideGlobal, name);
+            if (!t.IsCanceled) SavePlaylistState(paths, shuffle, secs, advance, wait, overrideGlobal, name);
         }, TaskScheduler.Default);
     }
 
@@ -1315,7 +1316,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }, TaskScheduler.Default);
     }
 
-    private static void SavePlaylistState(List<string> paths, bool shuffle, int intervalSeconds, bool advanceOnVideoEnd, bool overrideGlobal, string? name)
+    private static void SavePlaylistState(List<string> paths, bool shuffle, int intervalSeconds, bool advanceOnVideoEnd, bool waitForVideoEnd, bool overrideGlobal, string? name)
     {
         try
         {
@@ -1328,7 +1329,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     OverrideGlobalSettings = overrideGlobal,
                     IntervalSeconds = intervalSeconds,
                     AdvanceOnVideoEnd = advanceOnVideoEnd,
-                    WaitForVideoEnd = PlaylistWaitForVideoEnd
+                    WaitForVideoEnd = waitForVideoEnd
                 },
                 Name = name
             };

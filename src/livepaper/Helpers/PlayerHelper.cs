@@ -678,7 +678,7 @@ public static class PlayerHelper
         var cts = _waitCts = new CancellationTokenSource();
         var opts = _timedOptions;
         var intervalMs = (long)_timedInterval.TotalMilliseconds;
-        Task.Run(() => DoVideoEndWait(next, opts, intervalMs, cts.Token));
+        Task.Run(() => DoVideoEndWait(next, cts.Token));
     }
 
     public static bool RestoreTimedPlaylist()
@@ -1975,6 +1975,12 @@ public static class PlayerHelper
 
     public static void SetPlaylistShuffle(bool shuffle) =>
         TrySendCommand(shuffle ? "playlist-shuffle" : "playlist-unshuffle");
+
+    public static void SetVideoScale(string scale)
+    {
+        double panscan = scale == "fill" ? 1.0 : 0.0;
+        SendCommand("set_property", "panscan", panscan);
+    }
 
     private static void StartPlaylistObserver(IReadOnlyList<string> videoPaths)
     {
