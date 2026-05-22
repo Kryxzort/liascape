@@ -34,6 +34,8 @@ public class WallpaperEngineService : IBgsProvider
             Title = result.Title,
             PreviewUrl = result.ThumbnailUrl,
             DownloadUrl = result.PageUrl,
-            NeedsReferrer = false
+            NeedsReferrer = false,
+            IsScene = result.IsScene,
+            WorkshopId = result.WorkshopId
         });
 }

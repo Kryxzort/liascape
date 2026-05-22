@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,6 +15,7 @@ namespace livepaper.ViewModels;
 
 public partial class WallpaperCardViewModel : ViewModelBase
 {
+    private static readonly SemaphoreSlim _metadataSem = new(4, 4);
     public string Title { get; }
     public string ThumbnailSource { get; }
     public string PageUrl { get; }
@@ -93,6 +96,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _hasCrashed;
     [ObservableProperty] private bool _isWhitelisted;
+    [ObservableProperty] private bool _isCurrentlyPlaying;
+    [ObservableProperty] private string _videoDuration = "";
     [ObservableProperty] private int _sliderVolume;
     [ObservableProperty] private double _sliderSpeed;
 
@@ -104,6 +109,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     private double _globalSpeed;
     private bool _suppressSpeedChange;
 
+    public bool IsSpeedSliderVisible => LibraryItem != null && !IsScene;
     public bool IsVolumeSynced => _volumeOverride == null;
     public int? VolumeOverride => _volumeOverride;
     public bool IsSpeedSynced => _speedOverride == null;
@@ -195,9 +201,6 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public Action<WallpaperCardViewModel, int?>? OnVolumeChanged { get; set; }
     public Action<WallpaperCardViewModel, double?>? OnSpeedChanged { get; set; }
 
-
-    [ObservableProperty] private bool _isCurrentlyPlaying;
-
     public string CheckmarkText => IsInPlaylist ? "−" : "+";
 
     partial void OnIsInPlaylistChanged(bool value) => OnPropertyChanged(nameof(CheckmarkText));
@@ -227,16 +230,31 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
         if (LibraryItem != null)
         {
-            // Resolve symlinks so WeCopyFiles=false points to the workshop item dir
-            string path = LibraryItem.VideoPath;
-            try
+            if (IsScene)
             {
-                var target = File.ResolveLinkTarget(path, returnFinalTarget: true);
-                if (target != null) path = target.FullName;
+                if (LibraryItem.CopiedSceneDir != null && Directory.Exists(LibraryItem.CopiedSceneDir))
+                    dir = LibraryItem.CopiedSceneDir;
+                else if (WorkshopId != null)
+                {
+                    var wePath = SettingsService.Load().WallpaperEnginePath;
+                    if (!string.IsNullOrEmpty(wePath))
+                        dir = Path.Combine(wePath, WorkshopId);
+                }
             }
-            catch { }
-            filePath = path;
-            dir = Path.GetDirectoryName(path);
+
+            if (dir == null)
+            {
+                // Resolve symlinks so WeCopyFiles=false points to the workshop item dir
+                string path = LibraryItem.VideoPath;
+                try
+                {
+                    var target = File.ResolveLinkTarget(path, returnFinalTarget: true);
+                    if (target != null) path = target.FullName;
+                }
+                catch { }
+                filePath = path;
+                dir = Path.GetDirectoryName(path);
+            }
         }
         else if (!string.IsNullOrEmpty(PageUrl) && !PageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
@@ -284,6 +302,53 @@ public partial class WallpaperCardViewModel : ViewModelBase
         catch { return false; }
     }
 
+    public void LoadDurationAsync()
+    {
+        if (LibraryItem == null || IsScene) return;
+        Task.Run(async () =>
+        {
+            await _metadataSem.WaitAsync();
+            try
+            {
+                var dur = ReadDuration(LibraryItem.VideoPath);
+                Dispatcher.UIThread.Post(() => VideoDuration = dur);
+            }
+            finally { _metadataSem.Release(); }
+        });
+    }
+
+    private static string ReadDuration(string path)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("ffprobe")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
+            psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("format=duration");
+            psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("default=noprint_wrappers=1:nokey=1");
+            psi.ArgumentList.Add(path);
+            using var proc = Process.Start(psi);
+            var output = proc?.StandardOutput.ReadToEnd().Trim();
+            proc?.WaitForExit();
+            if (double.TryParse(output, NumberStyles.Float, CultureInfo.InvariantCulture, out double s))
+            {
+                var ts = TimeSpan.FromSeconds((int)s);
+                var parts = new System.Collections.Generic.List<string>();
+                if (ts.Hours > 0) parts.Add($"{ts.Hours} {(ts.Hours == 1 ? "hour" : "hours")}");
+                if (ts.Minutes > 0) parts.Add($"{ts.Minutes} {(ts.Minutes == 1 ? "minute" : "minutes")}");
+                if (ts.Seconds > 0 || parts.Count == 0) parts.Add($"{ts.Seconds} {(ts.Seconds == 1 ? "second" : "seconds")}");
+                if (parts.Count == 1) return parts[0];
+                return string.Join(", ", parts[..^1]) + " and " + parts[^1];
+            }
+        }
+        catch { }
+        return "";
+    }
+
     public WallpaperCardViewModel(WallpaperResult result)
     {
         Title = result.Title;
@@ -321,7 +386,6 @@ public partial class WallpaperCardViewModel : ViewModelBase
         _sliderVolume = item.VolumeOverride ?? SettingsService.Load().Volume;
         _speedOverride = item.SpeedOverride;
         _sliderSpeed = item.SpeedOverride ?? 1.0;
-#pragma warning restore MVVMTK0034
 
         // Pre-populate StaticThumbnailSource from WE cache if thumbnail is a GIF
         if (IsGifThumbnail && item.WorkshopId != null)
@@ -332,6 +396,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
             if (File.Exists(cached))
                 _staticThumbnailSource = cached;
         }
+#pragma warning restore MVVMTK0034
     }
 
     private static string GifThumbCacheDir => Path.Combine(
@@ -347,6 +412,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
         string outputPath = Path.Combine(cacheDir, $"{cacheKey}.jpg");
         Task.Run(async () =>
         {
+            await _metadataSem.WaitAsync();
             try
             {
                 Directory.CreateDirectory(cacheDir);
@@ -354,7 +420,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
                 if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
                     Dispatcher.UIThread.Post(() => StaticThumbnailSource = outputPath);
             }
-            catch { }
+            finally { _metadataSem.Release(); }
         });
     }
 }
