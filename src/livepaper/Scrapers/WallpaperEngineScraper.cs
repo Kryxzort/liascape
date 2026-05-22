@@ -22,7 +22,7 @@ public static class WallpaperEngineScraper
         // WE workshop layout: <workshopPath>/<wallpaperId>/{project.json, <video>, preview.*, ...}
         // Drive discovery from project.json so we pick up any video format
         // mpv supports (mp4, webm, mov, mkv, ...) while filtering out
-        // non-video wallpaper types ("scene", "web", "application").
+        // non-video wallpaper types ("web", "application").
         foreach (var dir in Directory.EnumerateDirectories(workshopPath))
         {
             var info = await ReadProjectAsync(dir);
