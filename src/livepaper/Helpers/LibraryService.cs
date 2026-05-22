@@ -122,32 +122,39 @@ public static class LibraryService
         if (!Directory.Exists(DownloadHelper.LibraryPath))
             return items;
 
-        foreach (var mp4 in Directory.GetFiles(DownloadHelper.LibraryPath, "*.mp4"))
+        // Videos use .mp4; imported still images use .png. Both conventions
+        // share the same .jpg-thumbnail / .id-sidecar layout.
+        var mediaFiles = Directory.GetFiles(DownloadHelper.LibraryPath, "*.mp4")
+            .Concat(Directory.GetFiles(DownloadHelper.LibraryPath, "*.png")
+                .Where(f => !File.Exists(Path.ChangeExtension(f, ".scene"))
+                         && !File.Exists(Path.ChangeExtension(f, ".mp4"))));
+
+        foreach (var media in mediaFiles)
         {
             // Dangling symlink (target was deleted, e.g., WE wallpaper
             // uninstalled from Steam). Sweep it and its sibling .jpg/.id.
-            if (!File.Exists(mp4))
+            if (!File.Exists(media))
             {
-                if (IsSymlink(mp4)) CleanOrphan(mp4);
+                if (IsSymlink(media)) CleanOrphan(media);
                 continue;
             }
 
-            string title = Path.GetFileNameWithoutExtension(mp4);
-            string? thumb = FindLibraryThumbnail(mp4);
+            string title = Path.GetFileNameWithoutExtension(media);
+            string? thumb = FindLibraryThumbnail(media);
 
-            string idFile = Path.ChangeExtension(mp4, ".id");
+            string idFile = Path.ChangeExtension(media, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
-            string? workshopId = ParseWorkshopId(sourceId, mp4, idFile);
-            bool hasCrashed = File.Exists(Path.ChangeExtension(mp4, ".crashed"));
-            bool isWhitelisted = File.Exists(Path.ChangeExtension(mp4, ".whitelist"));
-            int? volumeOverride = ReadVolumeOverride(mp4);
-            double? speedOverride = ReadSpeedOverride(mp4);
-            var fi = new FileInfo(mp4);
+            string? workshopId = ParseWorkshopId(sourceId, media, idFile);
+            bool hasCrashed = File.Exists(Path.ChangeExtension(media, ".crashed"));
+            bool isWhitelisted = File.Exists(Path.ChangeExtension(media, ".whitelist"));
+            int? volumeOverride = ReadVolumeOverride(media);
+            double? speedOverride = ReadSpeedOverride(media);
+            var fi = new FileInfo(media);
 
             items.Add(new LibraryItem
             {
                 Title = title,
-                VideoPath = mp4,
+                VideoPath = media,
                 ThumbnailPath = thumb,
                 SourceId = sourceId,
                 WorkshopId = workshopId,

@@ -17,6 +17,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public bool IsScene { get; }
     public string? WorkshopId { get; }
 
+    public bool IsScene { get; }
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
     [ObservableProperty] private bool _hasCrashed;
@@ -122,6 +123,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     public Action<WallpaperCardViewModel, int?>? OnVolumeChanged { get; set; }
     public Action<WallpaperCardViewModel, double?>? OnSpeedChanged { get; set; }
+
 
     [ObservableProperty] private bool _isCurrentlyPlaying;
 
