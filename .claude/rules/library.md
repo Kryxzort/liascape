@@ -21,3 +21,7 @@ Config: `~/.config/livepaper/settings.json` — Cache: `~/.cache/livepaper/`
 | `.id` | Source URL or workshop ID |
 | `.volume` | Per-video volume override (int, 0–100) |
 | `.speed` | Per-video speed override (double, InvariantCulture) |
+
+### Soft delete
+
+Moves all sidecars to `.trash/<batchId>/`. Trash purged on window close or startup. **Ctrl+Z** restores last batch.
