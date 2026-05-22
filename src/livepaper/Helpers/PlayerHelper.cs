@@ -291,6 +291,7 @@ public static class PlayerHelper
         // Mirror the timer-daemon guard: if the GUI is alive it owns the
         // in-process restart timer, so don't spawn a competing daemon.
         if (IsGuiTimerAlive()) return;
+        if (SettingsService.Load().RestartIntervalSeconds <= 0) return;
 
         KillRestartDaemon();
         try
@@ -323,7 +324,8 @@ public static class PlayerHelper
         _restartTimer = null;
         if (_daemonMode) return;
         var settings = SettingsService.Load();
-        int intervalMs = Math.Max(settings.RestartIntervalSeconds, 5) * 1000;
+        if (settings.RestartIntervalSeconds <= 0) return;
+        int intervalMs = settings.RestartIntervalSeconds * 1000;
         _restartTimer = new Timer(_ => RestartCurrent(), null,
             TimeSpan.FromMilliseconds(intervalMs),
             TimeSpan.FromMilliseconds(intervalMs));
@@ -404,7 +406,8 @@ public static class PlayerHelper
             while (true)
             {
                 var settings = SettingsService.Load();
-                int intervalMs = Math.Max(settings.RestartIntervalSeconds, 5) * 1000;
+                if (settings.RestartIntervalSeconds <= 0) return;
+                int intervalMs = settings.RestartIntervalSeconds * 1000;
                 Thread.Sleep(intervalMs);
                 settings = SettingsService.Load();
                 if (IsTimedPlaylistActive() && !IsTimedPlaylistPaused())

@@ -50,7 +50,7 @@ public class AppSettings
     public int RestartIntervalSeconds
     {
         get => _restartIntervalSeconds;
-        set => _restartIntervalSeconds = Math.Clamp(value, 5, 3600);
+        set => _restartIntervalSeconds = Math.Clamp(value, 0, 3600);
     }
     public bool GlobalWaitForVideoEnd { get; set; } = false;
     public bool PlaylistWaitForVideoEnd { get; set; } = false;

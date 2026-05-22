@@ -773,8 +773,9 @@
                                                        Margin="0,0,12,0"/>
                                             <NumericUpDown Grid.Column="1"
                                                            Value="{Binding RestartIntervalSeconds}"
-                                                           Minimum="5" Maximum="3600" Increment="60"
-                                                           FormatString="0" Width="108"/>
+                                                           Minimum="0" Maximum="3600" Increment="60"
+                                                           FormatString="0" Width="108"
+                                                           ShowButtonSpinner="True"/>
                                             <TextBlock Grid.Column="2" Text="s"
                                                        VerticalAlignment="Center"
                                                        Foreground="{DynamicResource Subtext}"
