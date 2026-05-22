@@ -12,7 +12,7 @@ paths:
 - Memory: `DemuxerMaxBytes`, `DemuxerMaxBackBytes` (int, MiB)
 - `HwDec`: `"auto"` | `"nvdec"` | `"vaapi"` | `"no"`
 - `VideoScale`: `"fill"` (panscan=1.0) | `"fit"` (panscan=0.0)
-- Auto-mute: `AutoMute` (false), `AutoMuteDelayMs` (200), `AutoUnmuteDelayMs` (2000), `AutoMuteThresholdDb` (-70.0)
+- Auto-mute: `AutoMute` (false), `AutoMuteDelayMs` (200), `AutoUnmuteDelayMs` (2000), `AutoMuteThresholdDb` (-70.0), `AutoMuteOnlyIfMprisActive` (false)
 - Global rotation: `GlobalIntervalSeconds` (1800), `GlobalAdvanceOnVideoEnd` (false)
 - Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600) — clamped in model setter; always active
 - Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`
