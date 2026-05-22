@@ -156,6 +156,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private double _cardMinWidth = 210;
     [ObservableProperty] private string _thumbnailAspect = "Default";
     [ObservableProperty] private string _cardSize = "Medium";
+    [ObservableProperty] private bool _autoPlayGifs;
     [ObservableProperty] private int _volume;
     [ObservableProperty] private double _speed;
     [ObservableProperty] private string _mpvOptionsPreview = "";
@@ -493,6 +494,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _videoScale = _settings.VideoScale;
         _thumbnailAspect = _settings.ThumbnailAspect;
         _cardSize = _settings.CardSize;
+        _autoPlayGifs = _settings.AutoPlayGifs;
         _librarySortIndex = _settings.LibrarySortIndex;
         _volume = _settings.Volume;
         _speed = _settings.Speed;
@@ -610,6 +612,24 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.CardSize = value;
         SettingsService.Save(_settings);
     }
+    partial void OnAutoPlayGifsChanged(bool value)
+    {
+        _settings.AutoPlayGifs = value;
+        SettingsService.Save(_settings);
+        if (!value)
+        {
+            foreach (var c in LibraryWallpapers)
+            {
+                if (!c.IsGifThumbnail) continue;
+                c.IsGifActive = false;
+                c.LoadStaticThumbnailAsync();
+            }
+            foreach (var c in BrowseWallpapers)
+                if (c.IsGifThumbnail) c.IsGifActive = false;
+            foreach (var c in PlaylistItems)
+                if (c.IsGifThumbnail) c.IsPlaylistGifActive = false;
+        }
+    }
     partial void OnVolumeChanged(int value)
     {
         if (LibraryWallpapers.FirstOrDefault(c => c.IsCurrentlyPlaying)?.VolumeOverride == null)
@@ -684,11 +704,13 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             PlaylistItems.Remove(card);
             card.IsInPlaylist = false;
+            card.IsPlaylistGifActive = false;
         }
         else
         {
             PlaylistItems.Add(card);
             card.IsInPlaylist = true;
+            if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
         }
     }
 
@@ -697,6 +719,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         PlaylistItems.Remove(card);
         card.IsInPlaylist = false;
+        card.IsPlaylistGifActive = false;
     }
 
     [RelayCommand]
@@ -709,6 +732,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             PlaylistItems.Add(c);
             c.IsInPlaylist = true;
+            if (AutoPlayGifs && c.IsGifThumbnail) c.IsPlaylistGifActive = true;
         }
         ClearLibrarySelection();
     }
@@ -723,6 +747,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             PlaylistItems.Remove(c);
             c.IsInPlaylist = false;
+            c.IsPlaylistGifActive = false;
         }
         ClearLibrarySelection();
     }
@@ -911,6 +936,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     PlaylistItems.Add(libCard);
                     libCard.IsInPlaylist = true;
+                    if (AutoPlayGifs && libCard.IsGifThumbnail) libCard.IsPlaylistGifActive = true;
                 }
             }
             PlaylistShuffle = playlist.Settings.Order == PlaylistOrder.Shuffle;
@@ -1003,7 +1029,7 @@ public partial class MainWindowViewModel : ViewModelBase
             var playlist = PlaylistService.Load(name);
             if (playlist == null) return;
 
-            foreach (var c in PlaylistItems) c.IsInPlaylist = false;
+            foreach (var c in PlaylistItems) { c.IsInPlaylist = false; c.IsPlaylistGifActive = false; }
             PlaylistItems.Clear();
 
             var byPath = LibraryWallpapers
@@ -1016,6 +1042,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     PlaylistItems.Add(libCard);
                     libCard.IsInPlaylist = true;
+                    if (AutoPlayGifs && libCard.IsGifThumbnail) libCard.IsPlaylistGifActive = true;
                 }
             }
 
@@ -1520,6 +1547,7 @@ public partial class MainWindowViewModel : ViewModelBase
         card.UpdateGlobalVolume(Volume);
         card.OnSpeedChanged = (c, v) => SyncSelectedSpeed(c, v);
         card.UpdateGlobalSpeed(Speed);
+        if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
         return card;
     }
 

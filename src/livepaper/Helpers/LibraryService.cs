@@ -140,8 +140,6 @@ public static class LibraryService
             }
 
             string title = Path.GetFileNameWithoutExtension(media);
-            string? thumb = FindLibraryThumbnail(media);
-
             string idFile = Path.ChangeExtension(media, ".id");
             string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
             string? workshopId = ParseWorkshopId(sourceId, media, idFile);
@@ -155,7 +153,7 @@ public static class LibraryService
             {
                 Title = title,
                 VideoPath = media,
-                ThumbnailPath = thumb,
+                ThumbnailPath = FindLibraryThumbnail(media),
                 SourceId = sourceId,
                 WorkshopId = workshopId,
                 HasCrashed = hasCrashed,
@@ -258,6 +256,7 @@ public static class LibraryService
         catch { return null; }
     }
 
+
     private static bool IsSymlink(string path)
     {
         try { return new FileInfo(path).LinkTarget != null; }
@@ -267,7 +266,8 @@ public static class LibraryService
     private static void CleanOrphan(string mp4Path)
     {
         try { File.Delete(mp4Path); } catch { }
-        try { File.Delete(Path.ChangeExtension(mp4Path, ".jpg")); } catch { }
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".gif" })
+            try { File.Delete(Path.ChangeExtension(mp4Path, ext)); } catch { }
         try { File.Delete(Path.ChangeExtension(mp4Path, ".id")); } catch { }
     }
 }
