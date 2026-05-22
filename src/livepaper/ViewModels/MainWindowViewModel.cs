@@ -422,6 +422,54 @@ public partial class MainWindowViewModel : ViewModelBase
         if (int.TryParse(index, out int i)) LibrarySortIndex = i;
     }
 
+    // ── Browse sort / auto-search ─────────────────────────────────────────
+
+    [ObservableProperty] private int _browseSortIndex = 0;
+    private CancellationTokenSource? _browseSearchDebounceCts;
+
+    partial void OnBrowseSortIndexChanged(int value)
+    {
+        if (SelectedSource.SupportsSorting)
+        {
+            if (_isSearchMode && !string.IsNullOrWhiteSpace(SearchQuery))
+                _ = SearchAsync();
+            else
+                _ = LoadWallpapersAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void SetBrowseSort(string index)
+    {
+        if (int.TryParse(index, out int i)) BrowseSortIndex = i;
+    }
+
+    partial void OnSearchQueryChanged(string value)
+    {
+        if (!SelectedSource.SupportsSearch) return;
+        _browseSearchDebounceCts?.Cancel();
+        _browseSearchDebounceCts?.Dispose();
+        _browseSearchDebounceCts = new CancellationTokenSource();
+        var token = _browseSearchDebounceCts.Token;
+        var trimmed = value.Trim();
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(200, token);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (token.IsCancellationRequested) return;
+                    if (string.IsNullOrEmpty(trimmed))
+                        _ = LoadWallpapersAsync();
+                    else
+                        _ = SearchAsync();
+                });
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
     private static IEnumerable<WallpaperCardViewModel> ApplyLibraryFilter(
         IEnumerable<WallpaperCardViewModel> source, string query, int sortIndex)
     {
@@ -1138,8 +1186,14 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         else if (shiftHeld && _lastSelectedIndex >= 0)
         {
-            int from = Math.Min(_lastSelectedIndex, idx);
-            int to = Math.Max(_lastSelectedIndex, idx);
+            if (_lastSelectedIndex >= displayed.Count)
+            {
+                _lastSelectedIndex = idx;
+                card.IsSelected = true;
+                return;
+            }
+            int from = Math.Max(0, Math.Min(_lastSelectedIndex, idx));
+            int to = Math.Min(displayed.Count - 1, Math.Max(_lastSelectedIndex, idx));
             for (int i = from; i <= to; i++)
                 displayed[i].IsSelected = true;
         }
@@ -1166,6 +1220,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = 1;
         SearchQuery = "";
         _isSearchMode = false;
+        BrowseSortIndex = 0;
         _ = LoadWallpapersAsync();
     }
 
@@ -1185,6 +1240,9 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+
+        if (SelectedSource is WallpaperEngineService weService)
+            weService.SortIndex = BrowseSortIndex;
 
         try
         {
@@ -1219,6 +1277,9 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+
+        if (SelectedSource is WallpaperEngineService weServiceSearch)
+            weServiceSearch.SortIndex = BrowseSortIndex;
 
         try
         {
