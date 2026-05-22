@@ -28,7 +28,7 @@ The app has three tabs:
 - **Preview modal** (click thumbnail): title, workshop ID (copy button); per-wallpaper volume slider (0–100, "↺ Global"); per-wallpaper speed slider (0.1–4×)
 - **Selection toolbar** above playlist strip when ≥1 selected: `Add to Playlist`, `Remove from Playlist`, `Delete`, `Cancel`
 - **Playlist strip** (always visible at bottom): horizontal small thumbnails; `−` badge; hover → dim + ▶ overlay; drag to reorder; click plays
-  - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval and AdvanceOnVideoEnd)
+  - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval, AdvanceOnVideoEnd, WaitForVideoEnd)
   - 📂/💾 load/save named playlists → `~/.local/share/livepaper/playlists/<name>.json`
   - ▶ Play; auto-state saved to `~/.config/livepaper/playlist_state.json`
   - GIF hover in playlist strip
@@ -37,7 +37,7 @@ The app has three tabs:
 
 ### Settings Tab
 - **Playback**: Loop, Mute audio, Disable cache, Volume (0–100, live IPC), Speed (0.1–4.0×, live IPC)
-- **Playlist (global rotation)**: Switch when video ends + Hours/Minutes/Seconds interval
+- **Playlist (global rotation)**: Switch when video ends, Wait for video to end, Hours/Minutes/Seconds interval
 - **Auto-Mute**: threshold/delay knobs + "Only mute if MPRIS active" checkbox
 - **Memory**: Demuxer max bytes / back bytes (NumericUpDown, integer MiB)
 - **Rendering**: Hardware decoding (auto/nvdec/vaapi/no), Video scale (fill/fit)
