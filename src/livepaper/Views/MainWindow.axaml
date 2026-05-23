@@ -685,14 +685,12 @@
                                                   Foreground="{DynamicResource TextColor}"/>
                                         <CheckBox Content="Wait for video to end after interval fires before switching"
                                                   IsChecked="{Binding DisplayWaitForVideoEnd}"
-                                                  IsEnabled="{Binding !DisplayAdvanceOnVideoEnd}"
                                                   Foreground="{DynamicResource TextColor}"/>
                                         <TextBlock Text="SWITCH EVERY"
                                                    FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}"
                                                    LetterSpacing="2"/>
-                                        <StackPanel Orientation="Horizontal" Spacing="12"
-                                                    IsEnabled="{Binding !DisplayAdvanceOnVideoEnd}">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Hours" FontSize="12"
                                                            Foreground="{DynamicResource Subtext}"/>
@@ -817,10 +815,8 @@
                                               Foreground="{DynamicResource TextColor}"/>
                                     <CheckBox Content="Wait for video to end after interval fires before switching"
                                               IsChecked="{Binding GlobalWaitForVideoEnd}"
-                                              IsEnabled="{Binding !GlobalAdvanceOnVideoEnd}"
                                               Foreground="{DynamicResource TextColor}"/>
-                                    <StackPanel Spacing="6"
-                                                IsEnabled="{Binding !GlobalAdvanceOnVideoEnd}">
+                                    <StackPanel Spacing="6">
                                         <TextBlock Text="SWITCH EVERY"
                                                    FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}"

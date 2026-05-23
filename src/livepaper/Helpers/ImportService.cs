@@ -157,18 +157,20 @@ public static class ImportService
 
     private static async Task<bool> TryExtractThumbnailAsync(string mediaPath, string outputPath, bool isImage)
     {
-        // ffmpeg is the standard tool for frame extraction. mpv on the system
-        // is a near-universal proxy for ffmpeg being installed too on most
-        // Linux distros. If absent, we just skip the thumbnail.
-        var args = new List<string> { "-y" };
-        // Videos seek 1s in to avoid intro frames; image inputs have no
-        // timeline so -ss is omitted.
-        if (!isImage) { args.Add("-ss"); args.Add("00:00:01"); }
-        args.Add("-i"); args.Add(mediaPath);
-        args.Add("-frames:v"); args.Add("1");
-        args.Add("-vf"); args.Add("scale=320:-1");
-        args.Add(outputPath);
-        return await RunFfmpegAsync(args.ToArray()) && File.Exists(outputPath);
+        if (isImage)
+            return await RunFfmpegAsync("-y", "-i", mediaPath, "-frames:v", "1", "-vf", "scale=320:-1", outputPath) && File.Exists(outputPath);
+
+        // Skip black/white frames via YAVG signalstats (30–225 range).
+        const string signalFilter = "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less,scale=320:-1";
+        if (await RunFfmpegAsync("-y", "-i", mediaPath, "-vf", signalFilter, "-frames:v", "1", outputPath) && File.Exists(outputPath))
+            return true;
+
+        File.Delete(outputPath);
+        if (await RunFfmpegAsync("-y", "-ss", "00:00:01", "-i", mediaPath, "-frames:v", "1", "-vf", "scale=320:-1", outputPath) && File.Exists(outputPath))
+            return true;
+
+        File.Delete(outputPath);
+        return await RunFfmpegAsync("-y", "-i", mediaPath, "-frames:v", "1", "-vf", "scale=320:-1", outputPath) && File.Exists(outputPath);
     }
 
     // Conversion ffmpeg invocations run inside _importLock, so a stuck

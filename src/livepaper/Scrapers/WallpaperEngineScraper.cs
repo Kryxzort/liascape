@@ -118,26 +118,38 @@ public static class WallpaperEngineScraper
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".cache", "livepaper", "we_thumbs");
 
-    // Returns (staticPath, animatedGifPath). animatedGifPath is non-null only when
-    // the source thumbnail is a GIF and a static frame was extracted from it.
+    // Returns (staticPath, animatedGifPath). animatedGifPath is non-null when a GIF
+    // exists in the directory. Checks for GIF before preview.jpg so videos with both
+    // get animated thumbnails.
     private static async Task<(string? Static, string? AnimatedGif)> FindThumbnailAsync(string dir)
     {
+        string workshopId = Path.GetFileName(dir);
         string preview = Path.Combine(dir, "preview.jpg");
-        if (File.Exists(preview)) return (preview, null);
-
         string? gifPath = Directory.GetFiles(dir, "*.gif", SearchOption.TopDirectoryOnly).FirstOrDefault();
 
         if (gifPath != null)
         {
-            string workshopId = Path.GetFileName(dir);
             string cacheDir = GifThumbCacheDir;
-            Directory.CreateDirectory(cacheDir);
             string staticCache = Path.Combine(cacheDir, $"{workshopId}.jpg");
 
+            if (File.Exists(preview))
+            {
+                // Cache preview.jpg so library cards find it in we_thumbs and show it immediately.
+                if (!File.Exists(staticCache))
+                {
+                    Directory.CreateDirectory(cacheDir);
+                    File.Copy(preview, staticCache);
+                }
+                return (preview, gifPath);
+            }
+
+            Directory.CreateDirectory(cacheDir);
             if (!File.Exists(staticCache))
                 await ExtractGifStaticFrameAsync(gifPath, staticCache);
             return File.Exists(staticCache) ? (staticCache, gifPath) : (gifPath, null);
         }
+
+        if (File.Exists(preview)) return (preview, null);
 
         foreach (string ext in new[] { "*.png", "*.jpg", "*.jpeg" })
         {
