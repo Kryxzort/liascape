@@ -622,7 +622,20 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 PlayerHelper.SwitchFromTimedToAdvanceOnEnd(paths, PlaylistShuffle);
             }
-            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
+            // ApplyPlaylist's mixed-playlist path upgrades to ApplyTimedPlaylist — record accordingly.
+            if (PlayerHelper.IsTimedPlaylistActive())
+                _settings.LastSession = new LastSession
+                {
+                    IsTimedPlaylist = true,
+                    Paths = paths,
+                    Shuffle = PlaylistShuffle,
+                    TimedIntervalSeconds = GetEffectiveIntervalSeconds(),
+                    WaitForVideoEnd = true,
+                    AdvanceOnVideoEnd = true,
+                    OverrideGlobalSettings = OverrideGlobalSettings
+                };
+            else
+                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
         }
         else
         {
@@ -1175,7 +1188,21 @@ public partial class MainWindowViewModel : ViewModelBase
         if (GetEffectiveAdvanceOnVideoEnd())
         {
             PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle, GetEffectiveIntervalSeconds());
-            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
+            // ApplyPlaylist may internally upgrade to ApplyTimedPlaylist when scenes are present
+            // and AllowScenes=true. Reflect that in LastSession so daemon resume picks the right path.
+            if (PlayerHelper.IsTimedPlaylistActive())
+                _settings.LastSession = new LastSession
+                {
+                    IsTimedPlaylist = true,
+                    Paths = paths,
+                    Shuffle = PlaylistShuffle,
+                    TimedIntervalSeconds = GetEffectiveIntervalSeconds(),
+                    WaitForVideoEnd = true,
+                    AdvanceOnVideoEnd = true,
+                    OverrideGlobalSettings = OverrideGlobalSettings
+                };
+            else
+                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
             SettingsService.Save(_settings);
             RefreshPlayingStatusSoon();
             return;
@@ -1223,7 +1250,20 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             // Pre-arranged order; pass shuffle=false so mpv plays the clicked card first.
             PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), shuffle: false);
-            _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
+            // ApplyPlaylist may upgrade to ApplyTimedPlaylist when scenes present + AllowScenes=true.
+            if (PlayerHelper.IsTimedPlaylistActive())
+                _settings.LastSession = new LastSession
+                {
+                    IsTimedPlaylist = true,
+                    Paths = paths,
+                    Shuffle = PlaylistShuffle,
+                    TimedIntervalSeconds = GetEffectiveIntervalSeconds(),
+                    WaitForVideoEnd = true,
+                    AdvanceOnVideoEnd = true,
+                    OverrideGlobalSettings = OverrideGlobalSettings
+                };
+            else
+                _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings };
             SettingsService.Save(_settings);
             RefreshPlayingStatusSoon();
             return;

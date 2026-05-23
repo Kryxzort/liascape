@@ -543,6 +543,9 @@ public static class PlayerHelper
             _waitForVideoEnd = state.WaitForVideoEnd;
             _advanceOnVideoEnd = state.AdvanceOnVideoEnd;
             _waitingForVideoEnd = state.WaitingForVideoEnd;
+            // Restore speed for tick speed factor (video-time vs wall-clock). Per-video
+            // override picked up via mpv IPC SetSpeed on next transition.
+            _currentSpeed = SettingsService.Load().Speed;
             return true;
         }
         catch { return false; }
@@ -637,7 +640,12 @@ public static class PlayerHelper
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
             _waitForVideoEnd = waitForVideoEnd;
             _advanceOnVideoEnd = advanceOnVideoEnd;
-            _currentSpeed = SettingsService.Load().Speed;
+            // Pick up per-video speed override for the first item so tick scales interval
+            // correctly from the first tick rather than after the next transition's SetSpeed.
+            // Scenes always play at 1× (tick uses 1.0 factor anyway), so override irrelevant for them.
+            _currentSpeed = IsScenePath(ordered[0])
+                ? SettingsService.Load().Speed
+                : (ReadSpeedOverride(ordered[0]) ?? SettingsService.Load().Speed);
             _history = [ordered[0]];
             _historyIndex = 0;
             SwitchToFile(ordered[0], mpvOptions);
@@ -662,26 +670,55 @@ public static class PlayerHelper
     }
 
     // Re-arms DoVideoEndWait after state is loaded from disk (daemon resume/restore).
-    // When _waitingForVideoEnd=true, _historyIndex already points to the pre-fetched next item —
-    // use it directly rather than calling AdvanceToNext() again (which would skip one item).
+    // Handles three cases:
+    //   (a) Current item is a scene → clear wait flag, no rearm. Timer ticks normally.
+    //   (b) Saved _waitingForVideoEnd=true (wait was in flight for either advance-on-end pre-fetch
+    //       or wait-for-video-end after timer fire) → rearm DoVideoEndWait on the prefetched next.
+    //   (c) Saved _waitingForVideoEnd=false + _advanceOnVideoEnd=true → set up new pre-fetch wait.
     // Must be called inside _lock.
     private static void RearmAdvanceOnVideoEnd()
     {
-        if (!_advanceOnVideoEnd) return;
         if (_timedPaths == null || _timedPaths.Count <= 1 || _history == null) return;
 
-        string? next;
-        if (_waitingForVideoEnd && _historyIndex >= 0 && _historyIndex < _history.Count)
-            next = _history[_historyIndex];
+        // Currently playing item: when _waitingForVideoEnd was saved true, _historyIndex is
+        // pre-fetched ahead so the actual playing item is at index-1.
+        string? current;
+        if (_waitingForVideoEnd && _historyIndex > 0 && _historyIndex < _history.Count)
+            current = _history[_historyIndex - 1];
+        else if (_historyIndex >= 0 && _historyIndex < _history.Count)
+            current = _history[_historyIndex];
         else
-            next = AdvanceToNext();
+            current = null;
 
-        if (next == null) return;
-        _waitingForVideoEnd = true;
-        var cts = _waitCts = new CancellationTokenSource();
-        var opts = _timedOptions;
-        var intervalMs = (long)_timedInterval.TotalMilliseconds;
-        Task.Run(() => DoVideoEndWait(next, cts.Token));
+        // Scenes have no natural video-end signal — clear wait flag so the timer ticks.
+        // Without this, a stale _waitingForVideoEnd=true would freeze the timer forever.
+        if (current != null && IsScenePath(current))
+        {
+            _waitingForVideoEnd = false;
+            _waitCts = null;
+            return;
+        }
+
+        // (b) A wait was in flight in the GUI — re-attach to the pre-fetched next item.
+        // Covers both advance-on-end (pre-fetched at launch) and wait-for-video-end (pre-fetched
+        // when the timer fired). Current is a video (scene case bailed above), so prevIsVideo: true.
+        if (_waitingForVideoEnd && _historyIndex >= 0 && _historyIndex < _history.Count)
+        {
+            var next = _history[_historyIndex];
+            var cts = _waitCts = new CancellationTokenSource();
+            Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+            return;
+        }
+
+        // (c) Advance-on-end mode mid-video without an in-flight wait — set one up.
+        if (_advanceOnVideoEnd)
+        {
+            var next = AdvanceToNext();
+            if (next == null) return;
+            _waitingForVideoEnd = true;
+            var cts = _waitCts = new CancellationTokenSource();
+            Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+        }
     }
 
     public static bool RestoreTimedPlaylist()
@@ -963,6 +1000,10 @@ public static class PlayerHelper
                 var speedOverride = ReadSpeedOverride(path);
                 int vol = volOverride ?? settings.Volume;
                 double spd = speedOverride ?? settings.Speed;
+                // Sync-update the tick's speed factor under the caller's lock so the
+                // first ticks after launch don't scale interval by the previous video's speed.
+                // The Task.Run still pushes the value to mpv via IPC.
+                _currentSpeed = spd;
                 Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SendCommand("set_property", "mute", true); });
 
                 var cts = _prelaunchCts = new CancellationTokenSource();
@@ -1857,19 +1898,28 @@ public static class PlayerHelper
         var session = settings.LastSession;
         if (session == null || session.Paths.Count == 0) return;
 
-        if (session.IsTimedPlaylist)
+        // Live state takes precedence over LastSession flags. ApplyPlaylist can upgrade to
+        // ApplyTimedPlaylist mid-call (scenes + AllowScenes) while the caller still saves
+        // LastSession.IsPlaylist=true with AdvanceOnVideoEnd=true. Without this check the
+        // daemon would attach a playlist observer to a timed playback and the timer would
+        // never fire → scene stuck forever.
+        bool timedActive = IsTimedPlaylistActive();
+
+        if (session.IsTimedPlaylist || timedActive)
         {
             bool started = IsPlaying && ResumeTimedTimer();
             if (!started)
             {
                 if (settings.ResumeFromLast && RestoreTimedPlaylist()) { }
-                else
+                else if (session.IsTimedPlaylist)
                 {
                     var paths = session.Shuffle
                         ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
                         : session.Paths;
                     ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd, session.AdvanceOnVideoEnd);
                 }
+                // For the upgrade case (LastSession.IsPlaylist + timedActive) without resume,
+                // there's no recorded TimedIntervalSeconds to reconstruct from — bail.
             }
         }
         else if (session.IsPlaylist)
