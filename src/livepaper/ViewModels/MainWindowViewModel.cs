@@ -950,8 +950,10 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerHelper.OnWallpaperChanged = path =>
             Dispatcher.UIThread.Post(() =>
             {
+                if (_currentlyPlayingCard != null) _currentlyPlayingCard.IsCurrentlyPlaying = false;
                 _currentlyPlayingCard = path == null ? null
                     : LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == path);
+                if (_currentlyPlayingCard != null) _currentlyPlayingCard.IsCurrentlyPlaying = true;
                 RefreshPlayingStatus();
             });
 
@@ -976,6 +978,23 @@ public partial class MainWindowViewModel : ViewModelBase
         if (s != null && PlayerHelper.IsPlaying)
         {
             if (s.IsTimedPlaylist) PlayerHelper.ResumeTimedTimer();
+            // Highlight the wallpaper that was already playing before the GUI opened (daemon-resumed).
+            // OnWallpaperChanged isn't fired in this process for sessions launched by the daemon.
+            var currentPath = s.Paths.Count == 1 ? s.Paths[0] : PlayerHelper.QueryCurrentPath();
+            WallpaperCardViewModel? playing = null;
+            if (currentPath != null)
+                playing = LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == currentPath);
+            if (playing == null)
+            {
+                var workshopId = PlayerHelper.QueryCurrentSceneWorkshopId();
+                if (workshopId != null)
+                    playing = LibraryWallpapers.FirstOrDefault(c => c.WorkshopId == workshopId);
+            }
+            if (playing != null)
+            {
+                playing.IsCurrentlyPlaying = true;
+                _currentlyPlayingCard = playing;
+            }
             RefreshPlayingStatus();
             PlayerHelper.UpdateRestartTimer();
         }
@@ -1910,7 +1929,17 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _shuffleLibrary;
 
     [RelayCommand]
-    private void Stop() { PlayerHelper.Stop(); AudioMonitor.KillDetachedMonitor(); StatusMessage = ""; }
+    private void Stop()
+    {
+        PlayerHelper.Stop();
+        AudioMonitor.KillDetachedMonitor();
+        StatusMessage = "";
+        if (_currentlyPlayingCard != null)
+        {
+            _currentlyPlayingCard.IsCurrentlyPlaying = false;
+            _currentlyPlayingCard = null;
+        }
+    }
 
     [RelayCommand]
     private void PlayLibrary()
@@ -2046,6 +2075,7 @@ public partial class MainWindowViewModel : ViewModelBase
         card.UpdateGlobalSpeed(Speed);
         if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
         card.OnOpenSettings = c => OpenPreview(c);
+        card.LoadDurationAsync();
         return card;
     }
 

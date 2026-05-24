@@ -64,6 +64,9 @@ public partial class MainWindow : Window
             PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
         };
 
+        MainTabControl.SelectionChanged += (_, _) =>
+            PlaylistPanel.IsVisible = MainTabControl.SelectedIndex == 1;
+
         this.AddHandler(PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);

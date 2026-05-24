@@ -601,6 +601,7 @@ public static class PlayerHelper
             if (paths.Length == 1)
             {
                 _current = Launch(mpvOptions, paths[0]);
+                OnWallpaperChanged?.Invoke(paths[0]);
             }
             else
             {
@@ -616,6 +617,7 @@ public static class PlayerHelper
                 _current = Launch(options, paths[paths.Length - 1]);
                 try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(paths.ToList())); } catch { }
                 StartPlaylistObserver(paths);
+                OnWallpaperChanged?.Invoke(paths[0]);
             }
         }
         UpdateRestartTimer();
@@ -1047,6 +1049,7 @@ public static class PlayerHelper
             _currentSpeed = ReadSpeedOverride(path) ?? SettingsService.Load().Speed;
             OnWallpaperChanged?.Invoke(path);
         }
+        OnWallpaperChanged?.Invoke(path);
     }
 
     private static bool TryIpcSwitchToFile(string path)
@@ -1081,6 +1084,49 @@ public static class PlayerHelper
         catch
         {
             return false;
+        }
+    }
+
+    public static string? QueryCurrentPath()
+    {
+        // For scenes, the mpv socket isn't connected. Fall back to the in-memory history.
+        if (IsLweRunning)
+        {
+            lock (_lock)
+            {
+                if (_history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
+                    return _history[_historyIndex];
+            }
+        }
+        return TryQueryCurrentPath();
+    }
+
+    public static string? QueryCurrentSceneWorkshopId()
+    {
+        if (!IsLweRunning) return null;
+        lock (_lock)
+        {
+            if (_history == null || _historyIndex < 0 || _historyIndex >= _history.Count) return null;
+            var path = _history[_historyIndex];
+            if (!IsScenePath(path)) return null;
+            try
+            {
+                var content = File.ReadAllText(path).Trim();
+                // .scene file contains either a workshop id (numeric) or a copied scene dir path.
+                if (Path.IsPathRooted(content))
+                {
+                    var idFile = Path.ChangeExtension(path, ".id");
+                    if (File.Exists(idFile))
+                    {
+                        var idContent = File.ReadAllText(idFile).Trim();
+                        var slash = idContent.LastIndexOfAny(['/', '\\']);
+                        return slash >= 0 ? idContent[(slash + 1)..] : idContent;
+                    }
+                    return null;
+                }
+                return content;
+            }
+            catch { return null; }
         }
     }
 
