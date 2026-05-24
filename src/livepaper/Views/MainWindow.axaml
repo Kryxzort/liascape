@@ -17,22 +17,8 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Window.Resources>
-        <ControlTemplate x:Key="ThumbnailDisplay" TargetType="TemplatedControl">
-            <Panel x:DataType="vm:WallpaperCardViewModel">
-                <asyncImageLoader:AdvancedImage
-                    Source="{Binding ThumbnailSource}"
-                    Stretch="UniformToFill"
-                    RenderOptions.BitmapInterpolationMode="LowQuality"
-                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-                <Viewbox IsVisible="{Binding IsGifActive}" Stretch="UniformToFill">
-                    <gif:GifImage Source="{Binding ActiveGifSource}"/>
-                </Viewbox>
-            </Panel>
-        </ControlTemplate>
-    </Window.Resources>
 
-    <Grid RowDefinitions="*,Auto,Auto">
+<Grid RowDefinitions="*,Auto,Auto">
 
             <TabControl Grid.Row="0" x:Name="MainTabControl">
 
@@ -149,9 +135,15 @@
                                                         Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                         Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                         CommandParameter="{Binding}">
-                                                    <asyncImageLoader:AdvancedImage
-                                                        Source="{Binding ThumbnailSource}"
-                                                        Stretch="UniformToFill"/>
+                                                    <Panel>
+                                                        <asyncImageLoader:AdvancedImage
+                                                            Source="{Binding ThumbnailSource}"
+                                                            Stretch="UniformToFill"/>
+                                                        <Viewbox IsVisible="{Binding IsGifActive}"
+                                                                 Stretch="UniformToFill">
+                                                            <gif:GifImage Source="{Binding ActiveGifSource}"/>
+                                                        </Viewbox>
+                                                    </Panel>
                                                 </Button>
 
                                                 <TextBlock Grid.Row="1"
@@ -323,9 +315,15 @@
                                                                 HorizontalAlignment="Stretch"
                                                                 Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                                 CommandParameter="{Binding}">
-                                                            <asyncImageLoader:AdvancedImage
-                                                                Source="{Binding ThumbnailSource}"
-                                                                Stretch="UniformToFill"/>
+                                                            <Panel>
+                                                                <asyncImageLoader:AdvancedImage
+                                                                    Source="{Binding ThumbnailSource}"
+                                                                    Stretch="UniformToFill"/>
+                                                                <Viewbox IsVisible="{Binding IsGifActive}"
+                                                                         Stretch="UniformToFill">
+                                                                    <gif:GifImage Source="{Binding ActiveGifSource}"/>
+                                                                </Viewbox>
+                                                            </Panel>
                                                         </Button>
 
                                                         <!-- Checkmark badge -->
@@ -1023,6 +1021,10 @@
                                             Source="{Binding ThumbnailSource}"
                                             Stretch="UniformToFill"
                                             Width="100" Height="90"/>
+                                        <Viewbox IsVisible="{Binding IsGifActive}"
+                                                 Stretch="UniformToFill">
+                                            <gif:GifImage Source="{Binding ActiveGifSource}"/>
+                                        </Viewbox>
                                         <Border Background="#99000000"
                                                 VerticalAlignment="Bottom"
                                                 Padding="4,2">
