@@ -1663,7 +1663,12 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void OpenPreview(WallpaperCardViewModel card) => PreviewCard = card;
+    private void OpenPreview(WallpaperCardViewModel card)
+    {
+        PreviewCard = card;
+        if (card.LibraryItem != null && string.IsNullOrEmpty(card.VideoDuration))
+            card.LoadDurationAsync();
+    }
 
     [RelayCommand]
     private void ClosePreview() => PreviewCard = null;
@@ -2075,7 +2080,6 @@ public partial class MainWindowViewModel : ViewModelBase
         card.UpdateGlobalSpeed(Speed);
         if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
         card.OnOpenSettings = c => OpenPreview(c);
-        card.LoadDurationAsync();
         return card;
     }
 

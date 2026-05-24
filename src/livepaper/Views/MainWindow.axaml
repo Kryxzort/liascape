@@ -1412,6 +1412,9 @@
                                             Source="{Binding ThumbnailSource}"
                                             Stretch="UniformToFill"
                                             Width="100" Height="90"/>
+                                        <Image IsVisible="{Binding IsPlaylistGifActive}"
+                                               aimg:ImageBehavior.AnimatedSource="{Binding PlaylistActiveGifSource}"
+                                               Stretch="UniformToFill"/>
                                         <Border Background="#99000000"
                                                 VerticalAlignment="Bottom"
                                                 Padding="4,2">
