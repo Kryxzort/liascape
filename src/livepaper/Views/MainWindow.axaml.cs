@@ -180,6 +180,7 @@ public partial class MainWindow : Window
         else if (IsWithin(source, LibraryScrollViewer))
         {
             if (IsWithinButton(source, LibraryScrollViewer)) return;
+            if (source is ScrollBar || (source as Visual)?.FindAncestorOfType<ScrollBar>() != null) return;
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, LibraryScrollViewer);
             if (card == null) { Vm?.DeselectAllLibrary(); return; }
             Vm?.SelectCard(card, shift, ctrl);
@@ -187,6 +188,7 @@ public partial class MainWindow : Window
         else if (IsWithin(source, BrowseScrollViewer))
         {
             if (IsWithinButton(source, BrowseScrollViewer)) return;
+            if (source is ScrollBar || (source as Visual)?.FindAncestorOfType<ScrollBar>() != null) return;
             var card = FindAncestorDataContext<WallpaperCardViewModel>(source, BrowseScrollViewer);
             if (card == null) { Vm?.DeselectAllBrowse(); return; }
             Vm?.SelectBrowseCard(card, shift, ctrl);
