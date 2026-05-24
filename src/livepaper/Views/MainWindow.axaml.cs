@@ -230,6 +230,7 @@ public partial class MainWindow : Window
     {
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
+        if (_dragCard != null) _dragCard.IsGifActive = false;
         _dragCard = null;
         _isDragging = false;
     }
@@ -258,6 +259,7 @@ public partial class MainWindow : Window
 
         DragPreviewCanvas.IsVisible = false;
         PlaylistDropIndicator.IsVisible = false;
+        if (_dragCard != null) _dragCard.IsGifActive = false;
         _dragCard = null;
         _isDragging = false;
     }
@@ -360,6 +362,18 @@ public partial class MainWindow : Window
         int cols = Math.Max(1, (int)Math.Floor(width / minCardWidth));
         double cardWidth = width / cols - CardHorizontalMargin;
         Vm.CardThumbnailHeight = Math.Round(cardWidth * ratio);
+    }
+
+    private void OnCardPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+            card.IsGifActive = true;
+    }
+
+    private void OnCardPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
+            card.IsGifActive = false;
     }
 
     private void OnBrowseScrollChanged(object? sender, ScrollChangedEventArgs e)

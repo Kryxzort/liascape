@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:asyncImageLoader="clr-namespace:AsyncImageLoader;assembly=AsyncImageLoader.Avalonia"
         xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:gif="clr-namespace:Avalonia.Labs.Gif;assembly=Avalonia.Labs.Gif"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
         x:Class="livepaper.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -137,7 +138,9 @@
                                     <DataTemplate x:DataType="vm:WallpaperCardViewModel">
                                         <Border Margin="6" CornerRadius="10"
                                                 ClipToBounds="True"
-                                                Background="{DynamicResource BgBase}">
+                                                Background="{DynamicResource BgBase}"
+                                                PointerEntered="OnCardPointerEntered"
+                                                PointerExited="OnCardPointerExited">
                                             <Grid RowDefinitions="Auto,*,Auto">
 
                                                 <Button Grid.Row="0" Padding="0"
@@ -301,7 +304,9 @@
                                         <DataTemplate x:DataType="vm:WallpaperCardViewModel">
                                             <Border Margin="6" CornerRadius="10"
                                                     ClipToBounds="True"
-                                                    Background="{DynamicResource BgBase}">
+                                                    Background="{DynamicResource BgBase}"
+                                                    PointerEntered="OnCardPointerEntered"
+                                                    PointerExited="OnCardPointerExited">
                                                 <Border.ContextMenu>
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
@@ -377,10 +382,6 @@
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
-                                                        <Border IsVisible="{Binding HasCrashed}"
-                                                                BorderBrush="{DynamicResource Danger}"
-                                                                BorderThickness="2.5"
-                                                                CornerRadius="10"/>
                                                     </Panel>
 
                                                 </Grid>
@@ -445,26 +446,26 @@
                                                    LetterSpacing="2"/>
                                         <CheckBox Content="Switch when video ends"
                                                   IsChecked="{Binding DisplayAdvanceOnVideoEnd}"
-                                                  Foreground="{StaticResource TextColor}"/>
+                                                  Foreground="{DynamicResource TextColor}"/>
                                         <StackPanel Orientation="Horizontal" Spacing="12"
                                                     IsEnabled="{Binding !DisplayAdvanceOnVideoEnd}">
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Hours" FontSize="12"
-                                                           Foreground="{StaticResource Subtext}"/>
+                                                           Foreground="{DynamicResource Subtext}"/>
                                                 <NumericUpDown Value="{Binding DisplayIntervalHours}"
                                                                Minimum="0" Maximum="99"
                                                                FormatString="0" Width="108"/>
                                             </StackPanel>
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Minutes" FontSize="12"
-                                                           Foreground="{StaticResource Subtext}"/>
+                                                           Foreground="{DynamicResource Subtext}"/>
                                                 <NumericUpDown Value="{Binding DisplayIntervalMinutes}"
                                                                Minimum="0" Maximum="59"
                                                                FormatString="0" Width="108"/>
                                             </StackPanel>
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="Seconds" FontSize="12"
-                                                           Foreground="{StaticResource Subtext}"/>
+                                                           Foreground="{DynamicResource Subtext}"/>
                                                 <NumericUpDown Value="{Binding DisplayIntervalSeconds}"
                                                                Minimum="0" Maximum="59"
                                                                FormatString="0" Width="108"/>
@@ -524,7 +525,7 @@
                                         <Grid ColumnDefinitions="Auto,Auto,Auto">
                                             <TextBlock Grid.Column="0" Text="Restart mpvpaper every"
                                                        VerticalAlignment="Center"
-                                                       Foreground="{StaticResource TextColor}"
+                                                       Foreground="{DynamicResource TextColor}"
                                                        Margin="0,0,12,0"/>
                                             <NumericUpDown Grid.Column="1"
                                                            Value="{Binding RestartIntervalSeconds}"
@@ -532,12 +533,12 @@
                                                            FormatString="0" Width="108"/>
                                             <TextBlock Grid.Column="2" Text="s"
                                                        VerticalAlignment="Center"
-                                                       Foreground="{StaticResource Subtext}"
+                                                       Foreground="{DynamicResource Subtext}"
                                                        Margin="8,0,0,0"/>
                                         </Grid>
                                         <TextBlock Text="Kills and relaunches mpvpaper periodically to prevent memory leaks"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource Muted}"/>
+                                                   Foreground="{DynamicResource Muted}"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -753,14 +754,14 @@
 
                             <TextBlock Text="APPEARANCE"
                                        FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource Muted}"
+                                       Foreground="{DynamicResource Muted}"
                                        LetterSpacing="2"/>
-                            <Border Background="{StaticResource BgBase}" CornerRadius="10" Padding="16">
+                            <Border Background="{DynamicResource BgBase}" CornerRadius="10" Padding="16">
                                 <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,12,Auto">
                                     <TextBlock Grid.Row="0" Grid.Column="0"
                                                Text="Thumbnail aspect"
                                                VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextColor}"/>
+                                               Foreground="{DynamicResource TextColor}"/>
                                     <ComboBox Grid.Row="0" Grid.Column="1"
                                               ItemsSource="{Binding ThumbnailAspectOptions}"
                                               SelectedItem="{Binding ThumbnailAspect}"
@@ -768,7 +769,7 @@
                                     <TextBlock Grid.Row="2" Grid.Column="0"
                                                Text="Card size"
                                                VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextColor}"/>
+                                               Foreground="{DynamicResource TextColor}"/>
                                     <ComboBox Grid.Row="2" Grid.Column="1"
                                               ItemsSource="{Binding CardSizeOptions}"
                                               SelectedItem="{Binding CardSize}"
@@ -943,8 +944,8 @@
         <Border x:Name="PlaylistPanel"
                 Grid.Row="1"
                 IsVisible="False"
-                Background="{StaticResource BgMantle}"
-                BorderBrush="{StaticResource Surface0}"
+                Background="{DynamicResource BgMantle}"
+                BorderBrush="{DynamicResource Surface0}"
                 BorderThickness="0,1,0,0">
             <DockPanel Margin="0,8,0,0">
 
@@ -952,7 +953,7 @@
                 <DockPanel DockPanel.Dock="Top" Margin="12,0,12,8">
                     <TextBlock Text="PLAYLIST"
                                FontSize="11" FontWeight="SemiBold"
-                               Foreground="{StaticResource Muted}"
+                               Foreground="{DynamicResource Muted}"
                                LetterSpacing="2"
                                VerticalAlignment="Center"/>
                     <StackPanel DockPanel.Dock="Right"
@@ -991,7 +992,7 @@
                 <!-- Empty state -->
                 <TextBlock IsVisible="{Binding IsPlaylistEmpty}"
                            Text="Add wallpapers using the + button on each card"
-                           Foreground="{StaticResource Muted}"
+                           Foreground="{DynamicResource Muted}"
                            FontSize="12"
                            Margin="12,0"
                            VerticalAlignment="Center"
@@ -1014,7 +1015,9 @@
                             <DataTemplate x:DataType="vm:WallpaperCardViewModel">
                                 <Border Width="100" CornerRadius="6"
                                         ClipToBounds="True"
-                                        Background="{DynamicResource BgBase}">
+                                        Background="{DynamicResource BgBase}"
+                                        PointerEntered="OnCardPointerEntered"
+                                        PointerExited="OnCardPointerExited">
                                     <Grid Height="90">
                                         <asyncImageLoader:AdvancedImage
                                             Source="{Binding ThumbnailSource}"
@@ -1045,7 +1048,12 @@
                                         </Button>
                                         <Border IsHitTestVisible="False" CornerRadius="6"
                                                 IsVisible="{Binding IsGifActive}"
+                                                Opacity="0.45"
                                                 BorderBrush="{DynamicResource Accent}"
+                                                BorderThickness="1.5"/>
+                                        <Border IsHitTestVisible="False" CornerRadius="6"
+                                                IsVisible="{Binding IsCurrentlyPlaying}"
+                                                BorderBrush="{DynamicResource Success}"
                                                 BorderThickness="1.5"/>
                                     </Grid>
                                 </Border>
@@ -1068,7 +1076,7 @@
 
         <!-- Status bar -->
         <Border Grid.Row="2"
-                Background="{StaticResource BgCrust}"
+                Background="{DynamicResource BgCrust}"
                 Padding="16,6">
             <TextBlock Text="{Binding StatusMessage}"
                        Foreground="{DynamicResource Muted}"
@@ -1077,7 +1085,7 @@
 
         <!-- Download progress modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsDownloading}" Background="#B2000000">
-            <Border Background="{StaticResource BgBase}" CornerRadius="12" Padding="28"
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
                     Width="420" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Downloading" FontSize="15" FontWeight="SemiBold"
@@ -1116,99 +1124,7 @@
                         Stretch="Uniform"
                         MaxWidth="828" MaxHeight="500"/>
 
-                    <!-- Crash warning -->
-                    <Border Grid.Row="1"
-                            IsVisible="{Binding PreviewCard.HasCrashed}"
-                            Background="#20f38ba8"
-                            CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <StackPanel Grid.Column="0" Spacing="2">
-                                <TextBlock Text="This scene crashed during playback"
-                                           Foreground="{StaticResource Danger}"
-                                           FontSize="12" FontWeight="SemiBold"/>
-                                <TextBlock Text="Removed from your playlist. Whitelist it to keep it there even when it crashes."
-                                           Foreground="{StaticResource Subtext}"
-                                           FontSize="11" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <CheckBox Grid.Column="1"
-                                      Content="Whitelist"
-                                      IsChecked="{Binding PreviewCard.IsWhitelisted}"
-                                      Foreground="{StaticResource TextColor}"
-                                      VerticalAlignment="Center"
-                                      Margin="12,0,0,0"/>
-                        </Grid>
-                    </Border>
-
-                    <!-- Per-wallpaper volume override -->
-                    <Border Grid.Row="2"
-                            IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Background="{StaticResource BgCrust}"
-                            CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
-                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                            <TextBlock Grid.Column="0"
-                                       Text="Volume"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource TextColor}"
-                                       Width="56"/>
-                            <Slider Grid.Column="1"
-                                    Minimum="0" Maximum="100"
-                                    TickFrequency="1" IsSnapToTickEnabled="True"
-                                    Value="{Binding PreviewCard.SliderVolume}"
-                                    VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2"
-                                       Text="{Binding PreviewCard.SliderVolume}"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource Subtext}"
-                                       Width="30" TextAlignment="Right"
-                                       Margin="8,0,0,0"/>
-                            <Button Grid.Column="3"
-                                    Content="↺ Global"
-                                    Classes="ghost"
-                                    FontSize="11"
-                                    Padding="10,6"
-                                    Margin="8,0,0,0"
-                                    IsVisible="{Binding !PreviewCard.IsVolumeSynced}"
-                                    ToolTip.Tip="Reset to global volume"
-                                    Command="{Binding PreviewCard.SyncToGlobalCommand}"/>
-                        </Grid>
-                    </Border>
-
-                    <!-- Per-wallpaper speed override -->
-                    <Border Grid.Row="3"
-                            IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Background="{StaticResource BgCrust}"
-                            CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
-                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                            <TextBlock Grid.Column="0"
-                                       Text="Speed"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource TextColor}"
-                                       Width="56"/>
-                            <Slider Grid.Column="1"
-                                    Minimum="0.1" Maximum="4"
-                                    TickFrequency="0.1"
-                                    IsSnapToTickEnabled="True"
-                                    Value="{Binding PreviewCard.SliderSpeed}"
-                                    VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2"
-                                       Text="{Binding PreviewCard.SliderSpeed, StringFormat='{}{0:F1}x'}"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource Subtext}"
-                                       Width="36" TextAlignment="Right"
-                                       Margin="8,0,0,0"/>
-                            <Button Grid.Column="3"
-                                    Content="↺ Global"
-                                    Classes="ghost"
-                                    FontSize="11"
-                                    Padding="10,6"
-                                    Margin="8,0,0,0"
-                                    IsVisible="{Binding !PreviewCard.IsSpeedSynced}"
-                                    ToolTip.Tip="Reset to global speed"
-                                    Command="{Binding PreviewCard.SyncSpeedToGlobalCommand}"/>
-                        </Grid>
-                    </Border>
-
-                    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
+                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
                             <TextBox Text="{Binding PreviewCard.Title}"
                                      IsReadOnly="True"
@@ -1219,7 +1135,7 @@
                                      Padding="0"/>
                             <TextBlock Text="{Binding PreviewCard.VideoDuration}"
                                        IsVisible="{Binding PreviewCard.VideoDuration, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                       Foreground="{StaticResource Subtext}"
+                                       Foreground="{DynamicResource Subtext}"
                                        FontSize="11"
                                        Margin="0,2,0,0"/>
                         </StackPanel>
@@ -1267,7 +1183,7 @@
 
         <!-- Clear library confirmation modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsClearLibraryOpen}" Background="#B2000000">
-            <Border Background="{StaticResource BgBase}" CornerRadius="12" Padding="28"
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
                     Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Clear Library" FontSize="15" FontWeight="SemiBold"
@@ -1295,7 +1211,7 @@
 
         <!-- Save playlist modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsSavePlaylistOpen}" Background="#B2000000">
-            <Border Background="{StaticResource BgBase}" CornerRadius="12" Padding="24"
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="24"
                     Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Save Playlist" FontSize="15" FontWeight="SemiBold"
@@ -1324,7 +1240,7 @@
 
         <!-- Load playlist modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsLoadPlaylistOpen}" Background="#B2000000">
-            <Border Background="{StaticResource BgBase}" CornerRadius="12" Padding="24"
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="24"
                     Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Load Playlist" FontSize="15" FontWeight="SemiBold"
@@ -1357,7 +1273,7 @@
 
         <!-- Import wallpaper modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsImportOpen}" Background="#B2000000">
-            <Border Background="{StaticResource BgBase}" CornerRadius="12" Padding="24"
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="24"
                     Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Import Wallpaper" FontSize="15" FontWeight="SemiBold"

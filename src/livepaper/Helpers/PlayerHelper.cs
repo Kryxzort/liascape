@@ -494,6 +494,7 @@ public static class PlayerHelper
             if (videoPaths.Count == 1)
             {
                 _current = Launch(mpvOptions, videoPaths[0]);
+                OnWallpaperChanged?.Invoke(videoPaths[0]);
             }
             else
             {
@@ -508,6 +509,7 @@ public static class PlayerHelper
                 var shuffleFlag = shuffle ? " --shuffle" : "";
                 var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf{shuffleFlag}";
                 _current = Launch(options, videoPaths[videoPaths.Count - 1]);
+                OnWallpaperChanged?.Invoke(videoPaths[0]);
             }
         }
         UpdateRestartTimer();
@@ -671,6 +673,7 @@ public static class PlayerHelper
             KillCurrentProcess();
             _current = Launch(mpvOptions, path);
         }
+        OnWallpaperChanged?.Invoke(path);
     }
 
     private static bool TryIpcSwitchToFile(string path)

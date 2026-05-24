@@ -598,7 +598,6 @@ public partial class MainWindowViewModel : ViewModelBase
                 playing.IsCurrentlyPlaying = true;
                 _currentlyPlayingCard = playing;
             }
-            RefreshPlayingStatus();
         }
     }
 
@@ -1466,10 +1465,6 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         var card = new WallpaperCardViewModel(item);
         card.OnTogglePlaylist = c => ToggleInPlaylistCommand.Execute(c);
-        card.OnVolumeChanged = (c, v) => SyncSelectedVolume(c, v);
-        card.UpdateGlobalVolume(Volume);
-        card.OnSpeedChanged = (c, v) => SyncSelectedSpeed(c, v);
-        card.UpdateGlobalSpeed(Speed);
         card.LoadDurationAsync();
         return card;
     }
