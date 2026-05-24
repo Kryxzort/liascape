@@ -587,18 +587,20 @@ public partial class MainWindowViewModel : ViewModelBase
         if (s == null || (!s.IsTimedPlaylist && !s.IsPlaylist)) return;
 
         bool advanceOnEnd = GetEffectiveAdvanceOnVideoEnd();
-        // Mixed playlists (scenes + videos) use timed machinery internally even when
-        // the session was saved as IsPlaylist. Check live runtime state to detect this.
+        // Mixed playlists (scenes + videos) use timed machinery internally regardless of how
+        // LastSession was tagged (legacy IsPlaylist=true vs new IsTimedPlaylist=true).
+        // Detect via scene presence so live updates apply in both cases.
+        bool hasScenes = s.Paths.Any(p => p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase));
         bool isTimedMode = s.IsTimedPlaylist || (s.IsPlaylist && PlayerHelper.IsTimedModeActive);
 
-        if (isTimedMode && (!advanceOnEnd || s.IsPlaylist))
+        if (isTimedMode && (!advanceOnEnd || hasScenes))
         {
-            // Timed or mixed playlist: propagate interval/mode changes live.
-            // For mixed (s.IsPlaylist), pass the actual advanceOnVideoEnd so the
-            // scene-aware chain is enabled/disabled correctly if the user toggles it.
+            // Timed or mixed playlist: propagate interval/mode changes live (no restart).
+            // For mixed playlists, advanceOnVideoEnd is kept enabled so the scene-aware
+            // chain stays armed when the user adjusts the interval.
             int secs = GetEffectiveIntervalSeconds();
             if (secs > 0) PlayerHelper.UpdateTimedSettings(PlaylistShuffle, secs, GetEffectiveWaitForVideoEnd(),
-                advanceOnVideoEnd: advanceOnEnd && s.IsPlaylist);
+                advanceOnVideoEnd: advanceOnEnd && hasScenes);
             return;
         }
 

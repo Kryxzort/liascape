@@ -1042,6 +1042,9 @@ public static class PlayerHelper
             var opts = BakeSpeedOverride(BakeVolumeOverride(mpvOptions, path), path);
             if (_isMuted && !opts.Contains("--no-audio")) opts += " --mute=yes";
             _current = Launch(opts, path);
+            // Keep tick speed factor in sync with the freshly launched video (mpv IPC path
+            // already updates this via SetSpeed; cold-start has no SetSpeed call).
+            _currentSpeed = ReadSpeedOverride(path) ?? SettingsService.Load().Speed;
             OnWallpaperChanged?.Invoke(path);
         }
     }
