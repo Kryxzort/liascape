@@ -433,14 +433,11 @@
                                                                     Width="24" Height="24"
                                                                     CornerRadius="12" Padding="0"
                                                                     BorderThickness="0"
-                                                                    Background="{DynamicResource BgCrust}"
+                                                                    Background="{DynamicResource DangerBg}"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
-                                                                <TextBlock Text="−"
-                                                                           FontSize="12" FontWeight="Bold"
-                                                                           Foreground="{DynamicResource Accent}"
-                                                                           HorizontalAlignment="Center"
-                                                                           VerticalAlignment="Center"/>
+                                                                <mi:MaterialIcon Kind="Close" Width="12" Height="12"
+                                                                                 Foreground="{DynamicResource Danger}"/>
                                                             </Button>
                                                             <Border Classes="playlist-item-hover"
                                                                     IsHitTestVisible="False" CornerRadius="6"
@@ -544,9 +541,10 @@
                                                         <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
                                                     </Button>
 
-                                                    <!-- Bottom title bar -->
+                                                    <!-- Bottom title bar (fixed 2-line height) -->
                                                     <Border Background="#66000000"
                                                             VerticalAlignment="Bottom"
+                                                            Height="36"
                                                             Padding="6,4"
                                                             IsHitTestVisible="False">
                                                         <TextBlock Text="{Binding Title}"
@@ -572,17 +570,18 @@
                                                                    Foreground="{StaticResource AccentFg}"/>
                                                     </Border>
 
-                                                    <!-- Playlist checkbox (top-right) -->
-                                                    <CheckBox HorizontalAlignment="Right"
+                                                    <!-- Playlist checkbox (top-right, always blue border) -->
+                                                    <CheckBox Classes="playlist-toggle"
+                                                              HorizontalAlignment="Right"
                                                               VerticalAlignment="Top"
                                                               Margin="0,6,6,0"
                                                               IsChecked="{Binding IsInPlaylist, Mode=OneWay}"
                                                               Command="{Binding AddToPlaylistCommand}"/>
 
-                                                    <!-- Delete (trash) button (bottom-right) -->
+                                                    <!-- Delete (trash) button above title bar -->
                                                     <Button HorizontalAlignment="Right"
                                                             VerticalAlignment="Bottom"
-                                                            Margin="0,0,6,6"
+                                                            Margin="0,0,6,42"
                                                             Width="28" Height="28"
                                                             Padding="0"
                                                             Classes="danger"
