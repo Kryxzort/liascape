@@ -441,6 +441,10 @@
                                                                            HorizontalAlignment="Center"
                                                                            VerticalAlignment="Center"/>
                                                             </Button>
+                                                            <Border Classes="library-hover-outline"
+                                                                    IsHitTestVisible="False" CornerRadius="6"
+                                                                    BorderBrush="{DynamicResource Accent}"
+                                                                    BorderThickness="1.5"/>
                                                             <Border IsHitTestVisible="False" CornerRadius="6"
                                                                     IsVisible="{Binding IsCurrentlyPlaying}"
                                                                     BorderBrush="{DynamicResource Success}"
