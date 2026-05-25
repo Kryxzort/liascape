@@ -203,7 +203,7 @@
             <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
         </Style>
         <Style Selector="Button.icon-x-hover:pointerover mi|MaterialIcon">
-            <Setter Property="Foreground" Value="#f8a0b8"/>
+            <Setter Property="Foreground" Value="#f59ab5"/>
         </Style>
 
         <!-- Modal backdrop -->
