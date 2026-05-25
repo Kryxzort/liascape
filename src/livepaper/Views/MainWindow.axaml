@@ -321,10 +321,10 @@
                                     BorderBrush="{DynamicResource Surface0}"
                                     BorderThickness="0,1,0,0"
                                     MinHeight="140">
-                                <DockPanel Margin="12,8">
+                                <DockPanel Margin="0,8,0,0">
 
                                     <!-- Playlist header -->
-                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                    <DockPanel DockPanel.Dock="Top" Margin="12,0,12,8">
                                         <TextBlock Text="PLAYLIST"
                                                    FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}"
@@ -441,11 +441,6 @@
                                                                            HorizontalAlignment="Center"
                                                                            VerticalAlignment="Center"/>
                                                             </Button>
-                                                            <Border IsHitTestVisible="False" CornerRadius="6"
-                                                                    IsVisible="{Binding IsPlaylistGifActive}"
-                                                                    Opacity="0.45"
-                                                                    BorderBrush="{DynamicResource Accent}"
-                                                                    BorderThickness="1.5"/>
                                                             <Border IsHitTestVisible="False" CornerRadius="6"
                                                                     IsVisible="{Binding IsCurrentlyPlaying}"
                                                                     BorderBrush="{DynamicResource Success}"
