@@ -433,7 +433,7 @@
                                                                     Width="24" Height="24"
                                                                     CornerRadius="12" Padding="0"
                                                                     BorderThickness="0"
-                                                                    Background="{DynamicResource DangerBg}"
+                                                                    Background="Transparent"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
                                                                 <mi:MaterialIcon Kind="Close" Width="12" Height="12"
@@ -544,7 +544,7 @@
                                                     <!-- Bottom title bar (fixed 2-line height) -->
                                                     <Border Background="#66000000"
                                                             VerticalAlignment="Bottom"
-                                                            Height="36"
+                                                            Height="44"
                                                             Padding="6,4"
                                                             IsHitTestVisible="False">
                                                         <TextBlock Text="{Binding Title}"
@@ -581,10 +581,11 @@
                                                     <!-- Delete (trash) button above title bar -->
                                                     <Button HorizontalAlignment="Right"
                                                             VerticalAlignment="Bottom"
-                                                            Margin="0,0,6,42"
+                                                            Margin="0,0,6,50"
                                                             Width="28" Height="28"
                                                             Padding="0"
                                                             Classes="danger"
+                                                            BorderThickness="0"
                                                             CornerRadius="6"
                                                             Command="{Binding $parent[Window].DataContext.DeleteCommand}"
                                                             CommandParameter="{Binding}">

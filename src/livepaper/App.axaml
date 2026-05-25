@@ -178,10 +178,13 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="{DynamicResource TextColor}"/>
         </Style>
-        <!-- Playlist toggle checkbox — always blue border -->
-        <Style Selector="CheckBox.playlist-toggle /template/ Border#NormalRectangle">
+        <!-- Playlist toggle checkbox — blue border when unchecked, no border when checked -->
+        <Style Selector="CheckBox.playlist-toggle:unchecked /template/ Border#NormalRectangle">
             <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
             <Setter Property="BorderThickness" Value="2"/>
+        </Style>
+        <Style Selector="CheckBox.playlist-toggle:checked /template/ Border#NormalRectangle">
+            <Setter Property="BorderThickness" Value="0"/>
         </Style>
 
         <!-- Modal backdrop -->
