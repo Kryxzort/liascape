@@ -517,6 +517,7 @@
                                             <Border Margin="6" CornerRadius="10"
                                                     ClipToBounds="True"
                                                     Background="{DynamicResource BgBase}"
+                                                    Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                     PointerEntered="OnCardPointerEntered"
                                                     PointerExited="OnCardPointerExited">
                                                 <Border.ContextMenu>
@@ -529,90 +530,70 @@
                                                                   Command="{Binding OpenSettingsCommand}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
-                                                <Grid RowDefinitions="Auto,*,Auto">
+                                                <Grid>
 
-                                                    <!-- Thumbnail + badges -->
-                                                    <Grid Grid.Row="0"
-                                                          Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}">
-                                                        <Button Padding="0"
-                                                                Background="Transparent" BorderThickness="0"
-                                                                HorizontalAlignment="Stretch"
-                                                                HorizontalContentAlignment="Stretch"
-                                                                VerticalContentAlignment="Stretch"
-                                                                CornerRadius="10,10,0,0" ClipToBounds="True"
-                                                                Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
-                                                                CommandParameter="{Binding}">
-                                                            <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
-                                                        </Button>
+                                                    <!-- Thumbnail (click = apply) -->
+                                                    <Button Padding="0"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            HorizontalAlignment="Stretch"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            VerticalContentAlignment="Stretch"
+                                                            CornerRadius="10" ClipToBounds="True"
+                                                            Command="{Binding $parent[Window].DataContext.ApplyCommand}"
+                                                            CommandParameter="{Binding}">
+                                                        <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
+                                                    </Button>
 
-                                                        <!-- SCENE badge -->
-                                                        <Border HorizontalAlignment="Left"
-                                                                VerticalAlignment="Top"
-                                                                Margin="5,5,0,0"
-                                                                IsVisible="{Binding IsScene}"
-                                                                Background="{StaticResource Accent}"
-                                                                CornerRadius="4" Padding="4,2"
-                                                                IsHitTestVisible="False">
-                                                            <TextBlock Text="SCENE"
-                                                                       FontSize="9" FontWeight="Bold"
-                                                                       Foreground="{StaticResource AccentFg}"/>
-                                                        </Border>
+                                                    <!-- Bottom title bar -->
+                                                    <Border Background="#66000000"
+                                                            VerticalAlignment="Bottom"
+                                                            Padding="6,4"
+                                                            IsHitTestVisible="False">
+                                                        <TextBlock Text="{Binding Title}"
+                                                                   Foreground="White"
+                                                                   FontSize="11"
+                                                                   TextWrapping="Wrap"
+                                                                   MaxLines="2"
+                                                                   TextAlignment="Center"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"/>
+                                                    </Border>
 
-                                                        <!-- Checkmark badge -->
-                                                        <Button HorizontalAlignment="Right"
-                                                                VerticalAlignment="Top"
-                                                                Margin="0,5,5,0"
-                                                                Width="24" Height="24"
-                                                                CornerRadius="12" Padding="0"
-                                                                BorderThickness="0"
-                                                                Background="{DynamicResource BgCrust}"
-                                                                Command="{Binding AddToPlaylistCommand}">
-                                                            <TextBlock Text="{Binding CheckmarkText}"
-                                                                       FontSize="12" FontWeight="Bold"
-                                                                       Foreground="{DynamicResource Accent}"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"/>
-                                                        </Button>
-                                                    </Grid>
+                                                    <!-- SCENE badge -->
+                                                    <Border HorizontalAlignment="Left"
+                                                            VerticalAlignment="Top"
+                                                            Margin="5,5,0,0"
+                                                            IsVisible="{Binding IsScene}"
+                                                            Background="{StaticResource Accent}"
+                                                            CornerRadius="4" Padding="4,2"
+                                                            IsHitTestVisible="False">
+                                                        <TextBlock Text="SCENE"
+                                                                   FontSize="9" FontWeight="Bold"
+                                                                   Foreground="{StaticResource AccentFg}"/>
+                                                    </Border>
 
-                                                    <Grid Grid.Row="1" Margin="10,8,10,4">
-                                                        <Grid ColumnDefinitions="Auto,*">
-                                                            <TextBlock Grid.Column="0"
-                                                                       Text="⚠ "
-                                                                       FontSize="12"
-                                                                       Foreground="{DynamicResource Danger}"
-                                                                       VerticalAlignment="Top"
-                                                                       IsVisible="{Binding HasCrashed}"
-                                                                       ToolTip.Tip="This scene crashed during playback"/>
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding Title}"
-                                                                       TextWrapping="Wrap"
-                                                                       Foreground="{DynamicResource TextColor}"
-                                                                       FontSize="12"
-                                                                       MaxLines="2"/>
-                                                        </Grid>
-                                                    </Grid>
+                                                    <!-- Playlist checkbox (top-right) -->
+                                                    <CheckBox HorizontalAlignment="Right"
+                                                              VerticalAlignment="Top"
+                                                              Margin="0,6,6,0"
+                                                              IsChecked="{Binding IsInPlaylist, Mode=OneWay}"
+                                                              Command="{Binding AddToPlaylistCommand}"/>
 
-                                                    <Grid Grid.Row="2" ColumnDefinitions="8*,5*" Margin="10,4,10,10">
-                                                        <Button Grid.Column="0"
-                                                                Content="Apply"
-                                                                Classes="accent"
-                                                                HorizontalAlignment="Stretch"
-                                                                FontSize="{Binding $parent[Window].DataContext.CardButtonFontSize}"
-                                                                Command="{Binding $parent[Window].DataContext.ApplyCommand}"
-                                                                CommandParameter="{Binding}"/>
-                                                        <Button Grid.Column="1"
-                                                                Content="Delete"
-                                                                Classes="danger"
-                                                                HorizontalAlignment="Stretch"
-                                                                Margin="6,0,0,0"
-                                                                FontSize="{Binding $parent[Window].DataContext.CardButtonFontSize}"
-                                                                Command="{Binding $parent[Window].DataContext.DeleteCommand}"
-                                                                CommandParameter="{Binding}"/>
-                                                    </Grid>
+                                                    <!-- Delete (trash) button (bottom-right) -->
+                                                    <Button HorizontalAlignment="Right"
+                                                            VerticalAlignment="Bottom"
+                                                            Margin="0,0,6,6"
+                                                            Width="28" Height="28"
+                                                            Padding="0"
+                                                            Classes="danger"
+                                                            CornerRadius="6"
+                                                            Command="{Binding $parent[Window].DataContext.DeleteCommand}"
+                                                            CommandParameter="{Binding}">
+                                                        <mi:MaterialIcon Kind="TrashCanOutline" Width="14" Height="14"/>
+                                                    </Button>
 
                                                     <!-- State overlays -->
-                                                    <Panel Grid.RowSpan="3" IsHitTestVisible="False">
+                                                    <Panel IsHitTestVisible="False">
                                                         <Border Classes="library-hover-outline"
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
@@ -625,15 +606,11 @@
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
+                                                        <Border IsVisible="{Binding HasCrashed}"
+                                                                BorderBrush="{StaticResource Danger}"
+                                                                BorderThickness="2.5"
+                                                                CornerRadius="10"/>
                                                     </Panel>
-
-                                                    <!-- Crash overlay -->
-                                                    <Border Grid.RowSpan="3"
-                                                            IsVisible="{Binding HasCrashed}"
-                                                            BorderBrush="{StaticResource Danger}"
-                                                            BorderThickness="2.5"
-                                                            CornerRadius="10"
-                                                            IsHitTestVisible="False"/>
 
                                                 </Grid>
                                             </Border>
