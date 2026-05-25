@@ -335,24 +335,25 @@
                                                     Spacing="6"
                                                     HorizontalAlignment="Right">
                                             <Button Classes="ghost"
-                                                    Width="32" Height="32" Padding="0"
+                                                    Width="28" Height="28" Padding="0"
                                                     ToolTip.Tip="Playlist Settings"
                                                     Command="{Binding TogglePlaylistSettingsCommand}">
                                                 <mi:MaterialIcon Kind="Tune" Width="16" Height="16"/>
                                             </Button>
                                             <Button Classes="ghost"
-                                                    Width="32" Height="32" Padding="0"
+                                                    Width="28" Height="28" Padding="0"
                                                     ToolTip.Tip="Load Playlist"
                                                     Command="{Binding OpenLoadPlaylistCommand}">
                                                 <mi:MaterialIcon Kind="FolderOpen" Width="16" Height="16"/>
                                             </Button>
                                             <Button Classes="ghost"
-                                                    Width="32" Height="32" Padding="0"
+                                                    Width="28" Height="28" Padding="0"
                                                     ToolTip.Tip="Save Playlist"
                                                     Command="{Binding OpenSavePlaylistCommand}">
                                                 <mi:MaterialIcon Kind="ContentSave" Width="16" Height="16"/>
                                             </Button>
                                             <Button Classes="accent"
+                                                    Padding="10,0" Height="28"
                                                     Command="{Binding PlayCustomPlaylistCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="4">
                                                     <mi:MaterialIcon Kind="Play" Width="14" Height="14"/>
