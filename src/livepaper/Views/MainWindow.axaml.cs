@@ -508,6 +508,7 @@ public partial class MainWindow : Window
         };
         minCardWidth *= sizeMultiplier;
         Vm.CardMinWidth = minCardWidth;
+        Vm.CardButtonFontSize = Math.Clamp(Math.Round(13.0 * minCardWidth / 210.0), 9, 13);
         int cols = Math.Max(1, (int)Math.Floor(width / minCardWidth));
         double cardWidth = width / cols - CardHorizontalMargin;
         Vm.CardThumbnailHeight = Math.Round(cardWidth * ratio);

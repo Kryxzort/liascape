@@ -599,17 +599,20 @@
                                                         </Grid>
                                                     </Grid>
 
-                                                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="10,4,10,10">
+                                                    <Grid Grid.Row="2" ColumnDefinitions="8*,5*" Margin="10,4,10,10">
                                                         <Button Grid.Column="0"
                                                                 Content="Apply"
                                                                 Classes="accent"
                                                                 HorizontalAlignment="Stretch"
+                                                                FontSize="{Binding $parent[Window].DataContext.CardButtonFontSize}"
                                                                 Command="{Binding $parent[Window].DataContext.ApplyCommand}"
                                                                 CommandParameter="{Binding}"/>
                                                         <Button Grid.Column="1"
                                                                 Content="Delete"
                                                                 Classes="danger"
+                                                                HorizontalAlignment="Stretch"
                                                                 Margin="6,0,0,0"
+                                                                FontSize="{Binding $parent[Window].DataContext.CardButtonFontSize}"
                                                                 Command="{Binding $parent[Window].DataContext.DeleteCommand}"
                                                                 CommandParameter="{Binding}"/>
                                                     </Grid>

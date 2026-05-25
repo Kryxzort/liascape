@@ -165,6 +165,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _videoScale = "fit";
     [ObservableProperty] private double _cardThumbnailHeight = 150;
     [ObservableProperty] private double _cardMinWidth = 210;
+    [ObservableProperty] private double _cardButtonFontSize = 13;
     [ObservableProperty] private string _thumbnailAspect = "Default";
     [ObservableProperty] private string _cardSize = "Medium";
     [ObservableProperty] private bool _autoPlayGifs;
