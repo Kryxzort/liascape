@@ -433,6 +433,7 @@
                                                                     Width="24" Height="24"
                                                                     CornerRadius="12" Padding="0"
                                                                     BorderThickness="0"
+                                                                    Classes="icon-overlay"
                                                                     Background="Transparent"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
@@ -511,12 +512,16 @@
                                     </ItemsRepeater.Layout>
                                     <ItemsRepeater.ItemTemplate>
                                         <DataTemplate x:DataType="vm:WallpaperCardViewModel">
-                                            <Border Margin="6" CornerRadius="10"
+                                            <Border Classes="library-card"
+                                                    Margin="6" CornerRadius="10"
                                                     ClipToBounds="True"
                                                     Background="{DynamicResource BgBase}"
                                                     Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
+                                                    RenderTransformOrigin="0.5,0.5"
                                                     PointerEntered="OnCardPointerEntered"
-                                                    PointerExited="OnCardPointerExited">
+                                                    PointerExited="OnCardPointerExited"
+                                                    PointerPressed="OnCardPointerPressed"
+                                                    PointerReleased="OnCardPointerReleased">
                                                 <Border.ContextMenu>
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
@@ -530,7 +535,8 @@
                                                 <Grid>
 
                                                     <!-- Thumbnail (click = apply) -->
-                                                    <Button Padding="0"
+                                                    <Button Classes="no-press-scale"
+                                                            Padding="0"
                                                             Background="Transparent" BorderThickness="0"
                                                             HorizontalAlignment="Stretch"
                                                             HorizontalContentAlignment="Stretch"
@@ -584,7 +590,7 @@
                                                             Margin="0,0,6,50"
                                                             Width="28" Height="28"
                                                             Padding="0"
-                                                            Classes="danger"
+                                                            Classes="danger icon-overlay"
                                                             BorderThickness="0"
                                                             CornerRadius="6"
                                                             Command="{Binding $parent[Window].DataContext.DeleteCommand}"

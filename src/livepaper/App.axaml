@@ -178,13 +178,21 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="{DynamicResource TextColor}"/>
         </Style>
-        <!-- Playlist toggle checkbox — blue border when unchecked, no border when checked -->
+        <!-- Playlist toggle checkbox -->
         <Style Selector="CheckBox.playlist-toggle:unchecked /template/ Border#NormalRectangle">
             <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
             <Setter Property="BorderThickness" Value="2"/>
         </Style>
+        <Style Selector="CheckBox.playlist-toggle:unchecked:pointerover /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="#3389b4fa"/>
+        </Style>
         <Style Selector="CheckBox.playlist-toggle:checked /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="{DynamicResource Accent}"/>
             <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="CheckBox.playlist-toggle:checked /template/ Path#CheckMark">
+            <Setter Property="Stroke" Value="Transparent"/>
+            <Setter Property="Fill" Value="Transparent"/>
         </Style>
 
         <!-- Modal backdrop -->
@@ -260,6 +268,25 @@
 
         <Style Selector="ScrollBar:pressed Thumb">
             <Setter Property="Background" Value="{DynamicResource Muted}"/>
+        </Style>
+
+        <!-- Library card press-to-zoom animation -->
+        <Style Selector="Border.library-card">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.065"/>
+                </Transitions>
+            </Setter>
+        </Style>
+
+        <!-- Suppress button press scale inside library cards -->
+        <Style Selector="Button.no-press-scale:pressed">
+            <Setter Property="RenderTransform" Value="scale(1)"/>
+        </Style>
+
+        <!-- Overlay icon buttons — no hover background -->
+        <Style Selector="Button.icon-overlay:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
         </Style>
 
         <!-- Library card hover outline -->

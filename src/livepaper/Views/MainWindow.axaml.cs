@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private const double PlaylistItemStride = PlaylistItemWidth + PlaylistItemSpacing;
 
     private double _lastRepeaterWidth;
+    private System.Threading.CancellationTokenSource? _cardHeightDebounce;
 
     // Playlist drag state
     private WallpaperCardViewModel? _dragCard;
@@ -472,6 +473,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnCardPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Border b && e.GetCurrentPoint(b).Properties.IsLeftButtonPressed)
+            b.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(0.96)");
+    }
+
+    private void OnCardPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (sender is Border b)
+            b.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(1)");
+    }
+
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
     {
         if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
@@ -485,8 +498,13 @@ public partial class MainWindow : Window
                 card.IsGifActive = false;
     }
 
-    private void UpdateCardThumbnailHeight()
+    private async void UpdateCardThumbnailHeight()
     {
+        _cardHeightDebounce?.Cancel();
+        _cardHeightDebounce = new System.Threading.CancellationTokenSource();
+        var ct = _cardHeightDebounce.Token;
+        try { await Task.Delay(40, ct); }
+        catch (OperationCanceledException) { return; }
         if (Vm == null) return;
         var width = BrowseItemsRepeater.Bounds.Width > 0
             ? BrowseItemsRepeater.Bounds.Width
