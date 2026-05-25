@@ -444,7 +444,6 @@
                                                             </Button>
                                                             <Border Classes="playlist-item-hover"
                                                                     IsHitTestVisible="False" CornerRadius="6"
-                                                                    Opacity="0"
                                                                     BorderBrush="{DynamicResource Accent}"
                                                                     BorderThickness="1.5"/>
                                                             <Border IsHitTestVisible="False" CornerRadius="6"
