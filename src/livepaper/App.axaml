@@ -190,6 +190,14 @@
             <Setter Property="BorderThickness" Value="2.5"/>
         </Style>
 
+        <!-- Toggle check path (checked state) — base + hover -->
+        <Style Selector="Path.toggle-check">
+            <Setter Property="Fill" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style Selector="Button.playlist-toggle-btn:pointerover Path.toggle-check">
+            <Setter Property="Fill" Value="{DynamicResource AccentHover}"/>
+        </Style>
+
         <!-- Playlist X button — transparent bg, icon lights up white on hover -->
         <Style Selector="Button.icon-x-hover mi|MaterialIcon">
             <Setter Property="Foreground" Value="{DynamicResource Danger}"/>

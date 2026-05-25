@@ -587,7 +587,7 @@
                                                             <Border Classes="toggle-ring"
                                                                     IsVisible="{Binding !IsInPlaylist}"/>
                                                             <!-- Checked: Accent fill with transparent checkmark cutout -->
-                                                            <Path Fill="{DynamicResource Accent}"
+                                                            <Path Classes="toggle-check"
                                                                   Stretch="Fill"
                                                                   IsVisible="{Binding IsInPlaylist}">
                                                                 <Path.Data>
