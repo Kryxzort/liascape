@@ -178,10 +178,16 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="{DynamicResource TextColor}"/>
         </Style>
-        <!-- Playlist toggle button hover tint -->
-        <Style Selector="Button.playlist-toggle-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#6689b4fa"/>
+        <!-- Playlist toggle ring — base appearance (simple class, no ancestor, so DataTemplate respects it) -->
+        <Style Selector="Border.toggle-ring">
             <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+        </Style>
+        <!-- Hover: brighten the ring border only (not the transparent interior) -->
+        <Style Selector="Button.playlist-toggle-btn:pointerover Border.toggle-ring">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHover}"/>
+            <Setter Property="BorderThickness" Value="2.5"/>
         </Style>
 
         <!-- Playlist X button — transparent bg, icon lights up white on hover -->
@@ -189,7 +195,7 @@
             <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
         </Style>
         <Style Selector="Button.icon-x-hover:pointerover mi|MaterialIcon">
-            <Setter Property="Foreground" Value="#ffafc7"/>
+            <Setter Property="Foreground" Value="#f8a0b8"/>
         </Style>
 
         <!-- Modal backdrop -->

@@ -584,9 +584,7 @@
                                                             Command="{Binding AddToPlaylistCommand}">
                                                         <Panel Width="18" Height="18">
                                                             <!-- Unchecked: border ring -->
-                                                            <Border CornerRadius="3"
-                                                                    BorderBrush="{DynamicResource Accent}"
-                                                                    BorderThickness="2"
+                                                            <Border Classes="toggle-ring"
                                                                     IsVisible="{Binding !IsInPlaylist}"/>
                                                             <!-- Checked: Accent fill with transparent checkmark cutout -->
                                                             <Path Fill="{DynamicResource Accent}"
@@ -612,7 +610,7 @@
                                                             Margin="0,0,6,50"
                                                             Width="28" Height="28"
                                                             Padding="0"
-                                                            Classes="danger icon-overlay"
+                                                            Classes="danger icon-overlay icon-x-hover"
                                                             BorderThickness="0"
                                                             CornerRadius="6"
                                                             Command="{Binding $parent[Window].DataContext.DeleteCommand}"
