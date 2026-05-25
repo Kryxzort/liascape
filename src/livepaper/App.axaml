@@ -267,5 +267,17 @@
             <Setter Property="Opacity" Value="0.5"/>
         </Style>
 
+        <!-- Playlist strip item hover outline (scoped to playlist-item border only) -->
+        <Style Selector="Border.playlist-item Border.playlist-item-hover">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.15"/>
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.playlist-item:pointerover Border.playlist-item-hover">
+            <Setter Property="Opacity" Value="0.5"/>
+        </Style>
+
     </Application.Styles>
 </Application>
