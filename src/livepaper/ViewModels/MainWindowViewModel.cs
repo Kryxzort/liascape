@@ -1623,7 +1623,12 @@ public partial class MainWindowViewModel : ViewModelBase
             card.IsSelected = !card.IsSelected;
             if (card.IsSelected) _lastSelectedIndex = idx;
         }
-        else if (shiftHeld && _lastSelectedIndex >= 0)
+        else if (shiftHeld && _lastSelectedIndex < 0)
+        {
+            card.IsSelected = true;
+            _lastSelectedIndex = idx;
+        }
+        else if (shiftHeld)
         {
             if (_lastSelectedIndex >= displayed.Count)
             {

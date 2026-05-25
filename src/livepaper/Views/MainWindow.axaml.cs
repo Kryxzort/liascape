@@ -66,6 +66,7 @@ public partial class MainWindow : Window
             PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
         };
 
+        this.AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel);
         this.AddHandler(PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -205,6 +206,23 @@ public partial class MainWindow : Window
             Vm.UndoDeleteCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
+        if (e.Source is not Visual source) return;
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        if (!shift && !ctrl) return;
+        if (!IsWithin(source, LibraryScrollViewer)) return;
+        // Don't intercept trash or playlist-toggle — let those buttons work normally
+        var btn = FindAncestor<Button>(source, LibraryScrollViewer);
+        if (btn != null && (btn.Classes.Contains("danger") || btn.Classes.Contains("playlist-toggle-btn"))) return;
+        var card = FindAncestorDataContext<WallpaperCardViewModel>(source, LibraryScrollViewer);
+        if (card == null) return;
+        Vm?.SelectCard(card, shift, ctrl);
+        e.Handled = true;
     }
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
