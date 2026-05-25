@@ -178,35 +178,18 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="{DynamicResource TextColor}"/>
         </Style>
-        <!-- Playlist toggle (ToggleButton — full visual control via ContentPresenter) -->
-        <Style Selector="ToggleButton.playlist-toggle">
-            <Setter Property="Width" Value="18"/>
-            <Setter Property="Height" Value="18"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="CornerRadius" Value="3"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
-            <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="Background" Value="Transparent"/>
-        </Style>
-        <Style Selector="ToggleButton.playlist-toggle /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="Transparent"/>
-        </Style>
-        <Style Selector="ToggleButton.playlist-toggle:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <!-- Playlist toggle button hover tint -->
+        <Style Selector="Button.playlist-toggle-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#3389b4fa"/>
-        </Style>
-        <Style Selector="ToggleButton.playlist-toggle:checked /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource Accent}"/>
-        </Style>
-        <Style Selector="ToggleButton.playlist-toggle:checked">
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="ToggleButton.playlist-toggle:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentHover}"/>
+            <Setter Property="CornerRadius" Value="3"/>
         </Style>
 
-        <!-- Playlist X button hover (danger tint) -->
-        <Style Selector="Button.icon-danger-hover:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource DangerBg}"/>
+        <!-- Playlist X button — transparent bg, icon lights up white on hover -->
+        <Style Selector="Button.icon-x-hover mi|MaterialIcon">
+            <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+        </Style>
+        <Style Selector="Button.icon-x-hover:pointerover mi|MaterialIcon">
+            <Setter Property="Foreground" Value="White"/>
         </Style>
 
         <!-- Modal backdrop -->

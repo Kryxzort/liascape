@@ -429,16 +429,15 @@
                                                             </Border>
                                                             <Button HorizontalAlignment="Right"
                                                                     VerticalAlignment="Top"
-                                                                    Margin="0,5,5,0"
-                                                                    Width="24" Height="24"
-                                                                    CornerRadius="12" Padding="0"
+                                                                    Margin="0,3,3,0"
+                                                                    Width="22" Height="22"
+                                                                    CornerRadius="11" Padding="0"
                                                                     BorderThickness="0"
-                                                                    Classes="icon-danger-hover"
+                                                                    Classes="icon-overlay icon-x-hover"
                                                                     Background="Transparent"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
-                                                                <mi:MaterialIcon Kind="Close" Width="12" Height="12"
-                                                                                 Foreground="{DynamicResource Danger}"/>
+                                                                <mi:MaterialIcon Kind="Close" Width="16" Height="16"/>
                                                             </Button>
                                                             <Border Classes="playlist-item-hover"
                                                                     IsHitTestVisible="False" CornerRadius="6"
@@ -519,9 +518,7 @@
                                                     Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
                                                     RenderTransformOrigin="0.5,0.5"
                                                     PointerEntered="OnCardPointerEntered"
-                                                    PointerExited="OnCardPointerExited"
-                                                    PointerPressed="OnCardPointerPressed"
-                                                    PointerReleased="OnCardPointerReleased">
+                                                    PointerExited="OnCardPointerExited">
                                                 <Border.ContextMenu>
                                                     <ContextMenu>
                                                         <MenuItem Header="Add to Playlist"
@@ -577,12 +574,37 @@
                                                     </Border>
 
                                                     <!-- Playlist toggle (top-right) -->
-                                                    <ToggleButton Classes="playlist-toggle"
-                                                                  HorizontalAlignment="Right"
-                                                                  VerticalAlignment="Top"
-                                                                  Margin="0,6,6,0"
-                                                                  IsChecked="{Binding IsInPlaylist, Mode=OneWay}"
-                                                                  Command="{Binding AddToPlaylistCommand}"/>
+                                                    <Button Classes="playlist-toggle-btn no-press-scale"
+                                                            HorizontalAlignment="Right"
+                                                            VerticalAlignment="Top"
+                                                            Margin="0,6,6,0"
+                                                            Width="18" Height="18"
+                                                            Padding="0" BorderThickness="0"
+                                                            Background="Transparent"
+                                                            Command="{Binding AddToPlaylistCommand}">
+                                                        <Panel Width="18" Height="18">
+                                                            <!-- Unchecked: border ring -->
+                                                            <Border CornerRadius="3"
+                                                                    BorderBrush="{DynamicResource Accent}"
+                                                                    BorderThickness="2"
+                                                                    IsVisible="{Binding !IsInPlaylist}"/>
+                                                            <!-- Checked: Accent fill with transparent checkmark cutout -->
+                                                            <Path Fill="{DynamicResource Accent}"
+                                                                  Stretch="Fill"
+                                                                  IsVisible="{Binding IsInPlaylist}">
+                                                                <Path.Data>
+                                                                    <CombinedGeometry GeometryCombineMode="Exclude">
+                                                                        <CombinedGeometry.Geometry1>
+                                                                            <RectangleGeometry Rect="0,0,20,20" RadiusX="3.3" RadiusY="3.3"/>
+                                                                        </CombinedGeometry.Geometry1>
+                                                                        <CombinedGeometry.Geometry2>
+                                                                            <PathGeometry Figures="M 3,10 L 7,16 L 18,5 L 17,4 L 7,13 L 4,9 Z"/>
+                                                                        </CombinedGeometry.Geometry2>
+                                                                    </CombinedGeometry>
+                                                                </Path.Data>
+                                                            </Path>
+                                                        </Panel>
+                                                    </Button>
 
                                                     <!-- Delete (trash) button above title bar -->
                                                     <Button HorizontalAlignment="Right"

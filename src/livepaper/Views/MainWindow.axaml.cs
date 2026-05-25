@@ -26,6 +26,7 @@ public partial class MainWindow : Window
 
     private double _lastRepeaterWidth;
     private System.Threading.CancellationTokenSource? _cardHeightDebounce;
+    private Border? _pressedCardBorder;
 
     // Playlist drag state
     private WallpaperCardViewModel? _dragCard;
@@ -211,6 +212,10 @@ public partial class MainWindow : Window
         if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
         if (e.Source is not Visual source) return;
 
+        _pressedCardBorder = FindAncestor<Border>(source, null, b => b.Classes.Contains("library-card"));
+        if (_pressedCardBorder != null)
+            _pressedCardBorder.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(0.96)");
+
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
 
@@ -292,6 +297,12 @@ public partial class MainWindow : Window
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_pressedCardBorder != null)
+        {
+            _pressedCardBorder.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(1)");
+            _pressedCardBorder = null;
+        }
+
         if (_dragCard == null) return;
 
         if (_isDragging && Vm != null)
@@ -471,18 +482,6 @@ public partial class MainWindow : Window
             if (se.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
                 card.IsGifActive = false;
         }
-    }
-
-    private void OnCardPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is Border b && e.GetCurrentPoint(b).Properties.IsLeftButtonPressed)
-            b.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(0.96)");
-    }
-
-    private void OnCardPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (sender is Border b)
-            b.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse("scale(1)");
     }
 
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
