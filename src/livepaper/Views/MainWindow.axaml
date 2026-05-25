@@ -372,22 +372,21 @@
                                                HorizontalAlignment="Center"/>
 
                                     <!-- Playlist thumbnails -->
-                                    <Grid IsVisible="{Binding !IsPlaylistEmpty}"
-                                          ClipToBounds="True">
+                                    <Grid IsVisible="{Binding !IsPlaylistEmpty}">
                                         <ScrollViewer x:Name="PlaylistScrollViewer"
                                                       HorizontalScrollBarVisibility="Auto"
-                                                      VerticalScrollBarVisibility="Disabled">
+                                                      VerticalScrollBarVisibility="Disabled"
+                                                      AllowAutoHide="False">
                                         <ItemsControl x:Name="PlaylistItemsControl"
                                                       ItemsSource="{Binding PlaylistItems}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
-                                                    <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,0"/>
                                                 </ItemsPanelTemplate>
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:WallpaperCardViewModel">
-                                                    <Border Classes="playlist-item"
-                                                            Width="100" CornerRadius="6"
+                                                    <Border Width="100" CornerRadius="6"
                                                             ClipToBounds="True"
                                                             Background="{DynamicResource BgBase}"
                                                             PointerEntered="OnPlaylistCardPointerEntered"
@@ -402,14 +401,6 @@
                                                                           Command="{Binding OpenSettingsCommand}"/>
                                                             </ContextMenu>
                                                         </Border.ContextMenu>
-                                                        <Border.Styles>
-                                                            <Style Selector="Border.playlist-item Grid.play-overlay">
-                                                                <Setter Property="Opacity" Value="0"/>
-                                                            </Style>
-                                                            <Style Selector="Border.playlist-item:pointerover Grid.play-overlay">
-                                                                <Setter Property="Opacity" Value="1"/>
-                                                            </Style>
-                                                        </Border.Styles>
                                                         <Grid Height="90">
                                                             <Panel>
                                                                 <asyncImageLoader:AdvancedImage
@@ -427,15 +418,6 @@
                                                                        Stretch="UniformToFill"
                                                                        Width="100" Height="90"/>
                                                             </Panel>
-                                                            <Grid Classes="play-overlay"
-                                                                  Background="#80000000"
-                                                                  IsHitTestVisible="False">
-                                                                <TextBlock Text="▶"
-                                                                           FontSize="28"
-                                                                           Foreground="White"
-                                                                           HorizontalAlignment="Center"
-                                                                           VerticalAlignment="Center"/>
-                                                            </Grid>
                                                             <Border Background="#99000000"
                                                                     VerticalAlignment="Bottom"
                                                                     Padding="4,2">
@@ -459,6 +441,19 @@
                                                                            HorizontalAlignment="Center"
                                                                            VerticalAlignment="Center"/>
                                                             </Button>
+                                                            <Border IsHitTestVisible="False" CornerRadius="6"
+                                                                    IsVisible="{Binding IsPlaylistGifActive}"
+                                                                    Opacity="0.45"
+                                                                    BorderBrush="{DynamicResource Accent}"
+                                                                    BorderThickness="1.5"/>
+                                                            <Border IsHitTestVisible="False" CornerRadius="6"
+                                                                    IsVisible="{Binding IsCurrentlyPlaying}"
+                                                                    BorderBrush="{DynamicResource Success}"
+                                                                    BorderThickness="1.5"/>
+                                                            <Border IsHitTestVisible="False" CornerRadius="6"
+                                                                    IsVisible="{Binding HasCrashed}"
+                                                                    BorderBrush="{DynamicResource Danger}"
+                                                                    BorderThickness="1.5"/>
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
