@@ -180,7 +180,7 @@
         </Style>
         <!-- Playlist toggle button hover tint -->
         <Style Selector="Button.playlist-toggle-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#3389b4fa"/>
+            <Setter Property="Background" Value="#6689b4fa"/>
             <Setter Property="CornerRadius" Value="3"/>
         </Style>
 
@@ -189,7 +189,7 @@
             <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
         </Style>
         <Style Selector="Button.icon-x-hover:pointerover mi|MaterialIcon">
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="#ffafc7"/>
         </Style>
 
         <!-- Modal backdrop -->

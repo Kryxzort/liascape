@@ -516,7 +516,7 @@
                                                     ClipToBounds="True"
                                                     Background="{DynamicResource BgBase}"
                                                     Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}"
-                                                    RenderTransformOrigin="0.5,0.5"
+                                                    RenderTransformOrigin="50%,50%"
                                                     PointerEntered="OnCardPointerEntered"
                                                     PointerExited="OnCardPointerExited">
                                                 <Border.ContextMenu>
