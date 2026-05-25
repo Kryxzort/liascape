@@ -352,9 +352,13 @@
                                                     Command="{Binding OpenSavePlaylistCommand}">
                                                 <mi:MaterialIcon Kind="ContentSave" Width="16" Height="16"/>
                                             </Button>
-                                            <Button Content="▶ Play"
-                                                    Classes="accent"
-                                                    Command="{Binding PlayCustomPlaylistCommand}"/>
+                                            <Button Classes="accent"
+                                                    Command="{Binding PlayCustomPlaylistCommand}">
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <mi:MaterialIcon Kind="Play" Width="14" Height="14"/>
+                                                    <TextBlock Text="Play" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
                                         </StackPanel>
                                     </DockPanel>
 
