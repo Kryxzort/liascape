@@ -433,7 +433,7 @@
                                                                     Width="24" Height="24"
                                                                     CornerRadius="12" Padding="0"
                                                                     BorderThickness="0"
-                                                                    Classes="icon-overlay"
+                                                                    Classes="icon-danger-hover"
                                                                     Background="Transparent"
                                                                     Command="{Binding $parent[Window].DataContext.RemoveFromPlaylistCommand}"
                                                                     CommandParameter="{Binding}">
@@ -576,13 +576,13 @@
                                                                    Foreground="{StaticResource AccentFg}"/>
                                                     </Border>
 
-                                                    <!-- Playlist checkbox (top-right, always blue border) -->
-                                                    <CheckBox Classes="playlist-toggle"
-                                                              HorizontalAlignment="Right"
-                                                              VerticalAlignment="Top"
-                                                              Margin="0,6,6,0"
-                                                              IsChecked="{Binding IsInPlaylist, Mode=OneWay}"
-                                                              Command="{Binding AddToPlaylistCommand}"/>
+                                                    <!-- Playlist toggle (top-right) -->
+                                                    <ToggleButton Classes="playlist-toggle"
+                                                                  HorizontalAlignment="Right"
+                                                                  VerticalAlignment="Top"
+                                                                  Margin="0,6,6,0"
+                                                                  IsChecked="{Binding IsInPlaylist, Mode=OneWay}"
+                                                                  Command="{Binding AddToPlaylistCommand}"/>
 
                                                     <!-- Delete (trash) button above title bar -->
                                                     <Button HorizontalAlignment="Right"
