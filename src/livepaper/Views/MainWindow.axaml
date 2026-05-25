@@ -338,25 +338,19 @@
                                                     Width="32" Height="32" Padding="0"
                                                     ToolTip.Tip="Playlist Settings"
                                                     Command="{Binding TogglePlaylistSettingsCommand}">
-                                                <TextBlock Text="⚙" FontSize="18"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                <mi:MaterialIcon Kind="Tune" Width="16" Height="16"/>
                                             </Button>
                                             <Button Classes="ghost"
                                                     Width="32" Height="32" Padding="0"
                                                     ToolTip.Tip="Load Playlist"
                                                     Command="{Binding OpenLoadPlaylistCommand}">
-                                                <TextBlock Text="📂" FontSize="16"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                <mi:MaterialIcon Kind="FolderOpen" Width="16" Height="16"/>
                                             </Button>
                                             <Button Classes="ghost"
                                                     Width="32" Height="32" Padding="0"
                                                     ToolTip.Tip="Save Playlist"
                                                     Command="{Binding OpenSavePlaylistCommand}">
-                                                <TextBlock Text="💾" FontSize="16"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                                                <mi:MaterialIcon Kind="ContentSave" Width="16" Height="16"/>
                                             </Button>
                                             <Button Content="▶ Play"
                                                     Classes="accent"
