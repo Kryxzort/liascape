@@ -2043,6 +2043,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void Apply(WallpaperCardViewModel card)
     {
+        DeselectAllLibrary();
         try
         {
             ApplyAndSave(card.PageUrl);
