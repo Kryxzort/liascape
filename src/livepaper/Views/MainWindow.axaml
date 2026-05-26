@@ -470,34 +470,6 @@
                                 </DockPanel>
                             </Border>
 
-                            <!-- Selection toolbar (above playlist strip) -->
-                            <Border DockPanel.Dock="Bottom"
-                                    IsVisible="{Binding AnyLibrarySelected}"
-                                    Background="{DynamicResource BgMantle}"
-                                    BorderBrush="{DynamicResource Surface0}"
-                                    BorderThickness="0,1,0,0"
-                                    Padding="16,10">
-                                <DockPanel>
-                                    <TextBlock VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextColor}"
-                                               FontSize="13"
-                                               Text="{Binding LibrarySelectedCount, StringFormat='{}{0} selected'}"/>
-                                    <StackPanel DockPanel.Dock="Right"
-                                                Orientation="Horizontal"
-                                                Spacing="8"
-                                                HorizontalAlignment="Right">
-                                        <Button Content="Add to Playlist" Classes="ghost"
-                                                Command="{Binding AddSelectedToPlaylistCommand}"/>
-                                        <Button Content="Remove from Playlist" Classes="ghost"
-                                                Command="{Binding RemoveSelectedFromPlaylistCommand}"/>
-                                        <Button Content="Delete" Classes="danger"
-                                                Command="{Binding DeleteSelectedCommand}"/>
-                                        <Button Content="Cancel" Classes="ghost"
-                                                Command="{Binding ClearLibrarySelectionCommand}"/>
-                                    </StackPanel>
-                                </DockPanel>
-                            </Border>
-
                             <!-- Library grid -->
                             <ScrollViewer x:Name="LibraryScrollViewer"
                                           HorizontalScrollBarVisibility="Disabled"

@@ -1126,18 +1126,40 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void ToggleInPlaylist(WallpaperCardViewModel card)
     {
-        if (card.LibraryItem == null) return;
-        if (card.IsInPlaylist)
+        if (card.IsSelected && LibrarySelectedCount > 0)
         {
-            PlaylistItems.Remove(card);
-            card.IsInPlaylist = false;
-            card.IsPlaylistGifActive = false;
+            bool adding = !card.IsInPlaylist;
+            foreach (var c in LibraryWallpapers.Where(c => c.IsSelected).ToList())
+            {
+                if (adding && !c.IsInPlaylist && c.LibraryItem != null)
+                {
+                    PlaylistItems.Add(c);
+                    c.IsInPlaylist = true;
+                    if (AutoPlayGifs && c.IsGifThumbnail) c.IsPlaylistGifActive = true;
+                }
+                else if (!adding && c.IsInPlaylist)
+                {
+                    PlaylistItems.Remove(c);
+                    c.IsInPlaylist = false;
+                    c.IsPlaylistGifActive = false;
+                }
+            }
         }
         else
         {
-            PlaylistItems.Add(card);
-            card.IsInPlaylist = true;
-            if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
+            if (card.LibraryItem == null) return;
+            if (card.IsInPlaylist)
+            {
+                PlaylistItems.Remove(card);
+                card.IsInPlaylist = false;
+                card.IsPlaylistGifActive = false;
+            }
+            else
+            {
+                PlaylistItems.Add(card);
+                card.IsInPlaylist = true;
+                if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
+            }
         }
     }
 
@@ -1862,7 +1884,14 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Delete(WallpaperCardViewModel card) => DeleteCards([card]);
+    private void Delete(WallpaperCardViewModel card)
+    {
+        if (card.IsSelected && LibrarySelectedCount > 0)
+            DeleteCards(LibraryWallpapers.Where(c => c.IsSelected).ToList());
+        else
+            DeleteCards([card]);
+        _lastSelectedIndex = -1;
+    }
 
     [RelayCommand]
     private void DeleteSelected()
