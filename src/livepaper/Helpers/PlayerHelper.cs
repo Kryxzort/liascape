@@ -2507,16 +2507,16 @@ public static class PlayerHelper
             foreach (var block in output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries))
             {
                 string? clientId = null;
+                bool isBuffer = false;
                 foreach (var line in block.Split('\n'))
                 {
                     var t = line.Trim();
                     if (t.StartsWith("client.id = \""))
-                    {
                         clientId = t.Substring("client.id = \"".Length).TrimEnd('"');
-                        break;
-                    }
+                    else if (t.StartsWith("media.name = \"") && t.Contains("buffer://"))
+                        isBuffer = true;
                 }
-                if (clientId == null || !lweClientIds.Contains(clientId)) continue;
+                if (clientId == null || !lweClientIds.Contains(clientId) || isBuffer) continue;
                 var firstLine = block.Split('\n')[0].Trim();
                 if (int.TryParse(firstLine, out int id))
                     ids.Add(id);
