@@ -18,18 +18,20 @@
     </Design.DataContext>
 
     <Window.Resources>
+        <CombinedGeometry x:Key="PlaylistToggleGeometry" GeometryCombineMode="Exclude">
+            <CombinedGeometry.Geometry1>
+                <RectangleGeometry Rect="0,0,20,20" RadiusX="3.3" RadiusY="3.3"/>
+            </CombinedGeometry.Geometry1>
+            <CombinedGeometry.Geometry2>
+                <PathGeometry Figures="M 3,10 L 7,16 L 18,5 L 17,4 L 7,13 L 4,9 Z"/>
+            </CombinedGeometry.Geometry2>
+        </CombinedGeometry>
         <ControlTemplate x:Key="ThumbnailDisplay" TargetType="TemplatedControl">
             <Panel x:DataType="vm:WallpaperCardViewModel" ClipToBounds="True">
                 <asyncImageLoader:AdvancedImage
-                    Source="{Binding StaticThumbnailSource}"
-                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Source="{Binding DisplayThumbnailSource}"
                     Stretch="UniformToFill"
                     RenderOptions.BitmapInterpolationMode="LowQuality"
-                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-                <asyncImageLoader:AdvancedImage
-                    Source="{Binding ThumbnailSource}"
-                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNullOrEmpty}}"
-                    Stretch="UniformToFill"
                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
                 <Image IsVisible="{Binding IsGifActive}"
                        aimg:ImageBehavior.AnimatedSource="{Binding ActiveGifSource}"
@@ -266,10 +268,6 @@
                                                 Orientation="Horizontal"
                                                 Spacing="10"
                                                 HorizontalAlignment="Right">
-                                        <CheckBox Content="Shuffle"
-                                                  IsChecked="{Binding ShuffleLibrary}"
-                                                  VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource Subtext}"/>
                                         <Button Content="Import"
                                                 Classes="ghost"
                                                 IsEnabled="{Binding !IsImporting}"
@@ -277,9 +275,6 @@
                                         <Button Content="Stop"
                                                 Classes="danger"
                                                 Command="{Binding StopCommand}"/>
-                                        <Button Content="Play All"
-                                                Classes="accent"
-                                                Command="{Binding PlayLibraryCommand}"/>
                                         <TextBox Text="{Binding LibrarySearchQuery}"
                                                  PlaceholderText="Search…"
                                                  Width="220"
@@ -405,14 +400,9 @@
                                                         <Grid Height="90">
                                                             <Panel>
                                                                 <asyncImageLoader:AdvancedImage
-                                                                    Source="{Binding StaticThumbnailSource}"
-                                                                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                                    Source="{Binding DisplayThumbnailSource}"
                                                                     Stretch="UniformToFill"
-                                                                    Width="100" Height="90"/>
-                                                                <asyncImageLoader:AdvancedImage
-                                                                    Source="{Binding ThumbnailSource}"
-                                                                    IsVisible="{Binding StaticThumbnailSource, Converter={x:Static StringConverters.IsNullOrEmpty}}"
-                                                                    Stretch="UniformToFill"
+                                                                    RenderOptions.BitmapInterpolationMode="LowQuality"
                                                                     Width="100" Height="90"/>
                                                                 <Image IsVisible="{Binding IsPlaylistGifActive}"
                                                                        aimg:ImageBehavior.AnimatedSource="{Binding PlaylistActiveGifSource}"
@@ -443,13 +433,11 @@
                                                                     IsHitTestVisible="False" CornerRadius="6"
                                                                     BorderBrush="{DynamicResource Accent}"
                                                                     BorderThickness="1.5"/>
-                                                            <Border IsHitTestVisible="False" CornerRadius="6"
-                                                                    IsVisible="{Binding IsCurrentlyPlaying}"
-                                                                    BorderBrush="{DynamicResource Success}"
-                                                                    BorderThickness="1.5"/>
-                                                            <Border IsHitTestVisible="False" CornerRadius="6"
-                                                                    IsVisible="{Binding HasCrashed}"
-                                                                    BorderBrush="{DynamicResource Danger}"
+                                                            <Border Classes="card-state"
+                                                                    Classes.playing="{Binding IsCurrentlyPlaying}"
+                                                                    Classes.crashed="{Binding HasCrashed}"
+                                                                    IsHitTestVisible="False" CornerRadius="6"
+                                                                    IsVisible="{Binding IsAnyStateOverlay}"
                                                                     BorderThickness="1.5"/>
                                                         </Grid>
                                                     </Border>
@@ -561,18 +549,8 @@
                                                             <!-- Checked: Accent fill with transparent checkmark cutout -->
                                                             <Path Classes="toggle-check"
                                                                   Stretch="Fill"
-                                                                  IsVisible="{Binding IsInPlaylist}">
-                                                                <Path.Data>
-                                                                    <CombinedGeometry GeometryCombineMode="Exclude">
-                                                                        <CombinedGeometry.Geometry1>
-                                                                            <RectangleGeometry Rect="0,0,20,20" RadiusX="3.3" RadiusY="3.3"/>
-                                                                        </CombinedGeometry.Geometry1>
-                                                                        <CombinedGeometry.Geometry2>
-                                                                            <PathGeometry Figures="M 3,10 L 7,16 L 18,5 L 17,4 L 7,13 L 4,9 Z"/>
-                                                                        </CombinedGeometry.Geometry2>
-                                                                    </CombinedGeometry>
-                                                                </Path.Data>
-                                                            </Path>
+                                                                  Data="{StaticResource PlaylistToggleGeometry}"
+                                                                  IsVisible="{Binding IsInPlaylist}"/>
                                                         </Panel>
                                                     </Button>
 
@@ -596,16 +574,11 @@
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
-                                                        <Border IsVisible="{Binding IsCurrentlyPlaying}"
-                                                                BorderBrush="{DynamicResource Success}"
-                                                                BorderThickness="2.5"
-                                                                CornerRadius="10"/>
-                                                        <Border IsVisible="{Binding IsSelected}"
-                                                                BorderBrush="{DynamicResource Accent}"
-                                                                BorderThickness="2.5"
-                                                                CornerRadius="10"/>
-                                                        <Border IsVisible="{Binding HasCrashed}"
-                                                                BorderBrush="{StaticResource Danger}"
+                                                        <Border Classes="card-state"
+                                                                Classes.playing="{Binding IsCurrentlyPlaying}"
+                                                                Classes.selected="{Binding IsSelected}"
+                                                                Classes.crashed="{Binding HasCrashed}"
+                                                                IsVisible="{Binding IsAnyStateOverlay}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
                                                     </Panel>
@@ -659,6 +632,10 @@
                                             </ToggleButton>
                                         </StackPanel>
                                     </StackPanel>
+
+                                    <CheckBox Content="Automatically add newly added library items to playlist"
+                                              IsChecked="{Binding AutoAddLibraryToPlaylist}"
+                                              Foreground="{DynamicResource TextColor}"/>
 
                                     <CheckBox Content="Override global rotation settings"
                                               IsChecked="{Binding OverrideGlobalSettings}"
@@ -1012,6 +989,9 @@
                                               Foreground="{DynamicResource TextColor}"/>
                                     <CheckBox Content="Allow scene support (experimental)"
                                               IsChecked="{Binding AllowScenes}"
+                                              Foreground="{DynamicResource TextColor}"/>
+                                    <CheckBox Content="Automatically add new Wallpaper Engine wallpapers to library"
+                                              IsChecked="{Binding AutoImportWallpaperEngine}"
                                               Foreground="{DynamicResource TextColor}"/>
 
                                     <!-- Monitor settings (only when scenes enabled) -->

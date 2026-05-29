@@ -91,11 +91,45 @@ sealed class Program
 
         if (args.Contains("--restore"))
         {
+            RunHeadlessAutoSync();
             PlayerHelper.Restore();
             return;
         }
 
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    // Runs WE auto-import + playlist auto-add for `--restore` so daemon-style
+    // launches pick up new wallpapers added since the last session.
+    private static void RunHeadlessAutoSync()
+    {
+        try
+        {
+            var settings = SettingsService.Load();
+            if (!settings.AutoImportWallpaperEngine) return;
+            var newPaths = LibraryService.SyncWallpaperEngine(
+                settings.WallpaperEnginePath, settings.AllowScenes, settings.WeCopyFiles);
+            if (newPaths.Count == 0) return;
+            if (!settings.AutoAddLibraryToPlaylist) return;
+
+            var state = PlaylistService.LoadCurrentState() ?? new livepaper.Models.CustomPlaylist();
+            var existing = new System.Collections.Generic.HashSet<string>(state.VideoPaths);
+            foreach (var p in newPaths)
+                if (existing.Add(p)) state.VideoPaths.Add(p);
+            PlaylistService.SaveCurrentState(state);
+
+            var session = settings.LastSession;
+            if (session != null && (session.IsPlaylist || session.IsTimedPlaylist))
+            {
+                var sessExisting = new System.Collections.Generic.HashSet<string>(session.Paths);
+                var merged = new System.Collections.Generic.List<string>(session.Paths);
+                foreach (var p in newPaths)
+                    if (sessExisting.Add(p)) merged.Add(p);
+                session.Paths = merged;
+                SettingsService.Save(settings);
+            }
+        }
+        catch { }
     }
 
     public static AppBuilder BuildAvaloniaApp()

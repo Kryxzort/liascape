@@ -70,6 +70,30 @@ public static class PlayerHelper
     }
 
     public static bool IsTimedModeActive { get { lock (_lock) { return _timedPaths != null; } } }
+
+    // When _waitingForVideoEnd is true, _historyIndex points to the pre-fetched next item.
+    // This returns the index of the item that is actually playing.
+    private static int PlayingHistoryIndex =>
+        (_waitingForVideoEnd && _historyIndex > 0) ? _historyIndex - 1 : _historyIndex;
+
+    public static void AppendToActivePlaylist(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0) return;
+        lock (_lock)
+        {
+            if (_timedPaths != null)
+            {
+                var existing = new HashSet<string>(_timedPaths, StringComparer.Ordinal);
+                foreach (var p in paths)
+                    if (existing.Add(p)) _timedPaths.Add(p);
+            }
+            else if (IsPlaying)
+            {
+                foreach (var p in paths)
+                    TrySendCommand("loadfile", p, "append");
+            }
+        }
+    }
     public static bool IsUserMuted => _userMuted;
     public static bool IsMuted => _isMuted;
 
@@ -605,19 +629,9 @@ public static class PlayerHelper
             }
             else
             {
-                var cacheDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".cache", "livepaper");
-                Directory.CreateDirectory(cacheDir);
-
-                var playlistPath = Path.Combine(cacheDir, "playlist.txt");
-                File.WriteAllLines(playlistPath, paths.Take(paths.Length - 1));
-
-                var options = $"{mpvOptions} --playlist={playlistPath} --loop-playlist=inf";
-                _current = Launch(options, paths[paths.Length - 1]);
-                try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(paths.ToList())); } catch { }
-                StartPlaylistObserver(paths);
-                OnWallpaperChanged?.Invoke(paths[0]);
+                // Livepaper-owned: full playlist control, mid-session injection, no mpv playlist file
+                ApplyTimedPlaylist(paths, mpvOptions, shuffle, intervalSeconds: 0, waitForVideoEnd: false, advanceOnVideoEnd: true);
+                return;
             }
         }
         UpdateRestartTimer();
@@ -657,9 +671,7 @@ public static class PlayerHelper
                 var next = AdvanceToNext();
                 if (next != null)
                 {
-                    _waitingForVideoEnd = true;
-                    var cts = _waitCts = new CancellationTokenSource();
-                    Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+                    ArmVideoEndWait(next);
                 }
             }
 
@@ -706,9 +718,7 @@ public static class PlayerHelper
         // when the timer fired). Current is a video (scene case bailed above), so prevIsVideo: true.
         if (_waitingForVideoEnd && _historyIndex >= 0 && _historyIndex < _history.Count)
         {
-            var next = _history[_historyIndex];
-            var cts = _waitCts = new CancellationTokenSource();
-            Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+            ArmVideoEndWait(_history[_historyIndex]);
             return;
         }
 
@@ -717,9 +727,7 @@ public static class PlayerHelper
         {
             var next = AdvanceToNext();
             if (next == null) return;
-            _waitingForVideoEnd = true;
-            var cts = _waitCts = new CancellationTokenSource();
-            Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
+            ArmVideoEndWait(next);
         }
     }
 
@@ -738,7 +746,7 @@ public static class PlayerHelper
 
             // When WaitingForVideoEnd=true the saved _historyIndex is pre-fetched one step ahead;
             // restore to the actually-playing item (one step back).
-            var playingHistIdx = (_waitingForVideoEnd && _historyIndex > 0) ? _historyIndex - 1 : _historyIndex;
+            var playingHistIdx = PlayingHistoryIndex;
             SwitchToFile(_history[playingHistIdx], _timedOptions);
             SaveTimedState();
 
@@ -859,9 +867,7 @@ public static class PlayerHelper
                     var next = AdvanceToNext();
                     if (next != null)
                     {
-                        _waitingForVideoEnd = true;
-                        var cts = _waitCts = new CancellationTokenSource();
-                        Task.Run(() => DoVideoEndWait(next, cts.Token));
+                        ArmVideoEndWait(next, prevIsVideo: false);
                     }
                     else
                     {
@@ -881,21 +887,7 @@ public static class PlayerHelper
     private static void LaunchAndReset(string path)
     {
         SwitchToFile(path, SettingsService.Load().BuildMpvOptions());
-        if (_advanceOnVideoEnd && !IsScenePath(path))
-        {
-            var next = AdvanceToNext();
-            if (next != null)
-            {
-                _waitingForVideoEnd = true;
-                var cts = _waitCts = new CancellationTokenSource();
-                Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
-            }
-        }
-        else
-        {
-            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-        }
-        SaveTimedState();
+        PostSwitch(path);
     }
 
     // Switch to the next wallpaper.
@@ -1167,22 +1159,36 @@ public static class PlayerHelper
     {
         lock (_lock)
         {
-            // When WaitingForVideoEnd is true, _historyIndex points to the prefetched next item.
-            int playingHistIdx = (_waitingForVideoEnd && _historyIndex > 0) ? _historyIndex - 1 : _historyIndex;
-            var currentPath = (_history != null && playingHistIdx >= 0 && playingHistIdx < _history.Count)
-                ? _history[playingHistIdx]
-                : null;
+            if (_timedPaths == null || _history == null) return;
 
-            TeardownTimer();
-            ClearTimedStateFile();
+            // Cancel any in-flight pre-fetch wait
+            bool wasWaiting = _waitingForVideoEnd;
+            _waitCts?.Cancel();
+            _waitCts = null;
+            _waitingForVideoEnd = false;
 
-            var rest = allPaths.Where(p => p != currentPath).ToList();
-            if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
+            // Un-advance history index if pre-fetch was in progress
+            if (wasWaiting && _historyIndex > 0)
+                _historyIndex--;
 
-            TrySendCommand("set", "loop-file", "no");
-            foreach (var p in rest)
-                TrySendCommand("loadfile", p, "append");
-            TrySendCommand("set", "loop-playlist", "inf");
+            _advanceOnVideoEnd = true;
+            _waitForVideoEnd = false;
+            _timedInterval = TimeSpan.Zero;
+            _timedShuffle = shuffle;
+            // _timedRemainingMs preserved: scenes still use the countdown;
+            // video paths arm DoVideoEndWait which holds the tick via _waitingForVideoEnd.
+
+            // Re-arm DoVideoEndWait for the next item
+            string? currentPath = (_historyIndex >= 0 && _historyIndex < _history.Count)
+                ? _history[_historyIndex] : null;
+            if (currentPath != null && !IsScenePath(currentPath) && _timedPaths.Count > 1)
+            {
+                var next = AdvanceToNext();
+                if (next != null)
+                    ArmVideoEndWait(next);
+            }
+
+            SaveTimedState();
         }
     }
 
@@ -1194,8 +1200,14 @@ public static class PlayerHelper
         {
             if (allPaths.Count == 0) return;
 
+            // Cancel any in-flight DoVideoEndWait (may have set loop-file=no + loadfile append)
+            _waitCts?.Cancel();
+            _waitCts = null;
+            _waitingForVideoEnd = false;
+
             var currentPath = TryQueryCurrentPath();
 
+            // Restore single-file loop mode and clear any pre-appended next item
             TrySendCommand("set", "loop-file", "inf");
             TrySendCommand("playlist-clear");
             TrySendCommand("set", "loop-playlist", "no");
@@ -1319,11 +1331,7 @@ public static class PlayerHelper
                     {
                         var nextPath = AdvanceToNext();
                         if (nextPath != null)
-                        {
-                            _waitingForVideoEnd = true;
-                            var cts = _waitCts = new CancellationTokenSource();
-                            Task.Run(() => DoVideoEndWait(nextPath, cts.Token, prevIsVideo: true));
-                        }
+                            ArmVideoEndWait(nextPath);
                     }
                 }
 
@@ -1594,22 +1602,7 @@ public static class PlayerHelper
                     TrySendCommand("playlist-clear");
 
                     OnWallpaperChanged?.Invoke(next);
-
-                    if (_advanceOnVideoEnd && !IsScenePath(next))
-                    {
-                        var nextNext = AdvanceToNext();
-                        if (nextNext != null)
-                        {
-                            _waitingForVideoEnd = true;
-                            var cts2 = _waitCts = new CancellationTokenSource();
-                            Task.Run(() => DoVideoEndWait(nextNext, cts2.Token, prevIsVideo: true));
-                        }
-                    }
-                    else
-                    {
-                        _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-                    }
-                    SaveTimedState();
+                    PostSwitch(next);
                 }
                 return;
             }
@@ -1676,21 +1669,7 @@ public static class PlayerHelper
             _waitingForVideoEnd = false;
             _waitCts = null;
             SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
-            if (_advanceOnVideoEnd && !IsScenePath(next))
-            {
-                var nextNext = AdvanceToNext();
-                if (nextNext != null)
-                {
-                    _waitingForVideoEnd = true;
-                    var cts2 = _waitCts = new CancellationTokenSource();
-                    Task.Run(() => DoVideoEndWait(nextNext, cts2.Token, prevIsVideo: true));
-                }
-            }
-            else
-            {
-                _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-            }
-            SaveTimedState();
+            PostSwitch(next);
         }
     }
 
@@ -1703,6 +1682,27 @@ public static class PlayerHelper
         // in the gap between cancel and the following SwitchToFile call.
         // TryIpcSwitchToFile will set the correct value immediately after.
         TrySendCommand("set", "loop-file", "inf");
+    }
+
+    private static void ArmVideoEndWait(string next, bool prevIsVideo = true)
+    {
+        var cts = _waitCts = new CancellationTokenSource();
+        _waitingForVideoEnd = true;
+        Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo));
+    }
+
+    // After switching to a new wallpaper: arm the next video-end pre-fetch (advance-on-end)
+    // or reset the countdown (timed interval). Always saves state.
+    private static void PostSwitch(string path)
+    {
+        if (_advanceOnVideoEnd && !IsScenePath(path))
+        {
+            var next = AdvanceToNext();
+            if (next != null) ArmVideoEndWait(next);
+        }
+        else
+            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
+        SaveTimedState();
     }
 
     private static void AdvanceAndLaunch()
@@ -1735,8 +1735,7 @@ public static class PlayerHelper
         if (_timedPaths == null || _timedPaths.Count == 0) return;
         // In advance-on-end mode _historyIndex is pre-fetched; use the item before it
         // as "current" so we don't accidentally exclude the pending-next item.
-        int playingIdx = (_waitingForVideoEnd && _historyIndex > 0)
-            ? _historyIndex - 1 : _historyIndex;
+        int playingIdx = PlayingHistoryIndex;
         var current = _history != null && playingIdx >= 0 && playingIdx < _history.Count
             ? _history[playingIdx]
             : null;
@@ -1841,7 +1840,7 @@ public static class PlayerHelper
             var oldIntervalMs = (long)_timedInterval.TotalMilliseconds;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
             var newIntervalMs = (long)_timedInterval.TotalMilliseconds;
-            var elapsed = oldIntervalMs - _timedRemainingMs;
+            var elapsed = Math.Max(0L, oldIntervalMs - _timedRemainingMs);
             _timedRemainingMs = elapsed >= newIntervalMs ? newIntervalMs : newIntervalMs - elapsed;
 
             bool advanceChanged = _advanceOnVideoEnd != advanceOnVideoEnd;
@@ -1863,11 +1862,7 @@ public static class PlayerHelper
                 {
                     var next = AdvanceToNext();
                     if (next != null)
-                    {
-                        _waitingForVideoEnd = true;
-                        var cts = _waitCts = new CancellationTokenSource();
-                        Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo: true));
-                    }
+                        ArmVideoEndWait(next);
                 }
             }
             else

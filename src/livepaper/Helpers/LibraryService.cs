@@ -2,12 +2,202 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using livepaper.Models;
 
 namespace livepaper.Helpers;
 
 public static class LibraryService
 {
+    private static string WeIndexPath => Path.Combine(DownloadHelper.LibraryPath, "we_ids.txt");
+
+    private static HashSet<string> LoadWeIndex()
+    {
+        Directory.CreateDirectory(DownloadHelper.LibraryPath);
+        if (!File.Exists(WeIndexPath))
+        {
+            var ids = CollectExistingWorkshopIds();
+            SaveWeIndex(ids);
+            return ids;
+        }
+        try
+        {
+            return new HashSet<string>(
+                File.ReadLines(WeIndexPath).Select(l => l.Trim()).Where(l => l.Length > 0),
+                StringComparer.Ordinal);
+        }
+        catch { return CollectExistingWorkshopIds(); }
+    }
+
+    private static void SaveWeIndex(HashSet<string> ids)
+    {
+        try { File.WriteAllLines(WeIndexPath, ids); } catch { }
+    }
+
+    private static void AppendToWeIndex(string workshopId)
+    {
+        try { File.AppendAllText(WeIndexPath, workshopId + "\n"); } catch { }
+    }
+
+    private static void RebuildWeIndex()
+    {
+        var ids = CollectExistingWorkshopIds();
+        SaveWeIndex(ids);
+    }
+
+    // Headless WE workshop scan. Creates symlinks (or copies) for any workshop
+    // item not already represented in the library by workshop ID. Returns the
+    // newly added library media paths (.mp4 for videos, .scene for scenes).
+    public static List<string> SyncWallpaperEngine(string workshopPath, bool allowScenes, bool weCopyFiles)
+    {
+        var added = new List<string>();
+        if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return added;
+        Directory.CreateDirectory(DownloadHelper.LibraryPath);
+
+        var existingIds = LoadWeIndex();
+
+        foreach (var dir in Directory.EnumerateDirectories(workshopPath))
+        {
+            string workshopId = Path.GetFileName(dir);
+            if (existingIds.Contains(workshopId)) continue;
+
+            string projectJson = Path.Combine(dir, "project.json");
+            string? type = null, file = null, title = null;
+            bool hasScenePkg = File.Exists(Path.Combine(dir, "scene.pkg"));
+
+            if (File.Exists(projectJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(projectJson));
+                    var root = doc.RootElement;
+                    type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+                    file = root.TryGetProperty("file", out var f) ? f.GetString() : null;
+                    title = root.TryGetProperty("title", out var ti) ? ti.GetString() : null;
+                }
+                catch { continue; }
+            }
+            else if (!hasScenePkg) continue;
+
+            string baseTitle = !string.IsNullOrEmpty(title) ? SanitizeName(title) : workshopId;
+            if (string.IsNullOrEmpty(baseTitle)) baseTitle = workshopId;
+
+            bool isVideo = string.Equals(type, "video", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(file);
+            bool isScene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && hasScenePkg);
+
+            if (isVideo)
+            {
+                string videoSrc = Path.Combine(dir, file!);
+                if (!File.Exists(videoSrc)) continue;
+                string destPath = ResolveUniqueName(baseTitle, ".mp4");
+                try
+                {
+                    if (weCopyFiles) File.Copy(videoSrc, destPath);
+                    else File.CreateSymbolicLink(destPath, videoSrc);
+                }
+                catch { continue; }
+
+                LinkOrCopyThumbnail(Path.Combine(dir, "preview.jpg"), destPath, weCopyFiles);
+                try { File.WriteAllText(Path.ChangeExtension(destPath, ".id"), workshopId); } catch { }
+                existingIds.Add(workshopId);
+                AppendToWeIndex(workshopId);
+                added.Add(destPath);
+            }
+            else if (isScene && allowScenes)
+            {
+                string destPath = ResolveUniqueName(baseTitle, ".scene");
+                string sceneContent = workshopId;
+                if (weCopyFiles)
+                {
+                    string copiedDir = Path.Combine(DownloadHelper.LibraryPath,
+                        $"{Path.GetFileNameWithoutExtension(destPath)}_{workshopId}");
+                    try
+                    {
+                        CopyDirectory(dir, copiedDir);
+                        sceneContent = copiedDir;
+                    }
+                    catch { continue; }
+                }
+                try { File.WriteAllText(destPath, sceneContent); } catch { continue; }
+                LinkOrCopyThumbnail(Path.Combine(dir, "preview.jpg"), destPath, weCopyFiles);
+                try { File.WriteAllText(Path.ChangeExtension(destPath, ".id"), workshopId); } catch { }
+                existingIds.Add(workshopId);
+                AppendToWeIndex(workshopId);
+                added.Add(destPath);
+            }
+        }
+
+        return added;
+    }
+
+    private static HashSet<string> CollectExistingWorkshopIds()
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (!Directory.Exists(DownloadHelper.LibraryPath)) return ids;
+        foreach (var idFile in Directory.EnumerateFiles(DownloadHelper.LibraryPath, "*.id"))
+        {
+            try
+            {
+                var raw = File.ReadAllText(idFile).Trim();
+                if (long.TryParse(raw, out _)) { ids.Add(raw); continue; }
+                var parts = raw.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < parts.Length - 1; i++)
+                {
+                    if ((parts[i] == "431960" || parts[i].Equals("workshop", StringComparison.OrdinalIgnoreCase))
+                        && long.TryParse(parts[i + 1], out _))
+                    {
+                        ids.Add(parts[i + 1]);
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+        return ids;
+    }
+
+    private static string ResolveUniqueName(string baseTitle, string ext)
+    {
+        for (int attempt = 0; attempt < 10000; attempt++)
+        {
+            string name = attempt == 0 ? baseTitle : $"{baseTitle} ({attempt})";
+            string candidate = Path.Combine(DownloadHelper.LibraryPath, name + ext);
+            if (File.Exists(candidate)) continue;
+            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".mp4"))) continue;
+            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".png"))) continue;
+            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".scene"))) continue;
+            return candidate;
+        }
+        return Path.Combine(DownloadHelper.LibraryPath, baseTitle + "_" + Guid.NewGuid().ToString("N") + ext);
+    }
+
+    private static void LinkOrCopyThumbnail(string src, string mediaDest, bool copy)
+    {
+        if (!File.Exists(src)) return;
+        string thumbDest = Path.ChangeExtension(mediaDest, ".jpg");
+        try
+        {
+            if (copy) File.Copy(src, thumbDest);
+            else File.CreateSymbolicLink(thumbDest, src);
+        }
+        catch { }
+    }
+
+    private static void CopyDirectory(string src, string dest)
+    {
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.GetFiles(src))
+            File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
+        foreach (var dir in Directory.GetDirectories(src))
+            CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
+    }
+
+    private static string SanitizeName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
+    }
+
     public static string TrashPath => Path.Combine(DownloadHelper.LibraryPath, ".trash");
 
     public static void Trash(LibraryItem item, string batchDir)
@@ -19,6 +209,7 @@ public static class LibraryService
             MoveIfExists(Path.ChangeExtension(item.VideoPath, ext), batchDir);
         if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
             Directory.Move(item.CopiedSceneDir, Path.Combine(batchDir, Path.GetFileName(item.CopiedSceneDir)));
+        if (item.WorkshopId != null) RebuildWeIndex();
     }
 
     public static void RestoreBatch(string batchDir)
@@ -36,6 +227,7 @@ public static class LibraryService
         foreach (var m in fileMoves) File.Move(m.Src, m.Dest);
         foreach (var m in dirMoves) Directory.Move(m.Src, m.Dest);
         try { Directory.Delete(batchDir); } catch { }
+        RebuildWeIndex();
     }
 
     public static void PurgeBatch(string batchDir)
@@ -90,6 +282,7 @@ public static class LibraryService
 
         if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
             Directory.Delete(item.CopiedSceneDir, recursive: true);
+        if (item.WorkshopId != null) RebuildWeIndex();
     }
 
     public static void MarkCrashed(string videoPath)
@@ -97,34 +290,21 @@ public static class LibraryService
         try { File.WriteAllText(Path.ChangeExtension(videoPath, ".crashed"), ""); } catch { }
     }
 
-    public static void SaveVolumeOverride(string videoPath, int? volume)
-    {
-        var path = Path.ChangeExtension(videoPath, ".volume");
-        try
-        {
-            if (volume.HasValue) File.WriteAllText(path, volume.Value.ToString());
-            else if (File.Exists(path)) File.Delete(path);
-        }
-        catch { }
-    }
+    public static void SaveVolumeOverride(string videoPath, int? volume) =>
+        SaveOrDeleteSidecar(videoPath, ".volume", volume.HasValue ? volume.Value.ToString() : null);
 
-    public static void SaveSpeedOverride(string videoPath, double? speed)
-    {
-        var path = Path.ChangeExtension(videoPath, ".speed");
-        try
-        {
-            if (speed.HasValue) File.WriteAllText(path, speed.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            else if (File.Exists(path)) File.Delete(path);
-        }
-        catch { }
-    }
+    public static void SaveSpeedOverride(string videoPath, double? speed) =>
+        SaveOrDeleteSidecar(videoPath, ".speed", speed.HasValue ? speed.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
 
-    public static void SetWhitelisted(string videoPath, bool whitelisted)
+    public static void SetWhitelisted(string videoPath, bool whitelisted) =>
+        SaveOrDeleteSidecar(videoPath, ".whitelist", whitelisted ? "" : null);
+
+    private static void SaveOrDeleteSidecar(string videoPath, string extension, string? content)
     {
-        var path = Path.ChangeExtension(videoPath, ".whitelist");
+        var path = Path.ChangeExtension(videoPath, extension);
         try
         {
-            if (whitelisted) File.WriteAllText(path, "");
+            if (content != null) File.WriteAllText(path, content);
             else if (File.Exists(path)) File.Delete(path);
         }
         catch { }

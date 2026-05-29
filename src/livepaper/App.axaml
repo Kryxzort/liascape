@@ -305,7 +305,7 @@
             <Setter Property="Opacity" Value="0"/>
             <Setter Property="Transitions">
                 <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.15"/>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
                 </Transitions>
             </Setter>
         </Style>
@@ -313,12 +313,23 @@
             <Setter Property="Opacity" Value="0.5"/>
         </Style>
 
+        <!-- Card state-overlay border (priority: playing < selected < crashed) -->
+        <Style Selector="Border.card-state.playing">
+            <Setter Property="BorderBrush" Value="{DynamicResource Success}"/>
+        </Style>
+        <Style Selector="Border.card-state.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style Selector="Border.card-state.crashed">
+            <Setter Property="BorderBrush" Value="{DynamicResource Danger}"/>
+        </Style>
+
         <!-- Playlist strip item hover outline -->
         <Style Selector="Border.playlist-item-hover">
             <Setter Property="Opacity" Value="0"/>
             <Setter Property="Transitions">
                 <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.15"/>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
                 </Transitions>
             </Setter>
         </Style>

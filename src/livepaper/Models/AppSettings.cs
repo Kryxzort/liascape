@@ -54,6 +54,8 @@ public class AppSettings
     }
     public bool GlobalWaitForVideoEnd { get; set; } = false;
     public bool PlaylistWaitForVideoEnd { get; set; } = false;
+    public bool AutoAddLibraryToPlaylist { get; set; } = false;
+    public bool AutoImportWallpaperEngine { get; set; } = false;
     public LastSession? LastSession { get; set; }
 
     public string BuildMpvOptions()

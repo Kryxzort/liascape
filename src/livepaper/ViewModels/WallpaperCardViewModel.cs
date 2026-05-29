@@ -27,6 +27,14 @@ public partial class WallpaperCardViewModel : ViewModelBase
     [ObservableProperty] private string? _staticThumbnailSource;
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
 
+    // Single source used by the card's static image layer. Falls back to ThumbnailSource when no
+    // extracted static frame is available. Avoids materializing two AdvancedImage controls per card.
+    public string? DisplayThumbnailSource =>
+        string.IsNullOrEmpty(StaticThumbnailSource) ? ThumbnailSource : StaticThumbnailSource;
+
+    partial void OnStaticThumbnailSourceChanged(string? value) =>
+        OnPropertyChanged(nameof(DisplayThumbnailSource));
+
     private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
     private Stream? _gifStream;
     public AnimatedImage.Avalonia.AnimatedImageSource? GifSource => _gifSource ??= LoadGifSource(out _gifStream);
@@ -38,7 +46,6 @@ public partial class WallpaperCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(ActiveGifSource));
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
-    public void RestartGif() { ReleaseGifSource(); OnPropertyChanged(nameof(ActiveGifSource)); }
 
     private void ReleaseGifSource()
     {
@@ -58,7 +65,6 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? PlaylistActiveGifSource =>
         IsPlaylistGifActive ? (_playlistGifSource ??= LoadGifSource(out _playlistGifStream)) : null;
-    public void RestartPlaylistGif() { ReleasePlaylistGifSource(); OnPropertyChanged(nameof(PlaylistActiveGifSource)); }
 
     private void ReleasePlaylistGifSource()
     {
@@ -92,11 +98,19 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
 
     public bool IsLocalSource => !PageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
-    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAnyStateOverlay))]
+    private bool _isSelected;
     [ObservableProperty] private bool _isInPlaylist;
-    [ObservableProperty] private bool _hasCrashed;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAnyStateOverlay))]
+    private bool _hasCrashed;
     [ObservableProperty] private bool _isWhitelisted;
-    [ObservableProperty] private bool _isCurrentlyPlaying;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAnyStateOverlay))]
+    private bool _isCurrentlyPlaying;
+
+    public bool IsAnyStateOverlay => HasCrashed || IsSelected || IsCurrentlyPlaying;
     [ObservableProperty] private string _videoDuration = "";
     [ObservableProperty] private int _sliderVolume;
     [ObservableProperty] private double _sliderSpeed;

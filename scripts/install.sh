@@ -9,12 +9,14 @@ BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
 ICONS_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
 
-echo "==> Building livepaper..."
-dotnet publish "$ROOT/src/livepaper" \
-    -r linux-x64 \
-    --self-contained \
-    -c Release \
-    -o "$PUBLISH_DIR"
+if [ "$1" != "--no-build" ]; then
+    echo "==> Building livepaper..."
+    dotnet publish "$ROOT/src/livepaper" \
+        -r linux-x64 \
+        --self-contained \
+        -c Release \
+        -o "$PUBLISH_DIR"
+fi
 
 echo "==> Installing to $HOME/.local/lib/livepaper/..."
 mkdir -p "$HOME/.local/lib/livepaper"

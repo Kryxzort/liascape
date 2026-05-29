@@ -61,8 +61,6 @@ public partial class MainWindow : Window
                 foreach (var c in Vm.BrowseWallpapers) ActivateGifCard(c);
                 foreach (var c in Vm.PlaylistItems) ActivatePlaylistGifCard(c);
             }
-            LibraryScrollViewer.ScrollChanged += OnLibraryScrollGif;
-            BrowseScrollViewer.ScrollChanged += OnBrowseScrollGif;
             PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
         };
 
@@ -487,9 +485,8 @@ public partial class MainWindow : Window
 
     private static void ActivateGifCard(WallpaperCardViewModel card)
     {
-        if (!card.IsGifThumbnail) return;
-        if (card.IsGifActive) card.RestartGif();
-        else card.IsGifActive = true;
+        if (!card.IsGifThumbnail || card.IsGifActive) return;
+        card.IsGifActive = true;
     }
 
     private void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
@@ -504,15 +501,16 @@ public partial class MainWindow : Window
 
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card
+            && card.IsGifThumbnail && !card.IsGifActive)
             card.IsGifActive = true;
     }
 
     private void OnCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
-            if (!card.IsGifThumbnail || Vm?.AutoPlayGifs == false)
-                card.IsGifActive = false;
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard
+            && card.IsGifThumbnail && Vm?.AutoPlayGifs == false && card.IsGifActive)
+            card.IsGifActive = false;
     }
 
     private async void UpdateCardThumbnailHeight()
@@ -549,22 +547,6 @@ public partial class MainWindow : Window
         Vm.CardThumbnailHeight = Math.Round(cardWidth * ratio);
     }
 
-    private void OnLibraryScrollGif(object? sender, ScrollChangedEventArgs e)
-    {
-        if (Vm?.AutoPlayGifs != true) return;
-        foreach (var child in LibraryItemsRepeater.Children)
-            if (child is StyledElement se && se.DataContext is WallpaperCardViewModel c && !c.IsGifActive)
-                ActivateGifCard(c);
-    }
-
-    private void OnBrowseScrollGif(object? sender, ScrollChangedEventArgs e)
-    {
-        if (Vm?.AutoPlayGifs != true) return;
-        foreach (var child in BrowseItemsRepeater.Children)
-            if (child is StyledElement se && se.DataContext is WallpaperCardViewModel c && !c.IsGifActive)
-                ActivateGifCard(c);
-    }
-
     private void OnPlaylistScrollGif(object? sender, ScrollChangedEventArgs e)
     {
         if (Vm?.AutoPlayGifs != true) return;
@@ -584,22 +566,22 @@ public partial class MainWindow : Window
 
     private void OnPlaylistCardPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card)
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card
+            && card.IsGifThumbnail && !card.IsPlaylistGifActive)
             card.IsPlaylistGifActive = true;
     }
 
     private void OnPlaylistCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard)
-            if (!card.IsGifThumbnail || Vm?.AutoPlayGifs == false)
-                card.IsPlaylistGifActive = false;
+        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard
+            && card.IsGifThumbnail && Vm?.AutoPlayGifs == false && card.IsPlaylistGifActive)
+            card.IsPlaylistGifActive = false;
     }
 
     private static void ActivatePlaylistGifCard(WallpaperCardViewModel card)
     {
-        if (!card.IsGifThumbnail) return;
-        if (card.IsPlaylistGifActive) card.RestartPlaylistGif();
-        else card.IsPlaylistGifActive = true;
+        if (!card.IsGifThumbnail || card.IsPlaylistGifActive) return;
+        card.IsPlaylistGifActive = true;
     }
 
     private void OnBrowseScrollChanged(object? sender, ScrollChangedEventArgs e)

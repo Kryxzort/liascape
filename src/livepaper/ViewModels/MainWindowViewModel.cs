@@ -198,6 +198,8 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _advanceOnVideoEnd = true;
     [ObservableProperty] private bool _playlistWaitForVideoEnd;
     [ObservableProperty] private bool _overrideGlobalSettings;
+    [ObservableProperty] private bool _autoAddLibraryToPlaylist;
+    [ObservableProperty] private bool _autoImportWallpaperEngine;
 
     // Global rotation settings (Settings tab)
     [ObservableProperty] private decimal _globalIntervalHours;
@@ -236,7 +238,7 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnAutoMuteChanged(bool value)
     {
         _settings.AutoMute = value;
-        if (value) AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, _settings.AutoMuteOnlyIfMprisActive);
+        if (value) RestartAudioMonitor();
         else AudioMonitor.Stop();
         SettingsService.Save(_settings);
     }
@@ -244,29 +246,35 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnAutoMuteDelayMsChanged(decimal value)
     {
         _settings.AutoMuteDelayMs = (int)value;
-        if (_settings.AutoMute) AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, _settings.AutoMuteOnlyIfMprisActive);
+        RestartAudioMonitor();
         SettingsService.Save(_settings);
     }
 
     partial void OnAutoUnmuteDelayMsChanged(decimal value)
     {
         _settings.AutoUnmuteDelayMs = (int)value;
-        if (_settings.AutoMute) AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, _settings.AutoMuteOnlyIfMprisActive);
+        RestartAudioMonitor();
         SettingsService.Save(_settings);
     }
 
     partial void OnAutoMuteThresholdDbChanged(decimal value)
     {
         _settings.AutoMuteThresholdDb = (double)value;
-        if (_settings.AutoMute) AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, _settings.AutoMuteOnlyIfMprisActive);
+        RestartAudioMonitor();
         SettingsService.Save(_settings);
     }
 
     partial void OnAutoMuteOnlyIfMprisActiveChanged(bool value)
     {
         _settings.AutoMuteOnlyIfMprisActive = value;
-        if (_settings.AutoMute) AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, value);
+        RestartAudioMonitor();
         SettingsService.Save(_settings);
+    }
+
+    private void RestartAudioMonitor()
+    {
+        if (_settings.AutoMute)
+            AudioMonitor.Start(_settings.AutoMuteDelayMs, _settings.AutoUnmuteDelayMs, _settings.AutoMuteThresholdDb, _settings.AutoMuteOnlyIfMprisActive);
     }
 
     partial void OnRestartIntervalSecondsChanged(decimal value)
@@ -517,6 +525,40 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshPlayingStatus();
     }
     partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+
+    partial void OnAutoAddLibraryToPlaylistChanged(bool value)
+    {
+        _settings.AutoAddLibraryToPlaylist = value;
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnAutoImportWallpaperEngineChanged(bool value)
+    {
+        _settings.AutoImportWallpaperEngine = value;
+        SettingsService.Save(_settings);
+        if (value) Task.Run(SyncWallpaperEngineAsync);
+    }
+
+    private async Task SyncWallpaperEngineAsync()
+    {
+        try
+        {
+            var added = LibraryService.SyncWallpaperEngine(
+                _settings.WallpaperEnginePath, _settings.AllowScenes, _settings.WeCopyFiles);
+            if (added.Count == 0) return;
+            var fresh = LibraryService.LoadAll().ToDictionary(i => i.VideoPath);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var media in added)
+                {
+                    if (LibraryWallpapers.Any(c => c.LibraryItem?.VideoPath == media)) continue;
+                    if (!fresh.TryGetValue(media, out var item)) continue;
+                    LibraryWallpapers.Add(MakeLibraryCard(item));
+                }
+            });
+        }
+        catch { }
+    }
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
@@ -605,9 +647,9 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        if (!isTimedMode && advanceOnEnd)
+        if (isTimedMode && advanceOnEnd && !hasScenes)
         {
-            // Pure mpv-native advance-on-end — shuffle order handled by ApplyShuffleOrderIfRunning
+            // Already in livepaper-owned advance-on-end — nothing to switch
             return;
         }
 
@@ -718,10 +760,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnLibrarySearchQueryChanged(string value)
     {
-        _searchDebounceCts?.Cancel();
-        _searchDebounceCts?.Dispose();
-        _searchDebounceCts = new CancellationTokenSource();
-        var token = _searchDebounceCts.Token;
+        var token = RenewCts(ref _searchDebounceCts).Token;
         var trimmed = value.Trim();
         Task.Run(async () =>
         {
@@ -778,10 +817,7 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnSearchQueryChanged(string value)
     {
         if (!SelectedSource.SupportsSearch) return;
-        _browseSearchDebounceCts?.Cancel();
-        _browseSearchDebounceCts?.Dispose();
-        _browseSearchDebounceCts = new CancellationTokenSource();
-        var token = _browseSearchDebounceCts.Token;
+        var token = RenewCts(ref _browseSearchDebounceCts).Token;
         var trimmed = value.Trim();
         Task.Run(async () =>
         {
@@ -828,6 +864,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _lastBrowseSelectedIndex = -1;
     private WallpaperCardViewModel? _currentlyPlayingCard;
     private bool _suppressFilterUpdate;
+    private bool _suppressAutoPlaylistAdd;
 
     private sealed class UndoBatch
     {
@@ -891,6 +928,8 @@ public partial class MainWindowViewModel : ViewModelBase
         _globalAdvanceOnVideoEnd = _settings.GlobalAdvanceOnVideoEnd;
         _globalWaitForVideoEnd = _settings.GlobalWaitForVideoEnd;
         _playlistWaitForVideoEnd = _settings.PlaylistWaitForVideoEnd;
+        _autoAddLibraryToPlaylist = _settings.AutoAddLibraryToPlaylist;
+        _autoImportWallpaperEngine = _settings.AutoImportWallpaperEngine;
         _wallpaperEnginePath = _settings.WallpaperEnginePath;
         _weCopyFiles = _settings.WeCopyFiles;
         _resumeFromLast = _settings.ResumeFromLast;
@@ -934,6 +973,17 @@ public partial class MainWindowViewModel : ViewModelBase
                 foreach (WallpaperCardViewModel c in e.OldItems) c.PropertyChanged -= OnLibraryCardChanged;
             LibrarySelectedCount = LibraryWallpapers.Count(c => c.IsSelected);
             if (!_suppressFilterUpdate) UpdateFilteredLibrary();
+            if (!_suppressAutoPlaylistAdd && AutoAddLibraryToPlaylist && e.NewItems != null)
+            {
+                var injected = new List<string>();
+                foreach (WallpaperCardViewModel c in e.NewItems)
+                {
+                    if (c.LibraryItem == null || c.IsInPlaylist) continue;
+                    AddCardToPlaylist(c);
+                    injected.Add(c.LibraryItem.VideoPath);
+                }
+                if (injected.Count > 0) PlayerHelper.AppendToActivePlaylist(injected);
+            }
         };
 
         PlaylistItems.CollectionChanged += (_, _) =>
@@ -971,9 +1021,40 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         });
 
+        List<string> newWePaths = [];
+        if (AutoImportWallpaperEngine)
+            newWePaths = LibraryService.SyncWallpaperEngine(
+                _settings.WallpaperEnginePath, _settings.AllowScenes, _settings.WeCopyFiles);
+
+        _suppressAutoPlaylistAdd = true;
         LoadLibrary();
         UpdateFilteredLibrary();
         RestorePlaylistState();
+        _suppressAutoPlaylistAdd = false;
+
+        if (AutoAddLibraryToPlaylist && newWePaths.Count > 0)
+        {
+            var injected = new List<string>();
+            foreach (var p in newWePaths)
+            {
+                var card = LibraryWallpapers.FirstOrDefault(c => c.LibraryItem?.VideoPath == p);
+                if (card == null || card.IsInPlaylist) continue;
+                AddCardToPlaylist(card);
+                injected.Add(p);
+            }
+            if (injected.Count > 0)
+            {
+                PlayerHelper.AppendToActivePlaylist(injected);
+                var session = _settings.LastSession;
+                if (session != null && (session.IsPlaylist || session.IsTimedPlaylist))
+                {
+                    var existing = new HashSet<string>(session.Paths);
+                    foreach (var p in injected)
+                        if (existing.Add(p)) session.Paths.Add(p);
+                    SettingsService.Save(_settings);
+                }
+            }
+        }
 
         var s = _settings.LastSession;
         if (s != null && PlayerHelper.IsPlaying)
@@ -1063,9 +1144,7 @@ public partial class MainWindowViewModel : ViewModelBase
         foreach (var c in LibraryWallpapers)
             c.UpdateGlobalVolume(value);
 
-        _volumeSaveCts?.Cancel();
-        _volumeSaveCts?.Dispose();
-        var cts = _volumeSaveCts = new CancellationTokenSource();
+        var cts = RenewCts(ref _volumeSaveCts);
         Task.Delay(400, cts.Token).ContinueWith(t =>
         {
             if (!t.IsCanceled) Dispatcher.UIThread.Post(SaveAndRebuild);
@@ -1132,17 +1211,9 @@ public partial class MainWindowViewModel : ViewModelBase
             foreach (var c in LibraryWallpapers.Where(c => c.IsSelected).ToList())
             {
                 if (adding && !c.IsInPlaylist && c.LibraryItem != null)
-                {
-                    PlaylistItems.Add(c);
-                    c.IsInPlaylist = true;
-                    if (AutoPlayGifs && c.IsGifThumbnail) c.IsPlaylistGifActive = true;
-                }
+                    AddCardToPlaylist(c);
                 else if (!adding && c.IsInPlaylist)
-                {
-                    PlaylistItems.Remove(c);
-                    c.IsInPlaylist = false;
-                    c.IsPlaylistGifActive = false;
-                }
+                    RemoveFromPlaylist(c);
             }
         }
         else
@@ -1150,15 +1221,11 @@ public partial class MainWindowViewModel : ViewModelBase
             if (card.LibraryItem == null) return;
             if (card.IsInPlaylist)
             {
-                PlaylistItems.Remove(card);
-                card.IsInPlaylist = false;
-                card.IsPlaylistGifActive = false;
+                RemoveFromPlaylist(card);
             }
             else
             {
-                PlaylistItems.Add(card);
-                card.IsInPlaylist = true;
-                if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
+                AddCardToPlaylist(card);
             }
         }
     }
@@ -1171,6 +1238,20 @@ public partial class MainWindowViewModel : ViewModelBase
         card.IsPlaylistGifActive = false;
     }
 
+    private void AddCardToPlaylist(WallpaperCardViewModel card)
+    {
+        PlaylistItems.Add(card);
+        card.IsInPlaylist = true;
+        if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
+    }
+
+    private CancellationTokenSource RenewCts(ref CancellationTokenSource? field)
+    {
+        field?.Cancel();
+        field?.Dispose();
+        return field = new CancellationTokenSource();
+    }
+
     [RelayCommand]
     private void AddSelectedToPlaylist()
     {
@@ -1178,11 +1259,7 @@ public partial class MainWindowViewModel : ViewModelBase
             .Where(c => c.IsSelected && c.LibraryItem != null && !c.IsInPlaylist)
             .ToList();
         foreach (var c in toAdd)
-        {
-            PlaylistItems.Add(c);
-            c.IsInPlaylist = true;
-            if (AutoPlayGifs && c.IsGifThumbnail) c.IsPlaylistGifActive = true;
-        }
+            AddCardToPlaylist(c);
         ClearLibrarySelection();
     }
 
@@ -1193,11 +1270,7 @@ public partial class MainWindowViewModel : ViewModelBase
             .Where(c => c.IsSelected && c.IsInPlaylist)
             .ToList();
         foreach (var c in toRemove)
-        {
-            PlaylistItems.Remove(c);
-            c.IsInPlaylist = false;
-            c.IsPlaylistGifActive = false;
-        }
+            RemoveFromPlaylist(c);
         ClearLibrarySelection();
     }
 
@@ -1361,9 +1434,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var overrideGlobal = OverrideGlobalSettings;
         var name = CurrentPlaylistName;
 
-        _playlistSaveCts?.Cancel();
-        _playlistSaveCts?.Dispose();
-        var cts = _playlistSaveCts = new CancellationTokenSource();
+        var cts = RenewCts(ref _playlistSaveCts);
         Task.Delay(200, cts.Token).ContinueWith(t =>
         {
             if (!t.IsCanceled) SavePlaylistState(paths, shuffle, secs, advance, wait, overrideGlobal, name);
@@ -1380,9 +1451,7 @@ public partial class MainWindowViewModel : ViewModelBase
             .ToList();
         var shuffle = PlaylistShuffle;
 
-        _playlistSyncCts?.Cancel();
-        _playlistSyncCts?.Dispose();
-        var cts = _playlistSyncCts = new CancellationTokenSource();
+        var cts = RenewCts(ref _playlistSyncCts);
         Task.Delay(100, cts.Token).ContinueWith(t =>
         {
             if (t.IsCanceled) return;
@@ -1440,9 +1509,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 if (byPath.TryGetValue(videoPath, out var libCard))
                 {
-                    PlaylistItems.Add(libCard);
-                    libCard.IsInPlaylist = true;
-                    if (AutoPlayGifs && libCard.IsGifThumbnail) libCard.IsPlaylistGifActive = true;
+                    AddCardToPlaylist(libCard);
                 }
             }
             PlaylistShuffle = playlist.Settings.Order == PlaylistOrder.Shuffle;
@@ -1548,9 +1615,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 if (byPath.TryGetValue(videoPath, out var libCard))
                 {
-                    PlaylistItems.Add(libCard);
-                    libCard.IsInPlaylist = true;
-                    if (AutoPlayGifs && libCard.IsGifThumbnail) libCard.IsPlaylistGifActive = true;
+                    AddCardToPlaylist(libCard);
                 }
             }
 
@@ -1951,10 +2016,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             LibraryWallpapers.Add(card);
             if (wasInPlaylist)
-            {
-                card.IsInPlaylist = true;
-                PlaylistItems.Add(card);
-            }
+                AddCardToPlaylist(card);
         }
         StatusMessage = batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}";
     }
@@ -1966,8 +2028,6 @@ public partial class MainWindowViewModel : ViewModelBase
         CanUndo = false;
     }
 
-    [ObservableProperty] private bool _shuffleLibrary;
-
     [RelayCommand]
     private void Stop()
     {
@@ -1978,65 +2038,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _currentlyPlayingCard.IsCurrentlyPlaying = false;
             _currentlyPlayingCard = null;
-        }
-    }
-
-    [RelayCommand]
-    private void PlayLibrary()
-    {
-        try
-        {
-            var paths = LibraryWallpapers
-                .Where(c => c.LibraryItem != null)
-                .Select(c => c.LibraryItem!.VideoPath)
-                .ToList();
-            if (paths.Count == 0) return;
-
-            if (_settings.GlobalAdvanceOnVideoEnd)
-            {
-                PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), ShuffleLibrary, _settings.GlobalIntervalSeconds);
-                if (PlayerHelper.IsTimedPlaylistActive())
-                    _settings.LastSession = new LastSession
-                    {
-                        IsTimedPlaylist = true,
-                        Paths = paths,
-                        Shuffle = ShuffleLibrary,
-                        TimedIntervalSeconds = _settings.GlobalIntervalSeconds,
-                        WaitForVideoEnd = true,
-                        AdvanceOnVideoEnd = true,
-                        OverrideGlobalSettings = false
-                    };
-                else
-                    _settings.LastSession = new LastSession { IsPlaylist = true, Paths = paths, Shuffle = ShuffleLibrary, AdvanceOnVideoEnd = true, OverrideGlobalSettings = false };
-                SettingsService.Save(_settings);
-                RefreshPlayingStatus();
-                return;
-            }
-
-            int intervalSecs = _settings.GlobalIntervalSeconds;
-            if (intervalSecs == 0 && paths.Count > 1)
-            {
-                StatusMessage = "Set an interval greater than 0 in Settings to use timed playback";
-                return;
-            }
-            var playPaths = ShuffleLibrary ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-            PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), ShuffleLibrary, intervalSecs, _settings.GlobalWaitForVideoEnd);
-            _settings.LastSession = new LastSession
-            {
-                IsTimedPlaylist = true,
-                Paths = paths,
-                Shuffle = ShuffleLibrary,
-                TimedIntervalSeconds = intervalSecs,
-                WaitForVideoEnd = _settings.GlobalWaitForVideoEnd,
-                AdvanceOnVideoEnd = false,
-                OverrideGlobalSettings = false
-            };
-            SettingsService.Save(_settings);
-            RefreshPlayingStatus();
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Failed to play library: {ex.Message}";
         }
     }
 

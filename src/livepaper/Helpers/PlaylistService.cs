@@ -13,7 +13,28 @@ public static class PlaylistService
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "livepaper", "playlists");
 
+    public static string CurrentStatePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".config", "livepaper", "playlist_state.json");
+
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    public static CustomPlaylist? LoadCurrentState()
+    {
+        if (!File.Exists(CurrentStatePath)) return null;
+        try { return JsonSerializer.Deserialize<CustomPlaylist>(File.ReadAllText(CurrentStatePath)); }
+        catch { return null; }
+    }
+
+    public static void SaveCurrentState(CustomPlaylist playlist)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(CurrentStatePath)!);
+            File.WriteAllText(CurrentStatePath, JsonSerializer.Serialize(playlist, JsonOpts));
+        }
+        catch { }
+    }
 
     public static List<string> ListNames()
     {
