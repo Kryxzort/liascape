@@ -22,9 +22,15 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 
 **Playlist (Play All / Shuffle):**
 - Shuffle **pre-applied** to path array in `ApplyPlaylist()` (not via `--shuffle`) so order is known for `playlist_observer_paths.json`
-- Writes all-but-last paths to `~/.cache/livepaper/playlist.txt`; passes last as positional arg (N-1 in file + 1 positional = N total)
-- Adds `--playlist=<file> --loop-playlist=inf`; does NOT include `loop` (per-file) in playlist mode
-- If scenes present and `AllowScenes` is true, `ApplyPlaylist` upgrades to `ApplyTimedPlaylist` internally
+- Single video → `Launch(opts, path)` directly
+- Multi-video (no scenes, or scenes with no interval) → `ApplyTimedPlaylist(intervalSeconds: 0, waitForVideoEnd: false, advanceOnVideoEnd: true)` — livepaper-owned; **no `--playlist=file` or `--loop-playlist=inf`**
+- Scenes present + `AllowScenes` + interval > 0 → `ApplyTimedPlaylist(secs, waitForVideoEnd: true, advanceOnVideoEnd: true)`
+- The old `playlist.txt` + `--playlist=file` approach is **not used** for multi-video; all playlists are livepaper-owned through the timed machinery
+
+**`AppendToActivePlaylist(IReadOnlyList<string> paths)`** — injects new paths into a running session:
+- Timed mode (`_timedPaths != null`): dedup-appends to `_timedPaths` in-memory. IPC `loadfile append` is handled naturally by advance-on-end pre-fetch.
+- Non-timed mode: sends `loadfile append` IPC for each path.
+- Called from ViewModel after `AutoAddLibraryToPlaylist` adds new WE items mid-session.
 
 ## Mute: user vs auto
 
@@ -66,8 +72,26 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **Detached daemon (GUI closed)**: `SpawnRestartDaemon()` launches `livepaper --restart-daemon` via `setsid`, writes PID to `restart.pid`. Bails if `IsGuiTimerAlive()` (mirrors timer-daemon guard). Killed on GUI open, by `Stop()`, and by `--kill`.
 
+**Restart disabled**: `RestartIntervalSeconds <= 0` → all restart paths (`SpawnRestartDaemon`, `UpdateRestartTimer`, daemon loop) bail immediately with no-op. Restart is fully off when interval is 0.
+
 **Timed playlist coordination**: `RestartCurrent()` writes `"restart"` to `pending_action.txt` instead of cold-restarting directly. The tick owner dispatches to `RestartCurrentAndLaunch()` which kills and relaunches the current wallpaper without advancing or resetting the countdown. Skipped when `_timedTimerPaused` is true (daemon also checks `IsTimedPlaylistPaused()` from the state file) to avoid queuing a restart that fires immediately on unpause.
 
 **Race guard**: `RestartCurrent()` checks `IsPlaying` inside `_lock` before calling `DoColdRestart` — prevents relaunch if `Stop()` ran while the callback was waiting on the lock.
+
+## Centralized Helpers
+
+**`ArmVideoEndWait(string next, bool prevIsVideo = true)`** — canonical way to start a `DoVideoEndWait` task. Sets `_waitingForVideoEnd = true`, creates and assigns `_waitCts`, spawns task. Always use this — never inline the 3-line pattern.
+
+**`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. If `_advanceOnVideoEnd && !IsScenePath(path)`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Else: resets `_timedRemainingMs` to full interval. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
+
+**`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed.
+
+## Mode Switches (mid-session, no mpvpaper restart)
+
+**`SwitchFromTimedToAdvanceOnEnd`**: cancels `_waitCts`, un-advances `_historyIndex` if pre-fetch was in flight, sets `_advanceOnVideoEnd = true` / `_timedInterval = Zero`, preserves `_timedRemainingMs`, re-arms `DoVideoEndWait`. Does NOT restart mpvpaper.
+
+**`SwitchFromAdvanceOnEndToTimed`**: cancels `_waitCts`, clears `_waitingForVideoEnd`, converts mpv to single-file loop (`loop-file=inf`), starts the livepaper timer.
+
+**`UpdateTimedSettings`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Never restarts current wallpaper.
 
 **SIGINT/SIGTERM**: intercepted in `App.axaml.cs` (`Console.CancelKeyPress` and `PosixSignalRegistration` stored in `_sigtermRegistration` field to prevent GC) and routed through `window.Close()` so the close handler always runs and daemons are always spawned.

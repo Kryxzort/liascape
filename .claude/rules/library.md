@@ -31,6 +31,15 @@ Config: `~/.config/livepaper/settings.json` — Cache: `~/.cache/livepaper/`
 
 Videos with `WeCopyFiles=true` are copied (not symlinked). Videos without it use `File.CreateSymbolicLink`.
 
+### WE dedup index (`we_ids.txt`)
+
+`we_ids.txt` at library root — one workshop ID per line. Used by `SyncWallpaperEngine` as a single-read dedup check instead of reading N `.id` sidecars.
+
+- **Bootstrap**: if file missing, built from existing `.id` sidecars (one-time migration).
+- **Append-on-import**: after each successful WE import, `AppendToWeIndex(workshopId)` appends one line.
+- **Rebuild-on-delete**: `Delete()`, `Trash()`, `RestoreBatch()` call `RebuildWeIndex()` to keep index accurate.
+- **Corruption safety**: if read fails, falls back to scanning `.id` sidecars directly.
+
 ### Soft delete
 
 Moves all sidecars to `.trash/<batchId>/`. Trash purged on window close or startup. **Ctrl+Z** restores last batch.

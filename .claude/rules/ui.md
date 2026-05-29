@@ -19,15 +19,17 @@ The app has three tabs:
 - **Right-click card**: web sources → "Open Page" (`xdg-open PageUrl`); WE local → "Open in File Manager" (D-Bus `ShowItems`, fallback `xdg-open dir`). Driven by `IsLocalSource` (`PageUrl` not http).
 
 ### Library Tab
-- Grid of downloaded wallpapers (`ItemsRepeater + UniformGridLayout`, responsive columns); SCENE badge, ⚠ if `HasCrashed`; circular badge top-right: `+`/`−` playlist toggle. Always visible.
+- Grid of downloaded wallpapers (`ItemsRepeater + UniformGridLayout`, responsive columns); **compact card design**: thumbnail with overlay elements, zooms slightly on hover
+- Card overlays (stacked `Panel`): SCENE badge, ⚠ if `HasCrashed`, checkmark corner when `IsSelected`, green outline when `IsCurrentlyPlaying`
+- `IsAnyStateOverlay` property on `WallpaperCardViewModel` — true when `HasCrashed || IsSelected || IsCurrentlyPlaying`; drives overlay visibility
+- **Multiselect**: Ctrl-click (toggle) / Shift-click (range); actions (Apply, Delete, Add/Remove Playlist) propagate to all selected cards. No separate selection toolbar — actions apply to selection automatically.
 - Library search (debounced 200ms) + sort (Name A–Z/Z–A, Newest/Oldest)
 - "Import": file picker (`.mp4`/`.webm`/`.mov`/`.mkv`/`.avi`/`.gif`); title modal copies to library, ffmpeg 320px thumbnail at 1s. `.id` holds `import:<source-path>`.
 - "Play All" + "Shuffle" toggle — follows global Settings → PLAYLIST
 - Per-card: Apply, Delete (soft-delete → `.trash/`; **Delete** key also triggers; **Ctrl+Z** undo)
 - **Right-click card**: "Add to Playlist", "Open in File Manager" (D-Bus `ShowItems`; scenes use `CopiedSceneDir` or WE workshop dir; symlinks resolved), "Settings" (opens preview modal)
-- **Preview modal** (click thumbnail): crash warning + whitelist toggle; title, workshop ID (copy button); per-wallpaper volume slider (0–100, "↺ Global"); per-wallpaper speed slider (0.1–4×)
-- **Selection toolbar** above playlist strip when ≥1 selected: `Add to Playlist`, `Remove from Playlist`, `Delete`, `Cancel`
-- **Playlist strip** (always visible at bottom): horizontal small thumbnails; `−` badge; hover → dim + ▶ overlay; drag to reorder; click plays
+- **Preview modal** (click thumbnail): crash warning + whitelist toggle; title, workshop ID (copy button); **video duration**; per-wallpaper volume slider (0–100, "↺ Global"); per-wallpaper speed slider (0.1–4×)
+- **Playlist strip** (always visible at bottom): horizontal small thumbnails; `−` badge; hover → dim + ▶ overlay + hover outline; drag to reorder; click plays; playing item has green outline (`Classes.playing`)
   - ⚙ settings popup (Sequential/Shuffle; `Override global rotation settings` unlocks Interval, AdvanceOnVideoEnd, WaitForVideoEnd)
   - 📂/💾 load/save named playlists → `~/.local/share/livepaper/playlists/<name>.json`
   - ▶ Play; auto-state saved to `~/.config/livepaper/playlist_state.json`
@@ -41,7 +43,8 @@ The app has three tabs:
 - **Auto-Mute**: threshold/delay knobs + "Only mute if MPRIS active" checkbox
 - **Memory**: Demuxer max bytes / back bytes (NumericUpDown, integer MiB)
 - **Rendering**: Hardware decoding (auto/nvdec/vaapi/no), Video scale (fill/fit)
-- **Sources / Wallpaper Engine**: workshop folder picker, Copy files toggle (`WeCopyFiles`), "Allow scene support" checkbox; monitor list editor (name, FPS, primary toggle), scene transition delay slider
+- **Sources / Wallpaper Engine**: workshop folder picker, Copy files toggle (`WeCopyFiles`), "Allow scene support" checkbox, "Automatically add new WE wallpapers to library" (`AutoImportWallpaperEngine`); monitor list editor (name, FPS, primary toggle), scene transition delay slider
+- **Library automation** (Playlist section): "Automatically add newly added library items to playlist" (`AutoAddLibraryToPlaylist`)
 - **Appearance**: Theme selector (31 built-in), Thumbnail aspect (Default/16:9/1:1), Card size (Small/Medium/Large)
 - Live mpv options preview; Reset to Defaults; keybind snippets for `--action=…`
 

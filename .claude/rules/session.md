@@ -15,7 +15,8 @@ paths:
 - Auto-mute: `AutoMute` (false), `AutoMuteDelayMs` (200), `AutoUnmuteDelayMs` (2000), `AutoMuteThresholdDb` (-70.0), `AutoMuteOnlyIfMprisActive` (false)
 - Global rotation: `GlobalIntervalSeconds` (1800), `GlobalAdvanceOnVideoEnd` (false), `GlobalWaitForVideoEnd` (false)
 - Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600) — clamped in model setter; always active
-- Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false)
+- Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false)
+- Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
 - LWE: `LweSilent` (false), `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - `LastSession`: tracks last applied mode for `--restore`
@@ -56,3 +57,11 @@ paths:
 **`IsTimedPlaylistActive()`**: state-file check (`Paths.Count > 0 && !TimerStopped`). Survives brief kill→launch gap.
 
 **`DoVideoEndWait` retry threshold**: 30 iterations (3 s) before breaking on `null` remaining. 500 ms threshold caused premature scene switches.
+
+## WE Auto-Import
+
+`LibraryService.SyncWallpaperEngine(workshopPath, allowScenes, weCopyFiles)` — headless scan of WE workshop dir. Returns `List<string>` of newly-added library media paths (.mp4 or .scene). Called:
+- GUI startup: in `MainWindowViewModel` constructor when `AutoImportWallpaperEngine` is true
+- `--restore` path: `RunHeadlessAutoSync()` in `Program.cs` before `PlayerHelper.Restore()`
+
+After sync, if `AutoAddLibraryToPlaylist` is true: `AddCardToPlaylist` for each new item, then `AppendToActivePlaylist` for mid-session injection, and `LastSession.Paths` updated + saved so next `--restore` includes them.
