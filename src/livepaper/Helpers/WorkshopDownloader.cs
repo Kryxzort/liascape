@@ -22,7 +22,7 @@ public static class WorkshopDownloader
     {
         return settings.WorkshopAcquireMode == "steamcmd"
             ? await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct)
-            : await AcquireViaSubscribeAsync(workshopId, settings.WallpaperEnginePath, progress, ct);
+            : await AcquireViaSubscribeAsync(settings.WallpaperEnginePath, workshopId, progress, ct);
     }
 
     private static async Task<string> AcquireViaSubscribeAsync(
