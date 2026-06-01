@@ -23,6 +23,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public LibraryItem? LibraryItem { get; }
     public bool IsScene { get; }
     public string? WorkshopId { get; }
+    public bool IsPlaceholder { get; }
 
     // Workshop browse metadata (only non-null for cards from SteamWorkshopService)
     public bool IsWorkshopResult { get; }
@@ -392,6 +393,14 @@ public partial class WallpaperCardViewModel : ViewModelBase
         }
         catch { }
         return "";
+    }
+
+    public WallpaperCardViewModel(bool isPlaceholder)
+    {
+        IsPlaceholder = isPlaceholder;
+        Title = "";
+        ThumbnailSource = "";
+        PageUrl = "";
     }
 
     public WallpaperCardViewModel(WallpaperResult result)

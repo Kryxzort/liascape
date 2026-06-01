@@ -1968,6 +1968,7 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+        for (int p = 0; p < 30; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
 
         if (SelectedSource is WallpaperEngineService weService)
             weService.SortIndex = BrowseSortIndex;
@@ -1998,10 +1999,18 @@ public partial class MainWindowViewModel : ViewModelBase
         for (int i = 0; i < results.Count; i++)
         {
             if (gen != _loadGeneration) return;
-            BrowseWallpapers.Add(new WallpaperCardViewModel(results[i]));
+            var card = new WallpaperCardViewModel(results[i]);
+            // Replace placeholder in-place → Avalonia reuses the visual, just swaps DataContext
+            if (i < BrowseWallpapers.Count)
+                BrowseWallpapers[i] = card;
+            else
+                BrowseWallpapers.Add(card);
             if ((i + 1) % batchSize == 0)
                 await Task.Yield();
         }
+        // Remove leftover placeholder cards if results had fewer than 30 items
+        while (gen == _loadGeneration && BrowseWallpapers.Count > results.Count)
+            BrowseWallpapers.RemoveAt(BrowseWallpapers.Count - 1);
     }
 
     [RelayCommand]
@@ -2018,6 +2027,7 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
+        for (int p = 0; p < 30; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
 
         if (SelectedSource is WallpaperEngineService weServiceSearch)
             weServiceSearch.SortIndex = BrowseSortIndex;
