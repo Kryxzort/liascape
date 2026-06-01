@@ -18,10 +18,10 @@ public class SteamWorkshopService : IBgsProvider
     public string WorkshopBasePath { get; set; } = "";
 
     public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => SteamWorkshopScraper.BrowseAsync(Filter, null, page, AllowScenes);
+        => Task.Run(() => SteamWorkshopScraper.BrowseAsync(Filter, null, page, AllowScenes));
 
     public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
-        => SteamWorkshopScraper.BrowseAsync(Filter, query, page, AllowScenes);
+        => Task.Run(() => SteamWorkshopScraper.BrowseAsync(Filter, query, page, AllowScenes));
 
     public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
         => Task.FromResult(new WallpaperDetail
