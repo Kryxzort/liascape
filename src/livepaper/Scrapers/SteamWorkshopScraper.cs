@@ -23,16 +23,17 @@ public static class SteamWorkshopScraper
         using (var req = new HttpRequestMessage(HttpMethod.Get, url))
         {
             req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-            using var resp = await HttpClientProvider.Client.SendAsync(req);
+            using var resp = await HttpClientProvider.Client.SendAsync(req).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
-            html = await resp.Content.ReadAsStringAsync();
+            html = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
         }
 
-        var ids = ExtractIds(html);
+        // HtmlAgilityPack parsing is CPU-bound — keep it off the UI thread
+        var ids = await Task.Run(() => ExtractIds(html)).ConfigureAwait(false);
         if (ids.Count == 0) return [];
 
-        var details = await GetDetailsBatchAsync(ids);
-        return MapToResults(ids, details, allowScenes);
+        var details = await GetDetailsBatchAsync(ids).ConfigureAwait(false);
+        return await Task.Run(() => MapToResults(ids, details, allowScenes)).ConfigureAwait(false);
     }
 
     private static string BuildUrl(WorkshopFilter filter, string? query, int page)
@@ -113,10 +114,10 @@ public static class SteamWorkshopScraper
         };
         req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
 
-        using var resp = await HttpClientProvider.Client.SendAsync(req);
+        using var resp = await HttpClientProvider.Client.SendAsync(req).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
-        var json = await resp.Content.ReadAsStringAsync();
+        var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
         var doc = JsonDocument.Parse(json);
         var result = new Dictionary<string, PublishedFileDetail>();
 
