@@ -1976,8 +1976,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var results = await SelectedSource.GetLatestAsync(CurrentPage);
             if (gen != _loadGeneration) return;
-            foreach (var r in results)
-                BrowseWallpapers.Add(new WallpaperCardViewModel(r));
+            await AddBrowseCardsAsync(results, gen);
         }
         catch (Exception ex)
         {
@@ -1988,6 +1987,20 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             if (gen == _loadGeneration)
                 IsLoading = false;
+        }
+    }
+
+    // Adds cards in small batches, yielding between each batch so the render
+    // loop gets frames and the loading spinner stays alive.
+    private async Task AddBrowseCardsAsync(IReadOnlyList<WallpaperResult> results, int gen)
+    {
+        const int batchSize = 5;
+        for (int i = 0; i < results.Count; i++)
+        {
+            if (gen != _loadGeneration) return;
+            BrowseWallpapers.Add(new WallpaperCardViewModel(results[i]));
+            if ((i + 1) % batchSize == 0)
+                await Task.Yield();
         }
     }
 
@@ -2013,8 +2026,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var results = await SelectedSource.SearchAsync(SearchQuery, 1);
             if (gen != _loadGeneration) return;
-            foreach (var r in results)
-                BrowseWallpapers.Add(new WallpaperCardViewModel(r));
+            await AddBrowseCardsAsync(results, gen);
         }
         catch (Exception ex)
         {
