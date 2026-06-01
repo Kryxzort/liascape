@@ -190,14 +190,20 @@ public static class SteamWorkshopScraper
 
             string? resolution = d.Tags.FirstOrDefault(t => _resolutionRegex.IsMatch(t));
 
-            string thumbUrl = d.PreviewUrl;
+            string rawPreviewUrl = d.PreviewUrl;
+            string thumbUrl = rawPreviewUrl;
             if (!string.IsNullOrEmpty(thumbUrl) && !thumbUrl.Contains('?'))
                 thumbUrl += "?imw=384&imh=216&letterbox=true";
+
+            // Pass raw URL as AnimatedThumbnailUrl so the card tries animated loading on hover.
+            // Steam serves GIF/WebP animated previews at the raw URL; JPEG items fail silently.
+            string? animatedUrl = string.IsNullOrEmpty(rawPreviewUrl) ? null : rawPreviewUrl;
 
             results.Add(new WallpaperResult
             {
                 Title = d.Title,
                 ThumbnailUrl = thumbUrl,
+                AnimatedThumbnailUrl = animatedUrl,
                 PageUrl = $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}",
                 IsScene = isScene,
                 WorkshopId = id,

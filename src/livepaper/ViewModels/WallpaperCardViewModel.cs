@@ -42,7 +42,12 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public bool HasWorkshopTags => IsWorkshopResult && WorkshopTags.Length > 0;
     // Static JPG extracted from GIF for non-animated display. ThumbnailSource stays as the GIF path.
     [ObservableProperty] private string? _staticThumbnailSource;
-    public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
+    // True for local .gif files AND for remote workshop cards that have a raw preview URL
+    // to attempt animated loading on hover (Steam serves GIF/WebP animated previews).
+    public bool IsGifThumbnail =>
+        ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ||
+        (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+         !string.IsNullOrEmpty(StaticThumbnailSource));
 
     // Single source used by the card's static image layer. Falls back to ThumbnailSource when no
     // extracted static frame is available. Avoids materializing two AdvancedImage controls per card.
