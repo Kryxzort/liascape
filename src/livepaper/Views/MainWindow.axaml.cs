@@ -88,6 +88,7 @@ public partial class MainWindow : Window
             _boundVm.PropertyChanged -= OnViewModelPropertyChanged;
             _boundVm.PickFolderDialog = null;
             _boundVm.PickVideoDialog = null;
+            _boundVm.PickFileDialog = null;
             _boundVm.CopyToClipboard = null;
             _boundVm = null;
         }
@@ -96,6 +97,7 @@ public partial class MainWindow : Window
             vm.PropertyChanged += OnViewModelPropertyChanged;
             vm.PickFolderDialog = PickFolderDialogAsync;
             vm.PickVideoDialog = PickVideoDialogAsync;
+            vm.PickFileDialog = PickFileDialogAsync;
             vm.CopyToClipboard = async text =>
             {
                 // Try wl-copy first — it forks a daemon that keeps holding
@@ -157,6 +159,16 @@ public partial class MainWindow : Window
         {
             Title = "Import Wallpaper",
             FileTypeFilter = [WallpaperFileType],
+            AllowMultiple = false
+        });
+        return files.Count > 0 ? files[0].Path.LocalPath : null;
+    }
+
+    private async Task<string?> PickFileDialogAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select steamcmd Executable",
             AllowMultiple = false
         });
         return files.Count > 0 ? files[0].Path.LocalPath : null;

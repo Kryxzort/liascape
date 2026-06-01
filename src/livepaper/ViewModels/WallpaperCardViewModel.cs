@@ -23,6 +23,23 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public LibraryItem? LibraryItem { get; }
     public bool IsScene { get; }
     public string? WorkshopId { get; }
+
+    // Workshop browse metadata (only non-null for cards from SteamWorkshopService)
+    public bool IsWorkshopResult { get; }
+    public string WorkshopDescription { get; } = "";
+    public string WorkshopAuthorId { get; } = "";
+    public string WorkshopSizeText { get; } = "";
+    public string WorkshopSubsText { get; } = "";
+    public string WorkshopFavText { get; } = "";
+    public string WorkshopViewsText { get; } = "";
+    public string WorkshopUpdatedText { get; } = "";
+    public string[] WorkshopTags { get; } = [];
+    public string? WorkshopUrl { get; }
+    public string? WorkshopSteamUri { get; }
+    public bool HasWorkshopStats => IsWorkshopResult &&
+        (!string.IsNullOrEmpty(WorkshopSubsText) || !string.IsNullOrEmpty(WorkshopFavText));
+    public bool HasWorkshopDescription => IsWorkshopResult && !string.IsNullOrEmpty(WorkshopDescription);
+    public bool HasWorkshopTags => IsWorkshopResult && WorkshopTags.Length > 0;
     // Static JPG extracted from GIF for non-animated display. ThumbnailSource stays as the GIF path.
     [ObservableProperty] private string? _staticThumbnailSource;
     public bool IsGifThumbnail => ThumbnailSource.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
@@ -383,6 +400,41 @@ public partial class WallpaperCardViewModel : ViewModelBase
         Resolution = result.Resolution;
         IsScene = result.IsScene;
         WorkshopId = result.WorkshopId;
+
+        if (result.WorkshopId != null && result.PageUrl.StartsWith("https://steamcommunity.com"))
+        {
+            IsWorkshopResult = true;
+            WorkshopDescription = result.Description ?? "";
+            WorkshopAuthorId = result.AuthorId ?? "";
+            WorkshopTags = result.Tags ?? [];
+            WorkshopUrl = $"https://steamcommunity.com/sharedfiles/filedetails/?id={result.WorkshopId}";
+            WorkshopSteamUri = $"steam://url/CommunityFilePage/{result.WorkshopId}";
+            if (result.FileSizeBytes.HasValue)
+                WorkshopSizeText = FormatBytes(result.FileSizeBytes.Value);
+            if (result.Subscriptions.HasValue)
+                WorkshopSubsText = FormatCount(result.Subscriptions.Value);
+            if (result.Favorites.HasValue)
+                WorkshopFavText = FormatCount(result.Favorites.Value);
+            if (result.Views.HasValue)
+                WorkshopViewsText = FormatCount(result.Views.Value);
+            if (result.AddedAt.HasValue)
+                WorkshopUpdatedText = result.AddedAt.Value.ToString("MMM d, yyyy");
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F1} GB";
+        if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F0} MB";
+        if (bytes >= 1_024) return $"{bytes / 1_024.0:F0} KB";
+        return $"{bytes} B";
+    }
+
+    private static string FormatCount(long n)
+    {
+        if (n >= 1_000_000) return $"{n / 1_000_000.0:F1}M";
+        if (n >= 1_000) return $"{n / 1_000.0:F1}K";
+        return n.ToString();
     }
 
     public WallpaperCardViewModel(LibraryItem item)

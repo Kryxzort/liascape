@@ -32,7 +32,8 @@ public partial class MainWindowViewModel : ViewModelBase
         new MotionBgsService(),
         new MoewallsService(),
         new DesktophutService(),
-        new WallpaperEngineService()
+        new WallpaperEngineService(),
+        new SteamWorkshopService()
     ];
 
     [ObservableProperty] private IBgsProvider _selectedSource;
@@ -145,6 +146,80 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _resumeFromLast;
     [ObservableProperty] private bool _allowScenes;
     [ObservableProperty] private decimal _sceneTransitionDelayMs;
+
+    // Workshop acquire settings
+    [ObservableProperty] private string _workshopAcquireMode = "subscribe";
+    [ObservableProperty] private string _steamCmdPath = "";
+    [ObservableProperty] private string _steamUsername = "";
+    public bool IsWorkshopSubscribeMode
+    {
+        get => WorkshopAcquireMode == "subscribe";
+        set { if (value) WorkshopAcquireMode = "subscribe"; }
+    }
+    public bool IsWorkshopSteamCmdMode
+    {
+        get => WorkshopAcquireMode == "steamcmd";
+        set { if (value) WorkshopAcquireMode = "steamcmd"; }
+    }
+
+    // Workshop filter state (for the filter flyout)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend7))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend30))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortRecent))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortLastUpdated))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortMostSubscribed))]
+    private string _workshopSort = "trend";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend7))]
+    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend30))]
+    private int _workshopTrendDays = 7;
+
+    public string[] WorkshopTypeOptions { get; } = ["Any", "Video", "Scene"];
+    public string[] WorkshopAgeRatingOptions { get; } = ["Any", "Everyone", "Questionable", "Mature"];
+    public string[] WorkshopResolutionOptions { get; } =
+        ["Any", "3840 x 2160", "2560 x 1440", "1920 x 1080", "1280 x 720", "Other resolution"];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    private string _workshopFilterTypeDisplay = "Any";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    private string _workshopFilterAgeRatingDisplay = "Any";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    private string _workshopFilterResolutionDisplay = "Any";
+
+    public ObservableCollection<WorkshopGenreItem> WorkshopGenres { get; } =
+    [
+        new("Abstract"), new("Animal"), new("Anime"), new("Cartoon"), new("CGI"),
+        new("Cyberpunk"), new("Fantasy"), new("Game"), new("Girls"), new("Guys"),
+        new("Landscape"), new("Medieval"), new("Memes"), new("MMD"), new("Music"),
+        new("Nature"), new("Pixel art"), new("Relaxing"), new("Retro"), new("Sci-Fi"),
+        new("Sports"), new("Technology"), new("Television"), new("Vehicle"), new("Unspecified")
+    ];
+
+    // Sort radio helpers
+    public bool IsWorkshopSortTrend7  { get => WorkshopSort == "trend" && WorkshopTrendDays == 7;  set { if (value) { WorkshopSort = "trend"; WorkshopTrendDays = 7; } } }
+    public bool IsWorkshopSortTrend30 { get => WorkshopSort == "trend" && WorkshopTrendDays == 30; set { if (value) { WorkshopSort = "trend"; WorkshopTrendDays = 30; } } }
+    public bool IsWorkshopSortRecent       { get => WorkshopSort == "mostrecent";             set { if (value) WorkshopSort = "mostrecent"; } }
+    public bool IsWorkshopSortLastUpdated  { get => WorkshopSort == "lastupdated";            set { if (value) WorkshopSort = "lastupdated"; } }
+    public bool IsWorkshopSortMostSubscribed { get => WorkshopSort == "totaluniquesubscribers"; set { if (value) WorkshopSort = "totaluniquesubscribers"; } }
+
+    // Workshop acquire button label (shown in browse card + preview modal)
+    public string WorkshopAcquireButtonLabel =>
+        WorkshopAcquireMode == "steamcmd" ? "Download & Apply" : "Subscribe & Import";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DownloadModalHeader))]
+    private bool _isWorkshopSubscribeWaiting;
+
+    public string DownloadModalHeader => IsWorkshopSubscribeWaiting ? "Waiting for Steam…" : "Downloading";
 
     // LWE monitor management
     [ObservableProperty] private ObservableCollection<LweMonitorViewModel> _lweMonitors = [];
@@ -284,14 +359,6 @@ public partial class MainWindowViewModel : ViewModelBase
         PlayerHelper.UpdateRestartTimer();
     }
 
-    partial void OnWallpaperEnginePathChanged(string value)
-    {
-        _settings.WallpaperEnginePath = value;
-        ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).WorkshopPath = value;
-        if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
-        SettingsService.Save(_settings);
-    }
-
     partial void OnWeCopyFilesChanged(bool value)
     {
         _settings.WeCopyFiles = value;
@@ -308,9 +375,40 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _settings.AllowScenes = value;
         ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).AllowScenes = value;
-        if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
+        ((SteamWorkshopService)Sources.First(s => s is SteamWorkshopService)).AllowScenes = value;
+        if (SelectedSource is WallpaperEngineService or SteamWorkshopService) _ = LoadWallpapersAsync();
         if (value && !PlayerHelper.IsLweAvailable())
             StatusMessage = "linux-wallpaperengine not found in PATH — install it to use scenes";
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnWallpaperEnginePathChanged(string value)
+    {
+        _settings.WallpaperEnginePath = value;
+        ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).WorkshopPath = value;
+        ((SteamWorkshopService)Sources.First(s => s is SteamWorkshopService)).WorkshopBasePath = value;
+        if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnWorkshopAcquireModeChanged(string value)
+    {
+        _settings.WorkshopAcquireMode = value;
+        OnPropertyChanged(nameof(IsWorkshopSubscribeMode));
+        OnPropertyChanged(nameof(IsWorkshopSteamCmdMode));
+        OnPropertyChanged(nameof(WorkshopAcquireButtonLabel));
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnSteamCmdPathChanged(string value)
+    {
+        _settings.SteamCmdPath = value;
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnSteamUsernameChanged(string value)
+    {
+        _settings.SteamUsername = value;
         SettingsService.Save(_settings);
     }
 
@@ -439,6 +537,16 @@ public partial class MainWindowViewModel : ViewModelBase
         if (PickFolderDialog == null) return;
         var path = await PickFolderDialog();
         if (path != null) WallpaperEnginePath = path;
+    }
+
+    public Func<Task<string?>>? PickFileDialog { get; set; }
+
+    [RelayCommand]
+    private async Task PickSteamCmdFileAsync()
+    {
+        if (PickFileDialog == null) return;
+        var path = await PickFileDialog();
+        if (path != null) SteamCmdPath = path;
     }
 
     [RelayCommand]
@@ -814,6 +922,71 @@ public partial class MainWindowViewModel : ViewModelBase
         if (int.TryParse(index, out int i)) BrowseSortIndex = i;
     }
 
+    // ── Workshop filter ───────────────────────────────────────────────────
+
+    private static string AnyToEmpty(string s) => s == "Any" ? "" : s;
+
+    private WorkshopFilter BuildWorkshopFilter() => new()
+    {
+        Sort = WorkshopSort,
+        TrendDays = WorkshopTrendDays,
+        Type = AnyToEmpty(WorkshopFilterTypeDisplay),
+        AgeRating = AnyToEmpty(WorkshopFilterAgeRatingDisplay),
+        Resolution = AnyToEmpty(WorkshopFilterResolutionDisplay),
+        Genres = new System.Collections.Generic.HashSet<string>(
+            WorkshopGenres.Where(g => g.IsSelected).Select(g => g.Name))
+    };
+
+    public bool WorkshopHasActiveFilters =>
+        WorkshopSort != "trend" || WorkshopTrendDays != 7 ||
+        WorkshopFilterTypeDisplay != "Any" ||
+        WorkshopFilterAgeRatingDisplay != "Any" ||
+        WorkshopFilterResolutionDisplay != "Any" ||
+        WorkshopGenres.Any(g => g.IsSelected);
+
+    [RelayCommand]
+    private void ApplyWorkshopFilter()
+    {
+        if (SelectedSource is not SteamWorkshopService service) return;
+        service.Filter = BuildWorkshopFilter();
+        _ = LoadWallpapersAsync();
+    }
+
+    [RelayCommand]
+    private void ClearWorkshopFilter()
+    {
+        WorkshopSort = "trend";
+        WorkshopTrendDays = 7;
+        WorkshopFilterTypeDisplay = "Any";
+        WorkshopFilterAgeRatingDisplay = "Any";
+        WorkshopFilterResolutionDisplay = "Any";
+        foreach (var g in WorkshopGenres) g.IsSelected = false;
+        if (SelectedSource is SteamWorkshopService service)
+        {
+            service.Filter = new WorkshopFilter();
+            _ = LoadWallpapersAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void SignInToSteam()
+    {
+        string? exe = WorkshopDownloader.FindSteamCmd(SteamCmdPath);
+        if (string.IsNullOrEmpty(exe))
+        {
+            ErrorTitle = "steamcmd Not Found";
+            ErrorMessage = "Could not locate steamcmd. Install it (e.g. 'sudo pacman -S steamcmd' or 'sudo apt install steamcmd') and set the path in Settings.";
+            return;
+        }
+        if (string.IsNullOrEmpty(SteamUsername))
+        {
+            ErrorTitle = "Steam Username Required";
+            ErrorMessage = "Enter your Steam username in the field above before signing in.";
+            return;
+        }
+        WorkshopDownloader.LaunchSteamCmdSignIn(exe, SteamUsername);
+    }
+
     partial void OnSearchQueryChanged(string value)
     {
         if (!SelectedSource.SupportsSearch) return;
@@ -947,10 +1120,21 @@ public partial class MainWindowViewModel : ViewModelBase
             _selectedMonitorIsPrimary = _lweMonitors[0].IsPrimary;
         }
         _mpvOptionsPreview = _settings.BuildMpvOptions();
+        _workshopAcquireMode = _settings.WorkshopAcquireMode;
+        _steamCmdPath = _settings.SteamCmdPath;
+        _steamUsername = _settings.SteamUsername;
+
         var weService = (WallpaperEngineService)Sources.First(s => s is WallpaperEngineService);
         weService.WorkshopPath = _settings.WallpaperEnginePath;
         weService.AllowScenes = _settings.AllowScenes;
+
+        var wsService = (SteamWorkshopService)Sources.First(s => s is SteamWorkshopService);
+        wsService.AllowScenes = _settings.AllowScenes;
+        wsService.WorkshopBasePath = _settings.WallpaperEnginePath;
 #pragma warning restore MVVMTK0034
+
+        foreach (var genre in WorkshopGenres)
+            genre.PropertyChanged += (_, _) => OnPropertyChanged(nameof(WorkshopHasActiveFilters));
 
         LibraryService.CleanTrash();
 
@@ -1900,8 +2084,10 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? $"{target.Title} ({completed + 1}/{targets.Count})"
                 : target.Title;
 
+            // Dedup: check by source URL or by workshop ID (covers WE Local imports)
             var existing = LibraryWallpapers.FirstOrDefault(c =>
-                c.LibraryItem?.SourceId != null && c.LibraryItem.SourceId == target.PageUrl);
+                (c.LibraryItem?.SourceId != null && c.LibraryItem.SourceId == target.PageUrl) ||
+                (target.WorkshopId != null && c.LibraryItem?.WorkshopId == target.WorkshopId));
             if (existing != null)
             {
                 if (target == applyTarget && !applied) { ApplyAndSave(existing.PageUrl); applied = true; }
@@ -1921,8 +2107,57 @@ public partial class MainWindowViewModel : ViewModelBase
                     IsScene = target.IsScene,
                     WorkshopId = target.WorkshopId
                 });
-                var progressReporter = new Progress<double>(p => DownloadProgress = p);
-                var item = await DownloadHelper.DownloadAsync(detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles);
+
+                LibraryItem item;
+                if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
+                {
+                    IsWorkshopSubscribeWaiting = _settings.WorkshopAcquireMode == "subscribe";
+                    DownloadIndeterminate = true;
+                    using var acquireCts = CancellationTokenSource.CreateLinkedTokenSource(
+                        new CancellationToken());
+                    var acquireProgress = new Progress<(double, string)>(t =>
+                    {
+                        DownloadProgress = Math.Max(0, t.Item1);
+                        StatusMessage = t.Item2;
+                    });
+                    string workshopDir = await WorkshopDownloader.AcquireAsync(
+                        detail.WorkshopId, _settings, acquireProgress, acquireCts.Token);
+                    IsWorkshopSubscribeWaiting = false;
+                    StatusMessage = $"Importing {target.Title}…";
+
+                    // Re-check dedup (might have appeared while waiting)
+                    existing = LibraryWallpapers.FirstOrDefault(c =>
+                        c.LibraryItem?.WorkshopId == detail.WorkshopId);
+                    if (existing != null)
+                    {
+                        if (target == applyTarget && !applied) { ApplyAndSave(existing.PageUrl); applied = true; }
+                        StatusMessage = $"Applied: {target.Title}";
+                        completed++;
+                        succeeded++;
+                        continue;
+                    }
+
+                    // Build detail from the acquired workshop dir (mirrors WE Local path)
+                    var localDetail = new WallpaperDetail
+                    {
+                        Title = detail.Title,
+                        PreviewUrl = target.ThumbnailSource,
+                        DownloadUrl = workshopDir,
+                        IsScene = detail.IsScene,
+                        WorkshopId = detail.WorkshopId,
+                        NeedsReferrer = false
+                    };
+                    item = await DownloadHelper.DownloadAsync(
+                        localDetail, target.ThumbnailSource,
+                        target.PageUrl, null, WeCopyFiles);
+                }
+                else
+                {
+                    var progressReporter = new Progress<double>(p => DownloadProgress = p);
+                    item = await DownloadHelper.DownloadAsync(
+                        detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles);
+                }
+
                 var libCard = MakeLibraryCard(item);
                 LibraryWallpapers.Add(libCard);
 
@@ -1932,6 +2167,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
+                IsWorkshopSubscribeWaiting = false;
                 bool isRateLimit = ex.Message.Contains("daily download limit");
                 ErrorTitle = isRateLimit ? "Wallsflow Download Limit" : "Download Failed";
                 ErrorMessage = isRateLimit
@@ -1943,6 +2179,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         IsDownloading = false;
+        IsWorkshopSubscribeWaiting = false;
 
         if (targets.Count > 1)
             StatusMessage = $"Downloaded {succeeded}/{targets.Count} wallpapers";

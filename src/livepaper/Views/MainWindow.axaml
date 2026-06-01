@@ -114,6 +114,123 @@
                                         </Button.Flyout>
                                         <mi:MaterialIcon Kind="SortVariant" Width="16" Height="16"/>
                                     </Button>
+                                    <!-- Workshop filter button -->
+                                    <Button Classes="ghost"
+                                            Width="28" Height="28" Padding="0"
+                                            IsVisible="{Binding SelectedSource.SupportsTagFilter}"
+                                            ToolTip.Tip="Filter">
+                                        <Button.Flyout>
+                                            <Flyout Placement="BottomEdgeAlignedRight" ShowMode="TransientWithDismissOnPointerMoveAway">
+                                                <Border Width="460" Padding="16"
+                                                        Background="{DynamicResource BgBase}"
+                                                        CornerRadius="10">
+                                                    <StackPanel Spacing="14">
+
+                                                        <!-- SORT -->
+                                                        <TextBlock Text="SORT"
+                                                                   FontSize="11" FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource Muted}"
+                                                                   LetterSpacing="2"/>
+                                                        <StackPanel Spacing="6">
+                                                            <RadioButton Content="Most Popular (7 days)" GroupName="WsSort"
+                                                                         IsChecked="{Binding IsWorkshopSortTrend7}"
+                                                                         Foreground="{DynamicResource TextColor}"/>
+                                                            <RadioButton Content="Most Popular (30 days)" GroupName="WsSort"
+                                                                         IsChecked="{Binding IsWorkshopSortTrend30}"
+                                                                         Foreground="{DynamicResource TextColor}"/>
+                                                            <RadioButton Content="Most Recent" GroupName="WsSort"
+                                                                         IsChecked="{Binding IsWorkshopSortRecent}"
+                                                                         Foreground="{DynamicResource TextColor}"/>
+                                                            <RadioButton Content="Last Updated" GroupName="WsSort"
+                                                                         IsChecked="{Binding IsWorkshopSortLastUpdated}"
+                                                                         Foreground="{DynamicResource TextColor}"/>
+                                                            <RadioButton Content="Most Subscribed" GroupName="WsSort"
+                                                                         IsChecked="{Binding IsWorkshopSortMostSubscribed}"
+                                                                         Foreground="{DynamicResource TextColor}"/>
+                                                        </StackPanel>
+
+                                                        <!-- TYPE + AGE RATING -->
+                                                        <Grid ColumnDefinitions="*,16,*">
+                                                            <StackPanel Grid.Column="0" Spacing="6">
+                                                                <TextBlock Text="TYPE"
+                                                                           FontSize="11" FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource Muted}"
+                                                                           LetterSpacing="2"/>
+                                                                <ComboBox ItemsSource="{Binding WorkshopTypeOptions}"
+                                                                          SelectedItem="{Binding WorkshopFilterTypeDisplay}"
+                                                                          HorizontalAlignment="Stretch"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2" Spacing="6">
+                                                                <TextBlock Text="AGE RATING"
+                                                                           FontSize="11" FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource Muted}"
+                                                                           LetterSpacing="2"/>
+                                                                <ComboBox ItemsSource="{Binding WorkshopAgeRatingOptions}"
+                                                                          SelectedItem="{Binding WorkshopFilterAgeRatingDisplay}"
+                                                                          HorizontalAlignment="Stretch"/>
+                                                            </StackPanel>
+                                                        </Grid>
+
+                                                        <!-- RESOLUTION -->
+                                                        <StackPanel Spacing="6">
+                                                            <TextBlock Text="RESOLUTION"
+                                                                       FontSize="11" FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource Muted}"
+                                                                       LetterSpacing="2"/>
+                                                            <ComboBox ItemsSource="{Binding WorkshopResolutionOptions}"
+                                                                      SelectedItem="{Binding WorkshopFilterResolutionDisplay}"
+                                                                      HorizontalAlignment="Stretch"/>
+                                                        </StackPanel>
+
+                                                        <!-- GENRE -->
+                                                        <StackPanel Spacing="6">
+                                                            <TextBlock Text="GENRE"
+                                                                       FontSize="11" FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource Muted}"
+                                                                       LetterSpacing="2"/>
+                                                            <ItemsControl ItemsSource="{Binding WorkshopGenres}">
+                                                                <ItemsControl.ItemsPanel>
+                                                                    <ItemsPanelTemplate>
+                                                                        <WrapPanel Orientation="Horizontal"/>
+                                                                    </ItemsPanelTemplate>
+                                                                </ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate x:DataType="vm:WorkshopGenreItem">
+                                                                        <ToggleButton Content="{Binding Name}"
+                                                                                      IsChecked="{Binding IsSelected}"
+                                                                                      Margin="2,2,0,0"
+                                                                                      Padding="8,4"
+                                                                                      FontSize="11"
+                                                                                      CornerRadius="6"/>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+
+                                                        <!-- Apply / Clear -->
+                                                        <StackPanel Orientation="Horizontal" Spacing="8"
+                                                                    HorizontalAlignment="Right">
+                                                            <Button Content="Clear"
+                                                                    Classes="ghost"
+                                                                    Command="{Binding ClearWorkshopFilterCommand}"/>
+                                                            <Button Content="Apply"
+                                                                    Classes="accent"
+                                                                    Command="{Binding ApplyWorkshopFilterCommand}"/>
+                                                        </StackPanel>
+
+                                                    </StackPanel>
+                                                </Border>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                        <Panel>
+                                            <mi:MaterialIcon Kind="FilterVariant" Width="16" Height="16"/>
+                                            <Ellipse Width="7" Height="7"
+                                                     Fill="{DynamicResource Accent}"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                     Margin="0,-2,-2,0"
+                                                     IsVisible="{Binding WorkshopHasActiveFilters}"/>
+                                        </Panel>
+                                    </Button>
                                     <Button Classes="ghost"
                                             Width="28" Height="28" Padding="0"
                                             Command="{Binding LoadWallpapersCommand}"
@@ -1089,6 +1206,60 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- Workshop download mode -->
+                            <TextBlock Text="WORKSHOP DOWNLOAD"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Muted}"
+                                       LetterSpacing="2"/>
+                            <Border Background="{DynamicResource BgBase}" CornerRadius="10" Padding="16">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="How to acquire Workshop wallpapers"
+                                               Foreground="{DynamicResource TextColor}"/>
+                                    <StackPanel Spacing="8">
+                                        <RadioButton Content="Subscribe via Steam (recommended)"
+                                                     GroupName="WsAcquireMode"
+                                                     IsChecked="{Binding IsWorkshopSubscribeMode}"
+                                                     Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Opens the item in Steam so you can subscribe. livepaper detects the download and imports it. Requires Steam to be running."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   Margin="24,0,0,0"/>
+                                        <RadioButton Content="Download via steamcmd (one-time setup)"
+                                                     GroupName="WsAcquireMode"
+                                                     IsChecked="{Binding IsWorkshopSteamCmdMode}"
+                                                     Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Uses steamcmd to download directly inside the app. Requires steamcmd installed and a one-time sign-in below."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   Margin="24,0,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- steamcmd settings -->
+                                    <StackPanel IsVisible="{Binding IsWorkshopSteamCmdMode}" Spacing="10" Margin="0,4,0,0">
+                                        <TextBlock Text="steamcmd path (leave blank to auto-detect)"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   FontSize="12"/>
+                                        <TextBox Text="{Binding SteamCmdPath}"
+                                                 PlaceholderText="/usr/bin/steamcmd"
+                                                 Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Steam username"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   FontSize="12"/>
+                                        <TextBox Text="{Binding SteamUsername}"
+                                                 PlaceholderText="your_steam_username"
+                                                 Foreground="{DynamicResource TextColor}"/>
+                                        <Button Content="Sign in to Steam (one-time)"
+                                                Classes="ghost"
+                                                HorizontalAlignment="Left"
+                                                Command="{Binding SignInToSteamCommand}"
+                                                ToolTip.Tip="Opens a terminal for interactive Steam login. Required once to cache credentials."/>
+                                        <TextBlock Text="After signing in, downloads are fully automatic — no password prompt."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
                             <TextBlock Text="APPEARANCE"
                                        FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource Muted}"
@@ -1338,19 +1509,25 @@
         <!-- Download progress modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsDownloading}" Background="#B2000000">
             <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
-                    Width="420" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    Width="440" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
-                    <TextBlock Text="Downloading" FontSize="15" FontWeight="SemiBold"
+                    <TextBlock Text="{Binding DownloadModalHeader}"
+                               FontSize="15" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextColor}"/>
                     <TextBlock Text="{Binding DownloadTitle}" FontSize="12"
                                Foreground="{DynamicResource Subtext}"
                                TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="Subscribe to the item in the Steam overlay to start the download."
+                               FontSize="11" Foreground="{DynamicResource Muted}"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding IsWorkshopSubscribeWaiting}"/>
                     <ProgressBar Value="{Binding DownloadProgress}"
                                  Minimum="0" Maximum="1"
                                  IsIndeterminate="{Binding DownloadIndeterminate}"
                                  Height="6" CornerRadius="3"/>
                     <TextBlock FontSize="11" Foreground="{DynamicResource Muted}"
-                               HorizontalAlignment="Right">
+                               HorizontalAlignment="Right"
+                               IsVisible="{Binding !IsWorkshopSubscribeWaiting}">
                         <TextBlock.Text>
                             <Binding Path="DownloadProgress" StringFormat="{}{0:P0}"/>
                         </TextBlock.Text>
@@ -1367,9 +1544,9 @@
                     Command="{Binding ClosePreviewCommand}"/>
 
             <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="16"
-                    MaxWidth="860" MaxHeight="600"
+                    MaxWidth="860" MaxHeight="680"
                     HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Grid RowDefinitions="*,Auto,Auto,Auto,Auto">
+                <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,Auto">
 
                     <Panel Grid.Row="0" DataContext="{Binding PreviewCard}"
                            x:DataType="vm:WallpaperCardViewModel"
@@ -1385,8 +1562,94 @@
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Panel>
 
-                    <!-- Crash warning -->
+                    <!-- Workshop metadata panel (browse cards only) -->
                     <Border Grid.Row="1"
+                            IsVisible="{Binding PreviewCard.IsWorkshopResult}"
+                            Background="{DynamicResource BgCrust}"
+                            CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+                        <StackPanel Spacing="8" DataContext="{Binding PreviewCard}"
+                                    x:DataType="vm:WallpaperCardViewModel">
+
+                            <!-- Stats row: subs / favs / views / size / updated -->
+                            <WrapPanel Orientation="Horizontal">
+                                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,0"
+                                            IsVisible="{Binding HasWorkshopStats}">
+                                    <mi:MaterialIcon Kind="AccountGroup" Width="13" Height="13"
+                                                     Foreground="{DynamicResource Subtext}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WorkshopSubsText}"
+                                               FontSize="11" Foreground="{DynamicResource TextColor}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Text="subs"
+                                               FontSize="11" Foreground="{DynamicResource Subtext}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,0"
+                                            IsVisible="{Binding HasWorkshopStats}">
+                                    <mi:MaterialIcon Kind="Heart" Width="13" Height="13"
+                                                     Foreground="{DynamicResource Subtext}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WorkshopFavText}"
+                                               FontSize="11" Foreground="{DynamicResource TextColor}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,0"
+                                            IsVisible="{Binding HasWorkshopStats}">
+                                    <mi:MaterialIcon Kind="Eye" Width="13" Height="13"
+                                                     Foreground="{DynamicResource Subtext}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WorkshopViewsText}"
+                                               FontSize="11" Foreground="{DynamicResource TextColor}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,0"
+                                            IsVisible="{Binding WorkshopSizeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                    <mi:MaterialIcon Kind="DatabaseOutline" Width="13" Height="13"
+                                                     Foreground="{DynamicResource Subtext}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WorkshopSizeText}"
+                                               FontSize="11" Foreground="{DynamicResource TextColor}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="4"
+                                            IsVisible="{Binding WorkshopUpdatedText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                    <mi:MaterialIcon Kind="CalendarBlankOutline" Width="13" Height="13"
+                                                     Foreground="{DynamicResource Subtext}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WorkshopUpdatedText}"
+                                               FontSize="11" Foreground="{DynamicResource Subtext}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </WrapPanel>
+
+                            <!-- Tags -->
+                            <ItemsControl ItemsSource="{Binding WorkshopTags}"
+                                          IsVisible="{Binding HasWorkshopTags}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource Surface0}"
+                                                CornerRadius="4" Padding="6,2" Margin="2,2,0,0">
+                                            <TextBlock Text="{Binding}" FontSize="10"
+                                                       Foreground="{DynamicResource Subtext}"/>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Description -->
+                            <ScrollViewer MaxHeight="80"
+                                          IsVisible="{Binding HasWorkshopDescription}"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <TextBlock Text="{Binding WorkshopDescription}"
+                                           FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Subtext}"/>
+                            </ScrollViewer>
+
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Crash warning -->
+                    <Border Grid.Row="2"
                             IsVisible="{Binding PreviewCard.HasCrashed}"
                             Background="#20f38ba8"
                             CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
@@ -1409,7 +1672,7 @@
                     </Border>
 
                     <!-- Per-wallpaper volume override -->
-                    <Border Grid.Row="2"
+                    <Border Grid.Row="3"
                             IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
                             Background="{DynamicResource BgCrust}"
                             CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
@@ -1443,7 +1706,7 @@
                     </Border>
 
                     <!-- Per-wallpaper speed override -->
-                    <Border Grid.Row="3"
+                    <Border Grid.Row="4"
                             IsVisible="{Binding PreviewCard.IsSpeedSliderVisible}"
                             Background="{DynamicResource BgCrust}"
                             CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
@@ -1477,7 +1740,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
+                    <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" Margin="0,12,0,0">
                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
                             <TextBlock Text="{Binding PreviewCard.Title}"
                                        Foreground="{DynamicResource TextColor}"
@@ -1504,8 +1767,9 @@
                                 </Button>
                             </StackPanel>
                         </StackPanel>
+                        <!-- Acquire / Apply buttons -->
                         <Button Grid.Column="1"
-                                Content="Download &amp; Apply"
+                                Content="{Binding WorkshopAcquireButtonLabel}"
                                 Classes="accent"
                                 Margin="8,0,0,0"
                                 IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNull}}"
@@ -1518,11 +1782,16 @@
                                 IsVisible="{Binding PreviewCard.LibraryItem, Converter={x:Static ObjectConverters.IsNotNull}}"
                                 Command="{Binding ApplyCommand}"
                                 CommandParameter="{Binding PreviewCard}"/>
-                        <Button Grid.Column="2"
-                                Content="Close"
-                                Classes="ghost"
-                                Margin="8,0,0,0"
-                                Command="{Binding ClosePreviewCommand}"/>
+                        <!-- Open on Steam (workshop cards only, next to Close) -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <Button Content="Open on Steam"
+                                    Classes="ghost"
+                                    IsVisible="{Binding PreviewCard.IsWorkshopResult}"
+                                    Command="{Binding PreviewCard.OpenPageCommand}"/>
+                            <Button Content="Close"
+                                    Classes="ghost"
+                                    Command="{Binding ClosePreviewCommand}"/>
+                        </StackPanel>
                     </Grid>
 
                 </Grid>
