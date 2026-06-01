@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using livepaper.Models;
@@ -45,7 +46,11 @@ public static class WorkshopDownloader
 
         progress?.Report((-1, "Waiting for Steam to download… Subscribe to the item in Steam."));
 
-        var candidates = BuildCandidatePaths(workshopBasePath, workshopId);
+        string[] candidates =
+        [
+            Path.Combine(workshopBasePath, workshopId),
+            Path.Combine(SteamCmdWorkshopContentDir, workshopId)
+        ];
 
         const int maxWaitMs = 600_000;
         const int pollMs = 3_000;
@@ -143,81 +148,30 @@ public static class WorkshopDownloader
         return itemDir;
     }
 
-    private static string[] BuildCandidatePaths(string workshopBasePath, string workshopId)
+    public static async Task<string?> ResolveVideoFileAsync(string workshopDir)
     {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string suffix = Path.Combine("steamapps", "workshop", "content", "431960", workshopId);
-
-        var paths = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
+        string projectJson = Path.Combine(workshopDir, "project.json");
+        if (!File.Exists(projectJson)) return null;
+        try
         {
-            Path.Combine(workshopBasePath, workshopId),
-            Path.Combine(SteamCmdWorkshopContentDir, workshopId)
-        };
-
-        // Common Steam root locations on Linux
-        foreach (var steamRoot in new[]
-        {
-            Path.Combine(home, ".local", "share", "Steam"),
-            Path.Combine(home, ".steam", "steam"),
-            Path.Combine(home, ".steam", "root"),
-            "/usr/share/steam"
-        })
-        {
-            paths.Add(Path.Combine(steamRoot, suffix));
+            using var stream = File.OpenRead(projectJson);
+            var doc = await JsonDocument.ParseAsync(stream);
+            if (!doc.RootElement.TryGetProperty("file", out var f)) return null;
+            var file = f.GetString();
+            if (string.IsNullOrEmpty(file)) return null;
+            var path = Path.Combine(workshopDir, file);
+            return File.Exists(path) ? path : null;
         }
-
-        // Also scan libraryfolders.vdf for additional Steam library roots
-        foreach (var root in ReadSteamLibraryRoots(home))
-            paths.Add(Path.Combine(root, suffix));
-
-        return [.. paths];
-    }
-
-    private static System.Collections.Generic.IEnumerable<string> ReadSteamLibraryRoots(string home)
-    {
-        string[] vdfCandidates =
-        [
-            Path.Combine(home, ".local", "share", "Steam", "steamapps", "libraryfolders.vdf"),
-            Path.Combine(home, ".steam", "steam", "steamapps", "libraryfolders.vdf")
-        ];
-
-        foreach (var vdf in vdfCandidates)
-        {
-            if (!File.Exists(vdf)) continue;
-            string text;
-            try { text = File.ReadAllText(vdf); }
-            catch { continue; }
-
-            // Parse lines like:  "path"  "/path/to/library"
-            foreach (System.Text.RegularExpressions.Match m in
-                System.Text.RegularExpressions.Regex.Matches(text, @"""path""\s+""([^""]+)"""))
-            {
-                yield return m.Groups[1].Value;
-            }
-        }
+        catch { return null; }
     }
 
     private static bool IsWorkshopDirReady(string dir)
     {
         if (!Directory.Exists(dir)) return false;
-        try
-        {
-            // project.json is the canonical signal (present on video + scene items)
-            string pj = Path.Combine(dir, "project.json");
-            if (File.Exists(pj) && new FileInfo(pj).Length > 10) return true;
-
-            // Fallback: any video, scene package, or preview image present means
-            // the download is complete enough to import
-            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly))
-            {
-                var ext = Path.GetExtension(f).ToLowerInvariant();
-                if (ext is ".mp4" or ".webm" or ".mov" or ".mkv" or ".avi"
-                         or ".pkg" or ".jpg" or ".png" or ".gif")
-                    return true;
-            }
-        }
-        catch { }
-        return false;
+        string pj = Path.Combine(dir, "project.json");
+        if (!File.Exists(pj)) return false;
+        try { return new FileInfo(pj).Length > 10; }
+        catch { return false; }
     }
 
     public static string? FindSteamCmd(string? configured)

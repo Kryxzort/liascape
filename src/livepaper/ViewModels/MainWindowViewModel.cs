@@ -2145,12 +2145,21 @@ public partial class MainWindowViewModel : ViewModelBase
                         continue;
                     }
 
-                    // Build detail from the acquired workshop dir (mirrors WE Local path)
+                    // For video items, resolve the actual video file from project.json.
+                    // DownloadHelper expects a file path (not a dir) for the video branch.
+                    string downloadUrl = workshopDir;
+                    if (!detail.IsScene)
+                    {
+                        var videoFile = await WorkshopDownloader.ResolveVideoFileAsync(workshopDir);
+                        if (!string.IsNullOrEmpty(videoFile))
+                            downloadUrl = videoFile;
+                    }
+
                     var localDetail = new WallpaperDetail
                     {
                         Title = detail.Title,
                         PreviewUrl = target.ThumbnailSource,
-                        DownloadUrl = workshopDir,
+                        DownloadUrl = downloadUrl,
                         IsScene = detail.IsScene,
                         WorkshopId = detail.WorkshopId,
                         NeedsReferrer = false
