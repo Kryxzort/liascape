@@ -221,6 +221,14 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public string DownloadModalHeader => IsWorkshopSubscribeWaiting ? "Waiting for Steam…" : "Downloading";
 
+    private CancellationTokenSource? _workshopAcquireCts;
+
+    [RelayCommand]
+    private void CancelWorkshopAcquire()
+    {
+        _workshopAcquireCts?.Cancel();
+    }
+
     // LWE monitor management
     [ObservableProperty] private ObservableCollection<LweMonitorViewModel> _lweMonitors = [];
     [ObservableProperty] private LweMonitorViewModel? _selectedLweMonitor;
@@ -2113,15 +2121,15 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     IsWorkshopSubscribeWaiting = _settings.WorkshopAcquireMode == "subscribe";
                     DownloadIndeterminate = true;
-                    using var acquireCts = CancellationTokenSource.CreateLinkedTokenSource(
-                        new CancellationToken());
+                    _workshopAcquireCts?.Dispose();
+                    _workshopAcquireCts = new CancellationTokenSource();
                     var acquireProgress = new Progress<(double, string)>(t =>
                     {
                         DownloadProgress = Math.Max(0, t.Item1);
                         StatusMessage = t.Item2;
                     });
                     string workshopDir = await WorkshopDownloader.AcquireAsync(
-                        detail.WorkshopId, _settings, acquireProgress, acquireCts.Token);
+                        detail.WorkshopId, _settings, acquireProgress, _workshopAcquireCts.Token);
                     IsWorkshopSubscribeWaiting = false;
                     StatusMessage = $"Importing {target.Title}…";
 
@@ -2164,6 +2172,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 if (target == applyTarget && !applied) { ApplyAndSave(item.VideoPath); applied = true; }
                 StatusMessage = $"Applied: {target.Title}";
                 succeeded++;
+            }
+            catch (OperationCanceledException)
+            {
+                IsWorkshopSubscribeWaiting = false;
+                StatusMessage = $"Cancelled: {target.Title}";
+                completed++;
+                break;
             }
             catch (Exception ex)
             {

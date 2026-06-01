@@ -254,6 +254,15 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void OpenSteamUri()
+    {
+        var uri = WorkshopSteamUri;
+        if (string.IsNullOrEmpty(uri)) return;
+        try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { uri }, UseShellExecute = false }); }
+        catch { }
+    }
+
+    [RelayCommand]
     private async Task OpenInFileManager()
     {
         string? dir = null;

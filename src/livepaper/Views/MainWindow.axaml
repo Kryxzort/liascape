@@ -1532,6 +1532,11 @@
                             <Binding Path="DownloadProgress" StringFormat="{}{0:P0}"/>
                         </TextBlock.Text>
                     </TextBlock>
+                    <Button Content="Cancel"
+                            Classes="ghost"
+                            HorizontalAlignment="Right"
+                            IsVisible="{Binding IsWorkshopSubscribeWaiting}"
+                            Command="{Binding CancelWorkshopAcquireCommand}"/>
                 </StackPanel>
             </Border>
         </Grid>
@@ -1787,7 +1792,7 @@
                             <Button Content="Open on Steam"
                                     Classes="ghost"
                                     IsVisible="{Binding PreviewCard.IsWorkshopResult}"
-                                    Command="{Binding PreviewCard.OpenPageCommand}"/>
+                                    Command="{Binding PreviewCard.OpenSteamUriCommand}"/>
                             <Button Content="Close"
                                     Classes="ghost"
                                     Command="{Binding ClosePreviewCommand}"/>
