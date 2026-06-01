@@ -1028,7 +1028,7 @@ public static class PlayerHelper
             var settings = SettingsService.Load();
             int vol = volOverride ?? settings.Volume;
             double spd = speedOverride ?? settings.Speed;
-            Task.Run(() => { SetVolume(vol); SetSpeed(spd); });
+            Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SendCommand("set_property", "mute", true); });
         }
         else
         {
