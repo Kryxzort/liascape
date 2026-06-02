@@ -2027,7 +2027,8 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     // Adds cards in small batches, yielding between each batch so the render
-    // loop gets frames and the loading spinner stays alive.
+    // loop gets frames and the loading spinner stays alive. Leaves a trailing
+    // placeholder "runway" that fills in as the user scrolls toward it.
     private async Task AddBrowseCardsAsync(IReadOnlyList<WallpaperResult> results, int gen)
     {
         const int batchSize = 5;
@@ -2043,8 +2044,38 @@ public partial class MainWindowViewModel : ViewModelBase
             if ((i + 1) % batchSize == 0)
                 await Task.Yield();
         }
-        // Remove leftover placeholder cards if results had fewer than 30 items
-        while (gen == _loadGeneration && BrowseWallpapers.Count > results.Count)
+        if (gen != _loadGeneration) return;
+        // Drop any leftover placeholders past the real cards, then lay down a fresh runway.
+        while (BrowseWallpapers.Count > results.Count)
+            BrowseWallpapers.RemoveAt(BrowseWallpapers.Count - 1);
+        if (results.Count == 0) { NoMorePages = true; return; }
+        TopUpRunway(gen);
+    }
+
+    // Trailing placeholder cards kept after the loaded cards so scrolling always has more "coming",
+    // filled by LoadMore as they approach the viewport. One page's worth.
+    private void TopUpRunway(int gen)
+    {
+        if (gen != _loadGeneration) return;
+        if (!SelectedSource.SupportsPagination || NoMorePages) return;
+        int target = SelectedSource.PageSizeHint;
+        int have = 0;
+        for (int i = BrowseWallpapers.Count - 1; i >= 0 && BrowseWallpapers[i].IsPlaceholder; i--)
+            have++;
+        for (int i = have; i < target; i++)
+            BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
+    }
+
+    private int FirstPlaceholderIndex()
+    {
+        for (int i = 0; i < BrowseWallpapers.Count; i++)
+            if (BrowseWallpapers[i].IsPlaceholder) return i;
+        return -1;
+    }
+
+    private void RemoveTrailingPlaceholders()
+    {
+        while (BrowseWallpapers.Count > 0 && BrowseWallpapers[^1].IsPlaceholder)
             BrowseWallpapers.RemoveAt(BrowseWallpapers.Count - 1);
     }
 
@@ -2088,24 +2119,13 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private async Task LoadMoreAsync()
     {
-        if (!SelectedSource.SupportsPagination || NoMorePages) return;
+        if (!SelectedSource.SupportsPagination || NoMorePages || IsLoading) return;
 
-        // Capture the load generation. A source switch / search / refresh bumps _loadGeneration and
-        // Clears BrowseWallpapers; if that happens during our await, that load now owns the
-        // collection and we must not touch it (otherwise stale indices throw IndexOutOfRange).
+        // The collection already ends in a placeholder runway (laid down by AddBrowseCardsAsync /
+        // previous LoadMore). Fetch the next page, fill the leading runway placeholders in place,
+        // then top the runway back up so there's always more "coming" as the user scrolls.
         var gen = _loadGeneration;
         IsLoading = true;
-        int placeholderCount = SelectedSource.PageSizeHint;
-
-        // Track the exact placeholder instances so replacement/removal is index-independent.
-        var placeholders = new List<WallpaperCardViewModel>(placeholderCount);
-        for (int i = 0; i < placeholderCount; i++)
-        {
-            var ph = new WallpaperCardViewModel(isPlaceholder: true);
-            placeholders.Add(ph);
-            BrowseWallpapers.Add(ph);
-        }
-
         try
         {
             CurrentPage++;
@@ -2125,27 +2145,32 @@ public partial class MainWindowViewModel : ViewModelBase
                 .Select(r => new WallpaperCardViewModel(r))
                 .ToList();
 
-            // Replace placeholders in place (by reference), append overflow, drop the rest.
-            int reused = Math.Min(newCards.Count, placeholders.Count);
-            for (int i = 0; i < reused; i++)
+            if (newCards.Count == 0)
             {
-                int idx = BrowseWallpapers.IndexOf(placeholders[i]);
-                if (idx >= 0) BrowseWallpapers[idx] = newCards[i];
-                else BrowseWallpapers.Add(newCards[i]);
+                NoMorePages = true;
+                RemoveTrailingPlaceholders();
+                return;
             }
-            for (int i = placeholders.Count; i < newCards.Count; i++)
-                BrowseWallpapers.Add(newCards[i]);
-            for (int i = reused; i < placeholders.Count; i++)
-                BrowseWallpapers.Remove(placeholders[i]);
 
-            if (newCards.Count == 0) NoMorePages = true;
+            // Fill from the first placeholder onward (replace in place so Avalonia reuses visuals).
+            int pi = FirstPlaceholderIndex();
+            if (pi < 0) pi = BrowseWallpapers.Count;
+            foreach (var card in newCards)
+            {
+                if (pi < BrowseWallpapers.Count && BrowseWallpapers[pi].IsPlaceholder)
+                    BrowseWallpapers[pi] = card;
+                else
+                    BrowseWallpapers.Insert(pi, card);
+                pi++;
+            }
+            TopUpRunway(gen);
         }
         catch (Exception ex)
         {
             if (gen == _loadGeneration)
             {
-                foreach (var ph in placeholders) BrowseWallpapers.Remove(ph);
                 NoMorePages = true;
+                RemoveTrailingPlaceholders();
                 StatusMessage = $"Failed to load more: {ex.Message}";
             }
         }

@@ -649,6 +649,13 @@ public partial class MainWindow : Window
         {
             _realizedBrowse.Add(el);
             if (Vm?.AutoPlayGifs == true) ScheduleGifReconcile();
+            // A placeholder scrolled into view → fetch to fill it (infinite runway). LoadMore is
+            // self-guarded (IsLoading/NoMorePages) so the burst of prepared placeholders coalesces.
+            if (!_debugFreezeLoad
+                && el.DataContext is WallpaperCardViewModel ph && ph.IsPlaceholder
+                && Vm is { IsLoading: false, NoMorePages: false } vm
+                && vm.SelectedSource.SupportsPagination)
+                vm.LoadMoreCommand.Execute(null);
             return;
         }
 
