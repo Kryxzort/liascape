@@ -18,6 +18,9 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        // Replace the default unbounded image cache with an LRU-bounded one so decoded thumbnails
+        // don't accumulate without limit during long/infinite scroll.
+        AsyncImageLoader.ImageLoader.AsyncImageLoader = new BoundedRamImageLoader();
         var settings = SettingsService.Load();
         ThemeService.Apply(ThemeService.Find(settings.Theme) ?? ThemeService.Default);
     }

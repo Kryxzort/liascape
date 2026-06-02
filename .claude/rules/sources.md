@@ -90,3 +90,7 @@ Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.Works
 After acquire: `DownloadHelper.DownloadAsync` with the workshop dir as `DownloadUrl` (local file path), identical to WE Local import. `WallpaperDetail.IsWorkshopAcquire = true` signals the acquire branch in `DownloadCardsAsync`.
 
 **Dedup**: checks both `LibraryItem.SourceId == PageUrl` AND `LibraryItem.WorkshopId == workshopId` to cover items previously imported via WE Local.
+
+**Preview thumbnails / animation (perf):** card static layer uses the resized `preview_url + ?imw=384&imh=216&letterbox=true`; the animated layer uses the raw full-res `preview_url`. Animated previews are loaded off the UI thread and bounded — see the GIF perf gotchas in `ui.md` (`AnimatedPreviewCache`, `GifRendererBuilder`, `BoundedRamImageLoader`, viewport-gated + debounced activation). Animated-preview bytes are cached at `~/.cache/livepaper/workshop_previews/` (LRU-bounded, 400 files).
+
+**Debug bridge:** launch with env `LIVEPAPER_DEBUG_IPC=1` to enable `DebugBridge` (unix socket `/tmp/livepaper-debug.sock`, no-op otherwise). Line commands: `source <name>`, `tab N`, `scroll <px>`, `scrollbottom`, `loadmore`, `metrics`, `gc`, `sample`. Used to profile scroll/memory. Caveat: scripted `Offset` writes can't reproduce real mouse-wheel virtualization/recycling or sub-debounce fling timing — validate scroll smoothness with a real wheel, not the bridge.

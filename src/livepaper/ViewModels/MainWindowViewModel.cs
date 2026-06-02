@@ -1434,7 +1434,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         PlaylistItems.Add(card);
         card.IsInPlaylist = true;
-        if (AutoPlayGifs && card.IsGifThumbnail) card.IsPlaylistGifActive = true;
+        if (AutoPlayGifs && card.IsAutoPlayGif) card.IsPlaylistGifActive = true;
     }
 
     private CancellationTokenSource RenewCts(ref CancellationTokenSource? field)
@@ -2055,7 +2055,22 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (!SelectedSource.SupportsPagination || NoMorePages) return;
 
+        // Capture the load generation. A source switch / search / refresh bumps _loadGeneration and
+        // Clears BrowseWallpapers; if that happens during our await, that load now owns the
+        // collection and we must not touch it (otherwise stale indices throw IndexOutOfRange).
+        var gen = _loadGeneration;
         IsLoading = true;
+        const int placeholderCount = 10;
+
+        // Track the exact placeholder instances so replacement/removal is index-independent.
+        var placeholders = new List<WallpaperCardViewModel>(placeholderCount);
+        for (int i = 0; i < placeholderCount; i++)
+        {
+            var ph = new WallpaperCardViewModel(isPlaceholder: true);
+            placeholders.Add(ph);
+            BrowseWallpapers.Add(ph);
+        }
+
         try
         {
             CurrentPage++;
@@ -2063,24 +2078,46 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? await SelectedSource.SearchAsync(_currentQuery, CurrentPage)
                 : await SelectedSource.GetLatestAsync(CurrentPage);
 
-            var existingUrls = BrowseWallpapers.Select(c => c.PageUrl).ToHashSet();
-            int added = 0;
-            foreach (var r in results)
+            if (gen != _loadGeneration) return;
+
+            var existingUrls = BrowseWallpapers
+                .Where(c => !c.IsPlaceholder)
+                .Select(c => c.PageUrl)
+                .ToHashSet();
+
+            var newCards = results
+                .Where(r => !existingUrls.Contains(r.PageUrl))
+                .Select(r => new WallpaperCardViewModel(r))
+                .ToList();
+
+            // Replace placeholders in place (by reference), append overflow, drop the rest.
+            int reused = Math.Min(newCards.Count, placeholders.Count);
+            for (int i = 0; i < reused; i++)
             {
-                if (existingUrls.Contains(r.PageUrl)) continue;
-                BrowseWallpapers.Add(new WallpaperCardViewModel(r));
-                added++;
+                int idx = BrowseWallpapers.IndexOf(placeholders[i]);
+                if (idx >= 0) BrowseWallpapers[idx] = newCards[i];
+                else BrowseWallpapers.Add(newCards[i]);
             }
-            if (added == 0) NoMorePages = true;
+            for (int i = placeholders.Count; i < newCards.Count; i++)
+                BrowseWallpapers.Add(newCards[i]);
+            for (int i = reused; i < placeholders.Count; i++)
+                BrowseWallpapers.Remove(placeholders[i]);
+
+            if (newCards.Count == 0) NoMorePages = true;
         }
         catch (Exception ex)
         {
-            NoMorePages = true;
-            StatusMessage = $"Failed to load more: {ex.Message}";
+            if (gen == _loadGeneration)
+            {
+                foreach (var ph in placeholders) BrowseWallpapers.Remove(ph);
+                NoMorePages = true;
+                StatusMessage = $"Failed to load more: {ex.Message}";
+            }
         }
         finally
         {
-            IsLoading = false;
+            if (gen == _loadGeneration)
+                IsLoading = false;
         }
     }
 

@@ -50,6 +50,11 @@ public partial class WallpaperCardViewModel : ViewModelBase
         (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
          !string.IsNullOrEmpty(StaticThumbnailSource));
 
+    // Eligible for AutoPlayGifs bulk auto-activation. Remote previews are now loaded
+    // asynchronously (see LoadRemoteGifSourceAsync + AnimatedPreviewCache), so auto-playing
+    // a whole grid of Workshop cards no longer blocks the UI thread.
+    public bool IsAutoPlayGif => IsGifThumbnail;
+
     // Single source used by the card's static image layer. Falls back to ThumbnailSource when no
     // extracted static frame is available. Avoids materializing two AdvancedImage controls per card.
     public string? DisplayThumbnailSource =>
@@ -60,7 +65,15 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _gifSource;
     private Stream? _gifStream;
-    public AnimatedImage.Avalonia.AnimatedImageSource? GifSource => _gifSource ??= LoadGifSource(out _gifStream);
+    private CancellationTokenSource? _gifLoadCts;
+    private bool _gifLoadStarted;
+    // Bound by the preview modal AND (via ActiveGifSource) by the grid cards. For local files this
+    // builds synchronously; for remote previews it kicks off an async download (off the UI thread)
+    // and notifies when ready — returning null in the meantime so the static thumbnail shows.
+    public AnimatedImage.Avalonia.AnimatedImageSource? GifSource
+    {
+        get { EnsureGifSourceLoading(); return _gifSource; }
+    }
 
     [ObservableProperty] private bool _isGifActive;
     partial void OnIsGifActiveChanged(bool value)
@@ -70,43 +83,124 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
 
+    private void EnsureGifSourceLoading()
+    {
+        if (_gifSource != null || _gifLoadStarted || !IsGifThumbnail) return;
+        _gifLoadStarted = true;
+        if (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            _gifLoadCts = new CancellationTokenSource();
+            _ = LoadRemoteGifSourceAsync(_gifLoadCts.Token);
+        }
+        else
+        {
+            _gifSource = LoadLocalGifSource(ThumbnailSource, out _gifStream);
+        }
+    }
+
+    // Download the preview bytes AND parse the animation entirely off the UI thread, then hand the
+    // control a ready-to-play source so the UI thread only wires up the timeline (no stall).
+    private async Task LoadRemoteGifSourceAsync(CancellationToken ct)
+    {
+        try
+        {
+            var bytes = await AnimatedPreviewCache.GetBytesAsync(ThumbnailSource, ct);
+            if (ct.IsCancellationRequested || bytes == null || bytes.Length == 0) return;
+            var source = await BuildAnimatedSourceAsync(bytes, ct);
+            if (ct.IsCancellationRequested || source == null) return;
+            _gifSource = source;
+            // Notify both bindings so the now-ready source is picked up.
+            OnPropertyChanged(nameof(GifSource));
+            OnPropertyChanged(nameof(ActiveGifSource));
+        }
+        catch { }
+    }
+
+    // Parses on a background thread when possible (GifRendererBuilder), falling back to an
+    // in-memory stream source (parsed on the UI thread, but at least with no network).
+    private async Task<AnimatedImage.Avalonia.AnimatedImageSource?> BuildAnimatedSourceAsync(byte[] bytes, CancellationToken ct)
+    {
+        if (GifRendererBuilder.IsAvailable)
+        {
+            var prebuilt = await Task.Run(() => GifRendererBuilder.TryBuild(bytes), ct);
+            if (prebuilt != null) return prebuilt;
+        }
+        return new AnimatedImage.Avalonia.AnimatedImageSourceStream(new MemoryStream(bytes, writable: false));
+    }
+
     private void ReleaseGifSource()
     {
+        _gifLoadCts?.Cancel();
+        _gifLoadCts?.Dispose();
+        _gifLoadCts = null;
         (_gifSource as IDisposable)?.Dispose();
         _gifStream?.Dispose();
         _gifSource = null;
         _gifStream = null;
+        _gifLoadStarted = false;
     }
 
     private AnimatedImage.Avalonia.AnimatedImageSource? _playlistGifSource;
     private Stream? _playlistGifStream;
+    private CancellationTokenSource? _playlistGifLoadCts;
+    private bool _playlistGifLoadStarted;
     [ObservableProperty] private bool _isPlaylistGifActive;
     partial void OnIsPlaylistGifActiveChanged(bool value)
     {
-        if (!value) ReleasePlaylistGifSource();
+        if (!value) { ReleasePlaylistGifSource(); OnPropertyChanged(nameof(PlaylistActiveGifSource)); return; }
+        EnsurePlaylistGifSourceLoading();
         OnPropertyChanged(nameof(PlaylistActiveGifSource));
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? PlaylistActiveGifSource =>
-        IsPlaylistGifActive ? (_playlistGifSource ??= LoadGifSource(out _playlistGifStream)) : null;
+        IsPlaylistGifActive ? _playlistGifSource : null;
+
+    private void EnsurePlaylistGifSourceLoading()
+    {
+        if (_playlistGifSource != null || _playlistGifLoadStarted || !IsGifThumbnail) return;
+        _playlistGifLoadStarted = true;
+        if (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            _playlistGifLoadCts = new CancellationTokenSource();
+            _ = LoadRemotePlaylistGifSourceAsync(_playlistGifLoadCts.Token);
+        }
+        else
+        {
+            _playlistGifSource = LoadLocalGifSource(ThumbnailSource, out _playlistGifStream);
+        }
+    }
+
+    private async Task LoadRemotePlaylistGifSourceAsync(CancellationToken ct)
+    {
+        try
+        {
+            var bytes = await AnimatedPreviewCache.GetBytesAsync(ThumbnailSource, ct);
+            if (ct.IsCancellationRequested || bytes == null || bytes.Length == 0) return;
+            var source = await BuildAnimatedSourceAsync(bytes, ct);
+            if (ct.IsCancellationRequested || source == null) return;
+            _playlistGifSource = source;
+            OnPropertyChanged(nameof(PlaylistActiveGifSource));
+        }
+        catch { }
+    }
 
     private void ReleasePlaylistGifSource()
     {
+        _playlistGifLoadCts?.Cancel();
+        _playlistGifLoadCts?.Dispose();
+        _playlistGifLoadCts = null;
         (_playlistGifSource as IDisposable)?.Dispose();
         _playlistGifStream?.Dispose();
         _playlistGifSource = null;
         _playlistGifStream = null;
+        _playlistGifLoadStarted = false;
     }
 
-    private AnimatedImage.Avalonia.AnimatedImageSource? LoadGifSource(out Stream? stream)
+    private static AnimatedImage.Avalonia.AnimatedImageSource? LoadLocalGifSource(string thumbnailSource, out Stream? stream)
     {
         stream = null;
-        if (!IsGifThumbnail) return null;
         try
         {
-            if (ThumbnailSource.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                return new AnimatedImage.Avalonia.AnimatedImageSourceUri { UriSource = new Uri(ThumbnailSource, UriKind.Absolute) };
-
-            string path = ThumbnailSource;
+            string path = thumbnailSource;
             if (path.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
                 path = path.Substring(7);
 

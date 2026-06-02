@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
+using livepaper.Helpers;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -27,6 +29,12 @@ public partial class MainWindow : Window
     private double _lastRepeaterWidth;
     private System.Threading.CancellationTokenSource? _cardHeightDebounce;
     private Border? _pressedCardBorder;
+    // Realized Browse-grid containers, used to drive viewport-gated GIF activation so only the
+    // cards actually on screen decode/animate (not the larger ItemsRepeater realization buffer).
+    private readonly System.Collections.Generic.HashSet<Control> _realizedBrowse = new();
+    // Debounces GIF activation until scrolling settles, so a fast fling doesn't decode a full-res
+    // preview for every card it passes (allocation churn → GC pauses → scroll lag).
+    private DispatcherTimer? _gifSettleTimer;
 
     // Playlist drag state
     private WallpaperCardViewModel? _dragCard;
@@ -58,7 +66,7 @@ public partial class MainWindow : Window
             if (Vm?.AutoPlayGifs == true)
             {
                 foreach (var c in Vm.LibraryWallpapers) ActivateGifCard(c);
-                foreach (var c in Vm.BrowseWallpapers) ActivateGifCard(c);
+                ReconcileBrowseGifs();
                 foreach (var c in Vm.PlaylistItems) ActivatePlaylistGifCard(c);
             }
             PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
@@ -70,6 +78,90 @@ public partial class MainWindow : Window
         this.AddHandler(PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
         this.AddHandler(PointerCaptureLostEvent, OnPointerCaptureLost, RoutingStrategies.Bubble, handledEventsToo: true);
         MainTabControl.SelectionChanged += OnTabChanged;
+
+        if (DebugBridge.Enabled)
+        {
+            var hbSw = System.Diagnostics.Stopwatch.StartNew();
+            long hbLast = 0;
+            var hbTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            hbTimer.Tick += (_, _) =>
+            {
+                long now = hbSw.ElapsedMilliseconds;
+                long gap = now - hbLast;
+                if (gap > 250) Console.Error.WriteLine($"[HB] stall {gap}ms");
+                hbLast = now;
+            };
+            hbTimer.Start();
+            DebugBridge.Handler = HandleDebugCommand;
+            DebugBridge.Start();
+        }
+    }
+
+    // Debug control channel handler (see DebugBridge). Runs on the UI thread.
+    private string HandleDebugCommand(string cmd)
+    {
+        var parts = cmd.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var verb = parts.Length > 0 ? parts[0] : "";
+        var arg = parts.Length > 1 ? parts[1] : "";
+        switch (verb)
+        {
+            case "tab":
+                MainTabControl.SelectedIndex = int.Parse(arg);
+                return $"tab={MainTabControl.SelectedIndex}";
+            case "source":
+                if (Vm == null) return "no vm";
+                var src = Vm.Sources.FirstOrDefault(s => s.Name.Contains(arg, StringComparison.OrdinalIgnoreCase));
+                if (src == null) return "source not found: " + arg;
+                Vm.SelectedSource = src;
+                return "source=" + src.Name;
+            case "scroll":
+            {
+                double d = double.Parse(arg);
+                var off = BrowseScrollViewer.Offset;
+                BrowseScrollViewer.Offset = new Vector(off.X, Math.Max(0, off.Y + d));
+                return $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
+            }
+            case "scrollbottom":
+            {
+                double ext = BrowseScrollViewer.Extent.Height;
+                double vp = BrowseScrollViewer.Viewport.Height;
+                BrowseScrollViewer.Offset = new Vector(BrowseScrollViewer.Offset.X, Math.Max(0, ext - vp));
+                return $"y={BrowseScrollViewer.Offset.Y:F0}/{ext:F0}";
+            }
+            case "loadmore":
+                Vm?.LoadMoreCommand.Execute(null);
+                return "loadmore fired";
+            case "gc":
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                return DebugMetrics();
+            case "sample":
+            {
+                if (Vm == null || Vm.BrowseWallpapers.Count == 0) return "no cards";
+                var c = Vm.BrowseWallpapers[0];
+                return $"display={c.DisplayThumbnailSource}\nthumb={c.ThumbnailSource}\nstatic={c.StaticThumbnailSource}";
+            }
+            case "metrics":
+                return DebugMetrics();
+            default:
+                return "unknown verb: " + verb;
+        }
+    }
+
+    private string DebugMetrics()
+    {
+        var p = System.Diagnostics.Process.GetCurrentProcess();
+        long ws = p.WorkingSet64 / (1024 * 1024);
+        long gc = GC.GetTotalMemory(false) / (1024 * 1024);
+        int cards = Vm?.BrowseWallpapers.Count ?? 0;
+        int active = 0;
+        if (Vm != null)
+            foreach (var c in Vm.BrowseWallpapers)
+                if (c.IsGifActive) active++;
+        return $"cards={cards} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
+               $"gen0={GC.CollectionCount(0)} gen2={GC.CollectionCount(2)} " +
+               $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
     }
 
     protected override void OnClosed(EventArgs e)
@@ -444,7 +536,7 @@ public partial class MainWindow : Window
             && sender is MainWindowViewModel vm2 && vm2.AutoPlayGifs)
         {
             foreach (var c in vm2.LibraryWallpapers) ActivateGifCard(c);
-            foreach (var c in vm2.BrowseWallpapers) ActivateGifCard(c);
+            ReconcileBrowseGifs();
             foreach (var c in vm2.PlaylistItems) ActivatePlaylistGifCard(c);
         }
     }
@@ -463,16 +555,18 @@ public partial class MainWindow : Window
         if (Vm?.AutoPlayGifs != true) return;
         Dispatcher.UIThread.Post(() =>
         {
-            var cards = MainTabControl.SelectedIndex == 0
-                ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>)Vm.BrowseWallpapers
-                : MainTabControl.SelectedIndex == 1
-                    ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>)Vm.LibraryWallpapers
-                    : System.Array.Empty<WallpaperCardViewModel>();
-            foreach (var c in cards)
+            if (MainTabControl.SelectedIndex == 0)
             {
-                if (!c.IsGifThumbnail) continue;
-                c.IsGifActive = false;
-                c.IsGifActive = true;
+                ReconcileBrowseGifs();
+            }
+            else if (MainTabControl.SelectedIndex == 1)
+            {
+                foreach (var c in Vm.LibraryWallpapers)
+                {
+                    if (!c.IsAutoPlayGif) continue;
+                    c.IsGifActive = false;
+                    c.IsGifActive = true;
+                }
             }
         }, DispatcherPriority.Background);
     }
@@ -480,11 +574,22 @@ public partial class MainWindow : Window
     private void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
     {
         if (Vm?.AutoPlayGifs != true) return;
-        if (e.Element is not StyledElement se) return;
-        if (se.DataContext is WallpaperCardViewModel card)
+        if (e.Element is not Control el) return;
+
+        // Browse grid: track the container and let viewport reconciliation decide what animates,
+        // so the off-screen realization buffer doesn't decode full-res previews.
+        if (ReferenceEquals(sender, BrowseItemsRepeater))
+        {
+            _realizedBrowse.Add(el);
+            ScheduleGifReconcile();
+            return;
+        }
+
+        // Library / others: activate all realized (bounded set, not infinite-scroll).
+        if (el.DataContext is WallpaperCardViewModel card)
             ActivateGifCard(card);
         else
-            se.DataContextChanged += OnElementDataContextChanged;
+            el.DataContextChanged += OnElementDataContextChanged;
     }
 
     private void OnElementDataContextChanged(object? sender, EventArgs e)
@@ -497,18 +602,55 @@ public partial class MainWindow : Window
 
     private static void ActivateGifCard(WallpaperCardViewModel card)
     {
-        if (!card.IsGifThumbnail || card.IsGifActive) return;
+        if (!card.IsAutoPlayGif || card.IsGifActive) return;
         card.IsGifActive = true;
+    }
+
+    // Restart the settle timer; GIFs (re)activate only once scrolling pauses.
+    private void ScheduleGifReconcile()
+    {
+        if (Vm?.AutoPlayGifs != true) return;
+        _gifSettleTimer ??= CreateGifSettleTimer();
+        _gifSettleTimer.Stop();
+        _gifSettleTimer.Start();
+    }
+
+    private DispatcherTimer CreateGifSettleTimer()
+    {
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(160) };
+        t.Tick += (_, _) => { t.Stop(); ReconcileBrowseGifs(); };
+        return t;
+    }
+
+    // Activate GIFs only for Browse cards whose container currently intersects the viewport;
+    // deactivate the rest. Keeps the number of concurrent full-res decodes ~one screenful
+    // regardless of how many cards have been scrolled past (no unbounded animation churn).
+    private void ReconcileBrowseGifs()
+    {
+        if (Vm?.AutoPlayGifs != true) return;
+        double vh = BrowseScrollViewer.Viewport.Height;
+        if (vh <= 0) return;
+        const double margin = 120; // start a touch before a card scrolls fully into view
+        foreach (var el in _realizedBrowse)
+        {
+            if (el.DataContext is not WallpaperCardViewModel card || !card.IsAutoPlayGif) continue;
+            var pt = el.TranslatePoint(new Point(0, 0), BrowseScrollViewer);
+            bool vis = pt.HasValue
+                && pt.Value.Y + el.Bounds.Height > -margin
+                && pt.Value.Y < vh + margin;
+            if (vis && !card.IsGifActive) card.IsGifActive = true;
+            else if (!vis && card.IsGifActive) card.IsGifActive = false;
+        }
     }
 
     private void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
     {
-        if (e.Element is StyledElement se)
-        {
-            se.DataContextChanged -= OnElementDataContextChanged;
-            if (se.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
-                card.IsGifActive = false;
-        }
+        if (e.Element is not Control el) return;
+        el.DataContextChanged -= OnElementDataContextChanged;
+        if (ReferenceEquals(sender, BrowseItemsRepeater))
+            _realizedBrowse.Remove(el);
+        if (el.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
+            card.IsGifActive = false;
     }
 
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
@@ -568,7 +710,7 @@ public partial class MainWindow : Window
         for (int i = 0; i < Vm.PlaylistItems.Count; i++)
         {
             var card = Vm.PlaylistItems[i];
-            if (!card.IsGifThumbnail) continue;
+            if (!card.IsAutoPlayGif) continue;
             double left = i * PlaylistItemStride;
             bool inView = left + PlaylistItemWidth > offset && left < offset + viewportWidth;
             if (inView && !card.IsPlaylistGifActive) ActivatePlaylistGifCard(card);
@@ -592,7 +734,7 @@ public partial class MainWindow : Window
 
     private static void ActivatePlaylistGifCard(WallpaperCardViewModel card)
     {
-        if (!card.IsGifThumbnail || card.IsPlaylistGifActive) return;
+        if (!card.IsAutoPlayGif || card.IsPlaylistGifActive) return;
         card.IsPlaylistGifActive = true;
     }
 
@@ -600,6 +742,9 @@ public partial class MainWindow : Window
     {
         if (sender is not ScrollViewer sv) return;
         if (DataContext is not MainWindowViewModel vm) return;
+
+        ScheduleGifReconcile();
+
         if (vm.IsLoading || vm.NoMorePages || !vm.SelectedSource.SupportsPagination) return;
 
         if (sv.Extent.Height - sv.Offset.Y - sv.Viewport.Height < 300)
