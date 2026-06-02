@@ -2192,6 +2192,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? await SelectedSource.SearchAsync(_currentQuery, CurrentPage)
                 : await SelectedSource.GetLatestAsync(CurrentPage);
 
+            // LoadMore is triggered from ElementPrepared (during the ItemsRepeater layout pass).
+            // With prefetch the await above can complete synchronously, so without this yield the
+            // collection mutations below would run during layout -> "Changes in data source are not
+            // allowed during layout". Task.Yield defers them to a fresh dispatcher turn.
+            await Task.Yield();
+
             if (gen != _loadGeneration) return;
 
             var existingUrls = BrowseWallpapers
