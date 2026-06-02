@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -76,5 +80,77 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
             if (_cache.Remove(url, out var e))
                 _lru.Remove(e.Node);
         }
+    }
+
+    // --- Persistent on-disk cache (under the RAM LRU) ---------------------------------------
+    // BaseWebImageLoader.LoadAsync checks LoadFromGlobalCache before downloading and calls
+    // SaveToGlobalCache after, so overriding these adds a disk cache: thumbnails survive scroll-back
+    // past the RAM cap and app restarts, with no re-download. Only remote URLs reach here (local
+    // file:// thumbnails are served by LoadFromLocalAsync first).
+    private const int DiskCap = 3000;
+    private static int _writesSinceTrim;
+
+    private static string DiskDir => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "livepaper", "thumbs");
+
+    protected override Task<Bitmap?> LoadFromGlobalCache(string url)
+    {
+        try
+        {
+            var path = DiskPath(url);
+            if (!File.Exists(path)) return Task.FromResult<Bitmap?>(null);
+            return Task.Run<Bitmap?>(() =>
+            {
+                try
+                {
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow); // touch for LRU trimming
+                    return new Bitmap(path);
+                }
+                catch { return null; }
+            });
+        }
+        catch { return Task.FromResult<Bitmap?>(null); }
+    }
+
+    protected override async Task SaveToGlobalCache(string url, byte[] imageBytes)
+    {
+        if (imageBytes.Length == 0) return;
+        try
+        {
+            Directory.CreateDirectory(DiskDir);
+            var path = DiskPath(url);
+            var tmp = path + ".tmp" + Environment.CurrentManagedThreadId;
+            await File.WriteAllBytesAsync(tmp, imageBytes).ConfigureAwait(false);
+            File.Move(tmp, path, overwrite: true);
+            if (Interlocked.Increment(ref _writesSinceTrim) % 100 == 0)
+                _ = Task.Run(TrimDisk);
+        }
+        catch { /* disk cache is best-effort */ }
+    }
+
+    private static void TrimDisk()
+    {
+        try
+        {
+            var dir = new DirectoryInfo(DiskDir);
+            if (!dir.Exists) return;
+            var files = dir.GetFiles();
+            if (files.Length <= DiskCap) return;
+            Array.Sort(files, (a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
+            for (int i = 0; i < files.Length - DiskCap; i++)
+            {
+                try { files[i].Delete(); } catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static string DiskPath(string url)
+    {
+        var bytes = SHA1.HashData(Encoding.UTF8.GetBytes(url));
+        var sb = new StringBuilder(bytes.Length * 2);
+        foreach (var b in bytes) sb.Append(b.ToString("x2"));
+        return Path.Combine(DiskDir, sb.ToString());
     }
 }
