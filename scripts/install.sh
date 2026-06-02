@@ -18,10 +18,20 @@ if [ "$1" != "--no-build" ]; then
         -o "$PUBLISH_DIR"
 fi
 
-echo "==> Installing to $HOME/.local/lib/livepaper/..."
-mkdir -p "$HOME/.local/lib/livepaper"
-cp -r "$PUBLISH_DIR"/. "$HOME/.local/lib/livepaper/"
-chmod 755 "$HOME/.local/lib/livepaper/livepaper"
+LIB="$HOME/.local/lib/livepaper"
+echo "==> Installing to $LIB/..."
+# Stage into a fresh dir, then atomically swap. Overwriting the dir in place with cp -r fails with
+# "Text file busy" (ETXTBSY) if an instance is still running (the exe + mmap'd native .so are open
+# for execution). Renaming dirs never hits that: the running process keeps its old inodes.
+STAGING="$LIB.staging.$$"
+OLD="$LIB.old.$$"
+rm -rf "$STAGING"
+mkdir -p "$STAGING"
+cp -r "$PUBLISH_DIR"/. "$STAGING/"
+chmod 755 "$STAGING/livepaper"
+if [ -d "$LIB" ]; then mv "$LIB" "$OLD"; fi
+mv "$STAGING" "$LIB"
+rm -rf "$OLD"
 
 echo "==> Installing launcher to $BIN_DIR..."
 mkdir -p "$BIN_DIR"
