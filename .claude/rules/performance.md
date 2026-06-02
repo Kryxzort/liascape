@@ -36,7 +36,11 @@ Measured with the debug FPS meter (see below), Workshop grid, fixed loaded set, 
 ### GC observation
 During steady scroll over a fixed set (fetch off, gifs off, realized ~110), `gen2` climbs ~1 full GC/sec and ws swings ~1GB. The churn is **AdvancedImage rebinding as containers recycle** (Source changes → reload/decode path) — even though the bounded cache avoids re-download. This GC pressure is a second contributor to the drops alongside raw per-card render cost. cache=0 *maximizes* recycle churn (re-realize every edge crossing); a small buffer may trade render cost for less churn — untested.
 
+### Template flattening — TRIED, no gain (reverted)
+Cut ~4 structural objects/card (thumbnail Button→Border+tap, inlined images instead of TemplatedControl, dropped inner thumb Grid + overlay Panel). **fps unchanged (26–32 at Small).** Conclusion: per-card cost is **NOT visual/object count** — empty containers are nearly free. It's the **AdvancedImage draw** (sampling a bitmap to fill each card ×N) + **GC churn** as cards recycle (gcHeap swings 100→370MB during scroll, gen2 climbs). Reverted (the Button→Border lost keyboard focus/press feedback for zero benefit). So Small@60 is not reachable by simplifying the template; it needs either far fewer visible cards or a different rendering stack (→ web rewrite, see memory `web-frontend-rewrite-idea`).
+
 ### Dead ends (do NOT retry)
+- **Template/structural flattening** — no fps gain (cost is image-draw + GC, not object count). See above.
 - **240fps render-loop override** — binding a 240 `IRenderLoop`/`IRenderTimer` (incl. reflection into internal `AvaloniaLocator.CurrentMutable`) succeeds but is inert; compositor already holds the 60 loop. Reverted. (See "Hard ceiling" above.)
 - **Shimmer Margin animation** — was a layout-storm; fixed (Canvas.Left) but it did not affect steady-scroll fps (only loading).
 - **Rounded-clip removal** — no measurable fps change.
