@@ -40,6 +40,41 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<WallpaperCardViewModel> _browseWallpapers = [];
     [ObservableProperty] private ObservableCollection<WallpaperCardViewModel> _libraryWallpapers = [];
     [ObservableProperty] private bool _isLoading;
+    // Single shared shimmer position: every placeholder's shimmer binds Canvas.Left to this, so they
+    // all sweep in sync (per-element Style animations start at each element's own time = out of phase).
+    [ObservableProperty] private double _shimmerX = ShimmerStart;
+    private const double ShimmerStart = -350, ShimmerEnd = 350, ShimmerSpeed = 778; // px/s (≈700px / 0.9s)
+    private DispatcherTimer? _shimmerTimer;
+    private long _shimmerLastTicks;
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        if (value)
+        {
+            if (_shimmerTimer == null)
+            {
+                _shimmerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+                _shimmerTimer.Tick += AdvanceShimmer;
+            }
+            _shimmerLastTicks = DateTime.UtcNow.Ticks;
+            _shimmerTimer.Start();
+        }
+        else
+        {
+            _shimmerTimer?.Stop();
+        }
+    }
+
+    private void AdvanceShimmer(object? sender, EventArgs e)
+    {
+        long now = DateTime.UtcNow.Ticks;
+        double dt = (now - _shimmerLastTicks) / (double)TimeSpan.TicksPerSecond;
+        _shimmerLastTicks = now;
+        double x = ShimmerX + ShimmerSpeed * dt;
+        if (x > ShimmerEnd) x = ShimmerStart + (x - ShimmerEnd);
+        ShimmerX = x;
+    }
+
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private int _currentPage = 1;

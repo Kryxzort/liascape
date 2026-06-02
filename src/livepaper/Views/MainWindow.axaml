@@ -65,7 +65,9 @@
             <Setter Property="Width" Value="350"/>
             <Setter Property="Height" Value="{Binding $parent[Canvas].Bounds.Height}"/>
             <Setter Property="Canvas.Top" Value="0"/>
-            <Setter Property="Canvas.Left" Value="-350"/>
+            <!-- Driven by one shared VM value (MainWindowViewModel.ShimmerX) so every placeholder
+                 shimmers in sync; per-element Style animations start at each element's own time. -->
+            <Setter Property="Canvas.Left" Value="{Binding $parent[Window].DataContext.ShimmerX}"/>
             <Setter Property="Background">
                 <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                     <GradientStop Color="#00FFFFFF" Offset="0.0"/>
@@ -77,16 +79,6 @@
                     <GradientStop Color="#00FFFFFF" Offset="1.0"/>
                 </LinearGradientBrush>
             </Setter>
-            <Style.Animations>
-                <Animation Duration="0:0:0.9" IterationCount="INFINITE" Easing="LinearEasing">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Canvas.Left" Value="-350"/>
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Canvas.Left" Value="350"/>
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
         </Style>
     </Window.Styles>
 
