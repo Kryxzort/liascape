@@ -124,6 +124,23 @@ public partial class MainWindow : Window
             case "tab":
                 MainTabControl.SelectedIndex = int.Parse(arg);
                 return $"tab={MainTabControl.SelectedIndex}";
+            case "cardsize":
+                if (Vm != null) Vm.CardSize = arg;
+                return "cardSize=" + Vm?.CardSize;
+            case "gifs":
+                if (Vm != null) Vm.AutoPlayGifs = arg == "on";
+                return "autoPlayGifs=" + Vm?.AutoPlayGifs;
+            case "fetch":
+                _debugFreezeLoad = arg == "off";
+                return "fetch=" + (!_debugFreezeLoad);
+            case "autoscroll":
+            {
+                var a = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                double pps = a.Length > 0 && double.TryParse(a[0], out var p) ? p : 2500;
+                double secs = a.Length > 1 && double.TryParse(a[1], out var s) ? s : 15;
+                StartAutoScroll(pps, secs);
+                return $"autoscroll {pps}px/s {secs}s";
+            }
             case "source":
                 if (Vm == null) return "no vm";
                 var src = Vm.Sources.FirstOrDefault(s => s.Name.Contains(arg, StringComparison.OrdinalIgnoreCase));
@@ -167,6 +184,38 @@ public partial class MainWindow : Window
         }
     }
 
+    // Debug: when true, scroll-triggered LoadMore is suppressed so we can measure scroll fps over a
+    // fixed already-loaded set without new fetches polluting the result.
+    private bool _debugFreezeLoad;
+    private bool _autoScrolling;
+    // Continuous per-frame scroll (bounces at top/bottom) to reproduce real smooth-scroll load,
+    // which discrete Offset jumps don't. FpsMeter samples while this runs.
+    private void StartAutoScroll(double pps, double secs)
+    {
+        if (_autoScrolling) return;
+        _autoScrolling = true;
+        var tl = TopLevel.GetTopLevel(this);
+        if (tl == null) { _autoScrolling = false; return; }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        TimeSpan? last = null;
+        int dir = 1;
+        void Frame(TimeSpan t)
+        {
+            if (!_autoScrolling) return;
+            double dt = last.HasValue ? (t - last.Value).TotalSeconds : 1.0 / 60;
+            last = t;
+            var sv = BrowseScrollViewer;
+            double max = Math.Max(0, sv.Extent.Height - sv.Viewport.Height);
+            double y = sv.Offset.Y + dir * pps * dt;
+            if (y >= max) { y = max; dir = -1; }
+            else if (y <= 0) { y = 0; dir = 1; }
+            sv.Offset = new Vector(sv.Offset.X, y);
+            if (sw.Elapsed.TotalSeconds < secs) tl.RequestAnimationFrame(Frame);
+            else _autoScrolling = false;
+        }
+        tl.RequestAnimationFrame(Frame);
+    }
+
     private string DebugMetrics()
     {
         var p = System.Diagnostics.Process.GetCurrentProcess();
@@ -177,7 +226,7 @@ public partial class MainWindow : Window
         if (Vm != null)
             foreach (var c in Vm.BrowseWallpapers)
                 if (c.IsGifActive) active++;
-        return $"fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
+        return $"fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} realized={_realizedBrowse.Count} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
                $"gen0={GC.CollectionCount(0)} gen2={GC.CollectionCount(2)} " +
                $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
     }
@@ -562,6 +611,7 @@ public partial class MainWindow : Window
     private void CheckFillViewport()
     {
         if (DataContext is not MainWindowViewModel vm) return;
+        if (_debugFreezeLoad) return;
         if (vm.IsLoading || vm.NoMorePages || !vm.SelectedSource.SupportsPagination) return;
 
         if (BrowseScrollViewer.Extent.Height <= BrowseScrollViewer.Viewport.Height)
@@ -591,17 +641,18 @@ public partial class MainWindow : Window
 
     private void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
     {
-        if (Vm?.AutoPlayGifs != true) return;
         if (e.Element is not Control el) return;
 
-        // Browse grid: track the container and let viewport reconciliation decide what animates,
-        // so the off-screen realization buffer doesn't decode full-res previews.
+        // Track realized Browse containers unconditionally (used for viewport gif-gating + the
+        // debug realized-count metric), regardless of the AutoPlayGifs setting.
         if (ReferenceEquals(sender, BrowseItemsRepeater))
         {
             _realizedBrowse.Add(el);
-            ScheduleGifReconcile();
+            if (Vm?.AutoPlayGifs == true) ScheduleGifReconcile();
             return;
         }
+
+        if (Vm?.AutoPlayGifs != true) return;
 
         // Library / others: activate all realized (bounded set, not infinite-scroll).
         if (el.DataContext is WallpaperCardViewModel card)
@@ -763,6 +814,7 @@ public partial class MainWindow : Window
 
         ScheduleGifReconcile();
 
+        if (_debugFreezeLoad) return;
         if (vm.IsLoading || vm.NoMorePages || !vm.SelectedSource.SupportsPagination) return;
 
         if (sv.Extent.Height - sv.Offset.Y - sv.Viewport.Height < 300)

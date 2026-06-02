@@ -27,7 +27,7 @@
             </CombinedGeometry.Geometry2>
         </CombinedGeometry>
         <ControlTemplate x:Key="ThumbnailDisplay" TargetType="TemplatedControl">
-            <Panel x:DataType="vm:WallpaperCardViewModel" ClipToBounds="True">
+            <Panel x:DataType="vm:WallpaperCardViewModel">
                 <asyncImageLoader:AdvancedImage
                     Source="{Binding DisplayThumbnailSource}"
                     Stretch="UniformToFill"
@@ -42,6 +42,20 @@
     </Window.Resources>
 
     <Window.Styles>
+        <!-- Minimal AdvancedImage template: just the decoded image, no loading spinner. The default
+             template shows an indeterminate (animated) ProgressBar while loading; with ~100 cards
+             recycling/rebinding during scroll that's ~100 continuously-animating spinners → big
+             per-frame cost. We rely on the static thumbnail layer instead. -->
+        <Style Selector="asyncImageLoader|AdvancedImage">
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Image Source="{Binding CurrentImage, RelativeSource={RelativeSource TemplatedParent}}"
+                           Stretch="{TemplateBinding Stretch}"
+                           StretchDirection="{TemplateBinding StretchDirection}"/>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+
         <!-- Moving glass shimmer for skeleton/placeholder cards -->
         <!-- Sliding glass shimmer: 600px gradient border sweeps L→R inside ClipToBounds parent -->
         <!-- Shimmer slides via Canvas.Left (arrange-only) instead of Margin, so it does NOT
@@ -329,7 +343,7 @@
                             <ItemsRepeater x:Name="BrowseItemsRepeater"
                                            ItemsSource="{Binding BrowseWallpapers}"
                                            Margin="10,0,0,0"
-                                           VerticalCacheLength="1">
+                                           VerticalCacheLength="0">
                                 <ItemsRepeater.Layout>
                                     <UniformGridLayout MinItemWidth="{Binding $parent[Window].DataContext.CardMinWidth}" ItemsStretch="Fill"/>
                                 </ItemsRepeater.Layout>
@@ -357,12 +371,15 @@
 
                                                     <Grid Grid.Row="0"
                                                           Height="{Binding $parent[Window].DataContext.CardThumbnailHeight}">
+                                                        <!-- No CornerRadius/ClipToBounds here: the
+                                                             outer card Border already clips to its
+                                                             rounded rect; per-card rounded clips are
+                                                             expensive in Skia and tank scroll fps. -->
                                                         <Button Padding="0"
                                                                 Background="Transparent" BorderThickness="0"
                                                                 HorizontalAlignment="Stretch"
                                                                 HorizontalContentAlignment="Stretch"
                                                                 VerticalContentAlignment="Stretch"
-                                                                CornerRadius="10,10,0,0" ClipToBounds="True"
                                                                 Command="{Binding $parent[Window].DataContext.OpenPreviewCommand}"
                                                                 CommandParameter="{Binding}">
                                                             <TemplatedControl Template="{StaticResource ThumbnailDisplay}"/>
@@ -674,7 +691,7 @@
                                 <ItemsRepeater x:Name="LibraryItemsRepeater"
                                                ItemsSource="{Binding FilteredLibraryWallpapers}"
                                                Margin="10,0,0,0"
-                                               VerticalCacheLength="1">
+                                               VerticalCacheLength="0">
                                     <ItemsRepeater.Layout>
                                         <UniformGridLayout MinItemWidth="{Binding $parent[Window].DataContext.CardMinWidth}" ItemsStretch="Fill"/>
                                     </ItemsRepeater.Layout>
