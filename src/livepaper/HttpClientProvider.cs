@@ -11,7 +11,13 @@ public static class HttpClientProvider
         AutomaticDecompression = System.Net.DecompressionMethods.All
     };
 
-    private static readonly HttpClient _client = new(_handler);
+    private static readonly HttpClient _client = new(_handler)
+    {
+        // Prefer HTTP/2 so parallel page GETs + the details POST multiplex over one connection
+        // (fewer TLS handshakes / round-trips). Falls back to 1.1 if a host doesn't support it.
+        DefaultRequestVersion = System.Net.HttpVersion.Version20,
+        DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrLower,
+    };
 
     public static HttpClient Client => _client;
 }

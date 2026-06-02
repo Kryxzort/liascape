@@ -20,15 +20,36 @@ public class SteamWorkshopService : IBgsProvider
     public bool SupportsTagFilter => true;
     public int PageSizeHint => PagesPerLoad * SteamPageSize;
 
-    public WorkshopFilter Filter { get; set; } = new();
-    public bool AllowScenes { get; set; } = false;
+    private WorkshopFilter _filter = new();
+    private bool _allowScenes;
+    private int _gen; // bumped when filter/scenes change → invalidates the prefetch
+
+    public WorkshopFilter Filter { get => _filter; set { _filter = value; Invalidate(); } }
+    public bool AllowScenes { get => _allowScenes; set { _allowScenes = value; Invalidate(); } }
     public string WorkshopBasePath { get; set; } = "";
 
-    public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => FetchPagesAsync(null, page);
+    private void Invalidate() { _gen++; _prefetch = null; }
 
-    public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
-        => FetchPagesAsync(query, page);
+    // Background-fetched next page so a scroll-load is instant. Keyed by (gen, query, page).
+    private (int gen, string? query, int page, Task<List<WallpaperResult>> task)? _prefetch;
+
+    public Task<List<WallpaperResult>> GetLatestAsync(int page = 1) => GetWithPrefetch(null, page);
+    public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1) => GetWithPrefetch(query, page);
+
+    // Return the requested page (reusing the prefetched task if it matches), and prime the NEXT page
+    // in the background so the following scroll-load resolves immediately. Called on the UI thread.
+    private Task<List<WallpaperResult>> GetWithPrefetch(string? query, int page)
+    {
+        Task<List<WallpaperResult>> task =
+            _prefetch is { } p && p.gen == _gen && p.query == query && p.page == page
+                ? p.task
+                : FetchPagesAsync(query, page);
+
+        var next = FetchPagesAsync(query, page + 1);
+        next.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted); // observe faults
+        _prefetch = (_gen, query, page + 1, next);
+        return task;
+    }
 
     // One app "page" = PagesPerLoad consecutive Steam pages, fetched in parallel and merged
     // (deduped by workshop id, order preserved).
