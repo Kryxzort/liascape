@@ -50,6 +50,11 @@ public static class GifRendererBuilder
         // null => the property-changed handler skips the synchronous first-frame Bitmap decode.
         // The animation timeline pushes frame 0 from the already-built renderer on its own loop.
         public override Stream? SourceSeekable => null;
-        public override FrameRenderer? TryCreate() => Renderer;
+
+        // Clone per consumer so the grid card and the preview modal each get their OWN compositing
+        // buffers/frame index. The clone shares the (immutable) parsed frame data but not the render
+        // state — without this, two animation loops drive one renderer's single bitmap concurrently
+        // and you get patchwork regions from different frames. Clone is cheap (shares frames).
+        public override FrameRenderer? TryCreate() => Renderer.Clone();
     }
 }
