@@ -48,6 +48,21 @@ During steady scroll over a fixed set (fetch off, gifs off, realized ~110), `gen
 - Tune `VerticalCacheLength` (small buffer vs 0) to balance render cost vs recycle GC churn.
 - Reduce overdraw / transparency layers per card.
 
+## Why per-card cost is ~0.3ms (GPU is fine; CPU scene-commit is the cost)
+
+- The app **is GPU-rendered** (nvidia-smi lists it as a graphics process; GLX direct rendering on the 3070 Ti). Not software raster.
+- The bottleneck is **CPU-side**: during scroll every realized card's position changes, so Avalonia re-records/commits all their visuals to the compositor **every frame** → cost ∝ (visible cards × visuals-per-card). Each card is ~12–15 visuals (Border→Panel→Grid→Grid→Button(template)→TemplatedControl→Panel→2×Image, TextBlock, Button(template), overlay Panel→2 Border). ~110 cards × ~13 ≈ 1400 visuals/frame ≈ 30ms.
+- Collapsed (`IsVisible=false`) subtrees (placeholder skeleton, SCENE badge, selected outline) are NOT composited, so they don't add steady scroll cost — only instantiation/memory.
+
+### Final curve (all opts applied)
+| Size | realized | fps | verdict |
+|------|----------|-----|---------|
+| Large | ~30 | 62 (low 58) | **locked 60** |
+| Medium | ~58 | 53–57 (low 36) | near, occasional dip |
+| Small | ~110 | ~32 (low 21) | cannot reach 60 |
+
+To get Small (~110 visible cards) to 60 would need ~2–3× fewer visuals **per card** (template flattening — uncertain payoff, risks UI changes) or simply fewer visible cards (larger size). Medium/Large are the smooth zone. Open question for product: default to Medium.
+
 ## How to measure (debug only)
 
 Launch with `LIVEPAPER_DEBUG_IPC=1` → on-screen FPS overlay (top-right) + Unix-socket bridge at `/tmp/livepaper-debug.sock`. Drive via `socat`:
