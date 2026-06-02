@@ -86,6 +86,8 @@ public static class SteamWorkshopScraper
             sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(filter.Resolution)}");
         foreach (var genre in filter.Genres)
             sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(genre)}");
+        foreach (var feature in filter.Features)
+            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(feature)}");
 
         return sb.ToString();
     }

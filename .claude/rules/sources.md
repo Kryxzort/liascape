@@ -82,6 +82,13 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
 `Landscape`, `Medieval`, `Memes`, `MMD`, `Music`, `Nature`, `Pixel art`, `Relaxing`, `Retro`,
 `Sci-Fi`, `Sports`, `Technology`, `Television`, `Vehicle`, `Unspecified`
 
+**Full filter taxonomy** (scraped from the browse page's embedded JSON `{"name":<category>,"tags":[…]}`; the filter UI is React with obfuscated classes, but the option values live in that escaped-JSON blob). Categories: Type, Genre, Age Rating, Resolution, Misc, Category, plus Asset/Preset subtypes. Implemented as `requiredtags[]` (AND):
+- **Type** (only playable shown): `Video`, `Scene`. (`Web`/`Application`/`Preset`/`Asset`/`Wallpaper` exist but are skipped — unplayable.)
+- **Age Rating**: `Everyone`, `Questionable`, `Mature`.
+- **Resolution** (full list): `Standard Definition`, `1280 x 720`, `1366 x 768`, `1920 x 1080`, `2560 x 1440`, `3840 x 2160`, `Ultrawide Standard Definition`, `Ultrawide 2560 x 1080`, `Ultrawide 3440 x 1440`, `Dual Standard Definition`, `Dual 3840 x 1080`, `Dual 5120 x 1440`, `Dual 7680 x 2160`, `Triple Standard Definition`, `Triple 4096 x 768`, `Triple 5760 x 1080`, `Triple 7680 x 1440`, `Triple 11520 x 2160`, `Portrait Standard Definition`, `Portrait 720 x 1280`, `Portrait 1080 x 1920`, `Portrait 1440 x 2560`, `Portrait 2160 x 3840`, `Other resolution`, `Dynamic resolution`.
+- **Features** (Misc group, multi-select; full set also includes admin/niche ones not exposed): `Approved`, `Verified`, `Audio responsive`, `HDR`, `3D`, `Customizable`, `Media Integration`, `Puppet Warp`, `Video Texture`, `No Animation`, `Multi-monitor optimized`.
+- Not exposed (niche / scene-element or asset/preset subtypes): `Background`/`Character`/`Clock`/`Fire`/`Interactive`/`Magic`/`Post Processing`/`Smoke`/`Space`/`Audio Visualizer` (Category), `Particle`/`Image`/`Sound`/`Model`/`Text`/`Sprite`/`Fullscreen`/`Composite`/`Script`/`Effect`/`Scripted Layer` (Asset), `Boolean`/`Number`/`Vec2..4`/`String` (Preset).
+
 **Download — `WorkshopDownloader.AcquireAsync`:**
 Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopAcquireMode`):
 - `"subscribe"` (default): `xdg-open steam://url/CommunityFilePage/<id>` → poll `workshop/content/431960/<id>/project.json` (3 s intervals, 10 min timeout). Checks both WE workshop dir and `~/.cache/livepaper/steamcmd_workshop/…`.

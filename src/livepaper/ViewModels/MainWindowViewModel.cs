@@ -216,8 +216,17 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public string[] WorkshopTypeOptions { get; } = ["Any", "Video", "Scene"];
     public string[] WorkshopAgeRatingOptions { get; } = ["Any", "Everyone", "Questionable", "Mature"];
+    // Full resolution taxonomy scraped from the WE workshop browse page.
     public string[] WorkshopResolutionOptions { get; } =
-        ["Any", "3840 x 2160", "2560 x 1440", "1920 x 1080", "1280 x 720", "Other resolution"];
+    [
+        "Any",
+        "Standard Definition", "1280 x 720", "1366 x 768", "1920 x 1080", "2560 x 1440", "3840 x 2160",
+        "Ultrawide Standard Definition", "Ultrawide 2560 x 1080", "Ultrawide 3440 x 1440",
+        "Dual Standard Definition", "Dual 3840 x 1080", "Dual 5120 x 1440", "Dual 7680 x 2160",
+        "Triple Standard Definition", "Triple 4096 x 768", "Triple 5760 x 1080", "Triple 7680 x 1440", "Triple 11520 x 2160",
+        "Portrait Standard Definition", "Portrait 720 x 1280", "Portrait 1080 x 1920", "Portrait 1440 x 2560", "Portrait 2160 x 3840",
+        "Other resolution", "Dynamic resolution"
+    ];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
@@ -238,6 +247,14 @@ public partial class MainWindowViewModel : ViewModelBase
         new("Landscape"), new("Medieval"), new("Memes"), new("MMD"), new("Music"),
         new("Nature"), new("Pixel art"), new("Relaxing"), new("Retro"), new("Sci-Fi"),
         new("Sports"), new("Technology"), new("Television"), new("Vehicle"), new("Unspecified")
+    ];
+
+    // Misc feature tags from the WE workshop "Misc" filter group (AND-filtered like genres).
+    public ObservableCollection<WorkshopGenreItem> WorkshopFeatures { get; } =
+    [
+        new("Approved"), new("Verified"), new("Audio responsive"), new("HDR"), new("3D"),
+        new("Customizable"), new("Media Integration"), new("Puppet Warp"), new("Video Texture"),
+        new("No Animation"), new("Multi-monitor optimized")
     ];
 
     // Sort radio helpers
@@ -978,7 +995,9 @@ public partial class MainWindowViewModel : ViewModelBase
         AgeRating = AnyToEmpty(WorkshopFilterAgeRatingDisplay),
         Resolution = AnyToEmpty(WorkshopFilterResolutionDisplay),
         Genres = new System.Collections.Generic.HashSet<string>(
-            WorkshopGenres.Where(g => g.IsSelected).Select(g => g.Name))
+            WorkshopGenres.Where(g => g.IsSelected).Select(g => g.Name)),
+        Features = new System.Collections.Generic.HashSet<string>(
+            WorkshopFeatures.Where(f => f.IsSelected).Select(f => f.Name))
     };
 
     public bool WorkshopHasActiveFilters =>
@@ -986,7 +1005,8 @@ public partial class MainWindowViewModel : ViewModelBase
         WorkshopFilterTypeDisplay != "Any" ||
         WorkshopFilterAgeRatingDisplay != "Any" ||
         WorkshopFilterResolutionDisplay != "Any" ||
-        WorkshopGenres.Any(g => g.IsSelected);
+        WorkshopGenres.Any(g => g.IsSelected) ||
+        WorkshopFeatures.Any(f => f.IsSelected);
 
     [RelayCommand]
     private void ApplyWorkshopFilter()
@@ -1005,6 +1025,7 @@ public partial class MainWindowViewModel : ViewModelBase
         WorkshopFilterAgeRatingDisplay = "Any";
         WorkshopFilterResolutionDisplay = "Any";
         foreach (var g in WorkshopGenres) g.IsSelected = false;
+        foreach (var f in WorkshopFeatures) f.IsSelected = false;
         if (SelectedSource is SteamWorkshopService service)
         {
             service.Filter = new WorkshopFilter();
@@ -1179,6 +1200,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         foreach (var genre in WorkshopGenres)
             genre.PropertyChanged += (_, _) => OnPropertyChanged(nameof(WorkshopHasActiveFilters));
+        foreach (var feature in WorkshopFeatures)
+            feature.PropertyChanged += (_, _) => OnPropertyChanged(nameof(WorkshopHasActiveFilters));
 
         LibraryService.CleanTrash();
 
