@@ -76,6 +76,21 @@
 
     <Grid RowDefinitions="*,Auto">
 
+            <!-- Debug FPS overlay (enabled only under LIVEPAPER_DEBUG_IPC=1; spans all rows, above tabs) -->
+            <Border x:Name="FpsOverlay"
+                    Grid.RowSpan="2"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    ZIndex="9999"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,6,8,0"
+                    Background="#CC000000" CornerRadius="6" Padding="8,4">
+                <TextBlock x:Name="FpsText"
+                           Text="— fps"
+                           FontFamily="monospace" FontSize="13" FontWeight="Bold"
+                           Foreground="#FF7CFC00"/>
+            </Border>
+
             <TabControl Grid.Row="0" x:Name="MainTabControl">
 
                 <!-- ── Browse ── -->

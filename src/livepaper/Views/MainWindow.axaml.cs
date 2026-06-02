@@ -48,10 +48,15 @@ public partial class MainWindow : Window
         BrowseScrollViewer.ScrollChanged += OnBrowseScrollChanged;
         DataContextChanged += OnDataContextChanged;
         KeyDown += OnKeyDown;
-        new SmoothScroller(BrowseScrollViewer);
-        new SmoothScroller(LibraryScrollViewer);
-        new SmoothScroller(SettingsScrollViewer);
-        new SmoothScroller(PlaylistScrollViewer);
+        // SmoothScroller owns ScrollViewer.Offset via an inertia animator, which fights the
+        // robotic Offset writes used by the debug bridge. Skip it under debug.
+        if (!DebugBridge.Enabled)
+        {
+            new SmoothScroller(BrowseScrollViewer);
+            new SmoothScroller(LibraryScrollViewer);
+            new SmoothScroller(SettingsScrollViewer);
+            new SmoothScroller(PlaylistScrollViewer);
+        }
         Loaded += (_, _) =>
         {
             BrowseItemsRepeater.SizeChanged += (_, _) => UpdateCardThumbnailHeight();
@@ -92,6 +97,17 @@ public partial class MainWindow : Window
                 hbLast = now;
             };
             hbTimer.Start();
+
+            // On-screen FPS meter (debug only).
+            FpsOverlay.IsVisible = true;
+            FpsMeter.Updated += () =>
+                FpsText.Text = $"{FpsMeter.CurrentFps:F0} fps · {FpsMeter.LastFrameMs:F1}ms · low {FpsMeter.LowFps:F0}";
+            Loaded += (_, _) =>
+            {
+                var tl = TopLevel.GetTopLevel(this);
+                if (tl != null) FpsMeter.Start(tl);
+            };
+
             DebugBridge.Handler = HandleDebugCommand;
             DebugBridge.Start();
         }
@@ -142,6 +158,8 @@ public partial class MainWindow : Window
                 var c = Vm.BrowseWallpapers[0];
                 return $"display={c.DisplayThumbnailSource}\nthumb={c.ThumbnailSource}\nstatic={c.StaticThumbnailSource}";
             }
+            case "fps":
+                return $"fps={FpsMeter.CurrentFps:F0} ms={FpsMeter.LastFrameMs:F2} low={FpsMeter.LowFps:F0}";
             case "metrics":
                 return DebugMetrics();
             default:
@@ -159,7 +177,7 @@ public partial class MainWindow : Window
         if (Vm != null)
             foreach (var c in Vm.BrowseWallpapers)
                 if (c.IsGifActive) active++;
-        return $"cards={cards} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
+        return $"fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
                $"gen0={GC.CollectionCount(0)} gen2={GC.CollectionCount(2)} " +
                $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
     }
