@@ -44,12 +44,14 @@
     <Window.Styles>
         <!-- Moving glass shimmer for skeleton/placeholder cards -->
         <!-- Sliding glass shimmer: 600px gradient border sweeps L→R inside ClipToBounds parent -->
+        <!-- Shimmer slides via Canvas.Left (arrange-only) instead of Margin, so it does NOT
+             invalidate layout every frame across every placeholder. Host each in a Canvas. -->
         <Style Selector="Border.glassShimmer">
             <Setter Property="IsHitTestVisible" Value="False"/>
             <Setter Property="Width" Value="600"/>
-            <Setter Property="HorizontalAlignment" Value="Left"/>
-            <Setter Property="VerticalAlignment" Value="Stretch"/>
-            <Setter Property="Margin" Value="-600,0,0,0"/>
+            <Setter Property="Height" Value="{Binding $parent[Canvas].Bounds.Height}"/>
+            <Setter Property="Canvas.Top" Value="0"/>
+            <Setter Property="Canvas.Left" Value="-600"/>
             <Setter Property="Background">
                 <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                     <GradientStop Color="#00FFFFFF" Offset="0.0"/>
@@ -64,10 +66,10 @@
             <Style.Animations>
                 <Animation Duration="0:0:1.6" IterationCount="INFINITE" Easing="LinearEasing">
                     <KeyFrame Cue="0%">
-                        <Setter Property="Margin" Value="-600,0,0,0"/>
+                        <Setter Property="Canvas.Left" Value="-600"/>
                     </KeyFrame>
                     <KeyFrame Cue="100%">
-                        <Setter Property="Margin" Value="600,0,0,0"/>
+                        <Setter Property="Canvas.Left" Value="600"/>
                     </KeyFrame>
                 </Animation>
             </Style.Animations>
@@ -418,7 +420,7 @@
                                                             Background="{DynamicResource Surface0}"
                                                             CornerRadius="10,10,0,0"
                                                             ClipToBounds="True">
-                                                        <Border Classes="glassShimmer"/>
+                                                        <Canvas ClipToBounds="True"><Border Classes="glassShimmer"/></Canvas>
                                                     </Border>
 
                                                     <!-- Title lines skeleton -->
@@ -427,13 +429,13 @@
                                                                 Background="{DynamicResource Surface0}"
                                                                 Width="130" HorizontalAlignment="Left"
                                                                 ClipToBounds="True">
-                                                            <Border Classes="glassShimmer"/>
+                                                            <Canvas ClipToBounds="True"><Border Classes="glassShimmer"/></Canvas>
                                                         </Border>
                                                         <Border Height="9" CornerRadius="4"
                                                                 Background="{DynamicResource Surface0}"
                                                                 Width="80" HorizontalAlignment="Left"
                                                                 ClipToBounds="True">
-                                                            <Border Classes="glassShimmer"/>
+                                                            <Canvas ClipToBounds="True"><Border Classes="glassShimmer"/></Canvas>
                                                         </Border>
                                                     </StackPanel>
 
@@ -442,7 +444,7 @@
                                                             Margin="10,2,10,10" CornerRadius="6"
                                                             Background="{DynamicResource Surface0}"
                                                             ClipToBounds="True">
-                                                        <Border Classes="glassShimmer"/>
+                                                        <Canvas ClipToBounds="True"><Border Classes="glassShimmer"/></Canvas>
                                                     </Border>
                                                 </Grid>
                                             </Panel>
