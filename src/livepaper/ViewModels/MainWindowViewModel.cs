@@ -198,21 +198,48 @@ public partial class MainWindowViewModel : ViewModelBase
         set { if (value) WorkshopAcquireMode = "steamcmd"; }
     }
 
-    // Workshop filter state (for the filter flyout)
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend7))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend30))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortRecent))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortLastUpdated))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortMostSubscribed))]
+    // Workshop sort state. The two dropdowns (sort + trend period) drive the backing
+    // WorkshopSort/WorkshopTrendDays that BuildWorkshopFilter reads.
     private string _workshopSort = "trend";
+    private int _workshopTrendDays = 7;
+    public string WorkshopSort => _workshopSort;
+    public int WorkshopTrendDays => _workshopTrendDays;
+
+    public string[] WorkshopSortOptions { get; } =
+        ["Most Popular", "Most Recent", "Recently Updated", "Most Subscribed", "Top Rated"];
+    public string[] WorkshopTrendPeriodOptions { get; } =
+        ["Today", "This Week", "This Month", "Three Months", "Six Months", "This Year"];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend7))]
-    [NotifyPropertyChangedFor(nameof(IsWorkshopSortTrend30))]
-    private int _workshopTrendDays = 7;
+    [NotifyPropertyChangedFor(nameof(IsWorkshopTrendSelected))]
+    private string _workshopSortDisplay = "Most Popular";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkshopHasActiveFilters))]
+    private string _workshopTrendPeriodDisplay = "This Week";
+
+    // Trend period dropdown only applies to "Most Popular".
+    public bool IsWorkshopTrendSelected => WorkshopSortDisplay == "Most Popular";
+
+    partial void OnWorkshopSortDisplayChanged(string value) => _workshopSort = value switch
+    {
+        "Most Recent" => "mostrecent",
+        "Recently Updated" => "lastupdated",
+        "Most Subscribed" => "totaluniquesubscribers",
+        "Top Rated" => "toprated",
+        _ => "trend"
+    };
+
+    partial void OnWorkshopTrendPeriodDisplayChanged(string value) => _workshopTrendDays = value switch
+    {
+        "Today" => 1,
+        "This Month" => 30,
+        "Three Months" => 90,
+        "Six Months" => 180,
+        "This Year" => 365,
+        _ => 7
+    };
 
     public string[] WorkshopTypeOptions { get; } = ["Any", "Video", "Scene"];
     public string[] WorkshopAgeRatingOptions { get; } = ["Any", "Everyone", "Questionable", "Mature"];
@@ -256,13 +283,6 @@ public partial class MainWindowViewModel : ViewModelBase
         new("Customizable"), new("Media Integration"), new("Puppet Warp"), new("Video Texture"),
         new("No Animation"), new("Multi-monitor optimized")
     ];
-
-    // Sort radio helpers
-    public bool IsWorkshopSortTrend7  { get => WorkshopSort == "trend" && WorkshopTrendDays == 7;  set { if (value) { WorkshopSort = "trend"; WorkshopTrendDays = 7; } } }
-    public bool IsWorkshopSortTrend30 { get => WorkshopSort == "trend" && WorkshopTrendDays == 30; set { if (value) { WorkshopSort = "trend"; WorkshopTrendDays = 30; } } }
-    public bool IsWorkshopSortRecent       { get => WorkshopSort == "mostrecent";             set { if (value) WorkshopSort = "mostrecent"; } }
-    public bool IsWorkshopSortLastUpdated  { get => WorkshopSort == "lastupdated";            set { if (value) WorkshopSort = "lastupdated"; } }
-    public bool IsWorkshopSortMostSubscribed { get => WorkshopSort == "totaluniquesubscribers"; set { if (value) WorkshopSort = "totaluniquesubscribers"; } }
 
     // Workshop acquire button label (shown in browse card + preview modal)
     public string WorkshopAcquireButtonLabel =>
@@ -1019,8 +1039,8 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void ClearWorkshopFilter()
     {
-        WorkshopSort = "trend";
-        WorkshopTrendDays = 7;
+        WorkshopSortDisplay = "Most Popular";
+        WorkshopTrendPeriodDisplay = "This Week";
         WorkshopFilterTypeDisplay = "Any";
         WorkshopFilterAgeRatingDisplay = "Any";
         WorkshopFilterResolutionDisplay = "Any";

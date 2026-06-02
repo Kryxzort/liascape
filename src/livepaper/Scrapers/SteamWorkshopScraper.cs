@@ -65,7 +65,7 @@ public static class SteamWorkshopScraper
             "mostrecent" => "mostrecent",
             "lastupdated" => "lastupdated",
             "totaluniquesubscribers" => "totaluniquesubscribers",
-            "mostsubscribed" => "mostsubscribed",
+            "toprated" => "toprated",
             _ => "trend"
         };
         sb.Append($"&browsesort={sort}");

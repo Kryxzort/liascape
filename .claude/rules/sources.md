@@ -63,7 +63,7 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
 
 **Browse/search/sort/pagination:**
 - `GET https://steamcommunity.com/workshop/browse/?appid=431960&section=readytouseitems&numperpage=30`
-- `&browsesort=trend&days=7` (default) / `mostrecent` / `lastupdated` / `totaluniquesubscribers`
+- `&browsesort=` (all verified valid + distinct): `trend` (+`&days=` 1/7/30/90/180/365 = Today/Week/Month/3mo/6mo/Year), `mostrecent`, `lastupdated` (Recently Updated), `totaluniquesubscribers` (Most Subscribed), `toprated` (Top Rated). UI = a "Sort by" dropdown + a "Period" dropdown shown only for Most Popular. Client-side custom sorts are NOT viable (infinite scroll only loads pages in Steam's order; would scramble).
 - `&searchtext=<query>` for search; `&p=<n>` for pagination
 - Tag filtering: `&requiredtags%5B%5D=<tag>` (AND semantics); supports Type, AgeRating, Resolution, multiple Genres simultaneously
 - **CSS classes are obfuscated/hashed** — parse IDs from `//a[contains(@href,'filedetails/?id=')]/@href` via regex, NOT by class. Child `<img>` gives preview URL and alt-text title fallback.

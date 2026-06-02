@@ -189,23 +189,18 @@
                                                                    FontSize="11" FontWeight="SemiBold"
                                                                    Foreground="{DynamicResource Muted}"
                                                                    LetterSpacing="2"/>
-                                                        <StackPanel Spacing="6">
-                                                            <RadioButton Content="Most Popular (7 days)" GroupName="WsSort"
-                                                                         IsChecked="{Binding IsWorkshopSortTrend7}"
-                                                                         Foreground="{DynamicResource TextColor}"/>
-                                                            <RadioButton Content="Most Popular (30 days)" GroupName="WsSort"
-                                                                         IsChecked="{Binding IsWorkshopSortTrend30}"
-                                                                         Foreground="{DynamicResource TextColor}"/>
-                                                            <RadioButton Content="Most Recent" GroupName="WsSort"
-                                                                         IsChecked="{Binding IsWorkshopSortRecent}"
-                                                                         Foreground="{DynamicResource TextColor}"/>
-                                                            <RadioButton Content="Last Updated" GroupName="WsSort"
-                                                                         IsChecked="{Binding IsWorkshopSortLastUpdated}"
-                                                                         Foreground="{DynamicResource TextColor}"/>
-                                                            <RadioButton Content="Most Subscribed" GroupName="WsSort"
-                                                                         IsChecked="{Binding IsWorkshopSortMostSubscribed}"
-                                                                         Foreground="{DynamicResource TextColor}"/>
-                                                        </StackPanel>
+                                                        <Grid ColumnDefinitions="*,16,*">
+                                                            <ComboBox Grid.Column="0"
+                                                                      HorizontalAlignment="Stretch"
+                                                                      ItemsSource="{Binding WorkshopSortOptions}"
+                                                                      SelectedItem="{Binding WorkshopSortDisplay}"/>
+                                                            <!-- Trend period: only meaningful for "Most Popular" -->
+                                                            <ComboBox Grid.Column="2"
+                                                                      HorizontalAlignment="Stretch"
+                                                                      IsVisible="{Binding IsWorkshopTrendSelected}"
+                                                                      ItemsSource="{Binding WorkshopTrendPeriodOptions}"
+                                                                      SelectedItem="{Binding WorkshopTrendPeriodDisplay}"/>
+                                                        </Grid>
 
                                                         <!-- TYPE + AGE RATING -->
                                                         <Grid ColumnDefinitions="*,16,*">
