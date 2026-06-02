@@ -1892,6 +1892,10 @@
                                 CommandParameter="{Binding PreviewCard}"/>
                         <!-- Open on Steam (workshop cards only, next to Close) -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <Button Content="YouTube Video"
+                                    Classes="ghost"
+                                    IsVisible="{Binding PreviewCard.HasWorkshopYoutube}"
+                                    Command="{Binding PreviewCard.OpenYoutubeCommand}"/>
                             <Button Content="Open on Steam"
                                     Classes="ghost"
                                     IsVisible="{Binding PreviewCard.IsWorkshopResult}"

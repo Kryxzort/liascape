@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using livepaper.Helpers;
 using livepaper.Models;
+using livepaper.Scrapers;
 using livepaper.Services;
 
 namespace livepaper.ViewModels;
@@ -1988,6 +1989,21 @@ public partial class MainWindowViewModel : ViewModelBase
         PreviewCard = card;
         if (card.LibraryItem != null && string.IsNullOrEmpty(card.VideoDuration))
             card.LoadDurationAsync();
+        // Lazily detect an attached YouTube trailer (scrapes the item page); shows the button if found.
+        if (card.IsWorkshopResult && card.WorkshopId != null && string.IsNullOrEmpty(card.WorkshopYoutubeUrl))
+            _ = LoadWorkshopYoutubeAsync(card);
+    }
+
+    private async Task LoadWorkshopYoutubeAsync(WallpaperCardViewModel card)
+    {
+        try
+        {
+            var url = await SteamWorkshopScraper.GetYoutubeUrlAsync(card.WorkshopId!);
+            // Resumes on UI thread (no ConfigureAwait); only set if this card is still being previewed.
+            if (!string.IsNullOrEmpty(url) && ReferenceEquals(PreviewCard, card))
+                card.WorkshopYoutubeUrl = url;
+        }
+        catch { }
     }
 
     [RelayCommand]

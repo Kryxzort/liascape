@@ -362,6 +362,23 @@ public partial class WallpaperCardViewModel : ViewModelBase
         catch { }
     }
 
+    // Trailer URL for workshop items that have an attached YouTube video; populated lazily when the
+    // preview modal opens (scraped from the item page). Drives the "YouTube Video" button.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasWorkshopYoutube))]
+    private string? _workshopYoutubeUrl;
+
+    public bool HasWorkshopYoutube => !string.IsNullOrEmpty(WorkshopYoutubeUrl);
+
+    [RelayCommand]
+    private void OpenYoutube()
+    {
+        var url = WorkshopYoutubeUrl;
+        if (string.IsNullOrEmpty(url)) return;
+        try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { url }, UseShellExecute = false }); }
+        catch { }
+    }
+
     [RelayCommand]
     private async Task OpenInFileManager()
     {

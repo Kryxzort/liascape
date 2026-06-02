@@ -15,6 +15,25 @@ public static class SteamWorkshopScraper
 {
     private static readonly Regex _idRegex = new(@"filedetails/\?id=(\d+)", RegexOptions.Compiled);
     private static readonly Regex _resolutionRegex = new(@"^\d+ x \d+$", RegexOptions.Compiled);
+    private static readonly Regex _youtubeRegex = new(@"YOUTUBE_VIDEO_ID:\s*""([A-Za-z0-9_-]{11})""", RegexOptions.Compiled);
+
+    // Returns the YouTube trailer URL for a workshop item if its Steam page has one, else null.
+    // The item page exposes it as a JS var `YOUTUBE_VIDEO_ID: "<id>"`.
+    public static async Task<string?> GetYoutubeUrlAsync(string workshopId)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Get, $"https://steamcommunity.com/sharedfiles/filedetails/?id={workshopId}");
+            req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
+            using var resp = await HttpClientProvider.Client.SendAsync(req).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return null;
+            var html = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var m = _youtubeRegex.Match(html);
+            return m.Success ? $"https://www.youtube.com/watch?v={m.Groups[1].Value}" : null;
+        }
+        catch { return null; }
+    }
 
     public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, string? query, int page, bool allowScenes)
     {
