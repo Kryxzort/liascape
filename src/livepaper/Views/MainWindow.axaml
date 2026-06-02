@@ -66,8 +66,10 @@
             <Setter Property="Height" Value="{Binding $parent[Canvas].Bounds.Height}"/>
             <Setter Property="Canvas.Top" Value="0"/>
             <!-- Driven by one shared VM value (MainWindowViewModel.ShimmerX) so every placeholder
-                 shimmers in sync; per-element Style animations start at each element's own time. -->
-            <Setter Property="Canvas.Left" Value="{Binding $parent[Window].DataContext.ShimmerX}"/>
+                 shimmers in sync; per-element Style animations start at each element's own time.
+                 ReflectionBinding: compiled bindings can't resolve ShimmerX through the untyped
+                 $parent[Window].DataContext from a Style, which fails XAML compilation (AVLN2000). -->
+            <Setter Property="Canvas.Left" Value="{ReflectionBinding $parent[Window].DataContext.ShimmerX}"/>
             <Setter Property="Background">
                 <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                     <GradientStop Color="#00FFFFFF" Offset="0.0"/>
