@@ -638,13 +638,18 @@ public partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(MainWindowViewModel.PreviewCard))
         {
-            // While the preview modal is open, pause grid gif animations so the same gif isn't
-            // animated twice at once (which corrupts the frames). Resume when it closes.
+            // While the preview modal is open, pause grid gif animations (both Browse and Library)
+            // so the same gif isn't animated twice at once (which corrupts the frames). Resume the
+            // visible tab's grid when it closes.
             if (Vm?.PreviewCard != null)
             {
                 foreach (var el in _realizedBrowse)
                     if (el.DataContext is WallpaperCardViewModel c) c.DeactivateGifKeepSource();
+                foreach (var el in _realizedLib)
+                    if (el.DataContext is WallpaperCardViewModel c) c.DeactivateGifKeepSource();
             }
+            else if (MainTabControl.SelectedIndex == 1)
+                ReconcileLibraryGifs();
             else
                 ReconcileBrowseGifs();
         }
