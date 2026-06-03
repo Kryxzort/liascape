@@ -712,25 +712,14 @@ public partial class MainWindow : Window
         }
 
         // Track realized Library containers so gif animation is gated to the viewport (not all
-        // ~150 library gifs at once, which pegged the app at ~15fps / 3GB).
+        // ~150 library gifs at once, which pegged the app at ~15fps / 3GB). Activation is settle-
+        // debounced via the same timer as Browse so a fast scroll doesn't activate every card it
+        // flies past (that spiked activeGif to ~74 and dropped to ~16fps).
         if (ReferenceEquals(sender, LibraryItemsRepeater))
+        {
             _realizedLib.Add(el);
-
-        if (Vm?.AutoPlayGifs != true) return;
-
-        // Activate the realized card (viewport-gated by realization).
-        if (el.DataContext is WallpaperCardViewModel card)
-            ActivateGifCard(card);
-        else
-            el.DataContextChanged += OnElementDataContextChanged;
-    }
-
-    private void OnElementDataContextChanged(object? sender, EventArgs e)
-    {
-        if (sender is not StyledElement se) return;
-        se.DataContextChanged -= OnElementDataContextChanged;
-        if (Vm?.AutoPlayGifs == true && se.DataContext is WallpaperCardViewModel card)
-            ActivateGifCard(card);
+            if (Vm?.AutoPlayGifs == true) ScheduleGifReconcile();
+        }
     }
 
     private static void ActivateGifCard(WallpaperCardViewModel card)
@@ -751,7 +740,12 @@ public partial class MainWindow : Window
     private DispatcherTimer CreateGifSettleTimer()
     {
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(160) };
-        t.Tick += (_, _) => { t.Stop(); ReconcileBrowseGifs(); };
+        t.Tick += (_, _) =>
+        {
+            t.Stop();
+            if (MainTabControl.SelectedIndex == 1) ReconcileLibraryGifs();
+            else ReconcileBrowseGifs();
+        };
         return t;
     }
 
@@ -770,7 +764,6 @@ public partial class MainWindow : Window
     private void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
     {
         if (e.Element is not Control el) return;
-        el.DataContextChanged -= OnElementDataContextChanged;
         if (ReferenceEquals(sender, BrowseItemsRepeater))
             _realizedBrowse.Remove(el);
         else if (ReferenceEquals(sender, LibraryItemsRepeater))
