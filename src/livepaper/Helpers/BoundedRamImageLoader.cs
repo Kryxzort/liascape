@@ -23,15 +23,61 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
 {
     private const int Capacity = 96;
 
+    // Card thumbnails display at ~280-360px wide but the source files are full-res (library thumbs
+    // are ~1024-1388px, remote previews larger). Decoding to this width instead means the GPU samples
+    // a ~512px bitmap per card per frame instead of a 1MP+ one — far cheaper scroll, ~4-8x less RAM
+    // per cached bitmap. 512 keeps Large cards crisp on typical (≤1.25x) display scaling.
+    private const int DecodeWidth = 512;
+
     private readonly object _gate = new();
     private readonly LinkedList<string> _lru = new();
     private readonly Dictionary<string, (LinkedListNode<string> Node, Task<Bitmap?> Task)> _cache = new();
 
     public override Task<Bitmap?> ProvideImageAsync(string url)
-        => GetOrLoad(url, () => LoadAsync(url));
+        => GetOrLoad(url, () => LoadSizedAsync(url, null));
 
     public override Task<Bitmap?> ProvideImageAsync(string url, IStorageProvider? storageProvider = null)
-        => GetOrLoad(url, () => LoadAsync(url, storageProvider));
+        => GetOrLoad(url, () => LoadSizedAsync(url, storageProvider));
+
+    // Local files (library thumbnails) are decoded straight to DecodeWidth here. Remote URLs defer to
+    // the base download/cache pipeline; the disk-cache reload path (LoadFromGlobalCache) also decodes
+    // to DecodeWidth, so a re-shown remote thumb is downsized too.
+    private Task<Bitmap?> LoadSizedAsync(string url, IStorageProvider? storageProvider)
+    {
+        if (TryLocalPath(url, out var path))
+            return Task.Run(() => DecodeToWidth(path));
+        return storageProvider == null ? LoadAsync(url) : LoadAsync(url, storageProvider);
+    }
+
+    private static bool TryLocalPath(string url, out string path)
+    {
+        path = "";
+        try
+        {
+            if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                path = new Uri(url).LocalPath;
+                return File.Exists(path);
+            }
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase) && File.Exists(url))
+            {
+                path = url;
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static Bitmap? DecodeToWidth(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            return Bitmap.DecodeToWidth(fs, DecodeWidth, BitmapInterpolationMode.MediumQuality);
+        }
+        catch { return null; }
+    }
 
     private Task<Bitmap?> GetOrLoad(string url, Func<Task<Bitmap?>> loader)
     {
@@ -105,7 +151,8 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
                 try
                 {
                     File.SetLastWriteTimeUtc(path, DateTime.UtcNow); // touch for LRU trimming
-                    return new Bitmap(path);
+                    using var fs = File.OpenRead(path);
+                    return Bitmap.DecodeToWidth(fs, DecodeWidth, BitmapInterpolationMode.MediumQuality);
                 }
                 catch { return null; }
             });
