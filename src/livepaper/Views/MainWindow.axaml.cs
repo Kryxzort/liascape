@@ -141,10 +141,12 @@ public partial class MainWindow : Window
                 return "fetch=" + (!_debugFreezeLoad);
             case "openpreview":
             {
-                var card = Vm?.BrowseWallpapers.FirstOrDefault(c => !c.IsPlaceholder && c.IsGifThumbnail);
-                if (card == null) return "no gif card";
+                bool lib = MainTabControl.SelectedIndex == 1;
+                var pool = lib ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>?)Vm?.FilteredLibraryWallpapers : Vm?.BrowseWallpapers;
+                var card = pool?.FirstOrDefault(c => !c.IsPlaceholder && !string.IsNullOrEmpty(c.ThumbnailSource));
+                if (card == null) return "no card";
                 Vm!.OpenPreviewCommand.Execute(card);
-                return "opened " + card.Title;
+                return "opened " + card.Title + " gif=" + card.IsGifThumbnail;
             }
             case "closepreview":
                 Vm?.ClosePreviewCommand.Execute(null);
@@ -825,6 +827,11 @@ public partial class MainWindow : Window
         int cols = Math.Max(1, (int)Math.Floor(width / minCardWidth));
         double cardWidth = width / cols - CardHorizontalMargin;
         Vm.CardThumbnailHeight = Math.Round(cardWidth * ratio);
+
+        // Decode thumbnails to the card's actual pixel size (logical width × DPI scale) + 15% headroom,
+        // so quality matches the display at any card size / monitor scaling without over-decoding.
+        double scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+        Helpers.BoundedRamImageLoader.SetDecodeWidth((int)Math.Ceiling(cardWidth * scale * 1.15));
     }
 
     private void OnPlaylistScrollGif(object? sender, ScrollChangedEventArgs e)

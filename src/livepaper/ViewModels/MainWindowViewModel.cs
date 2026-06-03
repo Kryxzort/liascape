@@ -80,6 +80,12 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private int _currentPage = 1;
     [ObservableProperty] private WallpaperCardViewModel? _previewCard;
+    // Load the full-res still when a card is previewed; drop it (free the bitmap) when it isn't.
+    partial void OnPreviewCardChanged(WallpaperCardViewModel? oldValue, WallpaperCardViewModel? newValue)
+    {
+        oldValue?.ReleasePreviewBitmap();
+        newValue?.LoadPreviewBitmap();
+    }
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadProgress;
     [ObservableProperty] private string _downloadTitle = "";

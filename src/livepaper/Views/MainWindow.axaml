@@ -1683,12 +1683,16 @@
                            MaxWidth="828" MaxHeight="500">
                         <!-- Static image stays underneath (like the grid) so any transparent /
                              not-yet-covered region of the animated gif's frame canvas shows the
-                             static frame instead of garbage. AdvancedImage decodes the raw URL as a
-                             still (gif frame 0), full-res. -->
+                             static frame instead of garbage. The grid loader serves a 512px-wide
+                             thumbnail (fine for cards) — too soft enlarged here — so it's only the
+                             instant placeholder; PreviewBitmap (full-res, loaded on open) covers it. -->
                         <asyncImageLoader:AdvancedImage
                             Source="{Binding ThumbnailSource}"
                             Stretch="Uniform"
                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Image Source="{Binding PreviewBitmap}"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         <Image IsVisible="{Binding IsGifThumbnail}"
                                aimg:ImageBehavior.AnimatedSource="{Binding GifSource}"
                                Stretch="Uniform"

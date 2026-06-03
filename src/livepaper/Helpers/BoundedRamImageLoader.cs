@@ -24,10 +24,25 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
     private const int Capacity = 96;
 
     // Card thumbnails display at ~280-360px wide but the source files are full-res (library thumbs
-    // are ~1024-1388px, remote previews larger). Decoding to this width instead means the GPU samples
-    // a ~512px bitmap per card per frame instead of a 1MP+ one — far cheaper scroll, ~4-8x less RAM
-    // per cached bitmap. 512 keeps Large cards crisp on typical (≤1.25x) display scaling.
-    private const int DecodeWidth = 512;
+    // are ~1024-1388px, remote previews larger). Decoding to the card's actual pixel width instead
+    // means the GPU samples a small bitmap per card per frame, not a 1MP+ one — far cheaper scroll,
+    // far less RAM per cached bitmap, with zero visible quality loss (decode width >= display px).
+    // The width is driven from the live card size × display scaling (see SetDecodeWidth); changing it
+    // clears the RAM cache so on-screen thumbnails re-decode at the new size.
+    private static volatile int _decodeWidth = 512;
+    private static BoundedRamImageLoader? _instance;
+
+    public BoundedRamImageLoader() => _instance = this;
+
+    // width = card pixel width (logical × DPI scale) + headroom. Rounded to a 64px bucket so small
+    // window resizes don't thrash; only a real card-size/scale change re-decodes.
+    public static void SetDecodeWidth(int width)
+    {
+        int bucket = Math.Clamp(((width + 63) / 64) * 64, 256, 2048);
+        if (bucket == _decodeWidth) return;
+        _decodeWidth = bucket;
+        _instance?.ClearRamCache();
+    }
 
     private readonly object _gate = new();
     private readonly LinkedList<string> _lru = new();
@@ -74,9 +89,14 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
         try
         {
             using var fs = File.OpenRead(path);
-            return Bitmap.DecodeToWidth(fs, DecodeWidth, BitmapInterpolationMode.MediumQuality);
+            return Bitmap.DecodeToWidth(fs, _decodeWidth, BitmapInterpolationMode.MediumQuality);
         }
         catch { return null; }
+    }
+
+    private void ClearRamCache()
+    {
+        lock (_gate) { _cache.Clear(); _lru.Clear(); }
     }
 
     private Task<Bitmap?> GetOrLoad(string url, Func<Task<Bitmap?>> loader)
@@ -152,7 +172,7 @@ public sealed class BoundedRamImageLoader : BaseWebImageLoader
                 {
                     File.SetLastWriteTimeUtc(path, DateTime.UtcNow); // touch for LRU trimming
                     using var fs = File.OpenRead(path);
-                    return Bitmap.DecodeToWidth(fs, DecodeWidth, BitmapInterpolationMode.MediumQuality);
+                    return Bitmap.DecodeToWidth(fs, _decodeWidth, BitmapInterpolationMode.MediumQuality);
                 }
                 catch { return null; }
             });

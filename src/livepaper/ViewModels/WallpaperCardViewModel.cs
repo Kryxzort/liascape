@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -135,8 +136,11 @@ public partial class WallpaperCardViewModel : ViewModelBase
     {
         try
         {
-            string path = thumbnailSource;
-            if (path.StartsWith("file://", StringComparison.OrdinalIgnoreCase)) path = path.Substring(7);
+            // file:// URIs are percent-encoded (spaces, unicode); decode via Uri.LocalPath, NOT a
+            // naive Substring — otherwise File.Exists fails for any thumbnail with spaces/unicode.
+            string path = thumbnailSource.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                ? new Uri(thumbnailSource).LocalPath
+                : thumbnailSource;
             return File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
         }
         catch { return null; }
@@ -214,6 +218,44 @@ public partial class WallpaperCardViewModel : ViewModelBase
     // Set from the card's PointerEntered/Exited. Hover-only overlays (Library delete button + hover
     // outline) bind IsVisible to this so they are NOT composited for every card during a scroll.
     [ObservableProperty] private bool _isHovered;
+
+    // Full-resolution still for the enlarged preview modal. The grid loader downsizes thumbnails to
+    // ~card size (great for cards, soft blown up to ~828px), so the modal binds this instead — decoded
+    // at native resolution off the UI thread, loaded when the card is previewed, disposed when it isn't.
+    [ObservableProperty] private Bitmap? _previewBitmap;
+    private CancellationTokenSource? _previewBitmapCts;
+
+    public async void LoadPreviewBitmap()
+    {
+        ReleasePreviewBitmap();
+        if (string.IsNullOrEmpty(ThumbnailSource)) return;
+        _previewBitmapCts = new CancellationTokenSource();
+        var ct = _previewBitmapCts.Token;
+        try
+        {
+            var bytes = await GetGifBytesAsync(ThumbnailSource, ct); // local file read OR remote cache
+            if (bytes == null || bytes.Length == 0 || ct.IsCancellationRequested) return;
+            var bmp = await Task.Run(() =>
+            {
+                // Native resolution (no downscale) — the modal can be large and thumbnails are small
+                // source files, so this is max quality for one transient image.
+                using var ms = new MemoryStream(bytes, writable: false);
+                return new Bitmap(ms);
+            }, ct);
+            if (ct.IsCancellationRequested) { bmp.Dispose(); return; }
+            PreviewBitmap = bmp; // resumes on the UI thread (LoadPreviewBitmap is called from it)
+        }
+        catch { }
+    }
+
+    public void ReleasePreviewBitmap()
+    {
+        _previewBitmapCts?.Cancel();
+        _previewBitmapCts?.Dispose();
+        _previewBitmapCts = null;
+        PreviewBitmap?.Dispose();
+        PreviewBitmap = null;
+    }
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAnyStateOverlay))]
     private bool _isSelected;
