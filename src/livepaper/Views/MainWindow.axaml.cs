@@ -47,6 +47,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         BrowseScrollViewer.ScrollChanged += OnBrowseScrollChanged;
+        // Reset the gif settle-debounce on every Library scroll delta (like Browse), so gifs stay
+        // paused during the whole scroll — fast OR slow — and only re-light once it stops. Without
+        // this, slow scrolls left gaps >160ms between card-realizations and the timer fired mid-scroll.
+        LibraryScrollViewer.ScrollChanged += (_, _) => ScheduleGifReconcile();
         DataContextChanged += OnDataContextChanged;
         KeyDown += OnKeyDown;
         // SmoothScroller owns ScrollViewer.Offset via an inertia animator, which fights the
@@ -248,7 +252,8 @@ public partial class MainWindow : Window
         if (list != null)
             foreach (var c in list) { cards++; if (c.IsGifActive) active++; }
         var asv = ActiveScroll;
-        return $"tab={(lib ? "lib" : "browse")} fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} realized={_realizedBrowse.Count} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
+        int realized = lib ? _realizedLib.Count : _realizedBrowse.Count;
+        return $"tab={(lib ? "lib" : "browse")} fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} realized={realized} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
                $"gen0={GC.CollectionCount(0)} gen2={GC.CollectionCount(2)} " +
                $"y={asv.Offset.Y:F0}/{asv.Extent.Height:F0}";
     }
