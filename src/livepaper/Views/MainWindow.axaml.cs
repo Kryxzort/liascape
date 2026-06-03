@@ -133,6 +133,16 @@ public partial class MainWindow : Window
             case "fetch":
                 _debugFreezeLoad = arg == "off";
                 return "fetch=" + (!_debugFreezeLoad);
+            case "openpreview":
+            {
+                var card = Vm?.BrowseWallpapers.FirstOrDefault(c => !c.IsPlaceholder && c.IsGifThumbnail);
+                if (card == null) return "no gif card";
+                Vm!.OpenPreviewCommand.Execute(card);
+                return "opened " + card.Title;
+            }
+            case "closepreview":
+                Vm?.ClosePreviewCommand.Execute(null);
+                return "closed";
             case "autoscroll":
             {
                 var a = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -611,8 +621,10 @@ public partial class MainWindow : Window
             // While the preview modal is open, pause grid gif animations so the same gif isn't
             // animated twice at once (which corrupts the frames). Resume when it closes.
             if (Vm?.PreviewCard != null)
+            {
                 foreach (var el in _realizedBrowse)
                     if (el.DataContext is WallpaperCardViewModel c) c.DeactivateGifKeepSource();
+            }
             else
                 ReconcileBrowseGifs();
         }
@@ -708,26 +720,16 @@ public partial class MainWindow : Window
         return t;
     }
 
-    // Activate GIFs only for Browse cards whose container currently intersects the viewport;
-    // deactivate the rest. Keeps the number of concurrent full-res decodes ~one screenful
-    // regardless of how many cards have been scrolled past (no unbounded animation churn).
+    // Animate the realized Browse cards. With VerticalCacheLength=0 the ItemsRepeater only realizes
+    // ~the viewport, so "realized" already approximates "visible". ElementClearing deactivates cards
+    // as they scroll out.
     private void ReconcileBrowseGifs()
     {
         if (Vm?.AutoPlayGifs != true) return;
         if (Vm.PreviewCard != null) return; // grid gifs paused while the preview modal is open
-        double vh = BrowseScrollViewer.Viewport.Height;
-        if (vh <= 0) return;
-        const double margin = 120; // start a touch before a card scrolls fully into view
         foreach (var el in _realizedBrowse)
-        {
-            if (el.DataContext is not WallpaperCardViewModel card || !card.IsAutoPlayGif) continue;
-            var pt = el.TranslatePoint(new Point(0, 0), BrowseScrollViewer);
-            bool vis = pt.HasValue
-                && pt.Value.Y + el.Bounds.Height > -margin
-                && pt.Value.Y < vh + margin;
-            if (vis && !card.IsGifActive) card.IsGifActive = true;
-            else if (!vis && card.IsGifActive) card.IsGifActive = false;
-        }
+            if (el.DataContext is WallpaperCardViewModel card && card.IsAutoPlayGif && !card.IsGifActive)
+                card.IsGifActive = true;
     }
 
     private void OnRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
