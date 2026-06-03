@@ -1679,8 +1679,11 @@
                     <Panel Grid.Row="0" DataContext="{Binding PreviewCard}"
                            x:DataType="vm:WallpaperCardViewModel"
                            MaxWidth="828" MaxHeight="500">
+                        <!-- Static image stays underneath (like the grid) so any transparent /
+                             not-yet-covered region of the animated gif's frame canvas shows the
+                             static frame instead of garbage. AdvancedImage decodes the raw URL as a
+                             still (gif frame 0), full-res. -->
                         <asyncImageLoader:AdvancedImage
-                            IsVisible="{Binding !IsGifThumbnail}"
                             Source="{Binding ThumbnailSource}"
                             Stretch="Uniform"
                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
