@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     // Realized Browse-grid containers, used to drive viewport-gated GIF activation so only the
     // cards actually on screen decode/animate (not the larger ItemsRepeater realization buffer).
     private readonly System.Collections.Generic.HashSet<Control> _realizedBrowse = new();
+    private readonly System.Collections.Generic.HashSet<Control> _realizedLib = new();
     // Debounces GIF activation until scrolling settles, so a fast fling doesn't decode a full-res
     // preview for every card it passes (allocation churn → GC pauses → scroll lag).
     private DispatcherTimer? _gifSettleTimer;
@@ -67,11 +68,12 @@ public partial class MainWindow : Window
             BrowseItemsRepeater.ElementClearing += OnRepeaterElementClearing;
             LibraryItemsRepeater.ElementPrepared += OnRepeaterElementPrepared;
             LibraryItemsRepeater.ElementClearing += OnRepeaterElementClearing;
-            // Activate GIF cards already prepared before Loaded fired
+            // Activate GIF cards already prepared before Loaded fired (realized/visible only —
+            // app opens on Browse, so library gifs stay idle until that tab is shown).
             if (Vm?.AutoPlayGifs == true)
             {
-                foreach (var c in Vm.LibraryWallpapers) ActivateGifCard(c);
                 ReconcileBrowseGifs();
+                ReconcileLibraryGifs();
                 foreach (var c in Vm.PlaylistItems) ActivatePlaylistGifCard(c);
             }
             PlaylistScrollViewer.ScrollChanged += OnPlaylistScrollGif;
@@ -160,16 +162,18 @@ public partial class MainWindow : Window
             case "scroll":
             {
                 double d = double.Parse(arg);
-                var off = BrowseScrollViewer.Offset;
-                BrowseScrollViewer.Offset = new Vector(off.X, Math.Max(0, off.Y + d));
-                return $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
+                var asv = ActiveScroll;
+                var off = asv.Offset;
+                asv.Offset = new Vector(off.X, Math.Max(0, off.Y + d));
+                return $"y={asv.Offset.Y:F0}/{asv.Extent.Height:F0}";
             }
             case "scrollbottom":
             {
-                double ext = BrowseScrollViewer.Extent.Height;
-                double vp = BrowseScrollViewer.Viewport.Height;
-                BrowseScrollViewer.Offset = new Vector(BrowseScrollViewer.Offset.X, Math.Max(0, ext - vp));
-                return $"y={BrowseScrollViewer.Offset.Y:F0}/{ext:F0}";
+                var asv = ActiveScroll;
+                double ext = asv.Extent.Height;
+                double vp = asv.Viewport.Height;
+                asv.Offset = new Vector(asv.Offset.X, Math.Max(0, ext - vp));
+                return $"y={asv.Offset.Y:F0}/{ext:F0}";
             }
             case "loadmore":
                 Vm?.LoadMoreCommand.Execute(null);
@@ -198,6 +202,13 @@ public partial class MainWindow : Window
     // fixed already-loaded set without new fetches polluting the result.
     private bool _debugFreezeLoad;
     private bool _autoScrolling;
+    // Debug scroll/metrics target the visible tab's scrollviewer (0=Browse, 1=Library, 2=Settings).
+    private ScrollViewer ActiveScroll => MainTabControl.SelectedIndex switch
+    {
+        1 => LibraryScrollViewer,
+        2 => SettingsScrollViewer,
+        _ => BrowseScrollViewer
+    };
     // Continuous per-frame scroll (bounces at top/bottom) to reproduce real smooth-scroll load,
     // which discrete Offset jumps don't. FpsMeter samples while this runs.
     private void StartAutoScroll(double pps, double secs)
@@ -214,7 +225,7 @@ public partial class MainWindow : Window
             if (!_autoScrolling) return;
             double dt = last.HasValue ? (t - last.Value).TotalSeconds : 1.0 / 60;
             last = t;
-            var sv = BrowseScrollViewer;
+            var sv = ActiveScroll;
             double max = Math.Max(0, sv.Extent.Height - sv.Viewport.Height);
             double y = sv.Offset.Y + dir * pps * dt;
             if (y >= max) { y = max; dir = -1; }
@@ -231,14 +242,15 @@ public partial class MainWindow : Window
         var p = System.Diagnostics.Process.GetCurrentProcess();
         long ws = p.WorkingSet64 / (1024 * 1024);
         long gc = GC.GetTotalMemory(false) / (1024 * 1024);
-        int cards = Vm?.BrowseWallpapers.Count ?? 0;
-        int active = 0;
-        if (Vm != null)
-            foreach (var c in Vm.BrowseWallpapers)
-                if (c.IsGifActive) active++;
-        return $"fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} realized={_realizedBrowse.Count} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
+        bool lib = MainTabControl.SelectedIndex == 1;
+        var list = lib ? (System.Collections.Generic.IEnumerable<WallpaperCardViewModel>?)Vm?.FilteredLibraryWallpapers : Vm?.BrowseWallpapers;
+        int cards = 0, active = 0;
+        if (list != null)
+            foreach (var c in list) { cards++; if (c.IsGifActive) active++; }
+        var asv = ActiveScroll;
+        return $"tab={(lib ? "lib" : "browse")} fps={FpsMeter.CurrentFps:F0} low={FpsMeter.LowFps:F0} cards={cards} realized={_realizedBrowse.Count} activeGif={active} ws={ws}MB gcHeap={gc}MB " +
                $"gen0={GC.CollectionCount(0)} gen2={GC.CollectionCount(2)} " +
-               $"y={BrowseScrollViewer.Offset.Y:F0}/{BrowseScrollViewer.Extent.Height:F0}";
+               $"y={asv.Offset.Y:F0}/{asv.Extent.Height:F0}";
     }
 
     protected override void OnClosed(EventArgs e)
@@ -612,8 +624,9 @@ public partial class MainWindow : Window
         else if (e.PropertyName == nameof(MainWindowViewModel.AutoPlayGifs)
             && sender is MainWindowViewModel vm2 && vm2.AutoPlayGifs)
         {
-            foreach (var c in vm2.LibraryWallpapers) ActivateGifCard(c);
+            // Only the realized (visible) cards of the current tab — not all ~150 library gifs.
             ReconcileBrowseGifs();
+            ReconcileLibraryGifs();
             foreach (var c in vm2.PlaylistItems) ActivatePlaylistGifCard(c);
         }
         else if (e.PropertyName == nameof(MainWindowViewModel.PreviewCard))
@@ -645,20 +658,37 @@ public partial class MainWindow : Window
         if (Vm?.AutoPlayGifs != true) return;
         Dispatcher.UIThread.Post(() =>
         {
-            if (MainTabControl.SelectedIndex == 0)
+            int tab = MainTabControl.SelectedIndex;
+            // Animate gifs only on the visible tab; deactivate the other tab's realized gifs so they
+            // aren't decoding in the background (Library has ~150 gifs — leaving them all running
+            // pegged the app at ~15fps / 3GB).
+            if (tab == 0)
             {
+                DeactivateRealized(_realizedLib);
                 ReconcileBrowseGifs();
             }
-            else if (MainTabControl.SelectedIndex == 1)
+            else if (tab == 1)
             {
-                foreach (var c in Vm.LibraryWallpapers)
-                {
-                    if (!c.IsAutoPlayGif) continue;
-                    c.IsGifActive = false;
-                    c.IsGifActive = true;
-                }
+                DeactivateRealized(_realizedBrowse);
+                ReconcileLibraryGifs();
             }
         }, DispatcherPriority.Background);
+    }
+
+    private static void DeactivateRealized(System.Collections.Generic.HashSet<Control> realized)
+    {
+        foreach (var el in realized)
+            if (el.DataContext is WallpaperCardViewModel c && c.IsGifActive)
+                c.IsGifActive = false;
+    }
+
+    // Animate only the realized (≈visible) Library gif cards — NOT all LibraryWallpapers.
+    private void ReconcileLibraryGifs()
+    {
+        if (Vm?.AutoPlayGifs != true) return;
+        foreach (var el in _realizedLib)
+            if (el.DataContext is WallpaperCardViewModel card)
+                ActivateGifCard(card);
     }
 
     private void OnRepeaterElementPrepared(object? sender, ItemsRepeaterElementPreparedEventArgs e)
@@ -681,9 +711,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Track realized Library containers so gif animation is gated to the viewport (not all
+        // ~150 library gifs at once, which pegged the app at ~15fps / 3GB).
+        if (ReferenceEquals(sender, LibraryItemsRepeater))
+            _realizedLib.Add(el);
+
         if (Vm?.AutoPlayGifs != true) return;
 
-        // Library / others: activate all realized (bounded set, not infinite-scroll).
+        // Activate the realized card (viewport-gated by realization).
         if (el.DataContext is WallpaperCardViewModel card)
             ActivateGifCard(card);
         else
@@ -738,6 +773,8 @@ public partial class MainWindow : Window
         el.DataContextChanged -= OnElementDataContextChanged;
         if (ReferenceEquals(sender, BrowseItemsRepeater))
             _realizedBrowse.Remove(el);
+        else if (ReferenceEquals(sender, LibraryItemsRepeater))
+            _realizedLib.Remove(el);
         if (el.DataContext is WallpaperCardViewModel card && card.IsGifThumbnail)
             card.IsGifActive = false;
     }
