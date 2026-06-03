@@ -606,6 +606,16 @@ public partial class MainWindow : Window
             ReconcileBrowseGifs();
             foreach (var c in vm2.PlaylistItems) ActivatePlaylistGifCard(c);
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.PreviewCard))
+        {
+            // While the preview modal is open, pause grid gif animations so the same gif isn't
+            // animated twice at once (which corrupts the frames). Resume when it closes.
+            if (Vm?.PreviewCard != null)
+                foreach (var el in _realizedBrowse)
+                    if (el.DataContext is WallpaperCardViewModel c) c.DeactivateGifKeepSource();
+            else
+                ReconcileBrowseGifs();
+        }
     }
 
     private void CheckFillViewport()
@@ -704,6 +714,7 @@ public partial class MainWindow : Window
     private void ReconcileBrowseGifs()
     {
         if (Vm?.AutoPlayGifs != true) return;
+        if (Vm.PreviewCard != null) return; // grid gifs paused while the preview modal is open
         double vh = BrowseScrollViewer.Viewport.Height;
         if (vh <= 0) return;
         const double margin = 120; // start a touch before a card scrolls fully into view

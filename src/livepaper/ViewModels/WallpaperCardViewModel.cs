@@ -83,6 +83,20 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
     public AnimatedImage.Avalonia.AnimatedImageSource? ActiveGifSource => IsGifActive ? GifSource : null;
 
+    // Stop the grid animation WITHOUT releasing the source, so the preview modal (which binds
+    // GifSource) can keep animating this gif on its own. Two animations of the same gif at once
+    // corrupt each other (the library's frame decode isn't safe for concurrent playback of the
+    // same gif), so we pause the grid copy while the modal is open.
+    public void DeactivateGifKeepSource()
+    {
+        if (!IsGifActive) return;
+#pragma warning disable MVVMTK0034
+        _isGifActive = false; // bypass OnIsGifActiveChanged so the source is NOT released
+#pragma warning restore MVVMTK0034
+        OnPropertyChanged(nameof(IsGifActive));
+        OnPropertyChanged(nameof(ActiveGifSource));
+    }
+
     private void EnsureGifSourceLoading()
     {
         if (_gifSource != null || _gifLoadStarted || !IsGifThumbnail) return;
