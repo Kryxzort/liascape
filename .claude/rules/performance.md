@@ -10,6 +10,15 @@ Living log of UI performance findings + fixes. **Read before touching scroll/ren
 - Known upstream issue: AvaloniaUI/Avalonia#20350 ("Framerate is capped at 60 FPS on X11"). Renderer-agnostic (Glx/Egl/Vulkan/Software all 60).
 - **Conclusion: target a rock-solid 60, not 240.** 240 would need a fork of Avalonia.X11 or a different backend (native Wayland/Vulkan) — out of scope.
 
+## Library tab (same engine as Browse; gif gating was the big win)
+
+Measured with a 1030-file / 147-gif library (debug bridge now tab-aware — `tab 1` then `metrics`/`autoscroll` target `LibraryScrollViewer`):
+
+- **Catastrophe (fixed):** Library force-activated **every** gif card — `OnTabChanged` looped *all* `LibraryWallpapers` (not realized), and startup + the AutoPlayGifs toggle did the same. Result: ~147 gifs decoding at once, even off-screen and even while on the Browse tab → **18fps idle / 11fps scroll, 1.3→3.3GB ws**. Fix: mirror Browse — track realized containers (`_realizedLib` via ElementPrepared/Clearing) and animate only those; deactivate the *other* tab's realized gifs on tab switch so nothing decodes in the background. → **idle/Medium/Large back to 60**, activeGif 147→~viewport.
+- **Local gifs must load off-thread too.** Library gifs are local files; the old path handed the control an `AnimatedImageSourceStream`, so the lib parsed (allocated frame buffers) **on the UI thread** as each card realized → scroll stutter. Unified onto the remote off-thread path (`GetGifBytesAsync`: remote cache OR async file read → `GifRendererBuilder` off-thread). 
+- **Activation must be settle-debounced** (like Browse `ScheduleGifReconcile`, 160ms). Activating in `ElementPrepared` immediately lit every card a fast scroll flew past (~74 concurrent). Debounced: during motion `activeGif`→~0, gifs re-light only when scrolling stops. Settle timer is tab-aware (`ReconcileLibraryGifs` vs `ReconcileBrowseGifs`).
+- **Residual Small-card cost is NOT gifs** — mid-scroll `fps≈14` with `activeGif=0` at Small. It's the per-card render ceiling below (~66 library cards/frame), same as Browse Small. Library cards are a touch heavier (title bar + playlist toggle Path + delete MaterialIcon + state-overlay Panel always present), so Small is slightly worse than Browse Small. Medium/Large scroll smooth. Lever is the same: bigger cards (fewer visible) or decode-to-display-size (untried, backlog).
+
 ## Root cause of scroll jank: render cost ∝ realized card count
 
 Measured with the debug FPS meter (see below), Workshop grid, fixed loaded set, fetch frozen:
