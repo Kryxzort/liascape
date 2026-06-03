@@ -210,6 +210,10 @@ public partial class WallpaperCardViewModel : ViewModelBase
     }
 
     public bool IsLocalSource => !PageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+
+    // Set from the card's PointerEntered/Exited. Hover-only overlays (Library delete button + hover
+    // outline) bind IsVisible to this so they are NOT composited for every card during a scroll.
+    [ObservableProperty] private bool _isHovered;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAnyStateOverlay))]
     private bool _isSelected;

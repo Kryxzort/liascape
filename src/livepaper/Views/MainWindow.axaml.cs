@@ -779,15 +779,17 @@ public partial class MainWindow : Window
 
     private void OnCardPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card
-            && card.IsGifThumbnail && !card.IsGifActive)
+        if (sender is not StyledElement se || se.DataContext is not WallpaperCardViewModel card) return;
+        card.IsHovered = true; // drives hover-only overlays (delete btn + outline) so they aren't composited while scrolling
+        if (card.IsGifThumbnail && !card.IsGifActive)
             card.IsGifActive = true;
     }
 
     private void OnCardPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is StyledElement se && se.DataContext is WallpaperCardViewModel card && card != _dragCard
-            && card.IsGifThumbnail && Vm?.AutoPlayGifs == false && card.IsGifActive)
+        if (sender is not StyledElement se || se.DataContext is not WallpaperCardViewModel card || card == _dragCard) return;
+        card.IsHovered = false;
+        if (card.IsGifThumbnail && Vm?.AutoPlayGifs == false && card.IsGifActive)
             card.IsGifActive = false;
     }
 

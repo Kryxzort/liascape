@@ -794,12 +794,13 @@
                                                         </Panel>
                                                     </Button>
 
-                                                    <!-- Delete (trash) button above title bar -->
+                                                    <!-- Delete (trash) button above title bar (hover-only: skip compositing while scrolling) -->
                                                     <Button HorizontalAlignment="Right"
                                                             VerticalAlignment="Bottom"
                                                             Margin="0,0,6,50"
                                                             Width="28" Height="28"
                                                             Padding="0"
+                                                            IsVisible="{Binding IsHovered}"
                                                             Classes="danger icon-overlay icon-x-hover"
                                                             BorderThickness="0"
                                                             CornerRadius="6"
@@ -811,6 +812,7 @@
                                                     <!-- State overlays -->
                                                     <Panel IsHitTestVisible="False">
                                                         <Border Classes="library-hover-outline"
+                                                                IsVisible="{Binding IsHovered}"
                                                                 BorderBrush="{DynamicResource Accent}"
                                                                 BorderThickness="2.5"
                                                                 CornerRadius="10"/>
