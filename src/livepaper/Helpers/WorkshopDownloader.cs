@@ -93,10 +93,15 @@ public static class WorkshopDownloader
         string sessionId = Guid.NewGuid().ToString("N")[..24];
         string action = subscribe ? "subscribe" : "unsubscribe";
 
+        // The cookie value must be URL-encoded: the `||` between steamid and token becomes %7C%7C
+        // (matches the browser's encodeURIComponent). Normalize first (Unescape→Escape) so both a
+        // raw minted value and an already-encoded pasted value end up encoded exactly once.
+        string cookieValue = Uri.EscapeDataString(Uri.UnescapeDataString(steamLoginSecure.Trim()));
+
         using var req = new HttpRequestMessage(HttpMethod.Post,
             $"https://steamcommunity.com/sharedfiles/{action}");
         req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-        req.Headers.Add("Cookie", $"sessionid={sessionId}; steamLoginSecure={steamLoginSecure.Trim()}");
+        req.Headers.Add("Cookie", $"sessionid={sessionId}; steamLoginSecure={cookieValue}");
         req.Content = new FormUrlEncodedContent(new System.Collections.Generic.Dictionary<string, string>
         {
             ["id"] = workshopId,
@@ -106,11 +111,15 @@ public static class WorkshopDownloader
 
         using var resp = await HttpClientProvider.Client.SendAsync(req, ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
-        // Steam returns {"success":1} on success; 1 also = already in that state.
-        if (!resp.IsSuccessStatusCode || body.Contains("\"success\":8") || body.Contains("\"success\":15"))
+        // Steam returns {"success":1} on success (1 also = already in that state). Anything else
+        // (non-2xx, or a success code that isn't 1) means the request didn't take.
+        bool ok = resp.IsSuccessStatusCode
+            && (body.Contains("\"success\":1") || body.Length == 0);
+        if (!ok)
             throw new InvalidOperationException(
-                "Steam rejected the subscribe request — your login cookie may be expired. " +
-                "Re-paste steamLoginSecure in Settings → Sources.");
+                "Steam rejected the subscribe request — your login may be expired. " +
+                "Re-sign in to Steam (QR) in Settings → Sources." +
+                $" [{(int)resp.StatusCode} {(body.Length > 120 ? body[..120] : body)}]");
     }
 
     // All places a downloaded workshop item might already live (every Steam library + steamcmd).
