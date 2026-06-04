@@ -353,6 +353,8 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<WallpaperCardViewModel> _playlistItems = [];
     [ObservableProperty] private bool _isPlaylistEmpty = true;
     [ObservableProperty] private bool _isPlaylistSettingsOpen;
+    [ObservableProperty] private bool _isPlaylistCollapsed;
+    public double PlaylistBarMinHeight => IsPlaylistCollapsed ? 0 : 140;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSequential))]
     private bool _playlistShuffle;
@@ -734,6 +736,16 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.AutoAddLibraryToPlaylist = value;
         SettingsService.Save(_settings);
     }
+
+    partial void OnIsPlaylistCollapsedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PlaylistBarMinHeight));
+        _settings.IsPlaylistCollapsed = value;
+        SettingsService.Save(_settings);
+    }
+
+    [RelayCommand]
+    private void TogglePlaylistCollapsed() => IsPlaylistCollapsed = !IsPlaylistCollapsed;
 
     partial void OnAutoImportWallpaperEngineChanged(bool value)
     {
@@ -1205,6 +1217,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _playlistWaitForVideoEnd = _settings.PlaylistWaitForVideoEnd;
         _autoAddLibraryToPlaylist = _settings.AutoAddLibraryToPlaylist;
         _autoImportWallpaperEngine = _settings.AutoImportWallpaperEngine;
+        _isPlaylistCollapsed = _settings.IsPlaylistCollapsed;
         _wallpaperEnginePath = _settings.WallpaperEnginePath;
         _weCopyFiles = _settings.WeCopyFiles;
         _resumeFromLast = _settings.ResumeFromLast;

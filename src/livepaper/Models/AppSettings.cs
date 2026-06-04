@@ -56,6 +56,7 @@ public class AppSettings
     public bool PlaylistWaitForVideoEnd { get; set; } = false;
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoImportWallpaperEngine { get; set; } = false;
+    public bool IsPlaylistCollapsed { get; set; } = false;
     public string WorkshopAcquireMode { get; set; } = "subscribe";
     public string SteamCmdPath { get; set; } = "";
     public string SteamUsername { get; set; } = "";
