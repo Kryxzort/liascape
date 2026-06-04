@@ -86,15 +86,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private string _statusMessage = "";
-    // Playing metadata (wallpaper title, interval, volume). Kept separate from StatusMessage
-    // so user-feedback messages (delete/undo/import) are never overwritten by playback updates.
-    [ObservableProperty] private string _playingStatus = "";
     public bool HasStatusContent => !string.IsNullOrEmpty(StatusMessage) || CanUndo;
-    public bool ShowPlayingStatus => !string.IsNullOrEmpty(PlayingStatus) && !HasStatusContent;
-    public bool ShowFallbackTitle => !HasStatusContent && string.IsNullOrEmpty(PlayingStatus);
-    partial void OnStatusMessageChanged(string value) { OnPropertyChanged(nameof(HasStatusContent)); OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
-    partial void OnCanUndoChanged(bool value) { OnPropertyChanged(nameof(HasStatusContent)); OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
-    partial void OnPlayingStatusChanged(string value) { OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
+    partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatusContent));
+    partial void OnCanUndoChanged(bool value) => OnPropertyChanged(nameof(HasStatusContent));
     [ObservableProperty] private int _currentPage = 1;
     [ObservableProperty] private WallpaperCardViewModel? _previewCard;
     // Load the full-res still when a card is previewed; drop it (free the bitmap) when it isn't.
@@ -1302,7 +1296,7 @@ public partial class MainWindowViewModel : ViewModelBase
         };
 
         PlayerHelper.OnTimedPlaylistStopped = () =>
-            Dispatcher.UIThread.Post(() => PlayingStatus = "");
+            Dispatcher.UIThread.Post(() => StatusMessage = "");
 
 
         PlayerHelper.OnWallpaperChanged = path =>
@@ -2113,7 +2107,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _isSearchMode = false;
         NoMorePages = false;
         IsLoading = true;
-        PlayingStatus = "";
+        StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
         for (int p = 0; p < SelectedSource.PageSizeHint; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
@@ -2203,7 +2197,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = 1;
         NoMorePages = false;
         IsLoading = true;
-        PlayingStatus = "";
+        StatusMessage = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
         for (int p = 0; p < SelectedSource.PageSizeHint; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
@@ -2532,7 +2526,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         PlayerHelper.Stop();
         AudioMonitor.KillDetachedMonitor();
-        PlayingStatus = "";
+        StatusMessage = "";
         if (_currentlyPlayingCard != null)
         {
             _currentlyPlayingCard.IsCurrentlyPlaying = false;
@@ -2701,6 +2695,6 @@ public partial class MainWindowViewModel : ViewModelBase
         if (Loop) parts.Add("Loop");
         if (Math.Abs(Speed - 1.0) > 0.01) parts.Add($"{Speed:0.##}×");
 
-        PlayingStatus = string.Join(" • ", parts);
+        StatusMessage = string.Join(" • ", parts);
     }
 }
