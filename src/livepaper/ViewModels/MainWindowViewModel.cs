@@ -90,7 +90,11 @@ public partial class MainWindowViewModel : ViewModelBase
     // so user-feedback messages (delete/undo/import) are never overwritten by playback updates.
     [ObservableProperty] private string _playingStatus = "";
     public bool HasStatusContent => !string.IsNullOrEmpty(StatusMessage) || CanUndo;
-    partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatusContent));
+    public bool ShowPlayingStatus => !string.IsNullOrEmpty(PlayingStatus) && !HasStatusContent;
+    public bool ShowFallbackTitle => !HasStatusContent && string.IsNullOrEmpty(PlayingStatus);
+    partial void OnStatusMessageChanged(string value) { OnPropertyChanged(nameof(HasStatusContent)); OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
+    partial void OnCanUndoChanged(bool value) { OnPropertyChanged(nameof(HasStatusContent)); OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
+    partial void OnPlayingStatusChanged(string value) { OnPropertyChanged(nameof(ShowPlayingStatus)); OnPropertyChanged(nameof(ShowFallbackTitle)); }
     [ObservableProperty] private int _currentPage = 1;
     [ObservableProperty] private WallpaperCardViewModel? _previewCard;
     // Load the full-res still when a card is previewed; drop it (free the bitmap) when it isn't.
@@ -1163,8 +1167,6 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     private readonly List<UndoBatch> _undoBatches = [];
     [ObservableProperty] private bool _canUndo;
-    partial void OnCanUndoChanged(bool value) => OnPropertyChanged(nameof(HasStatusContent));
-
     public Func<Task<string?>>? PickFolderDialog { get; set; }
     public Func<Task<string?>>? PickVideoDialog { get; set; }
     public Func<string, Task>? CopyToClipboard { get; set; }

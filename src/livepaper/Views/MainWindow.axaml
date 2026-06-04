@@ -500,10 +500,14 @@
                                     BorderThickness="0,0,0,1"
                                     BorderBrush="{DynamicResource Surface0}">
                                 <DockPanel>
-                                    <!-- Fallback title or status message + Undo -->
+                                    <!-- Fallback title / playing status / user status + Undo -->
                                     <Panel VerticalAlignment="Center">
                                         <TextBlock Text="Your downloaded wallpapers"
-                                                   IsVisible="{Binding !HasStatusContent}"
+                                                   IsVisible="{Binding ShowFallbackTitle}"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   FontSize="13"/>
+                                        <TextBlock Text="{Binding PlayingStatus}"
+                                                   IsVisible="{Binding ShowPlayingStatus}"
                                                    Foreground="{DynamicResource Subtext}"
                                                    FontSize="13"/>
                                         <StackPanel IsVisible="{Binding HasStatusContent}"
