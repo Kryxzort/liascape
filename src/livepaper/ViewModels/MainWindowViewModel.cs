@@ -86,6 +86,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private string _statusMessage = "";
+    public bool HasStatusContent => !string.IsNullOrEmpty(StatusMessage) || CanUndo;
+    partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatusContent));
     [ObservableProperty] private int _currentPage = 1;
     [ObservableProperty] private WallpaperCardViewModel? _previewCard;
     // Load the full-res still when a card is previewed; drop it (free the bitmap) when it isn't.
@@ -1158,6 +1160,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     private readonly List<UndoBatch> _undoBatches = [];
     [ObservableProperty] private bool _canUndo;
+    partial void OnCanUndoChanged(bool value) => OnPropertyChanged(nameof(HasStatusContent));
 
     public Func<Task<string?>>? PickFolderDialog { get; set; }
     public Func<Task<string?>>? PickVideoDialog { get; set; }

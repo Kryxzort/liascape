@@ -1602,10 +1602,18 @@
             </TabControl>
 
 
-        <!-- Status bar -->
-        <Border Grid.Row="2"
-                Background="{DynamicResource BgCrust}"
-                Padding="16,6">
+        <!-- Status toast (floating overlay, bottom-left, no layout row) -->
+        <Border Grid.Row="0"
+                IsVisible="{Binding HasStatusContent}"
+                IsHitTestVisible="{Binding HasStatusContent}"
+                VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                Margin="16,0,0,14"
+                ZIndex="500"
+                Background="{DynamicResource BgMantle}"
+                BorderBrush="{DynamicResource Surface0}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12,6">
             <DockPanel>
                 <Button DockPanel.Dock="Right"
                         IsVisible="{Binding CanUndo}"
