@@ -1447,6 +1447,11 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
+        // Pre-warm the Steam access token in the background so the first workshop subscribe of the
+        // session is instant (the ~1-3s mint happens here at launch, not on the user's first click).
+        if (_settings.WorkshopAcquireMode == "subscribe" && !string.IsNullOrEmpty(_settings.SteamRefreshToken))
+            _ = Task.Run(async () => { try { await SteamAuthService.GetCookieAsync(_settings); } catch { } });
+
         var s = _settings.LastSession;
         if (s != null && PlayerHelper.IsPlaying)
         {
