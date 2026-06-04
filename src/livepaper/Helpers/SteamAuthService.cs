@@ -59,24 +59,35 @@ public static class SteamAuthService
         finally { try { steamClient.Disconnect(); } catch { } }
     }
 
-    /// Mints a fresh access token from the stored refresh token (one short Steam connection).
-    private static async Task<string> GenerateAccessTokenAsync(ulong steamId, string refreshToken, CancellationToken ct)
+    /// Mints a fresh access token from the stored refresh token. Mirrors SteamKit2's WebCookie
+    /// sample: connect → log on with the refresh token → GenerateAccessTokenForApp inside the
+    /// LoggedOn callback. Generating without logging on first returns AccessDenied.
+    private static async Task<(ulong SteamId, string AccessToken)> MintAsync(
+        string accountName, string refreshToken, CancellationToken ct)
     {
         var steamClient = new SteamClient();
         var manager = new CallbackManager(steamClient);
-        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var steamUser = steamClient.GetHandler<SteamUser>()!;
+        var tcs = new TaskCompletionSource<(ulong, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        manager.Subscribe<SteamClient.ConnectedCallback>(cb => { _ = RunMintAsync(); });
-        manager.Subscribe<SteamClient.DisconnectedCallback>(_ =>
+        manager.Subscribe<SteamClient.ConnectedCallback>(cb =>
+            steamUser.LogOn(new SteamUser.LogOnDetails { Username = accountName, AccessToken = refreshToken }));
+        manager.Subscribe<SteamClient.DisconnectedCallback>(cb =>
             tcs.TrySetException(new InvalidOperationException("Disconnected from Steam before token refresh completed.")));
+        manager.Subscribe<SteamUser.LoggedOnCallback>(cb => { _ = OnLoggedOn(cb); });
 
-        async Task RunMintAsync()
+        async Task OnLoggedOn(SteamUser.LoggedOnCallback cb)
         {
             try
             {
+                if (cb.Result != EResult.OK)
+                {
+                    tcs.TrySetException(new InvalidOperationException($"Steam logon failed: {cb.Result}"));
+                    return;
+                }
                 var res = await steamClient.Authentication.GenerateAccessTokenForAppAsync(
-                    new SteamID(steamId), refreshToken, allowRenewal: false);
-                tcs.TrySetResult(res.AccessToken);
+                    cb.ClientSteamID, refreshToken, allowRenewal: false);
+                tcs.TrySetResult((cb.ClientSteamID.ConvertToUInt64(), res.AccessToken));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         }
@@ -90,7 +101,7 @@ public static class SteamAuthService
         });
 
         try { return await tcs.Task; }
-        finally { try { steamClient.Disconnect(); } catch { } }
+        finally { try { steamUser.LogOff(); steamClient.Disconnect(); } catch { } }
     }
 
     /// Returns a currently-valid steamLoginSecure cookie value, minting a fresh access token if the
@@ -113,8 +124,9 @@ public static class SteamAuthService
                 return $"{settings.SteamId}||{settings.SteamAccessToken}";
             }
 
-            var token = await GenerateAccessTokenAsync(settings.SteamId, settings.SteamRefreshToken, ct);
+            var (steamId, token) = await MintAsync(settings.SteamAccountName, settings.SteamRefreshToken, ct);
             settings.SteamAccessToken = token;
+            if (steamId != 0) settings.SteamId = steamId;
             SettingsService.Save(settings);
             return $"{settings.SteamId}||{token}";
         }
