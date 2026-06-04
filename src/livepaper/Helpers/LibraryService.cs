@@ -56,6 +56,17 @@ public static class LibraryService
 
         var existingIds = LoadWeIndex();
 
+        // Merge in IDs from URL-format .id files (Browse/Workshop downloads write the
+        // Steam page URL as sourceId, not the bare numeric ID). LoadWeIndex only reads
+        // we_ids.txt which lacks those entries — scanning .id files catches them so we
+        // don't create duplicates for wallpapers the user already downloaded via the app.
+        bool indexDirty = false;
+        foreach (var id in CollectExistingWorkshopIds())
+        {
+            if (existingIds.Add(id)) indexDirty = true;
+        }
+        if (indexDirty) SaveWeIndex(existingIds);
+
         foreach (var dir in Directory.EnumerateDirectories(workshopPath))
         {
             string workshopId = Path.GetFileName(dir);
@@ -139,7 +150,19 @@ public static class LibraryService
             try
             {
                 var raw = File.ReadAllText(idFile).Trim();
+                if (string.IsNullOrEmpty(raw)) continue;
                 if (long.TryParse(raw, out _)) { ids.Add(raw); continue; }
+
+                // Browse downloads write the Steam page URL as the source ID.
+                // Extract the numeric workshop ID from ?id= / &id= query param.
+                if (raw.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    var idParam = ExtractSteamWorkshopId(raw);
+                    if (idParam != null) ids.Add(idParam);
+                    continue;
+                }
+
+                // Local path — extract numeric workshop ID from path segments
                 var parts = raw.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
                 for (int i = 0; i < parts.Length - 1; i++)
                 {
@@ -154,6 +177,20 @@ public static class LibraryService
             catch { }
         }
         return ids;
+    }
+
+    // Extracts the numeric workshop item ID from a Steam community URL.
+    // Handles both ?id=NNN and &id=NNN forms.
+    private static string? ExtractSteamWorkshopId(string url)
+    {
+        int idx = url.IndexOf("?id=", StringComparison.Ordinal);
+        if (idx < 0) idx = url.IndexOf("&id=", StringComparison.Ordinal);
+        if (idx < 0) return null;
+        int start = idx + 4;
+        int end = start;
+        while (end < url.Length && char.IsDigit(url[end])) end++;
+        var candidate = url.Substring(start, end - start);
+        return candidate.Length >= 8 && long.TryParse(candidate, out _) ? candidate : null;
     }
 
     private static string ResolveUniqueName(string baseTitle, string ext)
