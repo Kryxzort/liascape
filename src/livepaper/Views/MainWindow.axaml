@@ -1439,29 +1439,14 @@
                                        LetterSpacing="2"/>
                             <Border Background="{DynamicResource BgBase}" CornerRadius="10" Padding="16">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Text="How to acquire Workshop wallpapers"
+                                    <TextBlock Text="Workshop items download via steamcmd"
                                                Foreground="{DynamicResource TextColor}"/>
-                                    <StackPanel Spacing="8">
-                                        <RadioButton Content="Subscribe via Steam (recommended)"
-                                                     GroupName="WsAcquireMode"
-                                                     IsChecked="{Binding IsWorkshopSubscribeMode}"
-                                                     Foreground="{DynamicResource TextColor}"/>
-                                        <TextBlock Text="Opens the item in Steam so you can subscribe. livepaper detects the download and imports it. Requires Steam to be running."
-                                                   FontSize="11" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource Muted}"
-                                                   Margin="24,0,0,0"/>
-                                        <RadioButton Content="Download via steamcmd (one-time setup)"
-                                                     GroupName="WsAcquireMode"
-                                                     IsChecked="{Binding IsWorkshopSteamCmdMode}"
-                                                     Foreground="{DynamicResource TextColor}"/>
-                                        <TextBlock Text="Uses steamcmd to download directly inside the app. Requires steamcmd installed and a one-time sign-in below."
-                                                   FontSize="11" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource Muted}"
-                                                   Margin="24,0,0,0"/>
-                                    </StackPanel>
+                                    <TextBlock Text="Requires steamcmd installed and a one-time Steam sign-in. After signing in, downloads are fully automatic. Deleting a workshop wallpaper also removes its downloaded files."
+                                               FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource Muted}"/>
 
                                     <!-- steamcmd settings -->
-                                    <StackPanel IsVisible="{Binding IsWorkshopSteamCmdMode}" Spacing="10" Margin="0,4,0,0">
+                                    <StackPanel Spacing="10" Margin="0,4,0,0">
                                         <TextBlock Text="steamcmd path (leave blank to auto-detect)"
                                                    Foreground="{DynamicResource Subtext}"
                                                    FontSize="12"/>

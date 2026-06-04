@@ -269,16 +269,35 @@ public static class LibraryService
 
     public static void PurgeBatch(string batchDir)
     {
+        // Permanent delete: also remove any steamcmd-downloaded workshop content for items in this
+        // batch (the "unsubscribe" on delete). Done at purge — not soft-delete — so Ctrl+Z undo can
+        // still restore symlinks that point into the steamcmd cache.
+        try { RemoveSteamCmdContentForBatch(batchDir); } catch { }
         try { Directory.Delete(batchDir, recursive: true); } catch { }
+    }
+
+    private static void RemoveSteamCmdContentForBatch(string batchDir)
+    {
+        if (!Directory.Exists(batchDir)) return;
+        foreach (var idFile in Directory.EnumerateFiles(batchDir, "*.id"))
+        {
+            try
+            {
+                var raw = File.ReadAllText(idFile).Trim();
+                string? wsId = long.TryParse(raw, out _) ? raw
+                    : raw.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ExtractSteamWorkshopId(raw)
+                    : null;
+                if (wsId != null) WorkshopDownloader.RemoveDownloadedItem(wsId);
+            }
+            catch { }
+        }
     }
 
     public static void CleanTrash()
     {
         if (!Directory.Exists(TrashPath)) return;
         foreach (var dir in Directory.GetDirectories(TrashPath))
-        {
-            try { Directory.Delete(dir, recursive: true); } catch { }
-        }
+            PurgeBatch(dir);
     }
 
     private static void MoveIfExists(string src, string destDir)

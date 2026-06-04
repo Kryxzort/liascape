@@ -97,10 +97,6 @@ public partial class MainWindowViewModel : ViewModelBase
         oldValue?.ReleasePreviewBitmap();
         newValue?.LoadPreviewBitmap();
     }
-    [ObservableProperty] private bool _isDownloading;
-    [ObservableProperty] private double _downloadProgress;
-    [ObservableProperty] private string _downloadTitle = "";
-    [ObservableProperty] private bool _downloadIndeterminate = true;
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private string _errorTitle = "Download Failed";
 
@@ -132,9 +128,6 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _importSourcePath = "";
 
     private CancellationTokenSource? _clearLibraryCts;
-
-    partial void OnDownloadProgressChanged(double value) =>
-        DownloadIndeterminate = value < 0.01;
 
     [RelayCommand]
     private void DismissError() => ErrorMessage = null;
@@ -200,20 +193,9 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _allowScenes;
     [ObservableProperty] private decimal _sceneTransitionDelayMs;
 
-    // Workshop acquire settings
-    [ObservableProperty] private string _workshopAcquireMode = "subscribe";
+    // Workshop acquire settings (steamcmd is the only supported method)
     [ObservableProperty] private string _steamCmdPath = "";
     [ObservableProperty] private string _steamUsername = "";
-    public bool IsWorkshopSubscribeMode
-    {
-        get => WorkshopAcquireMode == "subscribe";
-        set { if (value) WorkshopAcquireMode = "subscribe"; }
-    }
-    public bool IsWorkshopSteamCmdMode
-    {
-        get => WorkshopAcquireMode == "steamcmd";
-        set { if (value) WorkshopAcquireMode = "steamcmd"; }
-    }
 
     // Workshop sort state. The two dropdowns (sort + trend period) drive the backing
     // WorkshopSort/WorkshopTrendDays that BuildWorkshopFilter reads.
@@ -302,22 +284,7 @@ public partial class MainWindowViewModel : ViewModelBase
     ];
 
     // Workshop acquire button label (shown in browse card + preview modal)
-    public string WorkshopAcquireButtonLabel =>
-        WorkshopAcquireMode == "steamcmd" ? "Download & Apply" : "Subscribe & Import";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DownloadModalHeader))]
-    private bool _isWorkshopSubscribeWaiting;
-
-    public string DownloadModalHeader => IsWorkshopSubscribeWaiting ? "Waiting for Steam…" : "Downloading";
-
-    private CancellationTokenSource? _workshopAcquireCts;
-
-    [RelayCommand]
-    private void CancelWorkshopAcquire()
-    {
-        _workshopAcquireCts?.Cancel();
-    }
+    public string WorkshopAcquireButtonLabel => "Download & Apply";
 
     // LWE monitor management
     [ObservableProperty] private ObservableCollection<LweMonitorViewModel> _lweMonitors = [];
@@ -487,15 +454,6 @@ public partial class MainWindowViewModel : ViewModelBase
         ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).WorkshopPath = value;
         ((SteamWorkshopService)Sources.First(s => s is SteamWorkshopService)).WorkshopBasePath = value;
         if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
-        SettingsService.Save(_settings);
-    }
-
-    partial void OnWorkshopAcquireModeChanged(string value)
-    {
-        _settings.WorkshopAcquireMode = value;
-        OnPropertyChanged(nameof(IsWorkshopSubscribeMode));
-        OnPropertyChanged(nameof(IsWorkshopSteamCmdMode));
-        OnPropertyChanged(nameof(WorkshopAcquireButtonLabel));
         SettingsService.Save(_settings);
     }
 
@@ -1261,7 +1219,6 @@ public partial class MainWindowViewModel : ViewModelBase
             _selectedMonitorIsPrimary = _lweMonitors[0].IsPrimary;
         }
         _mpvOptionsPreview = _settings.BuildMpvOptions();
-        _workshopAcquireMode = _settings.WorkshopAcquireMode;
         _steamCmdPath = _settings.SteamCmdPath;
         _steamUsername = _settings.SteamUsername;
 
@@ -2375,10 +2332,7 @@ public partial class MainWindowViewModel : ViewModelBase
             LibraryItem item;
             if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
             {
-                target.DownloadLabel = _settings.WorkshopAcquireMode == "subscribe"
-                    ? "Waiting for Steam…" : "Downloading";
-                _workshopAcquireCts?.Dispose();
-                _workshopAcquireCts = cts;
+                target.DownloadLabel = "Downloading";
                 var acquireProgress = new Progress<(double, string)>(t =>
                 {
                     target.DownloadProgress = Math.Max(0, t.Item1);

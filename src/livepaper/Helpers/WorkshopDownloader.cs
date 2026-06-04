@@ -21,79 +21,42 @@ public static class WorkshopDownloader
         IProgress<(double Progress, string Status)>? progress,
         CancellationToken ct)
     {
-        return settings.WorkshopAcquireMode == "steamcmd"
-            ? await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct)
-            : await AcquireViaSubscribeAsync(settings.WallpaperEnginePath, workshopId, progress, ct);
-    }
-
-    private static async Task<string> AcquireViaSubscribeAsync(
-        string workshopBasePath,
-        string workshopId,
-        IProgress<(double, string)>? progress,
-        CancellationToken ct)
-    {
-        // Build candidate paths. Include multiple Steam library roots so the check succeeds
-        // regardless of which Steam library the user has WE installed in.
-        var candidateList = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(workshopBasePath))
-            candidateList.Add(Path.Combine(workshopBasePath, workshopId));
-        candidateList.Add(Path.Combine(SteamCmdWorkshopContentDir, workshopId));
-        // Standard Steam default path (fallback if WallpaperEnginePath is misconfigured)
-        candidateList.Add(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".local/share/Steam/steamapps/workshop/content/431960", workshopId));
-        // Steam Flatpak path
-        candidateList.Add(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960", workshopId));
-        // Discover extra Steam library folders from libraryfolders.vdf
-        foreach (var libRoot in ReadSteamLibraryRoots())
-            candidateList.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960", workshopId));
-
-        string[] candidates = [.. candidateList];
-
-        // Already downloaded — return immediately without opening Steam.
-        foreach (var dir in candidates)
+        // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
+        foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
         {
             if (IsWorkshopDirReady(dir))
                 return dir;
         }
+        return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
+    }
 
-        progress?.Report((-1, "Opening Steam…"));
+    // All places a downloaded workshop item might already live (every Steam library + steamcmd).
+    private static System.Collections.Generic.IEnumerable<string> ExistingWorkshopDirs(
+        string workshopBasePath, string workshopId)
+    {
+        var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var dirs = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrEmpty(workshopBasePath))
+            dirs.Add(Path.Combine(workshopBasePath, workshopId));
+        dirs.Add(Path.Combine(SteamCmdWorkshopContentDir, workshopId));
+        dirs.Add(Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960", workshopId));
+        dirs.Add(Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960", workshopId));
+        foreach (var libRoot in ReadSteamLibraryRoots())
+            dirs.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960", workshopId));
 
-        try
-        {
-            Process.Start(new ProcessStartInfo("xdg-open")
-            {
-                ArgumentList = { $"steam://url/CommunityFilePage/{workshopId}" },
-                UseShellExecute = false
-            });
-        }
+        foreach (var d in dirs)
+            if (seen.Add(d)) yield return d;
+    }
+
+    // Delete a steamcmd-downloaded workshop item (the "unsubscribe" equivalent on library delete).
+    // Only touches our own steamcmd cache — never the user's real Steam libraries.
+    public static void RemoveDownloadedItem(string workshopId)
+    {
+        if (string.IsNullOrWhiteSpace(workshopId)) return;
+        var dir = Path.Combine(SteamCmdWorkshopContentDir, workshopId);
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
         catch { }
-
-        progress?.Report((-1, "Waiting for Steam to download… Subscribe to the item in Steam."));
-
-        const int maxWaitMs = 600_000;
-        const int pollMs = 3_000;
-        int waited = 0;
-
-        while (waited < maxWaitMs)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            foreach (var dir in candidates)
-            {
-                if (IsWorkshopDirReady(dir))
-                    return dir;
-            }
-
-            await Task.Delay(pollMs, ct);
-            waited += pollMs;
-        }
-
-        throw new TimeoutException(
-            $"Timed out waiting for workshop item {workshopId} to download from Steam. " +
-            "Make sure you subscribed to the item and Steam is running.");
     }
 
     private static async Task<string> AcquireViaSteamCmdAsync(
