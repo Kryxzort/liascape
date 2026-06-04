@@ -500,10 +500,60 @@
                                     BorderThickness="0,0,0,1"
                                     BorderBrush="{DynamicResource Surface0}">
                                 <DockPanel>
-                                    <TextBlock Text="Your downloaded wallpapers"
-                                               Foreground="{DynamicResource Subtext}"
-                                               FontSize="13"
-                                               VerticalAlignment="Center"/>
+                                    <!-- Fallback title or status message + Undo -->
+                                    <Panel VerticalAlignment="Center">
+                                        <TextBlock Text="Your downloaded wallpapers"
+                                                   IsVisible="{Binding !HasStatusContent}"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   FontSize="13"/>
+                                        <StackPanel IsVisible="{Binding HasStatusContent}"
+                                                    Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="{Binding StatusMessage}"
+                                                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                       Foreground="{DynamicResource Subtext}"
+                                                       FontSize="13"
+                                                       VerticalAlignment="Center"/>
+                                            <Button IsVisible="{Binding CanUndo}"
+                                                    Command="{Binding UndoDeleteCommand}"
+                                                    Classes="ghost"
+                                                    Padding="8,2"
+                                                    FontSize="11">
+                                                <Button.Styles>
+                                                    <Style Selector="Button[IsVisible=true]">
+                                                        <Style.Animations>
+                                                            <Animation Duration="0:0:1.8" FillMode="None">
+                                                                <KeyFrame Cue="0%">
+                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                                <KeyFrame Cue="18%">
+                                                                    <Setter Property="BorderBrush" Value="White"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                                <KeyFrame Cue="36%">
+                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                                <KeyFrame Cue="54%">
+                                                                    <Setter Property="BorderBrush" Value="White"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                                <KeyFrame Cue="78%">
+                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                                <KeyFrame Cue="100%">
+                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                                                </KeyFrame>
+                                                            </Animation>
+                                                        </Style.Animations>
+                                                    </Style>
+                                                </Button.Styles>
+                                                Undo
+                                            </Button>
+                                        </StackPanel>
+                                    </Panel>
                                     <StackPanel DockPanel.Dock="Right"
                                                 Orientation="Horizontal"
                                                 Spacing="10"
@@ -576,57 +626,6 @@
                                                        Foreground="{DynamicResource Muted}"
                                                        LetterSpacing="2"
                                                        VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                        <!-- Status message + Undo live in the middle gap of the header row -->
-                                        <StackPanel DockPanel.Dock="Left"
-                                                    IsVisible="{Binding HasStatusContent}"
-                                                    Orientation="Horizontal" Spacing="8"
-                                                    Margin="12,0,0,0"
-                                                    VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding StatusMessage}"
-                                                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                       Foreground="{DynamicResource Muted}"
-                                                       FontSize="11"
-                                                       VerticalAlignment="Center"/>
-                                            <Button IsVisible="{Binding CanUndo}"
-                                                    Command="{Binding UndoDeleteCommand}"
-                                                    Classes="ghost"
-                                                    Padding="8,2"
-                                                    FontSize="11">
-                                                <Button.Styles>
-                                                    <Style Selector="Button[IsVisible=true]">
-                                                        <Style.Animations>
-                                                            <Animation Duration="0:0:1.8" FillMode="None">
-                                                                <KeyFrame Cue="0%">
-                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                                <KeyFrame Cue="18%">
-                                                                    <Setter Property="BorderBrush" Value="White"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                                <KeyFrame Cue="36%">
-                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                                <KeyFrame Cue="54%">
-                                                                    <Setter Property="BorderBrush" Value="White"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                                <KeyFrame Cue="78%">
-                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                                <KeyFrame Cue="100%">
-                                                                    <Setter Property="BorderBrush" Value="Transparent"/>
-                                                                    <Setter Property="BorderThickness" Value="1.5"/>
-                                                                </KeyFrame>
-                                                            </Animation>
-                                                        </Style.Animations>
-                                                    </Style>
-                                                </Button.Styles>
-                                                Undo
-                                            </Button>
                                         </StackPanel>
                                         <StackPanel DockPanel.Dock="Right"
                                                     Orientation="Horizontal"

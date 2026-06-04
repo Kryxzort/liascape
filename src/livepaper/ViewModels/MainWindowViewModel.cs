@@ -86,6 +86,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private string _statusMessage = "";
+    // Playing metadata (wallpaper title, interval, volume). Kept separate from StatusMessage
+    // so user-feedback messages (delete/undo/import) are never overwritten by playback updates.
+    [ObservableProperty] private string _playingStatus = "";
     public bool HasStatusContent => !string.IsNullOrEmpty(StatusMessage) || CanUndo;
     partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatusContent));
     [ObservableProperty] private int _currentPage = 1;
@@ -1297,7 +1300,7 @@ public partial class MainWindowViewModel : ViewModelBase
         };
 
         PlayerHelper.OnTimedPlaylistStopped = () =>
-            Dispatcher.UIThread.Post(() => StatusMessage = "");
+            Dispatcher.UIThread.Post(() => PlayingStatus = "");
 
 
         PlayerHelper.OnWallpaperChanged = path =>
@@ -2108,7 +2111,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _isSearchMode = false;
         NoMorePages = false;
         IsLoading = true;
-        StatusMessage = "";
+        PlayingStatus = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
         for (int p = 0; p < SelectedSource.PageSizeHint; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
@@ -2198,7 +2201,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = 1;
         NoMorePages = false;
         IsLoading = true;
-        StatusMessage = "";
+        PlayingStatus = "";
         BrowseWallpapers.Clear();
         _lastBrowseSelectedIndex = -1;
         for (int p = 0; p < SelectedSource.PageSizeHint; p++) BrowseWallpapers.Add(new WallpaperCardViewModel(isPlaceholder: true));
@@ -2527,7 +2530,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         PlayerHelper.Stop();
         AudioMonitor.KillDetachedMonitor();
-        StatusMessage = "";
+        PlayingStatus = "";
         if (_currentlyPlayingCard != null)
         {
             _currentlyPlayingCard.IsCurrentlyPlaying = false;
@@ -2696,6 +2699,6 @@ public partial class MainWindowViewModel : ViewModelBase
         if (Loop) parts.Add("Loop");
         if (Math.Abs(Speed - 1.0) > 0.01) parts.Add($"{Speed:0.##}×");
 
-        StatusMessage = string.Join(" • ", parts);
+        PlayingStatus = string.Join(" • ", parts);
     }
 }
