@@ -1188,6 +1188,18 @@ public partial class MainWindowViewModel : ViewModelBase
     private CancellationTokenSource? _volumeSaveCts;
     private CancellationTokenSource? _playlistSaveCts;
     private CancellationTokenSource? _playlistSyncCts;
+    private CancellationTokenSource? _statusClearCts;
+
+    private void SetTimedStatusMessage(string msg, int ms = 5000)
+    {
+        StatusMessage = msg;
+        var cts = RenewCts(ref _statusClearCts);
+        Task.Delay(ms, cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled) return;
+            Dispatcher.UIThread.Post(() => StatusMessage = "");
+        }, TaskScheduler.Default);
+    }
     private bool _isSyncingVolume;
     private bool _isSyncingSpeed;
 
@@ -2506,7 +2518,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _undoBatches.Add(new UndoBatch { BatchDir = batchDir, Items = batchItems });
             CanUndo = true;
-            StatusMessage = deleted > 1 ? $"Deleted {deleted} wallpapers (Ctrl+Z to undo)" : $"Deleted: {batchItems[0].Card.Title} (Ctrl+Z to undo)";
+            SetTimedStatusMessage(deleted > 1 ? $"Deleted {deleted} wallpapers" : $"Deleted: {batchItems[0].Card.Title}");
         }
     }
 
@@ -2524,6 +2536,7 @@ public partial class MainWindowViewModel : ViewModelBase
             if (wasInPlaylist)
                 AddCardToPlaylist(card);
         }
+        SetTimedStatusMessage(batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}");
     }
 
     public void PurgeTrash()
