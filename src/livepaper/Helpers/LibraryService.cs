@@ -468,13 +468,15 @@ public static class LibraryService
         catch { return null; }
     }
 
-    private static bool IsSymlink(string path)
+    internal static bool IsSymlink(string path)
     {
         try { return new FileInfo(path).LinkTarget != null; }
         catch { return false; }
     }
 
-    private static void CleanOrphan(string mp4Path)
+    internal static bool IsOrphanSymlink(string path) => !File.Exists(path) && IsSymlink(path);
+
+    internal static void CleanOrphan(string mp4Path)
     {
         try { File.Delete(mp4Path); } catch { }
         foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg", ".id", ".scene", ".crashed", ".whitelist", ".volume", ".speed" })

@@ -377,14 +377,33 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     partial void OnIsInPlaylistChanged(bool value) => OnPropertyChanged(nameof(CheckmarkText));
 
+    // True for WE wallpapers imported as symlinks (not copies). "Delete from Source" is only
+    // applicable here — copies have no external source folder to delete.
+    public bool IsWeSymlink => LibraryItem != null && LibraryItem.WorkshopId != null
+        && LibraryService.IsSymlink(LibraryItem.VideoPath);
+
     public Action<WallpaperCardViewModel>? OnTogglePlaylist { get; set; }
     public Action<WallpaperCardViewModel>? OnOpenSettings { get; set; }
+    public Action<WallpaperCardViewModel>? OnDelete { get; set; }
 
     [RelayCommand]
     private void AddToPlaylist() => OnTogglePlaylist?.Invoke(this);
 
     [RelayCommand]
     private void OpenSettings() => OnOpenSettings?.Invoke(this);
+
+    [RelayCommand]
+    private void DeleteFromSource()
+    {
+        if (LibraryItem == null || !IsWeSymlink) return;
+        var real = File.ResolveLinkTarget(LibraryItem.VideoPath, returnFinalTarget: true)?.FullName;
+        if (real == null) return;
+        var sourceDir = Path.GetDirectoryName(real);
+        if (sourceDir == null || !Directory.Exists(sourceDir)) return;
+        try { Directory.Delete(sourceDir, recursive: true); }
+        catch { return; }
+        OnDelete?.Invoke(this);
+    }
 
     [RelayCommand]
     private void OpenPage()

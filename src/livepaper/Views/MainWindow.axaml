@@ -118,7 +118,7 @@
                                 <!-- Source pills -->
                                 <ListBox DockPanel.Dock="Left"
                                          Classes="pills"
-                                         ItemsSource="{Binding Sources}"
+                                         ItemsSource="{Binding FilteredSources}"
                                          SelectedItem="{Binding SelectedSource}">
                                     <ListBox.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -727,6 +727,9 @@
                                                                   Command="{Binding OpenInFileManagerCommand}"/>
                                                         <MenuItem Header="Settings"
                                                                   Command="{Binding OpenSettingsCommand}"/>
+                                                        <MenuItem Header="Delete from Source"
+                                                                  Command="{Binding DeleteFromSourceCommand}"
+                                                                  IsVisible="{Binding IsWeSymlink}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
                                                 <Grid>

@@ -683,6 +683,7 @@ public partial class MainWindow : Window
             {
                 DeactivateRealized(_realizedBrowse);
                 ReconcileLibraryGifs();
+                Vm?.ValidateLibraryGhosts();
             }
         }, DispatcherPriority.Background);
     }
