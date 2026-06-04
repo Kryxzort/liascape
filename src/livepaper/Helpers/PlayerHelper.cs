@@ -851,7 +851,12 @@ public static class PlayerHelper
                 return;
             }
 
-            if (!_waitingForVideoEnd && (!_advanceOnVideoEnd || IsLweRunning))
+            // Freeze countdown only when BOTH waitForVideoEnd=true and a waiter is active.
+            // In advance-on-end-only combined mode (_waitForVideoEnd=false), the interval still
+            // counts so it can fire as a fallback if the video runs long.
+            // _timedInterval > Zero distinguishes combined/timed mode from pure advance-on-end
+            // (where _timedInterval = Zero and the countdown is irrelevant).
+            if ((!_waitingForVideoEnd || !_waitForVideoEnd) && (!_advanceOnVideoEnd || _timedInterval > TimeSpan.Zero || IsLweRunning))
             {
                 // Scale by playback speed so the timer counts video-time, not wall-clock.
                 // At 2x speed the interval expires in half the wall-clock time, which is
@@ -860,24 +865,36 @@ public static class PlayerHelper
                 _timedRemainingMs -= (long)(elapsedMs * speedFactor);
             }
 
-            if (_timedRemainingMs <= 0 && !_waitingForVideoEnd)
+            // _timedInterval > Zero prevents spurious expiry in pure advance-on-end mode
+            // (where _timedInterval = Zero and _timedRemainingMs starts at 0).
+            if (_timedRemainingMs <= 0 && _timedInterval > TimeSpan.Zero)
             {
-                if (_waitForVideoEnd)
+                if (_waitingForVideoEnd && !_waitForVideoEnd)
                 {
-                    var next = AdvanceToNext();
-                    if (next != null)
+                    // Combined mode: interval fired before the video ended.
+                    // AdvanceAndLaunch handles the pre-fetched _historyIndex + cancels the waiter.
+                    AdvanceAndLaunch();
+                }
+                else if (!_waitingForVideoEnd)
+                {
+                    if (_waitForVideoEnd)
                     {
-                        ArmVideoEndWait(next, prevIsVideo: false);
+                        var next = AdvanceToNext();
+                        if (next != null)
+                        {
+                            ArmVideoEndWait(next, prevIsVideo: false);
+                        }
+                        else
+                        {
+                            AdvanceAndLaunch();
+                        }
                     }
                     else
                     {
                         AdvanceAndLaunch();
                     }
                 }
-                else
-                {
-                    AdvanceAndLaunch();
-                }
+                // _waitingForVideoEnd && _waitForVideoEnd: DoVideoEndWait handles the advance
             }
 
             _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1699,6 +1716,10 @@ public static class PlayerHelper
         {
             var next = AdvanceToNext();
             if (next != null) ArmVideoEndWait(next);
+            // In combined mode (advance-on-end + real interval), also reset the fallback countdown
+            // so the interval applies fresh to the newly started video.
+            if (_timedInterval > TimeSpan.Zero)
+                _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
         }
         else
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
