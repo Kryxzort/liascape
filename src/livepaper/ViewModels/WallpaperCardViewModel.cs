@@ -386,6 +386,8 @@ public partial class WallpaperCardViewModel : ViewModelBase
     [ObservableProperty] private double _downloadProgress;
     [ObservableProperty] private bool _isDownloadIndeterminate = true;
     [ObservableProperty] private string _downloadLabel = "Downloading";
+    // Auto-switch from indeterminate spinner to actual progress bar as soon as bytes arrive.
+    partial void OnDownloadProgressChanged(double value) => IsDownloadIndeterminate = value < 0.01;
     public Action? CancelDownload { get; set; }
 
     [RelayCommand]

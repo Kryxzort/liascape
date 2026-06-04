@@ -32,6 +32,19 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
+        string[] candidates =
+        [
+            Path.Combine(workshopBasePath, workshopId),
+            Path.Combine(SteamCmdWorkshopContentDir, workshopId)
+        ];
+
+        // Already downloaded — return immediately without opening Steam.
+        foreach (var dir in candidates)
+        {
+            if (IsWorkshopDirReady(dir))
+                return dir;
+        }
+
         progress?.Report((-1, "Opening Steam…"));
 
         try
@@ -45,12 +58,6 @@ public static class WorkshopDownloader
         catch { }
 
         progress?.Report((-1, "Waiting for Steam to download… Subscribe to the item in Steam."));
-
-        string[] candidates =
-        [
-            Path.Combine(workshopBasePath, workshopId),
-            Path.Combine(SteamCmdWorkshopContentDir, workshopId)
-        ];
 
         const int maxWaitMs = 600_000;
         const int pollMs = 3_000;
@@ -168,10 +175,14 @@ public static class WorkshopDownloader
     private static bool IsWorkshopDirReady(string dir)
     {
         if (!Directory.Exists(dir)) return false;
+        // Scenes use scene.pkg; videos use project.json — either is valid.
         string pj = Path.Combine(dir, "project.json");
-        if (!File.Exists(pj)) return false;
-        try { return new FileInfo(pj).Length > 10; }
-        catch { return false; }
+        if (File.Exists(pj))
+        {
+            try { return new FileInfo(pj).Length > 10; }
+            catch { return false; }
+        }
+        return File.Exists(Path.Combine(dir, "scene.pkg"));
     }
 
     public static string? FindSteamCmd(string? configured)

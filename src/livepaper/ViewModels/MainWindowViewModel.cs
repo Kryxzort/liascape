@@ -2321,153 +2321,144 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private Task DownloadAsync(WallpaperCardViewModel card) =>
-        DownloadCardsAsync([card], applyTarget: card);
+    private Task DownloadAsync(WallpaperCardViewModel card)
+    {
+        // Fire-and-forget per card so clicking another card's button starts immediately.
+        _ = DownloadOneAsync(card, applyOnSuccess: true);
+        return Task.CompletedTask;
+    }
 
     [RelayCommand]
     private async Task DownloadSelectedAsync()
     {
         var selected = BrowseWallpapers.Where(c => c.IsSelected).ToList();
         if (selected.Count == 0) return;
-        await DownloadCardsAsync(selected, applyTarget: null);
         ClearBrowseSelection();
+        await Task.WhenAll(selected.Select(c => DownloadOneAsync(c, applyOnSuccess: false)));
+        if (selected.Count > 1)
+            StatusMessage = $"Downloaded {selected.Count(c => !c.IsDownloading)} wallpapers";
+    }
+
+    private async Task DownloadOneAsync(WallpaperCardViewModel target, bool applyOnSuccess)
+    {
+        if (target.IsDownloading) return;
+
+        // Dedup check
+        var existing = LibraryWallpapers.FirstOrDefault(c =>
+            (c.LibraryItem?.SourceId != null && c.LibraryItem.SourceId == target.PageUrl) ||
+            (target.WorkshopId != null && c.LibraryItem?.WorkshopId == target.WorkshopId));
+        if (existing != null)
+        {
+            if (applyOnSuccess) ApplyAndSave(existing.PageUrl);
+            StatusMessage = $"Applied: {target.Title}";
+            return;
+        }
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        target.IsDownloading = true;
+        target.DownloadProgress = 0;
+        target.IsDownloadIndeterminate = true;
+        target.DownloadLabel = "Downloading";
+        target.CancelDownload = () => cts.Cancel();
+
+        try
+        {
+            var detail = await SelectedSource.GetDetailAsync(new WallpaperResult
+            {
+                Title = target.Title,
+                ThumbnailUrl = target.ThumbnailSource,
+                PageUrl = target.PageUrl,
+                IsScene = target.IsScene,
+                WorkshopId = target.WorkshopId
+            });
+
+            LibraryItem item;
+            if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
+            {
+                target.DownloadLabel = _settings.WorkshopAcquireMode == "subscribe"
+                    ? "Waiting for Steam…" : "Downloading";
+                _workshopAcquireCts?.Dispose();
+                _workshopAcquireCts = cts;
+                var acquireProgress = new Progress<(double, string)>(t =>
+                {
+                    target.DownloadProgress = Math.Max(0, t.Item1);
+                    StatusMessage = t.Item2;
+                });
+                string workshopDir = await WorkshopDownloader.AcquireAsync(
+                    detail.WorkshopId, _settings, acquireProgress, cts.Token);
+                target.DownloadLabel = "Downloading";
+                StatusMessage = $"Importing {target.Title}…";
+
+                // Re-check dedup after wait
+                existing = LibraryWallpapers.FirstOrDefault(c =>
+                    c.LibraryItem?.WorkshopId == detail.WorkshopId);
+                if (existing != null)
+                {
+                    if (applyOnSuccess) ApplyAndSave(existing.PageUrl);
+                    StatusMessage = $"Applied: {target.Title}";
+                    return;
+                }
+
+                string downloadUrl = workshopDir;
+                if (!detail.IsScene)
+                {
+                    var videoFile = await WorkshopDownloader.ResolveVideoFileAsync(workshopDir);
+                    if (!string.IsNullOrEmpty(videoFile))
+                        downloadUrl = videoFile;
+                }
+
+                var localDetail = new WallpaperDetail
+                {
+                    Title = detail.Title,
+                    PreviewUrl = target.ThumbnailSource,
+                    DownloadUrl = downloadUrl,
+                    IsScene = detail.IsScene,
+                    WorkshopId = detail.WorkshopId,
+                    NeedsReferrer = false
+                };
+                item = await DownloadHelper.DownloadAsync(
+                    localDetail, target.ThumbnailSource,
+                    target.PageUrl, null, WeCopyFiles, cts.Token);
+            }
+            else
+            {
+                var progressReporter = new Progress<double>(p => target.DownloadProgress = p);
+                item = await DownloadHelper.DownloadAsync(
+                    detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles, cts.Token);
+            }
+
+            var libCard = MakeLibraryCard(item);
+            LibraryWallpapers.Add(libCard);
+
+            if (applyOnSuccess) ApplyAndSave(item.VideoPath);
+            StatusMessage = $"Applied: {target.Title}";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = $"Cancelled: {target.Title}";
+        }
+        catch (Exception ex)
+        {
+            bool isRateLimit = ex.Message.Contains("daily download limit");
+            ErrorTitle = isRateLimit ? "Wallsflow Download Limit" : "Download Failed";
+            ErrorMessage = isRateLimit
+                ? "Wallsflow limits unregistered users to 5 downloads per day. Log in to your Wallsflow account in Settings to continue downloading."
+                : ex.Message;
+            StatusMessage = $"Download failed: {target.Title}: {ex.Message}";
+        }
+        finally
+        {
+            target.IsDownloading = false;
+            target.CancelDownload = null;
+        }
     }
 
     private async Task DownloadCardsAsync(IReadOnlyList<WallpaperCardViewModel> targets, WallpaperCardViewModel? applyTarget)
     {
+        // Legacy path kept for any callers; routes through DownloadOneAsync.
         if (targets.Count == 0) return;
         PreviewCard = null;
-
-        bool applied = false;
-        int completed = 0;
-        int succeeded = 0;
-
-        foreach (var target in targets)
-        {
-            // Dedup: check by source URL or by workshop ID (covers WE Local imports)
-            var existing = LibraryWallpapers.FirstOrDefault(c =>
-                (c.LibraryItem?.SourceId != null && c.LibraryItem.SourceId == target.PageUrl) ||
-                (target.WorkshopId != null && c.LibraryItem?.WorkshopId == target.WorkshopId));
-            if (existing != null)
-            {
-                if (target == applyTarget && !applied) { ApplyAndSave(existing.PageUrl); applied = true; }
-                StatusMessage = $"Applied: {target.Title}";
-                completed++;
-                succeeded++;
-                continue;
-            }
-
-            using var cts = new System.Threading.CancellationTokenSource();
-            target.IsDownloading = true;
-            target.DownloadProgress = 0;
-            target.IsDownloadIndeterminate = true;
-            target.DownloadLabel = "Downloading";
-            target.CancelDownload = () => cts.Cancel();
-
-            try
-            {
-                var detail = await SelectedSource.GetDetailAsync(new WallpaperResult
-                {
-                    Title = target.Title,
-                    ThumbnailUrl = target.ThumbnailSource,
-                    PageUrl = target.PageUrl,
-                    IsScene = target.IsScene,
-                    WorkshopId = target.WorkshopId
-                });
-
-                LibraryItem item;
-                if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
-                {
-                    target.DownloadLabel = _settings.WorkshopAcquireMode == "subscribe"
-                        ? "Waiting for Steam…" : "Downloading";
-                    _workshopAcquireCts?.Dispose();
-                    _workshopAcquireCts = cts;
-                    var acquireProgress = new Progress<(double, string)>(t =>
-                    {
-                        target.DownloadProgress = Math.Max(0, t.Item1);
-                        StatusMessage = t.Item2;
-                    });
-                    string workshopDir = await WorkshopDownloader.AcquireAsync(
-                        detail.WorkshopId, _settings, acquireProgress, cts.Token);
-                    target.DownloadLabel = "Downloading";
-                    StatusMessage = $"Importing {target.Title}…";
-
-                    // Re-check dedup (might have appeared while waiting)
-                    existing = LibraryWallpapers.FirstOrDefault(c =>
-                        c.LibraryItem?.WorkshopId == detail.WorkshopId);
-                    if (existing != null)
-                    {
-                        if (target == applyTarget && !applied) { ApplyAndSave(existing.PageUrl); applied = true; }
-                        StatusMessage = $"Applied: {target.Title}";
-                        completed++;
-                        succeeded++;
-                        target.IsDownloading = false;
-                        target.CancelDownload = null;
-                        continue;
-                    }
-
-                    // For video items, resolve the actual video file from project.json.
-                    string downloadUrl = workshopDir;
-                    if (!detail.IsScene)
-                    {
-                        var videoFile = await WorkshopDownloader.ResolveVideoFileAsync(workshopDir);
-                        if (!string.IsNullOrEmpty(videoFile))
-                            downloadUrl = videoFile;
-                    }
-
-                    var localDetail = new WallpaperDetail
-                    {
-                        Title = detail.Title,
-                        PreviewUrl = target.ThumbnailSource,
-                        DownloadUrl = downloadUrl,
-                        IsScene = detail.IsScene,
-                        WorkshopId = detail.WorkshopId,
-                        NeedsReferrer = false
-                    };
-                    item = await DownloadHelper.DownloadAsync(
-                        localDetail, target.ThumbnailSource,
-                        target.PageUrl, null, WeCopyFiles, cts.Token);
-                }
-                else
-                {
-                    target.IsDownloadIndeterminate = false;
-                    var progressReporter = new Progress<double>(p => target.DownloadProgress = p);
-                    item = await DownloadHelper.DownloadAsync(
-                        detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles, cts.Token);
-                }
-
-                var libCard = MakeLibraryCard(item);
-                LibraryWallpapers.Add(libCard);
-
-                if (target == applyTarget && !applied) { ApplyAndSave(item.VideoPath); applied = true; }
-                StatusMessage = $"Applied: {target.Title}";
-                succeeded++;
-            }
-            catch (OperationCanceledException)
-            {
-                StatusMessage = $"Cancelled: {target.Title}";
-                completed++;
-                target.IsDownloading = false;
-                target.CancelDownload = null;
-                break;
-            }
-            catch (Exception ex)
-            {
-                bool isRateLimit = ex.Message.Contains("daily download limit");
-                ErrorTitle = isRateLimit ? "Wallsflow Download Limit" : "Download Failed";
-                ErrorMessage = isRateLimit
-                    ? "Wallsflow limits unregistered users to 5 downloads per day. Log in to your Wallsflow account in Settings to continue downloading."
-                    : ex.Message;
-                StatusMessage = $"Download failed: {target.Title}: {ex.Message}";
-            }
-
-            target.IsDownloading = false;
-            target.CancelDownload = null;
-            completed++;
-        }
-
-        if (targets.Count > 1)
-            StatusMessage = $"Downloaded {succeeded}/{targets.Count} wallpapers";
+        await Task.WhenAll(targets.Select(t => DownloadOneAsync(t, applyOnSuccess: t == applyTarget)));
     }
 
     [RelayCommand]
