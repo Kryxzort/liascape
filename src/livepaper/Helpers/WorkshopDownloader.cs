@@ -32,11 +32,25 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
-        string[] candidates =
-        [
-            Path.Combine(workshopBasePath, workshopId),
-            Path.Combine(SteamCmdWorkshopContentDir, workshopId)
-        ];
+        // Build candidate paths. Include multiple Steam library roots so the check succeeds
+        // regardless of which Steam library the user has WE installed in.
+        var candidateList = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(workshopBasePath))
+            candidateList.Add(Path.Combine(workshopBasePath, workshopId));
+        candidateList.Add(Path.Combine(SteamCmdWorkshopContentDir, workshopId));
+        // Standard Steam default path (fallback if WallpaperEnginePath is misconfigured)
+        candidateList.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local/share/Steam/steamapps/workshop/content/431960", workshopId));
+        // Steam Flatpak path
+        candidateList.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960", workshopId));
+        // Discover extra Steam library folders from libraryfolders.vdf
+        foreach (var libRoot in ReadSteamLibraryRoots())
+            candidateList.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960", workshopId));
+
+        string[] candidates = [.. candidateList];
 
         // Already downloaded — return immediately without opening Steam.
         foreach (var dir in candidates)
@@ -170,6 +184,43 @@ public static class WorkshopDownloader
             return File.Exists(path) ? path : null;
         }
         catch { return null; }
+    }
+
+    // Parse Steam's libraryfolders.vdf to discover all Steam library roots (users with
+    // games on multiple drives). Best-effort: returns roots whose path key we can extract.
+    private static System.Collections.Generic.List<string> ReadSteamLibraryRoots()
+    {
+        var roots = new System.Collections.Generic.List<string>();
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string[] vdfCandidates =
+        [
+            Path.Combine(home, ".local/share/Steam/steamapps/libraryfolders.vdf"),
+            Path.Combine(home, ".steam/steam/steamapps/libraryfolders.vdf"),
+            Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"),
+        ];
+
+        foreach (var vdf in vdfCandidates)
+        {
+            if (!File.Exists(vdf)) continue;
+            try
+            {
+                foreach (var line in File.ReadLines(vdf))
+                {
+                    // Lines look like:  "path"   "/mnt/games/SteamLibrary"
+                    var trimmed = line.TrimStart();
+                    if (!trimmed.StartsWith("\"path\"", StringComparison.OrdinalIgnoreCase)) continue;
+                    int firstQuote = trimmed.IndexOf('"', 6);
+                    if (firstQuote < 0) continue;
+                    int secondQuote = trimmed.IndexOf('"', firstQuote + 1);
+                    if (secondQuote < 0) continue;
+                    var path = trimmed.Substring(firstQuote + 1, secondQuote - firstQuote - 1)
+                        .Replace("\\\\", "/");
+                    if (!string.IsNullOrEmpty(path)) roots.Add(path);
+                }
+            }
+            catch { }
+        }
+        return roots;
     }
 
     private static bool IsWorkshopDirReady(string dir)
