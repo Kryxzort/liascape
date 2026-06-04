@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,12 +23,87 @@ public static class WorkshopDownloader
         CancellationToken ct)
     {
         // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
+        // Subscribe mode still subscribes below so the item is tracked online even if present.
+        bool alreadyHave = false;
         foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
         {
-            if (IsWorkshopDirReady(dir))
-                return dir;
+            if (IsWorkshopDirReady(dir)) { alreadyHave = true; break; }
         }
-        return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
+
+        if (settings.WorkshopAcquireMode == "steamcmd")
+        {
+            if (alreadyHave)
+                foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
+                    if (IsWorkshopDirReady(dir)) return dir;
+            return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
+        }
+
+        return await AcquireViaSubscribeAsync(workshopId, settings, progress, ct);
+    }
+
+    // Real Steam subscription via the community AJAX endpoint (same call the website's Subscribe
+    // button makes). Steam then syncs + auto-updates the item like any normal subscription, and the
+    // running Steam client downloads it to a workshop/content/431960 dir which we poll for.
+    private static async Task<string> AcquireViaSubscribeAsync(
+        string workshopId,
+        AppSettings settings,
+        IProgress<(double, string)>? progress,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(settings.SteamLoginSecure))
+            throw new InvalidOperationException(
+                "Steam login cookie not set. Paste your steamLoginSecure cookie in " +
+                "Settings → Sources, or switch to steamcmd mode.");
+
+        progress?.Report((-1, "Subscribing on Steam…"));
+        await SubscribeAsync(workshopId, settings.SteamLoginSecure, subscribe: true, ct);
+
+        progress?.Report((-1, "Subscribed — waiting for Steam to download…"));
+
+        const int maxWaitMs = 600_000;
+        const int pollMs = 3_000;
+        int waited = 0;
+        while (waited < maxWaitMs)
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
+                if (IsWorkshopDirReady(dir)) return dir;
+            await Task.Delay(pollMs, ct);
+            waited += pollMs;
+        }
+
+        throw new TimeoutException(
+            $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. " +
+            "Make sure Steam is running and signed in.");
+    }
+
+    // POST to /sharedfiles/subscribe (or /unsubscribe). sessionid is CSRF: it must match between
+    // the cookie and the form field, but its value is arbitrary — we generate one. steamLoginSecure
+    // is the real auth token (the user's logged-in web session).
+    public static async Task SubscribeAsync(string workshopId, string steamLoginSecure, bool subscribe, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(steamLoginSecure) || string.IsNullOrWhiteSpace(workshopId)) return;
+        string sessionId = Guid.NewGuid().ToString("N")[..24];
+        string action = subscribe ? "subscribe" : "unsubscribe";
+
+        using var req = new HttpRequestMessage(HttpMethod.Post,
+            $"https://steamcommunity.com/sharedfiles/{action}");
+        req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
+        req.Headers.Add("Cookie", $"sessionid={sessionId}; steamLoginSecure={steamLoginSecure.Trim()}");
+        req.Content = new FormUrlEncodedContent(new System.Collections.Generic.Dictionary<string, string>
+        {
+            ["id"] = workshopId,
+            ["appid"] = "431960",
+            ["sessionid"] = sessionId,
+        });
+
+        using var resp = await HttpClientProvider.Client.SendAsync(req, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        // Steam returns {"success":1} on success; 1 also = already in that state.
+        if (!resp.IsSuccessStatusCode || body.Contains("\"success\":8") || body.Contains("\"success\":15"))
+            throw new InvalidOperationException(
+                "Steam rejected the subscribe request — your login cookie may be expired. " +
+                "Re-paste steamLoginSecure in Settings → Sources.");
     }
 
     // All places a downloaded workshop item might already live (every Steam library + steamcmd).

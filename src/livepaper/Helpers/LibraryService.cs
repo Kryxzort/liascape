@@ -279,6 +279,7 @@ public static class LibraryService
     private static void RemoveSteamCmdContentForBatch(string batchDir)
     {
         if (!Directory.Exists(batchDir)) return;
+        var settings = SettingsService.Load();
         foreach (var idFile in Directory.EnumerateFiles(batchDir, "*.id"))
         {
             try
@@ -287,7 +288,14 @@ public static class LibraryService
                 string? wsId = long.TryParse(raw, out _) ? raw
                     : raw.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ExtractSteamWorkshopId(raw)
                     : null;
-                if (wsId != null) WorkshopDownloader.RemoveDownloadedItem(wsId);
+                if (wsId == null) continue;
+
+                // steamcmd cache cleanup (harmless if not present).
+                WorkshopDownloader.RemoveDownloadedItem(wsId);
+
+                // Real unsubscribe if a Steam login cookie is configured — best-effort, fire-and-forget.
+                if (!string.IsNullOrWhiteSpace(settings.SteamLoginSecure))
+                    _ = WorkshopDownloader.SubscribeAsync(wsId, settings.SteamLoginSecure, subscribe: false);
             }
             catch { }
         }

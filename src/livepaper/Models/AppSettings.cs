@@ -57,6 +57,9 @@ public class AppSettings
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoImportWallpaperEngine { get; set; } = false;
     public bool IsPlaylistCollapsed { get; set; } = false;
+    // "subscribe" (real Steam subscription via community endpoint) or "steamcmd" (direct download).
+    public string WorkshopAcquireMode { get; set; } = "subscribe";
+    public string SteamLoginSecure { get; set; } = "";
     public string SteamCmdPath { get; set; } = "";
     public string SteamUsername { get; set; } = "";
     public LastSession? LastSession { get; set; }

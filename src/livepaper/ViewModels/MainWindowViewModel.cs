@@ -193,9 +193,21 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _allowScenes;
     [ObservableProperty] private decimal _sceneTransitionDelayMs;
 
-    // Workshop acquire settings (steamcmd is the only supported method)
+    // Workshop acquire settings
+    [ObservableProperty] private string _workshopAcquireMode = "subscribe";
+    [ObservableProperty] private string _steamLoginSecure = "";
     [ObservableProperty] private string _steamCmdPath = "";
     [ObservableProperty] private string _steamUsername = "";
+    public bool IsWorkshopSubscribeMode
+    {
+        get => WorkshopAcquireMode == "subscribe";
+        set { if (value) WorkshopAcquireMode = "subscribe"; }
+    }
+    public bool IsWorkshopSteamCmdMode
+    {
+        get => WorkshopAcquireMode == "steamcmd";
+        set { if (value) WorkshopAcquireMode = "steamcmd"; }
+    }
 
     // Workshop sort state. The two dropdowns (sort + trend period) drive the backing
     // WorkshopSort/WorkshopTrendDays that BuildWorkshopFilter reads.
@@ -284,7 +296,8 @@ public partial class MainWindowViewModel : ViewModelBase
     ];
 
     // Workshop acquire button label (shown in browse card + preview modal)
-    public string WorkshopAcquireButtonLabel => "Download & Apply";
+    public string WorkshopAcquireButtonLabel =>
+        WorkshopAcquireMode == "subscribe" ? "Subscribe & Apply" : "Download & Apply";
 
     // LWE monitor management
     [ObservableProperty] private ObservableCollection<LweMonitorViewModel> _lweMonitors = [];
@@ -454,6 +467,21 @@ public partial class MainWindowViewModel : ViewModelBase
         ((WallpaperEngineService)Sources.First(s => s is WallpaperEngineService)).WorkshopPath = value;
         ((SteamWorkshopService)Sources.First(s => s is SteamWorkshopService)).WorkshopBasePath = value;
         if (SelectedSource is WallpaperEngineService) _ = LoadWallpapersAsync();
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnWorkshopAcquireModeChanged(string value)
+    {
+        _settings.WorkshopAcquireMode = value;
+        OnPropertyChanged(nameof(IsWorkshopSubscribeMode));
+        OnPropertyChanged(nameof(IsWorkshopSteamCmdMode));
+        OnPropertyChanged(nameof(WorkshopAcquireButtonLabel));
+        SettingsService.Save(_settings);
+    }
+
+    partial void OnSteamLoginSecureChanged(string value)
+    {
+        _settings.SteamLoginSecure = value;
         SettingsService.Save(_settings);
     }
 
@@ -1219,6 +1247,8 @@ public partial class MainWindowViewModel : ViewModelBase
             _selectedMonitorIsPrimary = _lweMonitors[0].IsPrimary;
         }
         _mpvOptionsPreview = _settings.BuildMpvOptions();
+        _workshopAcquireMode = _settings.WorkshopAcquireMode;
+        _steamLoginSecure = _settings.SteamLoginSecure;
         _steamCmdPath = _settings.SteamCmdPath;
         _steamUsername = _settings.SteamUsername;
 
@@ -2332,7 +2362,8 @@ public partial class MainWindowViewModel : ViewModelBase
             LibraryItem item;
             if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
             {
-                target.DownloadLabel = "Downloading";
+                target.DownloadLabel = _settings.WorkshopAcquireMode == "subscribe"
+                    ? "Subscribing…" : "Downloading";
                 var acquireProgress = new Progress<(double, string)>(t =>
                 {
                     target.DownloadProgress = Math.Max(0, t.Item1);

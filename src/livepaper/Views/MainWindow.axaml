@@ -1439,14 +1439,42 @@
                                        LetterSpacing="2"/>
                             <Border Background="{DynamicResource BgBase}" CornerRadius="10" Padding="16">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Text="Workshop items download via steamcmd"
+                                    <TextBlock Text="How to acquire Workshop wallpapers"
                                                Foreground="{DynamicResource TextColor}"/>
-                                    <TextBlock Text="Requires steamcmd installed and a one-time Steam sign-in. After signing in, downloads are fully automatic. Deleting a workshop wallpaper also removes its downloaded files."
-                                               FontSize="11" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource Muted}"/>
+                                    <StackPanel Spacing="8">
+                                        <RadioButton Content="Subscribe via Steam (keeps synced + auto-updates)"
+                                                     GroupName="WsAcquireMode"
+                                                     IsChecked="{Binding IsWorkshopSubscribeMode}"
+                                                     Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Truly subscribes the item on Steam so it stays synced and updated. Needs your Steam login cookie below and Steam running. Deleting unsubscribes."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   Margin="24,0,0,0"/>
+                                        <RadioButton Content="Download via steamcmd (snapshot, no sync)"
+                                                     GroupName="WsAcquireMode"
+                                                     IsChecked="{Binding IsWorkshopSteamCmdMode}"
+                                                     Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Downloads a one-time snapshot via steamcmd. No online subscription. Requires steamcmd + one-time sign-in."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   Margin="24,0,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- Subscribe settings (cookie) -->
+                                    <StackPanel IsVisible="{Binding IsWorkshopSubscribeMode}" Spacing="10" Margin="0,4,0,0">
+                                        <TextBlock Text="Steam login cookie (steamLoginSecure)"
+                                                   Foreground="{DynamicResource Subtext}"
+                                                   FontSize="12"/>
+                                        <TextBox Text="{Binding SteamLoginSecure}"
+                                                 PlaceholderText="paste steamLoginSecure cookie value"
+                                                 Foreground="{DynamicResource TextColor}"/>
+                                        <TextBlock Text="Get it from a browser logged into steamcommunity.com: DevTools (F12) → Application → Cookies → steamcommunity.com → copy the steamLoginSecure value. Steam must be running for downloads to sync."
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Muted}"/>
+                                    </StackPanel>
 
                                     <!-- steamcmd settings -->
-                                    <StackPanel Spacing="10" Margin="0,4,0,0">
+                                    <StackPanel IsVisible="{Binding IsWorkshopSteamCmdMode}" Spacing="10" Margin="0,4,0,0">
                                         <TextBlock Text="steamcmd path (leave blank to auto-detect)"
                                                    Foreground="{DynamicResource Subtext}"
                                                    FontSize="12"/>
