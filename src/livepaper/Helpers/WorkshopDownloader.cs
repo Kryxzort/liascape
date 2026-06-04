@@ -50,13 +50,8 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(settings.SteamLoginSecure))
-            throw new InvalidOperationException(
-                "Steam login cookie not set. Paste your steamLoginSecure cookie in " +
-                "Settings → Sources, or switch to steamcmd mode.");
-
         progress?.Report((-1, "Subscribing on Steam…"));
-        await SubscribeAsync(workshopId, settings.SteamLoginSecure, subscribe: true, ct);
+        await SetSubscribedAsync(workshopId, settings, subscribe: true, ct);
 
         progress?.Report((-1, "Subscribed — waiting for Steam to download…"));
 
@@ -75,6 +70,18 @@ public static class WorkshopDownloader
         throw new TimeoutException(
             $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. " +
             "Make sure Steam is running and signed in.");
+    }
+
+    // Obtains a valid steamLoginSecure (auto-minted from the stored refresh token, or manual paste)
+    // then subscribes/unsubscribes. This is the entry point callers use.
+    public static async Task SetSubscribedAsync(string workshopId, AppSettings settings, bool subscribe, CancellationToken ct = default)
+    {
+        var cookie = await SteamAuthService.GetCookieAsync(settings, ct);
+        if (string.IsNullOrWhiteSpace(cookie))
+            throw new InvalidOperationException(
+                "Not signed in to Steam. Use \"Sign in with Steam (QR)\" in Settings → Sources, " +
+                "or switch to steamcmd mode.");
+        await SubscribeAsync(workshopId, cookie, subscribe, ct);
     }
 
     // POST to /sharedfiles/subscribe (or /unsubscribe). sessionid is CSRF: it must match between

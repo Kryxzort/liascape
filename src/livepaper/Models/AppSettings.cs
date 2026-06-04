@@ -59,6 +59,12 @@ public class AppSettings
     public bool IsPlaylistCollapsed { get; set; } = false;
     // "subscribe" (real Steam subscription via community endpoint) or "steamcmd" (direct download).
     public string WorkshopAcquireMode { get; set; } = "subscribe";
+    // QR sign-in: refresh token (~1yr) + steamid; access token (~24h) cached + auto-minted.
+    public string SteamRefreshToken { get; set; } = "";
+    public ulong SteamId { get; set; } = 0;
+    public string SteamAccessToken { get; set; } = "";
+    public string SteamAccountName { get; set; } = "";
+    // Manual cookie paste (fallback / advanced; used only when no refresh token is stored).
     public string SteamLoginSecure { get; set; } = "";
     public string SteamCmdPath { get; set; } = "";
     public string SteamUsername { get; set; } = "";

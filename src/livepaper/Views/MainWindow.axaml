@@ -1460,15 +1460,22 @@
                                                    Margin="24,0,0,0"/>
                                     </StackPanel>
 
-                                    <!-- Subscribe settings (cookie) -->
+                                    <!-- Subscribe settings (QR sign-in) -->
                                     <StackPanel IsVisible="{Binding IsWorkshopSubscribeMode}" Spacing="10" Margin="0,4,0,0">
-                                        <TextBlock Text="Steam login cookie (steamLoginSecure)"
-                                                   Foreground="{DynamicResource Subtext}"
-                                                   FontSize="12"/>
-                                        <TextBox Text="{Binding SteamLoginSecure}"
-                                                 PlaceholderText="paste steamLoginSecure cookie value"
-                                                 Foreground="{DynamicResource TextColor}"/>
-                                        <TextBlock Text="Get it from a browser logged into steamcommunity.com: DevTools (F12) → Application → Cookies → steamcommunity.com → copy the steamLoginSecure value. Steam must be running for downloads to sync."
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button Content="Sign in with Steam (QR)"
+                                                    Classes="accent"
+                                                    Command="{Binding SignInWithQrCommand}"/>
+                                            <Button Content="Sign out"
+                                                    Classes="ghost"
+                                                    IsVisible="{Binding IsSteamSignedIn}"
+                                                    Command="{Binding SignOutSteamCommand}"/>
+                                            <TextBlock Text="{Binding SteamSignInLabel}"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource Subtext}"
+                                                       FontSize="12"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Scan once with the Steam mobile app. Stays signed in ~1 year and auto-renews — no daily re-login. Steam must be running for downloads to sync."
                                                    FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource Muted}"/>
                                     </StackPanel>
@@ -1964,6 +1971,28 @@
                     </Grid>
 
                 </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Steam QR sign-in modal -->
+        <Grid Grid.RowSpan="3" IsVisible="{Binding IsSteamQrOpen}" Background="#B2000000">
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
+                    Width="360" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel Spacing="14" HorizontalAlignment="Center">
+                    <TextBlock Text="Sign in to Steam" FontSize="15" FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextColor}"/>
+                    <Border Background="White" CornerRadius="8" Padding="12"
+                            Width="232" Height="232"
+                            HorizontalAlignment="Center">
+                        <Image Source="{Binding SteamQrImage}" Stretch="Uniform"/>
+                    </Border>
+                    <TextBlock Text="{Binding SteamQrStatus}" FontSize="12"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource Subtext}"/>
+                    <Button Content="Cancel" Classes="ghost" HorizontalAlignment="Center"
+                            Command="{Binding CancelSteamQrCommand}"/>
+                </StackPanel>
             </Border>
         </Grid>
 

@@ -293,9 +293,11 @@ public static class LibraryService
                 // steamcmd cache cleanup (harmless if not present).
                 WorkshopDownloader.RemoveDownloadedItem(wsId);
 
-                // Real unsubscribe if a Steam login cookie is configured — best-effort, fire-and-forget.
-                if (!string.IsNullOrWhiteSpace(settings.SteamLoginSecure))
-                    _ = WorkshopDownloader.SubscribeAsync(wsId, settings.SteamLoginSecure, subscribe: false);
+                // Real unsubscribe if signed in (QR refresh token or manual cookie) — best-effort.
+                bool hasAuth = !string.IsNullOrWhiteSpace(settings.SteamRefreshToken)
+                    || !string.IsNullOrWhiteSpace(settings.SteamLoginSecure);
+                if (hasAuth)
+                    _ = WorkshopDownloader.SetSubscribedAsync(wsId, settings, subscribe: false);
             }
             catch { }
         }

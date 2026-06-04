@@ -1102,6 +1102,83 @@ public partial class MainWindowViewModel : ViewModelBase
         WorkshopDownloader.LaunchSteamCmdSignIn(exe, SteamUsername);
     }
 
+    // ── Steam QR sign-in (subscribe mode) ───────────────────────────────────
+    [ObservableProperty] private bool _isSteamQrOpen;
+    [ObservableProperty] private Avalonia.Media.Imaging.Bitmap? _steamQrImage;
+    [ObservableProperty] private string _steamQrStatus = "";
+    public bool IsSteamSignedIn => !string.IsNullOrEmpty(_settings.SteamRefreshToken);
+    public string SteamSignInLabel => IsSteamSignedIn
+        ? $"Signed in as {(_settings.SteamAccountName.Length > 0 ? _settings.SteamAccountName : "Steam user")}"
+        : "Not signed in";
+
+    private CancellationTokenSource? _steamQrCts;
+
+    [RelayCommand]
+    private async Task SignInWithQr()
+    {
+        _steamQrCts = new CancellationTokenSource();
+        SteamQrImage = null;
+        SteamQrStatus = "Connecting to Steam…";
+        IsSteamQrOpen = true;
+        try
+        {
+            var (refreshToken, steamId, accountName) = await SteamAuthService.LoginViaQrAsync(
+                url => Dispatcher.UIThread.Post(() =>
+                {
+                    SteamQrImage = RenderQrBitmap(url);
+                    SteamQrStatus = "Scan with the Steam mobile app";
+                }),
+                _steamQrCts.Token);
+
+            _settings.SteamRefreshToken = refreshToken;
+            _settings.SteamId = steamId;
+            _settings.SteamAccountName = accountName;
+            _settings.SteamAccessToken = ""; // force a fresh mint on first use
+            SettingsService.Save(_settings);
+            OnPropertyChanged(nameof(IsSteamSignedIn));
+            OnPropertyChanged(nameof(SteamSignInLabel));
+            StatusMessage = $"Signed in to Steam as {accountName}";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            ErrorTitle = "Steam Sign-In Failed";
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsSteamQrOpen = false;
+            SteamQrImage = null;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelSteamQr()
+    {
+        _steamQrCts?.Cancel();
+        IsSteamQrOpen = false;
+    }
+
+    [RelayCommand]
+    private void SignOutSteam()
+    {
+        _settings.SteamRefreshToken = "";
+        _settings.SteamId = 0;
+        _settings.SteamAccessToken = "";
+        _settings.SteamAccountName = "";
+        SettingsService.Save(_settings);
+        OnPropertyChanged(nameof(IsSteamSignedIn));
+        OnPropertyChanged(nameof(SteamSignInLabel));
+    }
+
+    private static Avalonia.Media.Imaging.Bitmap RenderQrBitmap(string url)
+    {
+        var gen = new QRCoder.QRCodeGenerator();
+        var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.M);
+        var png = new QRCoder.PngByteQRCode(data).GetGraphic(8);
+        return new Avalonia.Media.Imaging.Bitmap(new MemoryStream(png));
+    }
+
     partial void OnSearchQueryChanged(string value)
     {
         if (!SelectedSource.SupportsSearch) return;
