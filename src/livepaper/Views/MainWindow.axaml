@@ -638,17 +638,21 @@
                                                             </ContextMenu>
                                                         </Border.ContextMenu>
                                                         <Grid Height="90">
-                                                            <Panel>
-                                                                <asyncImageLoader:AdvancedImage
-                                                                    Source="{Binding DisplayThumbnailSource}"
-                                                                    Stretch="UniformToFill"
-                                                                    RenderOptions.BitmapInterpolationMode="LowQuality"
-                                                                    Width="100" Height="90"/>
-                                                                <Image IsVisible="{Binding IsPlaylistGifActive}"
-                                                                       aimg:ImageBehavior.AnimatedSource="{Binding PlaylistActiveGifSource}"
-                                                                       Stretch="UniformToFill"
-                                                                       Width="100" Height="90"/>
-                                                            </Panel>
+                                                            <Border CornerRadius="6" ClipToBounds="True">
+                                                                <Panel>
+                                                                    <asyncImageLoader:AdvancedImage
+                                                                        Source="{Binding DisplayThumbnailSource}"
+                                                                        Stretch="UniformToFill"
+                                                                        RenderOptions.BitmapInterpolationMode="LowQuality"
+                                                                        HorizontalAlignment="Stretch"
+                                                                        VerticalAlignment="Stretch"/>
+                                                                    <Image IsVisible="{Binding IsPlaylistGifActive}"
+                                                                           aimg:ImageBehavior.AnimatedSource="{Binding PlaylistActiveGifSource}"
+                                                                           Stretch="UniformToFill"
+                                                                           HorizontalAlignment="Stretch"
+                                                                           VerticalAlignment="Stretch"/>
+                                                                </Panel>
+                                                            </Border>
                                                             <Border Background="#99000000"
                                                                     VerticalAlignment="Bottom"
                                                                     Padding="4,2">
