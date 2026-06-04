@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using livepaper.Models;
 
@@ -12,7 +13,7 @@ public static class DownloadHelper
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "livepaper", "library");
 
-    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false)
+    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false, CancellationToken ct = default)
     {
         Directory.CreateDirectory(LibraryPath);
 
@@ -87,7 +88,7 @@ public static class DownloadHelper
         }
         else
         {
-            await DownloadFileAsync(detail.DownloadUrl, videoPath, detail.NeedsReferrer ? detail.Referrer : null, progress);
+            await DownloadFileAsync(detail.DownloadUrl, videoPath, detail.NeedsReferrer ? detail.Referrer : null, progress, ct);
         }
 
         if (!string.IsNullOrEmpty(thumbnailUrl))
@@ -159,27 +160,27 @@ public static class DownloadHelper
         catch { return null; }
     }
 
-    private static async Task DownloadFileAsync(string url, string dest, string? referrer, IProgress<double>? progress = null)
+    private static async Task DownloadFileAsync(string url, string dest, string? referrer, IProgress<double>? progress = null, CancellationToken ct = default)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
         if (!string.IsNullOrEmpty(referrer))
             req.Headers.Referrer = new Uri(referrer);
 
-        using var resp = await HttpClientProvider.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        using var resp = await HttpClientProvider.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
 
         resp.EnsureSuccessStatusCode();
 
         long? total = resp.Content.Headers.ContentLength;
-        using var src = await resp.Content.ReadAsStreamAsync();
+        using var src = await resp.Content.ReadAsStreamAsync(ct);
         using var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 81920);
 
         var buffer = new byte[81920];
         long bytesRead = 0;
         int read;
-        while ((read = await src.ReadAsync(buffer)) > 0)
+        while ((read = await src.ReadAsync(buffer, ct)) > 0)
         {
-            await fs.WriteAsync(buffer.AsMemory(0, read));
+            await fs.WriteAsync(buffer.AsMemory(0, read), ct);
             bytesRead += read;
             if (total.HasValue)
                 progress?.Report((double)bytesRead / total.Value);

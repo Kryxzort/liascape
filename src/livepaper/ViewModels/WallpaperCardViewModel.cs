@@ -382,6 +382,15 @@ public partial class WallpaperCardViewModel : ViewModelBase
     public bool IsWeSymlink => LibraryItem != null && LibraryItem.WorkshopId != null
         && LibraryService.IsSymlink(LibraryItem.VideoPath);
 
+    [ObservableProperty] private bool _isDownloading;
+    [ObservableProperty] private double _downloadProgress;
+    [ObservableProperty] private bool _isDownloadIndeterminate = true;
+    [ObservableProperty] private string _downloadLabel = "Downloading";
+    public Action? CancelDownload { get; set; }
+
+    [RelayCommand]
+    private void CancelCardDownload() => CancelDownload?.Invoke();
+
     public Action<WallpaperCardViewModel>? OnTogglePlaylist { get; set; }
     public Action<WallpaperCardViewModel>? OnOpenSettings { get; set; }
     public Action<WallpaperCardViewModel>? OnDelete { get; set; }

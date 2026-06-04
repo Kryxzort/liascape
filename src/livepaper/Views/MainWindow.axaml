@@ -410,6 +410,32 @@
                                                                        FontSize="9" FontWeight="Bold"
                                                                        Foreground="{DynamicResource AccentFg}"/>
                                                         </Border>
+                                                        <!-- In-place download overlay -->
+                                                        <Panel IsVisible="{Binding IsDownloading}">
+                                                            <Border Background="#CC000000"/>
+                                                            <StackPanel VerticalAlignment="Center"
+                                                                        HorizontalAlignment="Center"
+                                                                        Spacing="8" Margin="12,0">
+                                                                <TextBlock Text="{Binding DownloadLabel}"
+                                                                           Foreground="White"
+                                                                           FontSize="12" FontWeight="SemiBold"
+                                                                           HorizontalAlignment="Center"/>
+                                                                <ProgressBar Value="{Binding DownloadProgress}"
+                                                                             Minimum="0" Maximum="1"
+                                                                             IsIndeterminate="{Binding IsDownloadIndeterminate}"
+                                                                             Height="4" CornerRadius="2"/>
+                                                            </StackPanel>
+                                                            <Button Classes="ghost"
+                                                                    HorizontalAlignment="Right"
+                                                                    VerticalAlignment="Top"
+                                                                    Margin="0,4,4,0"
+                                                                    Width="26" Height="26" Padding="0"
+                                                                    IsVisible="{Binding IsHovered}"
+                                                                    Command="{Binding CancelCardDownloadCommand}"
+                                                                    ToolTip.Tip="Cancel">
+                                                                <mi:MaterialIcon Kind="Close" Width="14" Height="14"/>
+                                                            </Button>
+                                                        </Panel>
                                                     </Grid>
 
                                                     <TextBlock Grid.Row="1"
@@ -425,6 +451,7 @@
                                                             Classes="accent"
                                                             Margin="10,4,10,10"
                                                             HorizontalAlignment="Stretch"
+                                                            IsEnabled="{Binding !IsDownloading}"
                                                             Command="{Binding $parent[Window].DataContext.DownloadCommand}"
                                                             CommandParameter="{Binding}"/>
 
@@ -1653,40 +1680,6 @@
 
 
 
-        <!-- Download progress modal -->
-        <Grid Grid.RowSpan="3" IsVisible="{Binding IsDownloading}" Background="#B2000000">
-            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
-                    Width="440" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="{Binding DownloadModalHeader}"
-                               FontSize="15" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextColor}"/>
-                    <TextBlock Text="{Binding DownloadTitle}" FontSize="12"
-                               Foreground="{DynamicResource Subtext}"
-                               TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="Subscribe to the item in the Steam overlay to start the download."
-                               FontSize="11" Foreground="{DynamicResource Muted}"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsWorkshopSubscribeWaiting}"/>
-                    <ProgressBar Value="{Binding DownloadProgress}"
-                                 Minimum="0" Maximum="1"
-                                 IsIndeterminate="{Binding DownloadIndeterminate}"
-                                 Height="6" CornerRadius="3"/>
-                    <TextBlock FontSize="11" Foreground="{DynamicResource Muted}"
-                               HorizontalAlignment="Right"
-                               IsVisible="{Binding !IsWorkshopSubscribeWaiting}">
-                        <TextBlock.Text>
-                            <Binding Path="DownloadProgress" StringFormat="{}{0:P0}"/>
-                        </TextBlock.Text>
-                    </TextBlock>
-                    <Button Content="Cancel"
-                            Classes="ghost"
-                            HorizontalAlignment="Right"
-                            IsVisible="{Binding IsWorkshopSubscribeWaiting}"
-                            Command="{Binding CancelWorkshopAcquireCommand}"/>
-                </StackPanel>
-            </Border>
-        </Grid>
 
         <!-- Image preview modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding PreviewCard, Converter={x:Static ObjectConverters.IsNotNull}}">

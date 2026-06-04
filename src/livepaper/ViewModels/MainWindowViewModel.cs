@@ -2338,18 +2338,12 @@ public partial class MainWindowViewModel : ViewModelBase
         if (targets.Count == 0) return;
         PreviewCard = null;
 
-        IsDownloading = true;
-        DownloadProgress = 0;
         bool applied = false;
         int completed = 0;
         int succeeded = 0;
 
         foreach (var target in targets)
         {
-            DownloadTitle = targets.Count > 1
-                ? $"{target.Title} ({completed + 1}/{targets.Count})"
-                : target.Title;
-
             // Dedup: check by source URL or by workshop ID (covers WE Local imports)
             var existing = LibraryWallpapers.FirstOrDefault(c =>
                 (c.LibraryItem?.SourceId != null && c.LibraryItem.SourceId == target.PageUrl) ||
@@ -2362,6 +2356,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 succeeded++;
                 continue;
             }
+
+            using var cts = new System.Threading.CancellationTokenSource();
+            target.IsDownloading = true;
+            target.DownloadProgress = 0;
+            target.IsDownloadIndeterminate = true;
+            target.DownloadLabel = "Downloading";
+            target.CancelDownload = () => cts.Cancel();
 
             try
             {
@@ -2377,18 +2378,18 @@ public partial class MainWindowViewModel : ViewModelBase
                 LibraryItem item;
                 if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
                 {
-                    IsWorkshopSubscribeWaiting = _settings.WorkshopAcquireMode == "subscribe";
-                    DownloadIndeterminate = true;
+                    target.DownloadLabel = _settings.WorkshopAcquireMode == "subscribe"
+                        ? "Waiting for Steam…" : "Downloading";
                     _workshopAcquireCts?.Dispose();
-                    _workshopAcquireCts = new CancellationTokenSource();
+                    _workshopAcquireCts = cts;
                     var acquireProgress = new Progress<(double, string)>(t =>
                     {
-                        DownloadProgress = Math.Max(0, t.Item1);
+                        target.DownloadProgress = Math.Max(0, t.Item1);
                         StatusMessage = t.Item2;
                     });
                     string workshopDir = await WorkshopDownloader.AcquireAsync(
-                        detail.WorkshopId, _settings, acquireProgress, _workshopAcquireCts.Token);
-                    IsWorkshopSubscribeWaiting = false;
+                        detail.WorkshopId, _settings, acquireProgress, cts.Token);
+                    target.DownloadLabel = "Downloading";
                     StatusMessage = $"Importing {target.Title}…";
 
                     // Re-check dedup (might have appeared while waiting)
@@ -2400,11 +2401,12 @@ public partial class MainWindowViewModel : ViewModelBase
                         StatusMessage = $"Applied: {target.Title}";
                         completed++;
                         succeeded++;
+                        target.IsDownloading = false;
+                        target.CancelDownload = null;
                         continue;
                     }
 
                     // For video items, resolve the actual video file from project.json.
-                    // DownloadHelper expects a file path (not a dir) for the video branch.
                     string downloadUrl = workshopDir;
                     if (!detail.IsScene)
                     {
@@ -2424,13 +2426,14 @@ public partial class MainWindowViewModel : ViewModelBase
                     };
                     item = await DownloadHelper.DownloadAsync(
                         localDetail, target.ThumbnailSource,
-                        target.PageUrl, null, WeCopyFiles);
+                        target.PageUrl, null, WeCopyFiles, cts.Token);
                 }
                 else
                 {
-                    var progressReporter = new Progress<double>(p => DownloadProgress = p);
+                    target.IsDownloadIndeterminate = false;
+                    var progressReporter = new Progress<double>(p => target.DownloadProgress = p);
                     item = await DownloadHelper.DownloadAsync(
-                        detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles);
+                        detail, target.ThumbnailSource, target.PageUrl, progressReporter, WeCopyFiles, cts.Token);
                 }
 
                 var libCard = MakeLibraryCard(item);
@@ -2442,14 +2445,14 @@ public partial class MainWindowViewModel : ViewModelBase
             }
             catch (OperationCanceledException)
             {
-                IsWorkshopSubscribeWaiting = false;
                 StatusMessage = $"Cancelled: {target.Title}";
                 completed++;
+                target.IsDownloading = false;
+                target.CancelDownload = null;
                 break;
             }
             catch (Exception ex)
             {
-                IsWorkshopSubscribeWaiting = false;
                 bool isRateLimit = ex.Message.Contains("daily download limit");
                 ErrorTitle = isRateLimit ? "Wallsflow Download Limit" : "Download Failed";
                 ErrorMessage = isRateLimit
@@ -2457,11 +2460,11 @@ public partial class MainWindowViewModel : ViewModelBase
                     : ex.Message;
                 StatusMessage = $"Download failed: {target.Title}: {ex.Message}";
             }
+
+            target.IsDownloading = false;
+            target.CancelDownload = null;
             completed++;
         }
-
-        IsDownloading = false;
-        IsWorkshopSubscribeWaiting = false;
 
         if (targets.Count > 1)
             StatusMessage = $"Downloaded {succeeded}/{targets.Count} wallpapers";
