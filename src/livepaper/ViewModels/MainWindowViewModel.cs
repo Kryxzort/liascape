@@ -354,7 +354,6 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _isPlaylistEmpty = true;
     [ObservableProperty] private bool _isPlaylistSettingsOpen;
     [ObservableProperty] private bool _isPlaylistCollapsed;
-    public double PlaylistBarMinHeight => IsPlaylistCollapsed ? 0 : 140;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSequential))]
     private bool _playlistShuffle;
@@ -739,7 +738,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnIsPlaylistCollapsedChanged(bool value)
     {
-        OnPropertyChanged(nameof(PlaylistBarMinHeight));
         _settings.IsPlaylistCollapsed = value;
         SettingsService.Save(_settings);
     }

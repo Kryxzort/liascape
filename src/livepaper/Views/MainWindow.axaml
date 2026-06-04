@@ -554,12 +554,11 @@
                             <Border DockPanel.Dock="Bottom"
                                     Background="{DynamicResource BgMantle}"
                                     BorderBrush="{DynamicResource Surface0}"
-                                    BorderThickness="0,1,0,0"
-                                    MinHeight="{Binding PlaylistBarMinHeight}">
-                                <DockPanel Margin="0,8,0,0">
+                                    BorderThickness="0,1,0,0">
+                                <DockPanel>
 
                                     <!-- Playlist header -->
-                                    <DockPanel DockPanel.Dock="Top" Margin="12,0,12,8">
+                                    <DockPanel DockPanel.Dock="Top" Margin="12,8,12,8">
                                         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                             <Button Classes="ghost"
                                                     Width="22" Height="22" Padding="0"
