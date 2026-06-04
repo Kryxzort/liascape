@@ -831,6 +831,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         else
         {
+            StatusMessage = "";
             RefreshPlayingStatus();
         }
     }
