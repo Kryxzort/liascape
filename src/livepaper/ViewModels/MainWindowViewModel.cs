@@ -38,6 +38,14 @@ public partial class MainWindowViewModel : ViewModelBase
     ];
 
     [ObservableProperty] private IBgsProvider _selectedSource;
+
+    // Hides "Wallpaper Engine (Local)" when AutoImportWallpaperEngine is on — those wallpapers
+    // are already in the Library, so browsing them separately is redundant.
+    public IReadOnlyList<IBgsProvider> FilteredSources =>
+        AutoImportWallpaperEngine
+            ? Sources.Where(s => s is not WallpaperEngineService).ToList()
+            : Sources;
+
     [ObservableProperty] private ObservableCollection<WallpaperCardViewModel> _browseWallpapers = [];
     [ObservableProperty] private ObservableCollection<WallpaperCardViewModel> _libraryWallpapers = [];
     [ObservableProperty] private bool _isLoading;
@@ -719,7 +727,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ApplyShuffleOrderIfRunning(value);
         RefreshPlayingStatus();
     }
-    partial void OnPlaylistWaitForVideoEndChanged(bool value) { if (value) AdvanceOnVideoEnd = false; _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnPlaylistWaitForVideoEndChanged(bool value) { _settings.PlaylistWaitForVideoEnd = value; SettingsService.Save(_settings); if (OverrideGlobalSettings) OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
 
     partial void OnAutoAddLibraryToPlaylistChanged(bool value)
     {
@@ -731,6 +739,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _settings.AutoImportWallpaperEngine = value;
         SettingsService.Save(_settings);
+        OnPropertyChanged(nameof(FilteredSources));
+        if (value && SelectedSource is WallpaperEngineService)
+            SelectedSource = Sources[0];
         if (value) Task.Run(SyncWallpaperEngineAsync);
     }
 
@@ -757,7 +768,7 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnIntervalHoursChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalMinutesChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnIntervalSecondsChanged(decimal value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
-    partial void OnAdvanceOnVideoEndChanged(bool value) { if (value) PlaylistWaitForVideoEnd = false; SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnAdvanceOnVideoEndChanged(bool value) { SavePlaylistStateDebounced(); if (OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnOverrideGlobalSettingsChanged(bool value)
     {
         SavePlaylistStateDebounced();
@@ -773,8 +784,8 @@ public partial class MainWindowViewModel : ViewModelBase
     partial void OnGlobalIntervalHoursChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalHours)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnGlobalIntervalMinutesChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalMinutes)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
     partial void OnGlobalIntervalSecondsChanged(decimal value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { ApplyEffectivePlaylistSettingsIfRunning(); OnPropertyChanged(nameof(DisplayIntervalSeconds)); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
-    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { if (value) GlobalWaitForVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
-    partial void OnGlobalWaitForVideoEndChanged(bool value) { if (value) GlobalAdvanceOnVideoEnd = false; SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalAdvanceOnVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayAdvanceOnVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
+    partial void OnGlobalWaitForVideoEndChanged(bool value) { SaveGlobalRotationSettings(); if (!OverrideGlobalSettings) { OnPropertyChanged(nameof(DisplayWaitForVideoEnd)); ApplyEffectivePlaylistSettingsIfRunning(); } RefreshLastSessionFromSettingsIfIdle(); RefreshPlayingStatus(); }
 
     private void SaveGlobalRotationSettings()
     {
@@ -831,20 +842,18 @@ public partial class MainWindowViewModel : ViewModelBase
         bool hasScenes = s.Paths.Any(p => p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase));
         bool isTimedMode = s.IsTimedPlaylist || (s.IsPlaylist && PlayerHelper.IsTimedModeActive);
 
-        if (isTimedMode && (!advanceOnEnd || hasScenes))
+        if (isTimedMode && (!advanceOnEnd || hasScenes || GetEffectiveIntervalSeconds() > 0))
         {
-            // Timed or mixed playlist: propagate interval/mode changes live (no restart).
-            // For mixed playlists, advanceOnVideoEnd is kept enabled so the scene-aware
-            // chain stays armed when the user adjusts the interval.
+            // Timed or mixed or combined (advance-on-end + interval): propagate changes live.
             int secs = GetEffectiveIntervalSeconds();
             if (secs > 0) PlayerHelper.UpdateTimedSettings(PlaylistShuffle, secs, GetEffectiveWaitForVideoEnd(),
-                advanceOnVideoEnd: advanceOnEnd && hasScenes);
+                advanceOnVideoEnd: advanceOnEnd);
             return;
         }
 
         if (isTimedMode && advanceOnEnd && !hasScenes)
         {
-            // Already in livepaper-owned advance-on-end — nothing to switch
+            // Pure advance-on-end (no interval) — already in correct mode
             return;
         }
 
@@ -913,7 +922,9 @@ public partial class MainWindowViewModel : ViewModelBase
         bool newWait = useOverride ? PlaylistWaitForVideoEnd : _settings.GlobalWaitForVideoEnd;
 
         bool hasScenes = s.Paths.Any(p => p.EndsWith(".scene", StringComparison.OrdinalIgnoreCase));
-        bool isPlaylist = newAdvance && !hasScenes;
+        // Pure advance-on-end (no interval, no scenes) is stored as IsPlaylist=true.
+        // Combined (advance + interval) or timed-only are stored as IsTimedPlaylist=true.
+        bool isPlaylist = newAdvance && !hasScenes && newSecs == 0;
 
         _settings.LastSession = new LastSession
         {
@@ -1579,18 +1590,38 @@ public partial class MainWindowViewModel : ViewModelBase
             .ToList();
         if (paths.Count == 0) return;
 
+        int intervalSecs = GetEffectiveIntervalSeconds();
+        bool waitForVideoEnd = GetEffectiveWaitForVideoEnd();
+
         if (GetEffectiveAdvanceOnVideoEnd())
         {
-            PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle, GetEffectiveIntervalSeconds());
-            // ApplyPlaylist may internally upgrade to ApplyTimedPlaylist when scenes are present
-            // and AllowScenes=true. Reflect that in LastSession so daemon resume picks the right path.
+            if (intervalSecs > 0)
+            {
+                // Combined mode: switch on video-end, with interval as a fallback.
+                var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
+                PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle,
+                    intervalSecs, waitForVideoEnd, advanceOnVideoEnd: true);
+                _settings.LastSession = new LastSession
+                {
+                    IsTimedPlaylist = true, Paths = paths, Shuffle = PlaylistShuffle,
+                    TimedIntervalSeconds = intervalSecs, WaitForVideoEnd = waitForVideoEnd,
+                    AdvanceOnVideoEnd = true, OverrideGlobalSettings = OverrideGlobalSettings
+                };
+                SettingsService.Save(_settings);
+                RefreshPlayingStatusSoon();
+                return;
+            }
+
+            // Pure advance-on-end (no interval): use ApplyPlaylist.
+            // May internally upgrade to ApplyTimedPlaylist when scenes are present.
+            PlayerHelper.ApplyPlaylist(paths, _settings.BuildMpvPlaylistOptions(), PlaylistShuffle, 0);
             if (PlayerHelper.IsTimedPlaylistActive())
                 _settings.LastSession = new LastSession
                 {
                     IsTimedPlaylist = true,
                     Paths = paths,
                     Shuffle = PlaylistShuffle,
-                    TimedIntervalSeconds = GetEffectiveIntervalSeconds(),
+                    TimedIntervalSeconds = 0,
                     WaitForVideoEnd = true,
                     AdvanceOnVideoEnd = true,
                     OverrideGlobalSettings = OverrideGlobalSettings
@@ -1602,15 +1633,13 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        int intervalSecs = GetEffectiveIntervalSeconds();
         if (intervalSecs == 0 && paths.Count > 1)
         {
             StatusMessage = "Set an interval greater than 0 to use timed playlists";
             return;
         }
-        var playPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        var waitForVideoEnd = GetEffectiveWaitForVideoEnd();
-        PlayerHelper.ApplyTimedPlaylist(playPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, waitForVideoEnd);
+        var timedPaths = PlaylistShuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
+        PlayerHelper.ApplyTimedPlaylist(timedPaths, _settings.BuildMpvOptions(), PlaylistShuffle, intervalSecs, waitForVideoEnd);
         _settings.LastSession = new LastSession
         {
             IsTimedPlaylist = true,
@@ -2568,7 +2597,21 @@ public partial class MainWindowViewModel : ViewModelBase
         card.UpdateGlobalSpeed(Speed);
         if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
         card.OnOpenSettings = c => OpenPreview(c);
+        card.OnDelete = c => Delete(c);
         return card;
+    }
+
+    internal void ValidateLibraryGhosts()
+    {
+        var ghosts = LibraryWallpapers
+            .Where(c => c.LibraryItem != null && !File.Exists(c.LibraryItem.VideoPath))
+            .ToList();
+        foreach (var ghost in ghosts)
+        {
+            if (LibraryService.IsOrphanSymlink(ghost.LibraryItem!.VideoPath))
+                LibraryService.CleanOrphan(ghost.LibraryItem.VideoPath);
+            LibraryWallpapers.Remove(ghost);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
