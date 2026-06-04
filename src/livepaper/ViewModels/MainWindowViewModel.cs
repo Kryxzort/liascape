@@ -818,8 +818,21 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OnLibraryCardChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(WallpaperCardViewModel.IsSelected)) return;
-        if (sender is WallpaperCardViewModel card)
-            LibrarySelectedCount = Math.Max(0, LibrarySelectedCount + (card.IsSelected ? 1 : -1));
+        if (sender is not WallpaperCardViewModel card) return;
+        LibrarySelectedCount = Math.Max(0, LibrarySelectedCount + (card.IsSelected ? 1 : -1));
+        if (LibrarySelectedCount > 0)
+        {
+            int scenes = LibraryWallpapers.Count(c => c.IsSelected && c.IsScene);
+            int videos = LibrarySelectedCount - scenes;
+            string detail = scenes == 0 ? $"{videos} video"
+                : videos == 0 ? $"{scenes} scene"
+                : $"{videos} video, {scenes} scene";
+            StatusMessage = $"{LibrarySelectedCount} selected — {detail}";
+        }
+        else
+        {
+            RefreshPlayingStatus();
+        }
     }
 
     private int GetEffectiveIntervalSeconds() =>
@@ -2511,7 +2524,6 @@ public partial class MainWindowViewModel : ViewModelBase
             if (wasInPlaylist)
                 AddCardToPlaylist(card);
         }
-        StatusMessage = batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}";
     }
 
     public void PurgeTrash()
