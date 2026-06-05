@@ -71,6 +71,9 @@ public static class LibraryService
         {
             string workshopId = Path.GetFileName(dir);
             if (existingIds.Contains(workshopId)) continue;
+            // Pending/just-unsubscribed via "Delete from Source" — don't resurrect it before Steam's
+            // own cleanup propagates (the folder may still be on disk for a bit).
+            if (WorkshopUnsubQueue.IsBlocked(workshopId)) continue;
 
             string projectJson = Path.Combine(dir, "project.json");
             string? type = null, file = null, title = null;
@@ -269,38 +272,9 @@ public static class LibraryService
 
     public static void PurgeBatch(string batchDir)
     {
-        // Permanent delete: also remove any steamcmd-downloaded workshop content for items in this
-        // batch (the "unsubscribe" on delete). Done at purge — not soft-delete — so Ctrl+Z undo can
-        // still restore symlinks that point into the steamcmd cache.
-        try { RemoveSteamCmdContentForBatch(batchDir); } catch { }
+        // Unsubscribe is NOT done here — "Delete from Source" enqueues ids into WorkshopUnsubQueue,
+        // which a throttled drain (close / next launch) processes. Plain deletes don't unsubscribe.
         try { Directory.Delete(batchDir, recursive: true); } catch { }
-    }
-
-    private static void RemoveSteamCmdContentForBatch(string batchDir)
-    {
-        if (!Directory.Exists(batchDir)) return;
-        var settings = SettingsService.Load();
-        foreach (var idFile in Directory.EnumerateFiles(batchDir, "*.id"))
-        {
-            try
-            {
-                var raw = File.ReadAllText(idFile).Trim();
-                string? wsId = long.TryParse(raw, out _) ? raw
-                    : raw.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ExtractSteamWorkshopId(raw)
-                    : null;
-                if (wsId == null) continue;
-
-                // steamcmd cache cleanup (harmless if not present).
-                WorkshopDownloader.RemoveDownloadedItem(wsId);
-
-                // Real unsubscribe if signed in (QR refresh token or manual cookie) — best-effort.
-                bool hasAuth = !string.IsNullOrWhiteSpace(settings.SteamRefreshToken)
-                    || !string.IsNullOrWhiteSpace(settings.SteamLoginSecure);
-                if (hasAuth)
-                    _ = WorkshopDownloader.SetSubscribedAsync(wsId, settings, subscribe: false);
-            }
-            catch { }
-        }
     }
 
     public static void CleanTrash()

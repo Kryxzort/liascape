@@ -1118,6 +1118,41 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    // ── Workshop unsubscribe drain (Delete from Source) ─────────────────────
+    [ObservableProperty] private bool _isUnsubDraining;
+    [ObservableProperty] private string _unsubProgress = "";
+    private CancellationTokenSource? _unsubCts;
+
+    public bool HasPendingUnsub => WorkshopUnsubQueue.HasPending();
+
+    /// Foreground drain (shown with the "please wait" modal) — used at close. Returns when the queue
+    /// is empty or the user hit Finish later (cancel); the queue persists either way.
+    public async Task DrainUnsubForegroundAsync()
+    {
+        if (!WorkshopUnsubQueue.HasPending()) return;
+        _unsubCts = new CancellationTokenSource();
+        IsUnsubDraining = true;
+        var progress = new Progress<(int Done, int Total)>(t =>
+            UnsubProgress = $"Unsubscribing {t.Done} / {t.Total}…");
+        try { await WorkshopDownloader.DrainUnsubQueueAsync(_settings, progress, _unsubCts.Token); }
+        catch { }
+        finally { IsUnsubDraining = false; }
+    }
+
+    [RelayCommand]
+    private void FinishUnsubLater() => _unsubCts?.Cancel();
+
+    // Silent background drain — used at launch to clear anything left from a prior force-quit.
+    private void DrainUnsubInBackground()
+    {
+        if (!WorkshopUnsubQueue.HasPending()) return;
+        _ = Task.Run(async () =>
+        {
+            try { await WorkshopDownloader.DrainUnsubQueueAsync(_settings, null, CancellationToken.None); }
+            catch { }
+        });
+    }
+
     private CancellationTokenSource? _steamQrCts;
 
     [RelayCommand]
@@ -1458,6 +1493,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // session is instant (the ~1-3s mint happens here at launch, not on the user's first click).
         if (_settings.WorkshopAcquireMode == "subscribe" && !string.IsNullOrEmpty(_settings.SteamRefreshToken))
             _ = Task.Run(async () => { try { await SteamAuthService.GetCookieAsync(_settings); } catch { } });
+
+        // Resume any unsubscribe queue left over from a prior force-quit (silent background drain).
+        DrainUnsubInBackground();
 
         var s = _settings.LastSession;
         if (s != null && PlayerHelper.IsPlaying)
@@ -2599,12 +2637,17 @@ public partial class MainWindowViewModel : ViewModelBase
         LibraryService.RestoreBatch(batch.BatchDir);
         _undoBatches.RemoveAt(_undoBatches.Count - 1);
         CanUndo = _undoBatches.Count > 0;
+        var restoredIds = new List<string>();
         foreach (var (card, wasInPlaylist) in batch.Items)
         {
             LibraryWallpapers.Add(card);
             if (wasInPlaylist)
                 AddCardToPlaylist(card);
+            if (card.LibraryItem?.WorkshopId is string wid) restoredIds.Add(wid);
         }
+        // Undo of a "Delete from Source" → pull the id back out of the unsubscribe queue (no
+        // unsubscribe has run yet). No-op for plain deletes (ids aren't in the queue).
+        if (restoredIds.Count > 0) WorkshopUnsubQueue.RemovePending(restoredIds);
         SetTimedStatusMessage(batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}");
     }
 

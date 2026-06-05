@@ -260,6 +260,24 @@ public partial class MainWindow : Window
                $"y={asv.Offset.Y:F0}/{asv.Extent.Height:F0}";
     }
 
+    private bool _allowClose;
+
+    protected override async void OnClosing(WindowClosingEventArgs e)
+    {
+        // "Delete from Source" items unsubscribe at close, with a progress modal. Hold the close,
+        // drain the queue (user can hit Finish later to exit early — the queue resumes next launch),
+        // then close for real. _allowClose guards against re-entry on the second Close().
+        if (!_allowClose && Vm?.HasPendingUnsub == true)
+        {
+            e.Cancel = true;
+            await Vm.DrainUnsubForegroundAsync();
+            _allowClose = true;
+            Close();
+            return;
+        }
+        base.OnClosing(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         Vm?.PurgeTrash();

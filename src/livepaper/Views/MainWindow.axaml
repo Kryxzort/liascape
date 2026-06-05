@@ -1974,6 +1974,25 @@
             </Border>
         </Grid>
 
+        <!-- Workshop unsubscribe drain modal (shown while closing) -->
+        <Grid Grid.RowSpan="3" IsVisible="{Binding IsUnsubDraining}" Background="#B2000000">
+            <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
+                    Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel Spacing="14">
+                    <TextBlock Text="Removing from Steam" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextColor}"/>
+                    <TextBlock Text="{Binding UnsubProgress}" FontSize="12"
+                               Foreground="{DynamicResource Subtext}"/>
+                    <ProgressBar IsIndeterminate="True" Height="4" CornerRadius="2"/>
+                    <TextBlock Text="Unsubscribing the wallpapers you deleted from source. This finishes next launch if you exit now."
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource Muted}"/>
+                    <Button Content="Finish later" Classes="ghost" HorizontalAlignment="Right"
+                            Command="{Binding FinishUnsubLaterCommand}"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- Steam QR sign-in modal -->
         <Grid Grid.RowSpan="3" IsVisible="{Binding IsSteamQrOpen}" Background="#B2000000">
             <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"

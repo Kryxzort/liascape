@@ -404,30 +404,13 @@ public partial class WallpaperCardViewModel : ViewModelBase
     private void OpenSettings() => OnOpenSettings?.Invoke(this);
 
     [RelayCommand]
-    private async Task DeleteFromSource()
+    private void DeleteFromSource()
     {
-        if (LibraryItem == null || !IsWeSymlink) return;
-
-        // Unsubscribe first so Steam stops tracking the item and won't re-download it. Without
-        // this, deleting the workshop folder while still subscribed just makes Steam re-sync it.
-        if (LibraryItem.WorkshopId != null)
-        {
-            var settings = SettingsService.Load();
-            bool signedIn = !string.IsNullOrWhiteSpace(settings.SteamRefreshToken)
-                || !string.IsNullOrWhiteSpace(settings.SteamLoginSecure);
-            if (signedIn)
-            {
-                try { await WorkshopDownloader.SetSubscribedAsync(LibraryItem.WorkshopId, settings, subscribe: false); }
-                catch { }
-            }
-        }
-
-        var real = File.ResolveLinkTarget(LibraryItem.VideoPath, returnFinalTarget: true)?.FullName;
-        var sourceDir = real != null ? Path.GetDirectoryName(real) : null;
-        if (sourceDir != null && Directory.Exists(sourceDir))
-        {
-            try { Directory.Delete(sourceDir, recursive: true); } catch { }
-        }
+        if (LibraryItem?.WorkshopId == null || !IsWeSymlink) return;
+        // Enqueue the unsubscribe (the actual Steam call + folder delete happen at the throttled
+        // drain on close / next launch) and soft-delete the library entry. Instant + undoable; undo
+        // pulls the id back out of the queue before any unsubscribe runs.
+        WorkshopUnsubQueue.AddPending([LibraryItem.WorkshopId]);
         OnDelete?.Invoke(this);
     }
 
