@@ -146,9 +146,87 @@ public static class SteamAuthService
             var cookie = await GetWebCookieAsync(settings.SteamRefreshToken, settings.SteamId, ct);
             settings.SteamAccessToken = cookie; // full steamLoginSecure value (steamid||webtoken)
             SettingsService.Save(settings);
+            MaybeRenewRefreshTokenInBackground(settings);
             return cookie;
         }
         finally { _mintGate.Release(); }
+    }
+
+    /// Days until the stored refresh token expires (null if unknown / not signed in). When this hits
+    /// 0 the user must re-sign-in; renewal below tries to keep it well above 0.
+    public static int? RefreshTokenDaysRemaining(AppSettings settings)
+    {
+        if (string.IsNullOrEmpty(settings.SteamRefreshToken)) return null;
+        if (JwtExpiryUtc(settings.SteamRefreshToken) is not DateTime exp) return null;
+        return Math.Max(0, (int)Math.Ceiling((exp - DateTime.UtcNow).TotalDays));
+    }
+
+    private static int _renewing;
+
+    /// Best-effort refresh-token renewal: when the stored refresh token is within 30 days of expiry,
+    /// log on with it and ask Steam for a renewed one (rolls the ~200-day window forward). Validated
+    /// before adoption (later expiry, same SteamID) and fully swallows errors — if Steam won't renew
+    /// (or won't log on a WebBrowser token), nothing changes and normal expiry + re-login applies.
+    private static void MaybeRenewRefreshTokenInBackground(AppSettings settings)
+    {
+        if (JwtExpiryUtc(settings.SteamRefreshToken) is not DateTime exp) return;
+        if (exp > DateTime.UtcNow.AddDays(30)) return;
+        if (Interlocked.CompareExchange(ref _renewing, 1, 0) != 0) return;
+
+        _ = Task.Run(async () =>
+        {
+            try { await TryRenewAsync(settings); }
+            catch { }
+            finally { Interlocked.Exchange(ref _renewing, 0); }
+        });
+    }
+
+    private static async Task TryRenewAsync(AppSettings settings)
+    {
+        var steamClient = new SteamClient();
+        var manager = new CallbackManager(steamClient);
+        var steamUser = steamClient.GetHandler<SteamUser>()!;
+        var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        manager.Subscribe<SteamClient.ConnectedCallback>(cb =>
+            steamUser.LogOn(new SteamUser.LogOnDetails { Username = settings.SteamAccountName, AccessToken = settings.SteamRefreshToken }));
+        manager.Subscribe<SteamClient.DisconnectedCallback>(cb => tcs.TrySetResult(null));
+        manager.Subscribe<SteamUser.LoggedOnCallback>(cb => { _ = OnLoggedOn(cb); });
+
+        async Task OnLoggedOn(SteamUser.LoggedOnCallback cb)
+        {
+            try
+            {
+                if (cb.Result != EResult.OK) { tcs.TrySetResult(null); return; }
+                var res = await steamClient.Authentication.GenerateAccessTokenForAppAsync(
+                    cb.ClientSteamID, settings.SteamRefreshToken, allowRenewal: true);
+                tcs.TrySetResult(string.IsNullOrEmpty(res.RefreshToken) ? null : res.RefreshToken);
+            }
+            catch { tcs.TrySetResult(null); }
+        }
+
+        steamClient.Connect();
+        using var reg = timeout.Token.Register(() => tcs.TrySetResult(null));
+        _ = Task.Run(() =>
+        {
+            while (!tcs.Task.IsCompleted)
+                manager.RunWaitCallbacks(TimeSpan.FromMilliseconds(500));
+        });
+
+        string? newRt;
+        try { newRt = await tcs.Task; }
+        finally { try { steamUser.LogOff(); steamClient.Disconnect(); } catch { } }
+        if (newRt == null) return;
+
+        // Adopt only if the renewed token is genuinely better and ours.
+        var newExp = JwtExpiryUtc(newRt);
+        var oldExp = JwtExpiryUtc(settings.SteamRefreshToken);
+        if (newExp == null || (oldExp != null && newExp <= oldExp)) return;
+        if (SteamIdFromJwt(newRt) != settings.SteamId) return;
+
+        settings.SteamRefreshToken = newRt;
+        SettingsService.Save(settings);
     }
 
     // The token portion of a `steamid||token` (or url-encoded) steamLoginSecure value.

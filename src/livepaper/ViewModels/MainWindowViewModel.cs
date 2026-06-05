@@ -1107,9 +1107,16 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private Avalonia.Media.Imaging.Bitmap? _steamQrImage;
     [ObservableProperty] private string _steamQrStatus = "";
     public bool IsSteamSignedIn => !string.IsNullOrEmpty(_settings.SteamRefreshToken);
-    public string SteamSignInLabel => IsSteamSignedIn
-        ? $"Signed in as {(_settings.SteamAccountName.Length > 0 ? _settings.SteamAccountName : "Steam user")}"
-        : "Not signed in";
+    public string SteamSignInLabel
+    {
+        get
+        {
+            if (!IsSteamSignedIn) return "Not signed in";
+            var name = _settings.SteamAccountName.Length > 0 ? _settings.SteamAccountName : "Steam user";
+            var days = SteamAuthService.RefreshTokenDaysRemaining(_settings);
+            return days is int d ? $"Signed in as {name} · session ~{d}d left" : $"Signed in as {name}";
+        }
+    }
 
     private CancellationTokenSource? _steamQrCts;
 
