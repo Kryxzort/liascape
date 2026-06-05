@@ -50,3 +50,22 @@ Moves all sidecars to `.trash/<batchId>/`. Trash purged on window close or start
 - `~/.config/livepaper/user_mute.state` — presence = user muted (guards against auto-unmute)
 - `~/.cache/livepaper/playlist_observer_paths.json` — shuffled path order for playlist observer reconnection
 - `~/.cache/livepaper/we_thumbs/<workshopId>.jpg` — static frame extracted from GIF thumbnails
+- `~/.config/livepaper/workshop_unsub.json` — durable "Delete from Source" unsubscribe queue (below)
+
+## Delete vs Delete from Source (workshop items)
+
+- **Delete** (`DeleteCards`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription — only removes the local entry. `PurgeBatch` does NOT unsubscribe.
+- **Delete from Source** (`WallpaperCardViewModel.DeleteFromSource`, right-click, `IsWeSymlink` only): enqueues the workshop id into `WorkshopUnsubQueue` + soft-deletes the entry. The unsubscribe + folder delete happen later in a throttled drain — never inline (inline raced Steam's folder cleanup → quick restart + AutoImport re-imported the item; and a bulk 200-300 delete can't be a fire-and-forget burst at shutdown).
+
+### `WorkshopUnsubQueue` (`Helpers/WorkshopUnsubQueue.cs`)
+- Persisted JSON list at `~/.config/livepaper/workshop_unsub.json`. Holds **only ids not yet unsubscribed** — a successful drain step removes the id from the file immediately (no "done" set kept).
+- `AddPending`, `Remove` (undo / re-subscribe / drain success), `IsBlocked`, `HasPending`, `Snapshot`. Thread-safe (re-reads file under a lock per call).
+- **Undo** of a delete-from-source batch → `Remove(ids)` (no unsubscribe ran). No-op for plain deletes.
+- **AutoImport** (`SyncWallpaperEngine`) skips `IsBlocked` ids → a still-on-disk folder isn't re-imported before the drain deletes it.
+- **Re-subscribe** via `AcquireViaSubscribeAsync` success → `Remove(id)`.
+
+### Drain (`WorkshopDownloader.DrainUnsubQueueAsync`)
+- Per id: `SetSubscribedAsync(subscribe:false)` → `DeleteWorkshopFolders` (delete every on-disk copy across all Steam libraries + steamcmd cache — a delete, not a cross-device move, so cheap) → `Remove(id)`. Throttled 300ms. Unsubscribe failure leaves the id queued to retry. Reports `(Done, Total, CurrentId)`.
+- **One drain task at a time** (VM `_draining` Interlocked guard). The modal (`IsUnsubModalOpen`) is a *view* onto it — **Dismiss hides the modal but does NOT stop the drain**; progress keeps flowing to `StatusMessage`.
+- **Launch**: `DrainUnsubInBackground` resumes a leftover queue (dismissable modal + status bar).
+- **Close**: `MainWindow.OnClosing` → `Vm.BeginCloseDrain(closeNow)`; if queued it cancels the close, runs the drain, and the completion callback calls `Close()` (`_allowClose` guards re-entry). Force-quit mid-drain → queue persists → resumes next launch.

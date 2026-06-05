@@ -1119,39 +1119,72 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     // ── Workshop unsubscribe drain (Delete from Source) ─────────────────────
-    [ObservableProperty] private bool _isUnsubDraining;
+    // The drain runs as ONE background task. The popup (IsUnsubModalOpen) is just a view onto it —
+    // dismissing the popup hides the modal but does NOT stop the drain; progress keeps flowing to the
+    // status bar. The queue persists, so force-quit resumes the rest next launch.
+    [ObservableProperty] private bool _isUnsubModalOpen;
     [ObservableProperty] private string _unsubProgress = "";
-    private CancellationTokenSource? _unsubCts;
+    private int _draining; // 0/1 guard — at most one drain task
+    private Action? _onDrainComplete;
 
     public bool HasPendingUnsub => WorkshopUnsubQueue.HasPending();
 
-    /// Foreground drain (shown with the "please wait" modal) — used at close. Returns when the queue
-    /// is empty or the user hit Finish later (cancel); the queue persists either way.
-    public async Task DrainUnsubForegroundAsync()
-    {
-        if (!WorkshopUnsubQueue.HasPending()) return;
-        _unsubCts = new CancellationTokenSource();
-        IsUnsubDraining = true;
-        var progress = new Progress<(int Done, int Total)>(t =>
-            UnsubProgress = $"Unsubscribing {t.Done} / {t.Total}…");
-        try { await WorkshopDownloader.DrainUnsubQueueAsync(_settings, progress, _unsubCts.Token); }
-        catch { }
-        finally { IsUnsubDraining = false; }
-    }
-
     [RelayCommand]
-    private void FinishUnsubLater() => _unsubCts?.Cancel();
+    private void DismissUnsubModal() => IsUnsubModalOpen = false; // hide only — drain keeps running
 
-    // Silent background drain — used at launch to clear anything left from a prior force-quit.
-    private void DrainUnsubInBackground()
+    /// Starts the background drain if not already running. Shows the (dismissable) modal and mirrors
+    /// progress to the status bar. `onComplete` runs on the UI thread when the queue is fully drained
+    /// (used by the close path to finish closing).
+    private void StartUnsubDrain(bool showModal, Action? onComplete = null)
     {
-        if (!WorkshopUnsubQueue.HasPending()) return;
+        if (!WorkshopUnsubQueue.HasPending()) { onComplete?.Invoke(); return; }
+        _onDrainComplete = onComplete;
+        if (System.Threading.Interlocked.CompareExchange(ref _draining, 1, 0) != 0)
+        {
+            // Already draining — just (re)show the modal if asked.
+            if (showModal) IsUnsubModalOpen = true;
+            return;
+        }
+
+        if (showModal) IsUnsubModalOpen = true;
+        var progress = new Progress<(int Done, int Total, string CurrentId)>(t =>
+        {
+            string msg = t.Done >= t.Total
+                ? "Finishing Steam removals…"
+                : $"Removing from Steam — {t.Done + 1}/{t.Total} (id {t.CurrentId})";
+            UnsubProgress = msg;
+            StatusMessage = msg;
+        });
+
         _ = Task.Run(async () =>
         {
-            try { await WorkshopDownloader.DrainUnsubQueueAsync(_settings, null, CancellationToken.None); }
+            try { await WorkshopDownloader.DrainUnsubQueueAsync(_settings, progress, CancellationToken.None); }
             catch { }
+            finally
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _draining, 0);
+                    IsUnsubModalOpen = false;
+                    SetTimedStatusMessage("Finished removing wallpapers from Steam");
+                    var cb = _onDrainComplete; _onDrainComplete = null;
+                    cb?.Invoke();
+                });
+            }
         });
     }
+
+    /// Called from the window's close path. If there's nothing queued, returns true (close now).
+    /// Otherwise starts the drain (dismissable modal) and finishes the close when it completes.
+    public bool BeginCloseDrain(Action closeNow)
+    {
+        if (!WorkshopUnsubQueue.HasPending()) return true;
+        StartUnsubDrain(showModal: true, onComplete: closeNow);
+        return false;
+    }
+
+    // Resume a leftover queue at launch (dismissable modal + status bar).
+    private void DrainUnsubInBackground() => StartUnsubDrain(showModal: true);
 
     private CancellationTokenSource? _steamQrCts;
 
@@ -2647,7 +2680,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         // Undo of a "Delete from Source" → pull the id back out of the unsubscribe queue (no
         // unsubscribe has run yet). No-op for plain deletes (ids aren't in the queue).
-        if (restoredIds.Count > 0) WorkshopUnsubQueue.RemovePending(restoredIds);
+        if (restoredIds.Count > 0) WorkshopUnsubQueue.Remove(restoredIds);
         SetTimedStatusMessage(batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}");
     }
 

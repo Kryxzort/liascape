@@ -262,17 +262,15 @@ public partial class MainWindow : Window
 
     private bool _allowClose;
 
-    protected override async void OnClosing(WindowClosingEventArgs e)
+    protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // "Delete from Source" items unsubscribe at close, with a progress modal. Hold the close,
-        // drain the queue (user can hit Finish later to exit early — the queue resumes next launch),
-        // then close for real. _allowClose guards against re-entry on the second Close().
-        if (!_allowClose && Vm?.HasPendingUnsub == true)
+        // "Delete from Source" items unsubscribe at close. Hold the close and start the (dismissable)
+        // drain; it calls back to close for real when done. Dismissing the modal doesn't stop it —
+        // the app stays open finishing removals (force-quit resumes next launch). _allowClose guards
+        // re-entry on the callback's Close().
+        if (!_allowClose && Vm != null && !Vm.BeginCloseDrain(() => { _allowClose = true; Close(); }))
         {
             e.Cancel = true;
-            await Vm.DrainUnsubForegroundAsync();
-            _allowClose = true;
-            Close();
             return;
         }
         base.OnClosing(e);

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 
 namespace livepaper.Helpers;
@@ -9,16 +8,14 @@ namespace livepaper.Helpers;
 /// Durable queue for "Delete from Source" unsubscribes, persisted at
 /// ~/.config/livepaper/workshop_unsub.json.
 ///
-/// Why a persisted queue: unsubscribing is an external, throttle-sensitive network action. A bulk
-/// delete (200-300 items) can't be a fire-and-forget burst at shutdown — the process may exit
-/// mid-way. So delete-from-source only *enqueues* ids; the drain (at close, with a progress modal,
-/// or on next launch) processes them throttled and survives force-quit by resuming from disk.
+/// Holds ONLY ids not yet unsubscribed (still to do). Unsubscribing is an external, throttle-
+/// sensitive action, and a bulk delete (200-300) can't be a fire-and-forget burst — the process may
+/// exit mid-way. So delete-from-source only *enqueues*; the throttled drain processes ids and
+/// removes each from the file the instant it succeeds (unsubscribe + folder delete). Force-quit just
+/// resumes the remaining ids next launch.
 ///
-/// - `pending`  — ids awaiting unsubscribe. Undo pulls them back out (no network happened yet).
-/// - `removed`  — ids already unsubscribed + folder-deleted; kept so AutoImport never resurrects an
-///                item whose Steam-side cleanup hasn't propagated. Self-prunes once the folder is gone.
-///
-/// AutoImport (SyncWallpaperEngine) skips anything in `pending ∪ removed`.
+/// AutoImport (SyncWallpaperEngine) skips queued ids so a still-on-disk folder can't be re-imported
+/// before the drain deletes it.
 public static class WorkshopUnsubQueue
 {
     private static readonly object _gate = new();
@@ -27,29 +24,23 @@ public static class WorkshopUnsubQueue
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "livepaper", "workshop_unsub.json");
 
-    private sealed class State
-    {
-        public List<string> Pending { get; set; } = [];
-        public List<string> Removed { get; set; } = [];
-    }
-
-    private static State Load()
+    private static List<string> Load()
     {
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<State>(File.ReadAllText(FilePath)) ?? new State();
+                return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(FilePath)) ?? [];
         }
         catch { }
-        return new State();
+        return [];
     }
 
-    private static void Save(State s)
+    private static void Save(List<string> ids)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(s));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(ids));
         }
         catch { }
     }
@@ -58,83 +49,46 @@ public static class WorkshopUnsubQueue
     {
         lock (_gate)
         {
-            var s = Load();
+            var list = Load();
+            bool changed = false;
             foreach (var id in ids)
             {
-                if (string.IsNullOrWhiteSpace(id)) continue;
-                s.Removed.Remove(id);            // re-deleting something previously removed
-                if (!s.Pending.Contains(id)) s.Pending.Add(id);
+                if (string.IsNullOrWhiteSpace(id) || list.Contains(id)) continue;
+                list.Add(id);
+                changed = true;
             }
-            Save(s);
+            if (changed) Save(list);
         }
     }
 
-    // Undo: an enqueued id is pulled back out before any unsubscribe happened.
-    public static void RemovePending(IEnumerable<string> ids)
+    // Undo, or deliberate re-subscribe → pull ids back out (no unsubscribe ran for them).
+    public static void Remove(IEnumerable<string> ids)
     {
         lock (_gate)
         {
-            var s = Load();
+            var list = Load();
             bool changed = false;
             foreach (var id in ids)
-                changed |= s.Pending.Remove(id);
-            if (changed) Save(s);
+                changed |= list.Remove(id);
+            if (changed) Save(list);
         }
     }
 
-    public static List<string> SnapshotPending()
+    public static void Remove(string id) => Remove([id]);
+
+    public static List<string> Snapshot()
     {
-        lock (_gate) { return [.. Load().Pending]; }
+        lock (_gate) { return Load(); }
     }
 
     public static bool HasPending()
     {
-        lock (_gate) { return Load().Pending.Count > 0; }
-    }
-
-    // Drain step succeeded: unsubscribed + folder deleted → move pending → removed.
-    public static void MarkRemoved(string id)
-    {
-        lock (_gate)
-        {
-            var s = Load();
-            s.Pending.Remove(id);
-            if (!s.Removed.Contains(id)) s.Removed.Add(id);
-            Save(s);
-        }
-    }
-
-    // Re-subscribe via the app: the item is wanted again → stop blocking it.
-    public static void Unblock(string id)
-    {
-        lock (_gate)
-        {
-            var s = Load();
-            bool changed = s.Pending.Remove(id) | s.Removed.Remove(id);
-            if (changed) Save(s);
-        }
+        lock (_gate) { return Load().Count > 0; }
     }
 
     public static bool IsBlocked(string id)
     {
         if (string.IsNullOrWhiteSpace(id)) return false;
-        lock (_gate)
-        {
-            var s = Load();
-            return s.Pending.Contains(id) || s.Removed.Contains(id);
-        }
-    }
-
-    // Drop `removed` ids whose workshop folder is gone (Steam finished cleanup) — they no longer
-    // need blocking. Keeps the file from growing without bound.
-    public static void PruneRemoved(Func<string, bool> folderStillExists)
-    {
-        lock (_gate)
-        {
-            var s = Load();
-            int before = s.Removed.Count;
-            s.Removed = s.Removed.Where(folderStillExists).ToList();
-            if (s.Removed.Count != before) Save(s);
-        }
+        lock (_gate) { return Load().Contains(id); }
     }
 }

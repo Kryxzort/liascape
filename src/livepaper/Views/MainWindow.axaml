@@ -1974,8 +1974,8 @@
             </Border>
         </Grid>
 
-        <!-- Workshop unsubscribe drain modal (shown while closing) -->
-        <Grid Grid.RowSpan="3" IsVisible="{Binding IsUnsubDraining}" Background="#B2000000">
+        <!-- Workshop unsubscribe drain modal (dismissable — hiding it doesn't stop the drain) -->
+        <Grid Grid.RowSpan="3" IsVisible="{Binding IsUnsubModalOpen}" Background="#B2000000">
             <Border Background="{DynamicResource BgBase}" CornerRadius="12" Padding="28"
                     Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="14">
@@ -1984,11 +1984,11 @@
                     <TextBlock Text="{Binding UnsubProgress}" FontSize="12"
                                Foreground="{DynamicResource Subtext}"/>
                     <ProgressBar IsIndeterminate="True" Height="4" CornerRadius="2"/>
-                    <TextBlock Text="Unsubscribing the wallpapers you deleted from source. This finishes next launch if you exit now."
+                    <TextBlock Text="Unsubscribing the wallpapers you deleted from source. You can dismiss this — it keeps going in the status bar, and finishes next launch if you quit."
                                FontSize="11" TextWrapping="Wrap"
                                Foreground="{DynamicResource Muted}"/>
-                    <Button Content="Finish later" Classes="ghost" HorizontalAlignment="Right"
-                            Command="{Binding FinishUnsubLaterCommand}"/>
+                    <Button Content="Dismiss" Classes="ghost" HorizontalAlignment="Right"
+                            Command="{Binding DismissUnsubModalCommand}"/>
                 </StackPanel>
             </Border>
         </Grid>

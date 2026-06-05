@@ -52,8 +52,8 @@ public static class WorkshopDownloader
     {
         progress?.Report((-1, "Subscribing on Steam…"));
         await SetSubscribedAsync(workshopId, settings, subscribe: true, ct);
-        // Deliberately re-subscribing → stop blocking it from auto-import.
-        WorkshopUnsubQueue.Unblock(workshopId);
+        // Deliberately re-subscribing → drop any queued unsubscribe for it.
+        WorkshopUnsubQueue.Remove(workshopId);
 
         progress?.Report((-1, "Subscribed — waiting for Steam to download…"));
 
@@ -153,14 +153,6 @@ public static class WorkshopDownloader
         catch { }
     }
 
-    // True if a workshop item still has files on disk anywhere (used to prune the removed-set).
-    public static bool WorkshopFolderExists(string workshopBasePath, string workshopId)
-    {
-        foreach (var dir in ExistingWorkshopDirs(workshopBasePath, workshopId))
-            if (Directory.Exists(dir)) return true;
-        return false;
-    }
-
     // Delete every on-disk copy of a workshop item (steamcmd cache + every Steam library). A delete,
     // not a move — cheap on any filesystem. Used by the unsubscribe drain so a quick restart with
     // AutoImport on can't re-import the folder before Steam's own cleanup propagates.
@@ -171,32 +163,31 @@ public static class WorkshopDownloader
     }
 
     /// Drains the persisted unsubscribe queue: for each pending id, unsubscribe → delete its folders
-    /// → mark removed. Throttled (small delay) to avoid Steam rate-limits. On unsubscribe failure the
-    /// id is left pending to retry next launch. Reports (done, total) for a progress UI.
-    public static async Task DrainUnsubQueueAsync(AppSettings settings, IProgress<(int Done, int Total)>? progress, CancellationToken ct)
+    /// → drop it from the queue (the queue holds only not-yet-done ids). Throttled to avoid Steam
+    /// rate-limits. On unsubscribe failure the id is left queued to retry on a later drain. Reports
+    /// (done, total, currentId) for the progress UI + status bar.
+    public static async Task DrainUnsubQueueAsync(AppSettings settings, IProgress<(int Done, int Total, string CurrentId)>? progress, CancellationToken ct)
     {
-        var pending = WorkshopUnsubQueue.SnapshotPending();
+        var pending = WorkshopUnsubQueue.Snapshot();
         int total = pending.Count, done = 0;
-        progress?.Report((0, total));
         foreach (var id in pending)
         {
             if (ct.IsCancellationRequested) break;
+            progress?.Report((done, total, id));
             try
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
                 DeleteWorkshopFolders(settings.WallpaperEnginePath, id);
-                WorkshopUnsubQueue.MarkRemoved(id);
+                WorkshopUnsubQueue.Remove(id);   // done → drop from the queue immediately
             }
             catch
             {
-                // Leave pending — retry on a later drain (e.g. after sign-in / next launch).
+                // Leave queued — retry on a later drain (e.g. after sign-in / next launch).
             }
             done++;
-            progress?.Report((done, total));
+            progress?.Report((done, total, id));
             try { await Task.Delay(300, ct); } catch { break; } // throttle
         }
-        // Forget removed ids whose folders Steam has finished cleaning.
-        WorkshopUnsubQueue.PruneRemoved(id => WorkshopFolderExists(settings.WallpaperEnginePath, id));
     }
 
     private static async Task<string> AcquireViaSteamCmdAsync(
