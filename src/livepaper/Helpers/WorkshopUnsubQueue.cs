@@ -5,17 +5,19 @@ using System.Text.Json;
 
 namespace livepaper.Helpers;
 
-/// Durable queue for "Delete from Source" unsubscribes, persisted at
+/// Durable state for "Delete from Source" unsubscribes, persisted at
 /// ~/.config/livepaper/workshop_unsub.json.
 ///
-/// Holds ONLY ids not yet unsubscribed (still to do). Unsubscribing is an external, throttle-
-/// sensitive action, and a bulk delete (200-300) can't be a fire-and-forget burst — the process may
-/// exit mid-way. So delete-from-source only *enqueues*; the throttled drain processes ids and
-/// removes each from the file the instant it succeeds (unsubscribe + folder delete). Force-quit just
-/// resumes the remaining ids next launch.
+/// Two lists:
+/// - `pending` — ids enqueued by delete-from-source, awaiting the unsubscribe POST. Undo pulls them
+///   back out (no network happened). The throttled drain processes them.
+/// - `blocked` — ids already unsubscribed. We do NOT delete the workshop folder ourselves — Steam
+///   removes it (folder + its appworkshop acf entry) on its next sync, which avoids leaving a stale
+///   acf/folder mismatch. While the folder still lingers, `blocked` stops AutoImport from
+///   re-importing it. Pruned once Steam has removed the folder.
 ///
-/// AutoImport (SyncWallpaperEngine) skips queued ids so a still-on-disk folder can't be re-imported
-/// before the drain deletes it.
+/// AutoImport (SyncWallpaperEngine) skips ids in `pending ∪ blocked`. Re-subscribe (Browse) or
+/// re-add via "Wallpaper Engine (Local)" unblocks the id.
 public static class WorkshopUnsubQueue
 {
     private static readonly object _gate = new();
@@ -24,71 +26,120 @@ public static class WorkshopUnsubQueue
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "livepaper", "workshop_unsub.json");
 
-    private static List<string> Load()
+    private sealed class State
+    {
+        public List<string> Pending { get; set; } = [];
+        public List<string> Blocked { get; set; } = [];
+    }
+
+    private static State Load()
     {
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(FilePath)) ?? [];
+                return JsonSerializer.Deserialize<State>(File.ReadAllText(FilePath)) ?? new State();
         }
         catch { }
-        return [];
+        return new State();
     }
 
-    private static void Save(List<string> ids)
+    private static void Save(State s)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(ids));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(s));
         }
         catch { }
     }
 
+    // Enqueue for unsubscribe AND block from AutoImport immediately — the block is durable from the
+    // moment of deletion, independent of whether/when the unsubscribe POST runs. (pending = still
+    // needs the POST; blocked = don't re-import. A deleted item is both at once.)
     public static void AddPending(IEnumerable<string> ids)
     {
         lock (_gate)
         {
-            var list = Load();
+            var s = Load();
             bool changed = false;
             foreach (var id in ids)
             {
-                if (string.IsNullOrWhiteSpace(id) || list.Contains(id)) continue;
-                list.Add(id);
-                changed = true;
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                if (!s.Pending.Contains(id)) { s.Pending.Add(id); changed = true; }
+                if (!s.Blocked.Contains(id)) { s.Blocked.Add(id); changed = true; }
             }
-            if (changed) Save(list);
+            if (changed) Save(s);
         }
     }
 
-    // Undo, or deliberate re-subscribe → pull ids back out (no unsubscribe ran for them).
-    public static void Remove(IEnumerable<string> ids)
+    // Undo → pull ids out of pending (no unsubscribe ran for them).
+    public static void RemovePending(IEnumerable<string> ids)
     {
         lock (_gate)
         {
-            var list = Load();
+            var s = Load();
             bool changed = false;
-            foreach (var id in ids)
-                changed |= list.Remove(id);
-            if (changed) Save(list);
+            foreach (var id in ids) changed |= s.Pending.Remove(id);
+            if (changed) Save(s);
         }
     }
 
-    public static void Remove(string id) => Remove([id]);
-
-    public static List<string> Snapshot()
+    // Drain step succeeded: unsubscribed → block (Steam will delete the folder on its next sync).
+    public static void MarkBlocked(string id)
     {
-        lock (_gate) { return Load(); }
+        lock (_gate)
+        {
+            var s = Load();
+            bool changed = s.Pending.Remove(id);
+            if (!s.Blocked.Contains(id)) { s.Blocked.Add(id); changed = true; }
+            if (changed) Save(s);
+        }
+    }
+
+    // Re-subscribe / re-add via WE Local → the item is wanted again, stop blocking it.
+    public static void Unblock(string id)
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            bool changed = s.Pending.Remove(id) | s.Blocked.Remove(id);
+            if (changed) Save(s);
+        }
+    }
+
+    public static List<string> SnapshotPending()
+    {
+        lock (_gate) { return [.. Load().Pending]; }
     }
 
     public static bool HasPending()
     {
-        lock (_gate) { return Load().Count > 0; }
+        lock (_gate) { return Load().Pending.Count > 0; }
     }
 
-    public static bool IsBlocked(string id)
+    // One read for a whole pass (AutoImport scan): pending ∪ blocked. Callers test against the set
+    // instead of calling IsBlocked per item (which would re-read the file each time).
+    public static HashSet<string> SnapshotBlockedSet()
     {
-        if (string.IsNullOrWhiteSpace(id)) return false;
-        lock (_gate) { return Load().Contains(id); }
+        lock (_gate)
+        {
+            var s = Load();
+            var set = new HashSet<string>(s.Pending, StringComparer.Ordinal);
+            set.UnionWith(s.Blocked);
+            return set;
+        }
+    }
+
+    // Drop blocked ids whose workshop folder Steam has finished removing. `folderExists` is called
+    // once per blocked id; the caller hoists any expensive lookup (e.g. libraryfolders.vdf parse).
+    public static void PruneBlocked(Func<string, bool> folderExists)
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            int before = s.Blocked.Count;
+            s.Blocked.RemoveAll(id => !folderExists(id));
+            if (s.Blocked.Count != before) Save(s);
+        }
     }
 }

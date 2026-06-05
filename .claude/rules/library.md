@@ -54,18 +54,22 @@ Moves all sidecars to `.trash/<batchId>/`. Trash purged on window close or start
 
 ## Delete vs Delete from Source (workshop items)
 
-- **Delete** (`DeleteCards`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription — only removes the local entry. `PurgeBatch` does NOT unsubscribe.
-- **Delete from Source** (`WallpaperCardViewModel.DeleteFromSource`, right-click, `IsWeSymlink` only): enqueues the workshop id into `WorkshopUnsubQueue` + soft-deletes the entry. The unsubscribe + folder delete happen later in a throttled drain — never inline (inline raced Steam's folder cleanup → quick restart + AutoImport re-imported the item; and a bulk 200-300 delete can't be a fire-and-forget burst at shutdown).
+- **Delete** (`DeleteCards`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription — only removes the local entry. `PurgeBatch` does NOT unsubscribe. **Exception:** when `AutoImportWallpaperEngine` is on, a plain delete of a workshop item would be re-imported next launch, so `DeleteCards` enqueues the unsubscribe (= delete-from-source) for any item with a `WorkshopId`.
+- **Delete from Source** (`WallpaperCardViewModel.DeleteFromSource`, right-click): enqueues the workshop id + soft-deletes the entry. Applies to any workshop item — symlink OR copy (`IsWorkshopItem` = `WorkshopId != null`); the drain works by id. Right-click option hidden when auto-import is on (`ShowDeleteFromSource = IsWorkshopItem && !AutoImportActive`) — the trash button already does it. Cards get `AutoImportActive` at creation + on `OnAutoImportWallpaperEngineChanged`.
+
+**We never delete the workshop folder ourselves.** Unsubscribing makes Steam remove the folder + its `appworkshop_431960.acf` entry together on its next sync (consistent — self-deleting would leave a stale acf/folder mismatch and touch Steam's files). A `blocked` set keeps AutoImport from resurrecting the lingering folder until Steam cleans it.
 
 ### `WorkshopUnsubQueue` (`Helpers/WorkshopUnsubQueue.cs`)
-- Persisted JSON list at `~/.config/livepaper/workshop_unsub.json`. Holds **only ids not yet unsubscribed** — a successful drain step removes the id from the file immediately (no "done" set kept).
-- `AddPending`, `Remove` (undo / re-subscribe / drain success), `IsBlocked`, `HasPending`, `Snapshot`. Thread-safe (re-reads file under a lock per call).
-- **Undo** of a delete-from-source batch → `Remove(ids)` (no unsubscribe ran). No-op for plain deletes.
-- **AutoImport** (`SyncWallpaperEngine`) skips `IsBlocked` ids → a still-on-disk folder isn't re-imported before the drain deletes it.
-- **Re-subscribe** via `AcquireViaSubscribeAsync` success → `Remove(id)`.
+- Persisted JSON at `~/.config/livepaper/workshop_unsub.json`: `{ Pending[], Blocked[] }`.
+- `pending` — enqueued, awaiting the unsubscribe POST. `blocked` — unsubscribed; AutoImport skips while Steam's folder cleanup lags.
+- API: `AddPending`, `RemovePending` (undo), `MarkBlocked` (drain success: pending→blocked), `Unblock` (re-subscribe / WE-Local re-add: drop from both), `SnapshotPending`, `HasPending`, `SnapshotBlockedSet` (one read for a whole pass), `PruneBlocked(folderExists)`. Thread-safe (re-reads file under a lock per call).
+- **AutoImport** (`SyncWallpaperEngine`) snapshots `pending ∪ blocked` **once** into a `HashSet` and skips matches in the loop (never `IsBlocked` per folder — that would re-read the file per dir).
+- **Undo** of delete-from-source → `RemovePending(ids)` (no unsubscribe ran). No-op for plain deletes.
+- **Re-add** (re-subscribe via `AcquireViaSubscribeAsync`, or WE-Local re-download in `DownloadOneAsync`) → `Unblock(id)`.
 
 ### Drain (`WorkshopDownloader.DrainUnsubQueueAsync`)
-- Per id: `SetSubscribedAsync(subscribe:false)` → `DeleteWorkshopFolders` (delete every on-disk copy across all Steam libraries + steamcmd cache — a delete, not a cross-device move, so cheap) → `Remove(id)`. Throttled 300ms. Unsubscribe failure leaves the id queued to retry. Reports `(Done, Total, CurrentId)`.
+- Per id: `SetSubscribedAsync(subscribe:false)` → `MarkBlocked(id)`. **No folder delete** — Steam does it. Throttled 300ms (rate-limit). Unsubscribe failure leaves the id pending to retry.
+- **Prune** (`WorkshopDownloader.PruneBlocked`, launch, background): drops blocked ids whose folder is gone (Steam finished). `WorkshopContentRoots` parses `libraryfolders.vdf` **once** and reuses it across ids (don't re-parse per id).
 - **One drain task at a time** (VM `_draining` Interlocked guard). The modal (`IsUnsubModalOpen`) is a *view* onto it — **Dismiss hides the modal but does NOT stop the drain**; progress keeps flowing to `StatusMessage`.
-- **Launch**: `DrainUnsubInBackground` resumes a leftover queue (dismissable modal + status bar).
-- **Close**: `MainWindow.OnClosing` → `Vm.BeginCloseDrain(closeNow)`; if queued it cancels the close, runs the drain, and the completion callback calls `Close()` (`_allowClose` guards re-entry). Force-quit mid-drain → queue persists → resumes next launch.
+- **Launch**: prune, then `DrainUnsubInBackground` resumes a leftover queue (dismissable modal + status bar).
+- **Close**: `MainWindow.OnClosing` → `Vm.BeginCloseDrain(closeNow)`; if queued it cancels the close, runs the drain, completion callback calls `Close()` (`_allowClose` guards re-entry). Force-quit mid-drain → queue persists → resumes next launch.

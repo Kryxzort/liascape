@@ -1529,7 +1529,9 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_settings.WorkshopAcquireMode == "subscribe" && !string.IsNullOrEmpty(_settings.SteamRefreshToken))
             _ = Task.Run(async () => { try { await SteamAuthService.GetCookieAsync(_settings); } catch { } });
 
-        // Resume any unsubscribe queue left over from a prior force-quit (silent background drain).
+        // Forget blocked ids whose folder Steam has finished removing, then resume any unsubscribe
+        // queue left over from a prior session (dismissable modal + status bar).
+        _ = Task.Run(() => { try { WorkshopDownloader.PruneBlocked(_settings); } catch { } });
         DrainUnsubInBackground();
 
         var s = _settings.LastSession;
@@ -2576,6 +2578,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
             var libCard = MakeLibraryCard(item);
             LibraryWallpapers.Add(libCard);
+            // Re-adding a workshop item (WE Local or re-subscribe) → it's wanted again; unblock it.
+            if (item.WorkshopId is string readdId) WorkshopUnsubQueue.Unblock(readdId);
 
             if (applyOnSuccess) ApplyAndSave(item.VideoPath);
             StatusMessage = $"Applied: {target.Title}";
@@ -2684,9 +2688,9 @@ public partial class MainWindowViewModel : ViewModelBase
                 AddCardToPlaylist(card);
             if (card.LibraryItem?.WorkshopId is string wid) restoredIds.Add(wid);
         }
-        // Undo of a "Delete from Source" → pull the id back out of the unsubscribe queue (no
-        // unsubscribe has run yet). No-op for plain deletes (ids aren't in the queue).
-        if (restoredIds.Count > 0) WorkshopUnsubQueue.Remove(restoredIds);
+        // Undo of a "Delete from Source" → unblock + dequeue (clear from both pending and blocked).
+        // No-op for plain deletes (ids aren't in the queue).
+        foreach (var id in restoredIds) WorkshopUnsubQueue.Unblock(id);
         SetTimedStatusMessage(batch.Items.Count > 1 ? $"Restored {batch.Items.Count} wallpapers" : $"Restored: {batch.Items[0].Card.Title}");
     }
 

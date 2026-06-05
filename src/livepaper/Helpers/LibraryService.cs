@@ -67,13 +67,16 @@ public static class LibraryService
         }
         if (indexDirty) SaveWeIndex(existingIds);
 
+        // One read of the unsubscribe state for the whole scan (don't re-read the file per folder).
+        var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
+
         foreach (var dir in Directory.EnumerateDirectories(workshopPath))
         {
             string workshopId = Path.GetFileName(dir);
             if (existingIds.Contains(workshopId)) continue;
             // Pending/just-unsubscribed via "Delete from Source" — don't resurrect it before Steam's
             // own cleanup propagates (the folder may still be on disk for a bit).
-            if (WorkshopUnsubQueue.IsBlocked(workshopId)) continue;
+            if (blocked.Contains(workshopId)) continue;
 
             string projectJson = Path.Combine(dir, "project.json");
             string? type = null, file = null, title = null;

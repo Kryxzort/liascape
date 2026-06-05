@@ -52,8 +52,8 @@ public static class WorkshopDownloader
     {
         progress?.Report((-1, "Subscribing on Steam…"));
         await SetSubscribedAsync(workshopId, settings, subscribe: true, ct);
-        // Deliberately re-subscribing → drop any queued unsubscribe for it.
-        WorkshopUnsubQueue.Remove(workshopId);
+        // Deliberately re-subscribing → unblock it (drop from pending + blocked).
+        WorkshopUnsubQueue.Unblock(workshopId);
 
         progress?.Report((-1, "Subscribed — waiting for Steam to download…"));
 
@@ -124,23 +124,41 @@ public static class WorkshopDownloader
                 $" [{(int)resp.StatusCode} {(body.Length > 120 ? body[..120] : body)}]");
     }
 
+    // Roots (…/431960) of every place workshop content can live: configured WE path, steamcmd cache,
+    // standard + Flatpak Steam, and each libraryfolders.vdf library. Parse the vdf once and reuse
+    // across many ids (the prune pass does this).
+    private static System.Collections.Generic.List<string> WorkshopContentRoots(string workshopBasePath)
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var roots = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrEmpty(workshopBasePath)) roots.Add(workshopBasePath); // already …/431960
+        roots.Add(SteamCmdWorkshopContentDir);
+        roots.Add(Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960"));
+        roots.Add(Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"));
+        foreach (var libRoot in ReadSteamLibraryRoots())
+            roots.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960"));
+        return roots;
+    }
+
     // All places a downloaded workshop item might already live (every Steam library + steamcmd).
     private static System.Collections.Generic.IEnumerable<string> ExistingWorkshopDirs(
         string workshopBasePath, string workshopId)
     {
         var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var dirs = new System.Collections.Generic.List<string>();
-        if (!string.IsNullOrEmpty(workshopBasePath))
-            dirs.Add(Path.Combine(workshopBasePath, workshopId));
-        dirs.Add(Path.Combine(SteamCmdWorkshopContentDir, workshopId));
-        dirs.Add(Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960", workshopId));
-        dirs.Add(Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960", workshopId));
-        foreach (var libRoot in ReadSteamLibraryRoots())
-            dirs.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960", workshopId));
-
-        foreach (var d in dirs)
+        foreach (var root in WorkshopContentRoots(workshopBasePath))
+        {
+            var d = Path.Combine(root, workshopId);
             if (seen.Add(d)) yield return d;
+        }
+    }
+
+    // Does any on-disk copy of this workshop item still exist? Pass precomputed roots to avoid
+    // re-parsing libraryfolders.vdf per id (used by the prune pass).
+    private static bool WorkshopFolderExists(System.Collections.Generic.List<string> roots, string workshopId)
+    {
+        foreach (var root in roots)
+            if (Directory.Exists(Path.Combine(root, workshopId))) return true;
+        return false;
     }
 
     // Delete a steamcmd-downloaded workshop item (the "unsubscribe" equivalent on library delete).
@@ -153,22 +171,13 @@ public static class WorkshopDownloader
         catch { }
     }
 
-    // Delete every on-disk copy of a workshop item (steamcmd cache + every Steam library). A delete,
-    // not a move — cheap on any filesystem. Used by the unsubscribe drain so a quick restart with
-    // AutoImport on can't re-import the folder before Steam's own cleanup propagates.
-    private static void DeleteWorkshopFolders(string workshopBasePath, string workshopId)
-    {
-        foreach (var dir in ExistingWorkshopDirs(workshopBasePath, workshopId))
-            try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }
-    }
-
-    /// Drains the persisted unsubscribe queue: for each pending id, unsubscribe → delete its folders
-    /// → drop it from the queue (the queue holds only not-yet-done ids). Throttled to avoid Steam
-    /// rate-limits. On unsubscribe failure the id is left queued to retry on a later drain. Reports
-    /// (done, total, currentId) for the progress UI + status bar.
+    /// Drains the unsubscribe queue: for each pending id, unsubscribe → mark blocked. We do NOT delete
+    /// the workshop folder — Steam removes it (folder + acf entry) on its next sync, avoiding a stale
+    /// acf/folder mismatch. `blocked` keeps AutoImport from re-importing the lingering folder until
+    /// Steam cleans it. Throttled; on failure the id stays pending to retry. Reports (done,total,id).
     public static async Task DrainUnsubQueueAsync(AppSettings settings, IProgress<(int Done, int Total, string CurrentId)>? progress, CancellationToken ct)
     {
-        var pending = WorkshopUnsubQueue.Snapshot();
+        var pending = WorkshopUnsubQueue.SnapshotPending();
         int total = pending.Count, done = 0;
         foreach (var id in pending)
         {
@@ -177,8 +186,7 @@ public static class WorkshopDownloader
             try
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
-                DeleteWorkshopFolders(settings.WallpaperEnginePath, id);
-                WorkshopUnsubQueue.Remove(id);   // done → drop from the queue immediately
+                WorkshopUnsubQueue.MarkBlocked(id);   // unsubscribed → Steam will delete the folder
             }
             catch
             {
@@ -188,6 +196,14 @@ public static class WorkshopDownloader
             progress?.Report((done, total, id));
             try { await Task.Delay(300, ct); } catch { break; } // throttle
         }
+    }
+
+    /// Forget blocked ids whose workshop folder Steam has finished removing. One-time, cheap: parses
+    /// libraryfolders.vdf once and does a few Directory.Exists per blocked id.
+    public static void PruneBlocked(AppSettings settings)
+    {
+        var roots = WorkshopContentRoots(settings.WallpaperEnginePath);
+        WorkshopUnsubQueue.PruneBlocked(id => WorkshopFolderExists(roots, id));
     }
 
     private static async Task<string> AcquireViaSteamCmdAsync(
