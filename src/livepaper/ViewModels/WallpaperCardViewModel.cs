@@ -404,15 +404,30 @@ public partial class WallpaperCardViewModel : ViewModelBase
     private void OpenSettings() => OnOpenSettings?.Invoke(this);
 
     [RelayCommand]
-    private void DeleteFromSource()
+    private async Task DeleteFromSource()
     {
         if (LibraryItem == null || !IsWeSymlink) return;
+
+        // Unsubscribe first so Steam stops tracking the item and won't re-download it. Without
+        // this, deleting the workshop folder while still subscribed just makes Steam re-sync it.
+        if (LibraryItem.WorkshopId != null)
+        {
+            var settings = SettingsService.Load();
+            bool signedIn = !string.IsNullOrWhiteSpace(settings.SteamRefreshToken)
+                || !string.IsNullOrWhiteSpace(settings.SteamLoginSecure);
+            if (signedIn)
+            {
+                try { await WorkshopDownloader.SetSubscribedAsync(LibraryItem.WorkshopId, settings, subscribe: false); }
+                catch { }
+            }
+        }
+
         var real = File.ResolveLinkTarget(LibraryItem.VideoPath, returnFinalTarget: true)?.FullName;
-        if (real == null) return;
-        var sourceDir = Path.GetDirectoryName(real);
-        if (sourceDir == null || !Directory.Exists(sourceDir)) return;
-        try { Directory.Delete(sourceDir, recursive: true); }
-        catch { return; }
+        var sourceDir = real != null ? Path.GetDirectoryName(real) : null;
+        if (sourceDir != null && Directory.Exists(sourceDir))
+        {
+            try { Directory.Delete(sourceDir, recursive: true); } catch { }
+        }
         OnDelete?.Invoke(this);
     }
 
