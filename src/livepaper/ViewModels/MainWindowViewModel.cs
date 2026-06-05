@@ -739,6 +739,8 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.AutoImportWallpaperEngine = value;
         SettingsService.Save(_settings);
         OnPropertyChanged(nameof(FilteredSources));
+        // Trash button = delete-from-source while auto-import is on; hide the redundant right-click.
+        foreach (var c in LibraryWallpapers) c.AutoImportActive = value;
         if (value && SelectedSource is WallpaperEngineService)
             SelectedSource = Sources[0];
         if (value) Task.Run(SyncWallpaperEngineAsync);
@@ -2634,6 +2636,10 @@ public partial class MainWindowViewModel : ViewModelBase
         foreach (var target in targets)
         {
             if (target.LibraryItem == null) continue;
+            // With auto-import on, a plain delete of a workshop item would just be re-added next
+            // launch — so the trash button must unsubscribe (delete-from-source). Enqueue it.
+            if (AutoImportWallpaperEngine && target.LibraryItem.WorkshopId is string wsId)
+                WorkshopUnsubQueue.AddPending([wsId]);
             bool wasInPlaylist = target.IsInPlaylist;
             try
             {
@@ -2781,6 +2787,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!AutoPlayGifs) card.LoadStaticThumbnailAsync();
         card.OnOpenSettings = c => OpenPreview(c);
         card.OnDelete = c => Delete(c);
+        card.AutoImportActive = AutoImportWallpaperEngine;
         return card;
     }
 

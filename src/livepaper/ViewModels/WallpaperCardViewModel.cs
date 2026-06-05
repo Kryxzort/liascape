@@ -377,10 +377,16 @@ public partial class WallpaperCardViewModel : ViewModelBase
 
     partial void OnIsInPlaylistChanged(bool value) => OnPropertyChanged(nameof(CheckmarkText));
 
-    // True for WE wallpapers imported as symlinks (not copies). "Delete from Source" is only
-    // applicable here — copies have no external source folder to delete.
-    public bool IsWeSymlink => LibraryItem != null && LibraryItem.WorkshopId != null
-        && LibraryService.IsSymlink(LibraryItem.VideoPath);
+    // Any workshop-sourced item (symlink OR copy) — "Delete from Source" unsubscribes by workshop
+    // id and the drain deletes the workshop folder by id, so it works for both. (Copies keep their
+    // own independent file in the library; only the external Steam source is removed.)
+    public bool IsWorkshopItem => LibraryItem?.WorkshopId != null;
+
+    // Auto-import re-adds workshop items on next launch, so a plain delete is futile — when it's on,
+    // the trash button itself unsubscribes (see DeleteCards) and this explicit option is redundant.
+    [ObservableProperty] private bool _autoImportActive;
+    public bool ShowDeleteFromSource => IsWorkshopItem && !AutoImportActive;
+    partial void OnAutoImportActiveChanged(bool value) => OnPropertyChanged(nameof(ShowDeleteFromSource));
 
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadProgress;
@@ -406,7 +412,7 @@ public partial class WallpaperCardViewModel : ViewModelBase
     [RelayCommand]
     private void DeleteFromSource()
     {
-        if (LibraryItem?.WorkshopId == null || !IsWeSymlink) return;
+        if (LibraryItem?.WorkshopId == null) return;
         // Enqueue the unsubscribe (the actual Steam call + folder delete happen at the throttled
         // drain on close / next launch) and soft-delete the library entry. Instant + undoable; undo
         // pulls the id back out of the queue before any unsubscribe runs.

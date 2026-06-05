@@ -827,7 +827,7 @@
                                                                   Command="{Binding OpenSettingsCommand}"/>
                                                         <MenuItem Header="Delete from Source"
                                                                   Command="{Binding DeleteFromSourceCommand}"
-                                                                  IsVisible="{Binding IsWeSymlink}"/>
+                                                                  IsVisible="{Binding ShowDeleteFromSource}"/>
                                                     </ContextMenu>
                                                 </Border.ContextMenu>
                                                 <Grid>
