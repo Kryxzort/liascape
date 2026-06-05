@@ -2636,6 +2636,22 @@ public partial class MainWindowViewModel : ViewModelBase
         string batchDir = Path.Combine(LibraryService.TrashPath, Guid.NewGuid().ToString("N")[..8]);
         var batchItems = new List<(WallpaperCardViewModel Card, bool WasInPlaylist)>();
         int deleted = 0;
+        // If the wallpaper playing right now is in this batch, we must stop/advance off it after the
+        // removals (mpvpaper keeps showing a file even once its symlink is trashed). Capture the next
+        // surviving playlist card (skipping any also-deleted ones, wrapping) before we remove things.
+        bool deletingPlaying = _currentlyPlayingCard != null && targets.Contains(_currentlyPlayingCard);
+        WallpaperCardViewModel? nextAfterPlaying = null;
+        if (deletingPlaying)
+        {
+            var pl = PlaylistItems.ToList();
+            int ci = pl.IndexOf(_currentlyPlayingCard!);
+            if (ci >= 0)
+                for (int k = 1; k <= pl.Count; k++)
+                {
+                    var cand = pl[(ci + k) % pl.Count];
+                    if (!targets.Contains(cand)) { nextAfterPlaying = cand; break; }
+                }
+        }
 
         foreach (var target in targets)
         {
@@ -2669,6 +2685,31 @@ public partial class MainWindowViewModel : ViewModelBase
             _undoBatches.Add(new UndoBatch { BatchDir = batchDir, Items = batchItems });
             CanUndo = true;
             SetTimedStatusMessage(deleted > 1 ? $"Deleted {deleted} wallpapers" : $"Deleted: {batchItems[0].Card.Title}");
+        }
+
+        if (deletingPlaying) HandlePlayingDeleted(nextAfterPlaying);
+    }
+
+    // The currently-playing wallpaper was just deleted. If a playlist is running with a surviving
+    // item, restart playback from it (PlayFromCard works for every playlist mode and the survivor
+    // list already excludes all just-deleted items). Otherwise stop.
+    private void HandlePlayingDeleted(WallpaperCardViewModel? next)
+    {
+        if (!PlayerHelper.IsPlaying) return;
+        var s = _settings.LastSession;
+        bool isPlaylist = s != null && (s.IsPlaylist || s.IsTimedPlaylist);
+
+        if (isPlaylist && next != null && PlaylistItems.Contains(next))
+        {
+            _playlistSyncCts?.Cancel(); // the Remove queued a debounced sync; we re-apply now
+            PlayFromCard(next);
+        }
+        else
+        {
+            // Single wallpaper, or nothing left to play → stop.
+            PlayerHelper.Stop();
+            if (_currentlyPlayingCard != null) { _currentlyPlayingCard.IsCurrentlyPlaying = false; _currentlyPlayingCard = null; }
+            StatusMessage = "";
         }
     }
 
