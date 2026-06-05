@@ -113,6 +113,14 @@ public static class WorkshopDownloader
 
         using var resp = await HttpClientProvider.Client.SendAsync(req, ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
+
+        // Rate-limited → distinct exception so the drain can stop early instead of hammering the
+        // rest of the queue (they'd all 429 too). 429, or Steam's 403 + empty/"too many" body.
+        if ((int)resp.StatusCode == 429
+            || (resp.StatusCode == System.Net.HttpStatusCode.Forbidden
+                && body.Contains("too many", StringComparison.OrdinalIgnoreCase)))
+            throw new SteamRateLimitException();
+
         // Steam returns {"success":1} on success (1 also = already in that state). Anything else
         // (non-2xx, or a success code that isn't 1) means the request didn't take.
         bool ok = resp.IsSuccessStatusCode
@@ -122,6 +130,12 @@ public static class WorkshopDownloader
                 "Steam rejected the subscribe request — your login may be expired. " +
                 "Re-sign in to Steam (QR) in Settings → Sources." +
                 $" [{(int)resp.StatusCode} {(body.Length > 120 ? body[..120] : body)}]");
+    }
+
+    // Thrown when Steam rate-limits a subscribe/unsubscribe; signals the drain to back off.
+    public sealed class SteamRateLimitException : Exception
+    {
+        public SteamRateLimitException() : base("Steam rate-limited the request.") { }
     }
 
     // Roots (…/431960) of every place workshop content can live: configured WE path, steamcmd cache,
@@ -187,6 +201,12 @@ public static class WorkshopDownloader
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
                 WorkshopUnsubQueue.MarkBlocked(id);   // unsubscribed → Steam will delete the folder
+            }
+            catch (SteamRateLimitException)
+            {
+                // Steam is limiting us — the rest of the queue would just fail too. Stop now; the
+                // remaining ids stay pending (and blocked) and resume on the next drain.
+                break;
             }
             catch
             {
