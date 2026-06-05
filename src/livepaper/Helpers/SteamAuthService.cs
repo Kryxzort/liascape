@@ -163,14 +163,14 @@ public static class SteamAuthService
 
     private static int _renewing;
 
-    /// Best-effort refresh-token renewal: when the stored refresh token is within 30 days of expiry,
+    /// Best-effort refresh-token renewal: when the stored refresh token is within 90 days of expiry,
     /// log on with it and ask Steam for a renewed one (rolls the ~200-day window forward). Validated
     /// before adoption (later expiry, same SteamID) and fully swallows errors — if Steam won't renew
     /// (or won't log on a WebBrowser token), nothing changes and normal expiry + re-login applies.
     private static void MaybeRenewRefreshTokenInBackground(AppSettings settings)
     {
         if (JwtExpiryUtc(settings.SteamRefreshToken) is not DateTime exp) return;
-        if (exp > DateTime.UtcNow.AddDays(30)) return;
+        if (exp > DateTime.UtcNow.AddDays(90)) return;
         if (Interlocked.CompareExchange(ref _renewing, 1, 0) != 0) return;
 
         _ = Task.Run(async () =>
