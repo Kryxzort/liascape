@@ -492,7 +492,11 @@ public static class LibraryService
     {
         if (sourceId == null) return null;
         if (long.TryParse(sourceId, out _)) return sourceId;
-        if (sourceId.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return null;
+        // Steam page URL (subscribe/workshop downloads write the ?id=NNN URL as the source) —
+        // recover the numeric workshop ID from the id= query param so right-click "Delete from
+        // Source" + the workshop-ID display survive a restart.
+        if (sourceId.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            return ExtractSteamWorkshopId(sourceId);
 
         // Local path — extract numeric workshop ID from path segments
         var parts = sourceId.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
