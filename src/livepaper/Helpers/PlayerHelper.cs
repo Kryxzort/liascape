@@ -17,6 +17,10 @@ public static class PlayerHelper
     private static Process? _current;
     private static Timer? _playlistTimer;
     private static Timer? _restartTimer;
+    // RestartOnSwitchOnly: a leak-restart is due but deferred to the next wallpaper switch (so the
+    // relaunch rides the natural changeover instead of a jarring mid-video restart). Lives in the tick
+    // owner's memory; set when it consumes a "soft-restart" pending action, consumed by the next SwitchToFile.
+    private static bool _restartPending;
     private static bool _daemonMode = false;
     private static List<string>? _timedPaths;
     private static int _timedIndex;
@@ -119,6 +123,21 @@ public static class PlayerHelper
             return state?.TimerPaused ?? false;
         }
         catch { return false; }
+    }
+
+    // Daemon-side (no in-memory history): read the timed-state file for the item count + current path,
+    // so RunRestartDaemon can apply the same scene-skip / defer-to-switch logic as the in-process timer.
+    private static (int Count, string? Current) ReadTimedSnapshot()
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
+            if (state == null) return (0, null);
+            int hi = state.WaitingForVideoEnd && state.HistoryIndex > 0 ? state.HistoryIndex - 1 : state.HistoryIndex;
+            string? cur = state.History != null && hi >= 0 && hi < state.History.Count ? state.History[hi] : null;
+            return (state.Paths.Count, cur);
+        }
+        catch { return (0, null); }
     }
 
     private static string IpcSocket => Path.Combine(
@@ -371,7 +390,17 @@ public static class PlayerHelper
         {
             if (_timedPaths != null && !_timedTimerStopped)
             {
-                if (!_timedTimerPaused)
+                if (_timedTimerPaused) return;
+                // Scene playing → mpvpaper isn't running; the restart is moot. Skip (this is what "zeroes"
+                // the restart timer while a scene plays — firing does nothing).
+                var cur = _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count
+                    ? _history[PlayingHistoryIndex] : null;
+                if (cur != null && IsScenePath(cur)) return;
+                // RestartOnSwitchOnly + a real playlist (a switch is coming) → defer: the next changeover
+                // becomes the relaunch. Otherwise (toggle off, or playlist-of-1 = no switch) → jarring restart now.
+                if (settings.RestartOnSwitchOnly && _timedPaths.Count > 1)
+                    WritePendingAction("soft-restart");
+                else
                     WritePendingAction("restart");
                 return;
             }
@@ -380,7 +409,7 @@ public static class PlayerHelper
             if (!IsPlaying) return;
             var session = settings.LastSession;
             if (session == null || session.Paths.Count == 0) return;
-            DoColdRestart(session, settings);
+            DoColdRestart(session, settings); // lone video → default (jarring) restart
         }
     }
 
@@ -436,7 +465,10 @@ public static class PlayerHelper
                 settings = SettingsService.Load();
                 if (IsTimedPlaylistActive() && !IsTimedPlaylistPaused())
                 {
-                    WritePendingAction("restart");
+                    var (count, cur) = ReadTimedSnapshot();
+                    if (cur != null && IsScenePath(cur)) { /* scene → skip (zeroes the restart timer) */ }
+                    else if (settings.RestartOnSwitchOnly && count > 1) WritePendingAction("soft-restart");
+                    else WritePendingAction("restart");
                 }
                 else if (IsPlaying)
                 {
@@ -590,6 +622,10 @@ public static class PlayerHelper
             TeardownTimer();
             ClearTimedStateFile();
             SwitchToFile(videoPath, mpvOptions);
+            // Track the single item so QueryCurrentPath works for scenes (no mpv socket to query) and a
+            // live override can identify what's playing. _timedPaths stays null → no timed-playlist logic.
+            _history = [videoPath];
+            _historyIndex = 0;
         }
         UpdateRestartTimer();
     }
@@ -934,6 +970,9 @@ public static class PlayerHelper
         // ── Transition involving a scene ──────────────────────────────────────
         if (nextIsScene || prevIsScene)
         {
+            // a scene swap tears mpvpaper down (→ leak reset) and "zeroes" the restart timer — any
+            // deferred restart is satisfied by the teardown; clear it + reset the in-process countdown.
+            if (_restartPending) { _restartPending = false; if (!_daemonMode) UpdateRestartTimer(); }
             if (nextIsScene)
             {
                 var settings = SettingsService.Load();
@@ -942,16 +981,18 @@ public static class PlayerHelper
                     KillCurrentProcess();
                     return;
                 }
-                string workshopId;
-                try { workshopId = File.ReadAllText(path).Trim(); }
-                catch { KillCurrentProcess(); return; }
+                // Folder-based scene: the item folder IS `path`. Launch a subscribed item by id (LWE's
+                // native lookup in the WE dir); an owned copy by directory path (copied scenes always
+                // launched from a path — SpawnLweProcesses' last arg accepts id OR dir).
+                var loc = LibraryStore.Locate(path);
+                string lweArg = loc?.Source == LibraryStore.Local ? loc.Value.Key : path;
 
                 // Capture old processes before launching new ones.
                 var oldMpvProcs = Process.GetProcessesByName("mpvpaper");
                 var oldLwePids = ReadCurrentLwePids();
 
                 // Launch new LWE without killing old yet.
-                var newPids = SpawnLweProcesses(workshopId, settings);
+                var newPids = SpawnLweProcesses(lweArg, settings);
                 OnWallpaperChanged?.Invoke(path);
 
                 if (newPids.Length > 0)
@@ -1036,16 +1077,21 @@ public static class PlayerHelper
         }
 
         // ── Video→video: existing seamless approach ───────────────────────────
+        // _restartPending → force the cold-start branch (skip the seamless IPC swap) so THIS changeover
+        // relaunches mpvpaper (the deferred leak-restart, masked by the natural switch). Then clear it.
         bool mpvAlive = File.Exists(IpcSocket) && Process.GetProcessesByName("mpvpaper").Length > 0;
-        if (mpvAlive && TryIpcSwitchToFile(path))
+        // Compute the effective volume/speed BEFORE the switch so they can ride INTO `loadfile` as
+        // per-file options. A post-loadfile `set_property volume` races mpv's own apply of the launch
+        // default (--volume) and gets clobbered → the advanced-to item played at the global, not its
+        // override. Passing them as loadfile options applies them atomically with the load (no race).
+        var cfg = SettingsService.Load();
+        int effVol = ReadVolumeOverride(path) ?? cfg.Volume;
+        double effSpd = ReadSpeedOverride(path) ?? cfg.Speed;
+        if (mpvAlive && !_restartPending && TryIpcSwitchToFile(path, effVol, effSpd))
         {
+            _currentSpeed = effSpd; // keep the timed-tick speed factor in sync (cold path sets it below)
             OnWallpaperChanged?.Invoke(path);
-            var volOverride = ReadVolumeOverride(path);
-            var speedOverride = ReadSpeedOverride(path);
-            var settings = SettingsService.Load();
-            int vol = volOverride ?? settings.Volume;
-            double spd = speedOverride ?? settings.Speed;
-            Task.Run(() => { SetVolume(vol); SetSpeed(spd); if (_isMuted) SendCommand("set_property", "mute", true); });
+            if (_isMuted) Task.Run(() => SendCommand("set_property", "mute", true));
         }
         else
         {
@@ -1056,22 +1102,28 @@ public static class PlayerHelper
             // Keep tick speed factor in sync with the freshly launched video (mpv IPC path
             // already updates this via SetSpeed; cold-start has no SetSpeed call).
             _currentSpeed = ReadSpeedOverride(path) ?? SettingsService.Load().Speed;
+            // this cold relaunch satisfied any deferred leak-restart; reset the in-process countdown
+            if (_restartPending) { _restartPending = false; if (!_daemonMode) UpdateRestartTimer(); }
             OnWallpaperChanged?.Invoke(path);
         }
         OnWallpaperChanged?.Invoke(path);
     }
 
-    private static bool TryIpcSwitchToFile(string path)
+    private static bool TryIpcSwitchToFile(string path, int volume, double speed)
     {
         // Read AppSettings.Loop directly so the loop state is explicit rather
         // than parsed out of the kill+launch options string. Other launch-only
         // options (hwdec, cache, demuxer) can't be toggled mid-session and only
         // take effect on next cold start.
         bool loopFile = SettingsService.Load().Loop;
+        // Per-file options applied atomically with the load (mpv ≥ 0.38: loadfile <url> <flags> <index> <opts>).
+        // Carries the effective volume/speed (+ mute) so the new file starts at them — no post-load reset race.
+        var fileOpts = $"volume={volume},speed={speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}";
+        if (_isMuted) fileOpts += ",mute=yes";
         return TrySendCommand("set", "loop-file", loopFile ? "inf" : "no")
             && TrySendCommand("set", "loop-playlist", "no")
             && TrySendCommand("playlist-clear")
-            && TrySendCommand("loadfile", path, "replace");
+            && TrySendCommand("loadfile", path, "replace", 0, fileOpts);
     }
 
     // Bool-returning variant of SendCommand for callers that need to know
@@ -1118,24 +1170,8 @@ public static class PlayerHelper
             if (_history == null || _historyIndex < 0 || _historyIndex >= _history.Count) return null;
             var path = _history[_historyIndex];
             if (!IsScenePath(path)) return null;
-            try
-            {
-                var content = File.ReadAllText(path).Trim();
-                // .scene file contains either a workshop id (numeric) or a copied scene dir path.
-                if (Path.IsPathRooted(content))
-                {
-                    var idFile = Path.ChangeExtension(path, ".id");
-                    if (File.Exists(idFile))
-                    {
-                        var idContent = File.ReadAllText(idFile).Trim();
-                        var slash = idContent.LastIndexOfAny(['/', '\\']);
-                        return slash >= 0 ? idContent[(slash + 1)..] : idContent;
-                    }
-                    return null;
-                }
-                return content;
-            }
-            catch { return null; }
+            // folder-based: the scene folder's NAME is the workshop id (workshop/<id> or local/<id>)
+            return Path.GetFileName(path.TrimEnd('/', '\\'));
         }
     }
 
@@ -1477,6 +1513,9 @@ public static class PlayerHelper
         }
     }
 
+    // Public accessor for the web UI (sync the in-app wallpaper preview to live mpv position).
+    public static double? QueryTimePos() => TryQueryTimePos();
+
     private static double? TryQueryTimePos()
     {
         var socketPath = IpcSocket;
@@ -1793,6 +1832,8 @@ public static class PlayerHelper
             case "prev": StepBackAndLaunch(); break;
             case "random": RandomAndLaunch(); break;
             case "restart": RestartCurrentAndLaunch(); break;
+            // defer: don't restart now — the next changeover's SwitchToFile becomes a cold relaunch (masked)
+            case "soft-restart": _restartPending = true; break;
         }
     }
 
@@ -2088,6 +2129,21 @@ public static class PlayerHelper
         _speedChangeTcs?.TrySetResult(true);
     }
 
+    // Apply a per-wallpaper override LIVE to the currently-playing wallpaper, seamlessly (no restart):
+    // mpv set_property for video volume/speed, LWE for scene volume (scenes are 1× → speed no-op). No-op
+    // unless `path` is what's playing. Effective = override ?? global, so clearing an override (index key
+    // dropped because it == global) snaps the running wallpaper back to the global value. SetSpeed keeps
+    // the timed-playlist cache (_currentSpeed) in sync, so later ticks/advances use the new value too.
+    public static void ApplyOverrideLive(string path)
+    {
+        var cur = QueryCurrentPath();
+        if (cur == null) return;
+        try { if (Path.GetFullPath(cur) != Path.GetFullPath(path)) return; } catch { return; }
+        var s = SettingsService.Load();
+        SetVolume(LibraryService.ReadVolumeOverride(path) ?? s.Volume);
+        if (!IsLweRunning) SetSpeed(LibraryService.ReadSpeedOverride(path) ?? s.Speed);
+    }
+
     public static void SetLoop(bool loop) =>
         TrySendCommand("set", "loop-file", loop ? "inf" : "no");
 
@@ -2346,6 +2402,7 @@ public static class PlayerHelper
         _playlistTimer?.Dispose();
         _playlistTimer = null;
         StopRestartTimer();
+        _restartPending = false; // don't carry a deferred restart into the next session
         _timedPaths = null;
         _history = null;
         _historyIndex = -1;
@@ -2379,8 +2436,10 @@ public static class PlayerHelper
         catch { return false; }
     }
 
+    // A scene's library path is its item FOLDER (workshop/<id> or local/<id> — a numeric-id dir, no
+    // file extension); a video/image path always ends in a media extension. So "no extension" ⟺ scene.
     public static bool IsScenePath(string path) =>
-        path.EndsWith(".scene", StringComparison.OrdinalIgnoreCase);
+        !string.IsNullOrEmpty(path) && Path.GetExtension(path).Length == 0;
 
     private static bool IsSkippedPath(string path)
     {
@@ -2576,21 +2635,12 @@ public static class PlayerHelper
         catch { }
     }
 
-    private static int? ReadVolumeOverride(string path)
-    {
-        var sidecar = Path.ChangeExtension(path, ".volume");
-        if (!File.Exists(sidecar)) return null;
-        try { return int.TryParse(File.ReadAllText(sidecar).Trim(), out int v) ? v : null; }
-        catch { return null; }
-    }
+    // Per-item overrides live in the source index (LibraryStore). Delegate to LibraryService so EVERY
+    // playback path (initial launch, playlist advance, transitions, scene launch, option baking) reads the
+    // same source of truth the UI/endpoints write.
+    private static int? ReadVolumeOverride(string path) => LibraryService.ReadVolumeOverride(path);
 
-    private static double? ReadSpeedOverride(string path)
-    {
-        var sidecar = Path.ChangeExtension(path, ".speed");
-        if (!File.Exists(sidecar)) return null;
-        try { return double.TryParse(File.ReadAllText(sidecar).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : null; }
-        catch { return null; }
-    }
+    private static double? ReadSpeedOverride(string path) => LibraryService.ReadSpeedOverride(path);
 
     private static string BakeVolumeOverride(string options, string path)
     {

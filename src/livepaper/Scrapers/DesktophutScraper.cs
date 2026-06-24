@@ -45,7 +45,8 @@ public static class DesktophutScraper
         doc.LoadHtml(html);
 
         var results = new List<WallpaperResult>();
-        var links = doc.DocumentNode.SelectNodes("//a[@class='wallpaper-card-link']");
+        // Desktophut markup (2026): <a class="wallpaper-card" href="/slug" aria-label="Title"><img src=".webp"></a>
+        var links = doc.DocumentNode.SelectNodes("//a[contains(@class,'wallpaper-card')]");
         if (links == null) return results;
 
         foreach (var a in links)
@@ -53,12 +54,17 @@ public static class DesktophutScraper
             try
             {
                 string href = a.GetAttributeValue("href", "");
-                string rawTitle = WebUtility.HtmlDecode(a.GetAttributeValue("title", ""));
+                // aria-label is the clean title; fall back to the title attr ("Download X live wallpaper (4K/HD)")
+                string aria = WebUtility.HtmlDecode(a.GetAttributeValue("aria-label", ""));
+                string rawTitle = !string.IsNullOrWhiteSpace(aria)
+                    ? aria
+                    : WebUtility.HtmlDecode(a.GetAttributeValue("title", ""));
                 string img = a.SelectSingleNode(".//img")?.GetAttributeValue("src", "") ?? "";
 
                 if (string.IsNullOrEmpty(href) || string.IsNullOrEmpty(rawTitle)) continue;
 
-                string title = Regex.Replace(rawTitle, @"\s+[Ll]ive [Ww]allpaper\s*$", "").Trim();
+                string title = Regex.Replace(rawTitle, @"^Download\s+", "");
+                title = Regex.Replace(title, @"\s+[Ll]ive [Ww]allpaper.*$", "").Trim();
                 if (string.IsNullOrEmpty(title)) title = rawTitle;
 
                 results.Add(new WallpaperResult

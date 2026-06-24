@@ -1,0 +1,559 @@
+/* Theme vars are injected on :root by the store (applyThemeVars). Defaults = Catppuccin Mocha
+   so first paint isn't unstyled. COOL: --accent drives every glow. */
+:root {
+  --bg-base: #1e1e2e; --bg-mantle: #181825; --bg-crust: #11111b;
+  --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
+  --text: #cdd6f4; --subtext: #a6adc8; --muted: #6c7086;
+  --accent: #89b4fa; --accent-fg: #11111b; --accent-hover: #74c7ec;
+  --danger: #f38ba8; --danger-bg: #2a1820; --success: #a6e3a1;
+  --gap: 14px; --cols: 5;
+  /* translucency of chrome (bars, buttons, dropdowns, fields). --tr-strong = +0.1, for denser surfaces
+     (filter popover) that need a touch more body. Single knob → change here to retune everything. */
+  --tr: 55%; --tr-strong: 75%;
+  /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
+  --glow-sm: 0 0 12px -2px var(--accent);
+  --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; }
+body {
+  /* Inter 14. */
+  background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%);
+  color: var(--text);
+  font: 14px/1.45 Inter, system-ui, sans-serif;
+  overflow: hidden;
+}
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+
+/* Custom scrollbar — 10px track, transparent; thumb 6px Surface1,
+   8px + Surface2 on hover, Muted on press, rounded, no arrows. transparent-border trick = the
+   2px→1px margin that fattens the thumb on hover. */
+/* NOTE: do NOT set `scrollbar-width`/`scrollbar-color` — Chromium ≥121 then ignores ::-webkit-scrollbar
+   and falls back to the un-rounded standard bar. We want the custom rounded thumb, so webkit-only. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--surface1); border-radius: 10px;
+  border: 2px solid transparent; background-clip: padding-box; min-height: 20px;
+  transition: background .1s, border-width .1s;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--surface2); border-width: 1px; }
+::-webkit-scrollbar-thumb:active { background: var(--muted); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---- app shell ---- */
+.app { display: flex; flex-direction: column; height: 100vh; position: relative; }
+.topbar {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  background: color-mix(in srgb, var(--bg-crust) var(--tr), transparent); /* translucent chrome (--tr) */
+  border-bottom: 1px solid var(--surface0);
+  z-index: 5;
+}
+.tabs { display: flex; gap: 4px; }
+/* Glowing accent pill active tab. */
+.tab {
+  padding: 6px 14px; border-radius: 8px; color: var(--subtext); font-weight: 600;
+  transition: color .15s, background .15s, box-shadow .2s;
+}
+.tab:hover { color: var(--text); background: var(--surface0); box-shadow: var(--glow-sm); }
+.tab.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
+.tab.active:hover { box-shadow: var(--glow); }
+
+.spacer { flex: 1; }
+.search {
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
+  border-radius: 8px; padding: 7px 12px; min-width: 240px; outline: none;
+  transition: border-color .15s, box-shadow .2s;
+}
+.search:hover, .search:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+
+/* don't shrink → pills keep their natural one-row width (no ugly forced wrap); the status (flex:1000,
+   min-width:0) takes the squeeze and truncates only when there's genuinely no horizontal room. */
+.pills { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+.pill {
+  padding: 6px 12px; border-radius: 999px; color: var(--subtext); font-size: 13px; font-weight: 600;
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: all .15s, box-shadow .2s;
+}
+.pill:hover { color: var(--text); box-shadow: var(--glow-sm); }
+.pill.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
+.pill.active:hover { box-shadow: var(--glow); }
+
+/* ---- grid ---- */
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--gap); }
+/* library scroll sits BEHIND the overlaid playlist strip — pad the bottom so the collapsed bar
+   never permanently hides the last row (expanding the bar covers cards by design: cards sit behind). */
+/* pad by the strip's live height (--strip-h, set by PlaylistStrip) + a gap so the last row clears the
+   bar whether it's collapsed or expanded. */
+/* end the scroll ABOVE the strip (margin, not padding) so no cards render behind the translucent strip
+   — it then shows the fixed wallpaper video directly as its translucent bg, not the grid scrolling under. */
+.lib-scroll { margin-bottom: var(--strip-h, 60px); padding-bottom: 16px; }
+/* --cols is set per scroll container by useGridFit (derived from window size + target count + aspect)
+   so visible count stays ~constant on resize while cards keep --thumb-aspect. */
+.grid { display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: var(--gap); }
+
+.card {
+  position: relative; background: var(--surface0); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  transition: transform .14s ease, box-shadow .2s ease;
+  user-select: none; -webkit-user-select: none; /* no text/drag-selection highlight on cards */
+  contain: content;
+  content-visibility: auto;           /* PERF: skip offscreen render+decode (the bench win) */
+  contain-intrinsic-size: auto 220px;
+}
+.card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.5), var(--glow); } /* DESIGN CHOICE: lift+glow */
+/* --thumb-aspect kept: respects the ThumbnailAspect setting (genuine, not design). */
+.thumb-wrap { position: relative; aspect-ratio: var(--thumb-aspect, 16 / 9); background: var(--bg-crust); cursor: pointer; }
+.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Hover slide-up Download & Apply. */
+.dl {
+  position: absolute; inset: auto 0 0 0; padding: 9px; font-weight: 700; font-size: 12.5px;
+  background: color-mix(in srgb, var(--accent) 92%, transparent); color: var(--accent-fg);
+  opacity: 0; transform: translateY(100%); transition: opacity .15s, transform .15s; box-shadow: var(--glow);
+}
+.thumb-wrap:hover .dl { opacity: 1; transform: translateY(0); }
+/* Browse hover download overlay — clean accent→dark scrim; the glyph does a leap → 360° flip →
+   squash-land loop (transform-only, composited). pointer-events:none → click hits .thumb-wrap. */
+/* hover download affordance = the download icon as a thin glowing accent OUTLINE (stroke only) */
+.dl-ico { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  opacity: 0; transition: opacity .2s ease; }
+.thumb-wrap:hover .dl-ico { opacity: 1; }
+.dl-glyph { color: var(--accent); width: 88%; height: 88%; fill: none; opacity: .7; transform-origin: center;
+  animation: dl-glow 2.6s cubic-bezier(.37, 0, .63, 1) infinite; }
+/* opacity + glow + a ~5px size breath, all synced */
+@keyframes dl-glow {
+  0%, 100% { opacity: .7;  transform: scale(1);
+    filter: drop-shadow(0 0 10px var(--accent)) drop-shadow(0 0 18px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
+  50%      { opacity: .85; transform: scale(1.022); /* ≈ 3px breath at typical icon size */
+    filter: drop-shadow(0 0 22px var(--accent)) drop-shadow(0 0 40px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
+}
+.badge {
+  position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
+  padding: 3px 7px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, black);
+  color: var(--accent-fg); box-shadow: var(--glow-sm);
+}
+.res {
+  position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700;
+  padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff;
+}
+.title { padding: 8px 10px; font-size: 12.5px; color: var(--subtext); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+
+/* Playing card border = green; gentle green glow pulse. */
+@keyframes pulse-glow {
+  0%,100% { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); }
+  50%     { box-shadow: 0 0 0 2px var(--success), 0 0 22px -1px var(--success); }
+}
+.card.playing { animation: pulse-glow 1.8s ease-in-out infinite; }
+
+.loadbar { height: 3px; background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%; animation: slide 1s linear infinite; }
+@keyframes slide { to { background-position: -200% 0; } }
+
+.theme-pick { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
+  border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color .15s, box-shadow .2s; }
+.theme-pick:hover, .theme-pick:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+
+.center-msg { display: grid; place-items: center; height: 60vh; color: var(--muted); }
+
+/* ---- buttons ---- */
+.btn { padding: 7px 14px; border-radius: 8px; font-weight: 700; font-size: 13px;
+  transition: transform .08s, box-shadow .2s, background .15s; text-decoration: none; display: inline-block; }
+.btn:active { transform: scale(.96); }
+.btn.accent { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.btn.accent:hover { box-shadow: var(--glow); }
+/* translucent chrome buttons (Undo/Import/etc.) → the wallpaper bg shows through, matching the bars */
+.btn.ghost { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--text); }
+.btn.ghost:hover { background: color-mix(in srgb, var(--surface1) 75%, transparent); box-shadow: var(--glow-sm); }
+/* Danger = outline for reversible (trash). DESIGN: solid red only at the irreversible point-of-no-return. */
+.btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.btn.danger:hover { background: var(--danger-bg); box-shadow: 0 0 12px -3px var(--danger); }
+.btn.danger.solid { background: var(--danger); color: #1a1015; border-color: var(--danger); }
+.btn.danger.solid:hover { box-shadow: 0 0 16px -2px var(--danger); }
+/* grow into all free topbar space (anchored right, expands left) so it truncates only when there's
+   genuinely no room. High flex-grow beats the .spacer so the status claims the gap. */
+.status { color: var(--subtext); font-size: 13px; flex: 1000 1 auto; min-width: 0; text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes glow-pulse-k { 0%,100% { box-shadow: 0 0 0 1px var(--accent); } 50% { box-shadow: var(--glow); } }
+.glow-pulse { animation: glow-pulse-k 1.6s ease-in-out infinite; } /* COOL: undo button calls attention */
+
+/* ---- library card overlays (USER-RULED FORK: compact title-overlay card) ---- */
+/* container-type so the overlay controls can scale with the card width (small windows / Small size) */
+.card.lib .thumb-wrap { cursor: pointer; container-type: inline-size; }
+/* small cards: shrink + reposition the trash, toggle, title bar and chips so they're not oversized */
+@container (max-width: 150px) {
+  .del { width: 24px; height: 24px; bottom: 30px; right: 4px; }
+  .del svg { width: 15px; height: 15px; }
+  .pl-toggle { width: 16px; height: 16px; top: 4px; right: 4px; }
+  .warn { bottom: 30px; left: 4px; }
+  .lib-title { height: 26px; padding: 2px 4px; }
+  .lib-title span { font-size: 9px; line-height: 1.2; }
+  .badge { font-size: 8px; padding: 2px 5px; top: 5px; left: 5px; }
+  .res { font-size: 8px; padding: 2px 5px; top: 5px; right: 5px; }
+}
+.card.crashed { outline: 2px solid var(--danger); }
+/* crashed warn — bottom-left, above the title bar (avoids the toggle/SCENE corners) */
+.warn { position: absolute; left: 6px; bottom: 50px; color: var(--danger); display: grid; place-items: center;
+  filter: drop-shadow(0 0 4px var(--danger)); }
+/* bottom title bar (#66000000), 2-line clamp, centered white */
+.lib-title { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; padding: 4px 6px;
+  background: rgba(0,0,0,.4); color: #fff; display: flex; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none; }
+.lib-title span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; font-size: 11px; line-height: 1.25; }
+/* trash (BR, hover-only, above the title bar) */
+.del { position: absolute; right: 6px; bottom: 50px; width: 32px; height: 32px; border-radius: 6px;
+  display: grid; place-items: center; background: none; color: #fff; opacity: 0;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); transition: opacity .12s, color .15s, filter .2s; }
+.card.lib:hover .del { opacity: 1; }
+.del:hover { color: var(--danger); filter: drop-shadow(0 0 5px var(--danger)); }
+/* ring/check playlist-toggle — transparent, currentColor accent → accent-hover */
+.pl-toggle { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; padding: 0;
+  display: grid; place-items: center; background: transparent; color: var(--accent); opacity: 0;
+  transition: opacity .12s, color .15s; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
+.card.lib:hover .pl-toggle, .pl-toggle.on { opacity: 1; }
+.pl-toggle:hover { color: var(--accent-hover); filter: drop-shadow(0 0 5px var(--accent)); }
+.pl-toggle-svg { display: block; }
+/* COOL: animated preview layer (gif/webp <img> or hover <video>) over the static thumb.
+   transition (not keyframe) so the browse opacity-toggle fades without remount → no gif restart. */
+.thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
+/* PERF: while a modal is open, the grid sits behind an opaque backdrop — freeze its (invisible) gif
+   overlays so they stop decoding/compositing and don't jank the morph. Pure CSS = no re-render. */
+body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { display: none; }
+/* while a card's modal opens/closes, drop its clip + raise it so the reverse (close) morph isn't
+   clipped to the card frame as the image shrinks back in. */
+.card.morphing { overflow: visible; contain: layout style; content-visibility: visible; z-index: 40; }
+/* through the morph, lift the flying thumbnail ABOVE the title bar so the title sits behind it
+   (the title is position:absolute, so the thumb needs to be positioned to win the stacking) */
+.card.lib.morphing .thumb { position: relative; z-index: 2; }
+.card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
+.sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
+  display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 12px; padding: 10px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); }
+.check { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-weight: 800;
+  box-shadow: var(--glow-sm); }
+
+/* card right-click context menu */
+.ctx-backdrop { position: fixed; inset: 0; z-index: 70; }
+.ctx-menu { position: absolute; z-index: 71; top: 36px; right: 8px; min-width: 190px; padding: 5px;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border: 1px solid var(--surface1); border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5), var(--glow-sm); display: flex; flex-direction: column; }
+.ctx-menu button { text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 13px; color: var(--text); }
+.ctx-menu button:hover { background: var(--surface0); }
+.ctx-menu .danger-item { color: var(--danger); }
+
+/* playlist settings popup + load select */
+.pl-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 8px 2px 10px; }
+.mini-sel { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext); border: 0; border-radius: 6px; padding: 4px 8px; font-size: 12px;
+  transition: color .12s, box-shadow .2s; }
+.mini-sel:hover { color: var(--text); box-shadow: var(--glow-sm); }
+
+/* download overlay (browse) — #CC000000, label + bar + cancel-X top-right */
+.dl-overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; justify-items: center;
+  background: rgba(0,0,0,.8); color: #fff; font-weight: 700; }
+.dl-label { font-size: 12px; font-weight: 600; }
+.dl-bar { width: 72%; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); overflow: hidden; }
+.dl-fill { height: 100%; background: var(--accent); box-shadow: var(--glow-sm); transition: width .2s; }
+.dl-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 6px; color: #fff;
+  font-size: 13px; display: grid; place-items: center; }
+.dl-x:hover { background: rgba(255,255,255,.15); }
+
+/* shimmer skeleton placeholder cards */
+.skel { position: relative; overflow: hidden; background: var(--surface0); }
+.skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,.10) 42%, rgba(255,255,255,.27) 50%, rgba(255,255,255,.10) 58%, transparent 75%);
+  animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { to { transform: translateX(100%); } }
+.skel-card { pointer-events: none; }
+.skel-card .thumb-wrap.skel { aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 10px 10px 0 0; }
+.skel-line { height: 11px; border-radius: 5px; } .skel-line.w1 { width: 70%; }
+.err-modal { width: min(460px, 90vw); padding: 22px 24px; }
+.err-modal h2 { margin: 0 0 8px; font-size: 17px; color: var(--danger); }
+.err-text { color: var(--subtext); font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+
+/* ---- playlist strip ---- */
+/* overlaid at the bottom (cards scroll BEHIND it) so collapse/expand never resizes .scroll →
+   useGridFit doesn't recompute → no card reflow. Opaque bg (no backdrop blur: it'd repaint over the
+   animating gif grid every frame — the documented lag trap). */
+.strip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+  border-top: 1px solid var(--surface1);
+  /* fully transparent bg → the live wallpaper video shows at 100% behind the strip (the scroll ends
+     above it via .lib-scroll margin, so no cards are behind it). Thumbnails + chrome stay opaque/visible. */
+  background: transparent; padding: 8px 12px 0; }
+.strip-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.strip-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
+.strip-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
+.mini { padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  transition: color .12s, background .15s, box-shadow .2s; }
+.mini:hover { color: var(--text); box-shadow: var(--glow-sm); }
+.mini.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.mini.on:hover { box-shadow: var(--glow); }
+.play-btn { padding: 6px 16px; border-radius: 8px; background: var(--accent); color: var(--accent-fg);
+  font-weight: 800; box-shadow: var(--glow-sm); transition: box-shadow .2s, transform .08s; }
+.play-btn:hover:not(:disabled) { box-shadow: var(--glow); }
+.play-btn:disabled { opacity: .4; box-shadow: none; }
+.strip-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+/* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
+   escapes the row's clip. Side margins cancel .strip's 12px padding so items sit flush left/right. */
+.strip-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; margin: 0 -12px; }
+.pl-item { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
+  overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  transition: box-shadow .2s, transform .12s; }
+.pl-item:hover:not(.playing) { transform: translateY(-2px); } /* glow is the fixed .pl-hover-glow layer (escapes the row clip) */
+/* absolutely fill the box (like the animated layer) — an in-flow img leaves a 1px sub-pixel gap that
+   the dark bg shows through at the top, worsened by the hover lift. */
+.pl-item .thumb { position: absolute; inset: 0; }
+/* COOL: hover glow as a fixed overlay (portal'd to body) → floats over the strip chrome, not clipped */
+.pl-hover-glow { position: fixed; z-index: 45; pointer-events: none; border-radius: 8px;
+  box-shadow: var(--glow); animation: pl-glow-in .15s ease both; }
+@keyframes pl-glow-in { from { opacity: 0; } to { opacity: 1; } }
+.pl-thumb { width: 100%; height: 100%; object-fit: cover; }
+.pl-item.playing { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); } /* green */
+.pl-remove { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border-radius: 999px;
+  background: none; color: #fff; opacity: 0; transition: opacity .12s, color .15s, filter .2s;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); display: grid; place-items: center; }
+.pl-item:hover .pl-remove { opacity: 1; }
+.pl-remove:hover { color: var(--danger); filter: drop-shadow(0 0 5px var(--danger)); }
+/* #99000000 strip-item title bar */
+.pl-title { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: rgba(0,0,0,.6);
+  color: #fff; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+/* strip context menu — fixed at cursor, opens upward (strip sits at the bottom) */
+.pl-ctx { position: fixed; top: auto; right: auto; transform: translateY(-100%); }
+
+/* ---- preview modal ---- */
+/* #B2000000 solid overlay — NO backdrop-filter. A full-viewport blur recomposites over the
+   animating library (autoplay gifs / playing-pulse / hover-video) every frame → severe lag. */
+/* transparent like the playlist bar → the live wallpaper shows behind the modal (gifs are frozen via
+   body.modal-open). The panel keeps its opaque mantle + shadow so it stays readable/distinct. */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: transparent; }
+/* overflow: visible — the morphing layoutId image must NOT be clipped to the panel while it flies in
+   from the card (else it only shows inside the panel box). Scroll lives on .modal-body instead. */
+/* translucent panel (same logic as the chrome) → the wallpaper shows through. */
+.modal { width: min(860px, 92vw); overflow: visible;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr), transparent);
+  border: 1px solid var(--surface1); border-radius: 16px; box-shadow: 0 24px 60px rgba(0,0,0,.6), var(--glow); }
+/* rounded on all corners so the image looks rounded all through the morph flight (not a sharp square) */
+/* enlarged thumbnail shows the wallpaper's OWN aspect (no 16:9 crop) — same as the library modal.
+   Layers (.layer) are absolute inset:0 so they fill this natural-aspect base box. */
+.modal-img { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; border-radius: 14px; max-height: 62vh; }
+/* YouTube trailer overlay — fills the stage, centers a 16:9 player (the video's own aspect) */
+.lib-stage { position: relative; width: 100%; } /* width:100% → morph target matches the card box (like .modal-stage) */
+.yt-stage { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: #000; border-radius: 14px; overflow: hidden; }
+.yt-frame { width: 100%; aspect-ratio: 16 / 9; max-height: 100%; border: 0; display: block; }
+.yt-close { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 8px;
+  display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; transition: background .15s, box-shadow .2s; }
+.yt-close:hover { background: var(--danger); box-shadow: var(--glow-sm); }
+/* library Settings modal: image-led + narrower so the thumbnail (often square) fills the width
+   instead of floating centered with empty side gaps. Image shows at its OWN aspect, uncropped. */
+.modal.lib-settings { width: min(460px, 92vw); }
+.modal-img.natural { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; }
+.modal-body { padding: 18px 20px 20px; max-height: 62vh; overflow-y: auto; }
+.modal-body h2 { margin: 0 0 8px; font-size: 20px; }
+.meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--subtext); font-size: 13px; align-items: center; }
+.desc { color: var(--subtext); font-size: 13px; max-height: 120px; overflow: auto; margin: 12px 0; white-space: pre-wrap; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface0); color: var(--subtext); }
+.modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+/* ---- settings ---- */
+/* full-width scroll area with an ambient accent backdrop (glow pools at the corners + faint dot grid);
+   the section cards themselves stay capped at 840 and centered (see .ssection). Glows are
+   viewport-fixed so they stay put while the content scrolls — ambient, not distracting. */
+.settings {
+  width: 100%; margin: 0 auto; padding-bottom: 48px;
+  background-image:
+    radial-gradient(900px 540px at 8% -6%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 62%),
+    radial-gradient(820px 520px at 104% 2%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 60%),
+    radial-gradient(820px 620px at 50% 116%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 58%);
+  background-repeat: no-repeat;
+}
+/* LIVE: the currently-playing wallpaper plays behind the cards at full opacity/fps (no overlay, no
+   blur). Fixed → stays put while content scrolls. */
+.settings-bg { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0;
+  pointer-events: none; }
+/* COOL: accent-tinted section cards — left glow strip, glowing icon chip, lift+glow on hover,
+   staggered fade-in. Brings the bland settings list to life without animating expensive properties. */
+.ssection {
+  position: relative; overflow: hidden; z-index: 1; /* above the live-wallpaper bg layer */
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); /* translucent → wallpaper shows through; text/controls stay opaque */
+  max-width: 840px; margin: 0 auto 16px;
+  border: 1px solid var(--surface1); border-radius: 14px; padding: 15px 18px 13px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  transition: border-color .2s, box-shadow .25s, transform .2s;
+  animation: ssection-in .55s cubic-bezier(.2,.7,.3,1) both;
+}
+.ssection:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface1));
+  box-shadow: 0 8px 26px rgba(0,0,0,.4), var(--glow-sm); }
+/* glowing accent strip down the left edge */
+.ssection::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2;
+  background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
+  box-shadow: 0 0 12px -1px var(--accent); opacity: .55; transition: opacity .25s; }
+.ssection:hover::before { opacity: 1; }
+@keyframes ssection-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+/* stagger as the tab opens — wider gaps so it actually reads as a cascade */
+.ssection:nth-child(1) { animation-delay: .06s } .ssection:nth-child(2) { animation-delay: .15s }
+.ssection:nth-child(3) { animation-delay: .24s } .ssection:nth-child(4) { animation-delay: .33s }
+.ssection:nth-child(5) { animation-delay: .42s } .ssection:nth-child(6) { animation-delay: .51s }
+.ssection:nth-child(7) { animation-delay: .60s } .ssection:nth-child(8) { animation-delay: .69s }
+.ssection:nth-child(9) { animation-delay: .78s } .ssection:nth-child(n+10) { animation-delay: .87s }
+.ssection h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px;
+  font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--accent); }
+.ssection-ico { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 8px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
+  transition: box-shadow .25s, transform .2s; }
+.ssection:hover .ssection-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: scale(1.1) rotate(-4deg); }
+.srow { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 9px; margin: 0 -9px;
+  border-radius: 9px; border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
+  transition: background .15s, box-shadow .15s; }
+.srow:first-of-type { border-top: 0; }
+.srow:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+/* LIFE: an accent bar that grows from the left on row hover (tactile) */
+.srow::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px;
+  background: var(--accent); box-shadow: 0 0 8px -1px var(--accent);
+  transform: scaleY(0); transform-origin: center; opacity: 0; transition: transform .18s ease, opacity .18s; }
+.srow:hover::before { transform: scaleY(1); opacity: 1; }
+.slabel { font-size: 13.5px; display: flex; flex-direction: column; }
+.slabel-row { display: inline-flex; align-items: center; gap: 7px; }
+.shint { font-size: 11px; color: var(--muted); }
+/* per-setting reset: bare icon (no box), glow on the icon itself. Only rendered when value deviates. */
+.s-reset { display: inline-flex; padding: 0; background: none; border: 0; outline: none; line-height: 0;
+  color: var(--subtext); transition: color .12s, filter .2s; }
+.s-reset:hover { color: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
+.sctl { display: flex; align-items: center; gap: 8px; }
+.settings input[type=range] { width: 200px; accent-color: var(--accent); transition: filter .2s; }
+.settings input[type=checkbox], .settings input[type=radio] { width: 17px; height: 17px; accent-color: var(--accent); transition: filter .2s; }
+/* COOL: glow native toggles/sliders on hover (drop-shadow works on the accent-colored control) */
+.settings input[type=range]:hover, .settings input[type=checkbox]:hover, .settings input[type=radio]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
+.settings select, .num, .text { background: var(--surface1); border: 1px solid var(--surface2); color: var(--text);
+  border-radius: 7px; padding: 5px 9px; outline: none; transition: border-color .15s, box-shadow .2s; }
+.settings select:hover, .num:hover, .text:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.settings select:focus, .num:focus, .text:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.num { width: 84px; } .text { width: 320px; }
+.hms { display: flex; align-items: center; gap: 6px; }
+.hms span { color: var(--muted); font-size: 12px; }
+.inline { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.mpv { background: var(--bg-crust); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--surface1));
+  border-radius: 8px; padding: 12px; font: 12px/1.5 ui-monospace, monospace;
+  color: var(--success); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
+  box-shadow: inset 0 0 18px -10px var(--accent); }
+.kb { background: var(--bg-crust); padding: 3px 8px; border-radius: 6px; font: 12px ui-monospace, monospace; color: var(--subtext); }
+
+/* ---- steam QR modal ---- */
+.qr-modal { width: 340px; padding: 24px; text-align: center; }
+.qr-modal h2 { margin: 0 0 4px; font-size: 18px; }
+.muted { color: var(--muted); font-size: 13px; margin: 4px 0; }
+.qr-box { width: 232px; height: 232px; margin: 16px auto; background: #fff; border-radius: 12px;
+  display: grid; place-items: center; box-shadow: var(--glow); } /* COOL: glowing QR */
+.qr-box img { width: 216px; height: 216px; image-rendering: pixelated; }
+
+/* ---- unsub drain toast (dismissable; drain keeps running) ---- */
+.drain-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 12px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); font-size: 13px; }
+.drain-toast em { color: var(--muted); font-style: normal; }
+.drain-bar { width: 90px; height: 5px; border-radius: 999px; background: var(--surface2); overflow: hidden; }
+.drain-fill { width: 40%; height: 100%; background: var(--accent); border-radius: 999px;
+  box-shadow: var(--glow-sm); animation: drain-ind 1.1s ease-in-out infinite; }
+@keyframes drain-ind { 0% { margin-left: -45%; } 100% { margin-left: 100%; } }
+
+/* ---- workshop filter bar ---- */
+.wfilter { position: relative; display: flex; gap: 8px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
+.wfilter select { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
+  border-radius: 8px; padding: 6px 10px; outline: none; }
+.wfilter select:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.wfilter-pop { position: absolute; top: 110%; left: 0; z-index: 20; width: min(640px, 90vw);
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); /* +0.1 over chrome */
+  border: 1px solid var(--surface1); border-radius: 12px; padding: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.5), var(--glow-sm); }
+/* ---- custom dropdown (Select.tsx) — app-controlled, translucent ---- */
+.sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1);
+  color: var(--text); border-radius: 8px; padding: 6px 10px; min-width: 92px; font: inherit;
+  transition: border-color .15s, box-shadow .2s; }
+.sel:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.sel-caret { opacity: .7; flex-shrink: 0; }
+.sel-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-backdrop { position: fixed; inset: 0; z-index: 90; }
+.sel-pop { position: fixed; z-index: 91; max-height: 52vh; overflow: auto; display: flex; flex-direction: column; gap: 2px;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); /* floating list = +0.1 (like the filter popover) */
+  border: 1px solid var(--surface1); border-radius: 8px; padding: 4px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.5), var(--glow-sm); }
+.sel-opt { text-align: left; padding: 6px 10px; border-radius: 6px; color: var(--text); white-space: nowrap; font: inherit;
+  transition: background .12s; }
+.sel-opt:hover { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
+.sel-opt.on { background: var(--accent); color: var(--accent-fg); }
+.wf-group { font-size: 11px; font-weight: 800; letter-spacing: .5px; color: var(--muted); margin: 6px 0 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
+  transition: all .12s, box-shadow .2s; }
+.chip:hover { color: var(--text); box-shadow: var(--glow-sm); }
+.chip.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); } /* COOL */
+.chip.on:hover { box-shadow: var(--glow); }
+.wf-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* ---- icons (lucide) + shared button states ---- */
+.ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ico svg, .mini svg, .del svg, .pl-remove svg, .pl-toggle svg { flex: none; }
+.btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+.muted-status { color: var(--muted); font-style: italic; }
+
+/* preview modal: layered image stage (thumb → full-res → gif) */
+.modal-stage { position: relative; width: 100%; }
+.modal-img.layer { position: absolute; inset: 0; transition: opacity .25s ease; }
+.meta .mrow { display: inline-flex; align-items: center; gap: 5px; }
+.meta .mrow svg { opacity: .8; }
+
+/* settings: help text + disabled rows + monitor name + native-picker browse */
+.help { font-size: 11.5px; color: var(--muted); margin: 2px 2px 9px; line-height: 1.45; }
+.help .kb { font-size: 11px; }
+.srow.disabled { opacity: .45; }
+.mon-name { width: 120px; }
+.text.wide { width: 100%; }
+
+/* save / load playlist modals */
+.pl-modal { width: min(380px, 92vw);
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); } /* playlist popups = stronger */
+.field-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: var(--muted); margin: 14px 0 6px; }
+.pl-names { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; margin-bottom: 4px; }
+.pl-name { text-align: left; padding: 8px 10px; border-radius: 7px; background: var(--surface0); color: var(--text); font-size: 13px;
+  transition: background .12s, box-shadow .2s; }
+.pl-name:hover { background: var(--surface1); box-shadow: var(--glow-sm); }
+.pl-name.sel { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+
+/* playlist settings overlay controls */
+.seg { display: flex; gap: 8px; margin-bottom: 6px; }
+.segbtn { flex: 1; padding: 8px; border-radius: 8px; background: var(--surface0); color: var(--subtext); font-weight: 600; }
+.segbtn.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.ck { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); margin: 8px 0; }
+.ck input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); transition: filter .2s; }
+.ck input[type=checkbox]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
+.ovr { display: flex; flex-direction: column; gap: 2px; }
+.ovr.dim { opacity: .45; }
+.pl-modal .hms input[type=number] { accent-color: var(--accent); }
+
+/* context menus are portal'd to <body> → fixed at the cursor (escape card/strip containment) */
+.lib-ctx, .pl-ctx { position: fixed; top: auto; right: auto; }
+.pl-ctx { transform: translateY(-100%); }
+
+/* persistent status header — top of content, under the tabs */
+.statushdr { display: flex; align-items: center; gap: 12px; padding: 9px 16px; font-size: 13px;
+  color: var(--muted); background: color-mix(in srgb, var(--bg-crust) 45%, transparent);
+  border-bottom: 1px solid var(--surface0); }
+.statushdr.active .sh-text { color: var(--text); }
+.sh-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Stop button — danger red with a soft glow */
+.btn.danger.glow-stop { box-shadow: 0 0 12px -3px var(--danger); }
+.btn.danger.glow-stop:hover { background: var(--danger-bg); box-shadow: 0 0 18px -2px var(--danger); }
+
+/* debug HUD (?debug / LP_DEBUG=1) */
+.dbg-hud { position: fixed; top: 6px; right: 6px; z-index: 9999; pointer-events: none;
+  font: 10px/1.3 ui-monospace, monospace; color: #b9f; background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent);
+  border: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
+  border-radius: 6px; padding: 2px 6px; text-align: right; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.dbg-hud b { color: #cfe; font-weight: 700; }
+.dbg-hud b.bad { color: var(--danger); }

@@ -68,8 +68,14 @@ public class SteamWorkshopService : IBgsProvider
         return merged;
     }
 
-    public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
-        => Task.FromResult(new WallpaperDetail
+    public async Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
+    {
+        // YouTube trailer (if any) is scraped from the item's Steam page; age rating is a tag.
+        string? youtube = result.WorkshopId != null
+            ? await SteamWorkshopScraper.GetYoutubeUrlAsync(result.WorkshopId).ConfigureAwait(false)
+            : null;
+        string? age = result.Tags?.FirstOrDefault(t => t is "Everyone" or "Questionable" or "Mature");
+        return new WallpaperDetail
         {
             Title = result.Title,
             PreviewUrl = result.ThumbnailUrl,
@@ -77,6 +83,12 @@ public class SteamWorkshopService : IBgsProvider
             NeedsReferrer = false,
             IsScene = result.IsScene,
             WorkshopId = result.WorkshopId,
-            IsWorkshopAcquire = true
-        });
+            IsWorkshopAcquire = true,
+            // rich metadata → persisted at download + shown in the preview/settings modals
+            Resolution = result.Resolution, AgeRating = age, YoutubeUrl = youtube,
+            PageUrl = result.PageUrl, AuthorName = result.AuthorName, Description = result.Description,
+            FileSizeBytes = result.FileSizeBytes, Subscriptions = result.Subscriptions,
+            Favorites = result.Favorites, Views = result.Views, Tags = result.Tags,
+        };
+    }
 }

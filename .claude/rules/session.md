@@ -8,17 +8,18 @@ paths:
 ## Settings & Session Persistence
 
 `AppSettings` (JSON at `~/.config/livepaper/settings.json`):
-- Playback: `Loop`, `NoAudio`, `DisableCache`, `Volume` (0–100), `Speed` (0.1–4.0, default 1.0)
+- Playback: `Loop`, `NoAudio`, `DisableCache` (default **false**), `Volume` (0–100), `Speed` (0.1–4.0, default 1.0). Per-item volume/speed overrides live in the library `index.json`, not here (see `library.md`).
 - Memory: `DemuxerMaxBytes`, `DemuxerMaxBackBytes` (int, MiB)
 - `HwDec`: `"auto"` | `"nvdec"` | `"vaapi"` | `"no"`
-- `VideoScale`: `"fill"` (panscan=1.0) | `"fit"` (panscan=0.0)
+- `VideoScale`: `"fill"` (panscan=1.0) | `"fit"` (panscan=0.0); `VideoFps` (0 = native, else caps video playback fps — scenes/LWE unaffected). VideoScale applies **live** (mpv `panscan` via IPC, incl. on advance); VideoFps on next launch.
 - Auto-mute: `AutoMute` (false), `AutoMuteDelayMs` (200), `AutoUnmuteDelayMs` (2000), `AutoMuteThresholdDb` (-70.0), `AutoMuteOnlyIfMprisActive` (false)
 - Global rotation: `GlobalIntervalSeconds` (1800), `GlobalAdvanceOnVideoEnd` (false), `GlobalWaitForVideoEnd` (false)
-- Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600) — clamped in model setter; always active
-- Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false)
+- Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600, clamped in setter; 0 = off); `RestartOnSwitchOnly` (false) — defer the mpvpaper leak-restart to the next playlist changeover (advanced)
+- Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false), `ReplaceDirectWithWorkshop` (false) — swap a direct-DL `workshop/` copy for a `local/` WE-dir symlink when it appears
 - Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
 - LWE: `LweSilent` (false), `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
+- Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `lpdbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
 - `LastSession`: tracks last applied mode for `--restore`
 
 `CustomPlaylist` (JSON at `~/.config/livepaper/playlist_state.json` for in-progress; named files in `~/.local/share/livepaper/playlists/`):
@@ -31,7 +32,7 @@ paths:
 - `Paths` — path(s) used; `Shuffle` — shuffle was on
 - `TimedIntervalSeconds`, `WaitForVideoEnd`, `AdvanceOnVideoEnd`, `OverrideGlobalSettings` — restores exact interval/mode rather than current globals
 
-**`RefreshLastSessionFromSettingsIfIdle()`** (ViewModel): syncs `LastSession` when rotation settings change while idle, so `--restore` picks up new interval/mode. Only updates if playlist paths match `s.Paths` (or `OverrideGlobalSettings` is false). Called from: `OnPlaylistWaitForVideoEndChanged`, `OnInterval*Changed`, `OnAdvanceOnVideoEndChanged`, `OnOverrideGlobalSettingsChanged`, `OnGlobal*Changed`.
+**`LastSession` upkeep:** the `/settings` POST **preserves** `LastSession` from disk (the UI re-POSTs a cached settings blob that omits it — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
 
 ## Timed Playlist
 
@@ -60,8 +61,8 @@ paths:
 
 ## WE Auto-Import
 
-`LibraryService.SyncWallpaperEngine(workshopPath, allowScenes, weCopyFiles)` — headless scan of WE workshop dir. Returns `List<string>` of newly-added library media paths (.mp4 or .scene). Called:
-- GUI startup: in `MainWindowViewModel` constructor when `AutoImportWallpaperEngine` is true
-- `--restore` path: `RunHeadlessAutoSync()` in `Program.cs` before `PlayerHelper.Restore()`
+`LibraryService.SyncWallpaperEngine(workshopPath, allowScenes, weCopyFiles)` — headless scan of the WE workshop dir. Creates `local/<id>` symlinks + index entries; returns newly-added paths (a video file, or the scene **folder** — scenes are folders now, no `.scene` marker). Called:
+- `--serve` startup: `RunHeadlessAutoSync()` off-thread in `ServerHost` (then broadcasts the `library-synced` WS event)
+- `--restore`: `RunHeadlessAutoSync()` in `Program.cs` before `PlayerHelper.Restore()`
 
 After sync, if `AutoAddLibraryToPlaylist` is true: `AddCardToPlaylist` for each new item, then `AppendToActivePlaylist` for mid-session injection, and `LastSession.Paths` updated + saved so next `--restore` includes them.

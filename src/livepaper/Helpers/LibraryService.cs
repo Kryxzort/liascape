@@ -7,526 +7,373 @@ using livepaper.Models;
 
 namespace livepaper.Helpers;
 
+// Per-source, per-item-folder library. Layout (see LibraryStore):
+//   <source>/<key>/<key>.mp4|png (+ <key>.jpg/.gif)        web/imported video — folder named after the item
+//   workshop/<id>/{file.mp4, preview.*, project.json}      direct-DL video (owned, Steam-mirror)
+//   local/<id> -> symlink into the user's WE dir           subscribed/WE-local video
+//   workshop/<id> | local/<id>                             SCENE — the item FOLDER itself is the play path.
+//       PlayerHelper.IsScenePath = "no media extension"; LWE launches by id (local) or dir (owned).
+//       Scene-ness comes from index .IsScene / project.json type / scene.pkg.
+//   <source>/index.json                                    metadata (volume/speed/crashed/whitelist/source/…)
+// Metadata + dedup live in the per-source index.json (see LibraryStore).
 public static class LibraryService
 {
-    private static string WeIndexPath => Path.Combine(DownloadHelper.LibraryPath, "we_ids.txt");
+    private static readonly string[] VideoExts = { ".mp4", ".webm", ".mov", ".mkv", ".avi" };
+    private static bool IsVideoFile(string p) => VideoExts.Contains(Path.GetExtension(p).ToLowerInvariant());
 
-    private static HashSet<string> LoadWeIndex()
+    // ---------- read overrides / flags (now from the source index) ----------
+    public static int? ReadVolumeOverride(string mediaPath) => LibraryStore.GetMeta(mediaPath)?.Volume;
+    public static double? ReadSpeedOverride(string mediaPath) => LibraryStore.GetMeta(mediaPath)?.Speed;
+    public static bool IsWhitelisted(string mediaPath) => LibraryStore.GetMeta(mediaPath)?.Whitelist ?? false;
+    public static bool HasCrashed(string mediaPath) => LibraryStore.GetMeta(mediaPath)?.Crashed ?? false;
+
+    // ---------- write overrides / flags (drop volume/speed when == global → "use global") ----------
+    public static void SaveVolumeOverride(string mediaPath, int? volume)
     {
-        Directory.CreateDirectory(DownloadHelper.LibraryPath);
-        if (!File.Exists(WeIndexPath))
+        if (volume.HasValue && volume.Value == SettingsService.Load().Volume) volume = null;
+        LibraryStore.SetMeta(mediaPath, m => m.Volume = volume);
+    }
+
+    public static void SaveSpeedOverride(string mediaPath, double? speed)
+    {
+        if (speed.HasValue && Math.Abs(speed.Value - SettingsService.Load().Speed) < 1e-6) speed = null;
+        LibraryStore.SetMeta(mediaPath, m => m.Speed = speed);
+    }
+
+    public static void SetWhitelisted(string mediaPath, bool whitelisted) =>
+        LibraryStore.SetMeta(mediaPath, m => m.Whitelist = whitelisted);
+
+    public static void MarkCrashed(string mediaPath) =>
+        LibraryStore.SetMeta(mediaPath, m => m.Crashed = true);
+
+    // ---------- LoadAll ----------
+    public static List<LibraryItem> LoadAll()
+    {
+        var items = new List<LibraryItem>();
+        if (!Directory.Exists(DownloadHelper.LibraryPath)) return items;
+
+        foreach (var source in LibraryStore.Sources)
         {
-            var ids = CollectExistingWorkshopIds();
-            SaveWeIndex(ids);
-            return ids;
+            var dir = LibraryStore.SourceDir(source);
+            if (!Directory.Exists(dir)) continue;
+            var idx = LibraryStore.LoadIndex(source);
+
+            // Every item is a folder. SCENE = folder whose VideoPath IS the folder (no media file —
+            // see PlayerHelper.IsScenePath); VIDEO/IMAGE = folder holding a media file. local/<id> is a
+            // symlink, still a directory entry. Scene-ness: the index flag, else project.json type / scene.pkg.
+            foreach (var itemDir in SafeDirs(dir))
+            {
+                var key = Path.GetFileName(itemDir);
+                var m = idx.GetValueOrDefault(key);
+                if ((m?.IsScene ?? false) || IsSceneFolder(itemDir))
+                {
+                    items.Add(Build(itemDir, key, m, isScene: true, assetDir: itemDir, workshopId: key,
+                        copiedSceneDir: source == LibraryStore.Workshop ? itemDir : null));
+                    continue;
+                }
+                var media = ResolveItemMedia(itemDir, key);
+                if (media == null) continue;
+                if (!File.Exists(media)) { if (m == null) TryDeleteDir(itemDir); continue; } // dangling symlink
+                items.Add(Build(media, key, m, isScene: false, itemDir));
+            }
         }
-        try
+        return items;
+    }
+
+    // A workshop/local folder is a scene when project.json says type=scene (authoritative when present),
+    // else when a compiled scene.pkg sits in it. Web/imported folders have neither → video/image.
+    private static bool IsSceneFolder(string itemDir)
+    {
+        var pj = Path.Combine(itemDir, "project.json");
+        if (File.Exists(pj))
         {
-            return new HashSet<string>(
-                File.ReadLines(WeIndexPath).Select(l => l.Trim()).Where(l => l.Length > 0),
-                StringComparer.Ordinal);
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(pj));
+                if (doc.RootElement.TryGetProperty("type", out var t))
+                    return string.Equals(t.GetString(), "scene", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { }
         }
-        catch { return CollectExistingWorkshopIds(); }
+        return File.Exists(Path.Combine(itemDir, "scene.pkg"));
     }
 
-    private static void SaveWeIndex(HashSet<string> ids)
+    // the playable media inside an item folder: web/imported = <key>.<videoext>|png; workshop/local = project.json "file"
+    private static string? ResolveItemMedia(string itemDir, string key)
     {
-        try { File.WriteAllLines(WeIndexPath, ids); } catch { }
+        var pj = Path.Combine(itemDir, "project.json");
+        if (File.Exists(pj))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(pj));
+                if (doc.RootElement.TryGetProperty("file", out var f) && f.GetString() is { Length: > 0 } file)
+                    return Path.Combine(itemDir, file);
+            }
+            catch { }
+        }
+        foreach (var ext in VideoExts.Concat(new[] { ".png" }))
+        {
+            var p = Path.Combine(itemDir, key + ext);
+            if (File.Exists(p)) return p;
+        }
+        // fall back to the first video file in the folder (workshop folder may name the file arbitrarily)
+        return SafeFiles(itemDir, "*").FirstOrDefault(IsVideoFile);
     }
 
-    private static void AppendToWeIndex(string workshopId)
+    private static LibraryItem Build(string media, string key, LibMeta? m, bool isScene,
+        string? assetDir = null, string? workshopId = null, string? copiedSceneDir = null)
     {
-        try { File.AppendAllText(WeIndexPath, workshopId + "\n"); } catch { }
+        m ??= new LibMeta();
+        string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
+        DateTime added; try { var fi = new FileInfo(media); added = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime; } catch { added = DateTime.Now; }
+        return new LibraryItem
+        {
+            Title = m.Title ?? key,
+            VideoPath = media,
+            ThumbnailPath = FindThumb(folder, key),
+            AnimatedThumbnailPath = FindAnimated(folder, key),
+            SourceId = m.SourceUrl ?? m.WorkshopId ?? workshopId,
+            IsScene = isScene || m.IsScene,
+            WorkshopId = m.WorkshopId ?? workshopId,
+            CopiedSceneDir = copiedSceneDir,
+            HasCrashed = m.Crashed,
+            IsWhitelisted = m.Whitelist,
+            VolumeOverride = m.Volume,
+            SpeedOverride = m.Speed,
+            AddedAt = added,
+            Resolution = m.Resolution, AgeRating = m.AgeRating, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
+            AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
+            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = m.Tags,
+        };
     }
 
-    private static void RebuildWeIndex()
+    // thumbnail in an item folder: <key>.jpg (web/imported) or preview.* (workshop/local Steam folder)
+    private static string? FindThumb(string folder, string key)
     {
-        var ids = CollectExistingWorkshopIds();
-        SaveWeIndex(ids);
+        foreach (var name in new[] { key + ".jpg", key + ".jpeg", key + ".png", "preview.jpg", "preview.png", "preview.jpeg" })
+        {
+            var p = Path.Combine(folder, name);
+            if (File.Exists(p)) return p;
+        }
+        return null;
     }
 
-    // Headless WE workshop scan. Creates symlinks (or copies) for any workshop
-    // item not already represented in the library by workshop ID. Returns the
-    // newly added library media paths (.mp4 for videos, .scene for scenes).
+    private static string? FindAnimated(string folder, string key)
+    {
+        foreach (var name in new[] { key + ".gif", key + ".webp", "preview.gif", "preview.webp" })
+        {
+            var p = Path.Combine(folder, name);
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+
+    // ---------- WE auto-import → local/<id> ----------
     public static List<string> SyncWallpaperEngine(string workshopPath, bool allowScenes, bool weCopyFiles)
     {
         var added = new List<string>();
         if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return added;
-        Directory.CreateDirectory(DownloadHelper.LibraryPath);
-
-        var existingIds = LoadWeIndex();
-
-        // Merge in IDs from URL-format .id files (Browse/Workshop downloads write the
-        // Steam page URL as sourceId, not the bare numeric ID). LoadWeIndex only reads
-        // we_ids.txt which lacks those entries — scanning .id files catches them so we
-        // don't create duplicates for wallpapers the user already downloaded via the app.
-        bool indexDirty = false;
-        foreach (var id in CollectExistingWorkshopIds())
-        {
-            if (existingIds.Add(id)) indexDirty = true;
-        }
-        if (indexDirty) SaveWeIndex(existingIds);
-
-        // One read of the unsubscribe state for the whole scan (don't re-read the file per folder).
+        var localDir = LibraryStore.SourceDir(LibraryStore.Local);
+        Directory.CreateDirectory(localDir);
+        var idx = LibraryStore.LoadIndex(LibraryStore.Local);
+        var have = ExistingWorkshopIds();
         var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
 
-        foreach (var dir in Directory.EnumerateDirectories(workshopPath))
+        foreach (var dir in SafeDirs(workshopPath))
         {
-            string workshopId = Path.GetFileName(dir);
-            if (existingIds.Contains(workshopId)) continue;
-            // Pending/just-unsubscribed via "Delete from Source" — don't resurrect it before Steam's
-            // own cleanup propagates (the folder may still be on disk for a bit).
-            if (blocked.Contains(workshopId)) continue;
-
-            string projectJson = Path.Combine(dir, "project.json");
+            var id = Path.GetFileName(dir);
+            if (have.Contains(id) || blocked.Contains(id)) continue;
             string? type = null, file = null, title = null;
             bool hasScenePkg = File.Exists(Path.Combine(dir, "scene.pkg"));
-
-            if (File.Exists(projectJson))
+            var pj = Path.Combine(dir, "project.json");
+            if (File.Exists(pj))
             {
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(projectJson));
-                    var root = doc.RootElement;
-                    type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
-                    file = root.TryGetProperty("file", out var f) ? f.GetString() : null;
-                    title = root.TryGetProperty("title", out var ti) ? ti.GetString() : null;
-                }
+                try { using var doc = JsonDocument.Parse(File.ReadAllText(pj)); var r = doc.RootElement;
+                    type = r.TryGetProperty("type", out var t) ? t.GetString() : null;
+                    file = r.TryGetProperty("file", out var f) ? f.GetString() : null;
+                    title = r.TryGetProperty("title", out var ti) ? ti.GetString() : null; }
                 catch { continue; }
             }
             else if (!hasScenePkg) continue;
-
-            string baseTitle = !string.IsNullOrEmpty(title) ? SanitizeName(title) : workshopId;
-            if (string.IsNullOrEmpty(baseTitle)) baseTitle = workshopId;
 
             bool isVideo = string.Equals(type, "video", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(file);
             bool isScene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && hasScenePkg);
 
             if (isVideo)
             {
-                string videoSrc = Path.Combine(dir, file!);
-                if (!File.Exists(videoSrc)) continue;
-                string destPath = ResolveUniqueName(baseTitle, ".mp4");
-                try
-                {
-                    if (weCopyFiles) File.Copy(videoSrc, destPath);
-                    else File.CreateSymbolicLink(destPath, videoSrc);
-                }
-                catch { continue; }
-
-                LinkOrCopyThumbnail(Path.Combine(dir, "preview.jpg"), destPath, weCopyFiles);
-                try { File.WriteAllText(Path.ChangeExtension(destPath, ".id"), workshopId); } catch { }
-                existingIds.Add(workshopId);
-                AppendToWeIndex(workshopId);
-                added.Add(destPath);
+                if (!File.Exists(Path.Combine(dir, file!))) continue;
+                var link = Path.Combine(localDir, id);
+                try { if (!Directory.Exists(link) && !File.Exists(link)) File.CreateSymbolicLink(link, dir); } catch { continue; }
+                idx[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st ? st : id, WorkshopId = id };
+                added.Add(Path.Combine(link, file!));
             }
             else if (isScene && allowScenes)
             {
-                string destPath = ResolveUniqueName(baseTitle, ".scene");
-                string sceneContent = workshopId;
-                if (weCopyFiles)
-                {
-                    string copiedDir = Path.Combine(DownloadHelper.LibraryPath,
-                        $"{Path.GetFileNameWithoutExtension(destPath)}_{workshopId}");
-                    try
-                    {
-                        CopyDirectory(dir, copiedDir);
-                        sceneContent = copiedDir;
-                    }
-                    catch { continue; }
-                }
-                try { File.WriteAllText(destPath, sceneContent); } catch { continue; }
-                LinkOrCopyThumbnail(Path.Combine(dir, "preview.jpg"), destPath, weCopyFiles);
-                try { File.WriteAllText(Path.ChangeExtension(destPath, ".id"), workshopId); } catch { }
-                existingIds.Add(workshopId);
-                AppendToWeIndex(workshopId);
-                added.Add(destPath);
+                var link = Path.Combine(localDir, id);                          // local/<id> → WE dir; the folder IS the scene
+                try { if (!Directory.Exists(link) && !File.Exists(link)) File.CreateSymbolicLink(link, dir); } catch { continue; }
+                idx[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st2 ? st2 : id, WorkshopId = id, IsScene = true };
+                added.Add(link);
             }
         }
-
+        LibraryStore.SaveIndex(LibraryStore.Local, idx);
         return added;
     }
 
-    private static HashSet<string> CollectExistingWorkshopIds()
+    // workshop/ + local/ folder names = the set of workshop IDs already present
+    private static HashSet<string> ExistingWorkshopIds()
     {
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        if (!Directory.Exists(DownloadHelper.LibraryPath)) return ids;
-        foreach (var idFile in Directory.EnumerateFiles(DownloadHelper.LibraryPath, "*.id"))
-        {
-            try
-            {
-                var raw = File.ReadAllText(idFile).Trim();
-                if (string.IsNullOrEmpty(raw)) continue;
-                if (long.TryParse(raw, out _)) { ids.Add(raw); continue; }
-
-                // Browse downloads write the Steam page URL as the source ID.
-                // Extract the numeric workshop ID from ?id= / &id= query param.
-                if (raw.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                {
-                    var idParam = ExtractSteamWorkshopId(raw);
-                    if (idParam != null) ids.Add(idParam);
-                    continue;
-                }
-
-                // Local path — extract numeric workshop ID from path segments
-                var parts = raw.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-                for (int i = 0; i < parts.Length - 1; i++)
-                {
-                    if ((parts[i] == "431960" || parts[i].Equals("workshop", StringComparison.OrdinalIgnoreCase))
-                        && long.TryParse(parts[i + 1], out _))
-                    {
-                        ids.Add(parts[i + 1]);
-                        break;
-                    }
-                }
-            }
-            catch { }
-        }
+        foreach (var src in new[] { LibraryStore.Workshop, LibraryStore.Local })
+            foreach (var d in SafeDirs(LibraryStore.SourceDir(src)))
+                ids.Add(Path.GetFileName(d));
         return ids;
     }
 
-    // Extracts the numeric workshop item ID from a Steam community URL.
-    // Handles both ?id=NNN and &id=NNN forms.
-    private static string? ExtractSteamWorkshopId(string url)
+    // ---------- replace a direct-DL with the WE-dir copy when it appears ----------
+    public static void ReconcileDirectDownloads(string workshopPath, bool weCopyFiles)
     {
-        int idx = url.IndexOf("?id=", StringComparison.Ordinal);
-        if (idx < 0) idx = url.IndexOf("&id=", StringComparison.Ordinal);
-        if (idx < 0) return null;
-        int start = idx + 4;
-        int end = start;
-        while (end < url.Length && char.IsDigit(url[end])) end++;
-        var candidate = url.Substring(start, end - start);
-        return candidate.Length >= 8 && long.TryParse(candidate, out _) ? candidate : null;
-    }
-
-    private static string ResolveUniqueName(string baseTitle, string ext)
-    {
-        for (int attempt = 0; attempt < 10000; attempt++)
+        if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return;
+        var workshopLib = LibraryStore.SourceDir(LibraryStore.Workshop);
+        if (!Directory.Exists(workshopLib)) return;
+        var localDir = LibraryStore.SourceDir(LibraryStore.Local);
+        Directory.CreateDirectory(localDir);
+        var localIdx = LibraryStore.LoadIndex(LibraryStore.Local);
+        var workshopIdx = LibraryStore.LoadIndex(LibraryStore.Workshop);
+        bool changed = false, localChanged = false;
+        foreach (var dir in SafeDirs(workshopLib).ToList())
         {
-            string name = attempt == 0 ? baseTitle : $"{baseTitle} ({attempt})";
-            string candidate = Path.Combine(DownloadHelper.LibraryPath, name + ext);
-            if (File.Exists(candidate)) continue;
-            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".mp4"))) continue;
-            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".png"))) continue;
-            if (File.Exists(Path.Combine(DownloadHelper.LibraryPath, name + ".scene"))) continue;
-            return candidate;
+            var id = Path.GetFileName(dir);
+            var weDir = Path.Combine(workshopPath, id);
+            if (!Directory.Exists(weDir)) continue;            // the WE-dir copy hasn't appeared
+            var link = Path.Combine(localDir, id);
+            if (Directory.Exists(link) || File.Exists(link)) continue; // already represented under local/
+            try
+            {
+                File.CreateSymbolicLink(link, weDir);          // local/<id> → WE dir (scene-ness rides in meta.IsScene)
+                var meta = workshopIdx.GetValueOrDefault(id) ?? new LibMeta { WorkshopId = id };
+                localIdx[id] = meta; localChanged = true;
+                Directory.Delete(dir, recursive: true);        // drop the direct-DL copy (reclaim disk)
+                workshopIdx.Remove(id); changed = true;
+            }
+            catch { try { if (File.Exists(link) || Directory.Exists(link)) File.Delete(link); } catch { } }
         }
-        return Path.Combine(DownloadHelper.LibraryPath, baseTitle + "_" + Guid.NewGuid().ToString("N") + ext);
+        if (localChanged) LibraryStore.SaveIndex(LibraryStore.Local, localIdx);
+        if (changed) LibraryStore.SaveIndex(LibraryStore.Workshop, workshopIdx);
     }
 
-    private static void LinkOrCopyThumbnail(string src, string mediaDest, bool copy)
-    {
-        if (!File.Exists(src)) return;
-        string thumbDest = Path.ChangeExtension(mediaDest, ".jpg");
-        try
-        {
-            if (copy) File.Copy(src, thumbDest);
-            else File.CreateSymbolicLink(thumbDest, src);
-        }
-        catch { }
-    }
-
-    private static void CopyDirectory(string src, string dest)
-    {
-        Directory.CreateDirectory(dest);
-        foreach (var file in Directory.GetFiles(src))
-            File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
-        foreach (var dir in Directory.GetDirectories(src))
-            CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
-    }
-
-    private static string SanitizeName(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
-    }
-
+    // ---------- trash / delete / restore ----------
     public static string TrashPath => Path.Combine(DownloadHelper.LibraryPath, ".trash");
 
     public static void Trash(LibraryItem item, string batchDir)
     {
-        Directory.CreateDirectory(batchDir);
-        MoveIfExists(item.VideoPath, batchDir);
-        if (item.ThumbnailPath != null) MoveIfExists(item.ThumbnailPath, batchDir);
-        foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg", ".id", ".crashed", ".whitelist", ".volume", ".speed" })
-            MoveIfExists(Path.ChangeExtension(item.VideoPath, ext), batchDir);
-        if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
-            Directory.Move(item.CopiedSceneDir, Path.Combine(batchDir, Path.GetFileName(item.CopiedSceneDir)));
-        if (item.WorkshopId != null) RebuildWeIndex();
+        var loc = LibraryStore.Locate(item.VideoPath);
+        if (loc == null) return;
+        var dest = Path.Combine(batchDir, loc.Value.Source);
+        Directory.CreateDirectory(dest);
+        // move the item's folder (scene → the folder IS VideoPath; video → its parent); record the index
+        // entry so Restore can replay it. Directory.Move on a local/ symlink moves the link, not its target.
+        var assetDir = item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath)!;
+        var idx = LibraryStore.LoadIndex(loc.Value.Source);
+        if (idx.TryGetValue(loc.Value.Key, out var meta))
+        {
+            try { File.WriteAllText(Path.Combine(dest, loc.Value.Key + ".meta.json"),
+                JsonSerializer.Serialize(new TrashedEntry(loc.Value.Source, loc.Value.Key, item.IsScene, meta))); } catch { }
+            idx.Remove(loc.Value.Key); LibraryStore.SaveIndex(loc.Value.Source, idx);
+        }
+        if (Directory.Exists(assetDir)) { try { Directory.Move(assetDir, Path.Combine(dest, loc.Value.Key)); } catch { } }
     }
+
+    private sealed record TrashedEntry(string Source, string Key, bool IsScene, LibMeta Meta);
 
     public static void RestoreBatch(string batchDir)
     {
         if (!Directory.Exists(batchDir)) return;
-        var fileMoves = Directory.GetFiles(batchDir)
-            .Select(f => (Src: f, Dest: Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(f))))
-            .ToList();
-        var dirMoves = Directory.GetDirectories(batchDir)
-            .Select(d => (Src: d, Dest: Path.Combine(DownloadHelper.LibraryPath, Path.GetFileName(d))))
-            .ToList();
-        // Bail if any destination already exists — avoids clobbering newly added items
-        if (fileMoves.Any(m => File.Exists(m.Dest)) || dirMoves.Any(m => Directory.Exists(m.Dest)))
-            return;
-        foreach (var m in fileMoves) File.Move(m.Src, m.Dest);
-        foreach (var m in dirMoves) Directory.Move(m.Src, m.Dest);
-        try { Directory.Delete(batchDir); } catch { }
-        RebuildWeIndex();
-    }
-
-    public static void PurgeBatch(string batchDir)
-    {
-        // Unsubscribe is NOT done here — "Delete from Source" enqueues ids into WorkshopUnsubQueue,
-        // which a throttled drain (close / next launch) processes. Plain deletes don't unsubscribe.
+        foreach (var sourceDir in Directory.GetDirectories(batchDir))
+        {
+            var source = Path.GetFileName(sourceDir);
+            var idx = LibraryStore.LoadIndex(source);
+            var target = LibraryStore.SourceDir(source);
+            Directory.CreateDirectory(target);
+            foreach (var entryFile in SafeFiles(sourceDir, "*.meta.json"))
+            {
+                try
+                {
+                    var e = JsonSerializer.Deserialize<TrashedEntry>(File.ReadAllText(entryFile));
+                    if (e == null) continue;
+                    var folderSrc = Path.Combine(sourceDir, e.Key);            // scene + video both restore the folder
+                    if (Directory.Exists(folderSrc) && !Directory.Exists(Path.Combine(target, e.Key)))
+                        Directory.Move(folderSrc, Path.Combine(target, e.Key));
+                    idx[e.Key] = e.Meta;
+                }
+                catch { }
+            }
+            LibraryStore.SaveIndex(source, idx);
+        }
         try { Directory.Delete(batchDir, recursive: true); } catch { }
     }
+
+    public static void PurgeBatch(string batchDir) { try { Directory.Delete(batchDir, recursive: true); } catch { } }
 
     public static void CleanTrash()
     {
         if (!Directory.Exists(TrashPath)) return;
-        foreach (var dir in Directory.GetDirectories(TrashPath))
-            PurgeBatch(dir);
+        foreach (var dir in Directory.GetDirectories(TrashPath)) PurgeBatch(dir);
     }
 
-    private static void MoveIfExists(string src, string destDir)
+    public static void Delete(LibraryItem item)
     {
-        if (File.Exists(src))
-            File.Move(src, Path.Combine(destDir, Path.GetFileName(src)));
+        var loc = LibraryStore.Locate(item.VideoPath);
+        if (loc == null) return;
+        // scene → the folder IS VideoPath; video → its parent. Directory.Delete unlinks a local/ symlink
+        // without touching the WE target (verified on .NET 9: recursive delete of a symlinked dir unlinks).
+        var assetDir = item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath)!;
+        try { if (Directory.Exists(assetDir)) Directory.Delete(assetDir, recursive: true); } catch { }
+        LibraryStore.Remove(item.VideoPath);
     }
 
     public static void DeleteAll()
     {
         if (!Directory.Exists(DownloadHelper.LibraryPath)) return;
-        foreach (var file in Directory.GetFiles(DownloadHelper.LibraryPath))
+        foreach (var source in LibraryStore.Sources)
         {
-            try { File.Delete(file); } catch { }
-        }
-        foreach (var dir in Directory.GetDirectories(DownloadHelper.LibraryPath))
-        {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            var d = LibraryStore.SourceDir(source);
+            try { if (Directory.Exists(d)) Directory.Delete(d, recursive: true); } catch { }
         }
     }
 
-    public static void Delete(LibraryItem item)
-    {
-        if (File.Exists(item.VideoPath)) File.Delete(item.VideoPath);
-        if (item.ThumbnailPath != null && File.Exists(item.ThumbnailPath)) File.Delete(item.ThumbnailPath);
-
-        foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg" })
-        {
-            var f = Path.ChangeExtension(item.VideoPath, ext);
-            if (File.Exists(f)) File.Delete(f);
-        }
-
-        foreach (var ext in new[] { ".id", ".crashed", ".whitelist", ".volume", ".speed" })
-        {
-            var f = Path.ChangeExtension(item.VideoPath, ext);
-            if (File.Exists(f)) File.Delete(f);
-        }
-
-        if (item.CopiedSceneDir != null && Directory.Exists(item.CopiedSceneDir))
-            Directory.Delete(item.CopiedSceneDir, recursive: true);
-        if (item.WorkshopId != null) RebuildWeIndex();
-    }
-
-    public static void MarkCrashed(string videoPath)
-    {
-        try { File.WriteAllText(Path.ChangeExtension(videoPath, ".crashed"), ""); } catch { }
-    }
-
-    public static void SaveVolumeOverride(string videoPath, int? volume) =>
-        SaveOrDeleteSidecar(videoPath, ".volume", volume.HasValue ? volume.Value.ToString() : null);
-
-    public static void SaveSpeedOverride(string videoPath, double? speed) =>
-        SaveOrDeleteSidecar(videoPath, ".speed", speed.HasValue ? speed.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
-
-    public static void SetWhitelisted(string videoPath, bool whitelisted) =>
-        SaveOrDeleteSidecar(videoPath, ".whitelist", whitelisted ? "" : null);
-
-    private static void SaveOrDeleteSidecar(string videoPath, string extension, string? content)
-    {
-        var path = Path.ChangeExtension(videoPath, extension);
-        try
-        {
-            if (content != null) File.WriteAllText(path, content);
-            else if (File.Exists(path)) File.Delete(path);
-        }
-        catch { }
-    }
-
-    public static List<LibraryItem> LoadAll()
-    {
-        var items = new List<LibraryItem>();
-        if (!Directory.Exists(DownloadHelper.LibraryPath))
-            return items;
-
-        // Videos use .mp4; imported still images use .png. Both conventions
-        // share the same .jpg-thumbnail / .id-sidecar layout.
-        // Exclude .png files that have a sibling .scene — those are scene thumbnails, not wallpapers.
-        var mediaFiles = Directory.GetFiles(DownloadHelper.LibraryPath, "*.mp4")
-            .Concat(Directory.GetFiles(DownloadHelper.LibraryPath, "*.png")
-                .Where(f => !File.Exists(Path.ChangeExtension(f, ".scene"))
-                         && !File.Exists(Path.ChangeExtension(f, ".mp4"))));
-
-        foreach (var media in mediaFiles)
-        {
-            // Dangling symlink (target was deleted, e.g., WE wallpaper
-            // uninstalled from Steam). Sweep it and its sibling .jpg/.id.
-            if (!File.Exists(media))
-            {
-                if (IsSymlink(media)) CleanOrphan(media);
-                continue;
-            }
-
-            string title = Path.GetFileNameWithoutExtension(media);
-            string idFile = Path.ChangeExtension(media, ".id");
-            string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
-            string? workshopId = ParseWorkshopId(sourceId, media, idFile);
-            bool hasCrashed = File.Exists(Path.ChangeExtension(media, ".crashed"));
-            bool isWhitelisted = File.Exists(Path.ChangeExtension(media, ".whitelist"));
-            int? volumeOverride = ReadVolumeOverride(media);
-            double? speedOverride = ReadSpeedOverride(media);
-            var fi = new FileInfo(media);
-
-            items.Add(new LibraryItem
-            {
-                Title = title,
-                VideoPath = media,
-                ThumbnailPath = FindLibraryThumbnail(media),
-                SourceId = sourceId,
-                WorkshopId = workshopId,
-                HasCrashed = hasCrashed,
-                IsWhitelisted = isWhitelisted,
-                VolumeOverride = volumeOverride,
-                SpeedOverride = speedOverride,
-                AddedAt = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime
-            });
-        }
-
-        foreach (var scene in Directory.GetFiles(DownloadHelper.LibraryPath, "*.scene"))
-        {
-            string title = Path.GetFileNameWithoutExtension(scene);
-            string? thumb = FindLibraryThumbnail(scene);
-            string idFile = Path.ChangeExtension(scene, ".id");
-            string? sourceId = File.Exists(idFile) ? File.ReadAllText(idFile).Trim() : null;
-            string? workshopId = null;
-            string? copiedSceneDir = null;
-            try
-            {
-                var raw = File.ReadAllText(scene).Trim();
-                if (Path.IsPathRooted(raw))
-                {
-                    copiedSceneDir = raw;
-                    workshopId = ParseWorkshopId(sourceId, scene, Path.ChangeExtension(scene, ".id"));
-                }
-                else
-                {
-                    workshopId = raw;
-                }
-            }
-            catch { }
-            bool hasCrashed = File.Exists(Path.ChangeExtension(scene, ".crashed"));
-            bool isWhitelisted = File.Exists(Path.ChangeExtension(scene, ".whitelist"));
-            int? volumeOverride = ReadVolumeOverride(scene);
-            double? speedOverride = ReadSpeedOverride(scene);
-            var fi = new FileInfo(scene);
-
-            items.Add(new LibraryItem
-            {
-                Title = title,
-                VideoPath = scene,
-                ThumbnailPath = thumb,
-                SourceId = sourceId,
-                IsScene = true,
-                WorkshopId = workshopId,
-                CopiedSceneDir = copiedSceneDir,
-                HasCrashed = hasCrashed,
-                IsWhitelisted = isWhitelisted,
-                VolumeOverride = volumeOverride,
-                SpeedOverride = speedOverride,
-                AddedAt = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime
-            });
-        }
-
-        return items;
-    }
-
-    private static string? FindLibraryThumbnail(string mediaPath)
-    {
-        string dir = Path.GetDirectoryName(mediaPath) ?? "";
-        string name = Path.GetFileNameWithoutExtension(mediaPath);
-        string fullMedia = Path.GetFullPath(mediaPath);
-        foreach (var file in Directory.EnumerateFiles(dir, name + ".*"))
-        {
-            if (Path.GetFullPath(file) == fullMedia) continue;
-            string ext = Path.GetExtension(file).ToLowerInvariant();
-            if (ext == ".jpg" || ext == ".png" || ext == ".gif" || ext == ".jpeg")
-                return file;
-        }
-        return null;
-    }
-
-    private static string? ParseWorkshopId(string? sourceId, string mp4, string idFile)
-    {
-        if (sourceId == null) return null;
-        if (long.TryParse(sourceId, out _)) return sourceId;
-        // Steam page URL (subscribe/workshop downloads write the ?id=NNN URL as the source) —
-        // recover the numeric workshop ID from the id= query param so right-click "Delete from
-        // Source" + the workshop-ID display survive a restart.
-        if (sourceId.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            return ExtractSteamWorkshopId(sourceId);
-
-        // Local path — extract numeric workshop ID from path segments
-        var parts = sourceId.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < parts.Length - 1; i++)
-        {
-            if ((parts[i] == "431960" || parts[i].Equals("workshop", StringComparison.OrdinalIgnoreCase))
-                && long.TryParse(parts[i + 1], out _))
-            {
-                string id = parts[i + 1];
-                try { File.WriteAllText(idFile, id); } catch { }
-                return id;
-            }
-        }
-        // Fallback: any purely numeric 8+ digit segment
-        foreach (var part in parts)
-        {
-            if (part.Length >= 8 && long.TryParse(part, out _))
-            {
-                try { File.WriteAllText(idFile, part); } catch { }
-                return part;
-            }
-        }
-        return null;
-    }
-
-    public static int? ReadVolumeOverride(string mediaPath)
-    {
-        var path = Path.ChangeExtension(mediaPath, ".volume");
-        if (!File.Exists(path)) return null;
-        try { return int.TryParse(File.ReadAllText(path).Trim(), out int v) ? v : null; }
-        catch { return null; }
-    }
-
-    public static double? ReadSpeedOverride(string mediaPath)
-    {
-        var path = Path.ChangeExtension(mediaPath, ".speed");
-        if (!File.Exists(path)) return null;
-        try { return double.TryParse(File.ReadAllText(path).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : null; }
-        catch { return null; }
-    }
+    // ---------- helpers (preserved) ----------
+    private static IEnumerable<string> SafeDirs(string dir)
+    { try { return Directory.GetDirectories(dir); } catch { return Array.Empty<string>(); } }
+    private static IEnumerable<string> SafeFiles(string dir, string pat)
+    { try { return Directory.GetFiles(dir, pat); } catch { return Array.Empty<string>(); } }
+    private static void TryDeleteDir(string dir) { try { Directory.Delete(dir, recursive: true); } catch { } }
 
     internal static bool IsSymlink(string path)
+    { try { return new FileInfo(path).LinkTarget != null || new DirectoryInfo(path).LinkTarget != null; } catch { return false; } }
+
+    public static string SanitizeName(string name)
     {
-        try { return new FileInfo(path).LinkTarget != null; }
-        catch { return false; }
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
     }
 
-    internal static bool IsOrphanSymlink(string path) => !File.Exists(path) && IsSymlink(path);
-
-    internal static void CleanOrphan(string mp4Path)
+    internal static void CopyDirectory(string src, string dest)
     {
-        try { File.Delete(mp4Path); } catch { }
-        foreach (var ext in new[] { ".jpg", ".png", ".gif", ".jpeg", ".id", ".scene", ".crashed", ".whitelist", ".volume", ".speed" })
-            try { File.Delete(Path.ChangeExtension(mp4Path, ext)); } catch { }
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.GetFiles(src)) File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
+        foreach (var dir in Directory.GetDirectories(src)) CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
+    }
+
+    // Extracts the numeric workshop item ID from a Steam community URL (?id=NNN / &id=NNN).
+    public static string? ExtractSteamWorkshopId(string url)
+    {
+        int idx = url.IndexOf("?id=", StringComparison.Ordinal);
+        if (idx < 0) idx = url.IndexOf("&id=", StringComparison.Ordinal);
+        if (idx < 0) return null;
+        int start = idx + 4, end = start;
+        while (end < url.Length && char.IsDigit(url[end])) end++;
+        var c = url.Substring(start, end - start);
+        return c.Length >= 8 && long.TryParse(c, out _) ? c : null;
     }
 }

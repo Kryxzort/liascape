@@ -9,14 +9,14 @@ using livepaper.Models;
 
 namespace livepaper.Helpers;
 
-// Imports a user-provided video into the library: copies the file, generates
-// a thumbnail with ffmpeg, and writes a sidecar `.id` so re-imports dedupe.
+// Imports a user-provided video into imported/<name>/: copies the file, generates a thumbnail
+// with ffmpeg, and records it in the source index so re-imports dedupe.
 public static class ImportService
 {
-    // Serialize the filename-selection + copy/move + .id-write critical
+    // Serialize the filename-selection + copy/move + index-write critical
     // section so two concurrent imports can't both pick the same safeTitle
     // (TOCTOU between File.Exists and the rename) and clobber each other.
-    // ViewModel-side IsImporting already blocks GUI re-entry, but defending
+    // The UI's import guard already blocks re-entry, but defending
     // inside the helper itself makes the contract self-contained.
     private static readonly SemaphoreSlim _importLock = new(1, 1);
 
@@ -28,131 +28,67 @@ public static class ImportService
     public static async Task<LibraryItem?> ImportAsync(string sourcePath, string title)
     {
         if (!File.Exists(sourcePath)) return null;
-        Directory.CreateDirectory(DownloadHelper.LibraryPath);
+        var importedDir = LibraryStore.SourceDir(LibraryStore.Imported);
+        Directory.CreateDirectory(importedDir);
 
         var baseTitle = SanitizeName(title);
         if (string.IsNullOrEmpty(baseTitle)) baseTitle = "imported";
         var sourceId = "import:" + sourcePath;
 
-        // Images are stored as .png so the library file extension never
-        // collides with the .jpg thumbnail naming convention.
         bool isImage = IsImage(sourcePath);
         string mediaExt = isImage ? ".png" : ".mp4";
-        string otherMediaExt = isImage ? ".mp4" : ".png";
 
-        string safeTitle;
-        string videoPath, thumbPath, idPath;
-
+        string key, itemDir, videoPath, thumbPath;
         await _importLock.WaitAsync();
         try
         {
-            // Resolve a target name. If the .mp4 already exists for this
-            // base title, look at the .id sidecar:
-            //   - id matches → re-import of the same source, replace in place
-            //   - id missing or differs → different item, append a counter
-            //     ("My Wallpaper (1)") so we don't overwrite someone else.
-            safeTitle = baseTitle;
-            for (int attempt = 0; ; attempt++)
-            {
-                safeTitle = attempt == 0 ? baseTitle : $"{baseTitle} ({attempt})";
-                videoPath = Path.Combine(DownloadHelper.LibraryPath, safeTitle + mediaExt);
-                thumbPath = Path.Combine(DownloadHelper.LibraryPath, safeTitle + ".jpg");
-                idPath = Path.Combine(DownloadHelper.LibraryPath, safeTitle + ".id");
+            // reuse the folder if this exact source was already imported (index SourceUrl match), else unique key
+            var idx = LibraryStore.LoadIndex(LibraryStore.Imported);
+            key = idx.FirstOrDefault(kv => kv.Value.SourceUrl == sourceId).Key
+                  ?? UniqueImportedKey(importedDir, baseTitle);
+            itemDir = Path.Combine(importedDir, key);
+            Directory.CreateDirectory(itemDir);
+            videoPath = Path.Combine(itemDir, key + mediaExt);
+            thumbPath = Path.Combine(itemDir, key + ".jpg");
 
-                // Cross-type collision: a library entry of the opposite media
-                // type already owns this base name's .jpg / .id sidecars.
-                // Bump the counter so we don't clobber its thumbnail / sourceId.
-                var otherMediaPath = Path.Combine(DownloadHelper.LibraryPath, safeTitle + otherMediaExt);
-                if (File.Exists(otherMediaPath))
-                {
-                    if (attempt > 1000) return null;
-                    continue;
-                }
-
-                // Scene collision: a .scene entry owns this name's .jpg / .id sidecars.
-                var sceneMediaPath = Path.Combine(DownloadHelper.LibraryPath, safeTitle + ".scene");
-                if (File.Exists(sceneMediaPath))
-                {
-                    if (attempt > 1000) return null;
-                    continue;
-                }
-
-                if (!File.Exists(videoPath)) break; // free name
-
-                string existingId = "";
-                try { if (File.Exists(idPath)) existingId = File.ReadAllText(idPath).Trim(); } catch { }
-                if (existingId == sourceId) break; // same source — replace in place
-
-                if (attempt > 1000) return null; // sanity bail
-            }
-
-            // Image source whose extension differs from .png is converted with
-            // ffmpeg so the library always stores a single canonical image
-            // format. PNG sources copy as-is.
             bool needsConvert = isImage && Path.GetExtension(sourcePath).ToLowerInvariant() != ".png";
-
-            // Same-path guard (mirrors DownloadHelper) — never overwrite the source.
             bool samePath = Path.GetFullPath(sourcePath) == Path.GetFullPath(videoPath);
             if (!samePath && needsConvert)
             {
-                var tmpPath = $"{videoPath}.{Guid.NewGuid():N}.tmp.png";
-                try
-                {
-                    var ok = await RunFfmpegAsync("-y", "-i", sourcePath, "-frames:v", "1", tmpPath);
-                    if (!ok || !File.Exists(tmpPath)) throw new Exception("image conversion failed");
-                    File.Move(tmpPath, videoPath, overwrite: true);
-                }
-                catch
-                {
-                    try { File.Delete(tmpPath); } catch { }
-                    throw;
-                }
+                var tmp = $"{videoPath}.{Guid.NewGuid():N}.tmp.png";
+                try { var ok = await RunFfmpegAsync("-y", "-i", sourcePath, "-frames:v", "1", tmp); if (!ok || !File.Exists(tmp)) throw new Exception("image conversion failed"); File.Move(tmp, videoPath, overwrite: true); }
+                catch { try { File.Delete(tmp); } catch { } throw; }
             }
             else if (!samePath)
             {
-                // Copy to a sibling .tmp first, then atomically rename. If the
-                // copy fails partway (source disappears, disk full, etc.) the
-                // existing library entry is left intact instead of being deleted
-                // and replaced with nothing. The GUID suffix prevents two
-                // concurrent imports targeting the same videoPath from racing
-                // on a shared `.tmp` file (in-process the lock already covers
-                // this, but cheap belt-and-suspenders for cross-process).
-                var tmpPath = $"{videoPath}.{Guid.NewGuid():N}.tmp";
-                try
-                {
-                    await Task.Run(() => File.Copy(sourcePath, tmpPath, overwrite: true));
-                    File.Move(tmpPath, videoPath, overwrite: true);
-                }
-                catch
-                {
-                    try { File.Delete(tmpPath); } catch { }
-                    throw;
-                }
+                var tmp = $"{videoPath}.{Guid.NewGuid():N}.tmp";
+                try { await Task.Run(() => File.Copy(sourcePath, tmp, overwrite: true)); File.Move(tmp, videoPath, overwrite: true); }
+                catch { try { File.Delete(tmp); } catch { } throw; }
             }
-
-            // Write the .id sidecar *before* the slow thumbnail extraction so
-            // any concurrent LibraryService.LoadAll observes the new .mp4 with
-            // its matching SourceId, not without one. Keeps SourceId-based
-            // dedup in ConfirmImport reliable.
-            await File.WriteAllTextAsync(idPath, sourceId);
+            // write the index entry before the slow thumbnail extraction so a concurrent LoadAll sees it
+            LibraryStore.SetMeta(videoPath, m => { m.Title = key; m.SourceUrl = sourceId; });
         }
-        finally
-        {
-            _importLock.Release();
-        }
+        finally { _importLock.Release(); }
 
-        // Thumbnail extraction is best-effort and doesn't interact with the
-        // filename-selection invariants; safe to run unlocked so other
-        // imports aren't blocked by a slow ffmpeg call.
         await TryExtractThumbnailAsync(videoPath, thumbPath, isImage);
 
         return new LibraryItem
         {
-            Title = safeTitle,
+            Title = key,
             VideoPath = videoPath,
             ThumbnailPath = File.Exists(thumbPath) ? thumbPath : null,
-            SourceId = sourceId
+            SourceId = sourceId,
         };
+    }
+
+    private static string UniqueImportedKey(string importedDir, string baseTitle)
+    {
+        for (int i = 0; i < 10000; i++)
+        {
+            string k = i == 0 ? baseTitle : $"{baseTitle} ({i})";
+            if (!Directory.Exists(Path.Combine(importedDir, k))) return k;
+        }
+        return baseTitle + "_" + Guid.NewGuid().ToString("N");
     }
 
     private static async Task<bool> TryExtractThumbnailAsync(string mediaPath, string outputPath, bool isImage)

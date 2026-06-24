@@ -1,28 +1,29 @@
 ---
 paths:
   - "scripts/**"
-  - "src/livepaper/Assets/**"
+  - "app/shell/package.json"
+  - "app/ui/package.json"
 ---
 
 ## Distribution
 
-### Scripts (`scripts/`)
-- `install.sh` — self-contained single binary (`PublishSingleFile=true`), installs to `~/.local/bin/`, desktop entry to `~/.local/share/applications/`, icon to `~/.local/share/icons/hicolor/512x512/apps/`
-- `build-appimage.sh` — same build, packages into `livepaper-x86_64.AppImage` via `appimagetool` (auto-downloaded if not in PATH)
-- `PKGBUILD` + `.SRCINFO` — AUR package `livepaper-git` at `aur.archlinux.org/packages/livepaper-git`
+The app ships as **two pieces**: a published self-contained C# backend + the built React UI, launched by an Electron shell.
 
-When updating AUR:
-```bash
-cd scripts && makepkg --printsrcinfo > .SRCINFO
-cp PKGBUILD .SRCINFO /tmp/aur-livepaper/
-cd /tmp/aur-livepaper && git add PKGBUILD .SRCINFO && git commit -m "..." && git push
-```
+### `scripts/install.sh` — the current installer
+1. `cd app/ui && npm install && npm run build` → UI bundle in `app/ui/dist/`.
+2. `dotnet publish src/livepaper -r linux-x64 --self-contained` → backend in `~/.local/share/livepaper-web/backend`.
+3. Stages the UI to `~/.local/share/livepaper-web/ui`; ensures `app/shell`'s Electron (`npm install`).
+4. Installs to `~/.local/bin`:
+   - **`livepaper`** — bare = open the GUI (`exec livepaper-ui`); any flag = the headless backend/CLI (`backend/livepaper "$@"`). Sets `LP_UI_DIR`.
+   - **`livepaper-ui`** — runs Electron on `app/shell` (sets `LP_BACKEND` + `LP_UI_DIR`).
+5. Writes `~/.local/share/applications/livepaper.desktop` (Exec=`livepaper-ui`).
 
-### Assets (`src/livepaper/Assets/`)
-- `livepaper.svg` — source icon (monitor + play button, transparent background)
-- `livepaper.png` — 512×512 PNG exported from SVG
+**Electron is `app/shell/node_modules/electron`** (decoupled from `demos/`). On this machine npm blocks install scripts, so the binary was seeded from `demos/shell`'s copy (same 33.4.11). install.sh keeps a `demos/shell` electron fallback as a safety; `demos/` stays (untracked) but isn't a dependency.
 
-To regenerate PNG after editing SVG:
-```bash
-rsvg-convert -w 512 -h 512 src/livepaper/Assets/livepaper.svg -o src/livepaper/Assets/livepaper.png
-```
+### ⚠️ Stale / not-yet-rebuilt packaging
+- **`scripts/build-appimage.sh`** and **`scripts/PKGBUILD`** still build the **pre-rewrite single-binary Avalonia app** (PKGBUILD has no `nodejs`/`electron` deps and points at the old upstream repo). They do **not** produce the current Electron+backend stack — treat as broken until rewritten.
+- **AppImage via electron-builder is NOT set up** — `app/shell/package.json` has only a `start` script (no `build`/`dist`, no electron-builder config). The "`npm run dist`" mentioned in older notes/README does not exist yet.
+- The old `src/livepaper/Assets/` icon (`livepaper.svg`/`.png`) was **deleted**; there is no packaged app icon wired up yet (the `.desktop` entry sets no `Icon=`). UI/static assets live under `app/ui/public`.
+
+### Dev (no install)
+`scripts/dev.sh` → systemd user units: `livepaper-vite` (HMR :5173) + `livepaper-watch` (`dotnet watch -- --serve` :5174). Launch the app normally; `main.js` auto-detects Vite. `scripts/dev-stop.sh` stops them. `scripts/freeze-monitor.sh` watches for the main-thread freeze.

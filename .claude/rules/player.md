@@ -25,12 +25,18 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 - Single video → `Launch(opts, path)` directly
 - Multi-video (no scenes, or scenes with no interval) → `ApplyTimedPlaylist(intervalSeconds: 0, waitForVideoEnd: false, advanceOnVideoEnd: true)` — livepaper-owned; **no `--playlist=file` or `--loop-playlist=inf`**
 - Scenes present + `AllowScenes` + interval > 0 → `ApplyTimedPlaylist(secs, waitForVideoEnd: true, advanceOnVideoEnd: true)`
-- The old `playlist.txt` + `--playlist=file` approach is **not used** for multi-video; all playlists are livepaper-owned through the timed machinery
+- Multi-video playlists are livepaper-owned through the timed machinery (no `playlist.txt` / `--playlist=file`)
 
 **`AppendToActivePlaylist(IReadOnlyList<string> paths)`** — injects new paths into a running session:
 - Timed mode (`_timedPaths != null`): dedup-appends to `_timedPaths` in-memory. IPC `loadfile append` is handled naturally by advance-on-end pre-fetch.
 - Non-timed mode: sends `loadfile append` IPC for each path.
-- Called from ViewModel after `AutoAddLibraryToPlaylist` adds new WE items mid-session.
+- Called from `AppOps` (the web layer) after `AutoAddLibraryToPlaylist` adds new WE items mid-session.
+
+## Scenes (folder-based) & live overrides
+
+- **A scene's play path IS its item folder** (`workshop/<id>` / `local/<id>`) — no `.scene` marker. `IsScenePath(path)` = "the path has no media file extension" (a folder ⟺ scene). `SwitchToFile`'s scene branch launches LWE by **id** (local — LWE's native WE-dir lookup) or **dir path** (owned `workshop/` copy; derived via `LibraryStore.Locate`); `QueryCurrentSceneWorkshopId` = the folder name. Scenes have no mpv socket, so `QueryCurrentPath` returns the folder from `_history`, and `Apply` sets `_history=[path]` for single applies so a lone scene is trackable.
+- **Per-item volume/speed come from the index.** `PlayerHelper`'s private `ReadVolumeOverride/ReadSpeedOverride` **delegate to `LibraryService`** (→ `LibraryStore`); effective = `override ?? global` on every path (launch, advance, transition, scene).
+- **Live apply, no restart:** `ApplyOverrideLive(path)` retargets the *playing* wallpaper — mpv `set_property volume/speed` (video) or `ApplyLweVolume`→`pactl` (scene volume; scenes are 1× → speed no-op). `SetVideoScale` applies fill/fit live via mpv `panscan`. A video→video IPC switch (`TryIpcSwitchToFile`) carries the effective volume/speed as **`loadfile` per-file options** — atomic, so mpv can't reset volume to the launch default after the load (otherwise the advanced-to item played at global).
 
 ## Mute: user vs auto
 
@@ -48,7 +54,7 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 
 ## Auto-Mute (`AudioMonitor`)
 
-`AudioMonitor.Start/Stop` called by ViewModel when `AutoMute` toggled or settings change. Three concurrent tasks:
+`AudioMonitor.Start/Stop` called by the `/settings` handler (`Web/ServerHost.cs`) when an AutoMute field changes; started on `--serve` startup, `Stop()`ped (+ handed to a detached `--monitor`) on `ApplicationStopping`. Three concurrent tasks:
 
 1. **`WatchStreamsAsync`** — runs `pactl subscribe`; maintains `ConcurrentDictionary<uint, CancellationTokenSource>` per-stream. On `'new'`: starts `parec`, verifies non-mpv after 100ms in background. On `'remove'`: cancels immediately. Initial reconciliation on startup. Filters mpv streams (`application.process.binary = "mpv"` / `application.name = "mpv"`) and corked streams.
 
@@ -58,7 +64,7 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 
 **Critical invariant**: always `--monitor-stream=<id>`. Never `@DEFAULT_MONITOR@` — captures livepaper's own audio → oscillation (mute → silence → unmute → audio detected → mute...).
 
-**SDL Application filter**: LWE registers as `application.name = "SDL Application"`. `GetNonMpvStreamIdsAsync()` skips SDL Application sink inputs — otherwise LWE audio triggers auto-mute of itself.
+**LWE stream filter**: linux-wallpaperengine's audio registers as `application.process.binary = "linux-wallpaperengine"` (also `application.name = "linux-wallpaperengine"`). `GetNonMpvStreamIdsAsync()` + `GetLweSinkInputIds()` match on the binary — auto-mute **skips** it (else LWE mutes itself) and live scene-volume **targets** it (`ApplyLweVolume` via `pactl`).
 
 **`_aboveThresholdCount` reset**: `Interlocked.Exchange(..., 0)` at top of `WatchStreamsAsync` (not in `Stop()`), so `finally` blocks from previous run can decrement safely without racing against new monitors.
 
@@ -94,4 +100,4 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`UpdateTimedSettings`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Never restarts current wallpaper.
 
-**SIGINT/SIGTERM**: intercepted in `App.axaml.cs` (`Console.CancelKeyPress` and `PosixSignalRegistration` stored in `_sigtermRegistration` field to prevent GC) and routed through `window.Close()` so the close handler always runs and daemons are always spawned.
+**App close**: the Electron shell (`app/shell/main.js`, `window-all-closed` / `before-quit`) kills `livepaper --serve`. The backend's ASP.NET `app.Lifetime.ApplicationStopping` hook (`Web/ServerHost.cs`) is the close handler: it `AudioMonitor.Stop()`s and hands mute back to a detached `--monitor` when AutoMute + playing.

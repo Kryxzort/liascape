@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace livepaper.Models;
 
@@ -7,11 +8,12 @@ public class AppSettings
 {
     public bool Loop { get; set; } = true;
     public bool NoAudio { get; set; } = true;
-    public bool DisableCache { get; set; } = true;
+    public bool DisableCache { get; set; } = false;
     public int DemuxerMaxBytes { get; set; } = 20;
     public int DemuxerMaxBackBytes { get; set; } = 5;
     public string HwDec { get; set; } = "auto";
-    public string VideoScale { get; set; } = "fit";
+    public string VideoScale { get; set; } = "fill";
+    public int VideoFps { get; set; } = 0; // cap mpv video playback fps (0 = native). Scenes (LWE) unaffected.
     private int _volume = 100;
     public int Volume
     {
@@ -39,9 +41,15 @@ public class AppSettings
     public int AutoUnmuteDelayMs { get; set; } = 2000;
     public double AutoMuteThresholdDb { get; set; } = -70.0;
     public bool AutoMuteOnlyIfMprisActive { get; set; } = false;
-    public string ThumbnailAspect { get; set; } = "Default";
+    public string ThumbnailAspect { get; set; } = "1:1";
     public string CardSize { get; set; } = "Medium";
     public bool AutoPlayGifs { get; set; } = false;
+    public bool AdvancedSettings { get; set; } = false;      // UI: reveal power-user settings rows
+    public bool WallpaperBgAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
+    public bool DebugMode { get; set; } = false;             // UI: enable the lpdbg bridge + metrics
+    public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
+    public bool RestartOnSwitchOnly { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
+    public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
     public int GlobalIntervalSeconds { get; set; } = 1800;
     public bool GlobalAdvanceOnVideoEnd { get; set; } = true;
@@ -81,6 +89,7 @@ public class AppSettings
         if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
         if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
         if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
+        if (VideoFps > 0) parts.Add($"--vf=fps={VideoFps}"); // cap playback fps (video only)
         if (VideoScale == "fill") parts.Add("--panscan=1.0");
         parts.Add("--image-display-duration=inf");
         return string.Join(" ", parts);
@@ -97,9 +106,33 @@ public class AppSettings
         if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
         if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
         if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
+        if (VideoFps > 0) parts.Add($"--vf=fps={VideoFps}"); // cap playback fps (video only)
         if (VideoScale == "fill") parts.Add("--panscan=1.0");
         parts.Add("--image-display-duration=10");
         return string.Join(" ", parts);
+    }
+
+    // Live preview of the linux-wallpaperengine (scene) command, one line per configured monitor.
+    // Mirrors PlayerHelper.SpawnLweProcesses exactly. Uses a <monitor> placeholder when none set.
+    public string BuildLweOptions()
+    {
+        var monitors = LweMonitors.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToList();
+        bool anyPrimary = monitors.Any(m => m.IsPrimary);
+        var src = monitors.Count > 0
+            ? monitors
+            : new List<LweMonitorSettings> { new() { Name = "<monitor>", Fps = 60, IsPrimary = true } };
+        var lines = new List<string>();
+        foreach (var m in src)
+        {
+            var parts = new List<string> { "linux-wallpaperengine", "--noautomute", "--screen-root", m.Name };
+            bool hasAudio = !anyPrimary || m.IsPrimary;
+            if (NoAudio || !hasAudio) parts.Add("--silent");
+            else { parts.Add("--volume"); parts.Add("100"); }
+            if (m.Fps > 0) { parts.Add("--fps"); parts.Add(m.Fps.ToString()); }
+            parts.Add("--no-fullscreen-pause");
+            lines.Add(string.Join(" ", parts));
+        }
+        return string.Join("\n", lines);
     }
 
     public static AppSettings Default() => new();

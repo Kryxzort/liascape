@@ -1,36 +1,45 @@
 # CLAUDE.md
 
-**livepaper** — Linux desktop app (C# + Avalonia UI) that fetches live wallpapers and applies them via [mpvpaper](https://github.com/GhostNaN/mpvpaper) on Wayland.
+**livepaper** — Linux live-wallpaper manager for Wayland. An **Electron + React** UI over a **headless C# backend**: the same `livepaper` binary runs the CLI, the background daemons, and a loopback web API (`--serve`) that the UI talks to. Wallpapers are applied via [mpvpaper](https://github.com/GhostNaN/mpvpaper) (videos) and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (WE scenes).
 
 ## System Dependencies
 
-- `mpvpaper`, `mpv` — wallpaper player
-- `.NET SDK` — build
+- `mpvpaper`, `mpv` — video wallpaper player
+- `.NET 10 SDK` — build the backend; `Node.js` / `npm` — build the React UI + run the Electron shell
 - Wayland compositor (Hyprland, Sway, GNOME on Wayland)
-- `pactl` / `parec` (libpulse) — Auto-Mute stream detection
-- `ffmpeg` — thumbnail extraction (Import flow)
-- `wl-clipboard` — `wl-copy` for keybind Copy buttons; falls back to Avalonia clipboard (releases on close)
+- `pactl` / `parec` (libpulse) — Auto-Mute stream detection (+ live LWE scene volume via `pactl`)
+- `ffmpeg` — thumbnail extraction (Import) + frozen-frame grabs
+- `wl-clipboard` — `wl-copy` for keybind Copy buttons (renderer uses `navigator.clipboard`, falls back to `wl-copy`)
+- `linux-wallpaperengine` *(optional)* — WE **scene** support (Settings → "Allow scene support")
 
 ## Common Commands
 
 ```bash
-dotnet run --project src/livepaper                            # run
-dotnet run --project src/livepaper -- --restore               # restore last session
-dotnet run --project src/livepaper -- --random                # random library wallpaper
-dotnet build src/livepaper                                    # build (no solution file at root)
-dotnet publish src/livepaper -r linux-x64 --self-contained    # release binary
-bash scripts/install.sh                                       # build + install to ~/.local/bin
+bash scripts/dev.sh                              # dev: Vite HMR (:5173) + dotnet watch --serve (:5174) as systemd user units
+livepaper                                        # open the app (GUI) — bare command launches the Electron shell
+livepaper-ui                                     # explicit GUI launcher (Electron)
+dotnet run --project src/livepaper -- --serve    # backend only (headless loopback API)
+cd app/ui && npm run dev                          # React UI only, in a browser (append ?api=<backend-port>)
+dotnet build src/livepaper                        # build backend (no solution file at root)
+cd app/ui && npm run build                        # build the UI bundle (dist/)
+bash scripts/install.sh                           # build UI + publish backend, install livepaper + livepaper-ui
+electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (offscreen, counts rendered elements)
 ```
+
+> **Note:** `app/shell` has its own Electron (decoupled from `demos/`, which is the old framework bake-off — kept, untracked). The CDP debug window (`LP_DEBUG=1`, port `:9222`, `node app/shell/cdp.js "<expr>"`) is for read-only inspection.
 
 ## CLI Flags
 
-- `--restore` — re-applies last session without opening UI. For timed playlists: `setsid`-spawns `--timer-daemon` and returns.
-- `--random` — picks random library video, applies, exits. Saves pick so `--restore` replays it.
+`livepaper` with **no args opens the GUI**; any flag runs headless:
+
+- `--serve` *(internal default for the backend)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/livepaper/serve.port`. The Electron shell spawns this with an explicit `--serve`.
+- `--restore` — re-applies last session without a UI. Timed playlists: `setsid`-spawns `--timer-daemon` and returns.
+- `--random` — picks a random library wallpaper, applies, exits. Saves the pick so `--restore` replays it.
 - `--kill` — stops playback, exits.
-- `--monitor` *(internal)* — starts `AudioMonitor`, blocks. Spawned detached when app closes with AutoMute on.
-- `--timer-daemon` *(internal)* — owns timed-playlist tick loop, blocks. Spawned by `--restore` (timed case) and GUI on close.
-- `--restart-daemon` *(internal)* — periodically kills and relaunches mpvpaper to work around a memory leak. Blocks indefinitely. Spawned by `--restore` and GUI on close whenever something is playing; killed by `--kill` and on app open.
-- `--action=<action>` — sends command to running session, exits. Actions:
+- `--monitor` *(internal)* — starts `AudioMonitor`, blocks. Spawned detached when the app closes with AutoMute on.
+- `--timer-daemon` *(internal)* — owns the timed-playlist tick loop, blocks. Spawned by `--restore` (timed) and on close.
+- `--restart-daemon` *(internal)* — periodically relaunches mpvpaper (frame-buffer leak workaround). Blocks. Spawned by `--restore`/on-close when playing; killed by `--kill` and on app open.
+- `--action=<action>` — sends a command to the running session, exits:
   - `toggle-mute`, `toggle-pause`, `stop`, `play`, `toggle-play`
   - `next-wallpaper`, `previous-wallpaper`, `random`
   - `volume-up` / `volume-down` — ±5, clamped 0–100, persisted to settings.json
@@ -38,16 +47,19 @@ bash scripts/install.sh                                       # build + install 
 ## Architecture
 
 ```text
-src/livepaper/
-├── Models/         # WallpaperResult, WallpaperDetail, LibraryItem, AppSettings, LastSession, AppTheme
-├── Scrapers/       # MotionBgsScraper, MoewallsScraper, WallpaperEngineScraper
-├── Services/       # IBgsProvider interface + one service per source
-├── Helpers/        # DownloadHelper, PlayerHelper, LibraryService, SettingsService, AudioMonitor, ThemeService
-├── ViewModels/     # MVVM (CommunityToolkit.Mvvm)
-└── Views/          # Avalonia XAML views
+src/livepaper/            # headless C# backend (CLI + daemons + --serve API). NO GUI here anymore.
+├── Models/               # WallpaperResult, WallpaperDetail, LibraryItem, AppSettings, LastSession, LibMeta
+├── Scrapers/             # MotionBgsScraper, MoewallsScraper, DesktophutScraper, WallpaperEngineScraper (static HTTP+HTML)
+├── Services/             # IBgsProvider + one service per source; SteamWorkshopService
+├── Helpers/              # PlayerHelper, DownloadHelper, LibraryService, LibraryStore, ImportService,
+│                         #   SettingsService, AudioMonitor, MonitorDetector, WorkshopDownloader, WorkshopUnsubQueue
+└── Web/                  # ServerHost (minimal-API endpoints), AppOps (orchestration), EventBus (WS), SteamOps
+app/
+├── ui/                   # Vite + React 19 + TS + zustand + framer-motion (the renderer)
+└── shell/                # Electron main/preload + probes; spawns `livepaper --serve`, loads the UI same-origin
 ```
 
-Each scraper is a static class (HTTP + HTML parsing). Each service wraps a scraper and implements `IBgsProvider`.
+The Avalonia UI (`Views/`, `ViewModels/`, `App.axaml`) was **removed** in the Electron rewrite — don't reference it. `Web/` only wraps the unchanged scrapers/helpers/daemons; UI lives in `app/`. See `.claude/rules/web-backend.md` + `web-ui.md`.
 
 ## Commit Style
 

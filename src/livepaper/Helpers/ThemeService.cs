@@ -1,7 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using Avalonia;
-using Avalonia.Media;
 using livepaper.Models;
 
 namespace livepaper.Helpers;
@@ -255,25 +253,6 @@ public static class ThemeService
     public static AppTheme Default => All[0];
 
     public static AppTheme? Find(string name) => All.FirstOrDefault(t => t.Name == name);
-
-    public static void Apply(AppTheme theme)
-    {
-        var res = Application.Current!.Resources;
-        void Set(string key, string hex) => res[key] = new SolidColorBrush(Color.Parse(hex));
-        Set("BgBase",      theme.BgBase);
-        Set("BgMantle",    theme.BgMantle);
-        Set("BgCrust",     theme.BgCrust);
-        Set("Surface0",    theme.Surface0);
-        Set("Surface1",    theme.Surface1);
-        Set("Surface2",    theme.Surface2);
-        Set("TextColor",   theme.TextColor);
-        Set("Subtext",     theme.Subtext);
-        Set("Muted",       theme.Muted);
-        Set("Accent",      theme.Accent);
-        Set("AccentFg",    theme.AccentFg);
-        Set("AccentHover", theme.AccentHover);
-        Set("Danger",      theme.Danger);
-        Set("DangerBg",    theme.DangerBg);
-        Set("Success",     theme.Success);
-    }
+    // Themes are served as data at GET /themes; the web client applies the colors as CSS vars
+    // (store.applyThemeVars).
 }

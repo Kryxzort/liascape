@@ -1,65 +1,62 @@
 #!/bin/bash
+# Install the web rewrite: publish the C# backend (CLI/daemons/--serve) + build the React UI,
+# install a `livepaper` CLI launcher (restore/action/daemons/serve) and a `livepaper-ui` GUI
+# launcher (Electron shell → spawns the backend, loads the UI). For a portable AppImage use
+# electron-builder: (cd app/shell && npm run dist).
 set -e
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PUBLISH_DIR="$ROOT/publish"
-ICON="$ROOT/src/livepaper/Assets/livepaper.png"
+LIB="$HOME/.local/share/livepaper-web"
+BIN="$HOME/.local/bin"
+APPS="$HOME/.local/share/applications"
 
-BIN_DIR="$HOME/.local/bin"
-APPS_DIR="$HOME/.local/share/applications"
-ICONS_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
+echo "==> building React UI"
+(cd "$ROOT/app/ui" && npm install && npm run build)
 
-if [ "$1" != "--no-build" ]; then
-    echo "==> Building livepaper..."
-    dotnet publish "$ROOT/src/livepaper" \
-        -r linux-x64 \
-        --self-contained \
-        -c Release \
-        -o "$PUBLISH_DIR"
-fi
+echo "==> publishing backend (self-contained)"
+rm -rf "$LIB/backend"
+dotnet publish "$ROOT/src/livepaper" -r linux-x64 --self-contained -c Release -o "$LIB/backend"
 
-LIB="$HOME/.local/lib/livepaper"
-echo "==> Installing to $LIB/..."
-# Stage into a fresh dir, then atomically swap. Overwriting the dir in place with cp -r fails with
-# "Text file busy" (ETXTBSY) if an instance is still running (the exe + mmap'd native .so are open
-# for execution). Renaming dirs never hits that: the running process keeps its old inodes.
-STAGING="$LIB.staging.$$"
-OLD="$LIB.old.$$"
-rm -rf "$STAGING"
-mkdir -p "$STAGING"
-cp -r "$PUBLISH_DIR"/. "$STAGING/"
-chmod 755 "$STAGING/livepaper"
-if [ -d "$LIB" ]; then mv "$LIB" "$OLD"; fi
-mv "$STAGING" "$LIB"
-rm -rf "$OLD"
+echo "==> staging UI"
+rm -rf "$LIB/ui"; mkdir -p "$LIB/ui"; cp -r "$ROOT/app/ui/dist/." "$LIB/ui/"
 
-echo "==> Installing launcher to $BIN_DIR..."
-mkdir -p "$BIN_DIR"
-cat > "$BIN_DIR/livepaper" <<'WRAPPER'
+echo "==> ensuring Electron (shell)"
+(cd "$ROOT/app/shell" && npm install >/dev/null 2>&1 || true)
+ELECTRON="$ROOT/app/shell/node_modules/electron/dist/electron"
+[ -x "$ELECTRON" ] || ELECTRON="$ROOT/demos/shell/node_modules/electron/dist/electron"
+
+mkdir -p "$BIN"
+echo "==> installing 'livepaper' (headless CLI: --restore/--action/daemons/--serve)"
+cat > "$BIN/livepaper" <<WRAP
 #!/bin/bash
-exec "$HOME/.local/lib/livepaper/livepaper" "$@"
-WRAPPER
-chmod 755 "$BIN_DIR/livepaper"
+export LP_UI_DIR="$LIB/ui"
+# bare 'livepaper' opens the GUI; any flag (--restore/--action/--serve/daemons) runs the headless backend
+[ \$# -eq 0 ] && exec "$BIN/livepaper-ui"
+exec "$LIB/backend/livepaper" "\$@"
+WRAP
+chmod 755 "$BIN/livepaper"
 
-echo "==> Installing icon..."
-mkdir -p "$ICONS_DIR"
-cp "$ICON" "$ICONS_DIR/livepaper.png"
+echo "==> installing 'livepaper-ui' (GUI)"
+cat > "$BIN/livepaper-ui" <<WRAP
+#!/bin/bash
+export LP_BACKEND="$LIB/backend/livepaper"
+export LP_UI_DIR="$LIB/ui"
+exec "$ELECTRON" "$ROOT/app/shell"
+WRAP
+chmod 755 "$BIN/livepaper-ui"
 
-echo "==> Installing desktop entry..."
-mkdir -p "$APPS_DIR"
-cat > "$APPS_DIR/livepaper.desktop" <<EOF
+mkdir -p "$APPS"
+cat > "$APPS/livepaper.desktop" <<EOF
 [Desktop Entry]
 Name=Livepaper
-Comment=Live wallpaper manager for Wayland
-Exec=$BIN_DIR/livepaper
-Icon=livepaper
+Comment=Live wallpaper manager (Wayland)
+Exec=$BIN/livepaper-ui
 Type=Application
 Categories=Utility;
 Keywords=wallpaper;live;wayland;video;
 EOF
-
-update-desktop-database "$APPS_DIR" 2>/dev/null || true
+update-desktop-database "$APPS" 2>/dev/null || true
 
 echo ""
-echo "Done. Make sure $BIN_DIR is in your PATH."
-echo "Run: livepaper"
+echo "Done. Ensure $BIN is on PATH."
+echo "  GUI:  livepaper            (bare = open the app; livepaper-ui also works)"
+echo "  CLI:  livepaper --restore | --action=next-wallpaper | --kill | --serve | …"

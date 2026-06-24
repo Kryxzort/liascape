@@ -1,4 +1,3 @@
-using Avalonia;
 using System;
 using System.Linq;
 using livepaper.Helpers;
@@ -7,7 +6,6 @@ namespace livepaper;
 
 sealed class Program
 {
-    [STAThread]
     public static void Main(string[] args)
     {
         PlayerHelper.LoadUserMuteState();
@@ -96,16 +94,22 @@ sealed class Program
             return;
         }
 
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        // Default + `--serve`: headless web backend for the Electron/React UI. Blocks. The Electron
+        // shell spawns this and reads the chosen port from ~/.config/livepaper/serve.port.
+        livepaper.Web.ServerHost.Run(args);
     }
 
-    // Runs WE auto-import + playlist auto-add for `--restore` so daemon-style
-    // launches pick up new wallpapers added since the last session.
-    private static void RunHeadlessAutoSync()
+    // Runs WE auto-import + playlist auto-add on `--restore` and `--serve` startup, so the library
+    // stays populated.
+    internal static void RunHeadlessAutoSync()
     {
         try
         {
             var settings = SettingsService.Load();
+            // independent of auto-import: swap any direct-DL copy whose workshop ID now lives in the WE dir
+            // for a symlink/copy of the WE file (in place → playlists/session stay valid; reclaims disk).
+            if (settings.ReplaceDirectWithWorkshop)
+                LibraryService.ReconcileDirectDownloads(settings.WallpaperEnginePath, settings.WeCopyFiles);
             if (!settings.AutoImportWallpaperEngine) return;
             var newPaths = LibraryService.SyncWallpaperEngine(
                 settings.WallpaperEnginePath, settings.AllowScenes, settings.WeCopyFiles);
@@ -131,13 +135,4 @@ sealed class Program
         }
         catch { }
     }
-
-    public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
-            .UsePlatformDetect()
-#if DEBUG
-            .WithDeveloperTools()
-#endif
-            .WithInterFont()
-            .LogToTrace();
 }

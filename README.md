@@ -1,6 +1,8 @@
 # livepaper
 
-A live wallpaper manager for Wayland. Browse and download animated wallpapers from online sources, or play wallpapers directly from your local Wallpaper Engine library — all applied to your desktop using [mpvpaper](https://github.com/GhostNaN/mpvpaper).
+A live wallpaper manager for Wayland. Browse and download animated wallpapers from online sources, or play wallpapers directly from your local Wallpaper Engine library — all applied to your desktop using [mpvpaper](https://github.com/GhostNaN/mpvpaper) (and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) for scenes).
+
+The interface is an **Electron + React** app over a **headless C# backend** — the same `livepaper` binary runs the CLI, the background daemons, and a local web API that the UI talks to.
 
 ![livepaper](docs/app.png)
 
@@ -11,7 +13,7 @@ A live wallpaper manager for Wayland. Browse and download animated wallpapers fr
 - `ffmpeg` (auto-generates thumbnails when importing videos)
 - `libpulse` (provides `pactl`/`parec` for Auto-Mute; satisfied by either `pulseaudio` or `pipewire-pulse` on Arch)
 - `wl-clipboard` (`wl-copy` keeps Settings-tab snippets on the clipboard after livepaper closes)
-- .NET 10 SDK (for building from source)
+- .NET 10 SDK **and** Node.js / npm (for building from source — the C# backend and the React UI respectively)
 
 ### Optional
 
@@ -26,6 +28,8 @@ A live wallpaper manager for Wayland. Browse and download animated wallpapers fr
 yay -S livepaper-git
 ```
 
+> ⚠️ The AUR package currently still builds the **legacy single-binary app**, not this Electron+backend rewrite. Until the `PKGBUILD` is updated, install from source.
+
 ### From source
 
 ```bash
@@ -34,17 +38,19 @@ cd livepaper
 bash scripts/install.sh
 ```
 
-Installs the binary to `~/.local/bin/livepaper` and registers the app in your launcher.
+Builds the React UI, publishes the self-contained C# backend, and installs **`livepaper`** to `~/.local/bin` (bare = open the GUI; flags = CLI/daemons), plus **`livepaper-ui`** (explicit GUI launcher) and a desktop entry.
 
 ## Usage
 
 ```bash
-livepaper                     # open the app
-livepaper --restore           # re-apply the last wallpaper without opening the app
+livepaper                     # open the app (Electron GUI)
+livepaper --restore           # re-apply the last wallpaper, no GUI (for autostart)
 livepaper --random            # pick a random wallpaper (from the active playlist if one's running, otherwise the library)
 livepaper --kill              # stop the wallpaper
 livepaper --action=<action>   # control the running session (see Compositor keybinds)
 ```
+
+Bare `livepaper` opens the GUI; any flag runs the headless side (`--serve` is the local backend the GUI talks to). `livepaper-ui` also launches the GUI directly.
 
 ### Autostart
 
@@ -114,13 +120,16 @@ The Settings tab covers:
 - **Playlist** — global rotation defaults: switch when video ends, or switch every Hours/Minutes/Seconds. Used by Play All and any playlist that doesn't override the globals.
 - **Auto-Mute** — automatically mutes the wallpaper when other audio is playing (e.g. videos, music, calls), with configurable threshold and mute/unmute delays
 - **Memory** — mpv demuxer cache size limits
-- **Rendering** — hardware decoding mode (auto / nvdec / vaapi / no)
+- **Rendering** — hardware decoding (auto / nvdec / vaapi / no), video scale (fill / fit), and an optional FPS cap (videos only; scenes unaffected)
 - **Wallpaper Engine** — workshop folder + copy-files toggle
 
 ## Building
 
 ```bash
-dotnet run --project src/livepaper     # run
-bash scripts/build-appimage.sh         # build AppImage
-bash scripts/install.sh                # install system-wide
+bash scripts/dev.sh                              # dev: Vite HMR + dotnet watch (then launch livepaper-ui)
+cd app/ui && npm run dev                         # UI only, in a browser (append ?api=<backend-port>)
+dotnet run --project src/livepaper -- --serve    # backend only (headless local API)
+bash scripts/install.sh                          # build UI + backend, install livepaper + livepaper-ui
 ```
+
+> Packaging (AppImage / AUR) is **not** rebuilt for the Electron stack yet — `scripts/build-appimage.sh` + `PKGBUILD` still target the old single-binary app. Use `scripts/install.sh` for now.

@@ -2,6 +2,9 @@ src/livepaper/bin/
 src/livepaper/obj/
 publish/
 AppDir/
+node_modules/
+app/ui/dist/
+demos/
 scripts/appimagetool
 scripts/*.pkg.tar.zst
 scripts/*.pkg.tar.zst.sig

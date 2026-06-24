@@ -60,11 +60,20 @@ public static class WorkshopDownloader
         const int maxWaitMs = 600_000;
         const int pollMs = 3_000;
         int waited = 0;
+        string? lastMedia = null; long lastSize = -1;
         while (waited < maxWaitMs)
         {
             ct.ThrowIfCancellationRequested();
             foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
-                if (IsWorkshopDirReady(dir)) return dir;
+            {
+                var media = TryGetMediaPath(dir);
+                if (media == null) continue;
+                long size = SafeLen(media);
+                // only accept once the media file has stopped growing (size stable across two polls)
+                // AND is non-empty — guards against importing a still-downloading partial file.
+                if (size > 0 && media == lastMedia && size == lastSize) return dir;
+                lastMedia = media; lastSize = size;
+            }
             await Task.Delay(pollMs, ct);
             waited += pollMs;
         }
@@ -354,17 +363,37 @@ public static class WorkshopDownloader
     }
 
     private static bool IsWorkshopDirReady(string dir)
+        => TryGetMediaPath(dir) is { } m && SafeLen(m) > 0;
+
+    // The actual playable file in a workshop dir: scene.pkg for scenes, else the video named in
+    // project.json's "file". Returns null until that file actually exists — Steam writes project.json
+    // BEFORE the media finishes downloading, so checking project.json alone imports a partial file.
+    private static string? TryGetMediaPath(string dir)
     {
-        if (!Directory.Exists(dir)) return false;
-        // Scenes use scene.pkg; videos use project.json — either is valid.
+        if (!Directory.Exists(dir)) return null;
+        string scene = Path.Combine(dir, "scene.pkg");
+        if (File.Exists(scene)) return scene;
         string pj = Path.Combine(dir, "project.json");
-        if (File.Exists(pj))
+        if (!File.Exists(pj)) return null;
+        try
         {
-            try { return new FileInfo(pj).Length > 10; }
-            catch { return false; }
+            using var s = File.OpenRead(pj);
+            var doc = JsonDocument.Parse(s);
+            if (doc.RootElement.TryGetProperty("file", out var f))
+            {
+                var file = f.GetString();
+                if (!string.IsNullOrEmpty(file))
+                {
+                    var p = Path.Combine(dir, file);
+                    return File.Exists(p) ? p : null;
+                }
+            }
         }
-        return File.Exists(Path.Combine(dir, "scene.pkg"));
+        catch { }
+        return null;
     }
+
+    private static long SafeLen(string path) { try { return new FileInfo(path).Length; } catch { return -1; } }
 
     public static string? FindSteamCmd(string? configured)
     {
