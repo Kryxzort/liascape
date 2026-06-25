@@ -1,12 +1,14 @@
 import { memo, useEffect, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette,
-  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench,
+  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
 import { api } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
+import { Combo } from "../components/Combo";
+import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
 const lp = (window as unknown as { lp?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).lp;
@@ -127,6 +129,20 @@ export const Settings = memo(function Settings() {
   const actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
     "next-wallpaper", "previous-wallpaper", "random", "volume-up", "volume-down"];
 
+  // Global transition config (the fallback used when a playlist doesn't override). The picker speaks
+  // the per-playlist field names, so adapt to/from the global* keys.
+  const [trPicker, setTrPicker] = useState(false);
+  const trVal: TransitionValue = {
+    transitionEnabled: g("globalTransitionEnabled", false),
+    transitionEffectIds: g<string[]>("globalTransitionEffectIds", []),
+    transitionDurationMs: g("globalTransitionDurationMs", 600),
+    transitionDurationMaxMs: g("globalTransitionDurationMaxMs", 0),
+    transitionShuffle: g("globalTransitionShuffle", true),
+  };
+  const trChange = (p: Partial<TransitionValue>) => {
+    for (const [k, v] of Object.entries(p)) set("global" + k[0].toUpperCase() + k.slice(1), v as never);
+  };
+
   return (
     <div className="scroll settings" ref={scrollRef}>
       <Section title="Playback" icon={<SlidersHorizontal size={15} />}>
@@ -135,6 +151,12 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Disable cache" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>}
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}`} disabled={mute} rk="volume">
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => set("volume", +e.target.value)} /></Row>
+        <Row label="Normalize audio" hint="match perceived loudness across videos (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." disabled={mute} rk="normalizeAudio">
+          <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
+        {!mute && g("normalizeAudio", false) && <Row label="Target loudness" hint="LUFS (dB-referenced loudness); −14 = streaming standard, lower = quieter. Pick a preset or type your own. Every video is matched to this level." rk="normalizeTargetLufs">
+          <Combo value={g("normalizeTargetLufs", -14) as number} min={-100} max={0} step={1}
+            onChange={(v) => set("normalizeTargetLufs", v)}
+            options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => set("speed", +e.target.value)} /></Row>
         <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><input className="num" type="number" min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(e) => set("restartIntervalSeconds", +e.target.value)} /></Row>
         {adv && <Row label="Restart only at playlist changeover" hint="defer the restart to the next video change (no mid-video flash); lone videos still restart" rk="restartOnSwitchOnly"><input type="checkbox" checked={g("restartOnSwitchOnly", false)} onChange={(e) => set("restartOnSwitchOnly", e.target.checked)} /></Row>}
@@ -152,7 +174,12 @@ export const Settings = memo(function Settings() {
           </div>
         </Row>
         <Row label="Auto-add new library items to playlist" rk="autoAddLibraryToPlaylist"><input type="checkbox" checked={g("autoAddLibraryToPlaylist", false)} onChange={(e) => set("autoAddLibraryToPlaylist", e.target.checked)} /></Row>
+        <Row label="Transitions" hint="animated effect between wallpaper switches" rk="globalTransitionEnabled">
+          <button className="btn ghost ico" onClick={() => setTrPicker(true)}><Sparkles size={14} />
+            {trVal.transitionEnabled ? `On · ${trVal.transitionEffectIds.length}` : "Off"}</button>
+        </Row>
       </Section>
+      <TransitionPicker open={trPicker} value={trVal} onChange={trChange} onClose={() => setTrPicker(false)} title="Global Transitions" />
 
       <Section title="Auto-Mute" icon={<VolumeX size={15} />}>
         <Row label="Mute when system audio plays" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
@@ -259,6 +286,13 @@ export const Settings = memo(function Settings() {
 
       <Section title="Advanced" icon={<Wrench size={15} />}>
         <Row label="Advanced settings" hint="show disable-cache, hardware decoding, demuxer, copy-files & the live command previews" rk="advancedSettings"><input type="checkbox" checked={adv} onChange={(e) => set("advancedSettings", e.target.checked)} /></Row>
+        {adv && <Row label="Transition method" hint="how a wallpaper switch animates — Reveal: freeze the old, keep the new playing (recommended); Frozen: both sides still; Full-live: both play (heavy on 4K). Warp-style effects fall back to Frozen in Reveal." rk="transitionMethod">
+          <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
+            options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
+        </Row>}
+        {adv && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live A-sync offset" hint="Full-live only: aim the outgoing video this many ms vs the live wallpaper at the cover, to cancel per-machine sync drift (negative = aim ahead). If you see a slight rewind raise it toward 0; a slight skip-ahead lower it. ~-30 here." rk="transitionLagOffsetMs">
+          <input className="num" type="number" min={-200} max={200} step={5} value={g("transitionLagOffsetMs", -30)} onChange={(e) => set("transitionLagOffsetMs", +e.target.value || 0)} /><span>ms</span>
+        </Row>}
         {adv && <Row label="Live wallpaper behind all tabs" hint="show the live wallpaper behind the grid on Browse & Library (visible in the gaps between cards)" rk="wallpaperBgAllTabs"><input type="checkbox" checked={g("wallpaperBgAllTabs", false)} onChange={(e) => set("wallpaperBgAllTabs", e.target.checked)} /></Row>}
         {adv && <Row label="Debug mode" hint="enable the lpdbg bridge + perf metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>}
         {adv && g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics HUD" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
