@@ -16,9 +16,13 @@ const portFile = path.join(os.homedir(), ".config", "livepaper", "serve.port");
 const VITE = "http://localhost:5173";
 
 // NVIDIA + native Wayland + Linux ≥6.12 crash-loops the GPU process (OzoneImageBacking/EGLImage) →
-// broken accel + dead window + systemic lag. Run under XWayland where NVIDIA accel is stable.
-// (override with LP_OZONE=wayland to try native again.)
-app.commandLine.appendSwitch("ozone-platform-hint", process.env.LP_OZONE || "x11");
+// broken accel + dead window + systemic lag; also on Electron ≥42 the native-Wayland surface is
+// created via Vulkan, which the wayland ozone backend rejects (`wayland_surface_factory: not
+// compatible with Vulkan`) → the window renders but never gets a visible surface. Run under XWayland
+// where NVIDIA accel is stable and the surface is created normally. (override LP_OZONE=wayland to try
+// native again.) HARD `--ozone-platform` — the `-hint` variant is advisory and Electron ≥42 ignores
+// it on a Wayland session, silently falling back to the broken native path.
+app.commandLine.appendSwitch("ozone-platform", process.env.LP_OZONE || "x11");
 
 // (Opt-in only) ANGLE backend override. The default GL backend crash-loops the GPU process on some
 // NVIDIA stacks (eglCreateImage 0x3009 / OzoneImageBacking) which kills WebGL — but forcing Vulkan

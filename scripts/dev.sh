@@ -5,6 +5,15 @@
 # `dotnet watch --serve` on a pinned port (5174), so .cs edits recompile in ~seconds without losing
 # the open window.
 set -e
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Native helpers are core (transitions + scene-audio crossfade), not optional — build them so dev
+# exercises them too. The dotnet-watch backend runs with WorkingDirectory=repo and auto-discovers
+# these via its repo-relative fallback (TransitionService.RepoPath / PlayerHelper cwd path), so no
+# env wiring is needed. set -e aborts loudly if the toolchain is missing (same deps as install.sh).
+echo "==> building native helpers (lp-transition + lp-audio)"
+make -C "$ROOT/src/native/lp-transition" >/dev/null
+make -C "$ROOT/src/native/lp-audio" >/dev/null
 
 systemctl --user daemon-reload
 systemctl --user enable --now livepaper-vite.service livepaper-watch.service

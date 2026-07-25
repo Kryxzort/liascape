@@ -166,5 +166,24 @@
         type = "app";
         program = "${livepaper}/bin/livepaper";
       };
+
+      # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make).
+      # `inputsFrom` the native + backend derivations gives this shell their EXACT build env —
+      # pkg-config path AND the stdenv cc wrapper's RPATH injection, so the make'd lp-transition /
+      # lp-audio actually find mpv/wayland/GL at runtime (a raw system gcc would not). Plus
+      # dotnet-sdk_10 + node + the runtime tools the dev backend shells out to. On NixOS the systemd
+      # dev units run `nix develop -c …`; run the whole thing with `nix develop -c bash scripts/dev.sh`.
+      devShells.${system}.default = pkgs.mkShell {
+        inputsFrom = [
+          backend
+          lp-transition
+          lp-audio
+        ];
+        packages = [
+          pkgs.dotnet-sdk_10
+          pkgs.nodejs
+        ] ++ runtimeTools;
+        DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
+      };
     };
 }
