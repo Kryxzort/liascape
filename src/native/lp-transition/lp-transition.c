@@ -867,14 +867,21 @@ static void render(struct surface *s) {
         }
     }
     // audio crossfade A→B on the shared decoder pair. LINEAR-in-time (not the visual smoothstep p) so
-    // it's an EVEN fade that lands at exactly 50/50 at the midpoint (A=B=0.5·vol). A short fade-IN
-    // (~60ms) still ramps it up from silence at the cover to kill the volume-snap "tick".
+    // it's an EVEN fade that lands at exactly 50/50 at the midpoint (A=B=0.5·vol).
+    // A (OUTGOING) starts at FULL — it's continuing seamlessly from the live wallpaper (mpvpaper-A,
+    // which plays until ~go+40ms), so ramping it up from 0 (the old `fade*` factor) dipped the audio
+    // at the handoff = the "silent at the start of the transition" gap. Only B (INCOMING) ramps from
+    // silence, with a short 60ms fade-in to kill the volume-snap click as its decoder audio turns on.
     if (audio_volume > 0.0 && g_vfrom.mpv && g_vto.mpv) {
         char vb[24];
         double x = el / duration_s; if (x < 0.0) x = 0.0; if (x > 1.0) x = 1.0; // linear progress
-        double fade = el / 0.060; if (fade > 1.0) fade = 1.0; // 60ms ramp, kills the click
-        snprintf(vb, sizeof vb, "%.1f", fade * (1.0 - x) * audio_volume); mpv_set_property_string(g_vfrom.mpv, "volume", vb);
-        snprintf(vb, sizeof vb, "%.1f", fade * x * audio_volume);         mpv_set_property_string(g_vto.mpv,   "volume", vb);
+        double fadeB = el / 0.060; if (fadeB > 1.0) fadeB = 1.0; if (fadeB < 0.0) fadeB = 0.0; // B fade-in
+        // Before go (el<0, align-a-end hold): overlay-A MUTED — mpvpaper-A underneath still carries A's
+        // audio; a full overlay-A here would DOUBLE it for the whole hold. At go, overlay-A jumps to full
+        // (matches mpvpaper-A's level → no dip) and takes over as mpvpaper-A switches to B ~40ms later.
+        double avol = el < 0.0 ? 0.0 : (1.0 - x) * audio_volume;
+        snprintf(vb, sizeof vb, "%.1f", avol);            mpv_set_property_string(g_vfrom.mpv, "volume", vb); // A full → 0
+        snprintf(vb, sizeof vb, "%.1f", fadeB * x * audio_volume); mpv_set_property_string(g_vto.mpv, "volume", vb); // B 0 → full
     } else if (reveal_a && audio_volume > 0.0 && g_vto.mpv) {
         // reveal_a: only B is in the overlay → fade B IN (scene-A's fade-OUT is the backend's lp-audio job).
         char vb[24];
