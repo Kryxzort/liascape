@@ -66,6 +66,7 @@ static struct uniform_def uniforms[MAX_UNIFORMS];
 static int n_uniforms = 0;
 static double duration_s = 0.6;
 static char *vert_path = NULL, *frag_path = NULL, *on_finish = NULL, *mpv_unpause = NULL;
+static bool list_outputs = false;   // --list-outputs: print the wl_outputs as JSON and exit (backend monitor fallback)
 static char *from_af = NULL, *to_af = NULL; // loudnorm filter for the overlay's A/B audio (normalization)
 static double from_speed = 1.0, to_speed = 1.0; // per-side playback speed (matches mpvpaper's setting)
 static int from_loop = 1, to_loop = 1;          // per-side DESKTOP loop semantic (mpvpaper's loop-file):
@@ -103,6 +104,8 @@ struct out_info {                 // a discovered wl_output + its connector name
     struct wl_output *output;
     char name[64];
     bool named;
+    int32_t x, y;                 // layout origin (geometry event)
+    int32_t w, h, refresh_mhz;    // current mode (--list-outputs reports these)
 };
 static struct out_info wl_outs[MAX_OUTPUTS];
 static int n_wl_outs = 0;
@@ -974,10 +977,15 @@ static void output_name(void *data, struct wl_output *o, const char *name) {
 }
 static void output_geometry(void *d, struct wl_output *o, int32_t x, int32_t y,
     int32_t pw, int32_t ph, int32_t sp, const char *m, const char *md, int32_t tr) {
-    (void)d;(void)o;(void)x;(void)y;(void)pw;(void)ph;(void)sp;(void)m;(void)md;(void)tr;
+    (void)o;(void)pw;(void)ph;(void)sp;(void)m;(void)md;(void)tr;
+    struct out_info *oi = d; oi->x = x; oi->y = y;
 }
 static void output_mode(void *d, struct wl_output *o, uint32_t f, int32_t w, int32_t h, int32_t r)
-{ (void)d;(void)o;(void)f;(void)w;(void)h;(void)r; }
+{
+    (void)o;
+    if (!(f & WL_OUTPUT_MODE_CURRENT)) return;
+    struct out_info *oi = d; oi->w = w; oi->h = h; oi->refresh_mhz = r;
+}
 static void output_done(void *d, struct wl_output *o) { (void)d;(void)o; }
 static void output_scale(void *d, struct wl_output *o, int32_t s) { (void)d;(void)o;(void)s; }
 static void output_description(void *d, struct wl_output *o, const char *desc)
@@ -1017,6 +1025,7 @@ static void parse_args(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         char *a = argv[i];
         if (!strcmp(a, "--duration-ms")) duration_s = atof(argv[++i]) / 1000.0;
+        else if (!strcmp(a, "--list-outputs")) list_outputs = true;
         else if (!strcmp(a, "--vert")) vert_path = argv[++i];
         else if (!strcmp(a, "--frag")) frag_path = argv[++i];
         else if (!strcmp(a, "--on-finish")) on_finish = argv[++i];
@@ -1072,9 +1081,35 @@ static void parse_args(int argc, char **argv) {
     }
 }
 
+// --list-outputs: enumerate the compositor's outputs over plain wl_output (v4 name + current mode
+// + geometry) and print them hyprctl-shaped. This is the backend's compositor-agnostic monitor
+// source — it needs only WAYLAND_DISPLAY, unlike hyprctl (HYPRLAND_INSTANCE_SIGNATURE) / swaymsg /
+// xrandr (DISPLAY+Xauthority), all of which are absent or wrong under a systemd user unit / boot
+// daemon. A detection miss there silently disabled every transition (TryStart: 0 monitors).
+static int do_list_outputs(void) {
+    display = wl_display_connect(NULL);
+    if (!display) { fprintf(stderr, "lp-transition: no Wayland display\n"); return 1; }
+    struct wl_registry *reg = wl_display_get_registry(display);
+    wl_registry_add_listener(reg, &reg_listener, NULL);
+    wl_display_roundtrip(display);   // globals
+    wl_display_roundtrip(display);   // output name/geometry/mode events
+    printf("[");
+    int n = 0;
+    for (int i = 0; i < n_wl_outs; i++) {
+        struct out_info *oi = &wl_outs[i];
+        if (!oi->named || oi->w <= 0 || oi->h <= 0) continue;   // unnamed (wl_output < v4) or no current mode
+        printf("%s{\"name\":\"%s\",\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,\"refreshRate\":%.3f}",
+               n++ ? "," : "", oi->name, oi->x, oi->y, oi->w, oi->h, oi->refresh_mhz / 1000.0);
+    }
+    printf("]\n");
+    wl_display_disconnect(display);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     proc_t0 = now_s();
     parse_args(argc, argv);
+    if (list_outputs) return do_list_outputs();
     if (!vert_path || !frag_path || !n_out_cfgs) {
         fprintf(stderr, "lp-transition: need --vert --frag and at least one --output\n");
         return 2;

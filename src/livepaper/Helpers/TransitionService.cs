@@ -146,17 +146,17 @@ public static class TransitionService
         {
             if (!cfg.Enabled || string.IsNullOrEmpty(fromPath)) return false;
             var dir = ResolveDir(); var bin = ResolveBinary();
-            if (dir == null || bin == null) return false;
+            if (dir == null || bin == null) { TransLog($"transition SKIPPED: assets dir={(dir ?? "MISSING")} renderer={(bin ?? "MISSING")}"); return false; }
             // Kill any prior overlay before starting a new one — a transition the user PAUSED is frozen
             // and never tears itself down, and rapid switches could otherwise stack overlays.
             foreach (var p in Process.GetProcessesByName("lp-transition"))
                 using (p) { try { p.Kill(true); } catch { } }
             var effect = PickEffect(cfg);
-            if (effect == null) return false;
+            if (effect == null) { TransLog("transition SKIPPED: no enabled effect resolves from the manifest"); return false; }
             int durationMs = PickDuration(cfg);
 
             var monitors = MonitorDetector.DetectAsync().GetAwaiter().GetResult();
-            if (monitors.Count == 0) return false;
+            if (monitors.Count == 0) { TransLog("transition SKIPPED: MonitorDetector found 0 outputs (hyprctl/swaymsg/wlr-randr/lp-transition --list-outputs/xrandr all failed)"); return false; }
 
             // per-transition scratch dir (cleaned up after the run)
             string work = Path.Combine(RuntimeDir(), "transition", DateTime.UtcNow.Ticks.ToString());
@@ -328,7 +328,7 @@ public static class TransitionService
                 args.Add("--height"); args.Add(h.ToString());
                 outputs++;
             }
-            if (outputs == 0) { TryDeleteDir(work); return false; }
+            if (outputs == 0) { TransLog("transition SKIPPED: frame capture/scale failed for every output"); TryDeleteDir(work); return false; }
             TransLog($"scaled {outputs} output(s); total capture {swCap.ElapsedMilliseconds}ms");
 
             var psi = new ProcessStartInfo(bin) { UseShellExecute = false };
@@ -573,7 +573,7 @@ public static class TransitionService
             if (cand != null && File.Exists(Path.Combine(cand, "manifest.json"))) { _dir = cand; return cand; }
         _dir = ""; return null;
     }
-    private static string? ResolveBinary()
+    public static string? ResolveBinary()
     {
         if (_bin != null) return _bin.Length == 0 ? null : _bin;
         var env = Environment.GetEnvironmentVariable("LP_TRANSITION_BIN");
