@@ -25,7 +25,9 @@ public static class MonitorDetector
     public static async Task<List<MonitorInfo>> DetectAsync()
     {
         // hyprctl monitors -j: [{ name, refreshRate (Hz float), focused (bool) }]
-        var hypr = await TryAsync("hyprctl", "monitors -j", ParseMonitors);
+        // hyprctl needs HYPRLAND_INSTANCE_SIGNATURE, which a systemd user unit / boot daemon doesn't
+        // inherit → discover the running instance from the runtime dir instead of failing over.
+        var hypr = await TryAsync("hyprctl", "monitors -j", ParseMonitors, HyprlandEnv());
         if (hypr != null) return hypr;
 
         // swaymsg -t get_outputs: [{ name, focused, primary, current_mode:{ refresh (mHz) } }]
@@ -37,6 +39,18 @@ public static class MonitorDetector
         var wlr = await TryAsync("wlr-randr", "--json", ParseWlrRandr);
         if (wlr != null) return wlr;
 
+        // lp-transition --list-outputs: plain wl_output enumeration (name + current mode + layout origin),
+        // hyprctl-shaped JSON. Compositor-agnostic and needs only WAYLAND_DISPLAY — the safety net when
+        // every compositor CLI above is missing or its env (instance signature, DISPLAY/Xauthority) isn't
+        // there. An empty result here used to silently disable every transition (TryStart: 0 monitors) and
+        // the un-covered timed advance then storm-switched (see PlayerHelper.DoVideoEndWait).
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))
+            && TransitionService.ResolveBinary() is { } lpBin)
+        {
+            var lp = await TryAsync(lpBin, "--list-outputs", ParseMonitors);
+            if (lp != null) return lp;
+        }
+
         // xrandr: universal X11 + XWayland fallback (covers GNOME/KDE/XFCE/etc. on X11, and most Wayland
         // sessions via XWayland). Has a real "primary" flag. Text output, parsed below.
         var xr = await TryAsync("xrandr", "", ParseXrandr);
@@ -45,7 +59,29 @@ public static class MonitorDetector
         return [];
     }
 
-    private static async Task<List<MonitorInfo>?> TryAsync(string cmd, string args, Func<string, List<MonitorInfo>?> parse)
+    // Extra env for hyprctl when HYPRLAND_INSTANCE_SIGNATURE isn't inherited: the live instance is the
+    // newest $XDG_RUNTIME_DIR/hypr/<sig>/ that still has its control socket.
+    private static Dictionary<string, string>? HyprlandEnv()
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE"))) return null;
+        try
+        {
+            var rt = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+            if (string.IsNullOrEmpty(rt)) return null;
+            var hyprDir = System.IO.Path.Combine(rt, "hypr");
+            if (!System.IO.Directory.Exists(hyprDir)) return null;
+            var sig = System.IO.Directory.GetDirectories(hyprDir)
+                .Where(d => System.IO.File.Exists(System.IO.Path.Combine(d, ".socket.sock")))
+                .OrderByDescending(d => System.IO.Directory.GetLastWriteTimeUtc(d))
+                .Select(System.IO.Path.GetFileName)
+                .FirstOrDefault();
+            return sig == null ? null : new() { ["HYPRLAND_INSTANCE_SIGNATURE"] = sig };
+        }
+        catch { return null; }
+    }
+
+    private static async Task<List<MonitorInfo>?> TryAsync(string cmd, string args, Func<string, List<MonitorInfo>?> parse,
+        Dictionary<string, string>? env = null)
     {
         try
         {
@@ -55,6 +91,7 @@ public static class MonitorDetector
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
             };
+            if (env != null) foreach (var (k, v) in env) psi.Environment[k] = v;
             using var proc = Process.Start(psi);
             if (proc == null) return null;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));

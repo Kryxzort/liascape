@@ -1092,17 +1092,24 @@ public static class PlayerHelper
         // ends — so skip the transition and just instant-cut.
         bool transitionPauseB = false; // method-dependent: reveal=false (B live), frozen/full-live=true (B paused, renderer unpauses)
         bool mpvAliveForTransition = File.Exists(IpcSocket) && MpvpaperProcs().Length > 0;
-        if (!nextIsScene && !prevIsScene && IsPlaying && mpvAliveForTransition && !_restartPending)
+        if (!nextIsScene && !prevIsScene)
         {
             var tcfg = TransitionService.CurrentConfig();
             if (tcfg.Enabled)
             {
-                var fromPath = QueryCurrentPath();
-                // The overlay covers (frozen A / live decode) before we switch B underneath; whether B
-                // is loaded paused or live depends on the chosen method (TryStart resolves it + reports
-                // pauseB). reveal = B plays live underneath; frozen/full-live = B paused, renderer unpauses.
-                if (!string.IsNullOrEmpty(fromPath) && fromPath != path)
-                    TransitionService.TryStart(fromPath, false, path, false, tcfg, out transitionPauseB);
+                if (!IsPlaying || !mpvAliveForTransition || _restartPending)
+                    TransitionService.TransLog($"transition SKIPPED (V→V gate): playing={IsPlaying} mpvAlive={mpvAliveForTransition} restartPending={_restartPending} → instant cut");
+                else
+                {
+                    var fromPath = QueryCurrentPath();
+                    // The overlay covers (frozen A / live decode) before we switch B underneath; whether B
+                    // is loaded paused or live depends on the chosen method (TryStart resolves it + reports
+                    // pauseB). reveal = B plays live underneath; frozen/full-live = B paused, renderer unpauses.
+                    if (!string.IsNullOrEmpty(fromPath) && fromPath != path)
+                        TransitionService.TryStart(fromPath, false, path, false, tcfg, out transitionPauseB);
+                    else
+                        TransitionService.TransLog($"transition SKIPPED (V→V gate): fromPath={(fromPath == null ? "null" : System.IO.Path.GetFileName(fromPath))} same-as-target={fromPath == path} → instant cut");
+                }
             }
         }
 
@@ -1400,9 +1407,12 @@ public static class PlayerHelper
         // take effect on next cold start.
         bool loopFile = SettingsService.Load().Loop;
         // Per-file options applied atomically with the load (mpv ≥ 0.38: loadfile <url> <flags> <index> <opts>).
-        // Carries the effective volume/speed (+ mute) so the new file starts at them — no post-load reset race.
-        var fileOpts = $"volume={volume},speed={speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}";
-        if (_isMuted) fileOpts += ",mute=yes";
+        // Carries the effective volume/speed + mute so the new file starts at them — no post-load reset race.
+        // mute is set EXPLICITLY both ways: file-local options are restored to the pre-file value at the
+        // next load, so a file loaded with only `mute=yes` and then auto-UNmuted via set_property would
+        // hand the next file the launch-time global (`--mute=yes`) → B plays muted while _isMuted=false
+        // and auto-mute never corrects it ("mute state doesn't carry over").
+        var fileOpts = $"volume={volume},speed={speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)},mute={(_isMuted ? "yes" : "no")}";
         // Transition handoff: load B paused at frame 0 (hidden under the opaque overlay); the
         // lp-transition renderer unpauses it (--mpv-unpause) the instant it tears down → seamless.
         if (pauseAtStart) fileOpts += ",pause=yes";
@@ -1916,6 +1926,30 @@ public static class PlayerHelper
         }
         if (ct.IsCancellationRequested) return;
 
+        // The InProgress wait above only covers a switch that DID get an overlay. When the transition
+        // bails (no monitors detected, renderer missing, capture failure…) the switch is a bare
+        // loadfile and this task is re-armed within ~1ms of it — mpv's `path` still says A and its
+        // playtime-remaining is A's last few seconds (< lead) → instant re-fire → a storm of switches
+        // ~85ms apart until the loadfile settles (seen as 2–9 flashes per advance, landing on a random
+        // item, per-file volume/mute lost). Gate on mpv reporting the file PostSwitch handed us as
+        // current — that is the only reliable "B is loaded" signal, transition or not.
+        var expectPath = _lastSwitchTarget;
+        if (expectPath != null && !prevIsScene && !IsScenePath(expectPath))
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (!ct.IsCancellationRequested && sw.ElapsedMilliseconds < 8000)
+            {
+                var cur = TryQueryCurrentPath();
+                if (cur == expectPath) break;
+                if (cur == null && !File.Exists(IpcSocket)) break; // mpv gone → cold-launch path below handles it
+                try { await Task.Delay(50, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+            }
+            if (ct.IsCancellationRequested) return;
+            if (sw.ElapsedMilliseconds >= 8000)
+                TransitionService.TransLog($"DoVideoEndWait: mpv never reported {System.IO.Path.GetFileName(expectPath)} as current after 8s — sampling anyway");
+        }
+
         if (!nextIsScene && !prevIsScene)
         {
             // In advance-on-end mode the first DoVideoEndWait fires immediately after launch;
@@ -1953,7 +1987,7 @@ public static class PlayerHelper
                             // within a frame regardless of warmup variance. Firing LATE is the only failure
                             // (gate opens instantly; A holds its last frame briefly — never rewinds, it runs
                             // loop-file=no), hence generous slack on top of the measured cover latency.
-                            int coverMs = Math.Clamp((TransitionService.LastCoverMs > 0 ? TransitionService.LastCoverMs : 1300) + 1200, 1500, 6000);
+                            int coverMs = Math.Clamp((TransitionService.LastCoverMs > 0 ? TransitionService.LastCoverMs : 2500) + 1200, 1500, 6000); // first run: ~2.4s measured on a 2-output full-live warmup; early only costs invisible hold
                             // re-read the duration each iteration (not the arm-time capture) so a transition-
                             // duration change during the possibly-minutes-long wait applies live to this lead
                             int durNowMs = TransitionService.CurrentConfig().DurationMs;
@@ -2140,10 +2174,15 @@ public static class PlayerHelper
         Task.Run(() => DoVideoEndWait(next, cts.Token, prevIsVideo));
     }
 
+    // The file the most recent switch made current. DoVideoEndWait waits for mpv to report it as
+    // `path` before sampling playtime-remaining (else it samples the outgoing file → storm-switch).
+    private static volatile string? _lastSwitchTarget;
+
     // After switching to a new wallpaper: arm the next video-end pre-fetch (advance-on-end)
     // or reset the countdown (timed interval). Always saves state.
     private static void PostSwitch(string path)
     {
+        _lastSwitchTarget = path;
         if (_advanceOnVideoEnd && !IsScenePath(path))
         {
             var next = AdvanceToNext();
@@ -2786,6 +2825,7 @@ public static class PlayerHelper
 
     private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
     {
+        _lastSwitchTarget = file; // a cold launch makes `file` current too (see DoVideoEndWait's settle gate)
         var socketPath = IpcSocket;
         Directory.CreateDirectory(Path.GetDirectoryName(socketPath)!);
         if (File.Exists(socketPath)) File.Delete(socketPath);
