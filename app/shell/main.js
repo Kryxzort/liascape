@@ -15,30 +15,32 @@ const uiDir = path.join(repoRoot, "app", "ui", "dist");
 const portFile = path.join(os.homedir(), ".config", "livepaper", "serve.port");
 const VITE = "http://localhost:5173";
 
-// NVIDIA + native Wayland + Linux ≥6.12 crash-loops the GPU process (OzoneImageBacking/EGLImage) →
-// broken accel + dead window + systemic lag; also on Electron ≥42 the native-Wayland surface is
-// created via Vulkan, which the wayland ozone backend rejects (`wayland_surface_factory: not
-// compatible with Vulkan`) → the window renders but never gets a visible surface. Run under XWayland
-// where NVIDIA accel is stable and the surface is created normally. (override LP_OZONE=wayland to try
-// native again.) HARD `--ozone-platform` — the `-hint` variant is advisory and Electron ≥42 ignores
-// it on a Wayland session, silently falling back to the broken native path.
-app.commandLine.appendSwitch("ozone-platform", process.env.LP_OZONE || "x11");
+// ── GPU / ozone platform selection (the load-bearing bit on Linux) ─────────────────────────────
+// ozone platform follows the ACTUAL session: Wayland if WAYLAND_DISPLAY is set, else X11. Use the
+// HARD `--ozone-platform` — the `-hint` variant is advisory and Electron ≥42 ignores it (it would
+// silently fall back to native Wayland and break; that was the "window renders but never displays").
+const onWayland = !!process.env.WAYLAND_DISPLAY;
+app.commandLine.appendSwitch("ozone-platform", process.env.LP_OZONE || (onWayland ? "wayland" : "x11"));
 
-// (Opt-in only) ANGLE backend override. The default GL backend crash-loops the GPU process on some
-// NVIDIA stacks (eglCreateImage 0x3009 / OzoneImageBacking) which kills WebGL — but forcing Vulkan
-// can break window compositing (black/transparent flicker). So it stays OFF unless explicitly asked.
+// NVIDIA (proprietary/open) + Electron ≥42 crash-loops the GPU process on BOTH paths: native-Wayland
+// makes the surface via Vulkan, which the wayland ozone backend rejects (invisible window), and
+// XWayland segfaults the GPU process (OzoneImageBacking/EGLImage, exit 139). So on NVIDIA we disable
+// the hardware GPU and render via SwiftShader — stable window + instant WebGL, at the cost of a
+// CPU-composited UI (the wallpaper itself is mpvpaper/LWE, not the Electron GPU, so no wallpaper hit).
+// AMD/Intel keep hardware GL (mesa is stable) → native Wayland, full accel — no penalty.
+// Overrides: LP_SOFTGL=1 forces software; LP_HWGL=1 forces hardware even on NVIDIA.
+const isNvidia = fs.existsSync("/proc/driver/nvidia") || fs.existsSync("/dev/nvidia0");
+const softGL = process.env.LP_SOFTGL ? true : process.env.LP_HWGL ? false : isNvidia;
+if (softGL) {
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+}
+
+// (Opt-in only) ANGLE backend override — rarely needed now that NVIDIA defaults to software GL.
 const angle = process.env.LP_ANGLE;
 if (angle) {
   app.commandLine.appendSwitch("use-angle", angle);
   if (angle === "vulkan") app.commandLine.appendSwitch("enable-features", "Vulkan");
-}
-
-// (Opt-in) Software GL. On stacks where the hardware GPU process crash-loops (eglCreateImage),
-// hardware WebGL is unavailable/slow to warm up → transition previews lag. SwiftShader renders the
-// whole renderer on CPU: stable window + instant WebGL, at the cost of CPU-composited UI.
-if (process.env.LP_SOFTGL) {
-  app.commandLine.appendSwitch("disable-gpu");
-  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
 }
 
 let backend;
