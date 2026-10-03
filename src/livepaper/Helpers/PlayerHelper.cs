@@ -1216,11 +1216,23 @@ public static class PlayerHelper
                             if (!hasOld) { AudioCtl($"set {newCsv} {targetVol} {oldMuteI}"); }
                             else
                             {
-                                int steps = Math.Clamp(fadeMs / 120, 5, 12);
+                                // EQUAL-POWER crossfade, corrected for a CUBIC volume curve. BOTH volume
+                                // paths here cube the percent: mpv's `volume` (measured: 50% → -18.07 dB,
+                                // not -6) and PulseAudio software volume (lp-audio's pa_volume_t, whose
+                                // mapping to gain is the cube of the fraction). A linear percent ramp
+                                // therefore sags ~18 dB at the midpoint — measured as a ~22 dB hole lasting
+                                // ~3s in the MIDDLE of a transition. So: pick the wanted GAIN with cos/sin
+                                // (cos²+sin² = 1 → constant total power), then pre-distort the percent by
+                                // its CUBE ROOT so the cubic curve reproduces that gain exactly.
+                                // Finer steps too (was 5-12 over up to 8s = audible stepping).
+                                static int XfPct(int target, double gain) =>
+                                    (int)Math.Round(target * Math.Cbrt(Math.Clamp(gain, 0.0, 1.0)));
+                                int steps = Math.Clamp(fadeMs / 50, 10, 160);
                                 for (int s = 1; s <= steps && !cts.IsCancellationRequested; s++)
                                 {
-                                    double f = (double)s / steps;
-                                    int nv = (int)Math.Round(targetVol * f), ov = (int)Math.Round(targetVol * (1 - f));
+                                    double x = (double)s / steps;
+                                    int nv = XfPct(targetVol, Math.Sin(x * Math.PI / 2));   // incoming: 0 → target
+                                    int ov = XfPct(targetVol, Math.Cos(x * Math.PI / 2));   // outgoing: target → 0
                                     if (newScenePids.Count > 0) AudioCtl($"set {newCsv} {nv} {oldMuteI}");
                                     if (oldIsMpv) SendCommand("set_property", "volume", ov);
                                     else if (oldPids.Count > 0) AudioCtl($"set {oldCsv} {ov} {oldMuteI}");

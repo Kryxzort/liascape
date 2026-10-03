@@ -84,6 +84,19 @@ static double from_epoch = 0.0;                    // CLOCK_REALTIME when from_s
                                                    // advanced by elapsed-since → lands on mpvpaper-A's live pos
 static double from_duration = 0.0;                 // A's length → wrap the advanced start (looping videos)
 static bool to_paused = false;                     // hold B at frame 0 until first paint (lockstep handoff)
+// ---- crossfade gain -------------------------------------------------------------------------
+// mpv's `volume` property is CUBIC in percent (measured on this box: volume=100 → -24.08 dBFS,
+// volume=50 → -42.15 (= -18.07 dB, NOT -6), volume=25 → -60.18 (= -36.10)). So ramping `volume`
+// linearly in percent — what this used to do — collapses the crossfade: at the midpoint both sides
+// sit at 0.5^3 = -18 dB instead of -6, which measured as a ~22 dB sag lasting ~3 s in the MIDDLE of
+// every transition (the "it goes quiet around the switch"). `volume-gain` is exact dB (measured:
+// -6 → -6.02, -12 → -12.04), so `volume` holds the user's level and the crossfade ramps the GAIN.
+// cos/sin (not linear) keeps cos²+sin² = 1 → constant total power the whole way: no sag, no dip.
+#define XFADE_SILENT_DB (-96.0)   // mpv's volume-gain-min; gain 1.6e-5 = inaudible
+#define XFADE_HALF_PI (1.57079632679489661923)  // -std=c11 does not define M_PI
+static double xfade_db(double gain) { return gain <= 1e-5 ? XFADE_SILENT_DB : 20.0 * log10(gain); }
+
+static double g_last_av = -1.0;                    // last user level pushed to the decoders' `volume`
 static double audio_volume = 0.0;                  // effective wallpaper volume (0 = muted → no overlay audio);
 static char *ready_file = NULL;                    // touched after the first frame is presented
 
@@ -385,7 +398,14 @@ static bool vidsrc_init(struct vid_src *v, const char *path, double start, int w
     mpv_set_option_string(v->mpv, "msg-level", g_log ? "all=v" : "all=no"); // capture decode/hwdec logs when logging
     mpv_set_option_string(v->mpv, "config", "no");
     mpv_set_option_string(v->mpv, "ytdl", "no");
-    if (with_audio) mpv_set_option_string(v->mpv, "volume", "0"); // enabled but silent → crossfaded up at go
+    if (with_audio) {
+        // `volume` = the user's wallpaper level (same cubic curve mpvpaper runs with → identical
+        // loudness); `volume-gain` = the crossfade, starting silent and ramped in exact dB at go.
+        char vb[24]; snprintf(vb, sizeof vb, "%.1f", audio_volume);
+        mpv_set_option_string(v->mpv, "volume", vb);
+        snprintf(vb, sizeof vb, "%.1f", XFADE_SILENT_DB);
+        mpv_set_option_string(v->mpv, "volume-gain", vb);
+    }
     else            mpv_set_option_string(v->mpv, "audio", "no"); // desktop owns audio; this side is muted
     // loudness normalization for the overlay's own audio (same loudnorm mpvpaper-B gets at teardown), so
     // the crossfade DURING the effect is leveled too — not just after. Volume (above) rides on top.
@@ -869,28 +889,37 @@ static void render(struct surface *s) {
             next_stat = el + 0.2;
         }
     }
-    // audio crossfade A→B on the shared decoder pair. LINEAR-in-time (not the visual smoothstep p) so
-    // it's an EVEN fade that lands at exactly 50/50 at the midpoint (A=B=0.5·vol).
-    // A (OUTGOING) starts at FULL — it's continuing seamlessly from the live wallpaper (mpvpaper-A,
-    // which plays until ~go+40ms), so ramping it up from 0 (the old `fade*` factor) dipped the audio
-    // at the handoff = the "silent at the start of the transition" gap. Only B (INCOMING) ramps from
-    // silence, with a short 60ms fade-in to kill the volume-snap click as its decoder audio turns on.
-    if (audio_volume > 0.0 && g_vfrom.mpv && g_vto.mpv) {
+    // audio crossfade A→B on the shared decoder pair. EQUAL-POWER in exact dB via `volume-gain`
+    // (see xfade_db): A = cos(x·π/2), B = sin(x·π/2), so A²+B² = 1 and the total power is CONSTANT
+    // from end to end — no midpoint sag. LINEAR-in-time x (not the visual smoothstep p) so the two
+    // sides cross at the effect's exact midpoint. `volume` is left alone: it holds the user's level.
+    // A (OUTGOING) starts at FULL — it continues seamlessly from the live wallpaper (mpvpaper-A,
+    // which plays until ~go+40ms), so ramping it up from 0 would dip the audio at the handoff.
+    // B (INCOMING) starts at sin(0)=0 → silent, rising smoothly: no step, no click, no 60ms kludge.
+    if (audio_volume > 0.0 && (g_vfrom.mpv || g_vto.mpv)) {
         char vb[24];
         double x = el / duration_s; if (x < 0.0) x = 0.0; if (x > 1.0) x = 1.0; // linear progress
-        double fadeB = el / 0.060; if (fadeB > 1.0) fadeB = 1.0; if (fadeB < 0.0) fadeB = 0.0; // B fade-in
-        // Before go (el<0, align-a-end hold): overlay-A MUTED — mpvpaper-A underneath still carries A's
-        // audio; a full overlay-A here would DOUBLE it for the whole hold. At go, overlay-A jumps to full
-        // (matches mpvpaper-A's level → no dip) and takes over as mpvpaper-A switches to B ~40ms later.
-        double avol = el < 0.0 ? 0.0 : (1.0 - x) * audio_volume;
-        snprintf(vb, sizeof vb, "%.1f", avol);            mpv_set_property_string(g_vfrom.mpv, "volume", vb); // A full → 0
-        snprintf(vb, sizeof vb, "%.1f", fadeB * x * audio_volume); mpv_set_property_string(g_vto.mpv, "volume", vb); // B 0 → full
-    } else if (reveal_a && audio_volume > 0.0 && g_vto.mpv) {
-        // reveal_a: only B is in the overlay → fade B IN (scene-A's fade-OUT is the backend's lp-audio job).
-        char vb[24];
-        double x = el / duration_s; if (x < 0.0) x = 0.0; if (x > 1.0) x = 1.0;
-        double fade = el / 0.060; if (fade > 1.0) fade = 1.0;
-        snprintf(vb, sizeof vb, "%.1f", fade * x * audio_volume); mpv_set_property_string(g_vto.mpv, "volume", vb);
+        // Before go (el<0, align-a-end hold): overlay-A SILENT — mpvpaper-A underneath still carries
+        // A's audio; an audible overlay-A here would DOUBLE it for the whole hold. At go it jumps to
+        // full (matching mpvpaper-A's level → no dip) and takes over as mpvpaper-A switches to B.
+        bool pre_go = el < 0.0;
+        // `vol N` on the control socket changes the user level mid-effect → push it to both decoders.
+        if (audio_volume != g_last_av) {
+            snprintf(vb, sizeof vb, "%.1f", audio_volume);
+            if (g_vfrom.mpv) mpv_set_property_string(g_vfrom.mpv, "volume", vb);
+            if (g_vto.mpv)   mpv_set_property_string(g_vto.mpv,   "volume", vb);
+            g_last_av = audio_volume;
+        }
+        // reveal_a has ONLY B in the overlay (A is the live scene underneath) → B fades in on its own
+        // and the backend's lp-audio fades scene-A out on the matching cos leg.
+        if (g_vfrom.mpv) {
+            snprintf(vb, sizeof vb, "%.2f", pre_go ? XFADE_SILENT_DB : xfade_db(cos(x * XFADE_HALF_PI)));
+            mpv_set_property_string(g_vfrom.mpv, "volume-gain", vb);   // A: 0 dB → silent
+        }
+        if (g_vto.mpv) {
+            snprintf(vb, sizeof vb, "%.2f", pre_go ? XFADE_SILENT_DB : xfade_db(sin(x * XFADE_HALF_PI)));
+            mpv_set_property_string(g_vto.mpv, "volume-gain", vb);     // B: silent → 0 dB
+        }
     }
     glViewport(0, 0, s->w, s->h);
     // reveal-b: TRANSPARENT compositing (like reveal) — clear alpha 0, keep the alpha channel so the
