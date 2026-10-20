@@ -1,0 +1,4 @@
+# upstream checkout (linux-wallpaperengine @ next-v2 ddea3b4) + build tree + full-res frames
+lwe/
+build/
+out/
