@@ -149,8 +149,15 @@ public static class TransitionService
             if (dir == null || bin == null) { TransLog($"transition SKIPPED: assets dir={(dir ?? "MISSING")} renderer={(bin ?? "MISSING")}"); return false; }
             // Kill any prior overlay before starting a new one — a transition the user PAUSED is frozen
             // and never tears itself down, and rapid switches could otherwise stack overlays.
+            bool killedPrior = false;
             foreach (var p in Process.GetProcessesByName("lp-transition"))
-                using (p) { try { p.Kill(true); } catch { } }
+                using (p) { try { p.Kill(true); killedPrior = true; } catch { } }
+            // A prior overlay killed MID-HANDOFF (next pressed during an effect) leaves mpvpaper-B PAUSED —
+            // it was parked for that overlay's teardown to unpause — so the wallpaper sat silent + frozen
+            // until THIS overlay's E0 (measured ~4.5s), and this overlay's A-track couldn't converge on a
+            // paused A (gave up at 4s). Hand it back to live. Pre-handoff kill: mpvpaper is still playing A →
+            // no-op. A user pause during a transition goes to the overlay, never mpvpaper → not overridden.
+            if (killedPrior) { MpvSetPause(false); TransLog("killed in-flight overlay → unpaused mpvpaper (was parked for its teardown)"); }
             var effect = PickEffect(cfg);
             if (effect == null) { TransLog("transition SKIPPED: no enabled effect resolves from the manifest"); return false; }
             int durationMs = PickDuration(cfg);
@@ -341,8 +348,11 @@ public static class TransitionService
             // readyFile only once EVERY output has a live A frame; until then it paints transparent
             // and the live wallpaper shows through). Only then does the caller switch mpvpaper to B,
             // so B never flashes during the overlay's libmpv warm-up and the teardown positions match.
-            // Capped (~3.5s) so a renderer that never paints can't hang the switch.
-            for (int i = 0; i < 440 && !File.Exists(readyFile) && !proc.HasExited; i++)
+            // Capped (~6.5s) so a renderer that never paints can't hang the switch. The cap MUST exceed the
+            // renderer's worst case (4.0s A-track budget + its 300ms AUDIO_SETTLE + spawn): at the old 3.5s a
+            // slow warmup timed out first → mpvpaper-A was cut to B while the overlay was still silent and
+            // transparent → measured 446ms of digital silence on A (and B's paused frame exposed).
+            for (int i = 0; i < 810 && !File.Exists(readyFile) && !proc.HasExited; i++)
                 System.Threading.Thread.Sleep(8);
             if (File.Exists(readyFile)) LastCoverMs = (int)swSpawn.ElapsedMilliseconds; // feeds the timed-advance lead
             TransLog($"overlay covered after {swSpawn.ElapsedMilliseconds}ms (spawn→cover); switching B now (pauseB={pauseB})");
