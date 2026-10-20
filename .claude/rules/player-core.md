@@ -125,3 +125,32 @@ cubic (measured `volume=50` → −18.07 dB), so the player drives mpv via `volu
 clamps to; `units::Gains` sums `GainSlot`s (`user`/`override`/`normalize`/`mute`/
 `automute`/`xfade`/`anticlick`, lowercase in `gain.<slot>` paths and JSON) in dB.
 Crossfades use `units::equal_power` (cos/sin). See `docs/player/invariants.md` #2–#4.
+
+## Clocks and Animation
+
+`src/clock.rs` (spec §4.2 "Clock"): `Clock::now() -> Duration`. `MonoClock` wraps
+`Instant`; `SteppedClock` only advances on `step(&self, d)` (tests); `OutputClock::new(base:
+Rc<dyn Clock>)` adds `pause`/`resume` per output — paused time is excised, never just
+unfrozen-and-jumped. All three are `Cell`-based, single-threaded, not `Send`/`Sync`.
+
+`src/anim.rs` (spec §4.2 "Animator", §4.3 recipes): `Animator::tick(now)` moves every
+`Animation` (`target: PropPath`, `from`/`to`, `start`/`duration`, `curve: Curve`, `unit:
+AnimUnit`, `corr`) along `value = from + (to-from)*curve.eval(progress)`. Curves: `Linear`,
+`Smoothstep` (`x²(3-2x)`), `EqualPowerOut`/`EqualPowerIn` (reuse `units::equal_power`'s
+cos/sin), `Step`. `eval` always clamps `x` to `[0,1]` first.
+
+- **`AnimUnit::GainLinear`** means `from`/`to` are **linear** amplitudes; the value `tick`/
+  `value_at` actually emit is `lin_to_db` of the curve output — so a `GainLinear` anim from
+  `0`→`1` emits `SILENT_DB` at its own `start`, not mid-ramp.
+- **Nothing before `start`.** `tick` emits nothing for an animation whose `start` hasn't
+  arrived yet; `value_at(path, t)` returns `None` only when no animation on `path` has
+  started by `t`, otherwise the value that animation would emit at `t` (held at its final
+  value once finished, until cancelled or superseded).
+- **One final value, exactly once.** The tick where `now >= start + duration` emits the
+  exact final value, reports `(AnimId, corr)` via `finished()`, and never emits that
+  animation again.
+- **Last-added wins.** Two animations can target the same `PropPath` at once (a caller
+  `add()`-ed a replacement without `cancel_target`-ing first); `tick` emits at most one
+  value per target per tick — the highest-`AnimId` (most recently added) not-yet-finished
+  one. The shadowed older one just sits inert until cancelled, `cancel_target`-ed, or it
+  becomes the winner itself (the current winner finished and was retired).
