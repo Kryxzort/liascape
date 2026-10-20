@@ -15,6 +15,9 @@ echo "==> building native helpers (lp-transition + lp-audio)"
 make -C "$ROOT/src/native/lp-transition" >/dev/null
 make -C "$ROOT/src/native/lp-audio" >/dev/null
 
+echo "==> building lp-player"
+cargo build --release --manifest-path "$ROOT/src/player/Cargo.toml" >/dev/null
+
 systemctl --user daemon-reload
 systemctl --user enable --now livepaper-vite.service livepaper-watch.service
 

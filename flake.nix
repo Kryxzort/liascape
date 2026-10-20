@@ -88,6 +88,29 @@
         '';
       };
 
+      # 3c) lp-player (Rust): the "utopia player" compositor that will replace mpvpaper +
+      # lp-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
+      # .claude/rules/player-core.md. bindgenHook + pkg-config are wired now even though this
+      # task doesn't bindgen anything yet, so Task 10 (libmpv FFI) doesn't have to touch the
+      # flake again.
+      lp-player = pkgs.rustPlatform.buildRustPackage {
+        pname = "lp-player";
+        inherit version;
+        src = ./src/player;
+        cargoLock.lockFile = ./src/player/Cargo.lock;
+        nativeBuildInputs = [
+          pkgs.pkg-config
+          pkgs.rustPlatform.bindgenHook
+        ];
+        buildInputs = [
+          pkgs.mpv-unwrapped
+          pkgs.wayland
+          pkgs.libGL
+          pkgs.libxkbcommon
+          pkgs.pipewire
+        ];
+      };
+
       # 4) Electron shell sources (plain JS; electron comes from nixpkgs, not the bundled prebuilt
       # which can't dlopen its libs on NixOS). Keep the 42.x pin — older crash-loops the GPU on
       # NVIDIA + kernel ≥6.12 (see .claude/rules/distribution.md).
@@ -159,7 +182,7 @@
     in
     {
       packages.${system} = {
-        inherit ui backend lp-transition lp-audio livepaper;
+        inherit ui backend lp-transition lp-audio lp-player livepaper;
         default = livepaper;
       };
       apps.${system}.default = {
@@ -167,21 +190,29 @@
         program = "${livepaper}/bin/livepaper";
       };
 
-      # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make).
-      # `inputsFrom` the native + backend derivations gives this shell their EXACT build env —
-      # pkg-config path AND the stdenv cc wrapper's RPATH injection, so the make'd lp-transition /
-      # lp-audio actually find mpv/wayland/GL at runtime (a raw system gcc would not). Plus
-      # dotnet-sdk_10 + node + the runtime tools the dev backend shells out to. On NixOS the systemd
-      # dev units run `nix develop -c …`; run the whole thing with `nix develop -c bash scripts/dev.sh`.
+      # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make +
+      # `cargo build` for lp-player). `inputsFrom` the native + backend + lp-player derivations
+      # gives this shell their EXACT build env — pkg-config path AND the stdenv cc wrapper's RPATH
+      # injection, so the make'd lp-transition / lp-audio actually find mpv/wayland/GL at runtime
+      # (a raw system gcc would not), and `cargo`/`rustc` resolve the same mpv-unwrapped/wayland/
+      # libGL/libxkbcommon/pipewire lp-player links against. Plus dotnet-sdk_10 + node + the
+      # runtime tools the dev backend shells out to. On NixOS the systemd dev units run
+      # `nix develop -c …`; run the whole thing with `nix develop -c bash scripts/dev.sh`.
       devShells.${system}.default = pkgs.mkShell {
         inputsFrom = [
           backend
           lp-transition
           lp-audio
+          lp-player
         ];
         packages = [
           pkgs.dotnet-sdk_10
           pkgs.nodejs
+          pkgs.cargo
+          pkgs.rustc
+          pkgs.clippy
+          pkgs.rustfmt
+          pkgs.rust-analyzer
         ] ++ runtimeTools;
         DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
       };
