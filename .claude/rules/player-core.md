@@ -157,3 +157,63 @@ cos/sin), `Step`. `eval` always clamps `x` to `[0,1]` first.
   disagree about which animation is live on a target. (A prior design let the newer one
   merely *shadow* the older per-tick, which let the older one resurface once the newer
   finished — a reviewed-and-rejected bug, not the intended behaviour.)
+
+## Graph & properties
+
+`src/graph/mod.rs` + `src/graph/props.rs` (spec §4.2 "Blocks", §4.3 "Recipes", §9 "`state`
+query"): the player's single source of truth. Every output, layer, source and effect is a
+`Node` with typed properties (`graph::PropValue`); `Graph::snapshot()` is the `state`
+query's payload, `Graph::create`/`destroy`/`set`/`get` are what Task 12's command API
+calls into.
+
+**Id scheme.** Outputs are `out:<connector>` (e.g. `out:DP-1`), given explicitly — there's
+no sensible auto-id for a connector name. Creating an output **also creates**
+`lay:<connector>:main`, a `Layer` with `output` set and `content` left at its default-unset
+`""`; destroying the output destroys that layer too. Everything else auto-ids as `src<n>` /
+`lay<n>` / `fx<n>` (independent counters starting at 1) when no id is given, or uses the
+caller's id verbatim otherwise. The `Player` singleton (id `player`) exists from
+`Graph::new()` and is never created or destroyed through `create`/`destroy`.
+
+**Path splitting.** A `PropPath` (`crate::anim::PropPath`) is `"<node id>.<prop name>"`,
+split at the **first** `.` — node ids never contain `.` (though they may contain `:`), so
+`"src7.gain.xfade"` splits to node `src7`, prop `gain.xfade`. `gain.<slot>` is the one
+dynamic property name: valid only on `Source` nodes, `<slot>` parsed via
+`units::GainSlot::from_str`; every other name goes through the static per-`NodeKind`
+schema in `props.rs` (`schema_for`/`schema_for_kind`).
+
+**Aliases**, resolved by `Graph::resolve` and transparently by `set`/`get`:
+- `out:*` — every output, sorted by id.
+- `lay:*:main` — every main layer, sorted by id.
+- `cur:<connector>` / `cur:*` — the source currently shown by that output's (or every
+  output's, deduplicated) main layer: if `content` is a `Source`, that id; if `content` is
+  an `Effect`, its `to` (the incoming side, mid-transition); if `content` is unset or
+  dangling, no entry.
+- anything else is tried as a concrete node id.
+
+`set` on a multi-resolution path (e.g. `out:*.paused`) applies to **every** resolved node —
+validated across all of them before any is mutated, so a failing alias expansion changes
+nothing. `get` on one that resolves to more than one node is `ambiguous`: there's no single
+value to return.
+
+**Error codes** (`ApiError { code, message, hint }`, `Serialize` + `Display` +
+`std::error::Error`): `no_such_node`, `no_such_prop`, `bad_type`, `out_of_range`,
+`read_only`, `ambiguous`, `unsupported`, `io` (the last reserved for a future task's
+persistence/socket I/O; nothing in `graph/` produces it yet). `hint` always names either
+this doc section or the `lp-player ctl state`/`ctl ...` command to inspect. Order of checks
+on a `set`: `no_such_prop` (including `gain.*` on a non-`Source`, or an unparseable slot)
+beats `read_only` beats `bad_type`/`out_of_range` — a caller never learns their value's
+shape is wrong on a property they weren't allowed to touch in the first place.
+
+**`drain_changes()`** returns every `(PropPath, PropValue)` applied by `set` since the last
+call, in call order (one entry per resolved node for a multi-resolution `set`). Node
+creation is **never** a change — there's no live source yet for a runtime hook to forward
+it to. The runtime (a later task) drains this every tick and forwards each entry to
+whatever `PropHook` the target source has registered; nothing in `graph/` talks to a live
+source directly.
+
+**Snapshot shape.** `Graph::snapshot()` is one JSON object keyed by node id; each node's
+object has `kind` plus **every** schema property (defaults included — a property is never
+omitted for being unset, so "every node with every property" holds without special-casing).
+`Source` nodes additionally get `gain` (an object of only the gain slots that have been
+set, in dB — unset slots don't appear) and `gain_effective_db` (their dB sum via
+`units::Gains::effective_db`, clamped to `[-96, 12]`).
