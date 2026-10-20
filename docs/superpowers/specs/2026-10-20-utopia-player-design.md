@@ -402,7 +402,7 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
   - **reveal**: A holds its frame; B plays live.
   - **frozen**: A holds its frame; B holds its first frame (its clock paused) and starts playing when the effect ends.
 
-  "Hold frame" is a layer property: the compositor keeps sampling the same texture.
+  "Hold frame" = the side's source is paused (after its ≤ 30 ms anti-click ramp); its last texture stays on screen.
 
   **Audio follows the picture** (owner): a side whose frame is held is **silent**; a live side is heard.
 
