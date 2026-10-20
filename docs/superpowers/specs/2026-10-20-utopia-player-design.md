@@ -233,10 +233,21 @@ Windows; this is the Linux equivalent.
   current.
 
 ### 5.2 Frames from workers
-- Workers render into GPU buffers exported as dmabuf; the compositor imports them as EGLImages/textures. Synchronise
-  with explicit fences (sync_file) where available, else a CPU-side `glFinish` handshake. The builder chooses the
-  mechanism after the Phase 0 spike (§12) proves it on NVIDIA.
+- Workers render into GPU buffers exported as dmabuf; the compositor imports them as EGLImages/textures.
+- **Decided by the Phase 0 spike** (`docs/player/spikes/dmabuf.md`, NVIDIA 595.84):
+  - **dmabuf + `sync_file` fences in both directions** (worker → "frame ready", compositor → "buffer released").
+  - Measured: 124,238 frames with 0 stale/torn/out-of-order; 144.0 fps; worker 1.4–1.6 % CPU; 0.10 ms p50
+    transport latency.
+- **Latch policy: the compositor samples only the newest frame whose fence has *already signalled*.** It never
+  `eglWaitSync`s on a worker fence. Waiting queues the compositor behind the worker's GPU job, which measured
+  143.18 fps under a 3.7 ms/frame worker load and lets a hung worker stall every output. Latch-signalled measured
+  144.00 fps at the same load.
+- The fallback, when fences are unavailable, is the worker waiting on its *own* `sync_file` before handing the
+  frame over (1.3 % CPU). A `glFinish` handshake burns 64 % of a core under GPU load; CPU copy failed. Neither is
+  used.
 - A worker frame not ready in time → the compositor reuses the previous frame (never blocks, never shows black).
+- Crash isolation verified: a worker SIGKILLed with its fence unsignalled still had the fence signal, and the held
+  frame stayed intact.
 
 ### 5.3 Audio
 - Each source owns its audio output stream (libmpv instance; LWE core audio in the scene worker; CEF audio in the web
@@ -500,6 +511,21 @@ The project is several sub-projects, in this order. Each ships behind a backend 
   last resort and must be raised with the owner).
 - *Desktop-GL port of the effect catalogue* → mechanical; verify every effect renders in headless mode against today's
   output.
+- *A worker can starve the compositor's GPU time* (spike: one worker at ~90 % GPU halves the compositor to 120 Hz;
+  raising the compositor's EGL context priority had no effect) → Phase 2 needs a **worker GPU budget**: a
+  per-worker frame-rate cap tied to its output's refresh, plus GPU-time telemetry with throttling.
+- *NVIDIA marks LINEAR dmabufs external-only*, and the compositor's core-profile context lacks
+  `GL_OES_EGL_image_external` → Phase 4 must check CEF's export format/modifiers before planning the web worker.
+- *Not yet exercised by the spike*: a worker GPU hang, suspend/VT-switch memory purge, several workers/outputs at
+  once, DP-1. These go into Phase 2's tests.
+- *LWE core needs local patches* (spike: `docs/player/spikes/lwe-core.md`), all in `patches/lwe/`:
+  - CMake version detection without `.git`
+  - a stray `gmpxx.h` include, and a glm include dir
+  - **a host audio-output driver**: the core only offers linear 0–128 volume and a hard mute that also pauses
+    decoding, both incompatible with §5.3's dB gains and ramps; est. 150–200 lines
+- *LWE renderer failure handling*: the worker must treat a 1×1 project size after the first render as a failed
+  renderer build and never call `wp_render_frame` again, which otherwise segfaults. It must also pass the
+  assets dir explicitly, because Steam auto-detection fails when WE sits in a secondary Steam library.
 - *Scope creep in scene compatibility* → it's the last phase and corpus-driven; it never blocks switch-over beyond
   "no worse than today".
 
