@@ -200,6 +200,12 @@ slowness (2026-10-20), independent of `AutoMuteDelayMs`:
 - Even with `--latency-msec=10`, spawning a process per stream costs ~**780 ms** before first data.
 
 The Signal must therefore:
+- **meter each foreign stream individually, never the mix**. Today's per-stream `--monitor-stream` method exists
+  because metering the mix made auto-mute hear the wallpaper itself and oscillate (owner, 2026-10-20). Keep that
+  property.
+- recognise the player's own audio **by ownership, not by name**: the PipeWire node and client ids the player
+  created (its sources, workers and the bus). Today's `application.name = "mpv"` match is fragile, since any other
+  mpv the user runs is wrongly ignored.
 - run **in-process** on a **persistent** audio-server connection (libpulse or libpipewire), no process per stream
 - attach a peak meter (small fragments, e.g. 10 ms) the instant a stream-create event arrives
 - decide on its first fragments
