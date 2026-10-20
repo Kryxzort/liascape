@@ -1,6 +1,6 @@
 # lp-player — the "utopia player" — design
 
-Status: design, awaiting owner review · Date: 2026-10-20 · Repo: livepaper-pro (branch `transitions-reveal`)
+Status: **approved by owner 2026-10-20** (with TransitionMethod kept) — next: implementation plan · Date: 2026-10-20 · Repo: livepaper-pro (branch `transitions-reveal`)
 
 Items marked **(my call)** were decided by the designer, not the owner; the owner can override any of them.
 Everything else was stated or confirmed by the owner.
@@ -382,9 +382,24 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
   override ?? global); VideoScale fill/fit; VideoFps cap; HwDec; DisableCache; demuxer max/back bytes; loudness
   normalisation and target LUFS; AutoMute (+ delays, threshold, MPRIS-only); user mute vs auto-mute semantics.
 - **Transitions**: effect list, duration and duration range, shuffle/sequential, per-playlist override vs global,
-  enable/disable. **(my call)** The `TransitionMethod` setting (frozen/reveal/full-live) existed only to work around
-  scene constraints, so it is retired: everything is live. Unknown or old values map to live. Any visual-style
-  options are effect parameters.
+  enable/disable, and **`TransitionMethod` stays, with all three modes** (owner: some people prefer seeing the very
+  last frame of the outgoing wallpaper and the very first frame of the incoming one). In the block model a method is
+  just which sides of the transition **hold their frame**:
+  - **full-live**: neither side holds; both play through the effect.
+  - **reveal**: A holds its frame; B plays live.
+  - **frozen**: A holds its frame; B holds its first frame (its clock paused) and starts playing when the effect ends.
+
+  "Hold frame" is a layer property: the compositor keeps sampling the same texture. It is **not** a pause of the
+  source. So A's **audio keeps running and crossfades out equal-power** in every mode, and the stream-continuity
+  invariant holds. This also closes today's documented gap: reveal/frozen V→V currently hard-cut the audio. It works
+  identically for video, image, scene and web sources.
+
+  **(my call)** On a video-end advance:
+  - full-live ends the effect at A's end (as today)
+  - reveal and frozen *start* the effect at A's end, so A's held frame is genuinely its very last frame
+
+  By its nature, frozen on a video-end advance is silent for the effect duration: A has ended and B is held at its
+  start. That is the mode's meaning, not a dropout, and the detector's expected-level model knows it.
 - **Scenes**: AllowScenes, LweVolume, per-monitor fps, primary-output audio, mouse-reactive scenes, scene crash →
   skip/advance.
 - **Images** (incl. imported images, zoom-to-fill) as sources.
@@ -480,7 +495,9 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 3. Desktop OpenGL core profile (to host LWE core) instead of GLES.
 4. Videos/images in-process; scenes and web in isolated workers.
 5. Playlists, rotation and auto-mute move into the player (Phase 3), retiring the backend daemons.
-6. `TransitionMethod` (frozen/reveal/full-live) retired; everything live.
+6. ~~`TransitionMethod` retired~~ → **owner: keep all three modes.** Modelled as per-side "hold frame". A's audio
+   keeps crossfading in every mode. On video-end advances, reveal/frozen start at A's end, so A's held frame is its
+   true last frame.
 7. Switch-over bar as in §11, including the 8 h soak that retires the restart daemon.
 8. Build behind a `PlayerEngine` setting; legacy stays the default until switch-over.
 9. Command API = JSON lines over a unix socket.
