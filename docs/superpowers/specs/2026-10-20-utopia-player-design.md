@@ -304,9 +304,22 @@ patches/lwe/NNNN-*.patch    our changes to LWE, one topic per patch, each with a
 UPSTREAM.md                 per vendored repo: URL, pinned commit, patch list, how to rebase, last sync date
 ```
 
+- **Credit for others' work (owner: "cleanly crediting them")**:
+  - Every imported upstream change is stored in `git format-patch` form, keeping the original `From:` author, date
+    and message, plus trailers:
+    - `Upstream-PR: <url>` or `Upstream-Commit: <sha>`
+    - `Origin: upstream-PR | upstream-commit | ours`
+    - `Adapted-by: livepaper` when modified
+  - `CREDITS.md` at the repo root is **generated** from those headers and from `UPSTREAM.md` by
+    `scripts/gen-credits.py`, and a test fails when it is stale. It lists, per upstream project: each imported
+    change, its author (name + GitHub handle), link, a one-line summary, our patch file and the licence. A second
+    section lists techniques adopted from mpvpaper, with upstream file and commit.
+  - Upstream `LICENSE`/`AUTHORS` files stay untouched in `third_party/`.
+  - The patch headers are GPL-3.0 §5(a)'s "notice that you modified it, with a date".
+  - Code merged directly into our own commits carries `Co-authored-by:` trailers.
 - **LWE**: vendored, not forked. Catching up = bump the pin → re-apply patches (scripted) → fix conflicts → run the
   scene test corpus (§11). Unmerged upstream PRs worth having are imported as patches with
-  `Origin: upstream-PR #NNN`. Candidates seen 2026-10-20:
+  `Origin: upstream-PR` and credited in `CREDITS.md`. Candidates seen 2026-10-20:
   - #692 particle "None" on text objects
   - #625 puppet-warp skeletal animation
   - #677 Wayland outputs locked to half refresh
@@ -389,17 +402,29 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
   - **reveal**: A holds its frame; B plays live.
   - **frozen**: A holds its frame; B holds its first frame (its clock paused) and starts playing when the effect ends.
 
-  "Hold frame" is a layer property: the compositor keeps sampling the same texture. It is **not** a pause of the
-  source. So A's **audio keeps running and crossfades out equal-power** in every mode, and the stream-continuity
-  invariant holds. This also closes today's documented gap: reveal/frozen V→V currently hard-cut the audio. It works
-  identically for video, image, scene and web sources.
+  "Hold frame" is a layer property: the compositor keeps sampling the same texture.
 
-  **(my call)** On a video-end advance:
-  - full-live ends the effect at A's end (as today)
-  - reveal and frozen *start* the effect at A's end, so A's held frame is genuinely its very last frame
+  **Audio follows the picture** (owner): a side whose frame is held is **silent**; a live side is heard.
 
-  By its nature, frozen on a video-end advance is silent for the effect duration: A has ended and B is held at its
-  start. That is the mode's meaning, not a dropout, and the detector's expected-level model knows it.
+  | method | picture | audio |
+  |---|---|---|
+  | full-live | both play | equal-power crossfade A→B |
+  | reveal | A holds its frame, B live | A silent; B's audio **rises with the reveal** (sin curve over the effect) — **(my call)**; the alternative is B at full from the start, which is today's behaviour |
+  | frozen | A holds, B holds its first frame | **silent through the effect**; B's audio starts when B starts playing at the end |
+
+  - **On a video-end advance**, full-live *ends* the effect at A's end (as today). Reveal and frozen *start* the
+    effect at A's end, so A's held frame is genuinely its **last** frame and A's audio has already ended (owner:
+    "reveal ends on A's last frame, nothing to crossfade").
+  - **On a manual/early switch**, A's frame is held where it is and its audio stops at that instant.
+  - **Anti-click rule**: any audio start or stop at a hold boundary uses a ≤ 30 ms gain ramp. This is not a crossfade;
+    it is the minimum that avoids a click, and it keeps the stream-continuity invariant.
+  - The silence in frozen mode, and A's silence in reveal, are the modes' meaning, not dropouts. The detector's
+    expected model encodes them.
+  - Works identically for video, image, scene and web sources.
+  - No "reveal-capable effects only" gate: B is a live texture, so every effect works with every method (today's
+    gate existed only because B was revealed through transparency).
+  - **Today's app differs** and is tracked in `docs/TODO.md`: reveal/frozen video-end advances fire ~effect + warmup
+    *before* A's end (A frozen several seconds early); reveal hard-cuts A's audio and starts B at full.
 - **Scenes**: AllowScenes, LweVolume, per-monitor fps, primary-output audio, mouse-reactive scenes, scene crash →
   skip/advance.
 - **Images** (incl. imported images, zoom-to-fill) as sources.
@@ -495,9 +520,8 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 3. Desktop OpenGL core profile (to host LWE core) instead of GLES.
 4. Videos/images in-process; scenes and web in isolated workers.
 5. Playlists, rotation and auto-mute move into the player (Phase 3), retiring the backend daemons.
-6. ~~`TransitionMethod` retired~~ → **owner: keep all three modes.** Modelled as per-side "hold frame". A's audio
-   keeps crossfading in every mode. On video-end advances, reveal/frozen start at A's end, so A's held frame is its
-   true last frame.
+6. ~~`TransitionMethod` retired~~ → **owner: keep all three modes**, with audio following the picture (held = silent).
+   My calls within that: in reveal, B's audio rises with the reveal; ≤ 30 ms anti-click ramps at hold boundaries.
 7. Switch-over bar as in §11, including the 8 h soak that retires the restart daemon.
 8. Build behind a `PlayerEngine` setting; legacy stays the default until switch-over.
 9. Command API = JSON lines over a unix socket.
