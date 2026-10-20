@@ -1,0 +1,6 @@
+# build outputs + wayland-scanner glue + raw run logs
+producer
+consumer
+*-protocol.c
+*-protocol.h
+out/
