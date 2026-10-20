@@ -9,7 +9,7 @@ paths:
 `lp-transition` + per-monitor LWE + `lp-audio` with one process that owns every wallpaper
 type, on every monitor, with every transition. Design: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 This file covers only what exists in the crate so far; later tasks append their own
-sections below as they add modules (units, clock, graph, gfx, mpv, sources, recipes, api,
+sections below as they add modules (clock, graph, gfx, mpv, sources, recipes, api,
 wl, headless, audio, probe, supervise, runtime — see the design's §file map).
 
 **The core invariant (everything else follows from this):** never hand an audible or
@@ -24,9 +24,10 @@ happen regardless of timing.
   from `CARGO_PKG_VERSION`); every other invocation, including no args, is a stub that
   prints `"not implemented yet"` to stderr and exits 2. Later tasks replace the stub
   branch with `serve`/`ctl`.
-- `src/lib.rs` — module wiring only (`pub mod log;` for now). Add new `pub mod` lines here
-  as later tasks add files; don't put logic in this file.
+- `src/lib.rs` — module wiring only (`pub mod log;`, `pub mod units;` for now). Add new
+  `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
+- `src/units.rs` — audio units (below).
 
 **No `build.rs` yet.** The design's file map pairs `Cargo.toml`/`build.rs` together
 (bindgen over `mpv/client.h` + `mpv/render_gl.h`), but that belongs with Task 10 (libmpv
@@ -113,3 +114,14 @@ gets an independent instance instead of fighting over the one process-global `On
 Don't reach for `Logger` from outside `log.rs`; if you need a log in a test elsewhere in
 the crate, that's a sign `log::init` should be called once from that test binary's setup,
 not that `Logger` should become more public.
+
+## Units
+
+`src/units.rs` (spec §5.3): **gains are dB everywhere inside the player; convert only at
+the edge, with that edge's own curve.** mpv's `volume` and PulseAudio stream volumes are
+cubic (measured `volume=50` → −18.07 dB), so the player drives mpv via `volume-gain`
+(exact dB) and keeps `volume` at 100 — see `units::mpv_volume_gain` /
+`units::pulse_volume_from_db`. `units::SILENT_DB` (−96) is the one floor everything
+clamps to; `units::Gains` sums `GainSlot`s (`user`/`override`/`normalize`/`mute`/
+`automute`/`xfade`/`anticlick`, lowercase in `gain.<slot>` paths and JSON) in dB.
+Crossfades use `units::equal_power` (cos/sin). See `docs/player/invariants.md` #2–#4.
