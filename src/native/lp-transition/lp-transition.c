@@ -214,6 +214,7 @@ static bool ready_signaled = false; // ready-file touched (delayed past go so th
 static bool fx_paused = false;      // effect frozen (pause keybind during the transition)
 static double pause_started = 0.0, pause_accum = 0.0; // freeze the progress clock across pause windows
 static double cur_speed = 1.0;     // overlay-A's current playback speed (closed-loop position tracking)
+static double last_speed_step = -1.0; // now_s() of the last overlay-A speed change (AUDIO_SETTLE anchor)
 static double in_band_t = -1.0;    // when A entered the lag deadband at 1x (must hold before covering)
 // Aim A slightly AHEAD of live to cancel the controller's settling drift (A drifts ~this far behind
 // during the final 1x hold = actuator latency). Machine-dependent ~0.02–0.05; can be overridden at
@@ -221,6 +222,15 @@ static double in_band_t = -1.0;    // when A entered the lag deadband at 1x (mus
 static double lag_target = -0.03;
 #define LAG_BAND 0.05              // cover once |A − (live+target)| stays within this (s)
 #define BAND_HOLD 0.080            // …and holds for this long at 1x (lets the speed-change drain settle)
+// AUDIO handoff settle: every speed step reconfigures overlay-A's audio chain (scaletempo in/out) → a
+// 3-4ms discontinuity that reaches the sink ~one audio buffer later (measured 202-240ms after the step).
+// GO comes ~83ms after the last step, so at a manual/late-fire switch that hole landed ~130ms AFTER E0 —
+// when overlay-A is the ONLY source of A (mpvpaper-A already cut) → 3-4ms of digital silence on A. So the
+// AUDIO handoff (overlay-A audible + ready-file → backend cuts mpvpaper-A) waits until this long after the
+// last speed step; mpvpaper-A keeps carrying A audibly underneath the (already covering) overlay until
+// then, so the hole plays out masked. Aligned switches already hold 400ms+ in the A-END gate → unchanged.
+// (Holding BAND_HOLD itself this long instead made the tracker limit-cycle and blow its 4s budget.)
+#define AUDIO_SETTLE 0.300
 static long frame_count = 0;       // for fps reporting (LP_TRANSITION_FPS=1)
 // FULL_LIVE: ONE shared decoder pair (decode A/B once into the shared GL context; every output samples
 // these textures → halves the decode on multi-monitor + one audio stream). Created on the first output.
@@ -709,6 +719,7 @@ static void render(struct surface *s) {
                     if (want != cur_speed) {
                         char sp[8]; snprintf(sp, sizeof sp, "%.3f", want);
                         mpv_set_property_string(g_vfrom.mpv, "speed", sp);
+                        last_speed_step = now_s();
                         logt("track: lag=%+.3f → %.3fx", lag, want);
                         cur_speed = want;
                         if (want != from_speed) in_band_t = -1.0; // left the deadband
@@ -725,7 +736,7 @@ static void render(struct surface *s) {
                         return;
                     }
                 }
-                if (cur_speed != from_speed) { char sp[8]; snprintf(sp, sizeof sp, "%.3f", from_speed); mpv_set_property_string(g_vfrom.mpv, "speed", sp); cur_speed = from_speed; }
+                if (cur_speed != from_speed) { char sp[8]; snprintf(sp, sizeof sp, "%.3f", from_speed); mpv_set_property_string(g_vfrom.mpv, "speed", sp); cur_speed = from_speed; last_speed_step = now_s(); }
                 logt("track done: lag=%+.3f", lag);
             }
             go_time = start_time = now_s();
@@ -903,6 +914,9 @@ static void render(struct surface *s) {
         // A's audio; an audible overlay-A here would DOUBLE it for the whole hold. At go it jumps to
         // full (matching mpvpaper-A's level → no dip) and takes over as mpvpaper-A switches to B.
         bool pre_go = el < 0.0;
+        // overlay-A takes over A's audio only at the AUDIO handoff (ready-file → backend cuts mpvpaper-A),
+        // which waits AUDIO_SETTLE past the last speed step; until then mpvpaper-A is still the audible A.
+        bool a_silent = pre_go || (ready_file && !ready_signaled);
         // `vol N` on the control socket changes the user level mid-effect → push it to both decoders.
         if (audio_volume != g_last_av) {
             snprintf(vb, sizeof vb, "%.1f", audio_volume);
@@ -913,7 +927,7 @@ static void render(struct surface *s) {
         // reveal_a has ONLY B in the overlay (A is the live scene underneath) → B fades in on its own
         // and the backend's lp-audio fades scene-A out on the matching cos leg.
         if (g_vfrom.mpv) {
-            snprintf(vb, sizeof vb, "%.2f", pre_go ? XFADE_SILENT_DB : xfade_db(cos(x * XFADE_HALF_PI)));
+            snprintf(vb, sizeof vb, "%.2f", a_silent ? XFADE_SILENT_DB : xfade_db(cos(x * XFADE_HALF_PI)));
             mpv_set_property_string(g_vfrom.mpv, "volume-gain", vb);   // A: 0 dB → silent
         }
         if (g_vto.mpv) {
@@ -963,7 +977,8 @@ static void render(struct surface *s) {
     // screen (~40ms past go = a couple vblanks, surface-count-independent). Touching it AT go races the
     // compositor: B (frame 0) loads while the last TRANSPARENT warming frame is still displayed → B
     // flashes through for ~1 frame. The opaque overlay is already covering during this short delay.
-    if (ready_file && !ready_signaled && go_time >= 0.0 && el >= 0.040) {
+    bool audio_settled = last_speed_step < 0.0 || now_s() - last_speed_step >= AUDIO_SETTLE;
+    if (ready_file && !ready_signaled && go_time >= 0.0 && el >= 0.040 && audio_settled) {
         FILE *rf = fopen(ready_file, "w"); if (rf) fclose(rf);
         ready_signaled = true;
         logt("ready-file signaled (go+%.0fms) → caller switches B now", el * 1000.0);
