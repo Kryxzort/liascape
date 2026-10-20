@@ -208,7 +208,8 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `pub fn db_to_lin(db: f64) -> f64` (amplitude)
   - `pub fn lin_to_db(lin: f64) -> f64` (≤ 1e-5 → `SILENT_DB`)
   - `pub fn equal_power(x: f64) -> (f64, f64)` (out, in) linear
-  - `pub enum GainSlot { User, Override, Normalize, Mute, AutoMute, Xfade, AntiClick }`
+  - `pub enum GainSlot { User, Override, Normalize, Mute, AutoMute, Xfade, AntiClick }`; string forms (property
+    paths `gain.<slot>`, JSON) are the lowercase names `user, override, normalize, mute, automute, xfade, anticlick`
   - `pub struct Gains(BTreeMap<GainSlot, f64>)` with `set(slot, db)`, `effective_db() -> f64` (sum, clamped to `[SILENT_DB, 12.0]`)
   - `pub fn mpv_volume_gain(db: f64) -> f64` (clamp to [−96, 12])
   - `pub fn pulse_volume_from_db(db: f64) -> u32` (= `round(65536 · cbrt(db_to_lin(db)))`)
@@ -516,7 +517,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - request `{"id":N,"cmd":"<verb>","args":{…}}` → `{"id":N,"ok":true,"result":…}` | `{"id":N,"ok":false,"error":{"code","message","hint"}}`
   - event (subscribed connections) `{"event":"<kind>","corr":…,"t_mono_ms":…, …}`
   - verbs:
-    - `hello` → `{version, capabilities:["video","image","color","transition","headless"?]}`
+    - `hello` → `{version, pid /* compositor process */, capabilities:["video","image","color","transition","headless"?]}`
     - `create {kind,id?,props}`, `destroy {id}`, `set {path,value}`, `get {path}`
     - `animate {path,to,duration_ms,curve,from?,unit?}`
     - `transition {…TransitionReq}` → `{corr}`, `cancel {corr}`
@@ -627,7 +628,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
     - offset = median(observed − expected)
     - **drops**: runs of 10 ms bins with expected + offset > −55 and observed < expected + offset − 15
     - **micro_gaps**: runs ≥ 2 ms of 1 ms observed values < expected(10 ms bin) + offset − 35 where expected + offset > −45
-  - The probe runs automatically after every `transition.done` when debug mode is on (`serve --debug`, or `set out:*.debug true` — property on outputs) and emits `probe.dropout {corr, report}`.
+  - The probe runs automatically after every `transition.done` when debug mode is on (`serve --debug`, or `set player.debug true`) and emits `probe.dropout {corr, report}`.
 
 - [ ] **Step 1: Write failing unit tests** with synthetic envelopes:
   - `clean_crossfade`: observed = expected with a 30 ms lag → `lag_ms=30`, `fit_db < 0.5`, no drops
