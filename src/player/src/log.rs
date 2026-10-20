@@ -10,6 +10,13 @@
 //! `Logger` behind a `OnceLock`, safe to call from any thread. `Logger::init_with_limit`
 //! is the same machinery with an injectable rotation threshold, kept crate-private for
 //! tests so they don't fight over the single global instance.
+//!
+//! Disk I/O failures (write/flush, or rotation) are never silent: each is counted
+//! (`write_failures()`) and diagnosed with one `eprintln!` per failure *burst* (not per
+//! event), while the event itself still lands in the in-memory ring. A rotation failure
+//! specifically detaches the writer first — disk logging is suspended rather than risk
+//! appending further events into a file that was just renamed out from under the old
+//! handle. See `rotate`'s doc comment for why.
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -83,10 +90,19 @@ struct LoggerState {
     start: Instant,
     dir: PathBuf,
     level: Level,
-    writer: BufWriter<File>,
+    /// `None` means disk logging is currently suspended (a rotation failure left no file
+    /// it's safe to keep appending to) — `write_line` diagnoses this on every call rather
+    /// than touching a stale handle. See `rotate`.
+    writer: Option<BufWriter<File>>,
     current_size: u64,
     rotate_bytes: u64,
     ring: VecDeque<Value>,
+    /// Count of events that did not reach disk (write/flush failure, or disk logging
+    /// suspended after a rotation failure). Surfaced via `Logger::write_failures`.
+    write_failures: u64,
+    /// Whether we're mid-failure-burst — gates the `eprintln!` in `note_write_failure` to
+    /// once per burst instead of once per event.
+    write_failure_streak: bool,
 }
 
 /// One event log: a buffered JSONL writer behind a mutex, plus an in-memory ring of
@@ -106,7 +122,7 @@ impl Logger {
     ) -> io::Result<Logger> {
         fs::create_dir_all(dir)?;
         let path = dir.join(EVENTS_FILE);
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let file = open_append(&path)?;
         let current_size = file.metadata()?.len();
 
         Ok(Logger {
@@ -114,12 +130,22 @@ impl Logger {
                 start: Instant::now(),
                 dir: dir.to_path_buf(),
                 level,
-                writer: BufWriter::new(file),
+                writer: Some(BufWriter::new(file)),
                 current_size,
                 rotate_bytes,
                 ring: VecDeque::new(),
+                write_failures: 0,
+                write_failure_streak: false,
             }),
         })
+    }
+
+    /// Total events that failed to reach disk since this logger was created — write/flush
+    /// failures, plus any event logged while disk logging is suspended after a rotation
+    /// failure. These events are still visible via `recent()` (the in-memory ring is
+    /// unaffected); only the file on disk is missing them.
+    pub(crate) fn write_failures(&self) -> u64 {
+        self.state.lock().unwrap().write_failures
     }
 
     pub(crate) fn event(
@@ -213,25 +239,89 @@ fn filter_matches(entry: &Value, filter: &LogFilter) -> bool {
 }
 
 /// Writes one line, rotating first if it would push `events.jsonl` past the limit.
+/// Every failure path — a write/flush error, or a rotation failure — goes through
+/// `note_write_failure` instead of silently dropping the event from disk.
 fn write_line(state: &mut LoggerState, value: &Value) {
+    if state.writer.is_none() {
+        // A prior rotation failure already suspended disk logging; don't retry rotation
+        // or touch a nonexistent handle on every single event.
+        note_write_failure(state, "disk logging is suspended after an earlier failure");
+        return;
+    }
+
     let line = serde_json::to_string(value).unwrap_or_default();
     let bytes = line.len() as u64 + 1; // + newline
 
     if state.current_size + bytes > state.rotate_bytes
-        && let Err(err) = rotate(state)
+        && let Err(err) = rotate(state, &open_fresh_events_file)
     {
-        eprintln!("lp-player: log rotation failed: {err}");
+        note_write_failure(
+            state,
+            &format!("log rotation failed, disk logging suspended: {err}"),
+        );
+        return;
     }
 
-    if writeln!(state.writer, "{line}").is_ok() && state.writer.flush().is_ok() {
-        state.current_size += bytes;
+    // `rotate` only ever returns `Ok` with `writer` set to `Some`, and we returned early
+    // above if it was `None` and rotation wasn't attempted (or was attempted and failed,
+    // in which case we already returned) — so this is always `Some` here.
+    let writer = state
+        .writer
+        .as_mut()
+        .expect("writer is Some: checked above, or just set by a successful rotate()");
+
+    match writeln!(writer, "{line}").and_then(|()| writer.flush()) {
+        Ok(()) => {
+            state.current_size += bytes;
+            if state.write_failure_streak {
+                eprintln!(
+                    "lp-player: log writes to disk recovered after {} failure(s) so far",
+                    state.write_failures
+                );
+                state.write_failure_streak = false;
+            }
+        }
+        Err(err) => {
+            note_write_failure(state, &format!("log write failed: {err}"));
+        }
     }
 }
 
-/// Shifts `events.jsonl` → `events.1.jsonl` → `events.2.jsonl` (oldest dropped), then
-/// reopens a fresh `events.jsonl`. At most 3 files exist after this returns.
-fn rotate(state: &mut LoggerState) -> io::Result<()> {
-    state.writer.flush()?;
+/// Records one event that failed to reach disk: increments `write_failures` always, but
+/// only `eprintln!`s on the first failure of a burst (cleared again on the next success)
+/// so a sustained failure (disk full, suspended logging) doesn't spam stderr once per
+/// event.
+fn note_write_failure(state: &mut LoggerState, msg: &str) {
+    state.write_failures += 1;
+    if !state.write_failure_streak {
+        eprintln!(
+            "lp-player: {msg} (event kept in the in-memory ring only; {} disk write failure(s) so far)",
+            state.write_failures
+        );
+        state.write_failure_streak = true;
+    }
+}
+
+/// Shifts `events.jsonl` → `events.1.jsonl` → `events.2.jsonl` (oldest dropped), then opens
+/// a fresh `events.jsonl` via `open_fresh` (a seam so tests can force the reopen to fail
+/// without needing real disk/permission failures). At most 3 files exist after this
+/// returns successfully.
+///
+/// **Safety on failure:** `state.writer` is set to `None` — and `state.current_size` to
+/// `0` — *before* calling `open_fresh`, not after. If `open_fresh` fails (its own doc:
+/// renames already succeeded, e.g. a transient EMFILE/ENOSPC/permission blip right at the
+/// reopen), any previously-open handle now refers to whatever was just renamed to
+/// `events.1.jsonl` — continuing to write through it would silently corrupt that file and
+/// blow past `rotate_bytes` forever. Detaching first guarantees that can never happen: on
+/// error, `writer` stays `None` (disk logging suspended, diagnosed by the caller) rather
+/// than ever pointing at a stale, renamed-away file.
+fn rotate(
+    state: &mut LoggerState,
+    open_fresh: &dyn Fn(&Path) -> io::Result<File>,
+) -> io::Result<()> {
+    if let Some(writer) = state.writer.as_mut() {
+        writer.flush()?;
+    }
 
     let p0 = state.dir.join(EVENTS_FILE);
     let p1 = state.dir.join(ROTATED_1);
@@ -247,14 +337,28 @@ fn rotate(state: &mut LoggerState) -> io::Result<()> {
         fs::rename(&p0, &p1)?;
     }
 
-    let file = OpenOptions::new()
+    state.writer = None;
+    state.current_size = 0;
+
+    let file = open_fresh(&p0)?;
+    state.writer = Some(BufWriter::new(file));
+    Ok(())
+}
+
+/// Opens `events.jsonl` for appending (process startup: continue whatever was already
+/// there across a restart).
+fn open_append(path: &Path) -> io::Result<File> {
+    OpenOptions::new().create(true).append(true).open(path)
+}
+
+/// Opens a fresh (truncated) `events.jsonl` — used by `rotate` once the old file has
+/// already been renamed away, so there's nothing to preserve.
+fn open_fresh_events_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(&p0)?;
-    state.writer = BufWriter::new(file);
-    state.current_size = 0;
-    Ok(())
+        .open(path)
 }
 
 fn wall_time_rfc3339() -> String {
@@ -295,6 +399,13 @@ pub fn recent(filter: &LogFilter, limit: usize) -> Vec<Value> {
         .get()
         .map(|logger| logger.recent(filter, limit))
         .unwrap_or_default()
+}
+
+/// Total events that failed to reach disk in the global log (write/flush failures, or
+/// disk logging suspended after a rotation failure) — see the module doc. `0` if `init`
+/// hasn't run yet. Every failure is also diagnosed on stderr once per failure burst.
+pub fn write_failures() -> u64 {
+    GLOBAL.get().map(Logger::write_failures).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -452,6 +563,131 @@ mod tests {
     #[test]
     fn default_rotate_limit_is_20_mib() {
         assert_eq!(DEFAULT_ROTATE_BYTES, 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn write_failures_are_counted_not_silent() {
+        // /dev/full always fails writes with ENOSPC — a realistic, portable (Linux-only,
+        // which matches this whole project) stand-in for "disk full" without needing a
+        // real full disk. Construct the Logger directly (same-module private field
+        // access) so the writer can point at /dev/full instead of a real temp file.
+        let dev_full = Path::new("/dev/full");
+        let file = match OpenOptions::new().write(true).open(dev_full) {
+            Ok(f) => f,
+            Err(err) => {
+                eprintln!(
+                    "skipping write_failures_are_counted_not_silent: /dev/full unavailable ({err})"
+                );
+                return;
+            }
+        };
+
+        let logger = Logger {
+            state: Mutex::new(LoggerState {
+                start: Instant::now(),
+                dir: unique_dir("write-fail"),
+                level: Level::Trace,
+                writer: Some(BufWriter::new(file)),
+                current_size: 0,
+                rotate_bytes: DEFAULT_ROTATE_BYTES,
+                ring: VecDeque::new(),
+                write_failures: 0,
+                write_failure_streak: false,
+            }),
+        };
+
+        logger.event("test", Level::Info, "k", None, json!({}));
+        logger.event("test", Level::Info, "k", None, json!({}));
+
+        assert!(
+            logger.write_failures() >= 1,
+            "disk write failures must be counted, not silently dropped"
+        );
+
+        // current_size must stay truthful: never credited for bytes that didn't actually
+        // land on disk.
+        assert_eq!(
+            logger.state.lock().unwrap().current_size,
+            0,
+            "current_size must not advance past bytes that failed to write"
+        );
+
+        // The ring is unaffected by disk failures — both events are still visible.
+        let events = logger.recent(&LogFilter::default(), 10);
+        assert_eq!(
+            events.len(),
+            2,
+            "events stay in the in-memory ring even when the disk write fails"
+        );
+    }
+
+    #[test]
+    fn rotation_failure_never_writes_through_stale_fd() {
+        let dir = unique_dir("rotation-fail");
+        let logger =
+            Logger::init_with_limit(&dir, Level::Trace, DEFAULT_ROTATE_BYTES).expect("init");
+
+        logger.event("test", Level::Info, "before", None, json!({}));
+
+        // Force the *final* reopen in rotate() to fail, simulating a transient failure
+        // right after the renames already succeeded (e.g. EMFILE, a permission blip, a
+        // race with another process) — the scenario a real OpenOptions call can hit but
+        // that can't be forced portably through real filesystem permissions in a test.
+        {
+            let mut state = logger.state.lock().unwrap();
+            let err = rotate(&mut state, &|_p: &Path| {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "forced for test",
+                ))
+            })
+            .expect_err("forced rotation should fail");
+            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+
+            assert!(
+                state.writer.is_none(),
+                "writer must be detached on a rotation failure, never left pointing at the \
+                 just-renamed file"
+            );
+            assert_eq!(
+                state.current_size, 0,
+                "current_size must be reset alongside detaching the writer"
+            );
+        }
+
+        assert!(
+            dir.join("events.1.jsonl").exists(),
+            "rotation got far enough to rename events.jsonl away before the reopen failed"
+        );
+        assert!(
+            !dir.join("events.jsonl").exists(),
+            "no events.jsonl should exist until a rotation succeeds"
+        );
+
+        // Further events must not panic, must not silently vanish, and critically must
+        // never be appended into the renamed file through the stale handle.
+        logger.event("test", Level::Info, "after-failure", None, json!({}));
+
+        assert!(
+            logger.write_failures() >= 1,
+            "events logged while disk logging is suspended must be diagnosed, not silently \
+             dropped"
+        );
+
+        let events = logger.recent(&LogFilter::default(), 10);
+        assert_eq!(
+            events.len(),
+            2,
+            "both events stay visible via the in-memory ring"
+        );
+
+        let on_disk = fs::read_to_string(dir.join("events.1.jsonl")).unwrap();
+        assert!(
+            !on_disk.contains("after-failure"),
+            "must never write through a stale fd into the renamed file: {on_disk:?}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

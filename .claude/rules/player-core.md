@@ -91,7 +91,23 @@ what has or hasn't been rotated to disk — it survives rotation (rotation only 
 files) and does not survive a process restart (nothing on disk is structured for random
 access; re-reading history from `events*.jsonl` is a future task's problem, not `recent`'s).
 
-**Gotcha:** `init`/`event`/`recent`/`new_corr` are the only public API — `Logger` and
+**Disk I/O failures are never silent.** A write/flush failure (disk full, permissions) and
+a rotation failure are both counted in `write_failures` (surfaced via `log::write_failures()`
+/ `Logger::write_failures`) and diagnosed with one `eprintln!` — on the *first* failure of a
+burst, not once per event, with a matching "recovered" line when writes start succeeding
+again — so a sustained failure doesn't spam stderr. The event itself still lands in the
+in-memory ring either way; `recent()` is unaffected by disk trouble. A **rotation** failure
+is handled more conservatively than a plain write/flush failure: `rotate` detaches
+`state.writer` (sets it to `None`) and resets `current_size` to `0` *before* attempting to
+reopen the fresh `events.jsonl`, so if that reopen fails (e.g. a transient EMFILE/ENOSPC/
+permission blip right after the renames already succeeded), the old handle — which by then
+refers to whatever got renamed to `events.1.jsonl` — is never written through again. Disk
+logging stays suspended (every event after that is diagnosed/counted, never silently
+dropped, never appended into the wrong file) until the process restarts; `write_line`
+checks `writer.is_none()` up front so it doesn't retry rotation or touch a stale handle on
+every subsequent event.
+
+**Gotcha:** `init`/`event`/`recent`/`new_corr`/`write_failures` are the only public API — `Logger` and
 `Logger::init_with_limit` are `pub(crate)`, used only by `log.rs`'s own tests so each test
 gets an independent instance instead of fighting over the one process-global `OnceLock`.
 Don't reach for `Logger` from outside `log.rs`; if you need a log in a test elsewhere in
