@@ -6,5 +6,6 @@
 
 pub mod anim;
 pub mod clock;
+pub mod graph;
 pub mod log;
 pub mod units;
