@@ -11,6 +11,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **LICENSE** for the repo. There is none today. lp-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 
 ## Legacy player (current app) — small fixes
+- [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
+      - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
+        `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several
+        seconds early instead of on its **last** frame. They should fire at A's end.
+      - **Reveal** hard-cuts A's audio at the freeze (possible click) and starts B's audio at full. It should get a
+        ≤ 30 ms anti-click fade on A, and B rising with the reveal (or full from the start, if the owner prefers).
+      - **Frozen** is already silent through the effect, which is correct; it needs only the ≤ 30 ms anti-click ramps.
 - [ ] `nix flake update` → mpvpaper **1.9** (PR #132 `glFenceSync` leak fix; flake.lock still pins 1.8). Owner's
       `RestartIntervalSeconds` is **0**, so it's leaking now (1.66 GB RSS after 42 min on 1.8). After the bump, soak and
       check RSS; if flat, the restart daemon's default can go to 0.
