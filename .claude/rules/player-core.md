@@ -149,8 +149,11 @@ cos/sin), `Step`. `eval` always clamps `x` to `[0,1]` first.
 - **One final value, exactly once.** The tick where `now >= start + duration` emits the
   exact final value, reports `(AnimId, corr)` via `finished()`, and never emits that
   animation again.
-- **Last-added wins.** Two animations can target the same `PropPath` at once (a caller
-  `add()`-ed a replacement without `cancel_target`-ing first); `tick` emits at most one
-  value per target per tick — the highest-`AnimId` (most recently added) not-yet-finished
-  one. The shadowed older one just sits inert until cancelled, `cancel_target`-ed, or it
-  becomes the winner itself (the current winner finished and was retired).
+- **`add()` supersedes, permanently.** `Animator` holds at most one live animation per
+  `PropPath` — `add()`ing a second animation on a target **removes** the earlier one
+  outright (same as `cancel()`; retracting its completion from the `finished()` queue too,
+  if it was already sitting there undrained). There is no "shadowed" animation left to
+  hand control back to once the newer one finishes, so `tick` and `value_at` can never
+  disagree about which animation is live on a target. (A prior design let the newer one
+  merely *shadow* the older per-tick, which let the older one resurface once the newer
+  finished — a reviewed-and-rejected bug, not the intended behaviour.)

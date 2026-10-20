@@ -25,18 +25,18 @@
 //! the first time `now >= start + duration`, reports it via [`Animator::finished`], and
 //! never emits that animation again.
 //!
-//! **Last-added wins.** Two (or more) animations can target the same [`PropPath`]
-//! simultaneously if a caller `add()`s a second one without first `cancel_target`-ing the
-//! first (e.g. a new transition starting while the previous one's tail is still animating
-//! the same gain slot). `tick` emits **at most one value per target per tick** — the most
-//! recently added ([`AnimId`] is a strictly increasing counter, so "most recently added" ==
-//! "highest id") among that target's animations that haven't yet had their one final
-//! emission. An older, shadowed animation on the same target is simply not evaluated or
-//! advanced while shadowed; it still exists (and `value_at` still sees it, ranked behind
-//! the newer one) until it is explicitly cancelled, or `cancel_target` clears the whole
-//! target.
+//! **Last-added wins, permanently — `add()` supersedes.** At most one animation can ever
+//! be live on a given [`PropPath`] at a time: calling `add()` for a target that already has
+//! an animation **removes that earlier one outright** — exactly as if [`Animator::cancel`]
+//! had been called on it (it never emits again, and if it had already queued a completion
+//! in [`Animator::finished`] that hasn't been drained yet, that queued completion is
+//! retracted too). This is what makes "last-added wins" hold *forever*, not just per-tick:
+//! there is no shadowed older animation waiting to resurface once the newer one finishes,
+//! so `tick` and `value_at` can never disagree about which animation is live on a target.
+//! A finished animation's final value is held by `value_at` only until it is cancelled or a
+//! newer `add()` on the same path supersedes it (same thing, from the target's point of
+//! view).
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -153,8 +153,8 @@ impl Animation {
 }
 
 /// Identifies one [`Animation`] added to an [`Animator`]. Ids are minted in strictly
-/// increasing order, which `Animator` also uses as its "most recently added" ranking for
-/// the last-added-wins rule.
+/// increasing order (purely for log/debug traceability — `Animator` no longer needs to
+/// rank by id, since `add()` enforces at most one live animation per target).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnimId(pub u64);
 
@@ -162,15 +162,17 @@ struct Entry {
     id: AnimId,
     anim: Animation,
     /// Set once this entry has had its one final-value emission from `tick`. A `done`
-    /// entry is never selected as a target's winner again (freeing the target for the
-    /// next most-recently-added entry, if any), but it is kept — not removed — so
-    /// `value_at` can keep answering with its final value until it is cancelled or
-    /// superseded.
+    /// entry is kept — not removed — so `value_at` can keep answering with its final
+    /// value, until it is cancelled or a newer `add()` on the same target supersedes it.
     done: bool,
 }
 
 /// Owns every in-flight (and recently finished, until cancelled/superseded) animation.
 /// Single-threaded: driven from the render loop via `&mut self` calls.
+///
+/// **Invariant:** at most one `Entry` exists per distinct [`PropPath`] at any time — see
+/// [`Animator::add`]. `tick`/`value_at` rely on this to never have to choose between two
+/// live animations on the same target.
 #[derive(Default)]
 pub struct Animator {
     next_id: u64,
@@ -187,8 +189,18 @@ impl Animator {
         }
     }
 
-    /// Adds a new animation, returning its id.
+    /// Adds a new animation, returning its id. **Supersedes** any existing animation on
+    /// the same target: that earlier entry is removed exactly as [`cancel`](Self::cancel)
+    /// would remove it (it will never emit again), and if it already had a completion
+    /// sitting in the undrained `finished()` queue, that completion is retracted — a
+    /// superseded animation must never surface a stale `finished()` event for an id a
+    /// caller no longer has any reason to recognise.
     pub fn add(&mut self, a: Animation) -> AnimId {
+        if let Some(pos) = self.entries.iter().position(|e| e.anim.target == a.target) {
+            let superseded_id = self.entries.remove(pos).id;
+            self.finished_queue.retain(|(id, _)| *id != superseded_id);
+        }
+
         let id = AnimId(self.next_id);
         self.next_id += 1;
         self.entries.push(Entry {
@@ -204,40 +216,24 @@ impl Animator {
         self.entries.retain(|e| e.id != id);
     }
 
-    /// Cancels every animation currently targeting `path` (winner and any shadowed ones).
+    /// Cancels the animation currently targeting `path`, if any.
     pub fn cancel_target(&mut self, path: &PropPath) {
         self.entries.retain(|e| &e.anim.target != path);
     }
 
-    /// Advances to `now`, returning the values to apply this tick: at most one
-    /// `(target, value)` per distinct target, from that target's most-recently-added
-    /// not-yet-finished animation, and only once `now >= that animation's start`. An
-    /// animation whose `now >= start + duration` emits its exact final value this call,
-    /// then is marked finished (reported via `finished()`) and never emitted again.
+    /// Advances to `now`, returning the values to apply this tick: one `(target, value)`
+    /// per live (not yet finished) animation whose `start` has arrived. An animation whose
+    /// `now >= start + duration` emits its exact final value this call, then is marked
+    /// finished (reported via `finished()`) and never emitted again.
     pub fn tick(&mut self, now: Duration) -> Vec<(PropPath, f64)> {
-        // Pick, per target, the not-yet-finished entry with the highest id.
-        let mut winner_of: HashMap<PropPath, usize> = HashMap::new();
-        for (i, e) in self.entries.iter().enumerate() {
-            if e.done {
-                continue;
-            }
-            match winner_of.get(&e.anim.target) {
-                Some(&j) if self.entries[j].id.0 >= e.id.0 => {}
-                _ => {
-                    winner_of.insert(e.anim.target.clone(), i);
-                }
-            }
-        }
-
-        let mut out = Vec::with_capacity(winner_of.len());
+        let mut out = Vec::new();
         let mut newly_finished = Vec::new();
-        for &i in winner_of.values() {
-            let anim = &self.entries[i].anim;
-            if now < anim.start {
-                continue; // hasn't begun yet: emit nothing
+        for (i, e) in self.entries.iter().enumerate() {
+            if e.done || now < e.anim.start {
+                continue; // already finished, or hasn't begun yet: emit nothing
             }
-            out.push((anim.target.clone(), anim.emitted_value(now)));
-            if now >= anim.end() {
+            out.push((e.anim.target.clone(), e.anim.emitted_value(now)));
+            if now >= e.anim.end() {
                 newly_finished.push(i);
             }
         }
@@ -253,28 +249,24 @@ impl Animator {
     }
 
     /// Drains and returns every `(AnimId, Option<CorrId>)` that has completed (not
-    /// cancelled) since the last call.
+    /// cancelled, and not superseded by a later `add()` on the same target) since the
+    /// last call.
     pub fn finished(&mut self) -> Vec<(AnimId, Option<CorrId>)> {
         std::mem::take(&mut self.finished_queue)
     }
 
-    /// What `path` would be showing at time `t`, for the dropout probe: the value that
-    /// path's most-recently-added animation (by id) whose `start <= t` would emit at `t`
-    /// — finished or not (a finished animation's `end()` is in the past, so its `progress`
-    /// at `t` is clamped to `1.0`, i.e. its final value). Returns `None` if no animation
-    /// on `path` has started by `t` (including if `path` has no animations at all).
+    /// What `path` would be showing at time `t`, for the dropout probe: the value `path`'s
+    /// (at most one, by the `Animator` invariant) animation would emit at `t`, if its
+    /// `start <= t` — finished or not (a finished animation's `end()` is in the past, so
+    /// its `progress` at `t` is clamped to `1.0`, i.e. its final value). Returns `None` if
+    /// no animation on `path` has started by `t` (including if `path` has no animation at
+    /// all). Because `add()` always supersedes, this can never disagree with what the most
+    /// recent `tick()` emitted for `path`.
     pub fn value_at(&self, path: &PropPath, t: Duration) -> Option<f64> {
-        let mut best: Option<&Entry> = None;
-        for e in &self.entries {
-            if &e.anim.target != path || e.anim.start > t {
-                continue;
-            }
-            match best {
-                Some(b) if b.id.0 >= e.id.0 => {}
-                _ => best = Some(e),
-            }
-        }
-        best.map(|e| e.anim.emitted_value(t))
+        self.entries
+            .iter()
+            .find(|e| &e.anim.target == path && e.anim.start <= t)
+            .map(|e| e.anim.emitted_value(t))
     }
 }
 
@@ -400,8 +392,9 @@ mod tests {
 
     #[test]
     fn last_added_wins_without_cancel() {
-        // Two animations on the same target, neither cancelled: tick must emit only the
-        // most-recently-added one's value, at most once per target per tick.
+        // Two animations added on the same target without an explicit cancel_target: the
+        // second add() must immediately supersede (remove) the first, so only the newer
+        // one is ever live, tick-by-tick and at completion.
         let mut a = Animator::new();
         let path = PropPath("fx2.progress".to_string());
         a.add(anim("fx2.progress", 0.0, 1.0, 0, 1000, Curve::Linear));
@@ -422,6 +415,77 @@ mod tests {
             vec![(newer, None)],
             "only the winning (newer) animation finishes"
         );
+    }
+
+    #[test]
+    fn supersede_is_permanent_no_handback_to_shadowed_animation() {
+        // Regression for the critical review finding: a long-running animation A on a
+        // target, superseded by a short animation B on the same target (no explicit
+        // cancel_target). Once B finishes, A must never resurface on a later tick — there
+        // is no "shadowed" A left to hand control back to, because add() removed it
+        // outright. A must never emit, and must never appear in finished() (including: no
+        // stale completion surfacing later for an id the caller no longer has reason to
+        // recognise).
+        let mut a = Animator::new();
+        let path = PropPath("fx2.progress".to_string());
+        let old = a.add(anim("fx2.progress", 0.0, 1.0, 0, 10_000, Curve::Linear)); // long A
+        let newer = a.add(anim("fx2.progress", 0.0, 0.3, 0, 200, Curve::Linear)); // short B
+
+        // Drive past B's end.
+        let at_end = a.tick(Duration::from_millis(200));
+        assert_eq!(at_end, vec![(path.clone(), 0.3)], "B's exact final value");
+        let fin = a.finished();
+        assert_eq!(
+            fin,
+            vec![(newer, None)],
+            "only B finishes; A must not appear"
+        );
+
+        // Tick again, much later: the old buggy behaviour would fall through to A here
+        // (A hasn't "finished" by its own clock yet at 10s duration) and emit A's
+        // part-way value, re-litigating a target that had already settled. The fixed
+        // behaviour: nothing emits for this target ever again.
+        let later = a.tick(Duration::from_millis(5_000));
+        assert!(
+            later.is_empty(),
+            "A must not resurface once B (the superseding animation) has finished"
+        );
+        assert!(
+            a.finished().is_empty(),
+            "A must never surface its own finished() event"
+        );
+
+        let much_later = a.tick(Duration::from_millis(50_000));
+        assert!(much_later.is_empty());
+        assert!(a.finished().is_empty());
+
+        let _ = old; // kept only to document which id is the superseded one
+    }
+
+    #[test]
+    fn value_at_agrees_with_tick_after_supersede() {
+        // value_at must never disagree with what tick() actually emitted for a target —
+        // the exact failure mode the critical review caught (tick and value_at used
+        // different "which animation is live" logic before the fix).
+        let mut a = Animator::new();
+        let path = PropPath("fx2.progress".to_string());
+        a.add(anim("fx2.progress", 0.0, 1.0, 0, 10_000, Curve::Linear)); // long A
+        a.add(anim("fx2.progress", 0.0, 0.3, 0, 200, Curve::Linear)); // short B
+
+        let at_end = a.tick(Duration::from_millis(200));
+        assert_eq!(at_end, vec![(path.clone(), 0.3)]);
+
+        assert_eq!(
+            a.value_at(&path, Duration::from_millis(200)),
+            Some(0.3),
+            "value_at at the tick instant must match what tick just emitted"
+        );
+        assert_eq!(
+            a.value_at(&path, Duration::from_millis(5_000)),
+            Some(0.3),
+            "value_at well after must still hold B's final value, never fall back to A"
+        );
+        assert_eq!(a.value_at(&path, Duration::from_millis(50_000)), Some(0.3));
     }
 
     #[test]
@@ -462,13 +526,20 @@ mod tests {
         a.tick(Duration::from_millis(2000));
         assert_eq!(a.value_at(&path, Duration::from_millis(9000)), Some(1.0));
 
-        // A more recently added animation on the same path supersedes the old one for
-        // value_at too, even though the old one was never cancelled.
+        // A more recently added animation on the same path supersedes (removes) the old
+        // one outright, for value_at too, even though the old one was never explicitly
+        // cancelled by the caller.
         let newer = a.add(anim("fx2.progress", 0.0, 0.4, 1000, 1000, Curve::Linear));
         assert_eq!(a.value_at(&path, Duration::from_millis(1500)), Some(0.2));
 
-        // Cancelling the newer one falls back to the older one again.
+        // Cancelling the newer one does NOT fall back to the superseded older one — it
+        // was removed, permanently, the instant `newer` was added. No entry is left on
+        // this path at all.
         a.cancel(newer);
-        assert_eq!(a.value_at(&path, Duration::from_millis(1500)), Some(0.5));
+        assert_eq!(
+            a.value_at(&path, Duration::from_millis(1500)),
+            None,
+            "the superseded animation must not resurface after its superseder is cancelled"
+        );
     }
 }
