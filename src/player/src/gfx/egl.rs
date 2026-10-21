@@ -365,6 +365,129 @@ impl Drop for WindowTarget {
     }
 }
 
+/// Keeps a [`Gfx`]'s EGL display + context alive (a clone of its [`Shared`], exactly like
+/// [`WindowTarget`]) and lets a `Drop` impl — which never gets a `&Gfx` — make that
+/// context current and delete GL objects in it. Built by [`Gfx::keep_alive`].
+///
+/// Exists for Task 10's libmpv sources: `mpv_render_context_free` must run with the GL
+/// context it was created on current (lp-transition gotcha, spec §5.1), and the source's
+/// FBO/texture must be deleted in that context too — regardless of whether the owning
+/// `Gfx` was dropped first. Holding this makes the drop order irrelevant: the EGL context
+/// can't be torn down while a source still owns objects in it.
+pub struct GlKeepAlive {
+    shared: Rc<Shared>,
+    delete_textures: Option<unsafe extern "system" fn(i32, *const u32)>,
+    delete_framebuffers: Option<unsafe extern "system" fn(i32, *const u32)>,
+}
+
+/// While alive, the [`GlKeepAlive`]'s context is current on this thread; on drop, whatever
+/// was current before [`GlKeepAlive::make_current`] is restored (nothing changes at all
+/// in the common case where the context was already current).
+pub struct CurrentGuard<'a> {
+    keep: &'a GlKeepAlive,
+    /// `Some(prev)` only if `make_current` actually switched contexts; `prev` is the
+    /// previously-current `(display, context, draw, read)`, or `None` if nothing was.
+    #[allow(clippy::type_complexity)]
+    restore: Option<
+        Option<(
+            egl::Display,
+            Option<egl::Context>,
+            Option<egl::Surface>,
+            Option<egl::Surface>,
+        )>,
+    >,
+    ok: bool,
+}
+
+impl CurrentGuard<'_> {
+    /// Whether the context is actually current (false only if `eglMakeCurrent` failed —
+    /// callers then skip GL calls rather than issue them against the wrong context).
+    pub fn is_current(&self) -> bool {
+        self.ok
+    }
+}
+
+impl Drop for CurrentGuard<'_> {
+    fn drop(&mut self) {
+        let Some(prev) = self.restore.take() else {
+            return;
+        };
+        let egl = &self.keep.shared.egl;
+        let _ = match prev {
+            Some((d, c, draw, read)) => egl.make_current(d, draw, read, c),
+            None => egl.make_current(self.keep.shared.display, None, None, None),
+        };
+    }
+}
+
+impl GlKeepAlive {
+    /// Make this context current (surfaceless if it wasn't already current with a surface)
+    /// until the returned guard drops.
+    pub fn make_current(&self) -> CurrentGuard<'_> {
+        let egl = &self.shared.egl;
+        if egl.get_current_context() == Some(self.shared.context) {
+            return CurrentGuard {
+                keep: self,
+                restore: None,
+                ok: true,
+            };
+        }
+        let prev = egl.get_current_display().map(|d| {
+            (
+                d,
+                egl.get_current_context(),
+                egl.get_current_surface(egl::DRAW),
+                egl.get_current_surface(egl::READ),
+            )
+        });
+        let ok = egl
+            .make_current(self.shared.display, None, None, Some(self.shared.context))
+            .is_ok();
+        CurrentGuard {
+            keep: self,
+            restore: Some(prev),
+            ok,
+        }
+    }
+
+    /// `glDeleteTextures` on `tex`. Call only while a [`CurrentGuard`] is current.
+    pub fn delete_texture(&self, tex: &super::Tex) {
+        if let Some(f) = self.delete_textures {
+            let id = tex.id.0.get();
+            unsafe { f(1, &id) };
+        }
+    }
+
+    /// `glDeleteFramebuffers` on `fbo`. Call only while a [`CurrentGuard`] is current.
+    pub fn delete_fbo(&self, fbo: &super::Fbo) {
+        if let Some(f) = self.delete_framebuffers {
+            let id = fbo.id.0.get();
+            unsafe { f(1, &id) };
+        }
+    }
+}
+
+impl Gfx {
+    /// A [`GlKeepAlive`] for this `Gfx`'s context (see there).
+    pub fn keep_alive(&self) -> GlKeepAlive {
+        let egl = &self.shared.egl;
+        // SAFETY: both are core GL 1.1/3.0 entry points with exactly these signatures.
+        let load = |name: &str| {
+            egl.get_proc_address(name).map(|f| unsafe {
+                std::mem::transmute::<
+                    extern "system" fn(),
+                    unsafe extern "system" fn(i32, *const u32),
+                >(f)
+            })
+        };
+        GlKeepAlive {
+            shared: Rc::clone(&self.shared),
+            delete_textures: load("glDeleteTextures"),
+            delete_framebuffers: load("glDeleteFramebuffers"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------------------
