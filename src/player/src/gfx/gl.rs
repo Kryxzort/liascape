@@ -188,6 +188,17 @@ impl Gfx {
     /// function flips rows while copying into the PNG buffer so callers never have to
     /// think about GL's orientation when looking at the file on disk.
     pub fn write_png(&self, tex: &Tex, path: impl AsRef<Path>) -> io::Result<()> {
+        self.write_png_rows(tex, path, true)
+    }
+
+    /// [`Gfx::write_png`] for a raw **source** texture, whose row 0 already holds the
+    /// image's top (R25: `t = 0` = image top, the layout `gfx::compose` flips once) — so
+    /// no flip here; the PNG is upright too (`capture` of a source, Task 12).
+    pub fn write_png_source(&self, tex: &Tex, path: impl AsRef<Path>) -> io::Result<()> {
+        self.write_png_rows(tex, path, false)
+    }
+
+    fn write_png_rows(&self, tex: &Tex, path: impl AsRef<Path>, flip: bool) -> io::Result<()> {
         let (w, h) = (tex.w, tex.h);
         let mut pixels = vec![0u8; (w as usize) * (h as usize) * 4];
 
@@ -208,21 +219,24 @@ impl Gfx {
         }
 
         let stride = (w as usize) * 4;
-        let mut flipped = vec![0u8; pixels.len()];
-        for row in 0..h as usize {
-            let src = &pixels[row * stride..(row + 1) * stride];
-            let dst_row = h as usize - 1 - row;
-            flipped[dst_row * stride..(dst_row + 1) * stride].copy_from_slice(src);
-        }
+        let out = if flip {
+            let mut flipped = vec![0u8; pixels.len()];
+            for row in 0..h as usize {
+                let src = &pixels[row * stride..(row + 1) * stride];
+                let dst_row = h as usize - 1 - row;
+                flipped[dst_row * stride..(dst_row + 1) * stride].copy_from_slice(src);
+            }
+            flipped
+        } else {
+            pixels
+        };
 
         let file = File::create(path)?;
         let mut encoder = png::Encoder::new(BufWriter::new(file), w, h);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().map_err(io::Error::other)?;
-        writer
-            .write_image_data(&flipped)
-            .map_err(io::Error::other)?;
+        writer.write_image_data(&out).map_err(io::Error::other)?;
         Ok(())
     }
 }

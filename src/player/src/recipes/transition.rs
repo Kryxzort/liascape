@@ -14,7 +14,7 @@
 //! `.claude/rules/player-core.md` § Transition recipe for the rules (methods' audio,
 //! align, interrupt/cancel/failure, shared A) and `docs/player/invariants.md` #5/#6.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -715,6 +715,23 @@ impl Transitions {
     /// Drain the event outbox (R37).
     pub fn drain_events(&mut self) -> Vec<TransitionEvent> {
         std::mem::take(&mut self.outbox)
+    }
+
+    /// What the `srcs:` alias needs (R50): per requested output (`out:<c>`), the sources
+    /// each live transition holds — its B and its outgoing A's — plus every grave (released
+    /// sources about to be destroyed). The runtime hands this to
+    /// `Graph::set_transition_sources` after every start/cancel/tick.
+    pub fn held_sources(&self) -> (BTreeMap<String, BTreeSet<String>>, BTreeSet<String>) {
+        let mut by_output: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for t in &self.active {
+            for o in &t.outputs {
+                let e = by_output.entry(o.clone()).or_default();
+                e.insert(t.b.clone());
+                e.extend(t.sides.iter().filter_map(|s| s.a.clone()));
+            }
+        }
+        let graves = self.graves.iter().map(|g| g.id.clone()).collect();
+        (by_output, graves)
     }
 
     /// Every live transition.

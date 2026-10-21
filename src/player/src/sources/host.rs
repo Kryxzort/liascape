@@ -42,6 +42,9 @@ pub struct SourceHost {
     /// Nodes whose source failed to open synchronously: not retried until the node goes.
     failed: BTreeSet<String>,
     events: Vec<(String, SourceEvent)>,
+    /// Sources whose node is gone, mid two-phase teardown (R51): silent, no longer
+    /// hosted (not in `ids`/`texture`/`wake_fds`), dropped by `update` once ready.
+    dying: Vec<(String, Hosted, std::time::Instant)>,
 }
 
 impl SourceHost {
@@ -51,6 +54,7 @@ impl SourceHost {
             sources: BTreeMap::new(),
             failed: BTreeSet::new(),
             events: Vec::new(),
+            dying: Vec::new(),
         }
     }
 
@@ -71,14 +75,20 @@ impl SourceHost {
             .cloned()
             .collect();
         for id in gone {
-            self.sources.remove(&id);
-            log::event(
-                "host",
-                Level::Debug,
-                "source.drop",
-                None,
-                json!({ "id": id }),
-            );
+            if let Some(mut h) = self.sources.remove(&id) {
+                if h.src.begin_teardown() {
+                    drop(h);
+                    log::event(
+                        "host",
+                        Level::Debug,
+                        "source.drop",
+                        None,
+                        json!({ "id": id }),
+                    );
+                } else {
+                    self.dying.push((id, h, std::time::Instant::now()));
+                }
+            }
         }
         self.failed
             .retain(|id| graph.kind_of(id) == Some(NodeKind::Source));
@@ -217,6 +227,7 @@ impl SourceHost {
     /// `paused` as the source reports it) into the graph via `Graph::set_observed` — never
     /// a change, so nothing loops back. An unknown value (`None`) leaves the graph as is.
     pub fn update(&mut self, gfx: &Gfx, graph: &mut Graph) {
+        self.reap_dying(false);
         let mut new_events = Vec::new();
         for (id, h) in &mut self.sources {
             h.src.update(gfx);
@@ -249,6 +260,44 @@ impl SourceHost {
         self.events.extend(new_events);
     }
 
+    /// Drop every dying source whose teardown is ready (all of them with `force`).
+    fn reap_dying(&mut self, force: bool) {
+        let mut i = 0;
+        while i < self.dying.len() {
+            if force || self.dying[i].1.src.teardown_ready() {
+                let (id, h, at) = self.dying.remove(i);
+                drop(h);
+                log::event(
+                    "host",
+                    Level::Debug,
+                    "source.drop",
+                    None,
+                    json!({ "id": id, "teardown_ms": at.elapsed().as_secs_f64() * 1000.0 }),
+                );
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Sources still mid-teardown (probes).
+    pub fn dying(&self) -> usize {
+        self.dying.len()
+    }
+
+    /// Finish every pending teardown: poll for up to `max`, then drop the rest anyway
+    /// (shutdown).
+    pub fn finish_teardown(&mut self, max: std::time::Duration) {
+        let t = std::time::Instant::now();
+        while !self.dying.is_empty() && t.elapsed() < max {
+            self.reap_dying(false);
+            if !self.dying.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        self.reap_dying(true);
+    }
+
     /// Drain every event since the last call, as `(source node id, event)`, in order.
     pub fn events(&mut self) -> Vec<(String, SourceEvent)> {
         std::mem::take(&mut self.events)
@@ -262,6 +311,30 @@ impl SourceHost {
     /// The live source for node `id` (probes/tests).
     pub fn get(&self, id: &str) -> Option<&dyn Source> {
         self.sources.get(id).map(|h| h.src.as_ref())
+    }
+
+    /// The live libmpv source for node `id`, if it is one (probes, stepped mode).
+    pub fn mpv(&self, id: &str) -> Option<&MpvSource> {
+        self.sources.get(id).and_then(|h| h.src.as_mpv())
+    }
+
+    pub fn mpv_mut(&mut self, id: &str) -> Option<&mut MpvSource> {
+        self.sources.get_mut(id).and_then(|h| h.src.as_mpv_mut())
+    }
+
+    /// Whether node `id`'s source failed to open (not retried until the node goes).
+    pub fn open_failed(&self, id: &str) -> bool {
+        self.failed.contains(id)
+    }
+
+    /// `(node id, wake fd)` of every hosted source that has one — the runtime registers
+    /// these with its event loop (by dup, so a source closing its fd never leaves a stale
+    /// registration behind).
+    pub fn wake_fds_by_id(&self) -> Vec<(String, RawFd)> {
+        self.sources
+            .iter()
+            .filter_map(|(id, h)| h.wake.map(|fd| (id.clone(), fd)))
+            .collect()
     }
 
     /// Ids of every hosted source.

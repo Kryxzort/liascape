@@ -18,11 +18,12 @@
 pub mod color;
 pub mod host;
 pub mod mpv;
+pub mod reaper;
 pub mod snapshot;
 
 pub use color::ColorSource;
 pub use host::SourceHost;
-pub use mpv::MpvSource;
+pub use mpv::{MpvSource, StepStatus};
 pub use snapshot::SnapshotSource;
 
 use crate::gfx::{Gfx, Tex};
@@ -66,6 +67,23 @@ pub trait Source {
     fn read(&self, prop: &str) -> Option<PropValue>;
     /// Drain the events produced since the last call.
     fn poll_events(&mut self) -> Vec<SourceEvent>;
+    /// Start tearing this source down without blocking (R51) — called when its node is
+    /// gone. `true` = it can be dropped right away; `false` = keep it (silent) and poll
+    /// [`Source::teardown_ready`] until it can.
+    fn begin_teardown(&mut self) -> bool {
+        true
+    }
+    /// After `begin_teardown` returned `false`: can it be dropped now without blocking?
+    fn teardown_ready(&mut self) -> bool {
+        true
+    }
+    /// The libmpv source behind this, if it is one (probes, stepped mode).
+    fn as_mpv(&self) -> Option<&MpvSource> {
+        None
+    }
+    fn as_mpv_mut(&mut self) -> Option<&mut MpvSource> {
+        None
+    }
 }
 
 pub(crate) fn unsupported(msg: impl Into<String>) -> ApiError {

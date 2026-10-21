@@ -223,6 +223,18 @@ impl Catalogue {
         })
     }
 
+    /// A catalogue with no effects (no `transitions/` directory resolved — e.g. a bare
+    /// install): cuts still work, every [`Catalogue::program`] is an unknown-id error.
+    pub fn empty() -> Catalogue {
+        Catalogue {
+            dir: PathBuf::new(),
+            effects: Vec::new(),
+            vert_src: String::new(),
+            frag_template: String::new(),
+            programs: HashMap::new(),
+        }
+    }
+
     /// Every effect id from `manifest.json`, in manifest order.
     pub fn ids(&self) -> Vec<String> {
         self.effects.iter().map(|e| e.id.clone()).collect()

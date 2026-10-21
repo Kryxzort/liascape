@@ -1,0 +1,1130 @@
+//! The running player (spec §4.1/§4.2): one calloop loop that owns the graph, the
+//! animator, the clock, the live sources, the transition recipe, the compositor and the
+//! outputs, and serves the command API (`api/`). `lp-player serve` is [`serve`].
+//!
+//! **Loop sources.** The listening socket + one edge-triggered source per client
+//! (`api::server`), one level-triggered source per mpv wake eventfd (a `dup` of the
+//! source's own fd, so dropping a source never leaves a dangling registration), a ping for
+//! log events from other threads, a signalfd (SIGINT/SIGTERM → clean quit), and — real
+//! clock only — a timer at the max output refresh. Task 13 adds the Wayland fd.
+//!
+//! **Who runs what (R47).** The timer tick is the one place animation and the recipes
+//! advance: `Animator::tick` → `Graph::set` → `drain_changes` → `SourceHost::sync` →
+//! `SourceHost::update` → `Transitions::tick` (with every source event since the last
+//! tick) → compose + present every output — the same order as
+//! `tests/common/harness.rs`. An mpv wake only syncs + updates the sources (textures,
+//! events); ticking on wakes would self-sustain (every gain push's reply wakes the fd).
+//!
+//! **Stepped clock (R48).** No timer: `step {ms}` advances the `SteppedClock`, runs the
+//! animator + `sync`, seeks every video source to its own virtual media time (paused,
+//! `seek <t> absolute exact`), waits (≤ [`STEP_TIMEOUT`], without blocking the loop) until
+//! each one's frame is the texture, then runs the rest of the tick and replies — the same
+//! command script always produces the same captures.
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use calloop::generic::Generic;
+use calloop::timer::{TimeoutAction, Timer};
+use calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken};
+use serde_json::{Map, Value, json};
+
+use crate::anim::{AnimUnit, Animation, Animator, Curve, PropPath};
+use crate::api::server::{ClientFd, EventTap, Server};
+use crate::api::{handlers, proto};
+use crate::clock::{Clock, MonoClock, SteppedClock};
+use crate::gfx::{Catalogue, Composer, Gfx};
+use crate::graph::{ApiError, Graph, NodeKind, PropValue};
+use crate::headless::{Headless, OutputBackend, OutputChange};
+use crate::log::{self, Level};
+use crate::recipes::Transitions;
+use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
+use crate::units::{SILENT_DB, db_to_lin};
+
+/// The longest a `step` waits for every video source's frame.
+pub const STEP_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long `quit` waits for the mpv reaper to destroy the last cores.
+pub const REAPER_WAIT: Duration = Duration::from_secs(2);
+/// Anti-click ramp used by `stop`/`quit` before sources are destroyed (invariant #4).
+const STOP_RAMP: Duration = Duration::from_millis(30);
+/// Tick durations the `loop` probe keeps.
+const TICK_HISTORY: usize = 64;
+
+/// `--clock`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockMode {
+    Real,
+    Stepped,
+}
+
+/// What `lp-player serve` was asked to run.
+#[derive(Debug, Clone)]
+pub struct ServeOpts {
+    /// `(width, height, hz)` per virtual output (`--outputs`), headless only.
+    pub outputs: Vec<(u32, u32, u32)>,
+    pub clock: ClockMode,
+    /// mpv `ao` for every source (`--ao null` in tests — R26); `None` = mpv's default
+    /// for lp-player (`pipewire`).
+    pub ao: Option<String>,
+    pub socket: PathBuf,
+    pub state_dir: PathBuf,
+    pub log_level: Level,
+}
+
+enum ClockKind {
+    Real(MonoClock),
+    Stepped(SteppedClock),
+}
+
+impl ClockKind {
+    fn now(&self) -> Duration {
+        match self {
+            ClockKind::Real(c) => c.now(),
+            ClockKind::Stepped(c) => c.now(),
+        }
+    }
+}
+
+/// Per-video-source virtual media time in stepped mode.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalTime {
+    /// Media seconds the source should show.
+    pub t: f64,
+    /// Steps it has been part of (it advances only from its second step on).
+    pub steps: u64,
+    /// A `position`/`path` change since the last step: start over from here.
+    pub reset: Option<f64>,
+}
+
+/// One source a step waits on.
+#[derive(Debug)]
+struct StepWait {
+    id: String,
+    t: f64,
+    video: bool,
+    seeked: bool,
+    done: bool,
+}
+
+/// A `step` in progress (the reply is sent when every wait is done).
+struct PendingStep {
+    client: u64,
+    req: Value,
+    deadline: Instant,
+    waits: Vec<StepWait>,
+    timer: Option<RegistrationToken>,
+    /// Synchronous work so far (the waiting excluded) — the tick duration.
+    work: Duration,
+    /// Of that, the source sync (where dropped sources are torn down).
+    sync: Duration,
+}
+
+/// Counters for the `loop` probe.
+#[derive(Default)]
+pub(crate) struct LoopStats {
+    pub ticks: u64,
+    pub wakes: u64,
+    pub last_ticks: VecDeque<f64>,
+    pub tick_times: VecDeque<Instant>,
+    pub last_phases: Map<String, Value>,
+    /// Longest stretch of synchronous loop work (a tick, a step, the post-dispatch
+    /// source sync/update) since the last `probe loop {"reset": true}`.
+    pub max_busy_ms: f64,
+    pub iterations: u64,
+}
+
+impl LoopStats {
+    fn record(&mut self, d: Duration, phases: Map<String, Value>) {
+        self.ticks += 1;
+        self.last_ticks.push_back(d.as_secs_f64() * 1000.0);
+        if self.last_ticks.len() > TICK_HISTORY {
+            self.last_ticks.pop_front();
+        }
+        let now = Instant::now();
+        self.tick_times.push_back(now);
+        while self
+            .tick_times
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(1))
+        {
+            self.tick_times.pop_front();
+        }
+        self.last_phases = phases;
+        self.busy(d);
+    }
+
+    pub(crate) fn busy(&mut self, d: Duration) {
+        self.max_busy_ms = self.max_busy_ms.max(d.as_secs_f64() * 1000.0);
+    }
+}
+
+/// The player process's state. Fields are crate-visible for the verb handlers and probes.
+pub struct Runtime {
+    pub(crate) gfx: Gfx,
+    pub(crate) cat: Catalogue,
+    pub(crate) composer: Composer,
+    pub(crate) graph: Graph,
+    pub(crate) anim: Animator,
+    clock: ClockKind,
+    pub(crate) host: SourceHost,
+    pub(crate) tr: Transitions,
+    pub(crate) backend: Box<dyn OutputBackend>,
+    pub(crate) server: Server,
+    pub(crate) tap: Arc<EventTap>,
+    pub(crate) handle: LoopHandle<'static, Runtime>,
+    pub(crate) stats: LoopStats,
+    pub(crate) tick_period: Duration,
+    /// Every source event since the last tick (handed to `Transitions::tick`).
+    src_events: Vec<(String, SourceEvent)>,
+    /// Last event per source, for the `sources` probe.
+    pub(crate) last_event: BTreeMap<String, String>,
+    wake_regs: BTreeMap<String, (RawFd, RegistrationToken)>,
+    pub(crate) wake_pending: bool,
+    step: Option<PendingStep>,
+    step_queue: VecDeque<(u64, Value, Duration)>,
+    pub(crate) local: BTreeMap<String, LocalTime>,
+    /// `stop`/`quit`: sources to destroy once their anti-click ramp is over.
+    pending_destroy: Vec<(Duration, String)>,
+    /// `quit` requested: exit once the ramps are done (or this instant passes).
+    quit_at: Option<Instant>,
+    pub(crate) started: Instant,
+}
+
+fn p(s: &str) -> PropPath {
+    PropPath(s.to_string())
+}
+
+impl Runtime {
+    pub(crate) fn stepped(&self) -> bool {
+        matches!(self.clock, ClockKind::Stepped(_))
+    }
+
+    pub(crate) fn now(&self) -> Duration {
+        self.clock.now()
+    }
+
+    pub(crate) fn clock_name(&self) -> &'static str {
+        if self.stepped() { "stepped" } else { "real" }
+    }
+
+    // ------------------------------------------------------------------ one tick
+
+    /// One full iteration (real clock: the timer; stepped: the end of a `step`).
+    pub(crate) fn tick(&mut self) {
+        let t = Instant::now();
+        let now = self.now();
+        self.run_anims(now);
+        self.destroy_due(now);
+        let t_sync = Instant::now();
+        self.sync_sources();
+        let sync_ms = t_sync.elapsed();
+        self.finish_tick(t.elapsed(), sync_ms);
+    }
+
+    /// The second half of a tick: update sources, run the recipes on every source event
+    /// since the last tick, compose + present every output.
+    fn finish_tick(&mut self, before: Duration, sync: Duration) {
+        let t = Instant::now();
+        let now = self.now();
+        self.update_sources();
+        let t_tr = Instant::now();
+        let evs = std::mem::take(&mut self.src_events);
+        self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
+        self.tr.drain_events(); // already in the event log → subscribers via the tap
+        self.refresh_srcs();
+        let tr_d = t_tr.elapsed();
+        let t_r = Instant::now();
+        self.render();
+        let render_d = t_r.elapsed();
+        let total = before + t.elapsed();
+        let mut phases = Map::new();
+        let ms = |d: Duration| json!(d.as_secs_f64() * 1000.0);
+        phases.insert("sync_ms".into(), ms(sync));
+        phases.insert("transitions_ms".into(), ms(tr_d));
+        phases.insert("render_ms".into(), ms(render_d));
+        phases.insert("total_ms".into(), ms(total));
+        self.stats.record(total, phases);
+    }
+
+    fn run_anims(&mut self, now: Duration) {
+        for (path, v) in self.anim.tick(now) {
+            if let Err(e) = self.graph.set(&path, PropValue::F64(v)) {
+                // The node went away under the animation (destroyed, output unplugged).
+                self.anim.cancel_target(&path);
+                log::event(
+                    "runtime",
+                    Level::Debug,
+                    "anim.dropped",
+                    None,
+                    json!({ "path": path.0, "error": e.to_string() }),
+                );
+            }
+        }
+        for (_, corr) in self.anim.finished() {
+            if let Some(c) = corr
+                && c.0.starts_with("an-")
+            {
+                log::event("runtime", Level::Info, "anim.done", Some(c), json!({}));
+            }
+        }
+    }
+
+    /// Forward graph changes to the live sources (and keep the wake-fd registrations in
+    /// line with the hosted sources).
+    pub(crate) fn sync_sources(&mut self) {
+        let changes = self.graph.drain_changes();
+        if self.stepped() {
+            for (path, v) in &changes {
+                if let Some((id, prop)) = path.0.split_once('.')
+                    && let Some(lt) = self.local.get_mut(id)
+                {
+                    match (prop, v) {
+                        ("position", PropValue::F64(t)) => lt.reset = Some(*t),
+                        ("path", _) => lt.reset = Some(0.0),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.host.sync(&self.gfx, &self.graph, &changes);
+        self.sync_wake_regs();
+    }
+
+    fn sync_wake_regs(&mut self) {
+        let live: BTreeMap<String, RawFd> = self.host.wake_fds_by_id().into_iter().collect();
+        let gone: Vec<String> = self
+            .wake_regs
+            .iter()
+            .filter(|(id, (fd, _))| live.get(*id) != Some(fd))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in gone {
+            if let Some((_, tok)) = self.wake_regs.remove(&id) {
+                self.handle.remove(tok);
+            }
+        }
+        for (id, fd) in live {
+            if self.wake_regs.contains_key(&id) {
+                continue;
+            }
+            // A dup: the registration owns its own fd, so the source closing its eventfd
+            // can never leave a dangling (or reused-number) registration behind.
+            let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+            if dup < 0 {
+                continue;
+            }
+            let owned = unsafe { OwnedFd::from_raw_fd(dup) };
+            let src = Generic::new(owned, Interest::READ, Mode::Level);
+            match self.handle.insert_source(src, |_, _, rt: &mut Runtime| {
+                rt.wake_pending = true;
+                rt.stats.wakes += 1;
+                Ok(PostAction::Continue)
+            }) {
+                Ok(tok) => {
+                    self.wake_regs.insert(id, (fd, tok));
+                }
+                Err(e) => log::event(
+                    "runtime",
+                    Level::Warn,
+                    "loop.register_failed",
+                    None,
+                    json!({ "id": id, "error": e.to_string() }),
+                ),
+            }
+        }
+    }
+
+    /// Update every source (render pending frames, never blocks), log + collect events.
+    pub(crate) fn update_sources(&mut self) {
+        self.host.update(&self.gfx, &mut self.graph);
+        for (id, ev) in self.host.events() {
+            let (kind, level, fields) = match &ev {
+                SourceEvent::Ready => ("source.ready", Level::Info, json!({ "id": id })),
+                SourceEvent::Ended => ("source.ended", Level::Info, json!({ "id": id })),
+                SourceEvent::Position(t) => {
+                    ("source.position", Level::Debug, json!({ "id": id, "t": t }))
+                }
+                // SourceHost already logged these (`source.error`/`source.rejected`).
+                SourceEvent::Error { reason } => ("", Level::Warn, json!({ "reason": reason })),
+                SourceEvent::Rejected { prop, reason } => {
+                    ("", Level::Warn, json!({ "prop": prop, "reason": reason }))
+                }
+            };
+            if !kind.is_empty() {
+                log::event("source", level, kind, None, fields);
+            }
+            let name = match &ev {
+                SourceEvent::Ready => "ready".to_string(),
+                SourceEvent::Ended => "ended".to_string(),
+                SourceEvent::Position(t) => format!("position {t:.3}"),
+                SourceEvent::Error { reason } => format!("error: {reason}"),
+                SourceEvent::Rejected { prop, reason } => format!("rejected {prop}: {reason}"),
+            };
+            self.last_event.insert(id.clone(), name);
+            self.src_events.push((id, ev));
+        }
+        self.last_event
+            .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
+    }
+
+    /// Feed the transition recipe's held sources into the `srcs:` alias (R50).
+    pub(crate) fn refresh_srcs(&mut self) {
+        let (by_output, graves) = self.tr.held_sources();
+        self.graph.set_transition_sources(by_output, graves);
+    }
+
+    /// Compose + present every output.
+    fn render(&mut self) {
+        let host = &self.host;
+        let textures = |id: &str| host.texture(id);
+        for o in self.backend.outputs() {
+            let Some(fbo) = self.backend.target(&o.name) else {
+                continue;
+            };
+            let id = format!("out:{}", o.name);
+            if let Err(e) = self.composer.compose_output(
+                &self.gfx,
+                &self.graph,
+                &mut self.cat,
+                &id,
+                &textures,
+                fbo,
+            ) {
+                log::event(
+                    "compose",
+                    Level::Warn,
+                    "compose.failed",
+                    None,
+                    json!({ "output": id, "error": e }),
+                );
+            }
+        }
+        for o in self.backend.outputs() {
+            if let Err(e) = self.backend.present(&self.gfx, &o.name) {
+                log::event(
+                    "output",
+                    Level::Warn,
+                    "output.present_failed",
+                    None,
+                    json!({ "output": o.name, "error": e }),
+                );
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ outputs
+
+    /// Apply the backend's hotplug: graph `out:<name>` nodes (+ their main layer), the
+    /// new output showing what the first other output shows (`cur:` semantics), the timer
+    /// period following the max refresh. Removing an output never touches a transition
+    /// on the others (the recipe logs and skips a missing layer).
+    pub(crate) fn apply_output_changes(&mut self) {
+        for ch in self.backend.take_changes() {
+            match ch {
+                OutputChange::Added(info) => {
+                    let id = format!("out:{}", info.name);
+                    let current = self.current_wallpaper();
+                    let mut props = Map::new();
+                    props.insert("name".into(), json!(info.name));
+                    props.insert("width".into(), json!(info.width));
+                    props.insert("height".into(), json!(info.height));
+                    props.insert("refresh_hz".into(), json!(info.hz));
+                    if let Err(e) = self.graph.create(NodeKind::Output, Some(id.clone()), props) {
+                        log::event(
+                            "output",
+                            Level::Warn,
+                            "output.graph_error",
+                            None,
+                            json!({ "output": id, "error": e.to_string() }),
+                        );
+                        continue;
+                    }
+                    if let Some(cur) = &current {
+                        let _ = self.graph.set(
+                            &p(&format!("lay:{}:main.content", info.name)),
+                            PropValue::Str(cur.clone()),
+                        );
+                    }
+                    log::event(
+                        "output",
+                        Level::Info,
+                        "output.added",
+                        None,
+                        json!({ "output": id, "width": info.width, "height": info.height,
+                                "hz": info.hz, "content": current }),
+                    );
+                }
+                OutputChange::Removed(name) => {
+                    let id = format!("out:{name}");
+                    let _ = self.graph.destroy(&id);
+                    log::event(
+                        "output",
+                        Level::Info,
+                        "output.removed",
+                        None,
+                        json!({ "output": id }),
+                    );
+                }
+            }
+        }
+        self.refresh_srcs();
+        let max_hz = self
+            .backend
+            .outputs()
+            .iter()
+            .map(|o| o.hz)
+            .max()
+            .unwrap_or(60)
+            .max(1);
+        self.tick_period = Duration::from_secs_f64(1.0 / max_hz as f64);
+    }
+
+    /// What a newly added output shows: `cur:` of the first output that has one.
+    fn current_wallpaper(&self) -> Option<String> {
+        self.graph
+            .ids_of(NodeKind::Output)
+            .iter()
+            .filter_map(|o| o.strip_prefix("out:"))
+            .find_map(|c| self.graph.resolve(&format!("cur:{c}")).into_iter().next())
+    }
+
+    // ------------------------------------------------------------------ stop / quit
+
+    /// `stop`: every in-flight transition is dropped (`transition.cancelled {reason:
+    /// "stopped"}`), every layer emptied, every source ramped to silence over 30 ms
+    /// (invariant #4) and then destroyed. `instant` (stepped clock / quit): silence and
+    /// destroy now — virtual time won't move on by itself.
+    pub(crate) fn stop_all(&mut self, instant: bool) -> Vec<String> {
+        let now = self.now();
+        for st in self.tr.status() {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.cancelled",
+                Some(st.corr.clone()),
+                json!({ "reason": "stopped", "at_ms": now.as_secs_f64() * 1000.0 }),
+            );
+        }
+        self.tr = Transitions::new();
+        self.anim = Animator::new();
+        for l in self.graph.ids_of(NodeKind::Layer) {
+            let _ = self
+                .graph
+                .set(&p(&format!("{l}.content")), PropValue::Str(String::new()));
+        }
+        for fx in self.graph.ids_of(NodeKind::Effect) {
+            let _ = self.graph.destroy(&fx);
+        }
+        let ids = self.graph.ids_of(NodeKind::Source);
+        let corr = log::new_corr("stop");
+        for id in &ids {
+            let path = p(&format!("{id}.gain.anticlick"));
+            if instant {
+                let _ = self.graph.set(&path, PropValue::F64(SILENT_DB));
+            } else {
+                let cur = match self.graph.get(&path) {
+                    Ok(PropValue::F64(f)) => f,
+                    _ => 0.0,
+                };
+                self.anim.add(Animation {
+                    target: path,
+                    from: db_to_lin(cur),
+                    to: 0.0,
+                    start: now,
+                    duration: STOP_RAMP,
+                    curve: Curve::Linear,
+                    unit: AnimUnit::GainLinear,
+                    corr: Some(corr.clone()),
+                });
+            }
+            self.pending_destroy.push((now + STOP_RAMP, id.clone()));
+        }
+        self.refresh_srcs();
+        if instant {
+            self.sync_sources(); // the −96 reaches mpv before the source goes
+            let due: Vec<String> = self.pending_destroy.drain(..).map(|(_, id)| id).collect();
+            for id in due {
+                let _ = self.graph.destroy(&id);
+            }
+            self.sync_sources();
+        }
+        log::event(
+            "runtime",
+            Level::Info,
+            "player.stopped",
+            Some(corr),
+            json!({ "sources": ids }),
+        );
+        ids
+    }
+
+    fn destroy_due(&mut self, now: Duration) {
+        let (due, keep): (Vec<_>, Vec<_>) = self
+            .pending_destroy
+            .drain(..)
+            .partition(|(at, _)| *at <= now);
+        self.pending_destroy = keep;
+        for (_, id) in due {
+            let _ = self.graph.destroy(&id);
+        }
+    }
+
+    /// `quit`: stop (ramped on the real clock), then exit once that's done.
+    pub(crate) fn begin_quit(&mut self, why: &str) {
+        if self.quit_at.is_some() {
+            return;
+        }
+        log::event(
+            "runtime",
+            Level::Info,
+            "player.quitting",
+            None,
+            json!({ "why": why }),
+        );
+        let instant = self.stepped();
+        self.stop_all(instant);
+        self.quit_at = Some(Instant::now() + STOP_RAMP * 4);
+    }
+
+    fn should_exit(&self) -> bool {
+        self.quit_at
+            .is_some_and(|at| self.pending_destroy.is_empty() || Instant::now() >= at)
+    }
+
+    /// Final teardown: every source gone (cores to the reaper), the reaper joined with a
+    /// bounded wait, stragglers logged.
+    fn shutdown(&mut self) {
+        for id in self.graph.ids_of(NodeKind::Source) {
+            let _ = self.graph.destroy(&id);
+        }
+        self.pending_destroy.clear();
+        self.sync_sources();
+        let t = Instant::now();
+        self.host.finish_teardown(Duration::from_millis(500));
+        let left = reaper::shutdown(REAPER_WAIT);
+        if left > 0 {
+            log::event(
+                "runtime",
+                Level::Warn,
+                "mpv.reaper_stragglers",
+                None,
+                json!({ "count": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+            );
+        }
+        log::event(
+            "runtime",
+            Level::Info,
+            "player.exit",
+            None,
+            json!({ "reaper_wait_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+        );
+        self.flush_tap();
+        for c in self.server.clients.values_mut() {
+            c.flush();
+        }
+    }
+
+    // ------------------------------------------------------------------ stepped mode
+
+    /// `step {ms}` (stepped clock only). The reply is deferred until the step is done.
+    pub(crate) fn queue_step(&mut self, client: u64, req: Value, dt: Duration) {
+        if self.step.is_some() {
+            self.step_queue.push_back((client, req, dt));
+        } else {
+            self.begin_step(client, req, dt);
+        }
+    }
+
+    fn begin_step(&mut self, client: u64, req: Value, dt: Duration) {
+        let t = Instant::now();
+        if let ClockKind::Stepped(c) = &self.clock {
+            c.step(dt);
+        }
+        let now = self.now();
+        self.run_anims(now);
+        self.destroy_due(now);
+        let t_sync = Instant::now();
+        self.sync_sources();
+        let sync_d = t_sync.elapsed();
+        self.update_sources();
+
+        let dt_s = dt.as_secs_f64();
+        let mut waits = Vec::new();
+        for id in self.host.ids() {
+            let Some(m) = self.host.mpv(&id) else {
+                continue;
+            };
+            let video = crate::sources::Source::kind(m) == "video";
+            let num = |prop: &str| match self.graph.get(&p(&format!("{id}.{prop}"))) {
+                Ok(PropValue::F64(f)) => f,
+                Ok(PropValue::I64(i)) => i as f64,
+                _ => 0.0,
+            };
+            let flag = |prop: &str| {
+                matches!(
+                    self.graph.get(&p(&format!("{id}.{prop}"))),
+                    Ok(PropValue::Bool(true))
+                )
+            };
+            let (paused, looped, speed, dur) =
+                (flag("paused"), flag("loop"), num("speed"), num("duration"));
+            let start = num("position");
+            let lt = self.local.entry(id.clone()).or_insert(LocalTime {
+                t: start,
+                steps: 0,
+                reset: None,
+            });
+            if let Some(r) = lt.reset.take() {
+                lt.t = r;
+            } else if lt.steps > 0 && !paused {
+                lt.t += dt_s * speed;
+            }
+            lt.steps += 1;
+            if dur > 0.0 {
+                if looped {
+                    lt.t = lt.t.rem_euclid(dur);
+                } else {
+                    lt.t = lt.t.clamp(0.0, dur);
+                }
+            }
+            let at_end = video && !looped && dur > 0.0 && lt.t >= dur;
+            let t_now = lt.t;
+            if let Some(m) = self.host.mpv_mut(&id) {
+                m.step_end(at_end);
+            }
+            waits.push(StepWait {
+                id,
+                t: t_now,
+                video,
+                seeked: false,
+                done: false,
+            });
+        }
+        let hosted: BTreeSet<String> = self.host.ids().into_iter().collect();
+        self.local.retain(|id, _| hosted.contains(id));
+
+        let timer = self
+            .handle
+            // Only wakes the loop: `after_dispatch` → `advance_step` sees the deadline.
+            .insert_source(
+                Timer::from_duration(STEP_TIMEOUT),
+                |_, _, _: &mut Runtime| TimeoutAction::Drop,
+            )
+            .ok();
+        self.step = Some(PendingStep {
+            client,
+            req,
+            deadline: Instant::now() + STEP_TIMEOUT,
+            waits,
+            timer,
+            work: t.elapsed(),
+            sync: sync_d,
+        });
+        self.advance_step();
+    }
+
+    /// Re-check the step in progress: seek ready sources, finish when every frame is in.
+    pub(crate) fn advance_step(&mut self) {
+        let Some(mut st) = self.step.take() else {
+            return;
+        };
+        let t = Instant::now();
+        self.update_sources();
+        for w in st.waits.iter_mut().filter(|w| !w.done) {
+            let Some(m) = self.host.mpv_mut(&w.id) else {
+                w.done = true; // gone meanwhile
+                continue;
+            };
+            if !w.seeked {
+                match m.step_status() {
+                    StepStatus::Broken(_) => {
+                        w.done = true;
+                        continue;
+                    }
+                    _ if !m.is_ready() => continue,
+                    _ => {}
+                }
+                w.seeked = true;
+                if w.video
+                    && m.step_target() != Some(w.t)
+                    && let Err(e) = m.step_seek(w.t)
+                {
+                    log::event(
+                        "runtime",
+                        Level::Warn,
+                        "step.seek_failed",
+                        None,
+                        json!({ "id": w.id, "error": e.to_string() }),
+                    );
+                    w.done = true;
+                    continue;
+                }
+            }
+            match m.step_status() {
+                StepStatus::Done | StepStatus::Broken(_) => w.done = true,
+                StepStatus::Pending(_) => {}
+            }
+        }
+        st.work += t.elapsed();
+        let all_done = st.waits.iter().all(|w| w.done);
+        if !all_done && Instant::now() < st.deadline {
+            self.step = Some(st);
+            return;
+        }
+        if let Some(tok) = st.timer.take() {
+            self.handle.remove(tok);
+        }
+        let result = if all_done {
+            Ok(())
+        } else {
+            let pending: Vec<String> = st
+                .waits
+                .iter()
+                .filter(|w| !w.done)
+                .map(|w| {
+                    let what = match self.host.mpv(&w.id).map(|m| m.step_status()) {
+                        Some(StepStatus::Pending(what)) => what,
+                        _ => "?",
+                    };
+                    format!("{} (t={:.3}s, waiting for {what})", w.id, w.t)
+                })
+                .collect();
+            Err(ApiError {
+                code: "timeout",
+                message: format!(
+                    "step: no frame within {} s from {}",
+                    STEP_TIMEOUT.as_secs(),
+                    pending.join(", ")
+                ),
+                hint: "`lp-player ctl probe '{\"name\":\"sources\"}'` shows each source's \
+                       state; `ctl logs '{\"kind_prefix\":\"source.\"}'` its events"
+                    .into(),
+            })
+        };
+        if let Err(e) = &result {
+            log::event(
+                "runtime",
+                Level::Warn,
+                "step.timeout",
+                None,
+                json!({ "error": e.message }),
+            );
+        }
+        self.finish_tick(st.work, st.sync);
+        let now_ms = self.now().as_secs_f64() * 1000.0;
+        self.respond(
+            st.client,
+            &st.req,
+            result.map(|()| json!({ "now_ms": now_ms })),
+        );
+        if let Some((c, r, dt)) = self.step_queue.pop_front() {
+            self.begin_step(c, r, dt);
+        }
+    }
+
+    // ------------------------------------------------------------------ API plumbing
+
+    /// Route queued log events to subscribers (before any reply, so a command's events
+    /// reach its own connection before its result).
+    pub(crate) fn flush_tap(&mut self) {
+        for _ in 0..8 {
+            let evs = self.tap.drain();
+            if evs.is_empty() {
+                break;
+            }
+            self.server.route(&evs);
+        }
+    }
+
+    /// Send a reply to `client`.
+    pub(crate) fn respond(&mut self, client: u64, id: &Value, r: Result<Value, ApiError>) {
+        self.flush_tap();
+        let line = match &r {
+            Ok(v) => proto::ok_line(id, v.clone()),
+            Err(e) => proto::err_line(id, e),
+        };
+        if let Some(c) = self.server.clients.get_mut(&client) {
+            c.send_line(&line);
+        }
+    }
+
+    /// Read + handle what client `cid` sent; flush its output.
+    pub(crate) fn client_io(&mut self, cid: u64, readable: bool, writable: bool) {
+        if readable {
+            let lines = match self.server.clients.get_mut(&cid) {
+                Some(c) => c.read_lines(),
+                None => return,
+            };
+            for line in lines {
+                if line.iter().all(u8::is_ascii_whitespace) {
+                    continue;
+                }
+                match proto::parse(&line) {
+                    Ok(req) => {
+                        if let Some(r) = handlers::handle(self, cid, &req) {
+                            self.respond(cid, &req.id, r);
+                        }
+                    }
+                    Err((id, e)) => self.respond(cid, &id, Err(e)),
+                }
+                if self
+                    .server
+                    .clients
+                    .get(&cid)
+                    .is_none_or(|c| c.dead.is_some())
+                {
+                    break;
+                }
+            }
+        }
+        if writable && let Some(c) = self.server.clients.get_mut(&cid) {
+            c.flush();
+        }
+    }
+
+    /// Register a freshly accepted client with the loop (edge-triggered, read + write).
+    fn register_client(&mut self, cid: u64) {
+        let Some(c) = self.server.clients.get_mut(&cid) else {
+            return;
+        };
+        let src = Generic::new(ClientFd(c.raw_fd()), Interest::BOTH, Mode::Edge);
+        match self
+            .handle
+            .insert_source(src, move |r, _, rt: &mut Runtime| {
+                rt.client_io(cid, r.readable || r.error, r.writable);
+                Ok(PostAction::Continue)
+            }) {
+            Ok(tok) => c.token = Some(tok),
+            Err(e) => c.dead = Some(format!("loop registration failed: {e}")),
+        }
+    }
+
+    /// After every dispatch: forward + update sources if mpv woke us, advance a pending
+    /// step, read clients with input left, deliver events, drop dead clients.
+    fn after_dispatch(&mut self) {
+        let t = Instant::now();
+        self.stats.iterations += 1;
+        // Changes from handlers reach the sources promptly; mpv wakes update textures.
+        self.sync_sources();
+        if self.wake_pending {
+            self.wake_pending = false;
+            self.update_sources();
+        }
+        self.advance_step();
+        let more: Vec<u64> = self
+            .server
+            .clients
+            .iter()
+            .filter(|(_, c)| c.more_input && c.dead.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        for cid in more {
+            self.client_io(cid, true, false);
+        }
+        self.stats.busy(t.elapsed());
+        self.flush_tap();
+        for c in self.server.clients.values_mut() {
+            c.flush();
+            c.finish_eof();
+        }
+        let dead = self.server.take_dead();
+        for mut c in dead {
+            if let Some(tok) = c.token.take() {
+                self.handle.remove(tok);
+            }
+            drop(c); // closes the socket, after its registration is gone
+        }
+        self.tap.set_topics(self.server.topics());
+    }
+
+    fn has_more_input(&self) -> bool {
+        self.server
+            .clients
+            .values()
+            .any(|c| c.more_input && c.dead.is_none())
+    }
+}
+
+/// Block SIGINT/SIGTERM for the whole process (before any thread exists) and return a
+/// signalfd that reports them — a clean `quit` instead of a kill.
+fn signal_fd() -> Result<OwnedFd, String> {
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        if libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut()) != 0 {
+            return Err("pthread_sigmask failed".into());
+        }
+        let fd = libc::signalfd(-1, &set, libc::SFD_NONBLOCK | libc::SFD_CLOEXEC);
+        if fd < 0 {
+            return Err(format!("signalfd: {}", std::io::Error::last_os_error()));
+        }
+        Ok(OwnedFd::from_raw_fd(fd))
+    }
+}
+
+/// `lp-player serve --headless …`: run until `quit` / SIGINT / SIGTERM.
+pub fn serve(opts: ServeOpts) -> Result<(), String> {
+    let sigfd = signal_fd()?;
+    log::init(&opts.state_dir, opts.log_level).map_err(|e| {
+        format!(
+            "event log in {}: {e} (set XDG_STATE_HOME to a writable directory)",
+            opts.state_dir.display()
+        )
+    })?;
+    let (listener, socket_file) = crate::api::server::bind(&opts.socket)?;
+    let gfx = Gfx::new_offscreen().map_err(|e| format!("no EGL device: {e}"))?;
+    let cat = match Catalogue::resolve_dir() {
+        Some(dir) => Catalogue::load(&dir).map_err(|e| format!("effect catalogue: {e}"))?,
+        None => {
+            log::event(
+                "runtime",
+                Level::Warn,
+                "effects.missing",
+                None,
+                json!({ "hint": "no transitions/ directory resolved (LP_TRANSITIONS_DIR, \
+                                 ~/.local/share/livepaper-web/transitions, the repo); \
+                                 only cuts are available" }),
+            );
+            Catalogue::empty()
+        }
+    };
+    let composer = Composer::new(&gfx)?;
+
+    let mut event_loop: EventLoop<'static, Runtime> =
+        EventLoop::try_new().map_err(|e| format!("event loop: {e}"))?;
+    let handle = event_loop.handle();
+    let (ping, ping_src) = calloop::ping::make_ping().map_err(|e| format!("ping: {e}"))?;
+    let tap = Arc::new(EventTap::new(ping));
+    log::set_tap(Some(tap.clone()));
+
+    let mut base = Map::new();
+    if let Some(ao) = &opts.ao {
+        base.insert("ao".into(), json!(ao));
+    }
+    let clock = match opts.clock {
+        ClockMode::Real => ClockKind::Real(MonoClock::new()),
+        ClockMode::Stepped => {
+            base.insert("stepped".into(), json!(true));
+            ClockKind::Stepped(SteppedClock::new())
+        }
+    };
+    let backend = Box::new(Headless::new(&gfx, &opts.outputs));
+    let mut rt = Runtime {
+        gfx,
+        cat,
+        composer,
+        graph: Graph::new(),
+        anim: Animator::new(),
+        clock,
+        host: SourceHost::new(base),
+        tr: Transitions::new(),
+        backend,
+        server: Server::default(),
+        tap,
+        handle: handle.clone(),
+        stats: LoopStats::default(),
+        tick_period: Duration::from_secs_f64(1.0 / 60.0),
+        src_events: Vec::new(),
+        last_event: BTreeMap::new(),
+        wake_regs: BTreeMap::new(),
+        wake_pending: false,
+        step: None,
+        step_queue: VecDeque::new(),
+        local: BTreeMap::new(),
+        pending_destroy: Vec::new(),
+        quit_at: None,
+        started: Instant::now(),
+    };
+    rt.apply_output_changes();
+
+    let ins = |e: calloop::InsertError<_>| format!("event loop: {}", e.error);
+    handle
+        .insert_source(
+            Generic::new(listener, Interest::READ, Mode::Level),
+            |_, l, rt: &mut Runtime| {
+                for cid in rt.server.accept(l) {
+                    rt.register_client(cid);
+                }
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(ins)?;
+    handle
+        .insert_source(ping_src, |_, _, _: &mut Runtime| {})
+        .map_err(|e| format!("event loop: {}", e.error))?;
+    handle
+        .insert_source(
+            Generic::new(sigfd, Interest::READ, Mode::Level),
+            |_, fd, rt: &mut Runtime| {
+                let mut info = [0u8; 128];
+                let fd = std::os::fd::AsRawFd::as_raw_fd(&**fd);
+                unsafe { libc::read(fd, info.as_mut_ptr().cast(), info.len()) };
+                rt.begin_quit("signal");
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(|e| format!("event loop: {}", e.error))?;
+    if opts.clock == ClockMode::Real {
+        let period = rt.tick_period;
+        handle
+            .insert_source(
+                Timer::from_duration(period),
+                |deadline, _, rt: &mut Runtime| {
+                    rt.tick();
+                    let next = deadline + rt.tick_period;
+                    let now = Instant::now();
+                    TimeoutAction::ToInstant(if next <= now {
+                        now + rt.tick_period
+                    } else {
+                        next
+                    })
+                },
+            )
+            .map_err(|e| format!("event loop: {}", e.error))?;
+    } else {
+        // Stepped: render once so captures before the first step see the empty outputs.
+        rt.tick();
+    }
+    log::event(
+        "runtime",
+        Level::Info,
+        "player.started",
+        None,
+        json!({
+            "pid": std::process::id(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "socket": opts.socket.display().to_string(),
+            "clock": rt.clock_name(),
+            "backend": rt.backend.kind(),
+            "outputs": rt.backend.outputs().iter().map(|o| o.name.clone()).collect::<Vec<_>>(),
+            "effects": rt.cat.ids().len(),
+        }),
+    );
+
+    loop {
+        let timeout = if rt.has_more_input() {
+            Some(Duration::ZERO)
+        } else if rt.quit_at.is_some() {
+            Some(Duration::from_millis(5))
+        } else {
+            None
+        };
+        event_loop
+            .dispatch(timeout, &mut rt)
+            .map_err(|e| format!("event loop: {e}"))?;
+        rt.after_dispatch();
+        rt.apply_output_changes();
+        if rt.should_exit() {
+            break;
+        }
+    }
+    rt.shutdown();
+    log::set_tap(None);
+    drop(socket_file);
+    Ok(())
+}
