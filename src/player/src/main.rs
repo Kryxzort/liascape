@@ -80,6 +80,7 @@ fn serve_main(args: &[String]) -> ExitCode {
         outputs,
         clock,
         ao,
+        own_socket_dir: socket.is_none() && lp_player::paths::socket_is_default(),
         socket: socket.unwrap_or_else(lp_player::paths::socket),
         state_dir: lp_player::paths::state_dir(),
         log_level: level,

@@ -11,7 +11,7 @@
 //! block the loop or delay another client.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -37,76 +37,154 @@ pub const LINES_PER_WAKE: usize = 32;
 /// Events the tap buffers between loop iterations before dropping the oldest.
 const TAP_CAPACITY: usize = 50_000;
 
-/// The socket file: removed again when this is dropped (clean exit, or an error after
-/// binding).
-pub struct SocketFile(pub PathBuf);
+/// The instance's files: the socket and its lock file (`<socket>.lock`, `flock`ed for
+/// the process lifetime). Dropping it (clean exit, or an error after binding) removes the
+/// socket, then the lock file — while still holding the lock — then releases it.
+pub struct SocketFile {
+    pub socket: PathBuf,
+    pub lock_path: PathBuf,
+    socket_bound: bool,
+    _lock: std::fs::File,
+}
 
-impl Drop for SocketFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+impl SocketFile {
+    /// Remove both files now (before an `_exit`, where `Drop` won't run).
+    pub fn remove_now(&mut self) {
+        if self.socket_bound {
+            let _ = std::fs::remove_file(&self.socket);
+            self.socket_bound = false;
+        }
+        let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
-/// Bind the command socket at `path`: the directory is created `0700`, the socket made
-/// `0600`. Single instance: a socket someone answers on → `Err("already running (pid N)")`;
-/// one nobody listens on (a crash leftover) is unlinked and re-bound.
-pub fn bind(path: &Path) -> Result<(UnixListener, SocketFile), String> {
+impl Drop for SocketFile {
+    fn drop(&mut self) {
+        self.remove_now();
+    }
+}
+
+/// The lock file next to `socket`: `lp-player.sock` → `lp-player.lock`.
+pub fn lock_path(socket: &Path) -> PathBuf {
+    socket.with_extension("lock")
+}
+
+fn already_running(pid: &str, socket: &Path) -> String {
+    format!(
+        "lp-player is already running (pid {pid}) on {}; stop it with `lp-player ctl quit`, \
+         or give this one another --socket",
+        socket.display()
+    )
+}
+
+/// Take the single-instance lock: `flock(LOCK_EX|LOCK_NB)` on `<socket>.lock` (created
+/// `0600`), re-checked against the path (a lock file unlinked by an exiting owner between
+/// our open and our lock is retried), then our pid written into it. Held → `Err("already
+/// running (pid N)")` with N read from the file.
+fn take_lock(socket: &Path) -> Result<std::fs::File, String> {
+    use std::io::Seek;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let lp = lock_path(socket);
+    for _ in 0..50 {
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&lp)
+            .map_err(|e| format!("open lock file {}: {e}", lp.display()))?;
+        let r = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if r != 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                return Err(format!("lock {}: {err}", lp.display()));
+            }
+            // Held: the owner writes its pid right after locking — give it a moment.
+            let mut pid = String::new();
+            for _ in 0..100 {
+                pid.clear();
+                let _ = f.rewind();
+                let _ = f.read_to_string(&mut pid);
+                if !pid.trim().is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let pid = pid.trim();
+            return Err(already_running(
+                if pid.is_empty() { "?" } else { pid },
+                socket,
+            ));
+        }
+        // Locked — but is it still the file at that path? (Its previous owner may have
+        // unlinked it between our open and our flock.)
+        let same = match (f.metadata(), std::fs::metadata(&lp)) {
+            (Ok(a), Ok(b)) => a.ino() == b.ino() && a.dev() == b.dev(),
+            _ => false,
+        };
+        if !same {
+            continue;
+        }
+        f.set_len(0)
+            .and_then(|()| f.rewind())
+            .and_then(|()| write!(f, "{}", std::process::id()))
+            .and_then(|()| f.flush())
+            .map_err(|e| format!("write lock file {}: {e}", lp.display()))?;
+        return Ok(f);
+    }
+    Err(format!(
+        "lock file {} keeps being replaced; is another lp-player starting and stopping?",
+        lp.display()
+    ))
+}
+
+/// Bind the command socket at `path`. Single instance (R item 4): the `flock` on
+/// `<socket>.lock` decides — the loser exits with "already running (pid N)" and never
+/// touches the socket; the winner (holding the lock, so any socket file is a dead one's)
+/// unlinks a stale **socket** and binds, but refuses a path that isn't a socket. The
+/// directory is created `0700` — and only chmod-ed if we created it or `own_dir` (the
+/// default `$XDG_RUNTIME_DIR/livepaper`); a `--socket` in someone else's directory is left
+/// alone. The socket is made `0600`.
+pub fn bind(path: &Path, own_dir: bool) -> Result<(UnixListener, SocketFile), String> {
+    use std::os::unix::fs::FileTypeExt;
     let dir = path
         .parent()
         .ok_or_else(|| format!("socket path {} has no directory", path.display()))?;
+    let created = !dir.exists();
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| format!("chmod 0700 {}: {e}", dir.display()))?;
-    if path.exists() {
-        match UnixStream::connect(path) {
-            Ok(s) => {
-                let pid = ask_pid(s)
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "?".into());
-                return Err(format!(
-                    "lp-player is already running (pid {pid}) on {}; stop it with \
-                     `lp-player ctl quit`",
-                    path.display()
-                ));
-            }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-                ) =>
-            {
-                std::fs::remove_file(path)
-                    .map_err(|e| format!("remove stale socket {}: {e}", path.display()))?;
-            }
-            Err(e) => return Err(format!("probe existing socket {}: {e}", path.display())),
+    if created || own_dir {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("chmod 0700 {}: {e}", dir.display()))?;
+    }
+    let lock = take_lock(path)?;
+    let mut guard = SocketFile {
+        socket: path.to_path_buf(),
+        lock_path: lock_path(path),
+        socket_bound: false,
+        _lock: lock,
+    };
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_socket() => {
+            // We hold the lock: whoever bound this is gone (a crash leftover).
+            std::fs::remove_file(path)
+                .map_err(|e| format!("remove stale socket {}: {e}", path.display()))?;
         }
+        Ok(_) => {
+            return Err(format!(
+                "refusing to replace {}: it exists and is not a socket; pass another --socket",
+                path.display()
+            ));
+        }
+        Err(_) => {}
     }
     let l = UnixListener::bind(path).map_err(|e| format!("bind {}: {e}", path.display()))?;
-    let guard = SocketFile(path.to_path_buf());
+    guard.socket_bound = true;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("chmod 0600 {}: {e}", path.display()))?;
     l.set_nonblocking(true)
         .map_err(|e| format!("set_nonblocking: {e}"))?;
     Ok((l, guard))
-}
-
-/// `hello` on an already-running instance → its pid.
-fn ask_pid(s: UnixStream) -> Option<u64> {
-    s.set_read_timeout(Some(Duration::from_secs(1))).ok()?;
-    s.set_write_timeout(Some(Duration::from_secs(1))).ok()?;
-    (&s).write_all(b"{\"id\":1,\"cmd\":\"hello\"}\n").ok()?;
-    let mut r = BufReader::new(&s);
-    for _ in 0..64 {
-        let mut line = String::new();
-        if r.read_line(&mut line).ok()? == 0 {
-            return None;
-        }
-        let v: Value = serde_json::from_str(&line).ok()?;
-        if v["id"] == json!(1) {
-            return v["result"]["pid"].as_u64();
-        }
-    }
-    None
 }
 
 /// A borrowed client fd for the loop registration (the [`Client`] owns the stream and
@@ -139,6 +217,8 @@ pub struct Client {
     pub more_input: bool,
     /// The peer closed its write side.
     pub eof: bool,
+    /// A deferred reply (`step`) is outstanding: its later requests wait (FIFO).
+    pub awaiting: bool,
 }
 
 impl Client {
@@ -155,13 +235,28 @@ impl Client {
             quiet: false,
             more_input: false,
             eof: false,
+            awaiting: false,
         }
+    }
+
+    /// Put `lines` back in front of the unread input (FIFO behind a deferred reply).
+    pub fn unread(&mut self, lines: Vec<Vec<u8>>) {
+        if lines.is_empty() {
+            return;
+        }
+        let mut front = Vec::new();
+        for l in lines {
+            front.extend_from_slice(&l);
+            front.push(b'\n');
+        }
+        front.extend_from_slice(&self.inbuf);
+        self.inbuf = front;
     }
 
     /// After the peer's EOF: once every queued request is handled and every reply sent,
     /// close — quietly, or as a drop if it left half a line behind.
     pub fn finish_eof(&mut self) {
-        if !self.eof || self.more_input || self.dead.is_some() {
+        if !self.eof || self.more_input || self.awaiting || self.dead.is_some() {
             return;
         }
         self.flush();

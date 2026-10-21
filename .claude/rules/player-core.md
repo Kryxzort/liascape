@@ -768,9 +768,15 @@ created before the core so error-path locals drop in the same order). **Teardown
 two phases.** (1) When a node goes, `SourceHost::sync` calls `Source::begin_teardown()`
 (default: `true` = drop now). `MpvSource` sends `stop` (async) and returns `false`: the
 host moves it to a `dying` list (no longer in `ids`/`texture`/`wake_fds`; silent from the
-stop on). (2) `SourceHost::update` drops it once `teardown_ready()` — mpv's `idle-active`
-reported *after* the stop's reply (idle ⇒ the VO is uninitialised; already idle at the
-reply counts too), the core dead, or 500 ms (`TEARDOWN_MAX`). Then `Drop` frees the render
+stop on). (2) `SourceHost::update` drops it once `teardown_ready()` — mpv idle after the stop
+(idle ⇒ the VO is uninitialised), the core dead, or 500 ms (`TEARDOWN_MAX`). "Idle" is
+decided from event order, never from a stale initial value (item 14): the `stop` is only
+sent once the last gain push reached mpv (stopping cuts the audio — the final −96 dB lands
+first); at its reply the core counts as idle if no START_FILE was ever seen (a START_FILE
+would precede the reply, so no VO exists) or the last file ended and `idle-active` = true
+was reported *after* that END_FILE; otherwise the stop's own END_FILE + an `idle-active`
+notification after the reply are waited for. `rapid_create_destroy_never_stalls` (20×
+create + destroy at once, before the VO is up) guards it. Then `Drop` frees the render
 context — fast now: with the VO live, `mpv_render_context_free` waits on the playloop
 (**measured 21–32 ms** for a playing 1080p clip) — and hands the core to the **reaper**
 (`sources/reaper.rs`): one background thread runs `mpv_terminate_destroy` (30–240 ms
@@ -965,6 +971,19 @@ purpose (pending B, held A's, frozen B, snapshots) plus its graves. `held_source
 (Task 12) → (`out:<c>` → {B, A's} per live transition, every grave): the `srcs:` alias's
 transition half.
 
+**Hotplug (Task 12 fix round, R59/R60).** `adopt_output(new, like, g)`: the newest live
+transition covering output `like` takes `new` as one of its outputs — its main layer joins
+`like`'s side (so that A is not shared), its content = what the transition shows (A
+pre-Running, the side's fx while Running — A for a cut —, B after handoff); everything
+later (handoff, commit, cancel/snap-back, failure) treats it like the original layers.
+`drop_output(out, g, anim, now)` (the layer is already gone): the output leaves every
+live transition; a side left with no layer destroys its fx/snapshot and `release`s its A
+(restored if shown elsewhere, else ramped out → grave); the lead is re-picked (its End
+tracking reset) if its side went; a transition left with **no** output is committed at
+once by `commit_unseen` (effects go, A's released, `transition.handoff {committed:
+true}`, Done when its graves are buried) leaving B exactly as it is — returns those
+`(corr, B)` for the runtime to park or retire.
+
 **Tests (`tests/transition.rs`, harness `tests/common/harness.rs`)** — Graph + Animator +
 SteppedClock + Gfx + SourceHost + Transitions + Composer, virtual outputs `VIRTUAL-n`
 640×360, `ao: "null"`. Each tick waits ≥ 2 ms (`MIN_TICK`: otherwise a gain ramp becomes a
@@ -987,13 +1006,21 @@ every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is 
 Without `--headless` it exits 2 (Wayland = Task 13).
 
 **Paths (`src/paths.rs`).** Socket `$LP_PLAYER_SOCKET`, else
-`$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (else `/run/user/<uid>/…`); the dir is made
-`0700`, the socket `0600`. State/event log `$XDG_STATE_HOME/livepaper/lp-player/` (default
-`~/.local/state/livepaper/lp-player/`). **Single instance:** an existing socket that
-answers → exit 1 with `lp-player is already running (pid N)` (its `hello` pid); one that
-refuses (crash leftover) → unlinked and re-bound. The socket file is removed on every exit
-path after binding (`SocketFile` guard). A unix socket path must be < 108 bytes — tests use
-`std::env::temp_dir()`, not `target/`.
+`$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (else `/run/user/<uid>/…`); the socket is
+made `0600`, its dir `0700` — **only** if we created that dir or it's the default
+`…/livepaper` (a `--socket`/`LP_PLAYER_SOCKET` in someone else's directory is never
+chmod-ed). State/event log `$XDG_STATE_HOME/livepaper/lp-player/` (default
+`~/.local/state/livepaper/lp-player/`). **Single instance = a lock file:** `<socket>.lock`
+(`lp-player.lock`, `0600`) is `flock(LOCK_EX|LOCK_NB)`-ed for the process lifetime and
+holds the owner's pid; the loser exits 1 with `lp-player is already running (pid N) on
+<socket>; stop it with ctl quit, or give this one another --socket` and never touches the
+socket. A lock taken on a file its previous owner unlinked meanwhile is detected (inode vs
+path) and retried. The winner (holding the lock, so any socket file is a dead owner's)
+unlinks an existing path only if it **is a socket**, and refuses anything else with a
+hint. Socket + lock file are removed on every exit path after binding (`SocketFile`
+guard; `remove_now` before `_exit`). Pinned by `concurrent_starts_one_serves` (5 rounds of
+two simultaneous starts; RED before: `bind …: Address already in use`). A unix socket path
+must be < 108 bytes — tests use `std::env::temp_dir()`, not `target/`.
 
 **One calloop loop (`EventLoop<'static, Runtime>`).** Sources: the listener + one
 edge-triggered source per client (§ Command API), one level-triggered source per mpv wake
@@ -1028,34 +1055,86 @@ The step **waits without blocking the loop** (`PendingStep`, re-checked after ev
 dispatch, a one-shot `Timer` wakes it at the deadline) until every wait is `Done`/`Broken`
 — bounded by `STEP_TIMEOUT` (2 s) → `timeout` error naming each pending source, its target
 and what it waits for (the tick still runs) — then runs the rest of the tick and replies
-`{now_ms}`. Further `step`s queue behind it. **Determinism** = the same command script
+`{now_ms}`. **Per-client FIFO (item 8):** while a client's `step` is deferred, nothing more
+is read from it — the requests it pipelined behind the step are answered after it (so a
+pipelined `step` + `capture` captures the post-step frame; `pipelined_step_then_capture`),
+and a half-closed client still gets its deferred reply before the close
+(`half_closed_client_gets_step_reply`). Steps from different clients queue (≤
+`STEP_QUEUE_MAX` = 64, then `busy` with a hint) and run one after another — iteratively, a
+step that needs no frames finishing at once. Source `Position` events in stepped mode
+come on every `time-pos` change (it only moves on a step's seek), not on a wall-clock
+throttle. **Determinism** = the same command script
 gives byte-identical captures (`stepped_is_deterministic`: two servers, FrameIndex clip,
 markers 9 and 60 at 0.304 s and 2.032 s). Audio is silent in stepped mode (mpv paused).
 
 **Outputs (`OutputBackend`, R46).** `kind/outputs/take_changes/target/picture/present/
 as_headless_mut`. `Headless`: `VIRTUAL-1…n` in `--outputs` order, each an RGBA8 texture +
 FBO; `present` is a no-op, `capture` reads `picture`. Hotplug (`apply_output_changes`,
-after every dispatch and in the `headless.*` handlers): **added** → `out:<name>` (+ its
-main layer) with `name/width/height/refresh_hz`, content = `cur:` of the first output that
-has one (`output.added {content}`); **removed** → the node + layer destroyed
-(`output.removed`) — an in-flight transition carries on on the others (the recipe logs
-`transition.graph_error` for the missing layer and skips it; `hotplug_mid_transition`). An
-output added while a transition is pre-handoff shows A and keeps it (A becomes a shared A,
-R34) — the backend reacts to `output.added`.
+after every dispatch and in the `headless.*` handlers) creates/destroys `out:<name>` (+ its
+main layer, `name/width/height/refresh_hz`):
+
+- **Added (R59):** the new output **joins the live transition covering the first other
+  output** (`Transitions::adopt_output`, `transition.output_adopted`): it becomes one of
+  that transition's outputs on that output's side (so its A is not "shown outside"), shows
+  what the transition shows now (A before Running, the effect while Running, B after
+  handoff), and is carried through cancel/failure/commit/handoff like the others. Else it
+  shows `cur:` of the first output that has one; else the **parked** wallpaper, if any
+  (below). `output.added {content}` (corr = the adopting transition).
+- **Removed (R60):** the node + layer go; every live transition forgets the output
+  (`Transitions::drop_output` — a side left with no layer drops its effect/snapshot and
+  releases its A; a transition left with **no** output is committed at once,
+  `transition.handoff {committed: true}`). Then whatever that output alone showed or held —
+  not shown by another layer, not held/pending in a transition, not a snapshot — is
+  **retired** (30 ms ramp to −96, then destroyed): no invisible audible source survives,
+  and `srcs:*` never targets it. **Unless no output is left:** then the last current
+  wallpaper (a committed transition's B, else what the output showed) is **parked** —
+  ramped to −96 over 30 ms, then paused (and a transition's `xfade` set to its final 0 dB);
+  it stays in `srcs:*` (`Graph::set_parked`) so global settings still reach it, and is not
+  audible. The next output that appears with nothing to show shows it, unpaused (unless it
+  was paused before) and ramped back in over 30 ms (`source.parked`/`source.unparked`;
+  `state.parked`). Tests: `hotplug_mid_transition`,
+  `hotplug_added_before_running_joins_transition`,
+  `hotplug_added_during_running_then_cancel`, `remove_output_retires_what_only_it_showed`,
+  `remove_all_outputs_parks_and_readd_resumes`,
+  `remove_all_outputs_mid_transition_commits_and_parks_b`.
+
+**Retire = ramp, then destroy (item 10, core invariant).** `Runtime::retire(id)` — used by
+the `destroy` verb, `stop` and output removal: an audible source (not paused, ready,
+above −96 dB, a kind with audio) gets `gain.anticlick` ramped to −96 over 30 ms
+(`source.retire {ramp_ms}`); the node is destroyed **one tick after** the ramp ends (that
+tick's sync carries the final −96 dB to the live source — destroying in the same tick
+would drop the source before it got it: measured, it was torn down at −6 dB); a silent
+one goes at once. `MpvSource` then sends its teardown `stop` only once its last gain push
+has reached mpv, and `source.teardown {id, source_kind, gain_db}` records the level it
+went at (`destroy_ramps_audible_source_out` asserts ≤ −95.9 and a ramp seen in between).
+Parking pauses one tick after its ramp for the same reason.
 
 **stop / quit.** `stop`: every live transition dropped (`transition.cancelled {reason:
-"stopped"}`), animator reset, every layer emptied, effects destroyed, every source's
-`gain.anticlick` ramped to −96 over 30 ms (invariant #4) and destroyed when the ramp is
-over (stepped clock: set to −96 and destroyed at once — virtual time won't move by
-itself). `quit` (and SIGINT/SIGTERM): `stop`, exit once the destroys are done (≤ 120 ms),
-then `reaper::shutdown(2 s)` (stragglers logged), socket removed, exit 0.
+"stopped"}`), animator reset, the parked wallpaper forgotten, every layer emptied,
+effects destroyed, every source retired (stepped clock: set to −96 and destroyed at once —
+virtual time won't move by itself). `quit` (and SIGINT/SIGTERM — `sigterm_is_a_clean_exit`):
+`stop`, exit once the destroys are done (≤ 120 ms), `SourceHost::finish_teardown(500 ms)`,
+then `reaper::shutdown(2 s)`; socket + lock removed, exit 0. **If an mpv core is still
+being destroyed after that wait** (a straggler, logged `mpv.reaper_stragglers`), the
+process leaves with `_exit(0)` (item 16): every log line is already flushed, socket + lock
+are removed first, and atexit/static destructors (libmpv, ffmpeg, EGL) are skipped so they
+can't run under the straggler and spoil the exit status.
+
+**Rate-limited warnings.** `compose.failed` is logged at most once per (output, reason) per
+5 s with `suppressed: n`; tap overflow (`EventTap` dropped events) is logged as
+`api.tap_overflow {dropped_total}` likewise (from the loop — never from inside the tap).
 
 **Tests (`tests/api.rs`).** Spawn the real binary (`env!("CARGO_BIN_EXE_lp-player")`)
 with `serve --headless --outputs 640x360@60,320x180@60 --clock stepped --ao null` (some
 add `--clock real`), temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `std::env::temp_dir()`
-(never the real ones); the `Serve` guard kills the child on drop (also on panic). One
-server at a time (process-wide lock, handed between the two servers of a two-run test).
-Skips only without EGL or a catalogue.
+(never the real ones); the `Serve` guard kills the child on drop (also on panic), and
+every spawned `serve`/`ctl` child gets `PR_SET_PDEATHSIG(SIGKILL)` (`die_with_parent`) so
+an aborted/killed test run never leaves a stray server behind. One server at a time
+(process-wide lock, handed between the two servers of a two-run test). Skips only without
+EGL or a catalogue. **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
+kind (`video`/`image`/`color`/`snapshot` — the schema prop overwrites the node kind in the
+snapshot); recognise sources by `gain_effective_db`. And a log `fields` key named like a
+fixed key (`kind`, `corr`, …) overwrites it — `source.open`/`.teardown` say `source_kind`.
 
 ## Command API
 
@@ -1072,22 +1151,24 @@ unix socket (§ Runtime → Paths):
   delivered **before** its reply on the same connection (the tap is flushed before every
   reply).
 
-**`ctl`:** `lp-player ctl <verb> ['<json args>']` prints the result as pretty JSON, exit 0
-— or the error object (stdout), exit 1 (also for no player / bad JSON args, with a hint).
-`lp-player ctl subscribe <prefix…>` prints events one JSON object per line until Ctrl-C
-(or the player exits / stdout closes).
+**`ctl`:** `lp-player ctl [--timeout-ms N] <verb> ['<json args>']` prints the result as
+pretty JSON, exit 0 — or the error object (stdout), exit 1 (also for no player / bad JSON
+args / **no reply within `--timeout-ms`, default 10 000** → `timeout`, hint: pass a longer
+`--timeout-ms`; all with a hint). `lp-player ctl subscribe <prefix…>` prints events one
+JSON object per line until Ctrl-C, without a timeout; when the player exits it prints a
+note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
 | `hello` | — | `{version, pid, protocol: 1, capabilities: [video, image, color, transition, headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
-| `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
-| `destroy` | `{id}` | `{}` | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
-| `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
+| `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
+| `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
+| `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
 | `get` | `{path}` (must resolve to one node) | `{value}` | graph codes, `ambiguous` | `ctl get '{"path":"cur:DP-1.time_pos"}'` |
-| `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value | `{corr, targets}`; `anim.done {corr}` per finished animation | `bad_type` (non-numeric), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
+| `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}`; `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
 | `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
-| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz}], backend, sources (hosted ids)}` | — | `ctl state` |
+| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz}], backend, sources (hosted ids), parked}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
 | `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
 | `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
@@ -1095,20 +1176,23 @@ unix socket (§ Runtime → Paths):
 | `effects` | — | `{ids}` (catalogue order; `[]` without `transitions/`) | — | `ctl effects` |
 | `stop` | — | `{stopping: [ids]}` | — | `ctl stop` |
 | `quit` | — | `{}` (then the process exits 0) | — | `ctl quit` |
-| `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in) | `unsupported` (real clock), `timeout` | `ctl step '{"ms":16}'` |
+| `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in; the client's later requests wait for it) | `unsupported` (real clock), `timeout`, `busy` (64 queued) | `ctl step '{"ms":16}'` |
 | `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
 
 **Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
 `cmd` / bad args), `no_such_verb` (hint lists every verb), `no_such_effect`,
-`no_such_probe`, `timeout` (a step's frames), `io` (capture write, ctl connect).
+`no_such_probe`, `timeout` (a step's frames; `ctl`'s reply wait), `busy` (step queue
+full), `io` (capture write, ctl connect).
 
 **Event kinds** (subscribe by prefix): `transition.scheduled|started|handoff|done|
 cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
-(runtime, `position` is debug-level ~10 Hz) and `source.error|rejected|open|drop` (host),
-`output.added|removed`, `anim.start|done|dropped`, `api.client_connected|closed|dropped`,
-`player.started|stopped|quitting|exit`, `step.timeout`, `mpv.reaped`,
-`mpv.reaper_stragglers`, `effects.missing`, `compose.failed` — i.e. every event-log kind
+(runtime, `position` is debug-level ~10 Hz, every change in stepped mode),
+`source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
+(host), `transition.output_adopted`, `output.added|removed`, `anim.start|done|dropped`,
+`api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
+`step.timeout`, `mpv.reaped`, `mpv.reaper_stragglers`, `effects.missing`,
+`compose.failed` — i.e. every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
 
 **Global settings go to `srcs:*` (R50).** The backend (Task 17) sends every global setting
@@ -1117,18 +1201,23 @@ cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|po
 `cur:` misses the pending B of an in-flight transition, which would then take over with
 the old value (project rule "settings apply live"). Per-item overrides target the item's
 own source id. Layer settings (`fit`, `viewport`) go to `lay:*:main`. A `set` on a
-wildcard alias (`srcs:*`, `cur:*`, `out:*`, `lay:*:main`) that matches nothing right now
-is still type-checked against that kind's schema and succeeds with `targets: []` (a
-broadcast to nobody isn't an error); a concrete id that doesn't exist is `no_such_node`.
+broadcast alias (`srcs:*`, `cur:*`, `out:*`, `lay:*:main`, and `srcs:<c>`/`cur:<c>` of an
+output that exists) that matches nothing right now is still type-checked against that
+kind's schema and succeeds with `targets: []` (a broadcast to nobody isn't an error); an
+unknown connector or a concrete id that doesn't exist is `no_such_node`. With no output
+left, `srcs:*` is exactly the parked wallpaper (§ Runtime → Outputs).
 
 **Probes (`src/probe/`).** `list`; `sources` — per hosted source `{id, kind, path, ready,
 paused, loop, speed, time_pos, duration, gain_effective_db (graph), gains (the live
 source's own slots), live_kind, size, mpv_volume_gain, mpv_pause, requests_in_flight,
-stepped, step_status, virtual_t, last_event}` (`mpv_*` are synchronous mpv reads — probe
+stepped, step_status, virtual_t, last_event}` + `dying` (sources mid-teardown),
+`reaper_pending` (`mpv_*` are synchronous mpv reads — probe
 only); `loop` — `{clock, tick_period_ms, ticks, tick_hz_last_s, last_tick_ms,
 recent_ticks_ms, max_tick_ms_recent, last_phases {sync_ms, transitions_ms, render_ms,
 total_ms}, max_busy_ms (longest synchronous stretch since the last
-`args: {"reset": true}`), iterations, wakes, wake_pending, wake_fds, clients,
+`args: {"reset": true}`), max_busy_excl_open_ms + max_open_ms (the same with the
+synchronous source opens taken out / those opens alone — `MpvSource::open` is still
+synchronous on the loop, ms-scale), iterations, wakes, wake_pending, wake_fds, clients,
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`. A new probe = a file here +
 one `PROBES` entry.
 

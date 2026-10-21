@@ -39,7 +39,7 @@ use crate::clock::{Clock, MonoClock, SteppedClock};
 use crate::gfx::{Catalogue, Composer, Gfx};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
 use crate::headless::{Headless, OutputBackend, OutputChange};
-use crate::log::{self, Level};
+use crate::log::{self, CorrId, Level};
 use crate::recipes::Transitions;
 use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
 use crate::units::{SILENT_DB, db_to_lin};
@@ -50,6 +50,10 @@ pub const STEP_TIMEOUT: Duration = Duration::from_secs(2);
 pub const REAPER_WAIT: Duration = Duration::from_secs(2);
 /// Anti-click ramp used by `stop`/`quit` before sources are destroyed (invariant #4).
 const STOP_RAMP: Duration = Duration::from_millis(30);
+/// Steps that may wait behind the running one (one per client at most, by the FIFO).
+pub const STEP_QUEUE_MAX: usize = 64;
+/// Repeated warnings (same key) are logged at most this often (`warn_limited`).
+const WARN_EVERY: Duration = Duration::from_secs(5);
 /// Tick durations the `loop` probe keeps.
 const TICK_HISTORY: usize = 64;
 
@@ -70,6 +74,9 @@ pub struct ServeOpts {
     /// for lp-player (`pipewire`).
     pub ao: Option<String>,
     pub socket: PathBuf,
+    /// The socket's directory is ours to `chmod 0700` even if it exists (the default
+    /// `$XDG_RUNTIME_DIR/livepaper`); `false` for `--socket`/`LP_PLAYER_SOCKET`.
+    pub own_socket_dir: bool,
     pub state_dir: PathBuf,
     pub log_level: Level,
 }
@@ -122,6 +129,18 @@ struct PendingStep {
     sync: Duration,
 }
 
+/// The wallpaper kept while no output exists (R60).
+#[derive(Debug, Clone)]
+pub(crate) struct Parked {
+    pub id: String,
+    /// Its pause state to restore (a pending B always resumes playing).
+    resume_paused: bool,
+    /// When its park ramp is over (then it's paused); `None` = settled.
+    settle_at: Option<Duration>,
+    /// The ramp end has been reached once (its final value sent): pause next.
+    armed: bool,
+}
+
 /// Counters for the `loop` probe.
 #[derive(Default)]
 pub(crate) struct LoopStats {
@@ -133,11 +152,14 @@ pub(crate) struct LoopStats {
     /// Longest stretch of synchronous loop work (a tick, a step, the post-dispatch
     /// source sync/update) since the last `probe loop {"reset": true}`.
     pub max_busy_ms: f64,
+    /// The same with the synchronous source opens taken out (`max_open_ms` is those).
+    pub max_busy_excl_open_ms: f64,
+    pub max_open_ms: f64,
     pub iterations: u64,
 }
 
 impl LoopStats {
-    fn record(&mut self, d: Duration, phases: Map<String, Value>) {
+    fn record(&mut self, d: Duration, open: Duration, phases: Map<String, Value>) {
         self.ticks += 1;
         self.last_ticks.push_back(d.as_secs_f64() * 1000.0);
         if self.last_ticks.len() > TICK_HISTORY {
@@ -153,11 +175,15 @@ impl LoopStats {
             self.tick_times.pop_front();
         }
         self.last_phases = phases;
-        self.busy(d);
+        self.busy(d, open);
     }
 
-    pub(crate) fn busy(&mut self, d: Duration) {
-        self.max_busy_ms = self.max_busy_ms.max(d.as_secs_f64() * 1000.0);
+    /// One synchronous stretch `d`, of which `open` went into source opens.
+    pub(crate) fn busy(&mut self, d: Duration, open: Duration) {
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        self.max_busy_ms = self.max_busy_ms.max(ms(d));
+        self.max_busy_excl_open_ms = self.max_busy_excl_open_ms.max(ms(d.saturating_sub(open)));
+        self.max_open_ms = self.max_open_ms.max(ms(open));
     }
 }
 
@@ -187,9 +213,16 @@ pub struct Runtime {
     step_queue: VecDeque<(u64, Value, Duration)>,
     pub(crate) local: BTreeMap<String, LocalTime>,
     /// `stop`/`quit`: sources to destroy once their anti-click ramp is over.
-    pending_destroy: Vec<(Duration, String)>,
+    /// `(ramp end, id, armed)`: armed at the first tick at/after the ramp end — whose sync
+    /// sends the final −96 dB to the live source — and destroyed at the next one.
+    pending_destroy: Vec<(Duration, String, bool)>,
     /// `quit` requested: exit once the ramps are done (or this instant passes).
     quit_at: Option<Instant>,
+    /// R60: the wallpaper parked while no output exists.
+    pub(crate) parked: Option<Parked>,
+    /// Rate-limited warnings: key → (last emitted, suppressed since).
+    warned: BTreeMap<String, (Instant, u64)>,
+    tap_dropped_seen: u64,
     pub(crate) started: Instant,
 }
 
@@ -246,7 +279,8 @@ impl Runtime {
         phases.insert("transitions_ms".into(), ms(tr_d));
         phases.insert("render_ms".into(), ms(render_d));
         phases.insert("total_ms".into(), ms(total));
-        self.stats.record(total, phases);
+        let open = self.host.take_open_time();
+        self.stats.record(total, open, phases);
     }
 
     fn run_anims(&mut self, now: Duration) {
@@ -393,11 +427,12 @@ impl Runtime {
                 &textures,
                 fbo,
             ) {
-                log::event(
+                let key = format!("compose.failed {id} {e}");
+                warn_limited(
+                    &mut self.warned,
+                    key,
                     "compose",
-                    Level::Warn,
                     "compose.failed",
-                    None,
                     json!({ "output": id, "error": e }),
                 );
             }
@@ -417,57 +452,26 @@ impl Runtime {
 
     // ------------------------------------------------------------------ outputs
 
-    /// Apply the backend's hotplug: graph `out:<name>` nodes (+ their main layer), the
-    /// new output showing what the first other output shows (`cur:` semantics), the timer
-    /// period following the max refresh. Removing an output never touches a transition
-    /// on the others (the recipe logs and skips a missing layer).
+    /// Apply the backend's hotplug (graph `out:<name>` + its main layer; the timer period
+    /// follows the max refresh).
+    ///
+    /// **Added (R59/R60):** the new output joins the live transition covering the first
+    /// other output, if any (`Transitions::adopt_output` — it shows what that transition
+    /// shows and goes through cancel/commit/handoff with it); else it shows `cur:` of the
+    /// first output that has one; else, if a wallpaper is parked (no output was left), it
+    /// shows that, unpaused and ramped back in over 30 ms.
+    ///
+    /// **Removed (R60):** the node + layer go; every live transition forgets the output
+    /// (`Transitions::drop_output` — one left with no output is committed); then whatever
+    /// that output alone showed or held (not shown by another layer, not held by a
+    /// transition) is ramped to silence and destroyed (`retire`) — except, when no output
+    /// is left at all, the last current wallpaper (a committed transition's B, else what
+    /// the output showed), which is parked.
     pub(crate) fn apply_output_changes(&mut self) {
         for ch in self.backend.take_changes() {
             match ch {
-                OutputChange::Added(info) => {
-                    let id = format!("out:{}", info.name);
-                    let current = self.current_wallpaper();
-                    let mut props = Map::new();
-                    props.insert("name".into(), json!(info.name));
-                    props.insert("width".into(), json!(info.width));
-                    props.insert("height".into(), json!(info.height));
-                    props.insert("refresh_hz".into(), json!(info.hz));
-                    if let Err(e) = self.graph.create(NodeKind::Output, Some(id.clone()), props) {
-                        log::event(
-                            "output",
-                            Level::Warn,
-                            "output.graph_error",
-                            None,
-                            json!({ "output": id, "error": e.to_string() }),
-                        );
-                        continue;
-                    }
-                    if let Some(cur) = &current {
-                        let _ = self.graph.set(
-                            &p(&format!("lay:{}:main.content", info.name)),
-                            PropValue::Str(cur.clone()),
-                        );
-                    }
-                    log::event(
-                        "output",
-                        Level::Info,
-                        "output.added",
-                        None,
-                        json!({ "output": id, "width": info.width, "height": info.height,
-                                "hz": info.hz, "content": current }),
-                    );
-                }
-                OutputChange::Removed(name) => {
-                    let id = format!("out:{name}");
-                    let _ = self.graph.destroy(&id);
-                    log::event(
-                        "output",
-                        Level::Info,
-                        "output.removed",
-                        None,
-                        json!({ "output": id }),
-                    );
-                }
+                OutputChange::Added(info) => self.output_added(info),
+                OutputChange::Removed(name) => self.output_removed(&name),
             }
         }
         self.refresh_srcs();
@@ -482,6 +486,147 @@ impl Runtime {
         self.tick_period = Duration::from_secs_f64(1.0 / max_hz as f64);
     }
 
+    fn output_added(&mut self, info: crate::headless::OutputInfo) {
+        let id = format!("out:{}", info.name);
+        let others = self.graph.ids_of(NodeKind::Output);
+        let current = self.current_wallpaper();
+        let mut props = Map::new();
+        props.insert("name".into(), json!(info.name));
+        props.insert("width".into(), json!(info.width));
+        props.insert("height".into(), json!(info.height));
+        props.insert("refresh_hz".into(), json!(info.hz));
+        if let Err(e) = self.graph.create(NodeKind::Output, Some(id.clone()), props) {
+            log::event(
+                "output",
+                Level::Warn,
+                "output.graph_error",
+                None,
+                json!({ "output": id, "error": e.to_string() }),
+            );
+            return;
+        }
+        let layer = format!("lay:{}:main.content", info.name);
+        let adopted = others
+            .iter()
+            .find_map(|o| self.tr.adopt_output(&id, o, &mut self.graph));
+        let content = if adopted.is_some() {
+            self.graph.get(&p(&layer)).ok().map(|v| v.to_json())
+        } else if let Some(cur) = &current {
+            let _ = self.graph.set(&p(&layer), PropValue::Str(cur.clone()));
+            Some(json!(cur))
+        } else if let Some(pk) = self.unpark() {
+            let _ = self.graph.set(&p(&layer), PropValue::Str(pk.clone()));
+            Some(json!(pk))
+        } else {
+            None
+        };
+        log::event(
+            "output",
+            Level::Info,
+            "output.added",
+            adopted,
+            json!({ "output": id, "width": info.width, "height": info.height,
+                    "hz": info.hz, "content": content }),
+        );
+    }
+
+    fn output_removed(&mut self, name: &str) {
+        let id = format!("out:{name}");
+        let layer = format!("lay:{name}:main");
+        // What only this output may have shown or held.
+        let mut candidates: BTreeSet<String> = self.shown_by(&layer);
+        let (held, _) = self.tr.held_sources();
+        candidates.extend(held.get(&id).cloned().unwrap_or_default());
+        let cur_before = self
+            .graph
+            .resolve(&format!("cur:{name}"))
+            .into_iter()
+            .next();
+        let _ = self.graph.destroy(&id);
+        let now = self.now();
+        let committed = self
+            .tr
+            .drop_output(&id, &mut self.graph, &mut self.anim, now);
+        self.tr.drain_events();
+        self.refresh_srcs();
+        log::event(
+            "output",
+            Level::Info,
+            "output.removed",
+            None,
+            json!({ "output": id, "committed": committed.iter().map(|(c, _)| c.0.clone()).collect::<Vec<_>>() }),
+        );
+        if self.graph.ids_of(NodeKind::Output).is_empty() {
+            let last = committed
+                .last()
+                .map(|(_, b)| (b.clone(), true))
+                .or(cur_before.map(|c| (c, false)));
+            if let Some((pk, was_pending)) = last
+                && self.graph.kind_of(&pk) == Some(NodeKind::Source)
+            {
+                self.park(&pk, was_pending);
+                candidates.remove(&pk);
+            }
+        } else {
+            for (_, b) in &committed {
+                candidates.insert(b.clone());
+            }
+        }
+        let (held, graves) = self.tr.held_sources();
+        let held: BTreeSet<String> = held.into_values().flatten().chain(graves).collect();
+        for c in candidates {
+            let is_src = self.graph.kind_of(&c) == Some(NodeKind::Source);
+            if !is_src
+                || self.parked.as_ref().is_some_and(|pk| pk.id == c)
+                || held.contains(&c)
+                || self.str_prop(&c, "kind") == "snapshot"
+                || self.shown_anywhere(&c)
+            {
+                continue;
+            }
+            self.retire(&c);
+        }
+    }
+
+    fn str_prop(&self, id: &str, prop: &str) -> String {
+        match self.graph.get(&p(&format!("{id}.{prop}"))) {
+            Ok(PropValue::Str(s)) => s,
+            _ => String::new(),
+        }
+    }
+
+    fn bool_prop(&self, id: &str, prop: &str) -> bool {
+        matches!(
+            self.graph.get(&p(&format!("{id}.{prop}"))),
+            Ok(PropValue::Bool(true))
+        )
+    }
+
+    /// The sources layer `layer` shows (directly, or as either side of its effect).
+    fn shown_by(&self, layer: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let c = self.str_prop(layer, "content");
+        match self.graph.kind_of(&c) {
+            Some(NodeKind::Source) => {
+                out.insert(c);
+            }
+            Some(NodeKind::Effect) => {
+                out.insert(self.str_prop(&c, "from"));
+                out.insert(self.str_prop(&c, "to"));
+            }
+            _ => {}
+        }
+        out.retain(|s| !s.is_empty());
+        out
+    }
+
+    fn shown_anywhere(&self, id: &str) -> bool {
+        self.graph
+            .ids_of(NodeKind::Layer)
+            .iter()
+            .any(|l| self.shown_by(l).contains(id))
+    }
+
     /// What a newly added output shows: `cur:` of the first output that has one.
     fn current_wallpaper(&self) -> Option<String> {
         self.graph
@@ -489,6 +634,156 @@ impl Runtime {
             .iter()
             .filter_map(|o| o.strip_prefix("out:"))
             .find_map(|c| self.graph.resolve(&format!("cur:{c}")).into_iter().next())
+    }
+
+    /// Ramp `id`'s `gain.anticlick` from where it is (or where it's heading) to `to_db`
+    /// over 30 ms, starting now.
+    fn ramp_anticlick(&mut self, id: &str, to_db: f64, corr: Option<CorrId>) {
+        let path = p(&format!("{id}.gain.anticlick"));
+        let cur = self
+            .anim
+            .target_of(&path)
+            .unwrap_or(match self.graph.get(&path) {
+                Ok(PropValue::F64(f)) => f,
+                _ => 0.0,
+            });
+        let now = self.now();
+        self.anim.add(Animation {
+            target: path,
+            from: db_to_lin(cur),
+            to: db_to_lin(to_db),
+            start: now,
+            duration: STOP_RAMP,
+            curve: Curve::Linear,
+            unit: AnimUnit::GainLinear,
+            corr,
+        });
+    }
+
+    /// Whether `id` can make no sound right now (so it may go without a ramp): paused,
+    /// not ready yet (never played), at −96 dB, or a kind without audio.
+    fn is_silent(&self, id: &str) -> bool {
+        matches!(
+            self.str_prop(id, "kind").as_str(),
+            "color" | "snapshot" | "image"
+        ) || self.bool_prop(id, "paused")
+            || !self.bool_prop(id, "ready")
+            || self
+                .graph
+                .effective_gain_db(id)
+                .is_some_and(|db| db <= SILENT_DB + 1e-9)
+    }
+
+    /// Remove a source without a click (core invariant, item 10): an audible one is ramped
+    /// to −96 over 30 ms (`gain.anticlick`) and destroyed when the ramp is over; a silent
+    /// one goes at once. Returns the ramp length. Used by `destroy`, `stop`, output removal.
+    pub(crate) fn retire(&mut self, id: &str) -> Duration {
+        if self.graph.kind_of(id) != Some(NodeKind::Source) {
+            let _ = self.graph.destroy(id);
+            return Duration::ZERO;
+        }
+        if self.parked.as_ref().is_some_and(|pk| pk.id == id) {
+            self.parked = None;
+            self.graph.set_parked(None);
+        }
+        let ramp = if self.is_silent(id) {
+            let _ = self.graph.destroy(id);
+            Duration::ZERO
+        } else {
+            self.ramp_anticlick(id, SILENT_DB, None);
+            let at = self.now() + STOP_RAMP;
+            self.pending_destroy.push((at, id.to_string(), false));
+            STOP_RAMP
+        };
+        log::event(
+            "runtime",
+            Level::Debug,
+            "source.retire",
+            None,
+            json!({ "id": id, "ramp_ms": ramp.as_secs_f64() * 1000.0 }),
+        );
+        ramp
+    }
+
+    /// R60: no output is left — keep the current wallpaper, silent and paused, until one
+    /// comes back. `pending_b`: it's a transition's B that was never shown (it starts
+    /// playing when unparked, whatever its pause state now).
+    fn park(&mut self, id: &str, pending_b: bool) {
+        let resume_paused = !pending_b && self.bool_prop(id, "paused");
+        let silent = self.is_silent(id);
+        if silent {
+            let _ = self.graph.set(
+                &p(&format!("{id}.gain.anticlick")),
+                PropValue::F64(SILENT_DB),
+            );
+        } else {
+            self.ramp_anticlick(id, SILENT_DB, None);
+        }
+        let settle_at = self.now() + if silent { Duration::ZERO } else { STOP_RAMP };
+        self.parked = Some(Parked {
+            id: id.to_string(),
+            resume_paused,
+            settle_at: Some(settle_at),
+            armed: silent,
+        });
+        self.graph.set_parked(Some(id.to_string()));
+        self.settle_parked(self.now());
+        log::event(
+            "runtime",
+            Level::Info,
+            "source.parked",
+            None,
+            json!({ "id": id, "resume_paused": resume_paused }),
+        );
+    }
+
+    /// Once the park ramp is over: pause it, and put a transition's `xfade` at its final
+    /// 0 dB (silent anyway at anticlick −96) so unparking only has to ramp anticlick back.
+    fn settle_parked(&mut self, now: Duration) {
+        let Some(pk) = self.parked.as_mut() else {
+            return;
+        };
+        if pk.settle_at.is_none_or(|at| at > now) {
+            return;
+        }
+        if !pk.armed {
+            pk.armed = true; // this tick sends the final −96; pause on the next one
+            return;
+        }
+        pk.settle_at = None;
+        let id = pk.id.clone();
+        let _ = self
+            .graph
+            .set(&p(&format!("{id}.paused")), PropValue::Bool(true));
+        let xf = p(&format!("{id}.gain.xfade"));
+        self.anim.cancel_target(&xf);
+        let _ = self.graph.set(&xf, PropValue::F64(0.0));
+    }
+
+    /// Show the parked wallpaper again: unpaused (unless it was paused before), ramped
+    /// back in over 30 ms. Returns its id.
+    fn unpark(&mut self) -> Option<String> {
+        let pk = self.parked.take()?;
+        self.graph.set_parked(None);
+        if self.graph.kind_of(&pk.id) != Some(NodeKind::Source) {
+            return None;
+        }
+        if pk.settle_at.is_some() {
+            // Unparked mid-ramp: its xfade may still be animating — leave it.
+        }
+        let _ = self.graph.set(
+            &p(&format!("{}.paused", pk.id)),
+            PropValue::Bool(pk.resume_paused),
+        );
+        self.ramp_anticlick(&pk.id, 0.0, None);
+        log::event(
+            "runtime",
+            Level::Info,
+            "source.unparked",
+            None,
+            json!({ "id": pk.id }),
+        );
+        Some(pk.id)
     }
 
     // ------------------------------------------------------------------ stop / quit
@@ -520,37 +815,25 @@ impl Runtime {
         }
         let ids = self.graph.ids_of(NodeKind::Source);
         let corr = log::new_corr("stop");
-        for id in &ids {
-            let path = p(&format!("{id}.gain.anticlick"));
-            if instant {
+        self.parked = None;
+        self.graph.set_parked(None);
+        if instant {
+            for id in &ids {
+                let path = p(&format!("{id}.gain.anticlick"));
                 let _ = self.graph.set(&path, PropValue::F64(SILENT_DB));
-            } else {
-                let cur = match self.graph.get(&path) {
-                    Ok(PropValue::F64(f)) => f,
-                    _ => 0.0,
-                };
-                self.anim.add(Animation {
-                    target: path,
-                    from: db_to_lin(cur),
-                    to: 0.0,
-                    start: now,
-                    duration: STOP_RAMP,
-                    curve: Curve::Linear,
-                    unit: AnimUnit::GainLinear,
-                    corr: Some(corr.clone()),
-                });
             }
-            self.pending_destroy.push((now + STOP_RAMP, id.clone()));
+            self.sync_sources(); // the −96 reaches mpv before the source goes
+            for id in &ids {
+                let _ = self.graph.destroy(id);
+            }
+            self.pending_destroy.clear();
+            self.sync_sources();
+        } else {
+            for id in &ids {
+                self.retire(id);
+            }
         }
         self.refresh_srcs();
-        if instant {
-            self.sync_sources(); // the −96 reaches mpv before the source goes
-            let due: Vec<String> = self.pending_destroy.drain(..).map(|(_, id)| id).collect();
-            for id in due {
-                let _ = self.graph.destroy(&id);
-            }
-            self.sync_sources();
-        }
         log::event(
             "runtime",
             Level::Info,
@@ -562,14 +845,25 @@ impl Runtime {
     }
 
     fn destroy_due(&mut self, now: Duration) {
-        let (due, keep): (Vec<_>, Vec<_>) = self
-            .pending_destroy
-            .drain(..)
-            .partition(|(at, _)| *at <= now);
-        self.pending_destroy = keep;
-        for (_, id) in due {
+        let mut due = Vec::new();
+        for (at, id, armed) in &mut self.pending_destroy {
+            if *at <= now {
+                if *armed {
+                    due.push(id.clone());
+                } else {
+                    *armed = true; // this tick's sync carries the final −96 dB
+                }
+            }
+        }
+        self.pending_destroy.retain(|(_, id, _)| !due.contains(id));
+        for id in due {
+            for slot in crate::units::GainSlot::ALL {
+                self.anim
+                    .cancel_target(&p(&format!("{id}.gain.{}", slot.as_str())));
+            }
             let _ = self.graph.destroy(&id);
         }
+        self.settle_parked(now);
     }
 
     /// `quit`: stop (ramped on the real clock), then exit once that's done.
@@ -595,8 +889,8 @@ impl Runtime {
     }
 
     /// Final teardown: every source gone (cores to the reaper), the reaper joined with a
-    /// bounded wait, stragglers logged.
-    fn shutdown(&mut self) {
+    /// bounded wait, stragglers logged. Returns the number of stragglers.
+    fn shutdown(&mut self) -> usize {
         for id in self.graph.ids_of(NodeKind::Source) {
             let _ = self.graph.destroy(&id);
         }
@@ -625,17 +919,30 @@ impl Runtime {
         for c in self.server.clients.values_mut() {
             c.flush();
         }
+        left
     }
 
     // ------------------------------------------------------------------ stepped mode
 
-    /// `step {ms}` (stepped clock only). The reply is deferred until the step is done.
-    pub(crate) fn queue_step(&mut self, client: u64, req: Value, dt: Duration) {
-        if self.step.is_some() {
-            self.step_queue.push_back((client, req, dt));
-        } else {
-            self.begin_step(client, req, dt);
+    /// `step {ms}` (stepped clock only). The reply is deferred until the step is done;
+    /// meanwhile the client's later requests wait (per-client FIFO). At most
+    /// [`STEP_QUEUE_MAX`] steps wait behind the running one.
+    pub(crate) fn queue_step(
+        &mut self,
+        client: u64,
+        req: Value,
+        dt: Duration,
+    ) -> Result<(), ApiError> {
+        if self.step_queue.len() >= STEP_QUEUE_MAX {
+            return Err(ApiError {
+                code: "busy",
+                message: format!("{STEP_QUEUE_MAX} steps are already queued"),
+                hint: "wait for each `step` reply before sending the next".into(),
+            });
         }
+        self.step_queue.push_back((client, req, dt));
+        self.advance_step();
+        Ok(())
     }
 
     fn begin_step(&mut self, client: u64, req: Value, dt: Duration) {
@@ -723,13 +1030,29 @@ impl Runtime {
             work: t.elapsed(),
             sync: sync_d,
         });
-        self.advance_step();
     }
 
-    /// Re-check the step in progress: seek ready sources, finish when every frame is in.
+    /// Run the step machinery as far as it goes now — iteratively: start the next queued
+    /// step whenever none is running, re-check the running one, repeat while they finish.
     pub(crate) fn advance_step(&mut self) {
+        loop {
+            if self.step.is_none() {
+                match self.step_queue.pop_front() {
+                    Some((c, r, dt)) => self.begin_step(c, r, dt),
+                    None => return,
+                }
+            }
+            if !self.check_step() {
+                return; // still waiting for frames
+            }
+        }
+    }
+
+    /// Re-check the running step: seek ready sources; when every frame is in (or the
+    /// deadline passed) finish its tick and reply. `true` = it finished.
+    fn check_step(&mut self) -> bool {
         let Some(mut st) = self.step.take() else {
-            return;
+            return true;
         };
         let t = Instant::now();
         self.update_sources();
@@ -772,7 +1095,7 @@ impl Runtime {
         let all_done = st.waits.iter().all(|w| w.done);
         if !all_done && Instant::now() < st.deadline {
             self.step = Some(st);
-            return;
+            return false;
         }
         if let Some(tok) = st.timer.take() {
             self.handle.remove(tok);
@@ -820,9 +1143,12 @@ impl Runtime {
             &st.req,
             result.map(|()| json!({ "now_ms": now_ms })),
         );
-        if let Some((c, r, dt)) = self.step_queue.pop_front() {
-            self.begin_step(c, r, dt);
+        // The client's requests queued behind this step may proceed now.
+        if let Some(c) = self.server.clients.get_mut(&st.client) {
+            c.awaiting = false;
+            c.more_input = true;
         }
+        true
     }
 
     // ------------------------------------------------------------------ API plumbing
@@ -830,6 +1156,18 @@ impl Runtime {
     /// Route queued log events to subscribers (before any reply, so a command's events
     /// reach its own connection before its result).
     pub(crate) fn flush_tap(&mut self) {
+        let dropped = self.tap.dropped();
+        if dropped > self.tap_dropped_seen {
+            self.tap_dropped_seen = dropped;
+            warn_limited(
+                &mut self.warned,
+                "api.tap_overflow".into(),
+                "api",
+                "api.tap_overflow",
+                json!({ "dropped_total": dropped,
+                        "hint": "a subscriber's events outran the loop; narrow its topics" }),
+            );
+        }
         for _ in 0..8 {
             let evs = self.tap.drain();
             if evs.is_empty() {
@@ -855,28 +1193,40 @@ impl Runtime {
     pub(crate) fn client_io(&mut self, cid: u64, readable: bool, writable: bool) {
         if readable {
             let lines = match self.server.clients.get_mut(&cid) {
+                // FIFO: nothing more is read while a deferred reply is outstanding.
+                Some(c) if c.awaiting => Vec::new(),
                 Some(c) => c.read_lines(),
                 None => return,
             };
-            for line in lines {
+            let mut lines = lines.into_iter();
+            while let Some(line) = lines.next() {
+                let Some(c) = self.server.clients.get_mut(&cid) else {
+                    return;
+                };
+                if c.dead.is_some() {
+                    break;
+                }
+                if c.awaiting {
+                    // Wait for the deferred reply; keep the rest, in order, for later.
+                    c.unread(std::iter::once(line).chain(lines.by_ref()).collect());
+                    break;
+                }
                 if line.iter().all(u8::is_ascii_whitespace) {
                     continue;
                 }
                 match proto::parse(&line) {
-                    Ok(req) => {
-                        if let Some(r) = handlers::handle(self, cid, &req) {
-                            self.respond(cid, &req.id, r);
+                    Ok(req) => match handlers::handle(self, cid, &req) {
+                        Some(r) => self.respond(cid, &req.id, r),
+                        None => {
+                            // Deferred (`step`) — unless it was answered at once.
+                            if self.step_pending_for(cid, &req.id)
+                                && let Some(c) = self.server.clients.get_mut(&cid)
+                            {
+                                c.awaiting = true;
+                            }
                         }
-                    }
+                    },
                     Err((id, e)) => self.respond(cid, &id, Err(e)),
-                }
-                if self
-                    .server
-                    .clients
-                    .get(&cid)
-                    .is_none_or(|c| c.dead.is_some())
-                {
-                    break;
                 }
             }
         }
@@ -918,13 +1268,14 @@ impl Runtime {
             .server
             .clients
             .iter()
-            .filter(|(_, c)| c.more_input && c.dead.is_none())
+            .filter(|(_, c)| c.more_input && !c.awaiting && c.dead.is_none())
             .map(|(id, _)| *id)
             .collect();
         for cid in more {
             self.client_io(cid, true, false);
         }
-        self.stats.busy(t.elapsed());
+        let open = self.host.take_open_time();
+        self.stats.busy(t.elapsed(), open);
         self.flush_tap();
         for c in self.server.clients.values_mut() {
             c.flush();
@@ -944,7 +1295,46 @@ impl Runtime {
         self.server
             .clients
             .values()
-            .any(|c| c.more_input && c.dead.is_none())
+            .any(|c| c.more_input && !c.awaiting && c.dead.is_none())
+    }
+
+    /// Whether client `cid`'s request `req` is a step still running or queued.
+    fn step_pending_for(&self, cid: u64, req: &Value) -> bool {
+        self.step
+            .as_ref()
+            .is_some_and(|s| s.client == cid && &s.req == req)
+            || self
+                .step_queue
+                .iter()
+                .any(|(c, r, _)| *c == cid && r == req)
+    }
+}
+
+/// Emit a warning at most once per [`WARN_EVERY`] per `key` (e.g. node + reason); the
+/// next one carries `suppressed`: how many were swallowed meanwhile.
+fn warn_limited(
+    warned: &mut BTreeMap<String, (Instant, u64)>,
+    key: String,
+    comp: &'static str,
+    kind: &str,
+    mut fields: Value,
+) {
+    let now = Instant::now();
+    match warned.get_mut(&key) {
+        Some((at, n)) if now.duration_since(*at) < WARN_EVERY => {
+            *n += 1;
+        }
+        e => {
+            let suppressed = e.map_or(0, |(_, n)| *n);
+            if let Value::Object(m) = &mut fields {
+                m.insert("suppressed".into(), json!(suppressed));
+            }
+            log::event(comp, Level::Warn, kind, None, fields);
+            warned.insert(key, (now, 0));
+        }
+    }
+    if warned.len() > 1024 {
+        warned.retain(|_, (at, _)| now.duration_since(*at) < WARN_EVERY);
     }
 }
 
@@ -976,7 +1366,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
             opts.state_dir.display()
         )
     })?;
-    let (listener, socket_file) = crate::api::server::bind(&opts.socket)?;
+    let (listener, mut socket_file) = crate::api::server::bind(&opts.socket, opts.own_socket_dir)?;
     let gfx = Gfx::new_offscreen().map_err(|e| format!("no EGL device: {e}"))?;
     let cat = match Catalogue::resolve_dir() {
         Some(dir) => Catalogue::load(&dir).map_err(|e| format!("effect catalogue: {e}"))?,
@@ -1038,6 +1428,9 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         local: BTreeMap::new(),
         pending_destroy: Vec::new(),
         quit_at: None,
+        parked: None,
+        warned: BTreeMap::new(),
+        tap_dropped_seen: 0,
         started: Instant::now(),
     };
     rt.apply_output_changes();
@@ -1123,8 +1516,16 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
             break;
         }
     }
-    rt.shutdown();
+    let stragglers = rt.shutdown();
     log::set_tap(None);
+    if stragglers > 0 {
+        // An mpv core is still being destroyed on the reaper thread: a normal exit would
+        // run atexit/static destructors (libmpv, ffmpeg, EGL) under it. The log is already
+        // on disk (every event is flushed), so remove the socket + lock and leave now with
+        // a clean status (item 16).
+        socket_file.remove_now();
+        unsafe { libc::_exit(0) };
+    }
     drop(socket_file);
     Ok(())
 }

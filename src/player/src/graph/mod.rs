@@ -30,7 +30,8 @@
 //!   excluded. Where global settings (`gain.user`, `no_audio`, `speed`, …) go, so a
 //!   setting changed mid-transition also reaches the B that is about to take over. The
 //!   transition part comes from [`Graph::set_transition_sources`], refreshed by the runtime
-//!   after every `Transitions` start/cancel/tick.
+//!   after every `Transitions` start/cancel/tick. `srcs:*` also includes the wallpaper
+//!   parked while no output exists ([`Graph::set_parked`], R60).
 //! - anything else is tried as a concrete node id.
 //!
 //! `set` on a multi-resolution path (e.g. `out:*.paused`) applies to every resolved node.
@@ -195,6 +196,8 @@ pub struct Graph {
     tr_sources: BTreeMap<String, BTreeSet<String>>,
     /// Released sources waiting to be destroyed: never part of `srcs:` via `tr_sources`.
     tr_graves: BTreeSet<String>,
+    /// The wallpaper parked while no output exists (R60): part of `srcs:*`.
+    parked: Option<String>,
 }
 
 impl Default for Graph {
@@ -227,6 +230,7 @@ impl Graph {
             changes: Vec::new(),
             tr_sources: BTreeMap::new(),
             tr_graves: BTreeSet::new(),
+            parked: None,
         }
     }
 
@@ -427,6 +431,12 @@ impl Graph {
         self.tr_graves = graves;
     }
 
+    /// The wallpaper the runtime parked because no output is left (R60) — silent and
+    /// paused, but still a target of `srcs:*` so global settings keep reaching it.
+    pub fn set_parked(&mut self, id: Option<String>) {
+        self.parked = id;
+    }
+
     /// Writes an **observed** value (what a live source reports: `ready`, `duration`,
     /// `time_pos`, `width`, `height`, and `paused` as mpv reports it — mirrored by
     /// `sources::SourceHost::update`). Same resolution and type/range validation as
@@ -577,6 +587,11 @@ impl Graph {
                     if let Some(connector) = n.id.strip_prefix("out:") {
                         set.extend(self.srcs_for_connector(connector));
                     }
+                }
+                if let Some(p) = &self.parked
+                    && self.kind_of(p) == Some(NodeKind::Source)
+                {
+                    set.insert(p.clone());
                 }
                 set.into_iter().collect()
             }

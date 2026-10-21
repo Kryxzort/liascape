@@ -45,6 +45,9 @@ pub struct SourceHost {
     /// Sources whose node is gone, mid two-phase teardown (R51): silent, no longer
     /// hosted (not in `ids`/`texture`/`wake_fds`), dropped by `update` once ready.
     dying: Vec<(String, Hosted, std::time::Instant)>,
+    /// Time spent opening sources since the last `take_open_time` (opening is synchronous
+    /// — mpv init + render context; the `loop` probe reports it apart).
+    open_time: std::time::Duration,
 }
 
 impl SourceHost {
@@ -55,6 +58,7 @@ impl SourceHost {
             failed: BTreeSet::new(),
             events: Vec::new(),
             dying: Vec::new(),
+            open_time: std::time::Duration::ZERO,
         }
     }
 
@@ -76,6 +80,22 @@ impl SourceHost {
             .collect();
         for id in gone {
             if let Some(mut h) = self.sources.remove(&id) {
+                // What the live source still plays at as it goes (must be silent — the
+                // runtime ramps an audible source out before destroying its node).
+                let mut gains = crate::units::Gains::new();
+                for slot in crate::units::GainSlot::ALL {
+                    if let Some(PropValue::F64(db)) = h.src.read(&format!("gain.{}", slot.as_str()))
+                    {
+                        gains.set(slot, db);
+                    }
+                }
+                log::event(
+                    "host",
+                    Level::Info,
+                    "source.teardown",
+                    None,
+                    json!({ "id": id, "source_kind": h.src.kind(), "gain_db": gains.effective_db() }),
+                );
                 if h.src.begin_teardown() {
                     drop(h);
                     log::event(
@@ -101,14 +121,17 @@ impl SourceHost {
             let Some(node) = graph.props_of(&id) else {
                 continue;
             };
-            match self.open(gfx, &node) {
+            let t_open = std::time::Instant::now();
+            let opened_src = self.open(gfx, &node);
+            self.open_time += t_open.elapsed();
+            match opened_src {
                 Ok(h) => {
                     log::event(
                         "host",
                         Level::Debug,
                         "source.open",
                         None,
-                        json!({ "id": id, "kind": h.src.kind() }),
+                        json!({ "id": id, "source_kind": h.src.kind() }),
                     );
                     self.sources.insert(id.clone(), h);
                     opened.insert(id);
@@ -278,6 +301,11 @@ impl SourceHost {
                 i += 1;
             }
         }
+    }
+
+    /// Time spent in synchronous source opens since the last call (loop accounting).
+    pub fn take_open_time(&mut self) -> std::time::Duration {
+        std::mem::take(&mut self.open_time)
     }
 
     /// Sources still mid-teardown (probes).

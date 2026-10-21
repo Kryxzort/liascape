@@ -258,9 +258,14 @@ pub struct MpvSource {
     step: Option<StepSeek>,
 
     // Two-phase teardown (R51, `Source::begin_teardown`).
-    /// mpv's `idle-active` as last observed.
-    idle_active: bool,
-    /// When `begin_teardown` sent `stop`, and its request id.
+    /// A START_FILE was ever seen (a VO may exist).
+    started_any: bool,
+    /// mpv reported `idle-active` = true after the last file ended (its VO is gone).
+    /// Starts false ("unknown"): only a notification after an END_FILE sets it.
+    idle_after_end: bool,
+    /// When `begin_teardown` was called.
+    teardown_at: Option<Instant>,
+    /// When the teardown `stop` was sent, and its request id.
     teardown: Option<(Instant, u64)>,
     /// The core is idle (VO uninitialised) after that `stop`: freeing the render context
     /// won't wait on the playloop.
@@ -453,7 +458,9 @@ impl MpvSource {
             load_failed: None,
             stepped,
             step: None,
-            idle_active: true,
+            started_any: false,
+            idle_after_end: false,
+            teardown_at: None,
             teardown: None,
             idle_after_stop: false,
         };
@@ -556,6 +563,27 @@ impl MpvSource {
             error: None,
         });
         Ok(())
+    }
+
+    /// The teardown `stop` — only once the last gain push has reached mpv (a coalesced
+    /// one may still be owed): stopping cuts the audio, so the final −96 dB must land first.
+    fn send_teardown_stop(&mut self) {
+        if self.teardown.is_some() || self.gain_inflight || self.gain_dirty {
+            return;
+        }
+        let id = self.req_id();
+        if self.core().command_async(id, &["stop"]).is_err() {
+            self.dead = true; // can't stop it: just let it go
+            return;
+        }
+        self.inflight.insert(
+            id,
+            Request {
+                what: "stop (teardown)".into(),
+                kind: ReqKind::Stop,
+            },
+        );
+        self.teardown = Some((Instant::now(), id));
     }
 
     /// Stepped mode: whether this step's virtual time is at the (non-looping) end. The
@@ -796,9 +824,11 @@ impl MpvSource {
                 }
             }
             ReqKind::Stop => {
-                // Already idle when the stop landed (nothing loaded / a failed load): no
-                // later idle-active change will come.
-                if self.idle_active {
+                // Already idle when the stop landed: no file was ever started (events come
+                // in order: a START_FILE would precede this reply, so no VO exists), or the
+                // last one ended and mpv reported idle after it. Otherwise the stop's own
+                // END_FILE + idle notification follow.
+                if self.playing_entry.is_none() && (!self.started_any || self.idle_after_end) {
                     self.idle_after_stop = true;
                 }
             }
@@ -851,6 +881,8 @@ impl MpvSource {
                 Event::SetPropertyReply { id, error } => self.on_reply(id, error, None),
                 Event::StartFile { entry } => {
                     self.playing_entry = Some(entry);
+                    self.started_any = true;
+                    self.idle_after_end = false;
                     if self.is_current() {
                         self.file_loaded = false;
                         self.restarted = false;
@@ -913,9 +945,12 @@ impl MpvSource {
         match (id, value) {
             (OBS_TIME_POS, PropData::F64(t)) if live => {
                 self.time_pos = Some(t);
-                let due = self
-                    .last_pos_emit
-                    .is_none_or(|at| at.elapsed() >= POSITION_INTERVAL);
+                // Stepped: `time-pos` only moves on a step's seek — report every change
+                // (a wall-clock throttle would make the event stream timing-dependent).
+                let due = self.stepped
+                    || self
+                        .last_pos_emit
+                        .is_none_or(|at| at.elapsed() >= POSITION_INTERVAL);
                 if due {
                     self.last_pos_emit = Some(Instant::now());
                     self.pending.push(SourceEvent::Position(t));
@@ -932,10 +967,13 @@ impl MpvSource {
                 self.props.insert("paused".into(), PropValue::Bool(p));
             }
             (OBS_IDLE, PropData::Flag(idle)) => {
-                self.idle_active = idle;
+                if idle && self.playing_entry.is_none() {
+                    self.idle_after_end = true;
+                }
                 // Only an idle reported after the stop's reply counts (events arrive in
                 // order, so an older notification is processed before that reply).
                 if idle
+                    && self.playing_entry.is_none()
                     && let Some((_, req)) = self.teardown
                     && !self.inflight.contains_key(&req)
                 {
@@ -1273,18 +1311,8 @@ impl Source for MpvSource {
         if self.dead || self.handle.is_none() {
             return true;
         }
-        let id = self.req_id();
-        if self.core().command_async(id, &["stop"]).is_err() {
-            return true;
-        }
-        self.inflight.insert(
-            id,
-            Request {
-                what: "stop (teardown)".into(),
-                kind: ReqKind::Stop,
-            },
-        );
-        self.teardown = Some((Instant::now(), id));
+        self.teardown_at = Some(Instant::now());
+        self.send_teardown_stop();
         false
     }
 
@@ -1293,12 +1321,15 @@ impl Source for MpvSource {
         if !self.dead {
             self.drain_wake();
             self.pump();
+            if self.teardown.is_none() {
+                self.send_teardown_stop();
+            }
         }
         self.dead
             || self.idle_after_stop
             || self
-                .teardown
-                .is_none_or(|(at, _)| at.elapsed() >= TEARDOWN_MAX)
+                .teardown_at
+                .is_none_or(|at| at.elapsed() >= TEARDOWN_MAX)
     }
 
     fn as_mpv(&self) -> Option<&MpvSource> {

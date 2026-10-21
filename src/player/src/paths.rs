@@ -19,6 +19,12 @@ pub fn socket() -> PathBuf {
     run.join("livepaper/lp-player.sock")
 }
 
+/// Whether [`socket`] is the default path (no `LP_PLAYER_SOCKET` override) — then its
+/// directory (`…/livepaper`) is the player's own and may be `chmod 0700`-ed.
+pub fn socket_is_default() -> bool {
+    std::env::var_os("LP_PLAYER_SOCKET").is_none_or(|p| p.is_empty())
+}
+
 /// The state dir: `$XDG_STATE_HOME/livepaper/lp-player`, else
 /// `$HOME/.local/state/livepaper/lp-player`.
 pub fn state_dir() -> PathBuf {
