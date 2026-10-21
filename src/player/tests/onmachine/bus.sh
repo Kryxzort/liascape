@@ -159,8 +159,22 @@ cleanup() {
     if ((${#left[@]})); then
         n=$(clear_targets "${left[@]}")
         echo "cleared $n leftover target entries on ids ${left[*]}"
+        # Re-verify: clear_targets's own pw-metadata -d exit status isn't proof the entry is
+        # actually gone (a stale id, a race with PipeWire dropping it itself) — look again,
+        # on the interrupted path too (this runs from the EXIT trap either way).
+        local still=()
+        for id in "${left[@]}"; do
+            target_entries | awk -v id="$id" '$1 == id { f = 1 } END { exit !f }' && still+=("$id")
+        done
+        if ((${#still[@]})); then
+            echo "FAIL: routing metadata still on ids ${still[*]} after clear_targets: $(target_entries)" >&2
+            rc=1
+        else
+            echo "routing metadata on serve's nodes: none left"
+        fi
+    else
+        echo "routing metadata on serve's nodes: none left"
     fi
-    echo "routing metadata on serve's nodes: none left"
     pactl set-default-sink "$ORIG"
     local after
     after=$(pactl get-default-sink)

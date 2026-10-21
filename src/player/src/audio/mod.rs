@@ -120,8 +120,17 @@ impl Audio {
     /// Stop the meter, unload the bus (`audio.bus.down {reason: "shutdown"}`). Run after
     /// every source is gone, so no stream is left targeting a vanished sink. Idempotent.
     pub fn close(&mut self) {
+        // The meter's capture stream lives on the bus's own `lp-bus` thread and borrows its
+        // core (`bus.rs`'s module doc) — stop it first, so no capture callback can still be
+        // running against a connection that's about to go away.
         self.meter = None;
-        if self.bus.take().is_some() {
+        // Then the bus itself, explicitly (not just `Option::take`'s return value dropping
+        // at the end of the `if`): the drop is the actual teardown step (unloads the
+        // loopback module, which takes the sink with it), so it's spelled out rather than
+        // left implicit.
+        let bus = self.bus.take();
+        if let Some(b) = bus {
+            drop(b);
             self.down_reason = Some("shutdown".into());
             log::event(
                 "audio",

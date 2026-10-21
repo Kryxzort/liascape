@@ -14,7 +14,9 @@
 //!   transition events. A block's time = its graph cycle's start (`pw_time.now`,
 //!   CLOCK_MONOTONIC) + its first frame's offset in that buffer; a block spanning two buffers
 //!   is stamped at its first frame.
-//! - The capture runs on PipeWire's RT data thread and never blocks: blocks go to a
+//! - The capture's `process` callback runs on the bus's own `lp-bus` thread
+//!   (`main_loop.iterate()`) — not a separate RT data thread, since nothing here sets
+//!   `RT_PROCESS` (see `bus.rs`'s module doc) — and never blocks: blocks go to a
 //!   callback-local staging buffer, moved into the ring under a `try_lock` (a reader copying
 //!   a window just delays them to the next cycle).
 //!
