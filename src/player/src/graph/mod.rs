@@ -24,6 +24,13 @@
 //! - `cur:<connector>` / `cur:*` — the source currently shown by that output's (or every
 //!   output's, deduplicated) main layer: if `content` is a `Source`, that id; if `content`
 //!   is an `Effect`, its `to` (the incoming side); if `content` is unset, no entry.
+//! - `srcs:<connector>` / `srcs:*` (Task 12, R50) — every `Source` whose picture is on that
+//!   output (a layer of it shows it directly or as either side of an effect) **or** that an
+//!   in-flight transition on it holds (its pending B, held A's) — snapshots and graves
+//!   excluded. Where global settings (`gain.user`, `no_audio`, `speed`, …) go, so a
+//!   setting changed mid-transition also reaches the B that is about to take over. The
+//!   transition part comes from [`Graph::set_transition_sources`], refreshed by the runtime
+//!   after every `Transitions` start/cancel/tick.
 //! - anything else is tried as a concrete node id.
 //!
 //! `set` on a multi-resolution path (e.g. `out:*.paused`) applies to every resolved node.
@@ -44,7 +51,7 @@
 
 pub mod props;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -183,6 +190,11 @@ pub struct Graph {
     next_lay: u64,
     next_fx: u64,
     changes: Vec<(PropPath, PropValue)>,
+    /// `out:<connector>` → sources in-flight transitions on that output hold (pending B,
+    /// held A's) — the non-layer half of the `srcs:` alias (see the module doc).
+    tr_sources: BTreeMap<String, BTreeSet<String>>,
+    /// Released sources waiting to be destroyed: never part of `srcs:` via `tr_sources`.
+    tr_graves: BTreeSet<String>,
 }
 
 impl Default for Graph {
@@ -213,6 +225,8 @@ impl Graph {
             next_lay: 0,
             next_fx: 0,
             changes: Vec::new(),
+            tr_sources: BTreeMap::new(),
+            tr_graves: BTreeSet::new(),
         }
     }
 
@@ -356,6 +370,61 @@ impl Graph {
             self.apply_set(id, prop, value.clone(), true);
         }
         Ok(())
+    }
+
+    /// [`Graph::set`] from a raw wire value (the command API's `set`): each resolved node's
+    /// value is typed through its own schema (`gain.<slot>` → dB number) — same resolution,
+    /// same check order (`no_such_prop` > `read_only` > `bad_type`/`out_of_range`), same
+    /// all-or-nothing rule. Returns the node ids it applied to.
+    pub fn set_json(&mut self, path: &PropPath, raw: &Value) -> Result<Vec<String>, ApiError> {
+        let (node_ref, prop) = split_path(path)?;
+        let targets = self.resolve(node_ref);
+        if targets.is_empty() {
+            return Err(no_such_node(node_ref));
+        }
+        let mut vals = Vec::with_capacity(targets.len());
+        for id in &targets {
+            let kind = self.nodes.get(id).ok_or_else(|| no_such_node(id))?.kind;
+            vals.push(Self::typed_for_set(kind, prop, raw)?);
+        }
+        for (id, v) in targets.iter().zip(vals) {
+            self.apply_set(id, prop, v, true);
+        }
+        Ok(targets)
+    }
+
+    /// Type + validate a raw wire value for `kind.prop` exactly as [`Graph::set_json`] does
+    /// (without needing a node) — the API uses it to check a broadcast whose alias matches
+    /// nothing yet.
+    pub fn typed_for_set(kind: NodeKind, prop: &str, raw: &Value) -> Result<PropValue, ApiError> {
+        let ty = if prop.starts_with("gain.") {
+            PropType::F64
+        } else {
+            let pd = props::schema_for(kind, prop).ok_or_else(|| props::no_such_prop(prop))?;
+            // read_only beats bad_type: check it on a value of the right shape first.
+            props::validate_value(kind, prop, &pd.default, true)?;
+            pd.ty
+        };
+        if prop.starts_with("gain.") {
+            // no_such_prop (wrong kind / slot) beats bad_type.
+            props::validate_value(kind, prop, &PropValue::F64(0.0), true)?;
+        }
+        let v = props::from_json(prop, ty, raw)?;
+        props::validate_value(kind, prop, &v, true)?;
+        Ok(v)
+    }
+
+    /// The transition half of the `srcs:` alias (R50): `by_output` maps `out:<connector>`
+    /// to the sources in-flight transitions on it hold (pending B, held A's); `graves` are
+    /// released sources about to be destroyed, never included through this map. Replaces
+    /// the previous value; the runtime calls it after every `Transitions` start/cancel/tick.
+    pub fn set_transition_sources(
+        &mut self,
+        by_output: BTreeMap<String, BTreeSet<String>>,
+        graves: BTreeSet<String>,
+    ) {
+        self.tr_sources = by_output;
+        self.tr_graves = graves;
     }
 
     /// Writes an **observed** value (what a live source reports: `ready`, `duration`,
@@ -502,8 +571,19 @@ impl Graph {
                 }
                 set.into_iter().collect()
             }
+            "srcs:*" => {
+                let mut set = BTreeSet::new();
+                for n in self.nodes.values().filter(|n| n.kind == NodeKind::Output) {
+                    if let Some(connector) = n.id.strip_prefix("out:") {
+                        set.extend(self.srcs_for_connector(connector));
+                    }
+                }
+                set.into_iter().collect()
+            }
             _ => {
-                if let Some(connector) = alias.strip_prefix("cur:") {
+                if let Some(connector) = alias.strip_prefix("srcs:") {
+                    self.srcs_for_connector(connector).into_iter().collect()
+                } else if let Some(connector) = alias.strip_prefix("cur:") {
                     self.cur_for_connector(connector)
                 } else if self.nodes.contains_key(alias) {
                     vec![alias.to_string()]
@@ -541,6 +621,50 @@ impl Graph {
             },
             _ => vec![],
         }
+    }
+
+    /// The `srcs:<connector>` alias (module doc): sources shown by any layer of the output
+    /// (directly or as an effect side) plus what in-flight transitions on it hold —
+    /// snapshots and (transition-held) graves excluded; empty for an unknown output.
+    fn srcs_for_connector(&self, connector: &str) -> BTreeSet<String> {
+        let out = format!("out:{connector}");
+        let mut set = BTreeSet::new();
+        if !self.nodes.contains_key(&out) {
+            return set;
+        }
+        let str_prop = |n: &Node, k: &str| match n.props.get(k) {
+            Some(PropValue::Str(s)) => s.clone(),
+            _ => String::new(),
+        };
+        for l in self.nodes.values().filter(|n| n.kind == NodeKind::Layer) {
+            if str_prop(l, "output") != out && l.id != format!("lay:{connector}:main") {
+                continue;
+            }
+            let content = str_prop(l, "content");
+            match self.nodes.get(&content) {
+                Some(n) if n.kind == NodeKind::Source => {
+                    set.insert(content.clone());
+                }
+                Some(n) if n.kind == NodeKind::Effect => {
+                    set.insert(str_prop(n, "from"));
+                    set.insert(str_prop(n, "to"));
+                }
+                _ => {}
+            }
+        }
+        if let Some(held) = self.tr_sources.get(&out) {
+            set.extend(
+                held.iter()
+                    .filter(|id| !self.tr_graves.contains(*id))
+                    .cloned(),
+            );
+        }
+        set.retain(|id| {
+            self.nodes
+                .get(id)
+                .is_some_and(|n| n.kind == NodeKind::Source && str_prop(n, "kind") != "snapshot")
+        });
+        set
     }
 
     /// The full live graph as JSON (spec §9's `state` query): one entry per node id, each
@@ -970,5 +1094,98 @@ mod tests {
             assert_eq!(f.to_string(), s);
         }
         assert!("zoom".parse::<Fit>().is_err());
+    }
+
+    #[test]
+    fn srcs_alias_layers_pending_and_exclusions() {
+        let mut g = Graph::new();
+        out(&mut g, "out:A");
+        out(&mut g, "out:B");
+        let a = src(&mut g, "a");
+        let b = src(&mut g, "b");
+        let pend = src(&mut g, "pend");
+        let grave = src(&mut g, "grave");
+        let snap = g
+            .create(
+                NodeKind::Source,
+                Some("snap".into()),
+                json!({"kind": "snapshot", "of": "a"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+        // A shows a directly; B shows an effect snap → b.
+        g.set(&p("lay:A:main.content"), PropValue::Str(a.clone()))
+            .unwrap();
+        let fx = g
+            .create(
+                NodeKind::Effect,
+                Some("fx".into()),
+                json!({"from": snap, "to": b, "effect_id": "fade"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+        g.set(&p("lay:B:main.content"), PropValue::Str(fx)).unwrap();
+        assert_eq!(g.resolve("srcs:A"), vec!["a"]);
+        assert_eq!(g.resolve("srcs:B"), vec!["b"], "snapshot excluded");
+        // A transition on A holds a pending B and a grave.
+        let mut held = BTreeMap::new();
+        held.insert(
+            "out:A".to_string(),
+            [pend.clone(), grave.clone()].into_iter().collect(),
+        );
+        g.set_transition_sources(held, [grave.clone()].into_iter().collect());
+        assert_eq!(g.resolve("srcs:A"), vec!["a", "pend"], "grave excluded");
+        assert_eq!(g.resolve("srcs:*"), vec!["a", "b", "pend"]);
+        assert!(g.resolve("srcs:NOPE").is_empty());
+        // `set` on the alias reaches the pending one too.
+        let t = g.set_json(&p("srcs:*.gain.user"), &json!(-6)).unwrap();
+        assert_eq!(t, vec!["a", "b", "pend"]);
+        assert_eq!(g.get(&p("pend.gain.user")).unwrap(), PropValue::F64(-6.0));
+        assert_eq!(g.get(&p("grave.gain.user")).unwrap(), PropValue::F64(0.0));
+    }
+
+    #[test]
+    fn set_json_types_and_check_order() {
+        let mut g = Graph::new();
+        out(&mut g, "out:A");
+        src(&mut g, "s");
+        assert_eq!(g.set_json(&p("s.speed"), &json!(2)).unwrap(), vec!["s"]);
+        assert_eq!(g.get(&p("s.speed")).unwrap(), PropValue::F64(2.0));
+        g.set_json(&p("s.color"), &json!([1, 2, 3])).unwrap();
+        // read_only beats bad_type; no_such_prop beats both.
+        assert_eq!(
+            g.set_json(&p("s.ready"), &json!("x")).unwrap_err().code,
+            "read_only"
+        );
+        assert_eq!(
+            g.set_json(&p("s.nope"), &json!("x")).unwrap_err().code,
+            "no_such_prop"
+        );
+        assert_eq!(
+            g.set_json(&p("out:A.gain.user"), &json!(1))
+                .unwrap_err()
+                .code,
+            "no_such_prop"
+        );
+        assert_eq!(
+            g.set_json(&p("s.gain.user"), &json!("x")).unwrap_err().code,
+            "bad_type"
+        );
+        assert_eq!(
+            g.set_json(&p("s.speed"), &json!(99)).unwrap_err().code,
+            "out_of_range"
+        );
+        assert_eq!(
+            g.set_json(&p("nope.x"), &json!(1)).unwrap_err().code,
+            "no_such_node"
+        );
+        assert!(
+            g.drain_changes().len() == 2,
+            "only the two good sets recorded"
+        );
     }
 }

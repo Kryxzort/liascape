@@ -20,10 +20,9 @@ happen regardless of timing.
 
 ## Module map
 
-- `src/main.rs` — CLI entry point. Only `--version` is real (prints `lp-player <version>`
-  from `CARGO_PKG_VERSION`); every other invocation, including no args, is a stub that
-  prints `"not implemented yet"` to stderr and exits 2. Later tasks replace the stub
-  branch with `serve`/`ctl`.
+- `src/main.rs` — CLI entry point: `--version`, `serve` (§ Runtime), `ctl` (§ Command
+  API). `serve` without `--headless` exits 2 until Task 13 adds Wayland outputs; any other
+  invocation prints usage and exits 2.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
@@ -33,6 +32,15 @@ happen regardless of timing.
   `SnapshotSource`, and `SourceHost` (graph nodes ↔ live sources). § Sources.
 - `src/recipes/` — programs built only from the blocks; `transition.rs` (Task 11).
   § Transition recipe.
+- `src/runtime.rs` — the running player: one calloop loop, ticks, stepped mode,
+  hotplug, stop/quit. § Runtime.
+- `src/headless.rs` — the `OutputBackend` trait + `Headless` virtual outputs (Task 13
+  adds Wayland). § Runtime.
+- `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
+  `handlers.rs` (the verbs). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
+  and state paths. § Command API.
+- `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; Task 13/15 add
+  files). § Command API.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -117,7 +125,16 @@ dropped, never appended into the wrong file) until the process restarts; `write_
 checks `writer.is_none()` up front so it doesn't retry rotation or touch a stale handle on
 every subsequent event.
 
-**Gotcha:** `init`/`event`/`recent`/`new_corr`/`write_failures` are the only public API — `Logger` and
+**Tap (Task 12).** `log::set_tap(Some(Arc<dyn Tap>))` installs one process-wide consumer of
+every event — the command API's `subscribe`. `Tap::wants(level, kind)` is asked first
+(cheap prefix check); only then is the record built, **even below the logger's level
+threshold** (a subscriber asks for kinds; the file keeps its level — e.g. `source.position`
+is `debug`), and `Tap::send(&record)` gets it *after* the logger's lock is released. The
+record is exactly what the log stores (`kind`, `corr`, `t_mono_ms`, …); the API renames
+`kind` → `event` on the wire. `send` must only queue: it runs on whatever thread logged.
+`Logger::record(…, for_tap)` is the shared builder (`Logger::event` is now test-only).
+
+**Gotcha:** `init`/`event`/`recent`/`new_corr`/`write_failures`/`set_tap` are the only public API — `Logger` and
 `Logger::init_with_limit` are `pub(crate)`, used only by `log.rs`'s own tests so each test
 gets an independent instance instead of fighting over the one process-global `OnceLock`.
 Don't reach for `Logger` from outside `log.rs`; if you need a log in a test elsewhere in
@@ -201,6 +218,13 @@ schema in `props.rs` (`schema_for`/`schema_for_kind`).
   output's, deduplicated) main layer: if `content` is a `Source`, that id; if `content` is
   an `Effect`, its `to` (the incoming side, mid-transition); if `content` is unset or
   dangling, no entry.
+- `srcs:<connector>` / `srcs:*` (Task 12, R50) — every `Source` whose picture is on that
+  output (any layer with `output` = it, or its main layer, showing it directly or as either
+  side of an effect) **or** that an in-flight transition on it holds (pending B, held
+  A's) — `kind: snapshot` nodes and the recipe's graves excluded. The transition half is
+  pushed by the runtime (`Graph::set_transition_sources(by_output, graves)`, from
+  `Transitions::held_sources()`) after every `start`/`cancel`/`tick`. **This is where
+  global settings go** (§ Command API).
 - anything else is tried as a concrete node id.
 
 `set` on a multi-resolution path (e.g. `out:*.paused`) applies to **every** resolved node —
@@ -216,6 +240,11 @@ this doc section or the `lp-player ctl state`/`ctl ...` command to inspect. Orde
 on a `set`: `no_such_prop` (including `gain.*` on a non-`Source`, or an unparseable slot)
 beats `read_only` beats `bad_type`/`out_of_range` — a caller never learns their value's
 shape is wrong on a property they weren't allowed to touch in the first place.
+
+**`set_json(path, &Value)`** (Task 12) is `set` from a raw wire value: each resolved node's
+value is typed through its own schema (`gain.<slot>` → dB number), same check order
+(`no_such_prop` > `read_only` > `bad_type`/`out_of_range`) and all-or-nothing rule; it
+returns the node ids it applied to (the API's `set` → `{targets}`).
 
 **`drain_changes()`** returns every `(PropPath, PropValue)` applied by `set` since the last
 call, in call order (one entry per resolved node for a multi-resolution `set`). Node
@@ -337,6 +366,11 @@ reinvent it).
 through `glReadPixels`, whose native coordinate system has `(0, 0)` at the texture's
 *bottom-left* corner — the same convention `gl_FragCoord` uses. It is **not** flipped.
 Every later task reading pixels back for assertions inherits this origin.
+
+**`write_png_source(tex, path)`** (Task 12) is the same readback *without* the flip, for a
+raw source texture (image top already at row 0, R25) — `capture` of a source is upright
+too. **`Catalogue::empty()`** (Task 12): no effects (no `transitions/` resolved) — the
+runtime still serves cuts.
 
 **`write_png` orientation: top-down, flipped from GL's own order.** `Gfx::write_png` reads
 the whole texture (bottom-left origin, same as `read_rgba`) and flips rows before encoding,
@@ -729,8 +763,25 @@ with its GL context current and before `mpv_terminate_destroy`. Sources get no `
 `make_current()` (a guard that restores whatever was current before; a no-op when the
 context already is), `is_for(gfx)`, and `glDelete{Textures,Framebuffers}` pointers.
 `MpvSource::drop`: make current → free render ctx → delete both FBOs/textures → clear
-wakeup cb → destroy core → close eventfd (in `open`, the eventfd is created before the
-core so error-path locals drop in the same order). Drop order vs the `Gfx` is irrelevant —
+wakeup cb → **hand the core to the reaper** → close eventfd (in `open`, the eventfd is
+created before the core so error-path locals drop in the same order). **Teardown never stalls the loop (R51), in
+two phases.** (1) When a node goes, `SourceHost::sync` calls `Source::begin_teardown()`
+(default: `true` = drop now). `MpvSource` sends `stop` (async) and returns `false`: the
+host moves it to a `dying` list (no longer in `ids`/`texture`/`wake_fds`; silent from the
+stop on). (2) `SourceHost::update` drops it once `teardown_ready()` — mpv's `idle-active`
+reported *after* the stop's reply (idle ⇒ the VO is uninitialised; already idle at the
+reply counts too), the core dead, or 500 ms (`TEARDOWN_MAX`). Then `Drop` frees the render
+context — fast now: with the VO live, `mpv_render_context_free` waits on the playloop
+(**measured 21–32 ms** for a playing 1080p clip) — and hands the core to the **reaper**
+(`sources/reaper.rs`): one background thread runs `mpv_terminate_destroy` (30–240 ms
+measured), started on first use; the wakeup callback is cleared first (mpv invokes it
+under the same lock, so nothing writes the eventfd after that). `reaper::shutdown(timeout)`
+(`quit`: after `SourceHost::finish_teardown(500 ms)`, ≤ 2 s) closes the queue, waits and
+returns the stragglers (logged `mpv.reaper_stragglers`); later drops destroy
+synchronously. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
+`tests/api.rs::destroy_never_stalls_the_loop`: max loop busy around the destroy of a
+playing video 1.7–3.0 ms (5 runs); RED with a synchronous core destroy 29.6 ms, with the
+reaper but a one-phase drop 21–32 ms (flaky against the 20 ms bound). Drop order vs the `Gfx` is irrelevant —
 pinned by `source_outlives_gfx_safely`; dropping with another context current switches
 and restores (`update_with_foreign_context_is_refused`). If the context somehow can't be
 made current, the core is sent `stop` (silent), both callbacks are cleared, and it's
@@ -749,6 +800,20 @@ pinned `opengl-pbo=no` (mpv's default) in `open`. **Neither may be enabled while
 is in place.** `sources::mpv::fence_stub_calls()` counts stub calls;
 `fence_sync_stub_is_used` proves libmpv really calls it, and `first_frame_and_ready`
 checks no GL error is left behind.
+
+**Stepped mode (`opts.stepped: true`, Task 12, R48).** The core is paused for good
+(`pause=yes` set before the first load); `paused` and `position` applies are **stored
+only** (logical — what the graph says, mirrored back unchanged; observed `pause` is not
+mirrored), and `eof-reached`/EOF never emit `Ended`. The runtime drives frames:
+`step_seek(t)` sends `seek <t:.6> absolute exact` (async), and `step_status()` is `Done`
+once the seek's reply, then a PLAYBACK_RESTART, then a rendered frame have been seen
+(mpv completes the `seek` command before the playloop executes it, so the reply always
+precedes that seek's restart), `Pending(what)` meanwhile, `Broken(reason)` for a load error
+/ rejected seek / dead core (not waited on). `step_end(at_end)` queues `Ended` when the
+virtual time first reaches a non-looping end (a paused exact seek to the end never sets
+`eof-reached` — measured) and re-arms it once back before the end. `step_target()`,
+`is_ready()`, `is_stepped()` for the runtime/probes. `Source::as_mpv`/`as_mpv_mut`
+(default `None`) + `SourceHost::mpv`/`mpv_mut`/`wake_fds_by_id`/`open_failed` reach it.
 
 **`ColorSource::new([r,g,b])`** (0–255, the graph's `color`): a 1×1 `RGBA8` texture
 (LINEAR + CLAMP_TO_EDGE → the colour everywhere), created lazily on the first `update`
@@ -896,7 +961,9 @@ Mixing policy for two audible wallpapers is out of scope (docs/TODO.md).
 Align), `.handoff {to, from, committed}`, `.done {to}`, `.cancelled {reason}`, `.failed {path,
 reason}`. Order per corr: scheduled, started, handoff, done — or scheduled[, started],
 cancelled|failed. `status()` lists live transitions with `held` = sources paused on
-purpose (pending B, held A's, frozen B, snapshots) plus its graves.
+purpose (pending B, held A's, frozen B, snapshots) plus its graves. `held_sources()`
+(Task 12) → (`out:<c>` → {B, A's} per live transition, every grave): the `srcs:` alias's
+transition half.
 
 **Tests (`tests/transition.rs`, harness `tests/common/harness.rs`)** — Graph + Animator +
 SteppedClock + Gfx + SourceHost + Transitions + Composer, virtual outputs `VIRTUAL-n`
@@ -909,3 +976,180 @@ markers alias neighbours (limited-range luma: 4 reads as 3, 11 as 10) — ± 1 m
 state-machine rules (R44 seek, cut per-A ramps, video-is-never-a-still, held A destroyed at
 handoff) are unit-tested graph-only in `recipes/transition.rs` (synthetic events, no GPU).
 
+
+## Runtime
+
+`src/runtime.rs` + `src/headless.rs` (spec §4.1/§4.2, §9 "headless deterministic mode";
+Task 12). `lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
+[--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace]` — defaults
+`1920x1080@60`, `real`, mpv's lp-player default ao (`pipewire`), `info`. **`--ao null` in
+every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent.
+Without `--headless` it exits 2 (Wayland = Task 13).
+
+**Paths (`src/paths.rs`).** Socket `$LP_PLAYER_SOCKET`, else
+`$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (else `/run/user/<uid>/…`); the dir is made
+`0700`, the socket `0600`. State/event log `$XDG_STATE_HOME/livepaper/lp-player/` (default
+`~/.local/state/livepaper/lp-player/`). **Single instance:** an existing socket that
+answers → exit 1 with `lp-player is already running (pid N)` (its `hello` pid); one that
+refuses (crash leftover) → unlinked and re-bound. The socket file is removed on every exit
+path after binding (`SocketFile` guard). A unix socket path must be < 108 bytes — tests use
+`std::env::temp_dir()`, not `target/`.
+
+**One calloop loop (`EventLoop<'static, Runtime>`).** Sources: the listener + one
+edge-triggered source per client (§ Command API), one level-triggered source per mpv wake
+eventfd — a **`dup`** of the source's fd (`F_DUPFD_CLOEXEC`), so a dropped source closing
+its fd can never leave a dangling or reused-number registration —, a `Ping` for log events
+from other threads, a `signalfd` (SIGINT/SIGTERM blocked process-wide before any thread
+exists → a clean `quit`), and on the real clock a `Timer` at the max output refresh
+(`tick_period`, recomputed on hotplug; skips ahead if a tick overruns). Task 13 adds the
+Wayland fd and per-output frame callbacks.
+
+**Who runs what (R47).** The **timer tick** is the only place time-driven work runs:
+`Animator::tick` → `Graph::set` (a failed set — node gone — cancels that animation,
+`anim.dropped`) → due `stop` destroys → `sync_sources` (`drain_changes` → `SourceHost::sync`
+→ wake-fd registrations) → `update_sources` (`SourceHost::update`; `source.ready`/`.ended`/
+`.position` logged) → `Transitions::tick(every source event since the last tick)` →
+`refresh_srcs` → compose + present every output. **A wake (mpv eventfd) only flags**;
+after every dispatch the loop syncs pending graph changes to the sources and, if woken,
+updates them (textures, events) — never animation or recipes (ticking on wakes
+self-sustains: every gain push's reply wakes the fd). Handlers run inside the client's
+callback and change only the graph/animator/recipe; their changes reach the sources in the
+same iteration's post-dispatch sync.
+
+**Stepped clock (R48).** No timer. `step {ms}`: advance the `SteppedClock`, run the
+animator + due destroys + `sync_sources` + `update_sources`, then give every mpv source a
+**virtual media time**: created at its first step at its graph `position` (no advance that
+step, whenever it was opened); later steps advance it by `ms × speed` while the graph says
+`paused: false`; `position`/`path` changes reset it (`position` value / 0); `loop` → modulo
+`duration`, else clamped at `duration` (the first step at the end queues `Ended` via
+`step_end` — mpv never reports EOF for a paused seek). Videos are `step_seek`ed (skipped
+when the target is unchanged); images and not-yet-ready sources are waited for `Ready`.
+The step **waits without blocking the loop** (`PendingStep`, re-checked after every
+dispatch, a one-shot `Timer` wakes it at the deadline) until every wait is `Done`/`Broken`
+— bounded by `STEP_TIMEOUT` (2 s) → `timeout` error naming each pending source, its target
+and what it waits for (the tick still runs) — then runs the rest of the tick and replies
+`{now_ms}`. Further `step`s queue behind it. **Determinism** = the same command script
+gives byte-identical captures (`stepped_is_deterministic`: two servers, FrameIndex clip,
+markers 9 and 60 at 0.304 s and 2.032 s). Audio is silent in stepped mode (mpv paused).
+
+**Outputs (`OutputBackend`, R46).** `kind/outputs/take_changes/target/picture/present/
+as_headless_mut`. `Headless`: `VIRTUAL-1…n` in `--outputs` order, each an RGBA8 texture +
+FBO; `present` is a no-op, `capture` reads `picture`. Hotplug (`apply_output_changes`,
+after every dispatch and in the `headless.*` handlers): **added** → `out:<name>` (+ its
+main layer) with `name/width/height/refresh_hz`, content = `cur:` of the first output that
+has one (`output.added {content}`); **removed** → the node + layer destroyed
+(`output.removed`) — an in-flight transition carries on on the others (the recipe logs
+`transition.graph_error` for the missing layer and skips it; `hotplug_mid_transition`). An
+output added while a transition is pre-handoff shows A and keeps it (A becomes a shared A,
+R34) — the backend reacts to `output.added`.
+
+**stop / quit.** `stop`: every live transition dropped (`transition.cancelled {reason:
+"stopped"}`), animator reset, every layer emptied, effects destroyed, every source's
+`gain.anticlick` ramped to −96 over 30 ms (invariant #4) and destroyed when the ramp is
+over (stepped clock: set to −96 and destroyed at once — virtual time won't move by
+itself). `quit` (and SIGINT/SIGTERM): `stop`, exit once the destroys are done (≤ 120 ms),
+then `reaper::shutdown(2 s)` (stragglers logged), socket removed, exit 0.
+
+**Tests (`tests/api.rs`).** Spawn the real binary (`env!("CARGO_BIN_EXE_lp-player")`)
+with `serve --headless --outputs 640x360@60,320x180@60 --clock stepped --ao null` (some
+add `--clock real`), temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `std::env::temp_dir()`
+(never the real ones); the `Serve` guard kills the child on drop (also on panic). One
+server at a time (process-wide lock, handed between the two servers of a two-run test).
+Skips only without EGL or a catalogue.
+
+## Command API
+
+`src/api/` + `src/ctl.rs` (spec §4.2 "Command API", §8/§9; Task 12). JSON Lines over the
+unix socket (§ Runtime → Paths):
+
+- request `{"id":N,"cmd":"<verb>","args":{…}}` — `args` optional, `id` any JSON value
+  (echoed back)
+- reply `{"id":N,"ok":true,"result":…}` | `{"id":N,"ok":false,"error":{"code","message",
+  "hint"}}` — **every error has a hint saying what to do next**; an unparseable line gets
+  `"id":null`
+- event (after `subscribe`) `{"event":"<kind>","corr":…,"t_mono_ms":…,"t_wall","comp",
+  "level",…fields}` — the event-log record with `kind` renamed. Events a command causes are
+  delivered **before** its reply on the same connection (the tap is flushed before every
+  reply).
+
+**`ctl`:** `lp-player ctl <verb> ['<json args>']` prints the result as pretty JSON, exit 0
+— or the error object (stdout), exit 1 (also for no player / bad JSON args, with a hint).
+`lp-player ctl subscribe <prefix…>` prints events one JSON object per line until Ctrl-C
+(or the player exits / stdout closes).
+
+| verb | args | result | errors (besides `bad_request`) | `ctl` example |
+|---|---|---|---|---|
+| `hello` | — | `{version, pid, protocol: 1, capabilities: [video, image, color, transition, headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
+| `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
+| `destroy` | `{id}` | `{}` | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
+| `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
+| `get` | `{path}` (must resolve to one node) | `{value}` | graph codes, `ambiguous` | `ctl get '{"path":"cur:DP-1.time_pos"}'` |
+| `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value | `{corr, targets}`; `anim.done {corr}` per finished animation | `bad_type` (non-numeric), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
+| `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
+| `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
+| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz}], backend, sources (hosted ids)}` | — | `ctl state` |
+| `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
+| `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
+| `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
+| `probe` | `{name, args?}` | the probe's result | `no_such_probe` | `ctl probe '{"name":"sources"}'` |
+| `effects` | — | `{ids}` (catalogue order; `[]` without `transitions/`) | — | `ctl effects` |
+| `stop` | — | `{stopping: [ids]}` | — | `ctl stop` |
+| `quit` | — | `{}` (then the process exits 0) | — | `ctl quit` |
+| `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in) | `unsupported` (real clock), `timeout` | `ctl step '{"ms":16}'` |
+| `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
+| `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
+
+**Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
+`cmd` / bad args), `no_such_verb` (hint lists every verb), `no_such_effect`,
+`no_such_probe`, `timeout` (a step's frames), `io` (capture write, ctl connect).
+
+**Event kinds** (subscribe by prefix): `transition.scheduled|started|handoff|done|
+cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
+(runtime, `position` is debug-level ~10 Hz) and `source.error|rejected|open|drop` (host),
+`output.added|removed`, `anim.start|done|dropped`, `api.client_connected|closed|dropped`,
+`player.started|stopped|quitting|exit`, `step.timeout`, `mpv.reaped`,
+`mpv.reaper_stragglers`, `effects.missing`, `compose.failed` — i.e. every event-log kind
+(log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
+
+**Global settings go to `srcs:*` (R50).** The backend (Task 17) sends every global setting
+— `gain.user`, `no_audio`, `speed`, `hwdec`, `fps_cap`, `cache`, `demuxer_*`, `af`,
+`audio_delay` — as `set srcs:*.<prop>` (or `srcs:<connector>` per output), never `cur:*`:
+`cur:` misses the pending B of an in-flight transition, which would then take over with
+the old value (project rule "settings apply live"). Per-item overrides target the item's
+own source id. Layer settings (`fit`, `viewport`) go to `lay:*:main`. A `set` on a
+wildcard alias (`srcs:*`, `cur:*`, `out:*`, `lay:*:main`) that matches nothing right now
+is still type-checked against that kind's schema and succeeds with `targets: []` (a
+broadcast to nobody isn't an error); a concrete id that doesn't exist is `no_such_node`.
+
+**Probes (`src/probe/`).** `list`; `sources` — per hosted source `{id, kind, path, ready,
+paused, loop, speed, time_pos, duration, gain_effective_db (graph), gains (the live
+source's own slots), live_kind, size, mpv_volume_gain, mpv_pause, requests_in_flight,
+stepped, step_status, virtual_t, last_event}` (`mpv_*` are synchronous mpv reads — probe
+only); `loop` — `{clock, tick_period_ms, ticks, tick_hz_last_s, last_tick_ms,
+recent_ticks_ms, max_tick_ms_recent, last_phases {sync_ms, transitions_ms, render_ms,
+total_ms}, max_busy_ms (longest synchronous stretch since the last
+`args: {"reset": true}`), iterations, wakes, wake_pending, wake_fds, clients,
+subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`. A new probe = a file here +
+one `PROBES` entry.
+
+**Isolation (`api/server.rs`).** Non-blocking, edge-triggered client sockets; per wake a
+client gets ≤ 256 KiB read and ≤ 32 requests handled (the rest next iteration, round
+robin); a line over 1 MiB → `bad_request` + close; garbage JSON → `bad_request` (kept); a
+peer EOF still gets every queued reply before the close; > 16 MiB of unsent output (a
+dead/slow subscriber, or a client not reading replies) → dropped with
+`api.client_dropped {client, reason}`. The tap buffers ≤ 50 000 events between iterations
+(oldest dropped, `tap_dropped`). `bad_client_isolated` pins all of this (the good client's
+worst reply stays < 500 ms during a 40 000-request flood).
+
+**Debugging with `ctl` (AI recipe).**
+1. `ctl state` — what is on each output (`lay:<c>:main.content`, `cur:`), every source's
+   `ready/paused/time_pos/gain_effective_db`, live `transitions` (phase, held).
+2. `ctl logs '{"corr":"tr-12"}'` — one operation's whole story (a transition's
+   scheduled→started→handoff→done, or where it stopped: `cancelled`/`failed {reason}`);
+   `ctl logs '{"min_level":"warn"}'` for everything that went wrong.
+3. `ctl probe '{"name":"sources"}'` — what each live source actually runs (mpv's real
+   `volume-gain`, `pause`, unanswered requests, step status); `ctl probe '{"name":"loop"}'`
+   — is the loop ticking at the refresh, how long ticks take, did anything stall it.
+4. `ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'` — look at the picture.
+5. Reproduce deterministically: `serve --headless --clock stepped --ao null`, replay the
+   commands, `step`, `capture`.

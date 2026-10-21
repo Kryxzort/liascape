@@ -2,15 +2,23 @@
 //!
 //! Modules so far: the event log (`log`), audio units (`units`), clocks (`clock`), the
 //! Animator (`anim`), the node graph (`graph`), the GPU core (`gfx`), the libmpv wrapper
-//! (`mpv`), the frame sources (`sources`) and the recipes built from them (`recipes`). Later tasks append modules here — see
-//! `.claude/rules/player-core.md` for the map.
+//! (`mpv`), the frame sources (`sources`), the recipes built from them (`recipes`), the
+//! running player (`runtime`) with its outputs (`headless`), command API (`api`), probes
+//! (`probe`), socket/state paths (`paths`) and shell client (`ctl`). Later tasks append
+//! modules here — see `.claude/rules/player-core.md` for the map.
 
 pub mod anim;
+pub mod api;
 pub mod clock;
+pub mod ctl;
 pub mod gfx;
 pub mod graph;
+pub mod headless;
 pub mod log;
 pub mod mpv;
+pub mod paths;
+pub mod probe;
 pub mod recipes;
+pub mod runtime;
 pub mod sources;
 pub mod units;

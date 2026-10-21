@@ -44,6 +44,9 @@ const OBS_DHEIGHT: u64 = 4;
 const OBS_EOF: u64 = 5;
 const OBS_PAUSE: u64 = 6;
 const OBS_IMAGE: u64 = 7;
+const OBS_IDLE: u64 = 8;
+/// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
+const TEARDOWN_MAX: Duration = Duration::from_millis(500);
 
 /// mpv's own defaults, restored when a `demuxer_*_mib` property is set to 0 ("unset" —
 /// the legacy engine's convention: `AppSettings` only passes `--demuxer-max-*` when > 0).
@@ -153,6 +156,37 @@ enum ReqKind {
     Gain,
     /// A `loadfile`.
     Load,
+    /// A stepped-mode `seek` ([`MpvSource::step_seek`]).
+    Step,
+    /// The teardown `stop` ([`Source::begin_teardown`]).
+    Stop,
+}
+
+/// Where a stepped-mode frame request is ([`MpvSource::step_status`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StepStatus {
+    /// The frame for the requested position is in the texture (or nothing was asked and
+    /// the source is ready).
+    Done,
+    /// Still waiting — for what (`"ready"`, `"seek reply"`, `"playback restart"`,
+    /// `"frame"`), for error messages.
+    Pending(&'static str),
+    /// The source can't produce it (load error, seek rejected, core gone): don't wait.
+    Broken(String),
+}
+
+/// One stepped-mode seek in flight.
+#[derive(Debug)]
+struct StepSeek {
+    target: f64,
+    req: u64,
+    replied: bool,
+    /// PLAYBACK_RESTART seen after the seek's reply (the reply always precedes the seek's
+    /// own restart: mpv completes the `seek` command before the playloop executes it).
+    restarted: bool,
+    /// A frame rendered after that restart — the one at `target`.
+    rendered: bool,
+    error: Option<String>,
 }
 
 /// One FBO-backed render target.
@@ -214,6 +248,23 @@ pub struct MpvSource {
     last_pos_emit: Option<Instant>,
     last_error_log: Option<String>,
     pending: Vec<SourceEvent>,
+    /// The current load failed (cleared by the next load): stepped mode doesn't wait on it.
+    load_failed: Option<String>,
+
+    /// Stepped (deterministic headless) mode, R48: mpv itself stays paused for good;
+    /// `paused`/`position` are stored (logical, what the graph says) but not sent — the
+    /// runtime shows each step's frame with [`MpvSource::step_seek`].
+    stepped: bool,
+    step: Option<StepSeek>,
+
+    // Two-phase teardown (R51, `Source::begin_teardown`).
+    /// mpv's `idle-active` as last observed.
+    idle_active: bool,
+    /// When `begin_teardown` sent `stop`, and its request id.
+    teardown: Option<(Instant, u64)>,
+    /// The core is idle (VO uninitialised) after that `stop`: freeing the render context
+    /// won't wait on the playloop.
+    idle_after_stop: bool,
 }
 
 impl MpvSource {
@@ -226,7 +277,9 @@ impl MpvSource {
     /// mpv agree from the start — plus:
     /// - `ao` — mpv audio output, default [`DEFAULT_AO`] (tests pass `"null"`, R26);
     /// - `audio_device` — mpv `audio-device` (the player bus, Task 14);
-    /// - `kind` — `"video"` | `"image"`; default inferred from the extension.
+    /// - `kind` — `"video"` | `"image"`; default inferred from the extension;
+    /// - `stepped` — `true`: deterministic stepped mode (R48; mpv stays paused, frames come
+    ///   from [`MpvSource::step_seek`] — see the field doc).
     ///
     /// `path` in `opts` is ignored (the argument wins); read-only and unknown names are
     /// rejected with the graph's own error codes; a value mpv rejects here is
@@ -254,6 +307,11 @@ impl MpvSource {
             }
         };
         let ao = opt_str("ao")?.unwrap_or(DEFAULT_AO).to_string();
+        let stepped = match opts.get("stepped") {
+            None => false,
+            Some(Value::Bool(b)) => *b,
+            Some(other) => return Err(bad_type(format!("stepped must be a bool, got {other}"))),
+        };
         let audio_device = opt_str("audio_device")?.map(str::to_string);
 
         // Type every remaining opt up front (bad shapes fail before any mpv work).
@@ -261,7 +319,7 @@ impl MpvSource {
         let mut start: Option<f64> = None;
         for (k, v) in opts {
             match k.as_str() {
-                "ao" | "audio_device" | "kind" | "path" => {}
+                "ao" | "audio_device" | "kind" | "path" | "stepped" => {}
                 "position" => {
                     start =
                         Some(v.as_f64().ok_or_else(|| {
@@ -327,6 +385,7 @@ impl MpvSource {
             (OBS_EOF, "eof-reached", Format::Flag),
             (OBS_PAUSE, "pause", Format::Flag),
             (OBS_IMAGE, "current-tracks/video/image", Format::Flag),
+            (OBS_IDLE, "idle-active", Format::Flag),
         ] {
             handle.observe(id, name, f).map_err(api_err)?;
         }
@@ -391,6 +450,12 @@ impl MpvSource {
             last_pos_emit: None,
             last_error_log: None,
             pending: Vec::new(),
+            load_failed: None,
+            stepped,
+            step: None,
+            idle_active: true,
+            teardown: None,
+            idle_after_stop: false,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -413,6 +478,10 @@ impl MpvSource {
                 .set_property("start", &t.to_string())
                 .map_err(api_err)?;
             src.props.insert("position".into(), PropValue::F64(t));
+        }
+        if stepped {
+            // Paused for good; `props["paused"]` keeps the logical value.
+            src.core().set_property("pause", "yes").map_err(api_err)?;
         }
         src.live = true;
         src.load(path)?;
@@ -443,6 +512,93 @@ impl MpvSource {
     /// Read a raw mpv property as a double. Synchronous — tests/probes only.
     pub fn mpv_get_f64(&self, name: &str) -> Option<f64> {
         self.handle.as_ref()?.get_property_f64(name)
+    }
+
+    /// Opened in stepped mode (`stepped: true`).
+    pub fn is_stepped(&self) -> bool {
+        self.stepped
+    }
+
+    /// The current load is `Ready` (its first frame is the texture).
+    pub fn is_ready(&self) -> bool {
+        self.ready
+    }
+
+    /// Stepped mode (R48): show the frame at media time `t` — `seek <t> absolute exact`
+    /// with mpv paused. [`MpvSource::step_status`] says when that frame is the texture.
+    /// Only call once the source [`is_ready`](Self::is_ready).
+    pub fn step_seek(&mut self, t: f64) -> Result<(), ApiError> {
+        if !self.stepped {
+            return Err(unsupported(format!(
+                "{}: step_seek on a source not opened in stepped mode",
+                self.path
+            )));
+        }
+        // Fixed formatting: the same virtual time always becomes the same command.
+        let ts = format!("{t:.6}");
+        let id = self.req_id();
+        self.core()
+            .command_async(id, &["seek", &ts, "absolute", "exact"])
+            .map_err(api_err)?;
+        self.inflight.insert(
+            id,
+            Request {
+                what: format!("seek {ts} absolute exact (step)"),
+                kind: ReqKind::Step,
+            },
+        );
+        self.step = Some(StepSeek {
+            target: t,
+            req: id,
+            replied: false,
+            restarted: false,
+            rendered: false,
+            error: None,
+        });
+        Ok(())
+    }
+
+    /// Stepped mode: whether this step's virtual time is at the (non-looping) end. The
+    /// first step at the end queues `Ended` (once per play-through, like the real clock);
+    /// a step back before the end re-arms it.
+    pub fn step_end(&mut self, at_end: bool) {
+        if !self.stepped || self.kind == "image" {
+            return;
+        }
+        if at_end && !self.ended_sent {
+            self.ended_sent = true;
+            self.pending.push(SourceEvent::Ended);
+        } else if !at_end {
+            self.ended_sent = false;
+        }
+    }
+
+    /// The target of the last [`step_seek`](Self::step_seek), if one was issued for the
+    /// current load.
+    pub fn step_target(&self) -> Option<f64> {
+        self.step.as_ref().map(|s| s.target)
+    }
+
+    /// Where the last [`step_seek`](Self::step_seek) is (or, with none issued, whether the
+    /// source is ready).
+    pub fn step_status(&self) -> StepStatus {
+        if self.dead {
+            return StepStatus::Broken(format!("{}: mpv core shut down", self.path));
+        }
+        if let Some(e) = &self.load_failed {
+            return StepStatus::Broken(e.clone());
+        }
+        match &self.step {
+            None if self.ready => StepStatus::Done,
+            None => StepStatus::Pending("ready"),
+            Some(s) => match (&s.error, s.replied, s.restarted, s.rendered) {
+                (Some(e), ..) => StepStatus::Broken(e.clone()),
+                (None, false, ..) => StepStatus::Pending("seek reply"),
+                (None, true, false, _) => StepStatus::Pending("playback restart"),
+                (None, true, true, false) => StepStatus::Pending("frame"),
+                (None, true, true, true) => StepStatus::Done,
+            },
+        }
     }
 
     fn core(&self) -> &Handle {
@@ -545,6 +701,8 @@ impl MpvSource {
         self.ended_sent = false;
         self.time_pos = None;
         self.duration = None;
+        self.load_failed = None;
+        self.step = None;
         Ok(())
     }
 
@@ -585,6 +743,11 @@ impl MpvSource {
     }
 
     fn mark_ended(&mut self) {
+        // Stepped: the virtual clock says when the end is reached (`step_end`) — a paused
+        // exact seek to the end never sets mpv's `eof-reached`.
+        if self.stepped {
+            return;
+        }
         if !self.ended_sent && self.kind != "image" {
             self.ended_sent = true;
             self.pending.push(SourceEvent::Ended);
@@ -596,6 +759,7 @@ impl MpvSource {
         if let Some(log) = self.last_error_log.take() {
             reason.push_str(&format!(" ({log})"));
         }
+        self.load_failed = Some(reason.clone());
         self.pending.push(SourceEvent::Error { reason });
     }
 
@@ -629,6 +793,23 @@ impl MpvSource {
                     self.load_error(format!("loadfile failed: {}", error_string(error)));
                 } else {
                     self.want_entry = entry;
+                }
+            }
+            ReqKind::Stop => {
+                // Already idle when the stop landed (nothing loaded / a failed load): no
+                // later idle-active change will come.
+                if self.idle_active {
+                    self.idle_after_stop = true;
+                }
+            }
+            ReqKind::Step => {
+                if let Some(st) = self.step.as_mut()
+                    && st.req == id
+                {
+                    st.replied = true;
+                    if error < 0 {
+                        st.error = Some(format!("{}: {}", req.what, error_string(error)));
+                    }
                 }
             }
             ReqKind::Prop { prop, prev } => {
@@ -685,6 +866,11 @@ impl MpvSource {
                 Event::PlaybackRestart => {
                     if self.is_current() && self.file_loaded {
                         self.restarted = true;
+                        if let Some(st) = self.step.as_mut()
+                            && st.replied
+                        {
+                            st.restarted = true;
+                        }
                     }
                 }
                 Event::EndFile {
@@ -741,8 +927,20 @@ impl MpvSource {
             (OBS_EOF, PropData::Flag(true)) if live => self.mark_ended(),
             // Seeked back / looped: the next end is a new play-through.
             (OBS_EOF, PropData::Flag(false)) if self.is_current() => self.ended_sent = false,
-            (OBS_PAUSE, PropData::Flag(p)) => {
+            // Stepped: mpv is paused for good; `paused` stays the logical value.
+            (OBS_PAUSE, PropData::Flag(p)) if !self.stepped => {
                 self.props.insert("paused".into(), PropValue::Bool(p));
+            }
+            (OBS_IDLE, PropData::Flag(idle)) => {
+                self.idle_active = idle;
+                // Only an idle reported after the stop's reply counts (events arrive in
+                // order, so an older notification is processed before that reply).
+                if idle
+                    && let Some((_, req)) = self.teardown
+                    && !self.inflight.contains_key(&req)
+                {
+                    self.idle_after_stop = true;
+                }
             }
             (OBS_IMAGE, PropData::Flag(img)) if self.is_current() => {
                 self.kind = if img { "image" } else { "video" };
@@ -884,7 +1082,14 @@ impl Source for MpvSource {
         {
             if self.ready {
                 match render_into(gfx, render, &mut self.front, size) {
-                    Ok(()) => changed = true,
+                    Ok(()) => {
+                        changed = true;
+                        if let Some(st) = self.step.as_mut()
+                            && st.restarted
+                        {
+                            st.rendered = true;
+                        }
+                    }
                     Err(e) => self.last_error_log = Some(e.to_string()),
                 }
             } else {
@@ -962,6 +1167,8 @@ impl Source for MpvSource {
                 self.set("path", "start", "none")
                     .and_then(|()| self.load(&s))
             }
+            // Stepped: logical only (mpv stays paused; the runtime seeks each step).
+            "paused" | "position" if self.stepped => Ok(()),
             "paused" => self.set(prop, "pause", yes_no(b)),
             "speed" => self.set_f64(prop, "speed", num(v)),
             "loop" => self.set(prop, "loop-file", if b { "inf" } else { "no" }),
@@ -1057,6 +1264,50 @@ impl Source for MpvSource {
         self.pump();
         std::mem::take(&mut self.pending)
     }
+
+    /// R51 phase 1: `stop` (async) — the file ends, mpv goes idle and uninitialises its
+    /// VO, after which `mpv_render_context_free` no longer waits on the playloop (with the
+    /// VO live it blocked the loop 21–32 ms for a playing 1080p clip, measured). The
+    /// stream is silent from the stop on.
+    fn begin_teardown(&mut self) -> bool {
+        if self.dead || self.handle.is_none() {
+            return true;
+        }
+        let id = self.req_id();
+        if self.core().command_async(id, &["stop"]).is_err() {
+            return true;
+        }
+        self.inflight.insert(
+            id,
+            Request {
+                what: "stop (teardown)".into(),
+                kind: ReqKind::Stop,
+            },
+        );
+        self.teardown = Some((Instant::now(), id));
+        false
+    }
+
+    /// R51 phase 2: idle after the stop (or the core is gone, or [`TEARDOWN_MAX`] passed).
+    fn teardown_ready(&mut self) -> bool {
+        if !self.dead {
+            self.drain_wake();
+            self.pump();
+        }
+        self.dead
+            || self.idle_after_stop
+            || self
+                .teardown
+                .is_none_or(|(at, _)| at.elapsed() >= TEARDOWN_MAX)
+    }
+
+    fn as_mpv(&self) -> Option<&MpvSource> {
+        Some(self)
+    }
+
+    fn as_mpv_mut(&mut self) -> Option<&mut MpvSource> {
+        Some(self)
+    }
 }
 
 impl Drop for MpvSource {
@@ -1089,10 +1340,15 @@ impl Drop for MpvSource {
             std::mem::forget(self.handle.take());
         }
         drop(cur);
-        // 2. The core: stops the wakeup callback before 3. the eventfd closes (field drop).
+        // 2. The core: clear the wakeup callback (no write to the eventfd once this
+        //    returns — mpv calls it under the same lock), then hand the core to the reaper
+        //    thread (R51): `mpv_terminate_destroy` takes 30–240 ms (measured) and must never
+        //    stall the render loop. 3. The eventfd closes right after (field drop).
         if let Some(h) = &self.handle {
             unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
         }
-        drop(self.handle.take());
+        if let Some(h) = self.handle.take() {
+            super::reaper::reap(h);
+        }
     }
 }

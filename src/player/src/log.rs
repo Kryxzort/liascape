@@ -23,7 +23,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -148,6 +148,7 @@ impl Logger {
         self.state.lock().unwrap().write_failures
     }
 
+    #[cfg(test)]
     pub(crate) fn event(
         &self,
         comp: &'static str,
@@ -156,11 +157,27 @@ impl Logger {
         corr: Option<CorrId>,
         fields: Value,
     ) {
+        self.record(comp, level, kind, corr, fields, false);
+    }
+
+    /// Builds the event record; writes it (file + ring) when `level` passes the logger's
+    /// threshold. Returns the record only when `for_tap` (a [`Tap`] wants it — built even
+    /// below the threshold, so a subscriber can ask for e.g. debug-level kinds).
+    pub(crate) fn record(
+        &self,
+        comp: &'static str,
+        level: Level,
+        kind: &str,
+        corr: Option<CorrId>,
+        fields: Value,
+        for_tap: bool,
+    ) -> Option<Value> {
         // Mutex::lock only fails if a prior panic poisoned it; propagating that panic
         // is the right call here (a bug elsewhere, not something the logger can fix).
         let mut state = self.state.lock().unwrap();
-        if level > state.level {
-            return;
+        let keep = level <= state.level;
+        if !keep && !for_tap {
+            return None;
         }
 
         let t_mono_ms = state.start.elapsed().as_secs_f64() * 1000.0;
@@ -186,12 +203,15 @@ impl Logger {
         }
 
         let value = Value::Object(obj);
-        write_line(&mut state, &value);
-
-        state.ring.push_back(value);
-        if state.ring.len() > RING_CAPACITY {
-            state.ring.pop_front();
+        let out = for_tap.then(|| value.clone());
+        if keep {
+            write_line(&mut state, &value);
+            state.ring.push_back(value);
+            if state.ring.len() > RING_CAPACITY {
+                state.ring.pop_front();
+            }
         }
+        out
     }
 
     /// Returns up to `limit` matching events, most-recent window, oldest first.
@@ -386,9 +406,42 @@ pub fn init(dir: &Path, level: Level) -> io::Result<()> {
 
 /// Emits one event to the global log. A no-op (not a panic) if `init` hasn't run yet
 /// — callers that log speculatively before startup finishes don't need to guard this.
+/// If a [`Tap`] is installed and [`Tap::wants`] the event, it also gets the record —
+/// after the logger's lock is released.
 pub fn event(comp: &'static str, level: Level, kind: &str, corr: Option<CorrId>, fields: Value) {
-    if let Some(logger) = GLOBAL.get() {
-        logger.event(comp, level, kind, corr, fields);
+    let Some(logger) = GLOBAL.get() else {
+        return;
+    };
+    let tap = TAP
+        .read()
+        .ok()
+        .and_then(|t| t.clone())
+        .filter(|t| t.wants(level, kind));
+    if let Some(rec) = logger.record(comp, level, kind, corr, fields, tap.is_some())
+        && let Some(t) = tap
+    {
+        t.send(&rec);
+    }
+}
+
+/// A live consumer of every event (the command API's `subscribe`, Task 12). Installed
+/// with [`set_tap`]; called from whatever thread logs, so it must only queue (never block,
+/// never log itself).
+pub trait Tap: Send + Sync {
+    /// Cheap pre-filter, asked before the record is built: forward this event?
+    fn wants(&self, level: Level, kind: &str) -> bool;
+    /// One event record — the same object the log stores (`kind`, `corr`, `t_mono_ms`, …).
+    fn send(&self, record: &Value);
+}
+
+static TAP: RwLock<Option<Arc<dyn Tap>>> = RwLock::new(None);
+
+/// Install (or with `None` remove) the process-wide [`Tap`]. Events reach it whether or
+/// not they pass the logger's own level threshold — a subscriber asks for kinds, the log
+/// file keeps its level.
+pub fn set_tap(tap: Option<Arc<dyn Tap>>) {
+    if let Ok(mut t) = TAP.write() {
+        *t = tap;
     }
 }
 
@@ -469,6 +522,33 @@ mod tests {
         let t1 = e1["t_mono_ms"].as_f64().unwrap();
         assert!(t1 >= t0, "t_mono_ms must be monotonic: {t0} then {t1}");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn record_for_tap_below_threshold() {
+        let dir = unique_dir("tap-below");
+        let logger =
+            Logger::init_with_limit(&dir, Level::Info, DEFAULT_ROTATE_BYTES).expect("init");
+        // Below the threshold: no record unless a tap asks, and never in the ring/file.
+        assert!(
+            logger
+                .record("test", Level::Debug, "k.debug", None, json!({}), false)
+                .is_none()
+        );
+        let rec = logger
+            .record("test", Level::Debug, "k.debug", None, json!({"x": 1}), true)
+            .expect("record for the tap");
+        assert_eq!(rec["kind"], "k.debug");
+        assert_eq!(rec["x"], 1);
+        assert!(rec["t_mono_ms"].as_f64().is_some());
+        assert!(logger.recent(&LogFilter::default(), 10).is_empty());
+        // At/above it: written, and handed to the tap too.
+        let rec = logger
+            .record("test", Level::Info, "k.info", None, json!({}), true)
+            .expect("record");
+        assert_eq!(rec["kind"], "k.info");
+        assert_eq!(logger.recent(&LogFilter::default(), 10).len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
 
