@@ -75,22 +75,71 @@ type EglInstance = egl::Instance<egl::Static>;
 /// to it through raw `eglGetProcAddress` function pointers, same as `host.cpp`'s spike.
 type EglDeviceExt = *mut c_void;
 
-/// GPU context handle: an EGL display + context plus the [`glow::Context`] loaded through
-/// it. Owns the EGL instance via `Rc` (not `Copy` — `khronos_egl::Instance<T>` doesn't
-/// derive it) so [`WindowTarget`] (created later, from [`Gfx::window_target`]) can keep
-/// calling EGL functions through the exact same handle for as long as the `Gfx` that made
-/// it is still around.
+/// The EGL display + context pair, and the EGL API handle used to tear them down —
+/// everything [`Gfx`] and every [`WindowTarget`] made from it need to keep calling EGL,
+/// and everything that must be released, in order, exactly once, no matter which of
+/// those owners happens to drop last.
+///
+/// **Reference-counted (`Rc`), not borrowed.** A `WindowTarget` tied to `&'a Gfx` would
+/// force a self-referential struct the moment the runtime stores a `Gfx` and its
+/// `WindowTarget` side by side in the same per-output struct (which it does — one output
+/// owns one `Gfx` and one live `WindowTarget` together). `Rc` sidesteps that: `Gfx` and
+/// every `WindowTarget` it creates hold their own clone of the *same* `Shared`, so
+/// `Shared::drop` — the `eglMakeCurrent(none)` → `eglDestroyContext` → `eglTerminate`
+/// sequence — runs exactly once, whenever the *last* clone goes away, regardless of
+/// whether the `Gfx` or a `WindowTarget` dropped first. (Reviewed finding: an earlier
+/// version of this module put `display`/`context` directly on `Gfx` with its own `Drop`,
+/// while `WindowTarget` kept only a *copy* of the `Display` value — nothing kept the
+/// owning `Gfx` alive, so dropping it first `eglTerminate`d the display while a
+/// `WindowTarget` still referencing it was about to call `eglDestroySurface` on it:
+/// undefined behaviour. This `Shared` type is the fix.)
+struct Shared {
+    egl: EglInstance,
+    display: egl::Display,
+    context: egl::Context,
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        // Test-only, deterministic signal that this teardown actually ran (and when) —
+        // real EGL implementations aren't reliably strict about rejecting calls on a
+        // terminated display (observed directly: `eglQueryString` kept succeeding on this
+        // driver even after a manual, out-of-band `eglTerminate` on the same display), so
+        // counting here, rather than probing EGL's own post-teardown behaviour, is what
+        // makes the covering test below able to fail at all if this ownership fix ever
+        // regresses.
+        #[cfg(test)]
+        SHARED_DROP_COUNT.with(|c| c.set(c.get() + 1));
+
+        // Release the context before destroying it (a no-op if something else is already
+        // current on this thread) and terminate the display. Best-effort: there is no
+        // meaningful recovery from any of these failing during teardown, and panicking in
+        // `drop` would just mask whatever error got us here.
+        let _ = self.egl.make_current(self.display, None, None, None);
+        let _ = self.egl.destroy_context(self.display, self.context);
+        let _ = self.egl.terminate(self.display);
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// How many times `Shared::drop` has run on this test thread. Reset and read by
+    /// `tests::shared_egl_state_outlives_gfx_when_another_clone_exists` — see there.
+    static SHARED_DROP_COUNT: Cell<u32> = const { Cell::new(0) };
+}
+
+/// GPU context handle: the EGL display + context (via the shared [`Shared`], see its doc
+/// comment for why it's `Rc` rather than a borrow) plus the [`glow::Context`] loaded
+/// through it.
 ///
 /// Not `Send`/`Sync`: an EGL context (like any GL context) is only valid to use from the
 /// thread that made it current, and nothing here tries to migrate it. Same rationale as
 /// `clock.rs`'s `Cell`-based clocks.
 pub struct Gfx {
     pub gl: glow::Context,
-    pub(crate) egl: Rc<EglInstance>,
-    pub(crate) display: egl::Display,
-    context: egl::Context,
+    shared: Rc<Shared>,
     config: egl::Config,
-    /// Which EGL display-selection path produced `display` — surfaced for diagnostics
+    /// Which EGL display-selection path produced the display — surfaced for diagnostics
     /// (logged by callers, asserted on by nothing) and spelled out exactly as the brief's
     /// reference spike (`host.cpp`) labels its own two paths.
     pub path: String,
@@ -145,9 +194,11 @@ impl Gfx {
 
         Ok(Gfx {
             gl,
-            egl: Rc::new(egl),
-            display,
-            context,
+            shared: Rc::new(Shared {
+                egl,
+                display,
+                context,
+            }),
             config,
             path,
             empty_vao: Cell::new(None),
@@ -193,9 +244,11 @@ impl Gfx {
 
         Ok(Gfx {
             gl,
-            egl: Rc::new(egl),
-            display,
-            context,
+            shared: Rc::new(Shared {
+                egl,
+                display,
+                context,
+            }),
             config,
             path,
             empty_vao: Cell::new(None),
@@ -206,6 +259,11 @@ impl Gfx {
     /// from `libwayland-client`), sized `w`×`h`. Only valid on a [`Gfx`] built with
     /// [`new_wayland`](Self::new_wayland) (the config it chose has `EGL_WINDOW_BIT`;
     /// an offscreen `Gfx`'s pbuffer-only config would fail `eglCreatePlatformWindowSurface`).
+    ///
+    /// The returned [`WindowTarget`] clones this `Gfx`'s shared EGL state (see [`Shared`])
+    /// rather than borrowing it — the two are meant to be stored side by side (one output
+    /// owns one `Gfx` and one `WindowTarget`) and dropped in whichever order the owning
+    /// struct's fields happen to drop in, safely either way.
     ///
     /// Not exercised by any test in this task (R16) — compiles and documents the contract
     /// Task 13 builds the real output against.
@@ -225,8 +283,8 @@ impl Gfx {
         .map_err(|e| format!("wl_egl_window_create failed: {e}"))?;
 
         let surface = unsafe {
-            self.egl.create_platform_window_surface(
-                self.display,
+            self.shared.egl.create_platform_window_surface(
+                self.shared.display,
                 self.config,
                 egl_window.ptr().cast_mut(),
                 &[],
@@ -235,35 +293,29 @@ impl Gfx {
         .map_err(|e| format!("eglCreatePlatformWindowSurface failed: {e}"))?;
 
         Ok(WindowTarget {
-            egl: self.egl.clone(),
-            display: self.display,
+            shared: self.shared.clone(),
             surface,
             egl_window,
         })
     }
 }
 
-impl Drop for Gfx {
-    fn drop(&mut self) {
-        // Release the context before destroying it (a no-op if something else is already
-        // current on this thread) and terminate the display. Best-effort: there is no
-        // meaningful recovery from any of these failing during teardown, and panicking in
-        // `drop` would just mask whatever error got us here.
-        let _ = self.egl.make_current(self.display, None, None, None);
-        let _ = self.egl.destroy_context(self.display, self.context);
-        let _ = self.egl.terminate(self.display);
-    }
-}
-
 /// A window-backed EGL surface for one `wl_surface`, created by [`Gfx::window_target`].
+/// Holds its own clone of the owning `Gfx`'s [`Shared`] EGL state (display + context +
+/// the EGL API handle) — **not** a borrow of the `Gfx` — specifically so this struct and
+/// the `Gfx` it came from can be dropped in either order: whichever of the two drops last
+/// is the one whose `Shared` clone actually reaches zero and runs `Shared::drop`
+/// (`eglTerminate` etc.), so the display is always still valid when this type's own
+/// `Drop` calls `eglDestroySurface` on it, no matter the order. See [`Shared`]'s doc
+/// comment for the bug this replaced.
+///
 /// Owns the `wl_egl_window` (via [`wayland_egl::WlEglSurface`]) and the `EGLSurface` built
 /// from it; both are released on `Drop`, in the order EGL requires (surface, then the
 /// `wl_egl_window` through `WlEglSurface`'s own `Drop` — which per that crate's contract
 /// must happen *before* the underlying `wl_surface` is destroyed, a constraint owned by
 /// whoever holds the `wl_surface`, i.e. Task 13's output code, not this struct).
 pub struct WindowTarget {
-    egl: Rc<EglInstance>,
-    display: egl::Display,
+    shared: Rc<Shared>,
     surface: egl::Surface,
     egl_window: wayland_egl::WlEglSurface,
 }
@@ -279,20 +331,22 @@ impl WindowTarget {
     /// using `gfx`'s context. `gfx` must be the same [`Gfx`] this target was created from
     /// (or at least one sharing its EGL display) — EGL itself would reject the mismatch.
     pub fn make_current(&self, gfx: &Gfx) -> Result<(), String> {
-        gfx.egl
+        gfx.shared
+            .egl
             .make_current(
-                self.display,
+                self.shared.display,
                 Some(self.surface),
                 Some(self.surface),
-                Some(gfx.context),
+                Some(gfx.shared.context),
             )
             .map_err(|e| format!("eglMakeCurrent (window) failed: {e}"))
     }
 
     /// Present the back buffer (`eglSwapBuffers`).
     pub fn swap(&self, gfx: &Gfx) -> Result<(), String> {
-        gfx.egl
-            .swap_buffers(self.display, self.surface)
+        gfx.shared
+            .egl
+            .swap_buffers(self.shared.display, self.surface)
             .map_err(|e| format!("eglSwapBuffers failed: {e}"))
     }
 }
@@ -301,7 +355,13 @@ impl Drop for WindowTarget {
     fn drop(&mut self) {
         // Destroy the EGLSurface first; `egl_window`'s own `Drop` (wl_egl_window_destroy)
         // then runs automatically right after, per `wayland_egl::WlEglSurface`'s contract.
-        let _ = self.egl.destroy_surface(self.display, self.surface);
+        // `self.shared` is guaranteed still valid here even if the owning `Gfx` (and every
+        // other clone) has already been dropped — that's the whole point of holding a
+        // clone rather than a borrow; see `Shared`'s doc comment.
+        let _ = self
+            .shared
+            .egl
+            .destroy_surface(self.shared.display, self.surface);
     }
 }
 
@@ -553,5 +613,74 @@ fn load_gl(egl: &EglInstance) -> glow::Context {
             egl.get_proc_address(name)
                 .map_or(ptr::null(), |f| f as *const c_void)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Covers the reviewed finding: `WindowTarget` must keep `Gfx`'s EGL display/context
+    /// alive by holding a real `Rc<Shared>` clone, not a borrow or a copied `Display`
+    /// value, so dropping the `Gfx` first never tears down a display a `WindowTarget`
+    /// still needs. `WindowTarget` itself needs a real `wl_surface` to construct (not
+    /// available in a unit test — same reasoning as every other test touching the
+    /// Wayland path, R16), so this test exercises the ownership mechanism `WindowTarget`
+    /// relies on directly: clone `Gfx`'s `shared` field exactly as `window_target` does,
+    /// drop the `Gfx`, and prove the shared EGL display is still genuinely usable through
+    /// the surviving clone — not merely that `Rc::strong_count` arithmetic looks right.
+    #[test]
+    fn shared_egl_state_outlives_gfx_when_another_clone_exists() {
+        let Ok(gfx) = Gfx::new_offscreen() else {
+            println!("SKIP: no EGL device");
+            return;
+        };
+
+        SHARED_DROP_COUNT.with(|c| c.set(0));
+
+        // What `WindowTarget::shared` holds after `window_target()` returns.
+        let kept_alive = gfx.shared.clone();
+        assert_eq!(
+            Rc::strong_count(&kept_alive),
+            2,
+            "gfx and kept_alive must both hold the shared EGL state before gfx drops"
+        );
+
+        drop(gfx);
+
+        assert_eq!(
+            Rc::strong_count(&kept_alive),
+            1,
+            "dropping gfx must release its own strong reference, and only its own"
+        );
+        // The actual regression this covers: if `WindowTarget` only copied the `Display`
+        // value instead of cloning the `Rc<Shared>`, dropping `gfx` here would have run
+        // `Shared::drop` (eglMakeCurrent-none / eglDestroyContext / eglTerminate)
+        // immediately, even though `kept_alive` — standing in for a live `WindowTarget` —
+        // still needs that display. Counting `Shared::drop` runs (rather than probing
+        // EGL's own post-teardown behaviour — observed directly to be unreliable here:
+        // `eglQueryString` kept succeeding on this driver even after a manual, out-of-band
+        // `eglTerminate`) is what makes this a real, deterministic regression test.
+        assert_eq!(
+            SHARED_DROP_COUNT.with(|c| c.get()),
+            0,
+            "Shared::drop must not run while kept_alive still holds a reference"
+        );
+        // Secondary, real-world sanity check: the display is still usable too.
+        assert!(
+            kept_alive
+                .egl
+                .query_string(Some(kept_alive.display), egl::EXTENSIONS)
+                .is_ok(),
+            "display must still be initialized while a strong reference survives Gfx's drop"
+        );
+
+        // Last reference: `Shared::drop` must run here, exactly once.
+        drop(kept_alive);
+        assert_eq!(
+            SHARED_DROP_COUNT.with(|c| c.get()),
+            1,
+            "Shared::drop must run exactly once, when the last reference goes"
+        );
     }
 }
