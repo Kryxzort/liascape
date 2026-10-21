@@ -217,3 +217,87 @@ omitted for being unset, so "every node with every property" holds without speci
 `Source` nodes additionally get `gain` (an object of only the gain slots that have been
 set, in dB — unset slots don't appear) and `gain_effective_db` (their dB sum via
 `units::Gains::effective_db`, clamped to `[-96, 12]`).
+
+## GFX / EGL
+
+`src/gfx/egl.rs` + `src/gfx/gl.rs` (spec §5.1 "Graphics"): desktop OpenGL (core profile)
+via EGL — chosen so the compositor can host LWE core if ever needed, since LWE core
+renders with desktop GL loaded through glad (`docs/player/spikes/lwe-core.md` §2). `Gfx`
+owns the EGL display + context and the `glow::Context` loaded through it; `Gfx::new_offscreen`
+builds a surfaceless one (used by every GPU test today), `Gfx::new_wayland` +
+`Gfx::window_target` build a real one on a `wl_surface` (implemented to compile against a
+stable API now, first exercised by Task 13 — R16).
+
+**Display-selection order** (`Gfx::new_offscreen`, mirrors `spikes/lwe-core/host.cpp`'s
+`egl_init`, proven on this machine's NVIDIA 595.84):
+
+1. `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_DEFAULT_DISPLAY` native handle) — present on this
+   driver through glvnd, and the one that actually works here.
+2. Else `EGL_EXT_platform_device`: enumerate devices via `eglQueryDevicesEXT`, skip a
+   device exposing only `EGL_MESA_device_software` unless it's the last one, try each
+   until `eglGetPlatformDisplayEXT` + `eglInitialize` both succeed.
+
+Both steps go through **`eglGetPlatformDisplayEXT`, fetched by name via
+`eglGetProcAddress`, not `khronos-egl`'s core `get_platform_display`.** Measured on this
+machine (glvnd 1.7.0 + NVIDIA 595.84): the *core* EGL 1.5 entry point returns
+`EGL_BAD_PARAMETER` for the Mesa-defined `EGL_PLATFORM_SURFACELESS_MESA` token even though
+that token is listed in the client extension string — glvnd's core dispatch only
+recognizes a fixed set of KHR-registered platforms. The `EXT`-suffixed entry point (what
+`EGL_EXT_platform_base`/`EGL_MESA_platform_surfaceless` actually define, and what
+`host.cpp`'s spike uses) doesn't have this restriction. `Gfx::new_wayland` uses the same
+`EXT` call for consistency, not because it needs to.
+
+**Surfaceless requires `EGL_KHR_surfaceless_context`** on the chosen display (present on
+NVIDIA) — checked explicitly before `eglMakeCurrent(…, EGL_NO_SURFACE, EGL_NO_SURFACE,
+…)`, so a driver missing it reports exactly that by name instead of an opaque
+`eglMakeCurrent` failure downstream.
+
+**`khronos-egl`: `static` feature, not `dynamic` (deviation from the original call).**
+`dynamic` (`dlopen("libEGL.so.1")` at runtime) was tried first, as the brief asked. It
+failed under the documented build/test command (`env -u LD_LIBRARY_PATH nix develop -c
+cargo test …`): a bare-name `dlopen` only searches a binary's RPATH/RUNPATH, `LD_LIBRARY_
+PATH`, and the system cache, and nixpkgs' auto-rpath mechanism only rpaths a `-L` directory
+that an actual link invocation used — an ambient `NIX_LDFLAGS` entry from a `buildInputs`
+dev-shell package (`libGL`/libglvnd) never reaches the link line on its own. `static`
+instead runs `khronos-egl`'s `build.rs`, which calls the `pkg-config` crate's
+`probe("egl")` — the same mechanism `wayland-egl`/`wayland-sys` already use in this
+dependency tree — which *does* emit real `cargo:rustc-link-lib=EGL` +
+`cargo:rustc-link-search`, which *does* get auto-rpath'd. Net effect: `cargo test --test
+gfx_basic` under the exact documented command needs no extra environment variables, on
+this machine or (verified) inside `nix build .#lp-player`'s sandboxed check phase.
+
+**No build-time linking means no runtime graceful-failure path for "library missing"** —
+with `static`, a system lacking `libEGL` entirely fails at the dynamic linker before
+`main` runs, not as a `Result::Err` `Gfx::new_offscreen` could report. Every failure
+*after* that point (no vendor ICD, no GPU, `eglInitialize` failing) is still a clean `Err`,
+never a panic — this is the condition `tests/common::headless_gl` turns into a printed
+`"SKIP: no EGL device"` plus a `return`, and it's what keeps a sandboxed `nix build`'s
+check phase from failing over a missing `/dev/dri`.
+
+**Texture defaults** (`Gfx::tex`): `GL_RGBA8`, `LINEAR` min/mag filtering, `CLAMP_TO_EDGE`
+wrap on both axes — fixed, no per-call knobs. `Gfx::fbo` wraps a `Tex` at
+`GL_COLOR_ATTACHMENT0` and panics on an incomplete attachment (a programming error, not a
+recoverable runtime condition). `Gfx::empty_vao` is created once per `Gfx` and reused —
+core profile requires some VAO bound even for a fullscreen-triangle draw built entirely
+from `gl_VertexID` (Task 8's concern; this task only exposes the VAO so Task 8 doesn't
+reinvent it).
+
+**`read_rgba` origin: GL bottom-left.** `tests/common::read_rgba(gfx, tex, x, y)` reads
+through `glReadPixels`, whose native coordinate system has `(0, 0)` at the texture's
+*bottom-left* corner — the same convention `gl_FragCoord` uses. It is **not** flipped.
+Every later task reading pixels back for assertions inherits this origin.
+
+**`write_png` orientation: top-down, flipped from GL's own order.** `Gfx::write_png` reads
+the whole texture (bottom-left origin, same as `read_rgba`) and flips rows before encoding,
+so row 0 of the PNG file is the *top* of the image — the standard convention every common
+image viewer and format assumes. `read_rgba` and `write_png` therefore disagree about
+orientation on purpose: one matches GL, the other matches PNG, and neither re-flips what
+the other already flipped.
+
+**Build note: no `LD_LIBRARY_PATH`.** Thanks to `static` linking (above), nothing in
+`gfx/` needs `LD_LIBRARY_PATH` or `__EGL_VENDOR_LIBRARY_DIRS` set at build *or* test time —
+the plain `env -u LD_LIBRARY_PATH nix develop -c cargo test …` from the global constraints
+is sufficient. Don't reach for either env var to "fix" a `gfx` build/test problem; if
+`cargo test --test gfx_basic` prints `"SKIP: no EGL device"` on a machine that does have a
+GPU, that's a real `Gfx::new_offscreen` failure (check the error string it prints) — not a
+missing environment variable.
