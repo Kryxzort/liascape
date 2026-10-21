@@ -70,8 +70,17 @@ pub const METER_NAME: &str = "lp-player-bus.meter";
 pub const DEVICE: &str = "pipewire/lp-player-bus";
 /// The bus format: 48 kHz, F32, stereo.
 pub const RATE: u32 = 48_000;
-/// The meter's (and the latency probes') quantum request: 10 ms.
+/// The latency probes' quantum request: 10 ms. The meter no longer requests one (R68 fix
+/// round) — this is kept only for `measure_latency`'s transient streams.
 pub const QUANTUM: u32 = 480;
+/// PipeWire's own default max quantum (`default.clock.max-quantum`), in frames. Since the
+/// meter's capture no longer pins `node.latency` (R68), the graph it runs on can grow up to
+/// this before the meter's RT scratch buffer, sized for it below, would need to.
+const MAX_QUANTUM_FRAMES: usize = 8192;
+/// The meter capture is always stereo (FL/FR, [`RATE`]'s format): one scratch slot per
+/// interleaved sample, sized for [`MAX_QUANTUM_FRAMES`] so `Watch::start_meter`'s scratch
+/// never reallocates inside the RT process callback.
+const METER_SCRATCH_CAP: usize = MAX_QUANTUM_FRAMES * 2;
 
 /// `Bus::create` gives up after this long without a linked loopback.
 const CREATE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -242,9 +251,33 @@ impl Bus {
 impl Drop for Bus {
     fn drop(&mut self) {
         self.shared.quit.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(t) = self.thread.take()
+            && let Err(e) = t.join()
+        {
+            let msg = panic_message(&e);
+            log::event(
+                "audio",
+                Level::Error,
+                "audio.bus.thread_panicked",
+                None,
+                json!({ "panic": msg }),
+            );
+            self.shared.update(|i| {
+                i.state = BusState::Down;
+                i.reason = Some(format!("lp-bus thread panicked: {msg}"));
+            });
         }
+    }
+}
+
+/// The best-effort message out of a `std::thread::Result::Err` panic payload.
+fn panic_message(e: &(dyn std::any::Any + Send + 'static)) -> String {
+    if let Some(s) = e.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = e.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
     }
 }
 
@@ -534,14 +567,20 @@ fn latency_str() -> String {
     format!("{QUANTUM}/{RATE}")
 }
 
-/// A capture stream on `target` (`monitor`: the sink's monitor ports).
+/// A capture stream on `target` (`monitor`: the sink's monitor ports). `latency`, when
+/// given, requests that graph quantum (`node.latency`) for this stream. Only the ~1 s
+/// startup latency probes pass one; the meter's long-lived capture ([`Watch::start_meter`])
+/// passes `None` (the graph default) — a 10 ms request held for as long as the player runs
+/// would otherwise pin the *whole* PipeWire graph's quantum to it (R68: the meter must not
+/// force the graph quantum).
 fn capture_stream(
     core: &CoreRc,
     name: &str,
     target: &str,
     monitor: bool,
+    latency: Option<&str>,
 ) -> Result<StreamRc, String> {
-    let props = properties! {
+    let mut props = properties! {
         "media.type" => "Audio",
         "media.category" => "Capture",
         "node.name" => name,
@@ -549,11 +588,13 @@ fn capture_stream(
         "application.name" => APP_NAME,
         "target.object" => target,
         "stream.capture.sink" => if monitor { "true" } else { "false" },
-        "node.latency" => latency_str(),
         "node.dont-reconnect" => "true",
         "state.restore-props" => "false",
         "state.restore-target" => "false",
     };
+    if let Some(l) = latency {
+        props.insert("node.latency", l);
+    }
     StreamRc::new(core.clone(), name, props).map_err(|e| format!("stream {name}: {e}"))
 }
 
@@ -644,7 +685,7 @@ fn measure_latency(
         ("lp-player-bus.latency-in", SINK_NAME, true),
         ("lp-player-bus.latency-out", PLAYBACK_NAME, false),
     ] {
-        let s = capture_stream(core, name, target, monitor)?;
+        let s = capture_stream(core, name, target, monitor, Some(&latency_str()))?;
         let sh = shot.clone();
         let mut scratch = Vec::with_capacity(4096);
         let l = s
@@ -1045,8 +1086,40 @@ impl Watch {
                 }
                 if !self.echoed {
                     self.echoed = v.as_deref() == Some(w.as_str());
-                } else if v.as_deref() != Some(w.as_str()) {
-                    self.foreign = v; // None = someone cleared it: also not ours any more
+                    continue;
+                }
+                if v.as_deref() == Some(w.as_str()) {
+                    continue; // still our own value
+                }
+                // Someone else's write (or it was cleared: `v` is `None`) — unless it's
+                // this exact write that's foreign: a later write putting the subject's
+                // `target.object` back onto the *current* default, after we'd already
+                // reported an override, means the playback is observed back on the
+                // default without any intervention of ours. Status accuracy only (never a
+                // write of our own, R67): clear the stale flag so `overridden` reports what
+                // is true now. Keyed off this explicit write event, never a `linked_targets`
+                // snapshot — the module's own rule (see `Watch`'s doc): a relink the write
+                // triggers lags the metadata by a tick or more, so reading the momentary
+                // link set here would race the lag and misreport (found on-machine: the
+                // very next tick after the first override detection still showed the link
+                // on the old target, which this exact bug briefly cleared `override_seen`
+                // over, letting a second, spurious `audio.bus.moved` fire later).
+                if self.override_seen
+                    && s.default_sink.is_some()
+                    && v.as_deref()
+                        .and_then(|val| s.name_of_target(val))
+                        .as_deref()
+                        == s.default_sink.as_deref()
+                {
+                    self.foreign = None;
+                    self.override_seen = false;
+                    let back = s.default_sink.clone();
+                    self.shared.update(|i| {
+                        i.overridden = false;
+                        i.target = back.clone();
+                    });
+                } else {
+                    self.foreign = v;
                     if self.foreign.is_none() {
                         self.foreign = Some(String::new());
                     }
@@ -1229,7 +1302,9 @@ impl Watch {
 
     fn start_meter(&mut self, core: &CoreRc, m: Arc<MeterShared>) {
         self.meter = None;
-        let stream = match capture_stream(core, METER_NAME, SINK_NAME, true) {
+        // No `node.latency` request (R68): the meter must not pin the graph quantum for as
+        // long as the player runs. See `capture_stream`'s doc.
+        let stream = match capture_stream(core, METER_NAME, SINK_NAME, true, None) {
             Ok(s) => s,
             Err(e) => {
                 m.set_error(e);
@@ -1237,7 +1312,10 @@ impl Watch {
             }
         };
         let mut rt = MeterRt::new(m.clone(), RATE, 2);
-        let mut scratch = Vec::with_capacity(8192);
+        // Sized for PipeWire's own default max quantum up front (`METER_SCRATCH_CAP`) —
+        // with no pinned `node.latency`, the graph can run at anything up to it, and this
+        // scratch buffer must never reallocate inside the RT process callback.
+        let mut scratch = Vec::with_capacity(METER_SCRATCH_CAP);
         let m_state = m.clone();
         let l = stream
             .add_local_listener_with_user_data(())
@@ -1309,6 +1387,31 @@ mod tests {
             Some("easyeffects_sink")
         );
         assert_eq!(s.name_of_target("nope"), None);
+    }
+
+    #[test]
+    fn meter_scratch_capacity_absorbs_default_max_quantum_without_reallocating() {
+        // `Watch::start_meter`'s RT scratch (sized via `METER_SCRATCH_CAP`) must never grow
+        // inside the process callback — it has to be sized for PipeWire's own default max
+        // quantum (8192 frames, stereo) up front, now that the meter no longer pins
+        // `node.latency` and the graph can run at anything up to that (R68).
+        let mut scratch: Vec<f32> = Vec::with_capacity(METER_SCRATCH_CAP);
+        let cap0 = scratch.capacity();
+        assert!(cap0 >= MAX_QUANTUM_FRAMES * 2, "cap0={cap0}");
+        // Simulate `read_capture`'s pattern for the largest buffer PipeWire's default max
+        // quantum would ever hand the callback: clear (keeps capacity), then extend.
+        scratch.clear();
+        scratch.extend(std::iter::repeat_n(0.0f32, MAX_QUANTUM_FRAMES * 2));
+        assert_eq!(
+            scratch.len(),
+            MAX_QUANTUM_FRAMES * 2,
+            "didn't actually fill the buffer"
+        );
+        assert_eq!(
+            scratch.capacity(),
+            cap0,
+            "RT scratch reallocated inside the process callback"
+        );
     }
 
     #[test]
