@@ -47,6 +47,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
+- [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
+      (audio follows the picture). Decide: primary output only / loudest / all / user choice. lp-player keeps a
+      shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + lp-player world (both still build the
       pre-rewrite Avalonia app).
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#692, #625, #677, #631,
