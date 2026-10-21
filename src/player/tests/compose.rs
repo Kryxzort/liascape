@@ -595,3 +595,120 @@ fn y_axis_orientation_matches_image_top() {
         }
     }
 }
+
+/// Review finding (Critical, fix round 1 → fix round 2): round 1's fix made plain
+/// `Source` layers correct but introduced a *double* Y-flip for the `Effect` path
+/// (`render_side` pre-flipped raw `from`/`to` textures, and
+/// `effects::EffectProgram::draw` flips again via `transitions/wrap.frag.template`'s
+/// unconditional `getFromColor`/`getToColor` — flip∘flip = identity = the *original*
+/// upside-down bug, just now only for transitions). Untested at the time because
+/// `y_axis_orientation_matches_image_top` only exercises a plain `Source` layer, and
+/// `effect_fade_midpoint_through_graph` uses Y-uniform colours that can't distinguish a
+/// flip from no flip.
+///
+/// This pins the property that actually matters: **a transition at `progress = 0`/`1`
+/// must look pixel-identical to the plain `Source` layer it starts/ends on** — for two
+/// Y-asymmetric sources (A: top-red/bottom-blue, B: top-green/bottom-yellow, "top" in the
+/// first-uploaded-pixel-row/PNG sense, via `make_top_bottom_tex`), under both `fit =
+/// stretch` with the default full viewport and `fit = stretch` with a `viewport`
+/// restricted to the image's top half — scanning every output row, not just a sampled
+/// upper/lower pair.
+#[test]
+fn effect_progress_endpoints_match_plain_source() {
+    let Some((gfx, mut cat)) = setup() else {
+        return;
+    };
+    let mut composer = Composer::new(&gfx).expect("Composer::new");
+
+    const A_TOP: [u8; 4] = [255, 0, 0, 255]; // red
+    const A_BOTTOM: [u8; 4] = [0, 0, 255, 255]; // blue
+    const B_TOP: [u8; 4] = [0, 255, 0, 255]; // green
+    const B_BOTTOM: [u8; 4] = [255, 255, 0, 255]; // yellow
+
+    const OUT_SIZE: (i64, i64) = (64, 64);
+
+    for (scenario, viewport) in [
+        ("stretch_full_viewport", [0.0_f64, 0.0, 1.0, 1.0]),
+        ("stretch_top_half_viewport", [0.0_f64, 0.0, 1.0, 0.5]),
+    ] {
+        // progress = 0.0 must match plain A; progress = 1.0 must match plain B.
+        for (progress, plain_is_a) in [(0.0_f64, true), (1.0_f64, false)] {
+            let mut g = Graph::new();
+            make_output(&mut g, "out:PLAIN", OUT_SIZE.0, OUT_SIZE.1);
+            make_output(&mut g, "out:FX", OUT_SIZE.0, OUT_SIZE.1);
+            make_source(&mut g, "a");
+            make_source(&mut g, "b");
+
+            let plain_content = if plain_is_a { "a" } else { "b" };
+            g.set(
+                &p("lay:PLAIN:main.fit"),
+                PropValue::Str("stretch".to_string()),
+            )
+            .unwrap();
+            g.set(
+                &p("lay:PLAIN:main.viewport"),
+                PropValue::List(viewport.to_vec()),
+            )
+            .unwrap();
+            g.set(
+                &p("lay:PLAIN:main.content"),
+                PropValue::Str(plain_content.to_string()),
+            )
+            .unwrap();
+
+            let mut fx_props = Map::new();
+            fx_props.insert("effect_id".to_string(), json!("fade"));
+            fx_props.insert("from".to_string(), json!("a"));
+            fx_props.insert("to".to_string(), json!("b"));
+            fx_props.insert("progress".to_string(), json!(progress));
+            let fx = g
+                .create(NodeKind::Effect, None, fx_props)
+                .expect("create effect");
+            g.set(&p("lay:FX:main.fit"), PropValue::Str("stretch".to_string()))
+                .unwrap();
+            g.set(
+                &p("lay:FX:main.viewport"),
+                PropValue::List(viewport.to_vec()),
+            )
+            .unwrap();
+            g.set(&p("lay:FX:main.content"), PropValue::Str(fx))
+                .unwrap();
+
+            let a_tex = make_top_bottom_tex(&gfx, 64, 64, A_TOP, A_BOTTOM);
+            let b_tex = make_top_bottom_tex(&gfx, 64, 64, B_TOP, B_BOTTOM);
+            let mut registry: HashMap<String, Tex> = HashMap::new();
+            registry.insert("a".to_string(), a_tex);
+            registry.insert("b".to_string(), b_tex);
+            let textures = |id: &str| registry.get(id);
+
+            let plain_tex = gfx.tex(64, 64);
+            let plain_fbo = gfx.fbo(&plain_tex);
+            composer
+                .compose_output(&gfx, &g, &mut cat, "out:PLAIN", &textures, &plain_fbo)
+                .expect("plain compose_output");
+
+            let fx_tex = gfx.tex(64, 64);
+            let fx_fbo = gfx.fbo(&fx_tex);
+            composer
+                .compose_output(&gfx, &g, &mut cat, "out:FX", &textures, &fx_fbo)
+                .expect("fx compose_output");
+
+            // Full-row scan down the centre column: every row's colour must match
+            // within ±1 per channel (float/texture-filtering slack, not an orientation
+            // ambiguity — these fixtures are uniform within each half, far from any
+            // filtering boundary at the sampled rows).
+            for y in 0..64u32 {
+                let plain_px = read_rgba(&gfx, &plain_tex, 32, y);
+                let fx_px = read_rgba(&gfx, &fx_tex, 32, y);
+                for c in 0..4 {
+                    assert!(
+                        (plain_px[c] as i32 - fx_px[c] as i32).abs() <= 1,
+                        "{scenario}, progress={progress}: row {y} mismatch between plain \
+                         Source ({plain_content}) and the effect's endpoint: plain={plain_px:?} \
+                         fx={fx_px:?}"
+                    );
+                }
+            }
+        }
+    }
+}

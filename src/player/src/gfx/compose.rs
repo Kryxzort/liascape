@@ -35,22 +35,26 @@
 //! from a swapped one — `y_axis_orientation_matches_image_top` (below) is the one that
 //! does, with a Y-asymmetric (top-red/bottom-blue) source.
 //!
-//! **Sampling, separately from placement, *is* flipped — but only for raw, caller-
-//! supplied source textures, never for a texture this module wrote itself.** A raw source
-//! texture is assumed uploaded in the standard top-down/PNG row order (buffer row 0 = the
-//! image's top row); GL's own texel addressing places that row at `t = 0`, i.e. the
-//! texture's bottom-left-origin "bottom." Sampled with no correction, a plain `Source`
-//! layer would therefore render upside down — and would disagree with `content` pointing
-//! at an `Effect` instead, because `effects::EffectProgram::draw` (via
-//! `transitions/wrap.frag.template`'s `getFromColor`/`getToColor`, untouched — this crate
-//! never edits `transitions/`) *already* flips when sampling its own raw `from`/`to`
-//! inputs. [`BLIT_FRAG_SRC`]'s `flip_v` uniform applies that same correction uniformly:
-//! `true` for every raw-source draw ([`render_side`]'s `from`/`to` passes, and a plain
-//! `Source` layer drawn straight into the target), `false` for the one texture this
-//! module writes and re-reads itself — the effect's "result" intermediate — which is
-//! already in finished/screen orientation by the time it's blitted into the target (a
-//! second flip there would *un*-correct it). See [`BLIT_FRAG_SRC`]'s own doc comment for
-//! the exact formula.
+//! **Sampling, separately from placement, *is* flipped — but exactly once per source,
+//! on exactly one of this module's three draw sites.** A raw source texture is assumed
+//! uploaded in standard top-down/PNG row order (buffer row 0 = the image's top row); GL's
+//! own texel addressing places that row at `t = 0`, i.e. the texture's bottom-left-origin
+//! "bottom." Sampled with no correction anywhere, a plain `Source` layer would render
+//! upside down. [`BLIT_FRAG_SRC`]'s `flip_v` uniform is `true` *only* for
+//! [`Composer::compose_output`]'s plain-`Source` branch (drawn straight into the target,
+//! with nothing else downstream to correct it) and `false` everywhere else — including
+//! [`render_side`]'s `from`/`to` passes into an effect's intermediates, which must hand
+//! `effects::EffectProgram::draw` *uncorrected* data, because that function's own,
+//! unconditional `getFromColor`/`getToColor` flip (via `transitions/wrap.frag.template`,
+//! untouched — this crate never edits `transitions/`) is the correction for the `Effect`
+//! path. Flipping in both places compounds to no correction at all (flip∘flip =
+//! identity) — a real bug this module shipped once, caught by review rather than by a
+//! test that actually compared the two paths; see [`BLIT_FRAG_SRC`]'s own doc comment
+//! ("Which draws need `flip_v = true`") for the full reasoning and
+//! `tests/compose.rs::effect_progress_endpoints_match_plain_source` for the regression
+//! test (a transition at `progress = 0`/`1` must be pixel-identical to the plain `Source`
+//! layer it starts/ends on, Y-asymmetric sources, both a full `stretch` and a `viewport`-
+//! restricted case).
 //!
 //! ## Premultiplied-alpha opacity
 //!
@@ -213,22 +217,43 @@ void main() {
 /// premultiplied colour scaled by `opacity` (module doc comment's "Premultiplied-alpha
 /// opacity" section).
 ///
-/// `flip_v` selects which of two textures this draw is sampling — see the module doc
-/// comment's "Coordinate conventions" section for the full reasoning:
-/// - `false` (pass-through, `ty = vUv.y`): the texture was *written* by this module
-///   through an FBO (an effect's "result" intermediate — see [`Composer::draw_effect`]),
-///   so it's already in finished/screen orientation; no correction needed.
-/// - `true` (`ty = 1.0 - vUv.y`, applied *within* the already-selected `uv_rect` window,
-///   not globally): the texture is a raw, caller-supplied source (a plain `Source` layer,
-///   or either side of an effect before it's rendered into its intermediate) that this
-///   module never wrote itself — assumed uploaded in the standard top-down/PNG row order
-///   (row 0 of the pixel buffer = the image's top row), which GL's own texel addressing
-///   places at `t = 0`, i.e. the texture's *bottom* in the same bottom-left sense
-///   `tests/common::read_rgba` uses. Without this correction a plain `Source` layer would
-///   render upside down relative to the *same* texture shown through an `Effect` layer,
-///   because `effects::EffectProgram::draw` (via `transitions/wrap.frag.template`'s
-///   `getFromColor`/`getToColor`, untouched — this crate never edits `transitions/`)
-///   already applies exactly this correction when it samples its own `from`/`to` inputs.
+/// `flip_v` is `true` (`ty = 1.0 - vUv.y`, applied *within* the already-selected
+/// `uv_rect` window, not globally) for exactly **one** call site — [`Composer::
+/// compose_output`]'s plain-`Source` branch, drawing a raw caller-supplied texture
+/// straight into the final target — and `false` (pass-through, `ty = vUv.y`) everywhere
+/// else. This is **not** "every raw-source draw gets the correction, every already-
+/// written texture doesn't" (that was this module's first, buggy attempt, fixed by this
+/// round): what actually decides it is whether *anything downstream* already applies
+/// `transitions/wrap.frag.template`'s `getFromColor`/`getToColor` flip
+/// (`texture(fromTex, vec2(uv.x, 1.0 - uv.y))`, untouched — this crate never edits
+/// `transitions/`) to the same texture before it reaches the screen:
+///
+/// - **Plain `Source` layer → target: `flip_v = true`.** Nothing else in this draw's path
+///   corrects orientation, so this draw must. A raw texture is assumed uploaded in
+///   standard top-down/PNG row order (buffer row 0 = image top); GL's own texel
+///   addressing places that row at `t = 0`, the bottom-left-origin "bottom." Uncorrected,
+///   the image's top would render at the output's visual bottom.
+/// - **[`render_side`]'s `from`/`to` passes → their intermediate: `flip_v = false`.**
+///   The intermediate is consumed next by `effects::EffectProgram::draw`, which *always*
+///   applies the `getFromColor`/`getToColor` flip when it samples `fromTex`/`toTex` —
+///   regardless of what this module does. If `render_side` pre-flipped too, the two
+///   flips would compose to the identity (flip∘flip = no correction at all), silently
+///   reintroducing the exact upside-down bug `flip_v` exists to fix — for every
+///   transition, while a plain `Source` layer stayed correct. (This is precisely what
+///   shipped in this module's first attempt at the fix, caught by review, not by any
+///   test at the time.) `render_side` must hand `EffectProgram::draw` data in the *same*
+///   raw, uncorrected orientation a live source texture would already be in, and let that
+///   one, already-unconditional flip be the *only* correction applied.
+/// - **The effect's "result" intermediate → target (end of [`Composer::draw_effect`]):
+///   `flip_v = false`.** By the time `EffectProgram::draw` has written it, the one
+///   necessary correction (above) has already happened; this blit is a plain, same-
+///   orientation copy into the target, so flipping again would un-correct it.
+///
+/// Net effect: exactly one correction is ever applied to a given source's image data on
+/// its way to the screen, regardless of whether it got there via a plain `Source` layer
+/// or via an `Effect` — which is the actual property that matters (a transition at
+/// `progress = 0`/`1` must look identical to the plain layer it's transitioning from/to;
+/// covered by `tests/compose.rs::effect_progress_endpoints_match_plain_source`).
 const BLIT_FRAG_SRC: &str = "#version 330 core
 uniform sampler2D tex;
 uniform vec4 uv_rect;
@@ -283,8 +308,9 @@ impl BlitProgram {
     /// `[x,y,w,h]` sub-rectangle of `tex` to sample (`UvRect::uv`); the destination
     /// sub-rectangle is implicit in the caller's already-set `glViewport`, not a
     /// parameter here. `flip_v` is [`BLIT_FRAG_SRC`]'s orientation-correction switch —
-    /// `true` for a raw caller-supplied source texture, `false` for a texture this module
-    /// already wrote itself in finished orientation (see that constant's doc comment).
+    /// see that constant's doc comment ("Which draws need `flip_v = true`") for exactly
+    /// which call sites need `true` (only one) and why the rest need `false`, including
+    /// the raw-source ones.
     fn draw(&self, gfx: &Gfx, tex: &Tex, uv: [f64; 4], opacity: f64, flip_v: bool) {
         // SAFETY: same precondition as every other `gl.*` call in this crate.
         unsafe {
@@ -376,8 +402,12 @@ fn clear_transparent(gfx: &Gfx, fbo: glow::Framebuffer, w: u32, h: u32) {
 /// 1×1 texture object around just for that case.
 ///
 /// `tex` is always a *raw* caller-supplied source texture here (never something this
-/// module already wrote), so this always draws with `flip_v = true` — see
-/// [`BLIT_FRAG_SRC`]'s doc comment.
+/// module already wrote) — but this draws with `flip_v = false`, i.e. a pure pass-through
+/// that preserves `tex`'s native orientation into the intermediate. This is the opposite
+/// of what a direct-to-target `Source` draw needs, and is not a mistake: see
+/// [`BLIT_FRAG_SRC`]'s doc comment ("Which draws need `flip_v = true`") for why pre-
+/// flipping here would double-flip once `effects::EffectProgram::draw` samples this same
+/// intermediate through its own, unconditional correction.
 fn render_side(
     gfx: &Gfx,
     blit: &BlitProgram,
@@ -392,7 +422,7 @@ fn render_side(
         return;
     };
     let uv = fit_rect((tex.w, tex.h), (w, h), fit, viewport);
-    draw_rect(gfx, blit, tex, uv, 1.0, fbo, true);
+    draw_rect(gfx, blit, tex, uv, 1.0, fbo, false);
 }
 
 /// The two input intermediates and one result intermediate an effect layer needs, all
@@ -630,10 +660,10 @@ impl Composer {
             },
             opacity,
             target.id,
-            // `result_tex` is the effect's own output, already in finished/screen
-            // orientation (it came out of `EffectProgram::draw`, which already corrects
-            // orientation when *it* samples its raw `from`/`to` inputs) — no further
-            // flip here, unlike `render_side`'s raw-source draws above.
+            // `result_tex` is the effect's own output: `EffectProgram::draw` already
+            // applied the one necessary orientation correction when *it* sampled the
+            // (deliberately unflipped — see `render_side`) `from`/`to` intermediates.
+            // This is a plain, same-orientation copy into the target; no further flip.
             false,
         );
         Ok(())
