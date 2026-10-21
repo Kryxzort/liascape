@@ -2,6 +2,8 @@
 //! tasks — effect shaders, layer composition, mpv textures — extend this module rather
 //! than duplicating it).
 
+pub mod harness;
+
 use glow::HasContext;
 use lp_player::gfx::{Gfx, Tex};
 
