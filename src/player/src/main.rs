@@ -2,26 +2,28 @@
 //!
 //! ```text
 //! lp-player --version
-//! lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
-//!                 [--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace]
+//! lp-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
+//!                 [--log-level error|warn|info|debug|trace]          (Wayland outputs)
+//! lp-player serve --headless [--outputs 1920x1080@60[,…]] [same options]
 //! lp-player ctl <verb> ['<json args>']
 //! lp-player ctl subscribe <prefix…>
 //! ```
 //!
-//! `serve` without `--headless` needs the Wayland backend (Task 13). See
-//! `.claude/rules/player-core.md` § Command API.
+//! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (Task 13,
+//! `.claude/rules/player-core.md` § Wayland). See § Command API for `ctl`.
 
 use std::process::ExitCode;
 
 use lp_player::log::Level;
 use lp_player::runtime::{ClockMode, ServeOpts, serve};
 
-const SERVE_USAGE: &str = "usage: lp-player serve --headless [--outputs WxH@HZ[,…]] \
+const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[,…]]] \
                            [--clock real|stepped] [--ao <mpv ao>] [--socket <path>] \
                            [--log-level error|warn|info|debug|trace]";
 
 fn serve_main(args: &[String]) -> ExitCode {
     let mut headless = false;
+    let mut outputs_given = false;
     let mut outputs = "1920x1080@60".to_string();
     let mut clock = ClockMode::Real;
     let mut ao = None;
@@ -37,7 +39,10 @@ fn serve_main(args: &[String]) -> ExitCode {
         let r: Result<(), String> = (|| {
             match a.as_str() {
                 "--headless" => headless = true,
-                "--outputs" => outputs = val("--outputs")?,
+                "--outputs" => {
+                    outputs = val("--outputs")?;
+                    outputs_given = true;
+                }
                 "--clock" => {
                     clock = match val("--clock")?.as_str() {
                         "real" => ClockMode::Real,
@@ -62,10 +67,10 @@ fn serve_main(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    if !headless {
+    if !headless && outputs_given {
         eprintln!(
-            "lp-player serve: Wayland outputs aren't implemented yet (Task 13); run with \
-             --headless\n{SERVE_USAGE}"
+            "lp-player serve: --outputs only applies with --headless (Wayland outputs come \
+             from the compositor)\n{SERVE_USAGE}"
         );
         return ExitCode::from(2);
     }
@@ -84,6 +89,7 @@ fn serve_main(args: &[String]) -> ExitCode {
         socket: socket.unwrap_or_else(lp_player::paths::socket),
         state_dir: lp_player::paths::state_dir(),
         log_level: level,
+        wayland: !headless,
     };
     match serve(opts) {
         Ok(()) => ExitCode::SUCCESS,
@@ -105,7 +111,7 @@ fn main() -> ExitCode {
         Some("ctl") => lp_player::ctl::main(&args[1..]),
         _ => {
             eprintln!(
-                "usage: lp-player --version | lp-player serve --headless … | lp-player ctl \
+                "usage: lp-player --version | lp-player serve [--headless …] | lp-player ctl \
                  <verb> ['<json args>']"
             );
             ExitCode::from(2)

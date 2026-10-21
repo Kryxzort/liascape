@@ -5,8 +5,14 @@
 //! **Loop sources.** The listening socket + one edge-triggered source per client
 //! (`api::server`), one level-triggered source per mpv wake eventfd (a `dup` of the
 //! source's own fd, so dropping a source never leaves a dangling registration), a ping for
-//! log events from other threads, a signalfd (SIGINT/SIGTERM → clean quit), and — real
-//! clock only — a timer at the max output refresh. Task 13 adds the Wayland fd.
+//! log events from other threads, a signalfd (SIGINT/SIGTERM → clean quit), — real
+//! clock only — a timer at the max output refresh, and on Wayland the connection's fd
+//! (`calloop-wayland-source`; frame callbacks, hotplug, configures, pointer).
+//!
+//! **Presenting.** Headless outputs compose on every tick. Wayland outputs are *paced*
+//! (`OutputBackend::paced`): after every dispatch (and at the end of a tick) each output
+//! that can take a frame (its last frame callback arrived) is composed + presented only if
+//! its picture changed or something animates (`crate::redraw`) — else it stays idle.
 //!
 //! **Who runs what (R47).** The timer tick is the one place animation and the recipes
 //! advance: `Animator::tick` → `Graph::set` → `drain_changes` → `SourceHost::sync` →
@@ -38,9 +44,11 @@ use crate::api::{handlers, proto};
 use crate::clock::{Clock, MonoClock, SteppedClock};
 use crate::gfx::{Catalogue, Composer, Gfx};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
-use crate::headless::{Headless, OutputBackend, OutputChange};
+use crate::headless::{Headless, OutputBackend, OutputChange, OutputInfo};
 use crate::log::{self, CorrId, Level};
+use crate::probe::frames::FrameStats;
 use crate::recipes::Transitions;
+use crate::redraw::{self, Redraw};
 use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
 use crate::units::{SILENT_DB, db_to_lin};
 
@@ -79,6 +87,9 @@ pub struct ServeOpts {
     pub own_socket_dir: bool,
     pub state_dir: PathBuf,
     pub log_level: Level,
+    /// Real outputs: one layer-shell surface per `wl_output` (`crate::wl`); `false` =
+    /// headless virtual outputs from [`outputs`](Self::outputs).
+    pub wayland: bool,
 }
 
 enum ClockKind {
@@ -224,6 +235,10 @@ pub struct Runtime {
     warned: BTreeMap<String, (Instant, u64)>,
     tap_dropped_seen: u64,
     pub(crate) started: Instant,
+    /// Which paced outputs need a frame (Task 13).
+    pub(crate) redraw: Redraw,
+    /// Present timing per output (the `frames` probe).
+    pub(crate) frames: BTreeMap<String, FrameStats>,
 }
 
 fn p(s: &str) -> PropPath {
@@ -323,6 +338,21 @@ impl Runtime {
                 }
             }
         }
+        for (path, v) in &changes {
+            if let Some((id, "layer")) = path.0.split_once('.')
+                && let Some(name) = id.strip_prefix("out:")
+                && let PropValue::Str(layer) = v
+                && let Err(e) = self.backend.set_layer(name, layer)
+            {
+                log::event(
+                    "output",
+                    Level::Warn,
+                    "output.layer_failed",
+                    None,
+                    json!({ "output": id, "layer": layer, "error": e }),
+                );
+            }
+        }
         self.host.sync(&self.gfx, &self.graph, &changes);
         self.sync_wake_regs();
     }
@@ -374,6 +404,8 @@ impl Runtime {
     /// Update every source (render pending frames, never blocks), log + collect events.
     pub(crate) fn update_sources(&mut self) {
         self.host.update(&self.gfx, &mut self.graph);
+        let changed = self.host.take_changed();
+        self.redraw.mark_shown(&self.graph, &changed);
         for (id, ev) in self.host.events() {
             let (kind, level, fields) = match &ev {
                 SourceEvent::Ready => ("source.ready", Level::Info, json!({ "id": id })),
@@ -410,8 +442,13 @@ impl Runtime {
         self.graph.set_transition_sources(by_output, graves);
     }
 
-    /// Compose + present every output.
+    /// Compose + present every output (a paced backend: only those due, see
+    /// [`render_paced`](Self::render_paced)).
     fn render(&mut self) {
+        if self.backend.paced() {
+            self.render_paced();
+            return;
+        }
         let host = &self.host;
         let textures = |id: &str| host.texture(id);
         for o in self.backend.outputs() {
@@ -437,16 +474,93 @@ impl Runtime {
                 );
             }
         }
+        let now = Instant::now();
         for o in self.backend.outputs() {
-            if let Err(e) = self.backend.present(&self.gfx, &o.name) {
-                log::event(
+            match self.backend.present(&self.gfx, &o.name) {
+                Ok(()) => self
+                    .frames
+                    .entry(o.name.clone())
+                    .or_insert_with(|| FrameStats::new(o.refresh_mhz, now))
+                    .on_present(now),
+                Err(e) => log::event(
                     "output",
                     Level::Warn,
                     "output.present_failed",
                     None,
                     json!({ "output": o.name, "error": e }),
-                );
+                ),
             }
+        }
+    }
+
+    /// Paced presenting (Wayland): every output that can take a frame (its last frame
+    /// callback arrived) is composed + presented if its picture changed since its last
+    /// present or something animates (`crate::redraw`); otherwise it goes idle. Runs after
+    /// every dispatch and at the end of each tick.
+    pub(crate) fn render_paced(&mut self) {
+        let animating = redraw::animating(&self.anim, self.now());
+        let rev = self.graph.picture_rev();
+        for o in self.backend.outputs() {
+            if !self.backend.frame_state(&o.name).is_some_and(|f| f.ready) {
+                continue;
+            }
+            let stats = self
+                .frames
+                .entry(o.name.clone())
+                .or_insert_with(|| FrameStats::new(o.refresh_mhz, Instant::now()));
+            if !self.redraw.wants(&o.name, rev, animating) {
+                stats.on_idle();
+                continue;
+            }
+            let id = format!("out:{}", o.name);
+            {
+                let Some(fbo) = self.backend.target(&o.name) else {
+                    continue;
+                };
+                let host = &self.host;
+                let textures = |sid: &str| host.texture(sid);
+                if let Err(e) = self.composer.compose_output(
+                    &self.gfx,
+                    &self.graph,
+                    &mut self.cat,
+                    &id,
+                    &textures,
+                    fbo,
+                ) {
+                    warn_limited(
+                        &mut self.warned,
+                        format!("compose.failed {id} {e}"),
+                        "compose",
+                        "compose.failed",
+                        json!({ "output": id, "error": e }),
+                    );
+                }
+            }
+            match self.backend.present(&self.gfx, &o.name) {
+                Ok(()) => {
+                    if let Some(st) = self.frames.get_mut(&o.name) {
+                        st.on_present(Instant::now());
+                    }
+                    self.redraw.drawn(&o.name, rev);
+                }
+                Err(e) => warn_limited(
+                    &mut self.warned,
+                    format!("output.present_failed {id}"),
+                    "output",
+                    "output.present_failed",
+                    json!({ "output": id, "error": e }),
+                ),
+            }
+        }
+    }
+
+    /// Pointer samples from the backend → `out:<c>.pointer` `[x, y, buttons]` (observed).
+    pub(crate) fn pointer_events(&mut self) {
+        for s in self.backend.take_pointer() {
+            let _ = self.graph.set_observed(
+                &p(&format!("out:{}.pointer", s.output)),
+                PropValue::List(vec![s.x, s.y, s.buttons as f64]),
+            );
         }
     }
 
@@ -468,11 +582,27 @@ impl Runtime {
     /// is left at all, the last current wallpaper (a committed transition's B, else what
     /// the output showed), which is parked.
     pub(crate) fn apply_output_changes(&mut self) {
+        self.backend.process(&self.gfx);
         for ch in self.backend.take_changes() {
             match ch {
-                OutputChange::Added(info) => self.output_added(info),
-                OutputChange::Removed(name) => self.output_removed(&name),
+                OutputChange::Added(info) => {
+                    self.redraw.forget(&info.name);
+                    self.frames.insert(
+                        info.name.clone(),
+                        FrameStats::new(info.refresh_mhz, Instant::now()),
+                    );
+                    self.output_added(info)
+                }
+                OutputChange::Removed(name) => {
+                    self.redraw.forget(&name);
+                    self.frames.remove(&name);
+                    self.output_removed(&name)
+                }
+                OutputChange::Changed(info) => self.output_changed(info),
             }
+        }
+        for name in self.backend.take_redraws() {
+            self.redraw.mark(&name);
         }
         self.refresh_srcs();
         let max_hz = self
@@ -486,7 +616,7 @@ impl Runtime {
         self.tick_period = Duration::from_secs_f64(1.0 / max_hz as f64);
     }
 
-    fn output_added(&mut self, info: crate::headless::OutputInfo) {
+    fn output_added(&mut self, info: OutputInfo) {
         let id = format!("out:{}", info.name);
         let others = self.graph.ids_of(NodeKind::Output);
         let current = self.current_wallpaper();
@@ -527,6 +657,32 @@ impl Runtime {
             adopted,
             json!({ "output": id, "width": info.width, "height": info.height,
                     "hz": info.hz, "content": content }),
+        );
+    }
+
+    /// Same output, new size/refresh: the graph's read-only props follow (observed).
+    fn output_changed(&mut self, info: OutputInfo) {
+        let id = format!("out:{}", info.name);
+        for (prop, v) in [
+            ("width", info.width),
+            ("height", info.height),
+            ("refresh_hz", info.hz),
+        ] {
+            let _ = self
+                .graph
+                .set_observed(&p(&format!("{id}.{prop}")), PropValue::I64(v as i64));
+        }
+        if let Some(st) = self.frames.get_mut(&info.name) {
+            st.set_refresh(info.refresh_mhz);
+        }
+        self.redraw.mark(&info.name);
+        log::event(
+            "output",
+            Level::Info,
+            "output.changed",
+            None,
+            json!({ "output": id, "width": info.width, "height": info.height, "hz": info.hz,
+                    "refresh_mhz": info.refresh_mhz }),
         );
     }
 
@@ -604,20 +760,7 @@ impl Runtime {
 
     /// The sources layer `layer` shows (directly, or as either side of its effect).
     fn shown_by(&self, layer: &str) -> BTreeSet<String> {
-        let mut out = BTreeSet::new();
-        let c = self.str_prop(layer, "content");
-        match self.graph.kind_of(&c) {
-            Some(NodeKind::Source) => {
-                out.insert(c);
-            }
-            Some(NodeKind::Effect) => {
-                out.insert(self.str_prop(&c, "from"));
-                out.insert(self.str_prop(&c, "to"));
-            }
-            _ => {}
-        }
-        out.retain(|s| !s.is_empty());
-        out
+        redraw::shown_by(&self.graph, layer)
     }
 
     fn shown_anywhere(&self, id: &str) -> bool {
@@ -1357,7 +1500,8 @@ fn signal_fd() -> Result<OwnedFd, String> {
     }
 }
 
-/// `lp-player serve --headless …`: run until `quit` / SIGINT / SIGTERM.
+/// `lp-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
+/// connection is lost — then every source is silenced and torn down, and it returns `Err`).
 pub fn serve(opts: ServeOpts) -> Result<(), String> {
     let sigfd = signal_fd()?;
     log::init(&opts.state_dir, opts.log_level).map_err(|e| {
@@ -1367,7 +1511,15 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         )
     })?;
     let (listener, mut socket_file) = crate::api::server::bind(&opts.socket, opts.own_socket_dir)?;
-    let gfx = Gfx::new_offscreen().map_err(|e| format!("no EGL device: {e}"))?;
+    // Wayland: connect first (EGL needs the wl_display), then the context on it.
+    let (gfx, wl_source) = if opts.wayland {
+        let (wl, src) = crate::wl::Wayland::connect()?;
+        let gfx = Gfx::new_wayland(wl.display_ptr()).map_err(|e| format!("EGL on Wayland: {e}"))?;
+        (gfx, Some((wl, src)))
+    } else {
+        let gfx = Gfx::new_offscreen().map_err(|e| format!("no EGL device: {e}"))?;
+        (gfx, None)
+    };
     let cat = match Catalogue::resolve_dir() {
         Some(dir) => Catalogue::load(&dir).map_err(|e| format!("effect catalogue: {e}"))?,
         None => {
@@ -1403,7 +1555,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
             ClockKind::Stepped(SteppedClock::new())
         }
     };
-    let backend = Box::new(Headless::new(&gfx, &opts.outputs));
+    let (backend, wl_source): (Box<dyn OutputBackend>, _) = match wl_source {
+        Some((wl, src)) => (Box::new(wl), Some(src)),
+        None => (Box::new(Headless::new(&gfx, &opts.outputs)), None),
+    };
     let mut rt = Runtime {
         gfx,
         cat,
@@ -1432,6 +1587,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         warned: BTreeMap::new(),
         tap_dropped_seen: 0,
         started: Instant::now(),
+        redraw: Redraw::new(),
+        frames: BTreeMap::new(),
     };
     rt.apply_output_changes();
 
@@ -1462,6 +1619,18 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
             },
         )
         .map_err(|e| format!("event loop: {}", e.error))?;
+    if let Some(src) = wl_source {
+        // The queue dispatches into the backend's sctk state; hotplug/configures/frame
+        // callbacks are applied after the dispatch (`apply_output_changes`, `render_paced`).
+        handle
+            .insert_source(src, |_, queue, rt: &mut Runtime| {
+                match rt.backend.as_wayland_mut() {
+                    Some(w) => queue.dispatch_pending(&mut w.state),
+                    None => Ok(0),
+                }
+            })
+            .map_err(|e| format!("event loop: {}", e.error))?;
+    }
     if opts.clock == ClockMode::Real {
         let period = rt.tick_period;
         handle
@@ -1499,6 +1668,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         }),
     );
 
+    let mut fatal = None;
     loop {
         let timeout = if rt.has_more_input() {
             Some(Duration::ZERO)
@@ -1507,11 +1677,25 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         } else {
             None
         };
-        event_loop
-            .dispatch(timeout, &mut rt)
-            .map_err(|e| format!("event loop: {e}"))?;
+        if let Err(e) = event_loop.dispatch(timeout, &mut rt) {
+            // E.g. the compositor went away: silence + tear down like a quit, then fail.
+            log::event(
+                "runtime",
+                Level::Error,
+                "loop.failed",
+                None,
+                json!({ "error": e.to_string(), "backend": rt.backend.kind() }),
+            );
+            fatal = Some(format!("event loop ({} backend): {e}", rt.backend.kind()));
+            rt.stop_all(true);
+            break;
+        }
         rt.after_dispatch();
         rt.apply_output_changes();
+        rt.pointer_events();
+        if rt.backend.paced() {
+            rt.render_paced();
+        }
         if rt.should_exit() {
             break;
         }
@@ -1527,5 +1711,5 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         unsafe { libc::_exit(0) };
     }
     drop(socket_file);
-    Ok(())
+    fatal.map_or(Ok(()), Err)
 }

@@ -1,7 +1,8 @@
 //! Outputs (spec §4.2 "Output", §9 "headless deterministic mode"): the [`OutputBackend`]
 //! abstraction the runtime renders through, and its first implementation — [`Headless`],
-//! virtual outputs rendered offscreen (R46). Task 13 adds the Wayland backend (one
-//! layer-shell surface per `wl_output`, its own fd in the loop, present on frame callbacks).
+//! virtual outputs rendered offscreen (R46). The Wayland backend (`crate::wl`, Task 13:
+//! one layer-shell surface per `wl_output`, its own fd in the loop, presents paced by
+//! frame callbacks) implements the same trait and feeds the same hotplug path.
 //!
 //! Headless outputs are named `VIRTUAL-1`, `VIRTUAL-2`, … in `--outputs` order; the
 //! `headless.add_output` / `headless.remove_output` verbs hotplug more at any time.
@@ -20,7 +21,10 @@ pub struct OutputInfo {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    /// Refresh rounded to whole Hz (the graph's `refresh_hz`).
     pub hz: u32,
+    /// Exact refresh in mHz (`wl_output` mode; headless: `hz × 1000`) — frame pacing.
+    pub refresh_mhz: u32,
 }
 
 /// Hotplug, as the runtime consumes it ([`OutputBackend::take_changes`]).
@@ -28,10 +32,34 @@ pub struct OutputInfo {
 pub enum OutputChange {
     Added(OutputInfo),
     Removed(String),
+    /// Same output, new size/refresh (a mode change, a configure with another size).
+    Changed(OutputInfo),
+}
+
+/// Frame pacing state of one output on a paced backend ([`OutputBackend::frame_state`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameState {
+    /// It can take a frame now: configured, a render target exists, no frame callback
+    /// outstanding.
+    pub ready: bool,
+    /// A frame callback is outstanding (the last present hasn't been shown yet).
+    pub pending: bool,
+    /// Frame callbacks received so far.
+    pub callbacks: u64,
+}
+
+/// The pointer over an output's surface ([`OutputBackend::take_pointer`]): surface
+/// pixels, buttons as a bitmask (bit 0 left, 1 right, 2 middle, 3 side, 4 extra).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointerSample {
+    pub output: String,
+    pub x: f64,
+    pub y: f64,
+    pub buttons: u32,
 }
 
 /// What the runtime needs from a set of outputs. One implementation per platform:
-/// [`Headless`] now, Wayland in Task 13.
+/// [`Headless`] and the Wayland backend (`crate::wl::Wayland`).
 pub trait OutputBackend {
     /// `"headless"` / `"wayland"` (for `hello`/`state`).
     fn kind(&self) -> &'static str;
@@ -45,8 +73,41 @@ pub trait OutputBackend {
     fn picture(&self, name: &str) -> Option<&Tex>;
     /// Show what was just drawn into [`target`](Self::target) (headless: nothing to do).
     fn present(&mut self, gfx: &Gfx, name: &str) -> Result<(), String>;
+    /// Presents are paced by the compositor (Wayland frame callbacks): the runtime then
+    /// draws an output only when [`frame_state`](Self::frame_state) says it can take a
+    /// frame and its picture changed (`crate::redraw`). `false` (headless) = compose every
+    /// output on every tick.
+    fn paced(&self) -> bool {
+        false
+    }
+    /// Pacing state of output `name` (`None` on an unpaced backend).
+    fn frame_state(&self, _name: &str) -> Option<FrameState> {
+        None
+    }
+    /// Do the GPU-side work hotplug and configures left pending (create/resize window
+    /// targets, free removed outputs with the context current). Called before every
+    /// [`take_changes`](Self::take_changes).
+    fn process(&mut self, _gfx: &Gfx) {}
+    /// Outputs that need a fresh frame whatever their content (configured, resized,
+    /// re-created surface), since the last call.
+    fn take_redraws(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+    /// Move output `name` to compositor layer `layer` (`background|bottom|top|overlay`),
+    /// live (`out:<c>.layer`). Headless: nothing to move.
+    fn set_layer(&mut self, _name: &str, _layer: &str) -> Result<(), String> {
+        Ok(())
+    }
+    /// Pointer samples since the last call (`out:<c>.pointer`).
+    fn take_pointer(&mut self) -> Vec<PointerSample> {
+        Vec::new()
+    }
     /// The headless backend, for the `headless.*` verbs.
     fn as_headless_mut(&mut self) -> Option<&mut Headless> {
+        None
+    }
+    /// The Wayland backend, for its event-queue dispatch.
+    fn as_wayland_mut(&mut self) -> Option<&mut crate::wl::Wayland> {
         None
     }
 }
@@ -114,6 +175,7 @@ impl Headless {
                 width: w,
                 height: ht,
                 hz,
+                refresh_mhz: hz * 1000,
             };
             h.add(gfx, info).expect("validated by parse_outputs");
         }

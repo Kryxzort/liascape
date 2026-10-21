@@ -49,6 +49,11 @@
 //! the runtime (a later task) forwards these to whatever `PropHook` a live source has
 //! registered. Property seeding done by `create` is *not* a change: there is no live
 //! source yet for a hook to receive it.
+//!
+//! **`picture_rev`** (Task 13) counts every mutation that can change a picture — `create`,
+//! `destroy`, and every `set` except a `gain.<slot>` (audio only); never `set_observed`.
+//! The Wayland redraw policy (`crate::redraw`) compares it with the revision each output
+//! last presented, so a static wallpaper costs no frames.
 
 pub mod props;
 
@@ -198,6 +203,8 @@ pub struct Graph {
     tr_graves: BTreeSet<String>,
     /// The wallpaper parked while no output exists (R60): part of `srcs:*`.
     parked: Option<String>,
+    /// Picture-affecting mutations so far (see the module doc).
+    picture_rev: u64,
 }
 
 impl Default for Graph {
@@ -231,7 +238,14 @@ impl Graph {
             tr_sources: BTreeMap::new(),
             tr_graves: BTreeSet::new(),
             parked: None,
+            picture_rev: 0,
         }
+    }
+
+    /// Picture-affecting mutations so far: bumped by `create`, `destroy` and every `set`
+    /// except `gain.<slot>`; never by `set_observed` (the redraw policy, `crate::redraw`).
+    pub fn picture_rev(&self) -> u64 {
+        self.picture_rev
     }
 
     /// Creates a node of `kind`. `id` is required (and used verbatim) for `Output`;
@@ -275,6 +289,7 @@ impl Graph {
             }
         }
         self.nodes.insert(new_id.clone(), node);
+        self.picture_rev += 1;
 
         if kind == NodeKind::Output {
             let connector = new_id.strip_prefix("out:").unwrap_or(&new_id);
@@ -345,6 +360,7 @@ impl Graph {
             return Err(unsupported("the player singleton cannot be destroyed"));
         }
         let node = self.nodes.remove(id).ok_or_else(|| no_such_node(id))?;
+        self.picture_rev += 1;
         if node.kind == NodeKind::Output {
             let connector = id.strip_prefix("out:").unwrap_or(id);
             self.nodes.remove(&format!("lay:{connector}:main"));
@@ -515,6 +531,9 @@ impl Graph {
             node.props.insert(prop.to_string(), value.clone());
         }
         if record {
+            if !prop.starts_with("gain.") {
+                self.picture_rev += 1;
+            }
             self.changes.push((PropPath(format!("{id}.{prop}")), value));
         }
     }
@@ -767,6 +786,40 @@ mod tests {
         let err = g.set(&p("src1.speed"), PropValue::F64(9.0)).unwrap_err();
         assert_eq!(err.code, "out_of_range");
         assert!(err.hint.contains("0.1–4.0"), "hint was: {}", err.hint);
+    }
+
+    /// Task 13: the redraw policy's counter — a picture can only change through create,
+    /// destroy or a non-gain set; gain slots and observations never wake an output.
+    #[test]
+    fn picture_rev_counts_picture_mutations_only() {
+        let mut g = Graph::new();
+        let r0 = g.picture_rev();
+        out(&mut g, "out:DP-1");
+        src(&mut g, "src1");
+        let r1 = g.picture_rev();
+        assert!(r1 >= r0 + 2, "create bumps ({r0} -> {r1})");
+        g.set(&p("src1.gain.user"), PropValue::F64(-6.0)).unwrap();
+        g.set_observed(&p("src1.time_pos"), PropValue::F64(1.0))
+            .unwrap();
+        g.set_observed(&p("out:DP-1.pointer"), PropValue::List(vec![1.0, 2.0, 1.0]))
+            .unwrap();
+        assert_eq!(
+            g.picture_rev(),
+            r1,
+            "gain + observations are not picture changes"
+        );
+        g.set(&p("lay:DP-1:main.content"), PropValue::Str("src1".into()))
+            .unwrap();
+        assert_eq!(g.picture_rev(), r1 + 1);
+        g.set(&p("out:DP-1.layer"), PropValue::Str("overlay".into()))
+            .unwrap();
+        assert_eq!(g.picture_rev(), r1 + 2);
+        g.destroy("src1").unwrap();
+        assert_eq!(g.picture_rev(), r1 + 3);
+        let err = g
+            .set(&p("out:DP-1.pointer"), PropValue::List(vec![0.0, 0.0, 0.0]))
+            .unwrap_err();
+        assert_eq!(err.code, "read_only", "pointer is observed, never set");
     }
 
     #[test]

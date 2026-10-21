@@ -1,0 +1,451 @@
+#!/usr/bin/env bash
+# On-machine check for lp-player's Wayland backend (Task 13): one wlr-layer-shell surface
+# per wl_output, the frame-timing probe, and hotplug through Hyprland.
+#
+#   bash src/player/tests/onmachine/outputs.sh        # exit 0 = pass
+#
+# What it touches, and how it puts it back (see .claude/rules/player-core.md § Wayland):
+# - draws solid colours / a synthetic test clip on every monitor (briefly on the overlay
+#   layer for the grim pixel check, otherwise on the background layer);
+# - warps the cursor over the (overlay) surface to check pointer input, then puts it back
+#   where it was (also from the trap);
+# - disables DP-1 with `hyprctl eval hl.monitor{…disabled=true}` and re-enables it with the
+#   EXACT recorded mode/position/scale (never `preferred,auto`); a trap restores the recorded
+#   layout on any exit (failure, Ctrl-C) and verifies `hyprctl monitors -j` matches it;
+# - stops the legacy wallpaper (mpvpaper) first and leaves it stopped;
+# - runs its own `lp-player serve` with a private XDG_RUNTIME_DIR (socket + instance lock —
+#   other lanes' headless servers are unaffected) and kills it on exit, so no layer surface
+#   stays on screen.
+#
+# Env: LP_PLAYER_BIN (default: build target/release/lp-player via the flake devShell),
+# OUT_A / OUT_B (default DP-1 / DP-2), HZ_A / HZ_B (144 / 240),
+# MEAN_A / MEAN_B (6.9 / 4.2 ms), TOL_MS (0.5).
+set -u -o pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CRATE=$(cd "$HERE/../.." && pwd)
+REPO=$(cd "$CRATE/../.." && pwd)
+OUT_A=${OUT_A:-DP-1}
+OUT_B=${OUT_B:-DP-2}
+HZ_A=${HZ_A:-144}
+HZ_B=${HZ_B:-240}
+MEAN_A=${MEAN_A:-6.9}
+MEAN_B=${MEAN_B:-4.2}
+TOL_MS=${TOL_MS:-0.5}
+
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/lp-outputs.XXXXXX")
+RT=$SCRATCH/run
+STATE=$SCRATCH/state
+mkdir -m 700 "$RT" "$STATE"
+REAL_RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+WL=${WAYLAND_DISPLAY:-wayland-1}
+[[ $WL == /* ]] || WL=$REAL_RT/$WL
+LAYOUT=$SCRATCH/layout.json
+WS=$SCRATCH/workspaces.json
+SERVE_PID=
+FAILED=0
+CURSOR=
+
+say() { printf '[outputs] %s\n' "$*"; }
+fail() {
+    printf '[outputs] FAIL: %s\n' "$*"
+    FAILED=1
+    exit 1
+}
+
+NORM='[.[] | {name, width, height, refreshRate, x, y, scale, transform}] | sort_by(.name)'
+WSNORM='{ws: ([.[] | {id, monitor}] | sort_by(.id))}'
+
+# lp-player with its private runtime dir; the real compositor through an absolute socket.
+lp() {
+    env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$STATE" WAYLAND_DISPLAY="$WL" \
+        "$BIN" "$@"
+}
+ctl() { lp ctl --timeout-ms 8000 "$@"; }
+
+layout_now() { hyprctl monitors -j | jq -c "$NORM"; }
+
+restore_layout() {
+    [[ -s $LAYOUT ]] || return 0
+    local want now
+    want=$(jq -c "$NORM" "$LAYOUT")
+    now=$(layout_now)
+    if [[ $now != "$want" ]]; then
+        say "restoring the recorded monitor layout"
+        jq -c '.[]' "$LAYOUT" | while read -r m; do
+            local name cur
+            name=$(jq -r .name <<<"$m")
+            cur=$(hyprctl monitors -j | jq -c --arg n "$name" \
+                '[.[] | select(.name == $n) | {name, width, height, refreshRate, x, y, scale, transform}][0]')
+            [[ $cur == "$(jq -c '{name, width, height, refreshRate, x, y, scale, transform}' <<<"$m")" ]] && continue
+            local lua
+            lua=$(jq -r '"hl.monitor({ output = \"\(.name)\", mode = \"\(.width)x\(.height)@\(.refreshRate)\", position = \"\(.x)x\(.y)\", scale = \(.scale)"
+                + (if .transform != 0 then ", transform = \(.transform)" else "" end) + ", disabled = false })"' <<<"$m")
+            say "  hyprctl eval '$lua'"
+            hyprctl eval "$lua" >/dev/null
+        done
+        for _ in $(seq 1 50); do
+            [[ $(layout_now) == "$want" ]] && break
+            sleep 0.1
+        done
+    fi
+    now=$(layout_now)
+    if [[ $now == "$want" ]]; then
+        say "layout verified identical to the record: $now"
+    else
+        say "LAYOUT MISMATCH after restore: want $want, have $now"
+        FAILED=1
+    fi
+    # Workspace → monitor placement (Hyprland moves workspaces off a disabled monitor and
+    # back on re-enable; fix any that didn't come back).
+    if [[ -s $WS ]]; then
+        jq -c '.ws[]' "$WS" | while read -r w; do
+            local id mon now_mon
+            id=$(jq -r .id <<<"$w")
+            mon=$(jq -r .monitor <<<"$w")
+            now_mon=$(hyprctl workspaces -j | jq -r --argjson i "$id" '.[] | select(.id == $i) | .monitor')
+            if [[ -n $now_mon && $now_mon != "$mon" ]]; then
+                say "  moving workspace $id back to $mon"
+                hyprctl dispatch moveworkspacetomonitor "$id" "$mon" >/dev/null 2>&1 ||
+                    hyprctl eval "hl.dispatch(hl.dsp.workspace.move({ workspace = \"$id\", monitor = \"$mon\" }))" >/dev/null 2>&1
+            fi
+        done
+        say "workspaces now: $(hyprctl workspaces -j | jq -c "$WSNORM")"
+    fi
+}
+
+stop_serve() {
+    [[ -n $SERVE_PID ]] || return 0
+    if kill -0 "$SERVE_PID" 2>/dev/null; then
+        ctl quit >/dev/null 2>&1
+        for _ in $(seq 1 50); do
+            kill -0 "$SERVE_PID" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -TERM "$SERVE_PID" 2>/dev/null && sleep 1
+        kill -KILL "$SERVE_PID" 2>/dev/null
+    fi
+    wait "$SERVE_PID" 2>/dev/null
+    SERVE_STATUS=$?
+    SERVE_PID=
+}
+
+cursor_to() { hyprctl eval "hl.dispatch(hl.dsp.cursor.move({ x = $1, y = $2 }))" >/dev/null; }
+
+restore_cursor() {
+    [[ -n $CURSOR ]] || return 0
+    # Focus follows the cursor across monitors: give focus back first (a monitor focus
+    # may warp the cursor), then the cursor.
+    local f
+    f=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+    if [[ -n $FOCUS && $f != "$FOCUS" ]]; then
+        hyprctl eval "hl.dispatch(hl.dsp.focus({ monitor = \"$FOCUS\" }))" >/dev/null
+    fi
+    cursor_to "$(jq -r .x <<<"$CURSOR")" "$(jq -r .y <<<"$CURSOR")"
+    sleep 0.1
+    say "cursor restored to $(hyprctl cursorpos), focused monitor $(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name') (was $FOCUS)"
+    CURSOR=
+}
+
+cleanup() {
+    local rc=$?
+    restore_cursor
+    local ours=${SERVE_PID:-0}
+    stop_serve
+    restore_layout
+    if hyprctl layers -j | jq -e --argjson pid "$ours" '[.. | objects | select(.namespace? == "lp-player" and .pid? == $pid)] | length > 0' >/dev/null; then
+        say "WARNING: our lp-player layer surface is still mapped"
+        FAILED=1
+    fi
+    if [[ $FAILED != 0 || $rc != 0 ]]; then
+        say "serve log tail ($SCRATCH/serve.log):"
+        tail -n 15 "$SCRATCH/serve.log" 2>/dev/null | sed 's/^/    /'
+        say "RESULT: FAIL (scratch kept in $SCRATCH)"
+        exit 1
+    fi
+    say "RESULT: PASS"
+    # Our own mktemp dir (test clips, logs) is kept only on failure.
+    if command -v trash >/dev/null; then trash "$SCRATCH"; else say "scratch: $SCRATCH"; fi
+    exit 0
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# ------------------------------------------------------------------ preconditions
+command -v hyprctl >/dev/null || fail "hyprctl not found (this check needs Hyprland)"
+for t in jq grim python3 ffmpeg; do command -v "$t" >/dev/null || fail "$t not found"; done
+hyprctl monitors -j >"$LAYOUT" || fail "hyprctl monitors failed (HYPRLAND_INSTANCE_SIGNATURE set?)"
+hyprctl workspaces -j | jq -c "$WSNORM" >"$WS"
+FOCUS=$(jq -r '.[] | select(.focused) | .name' "$LAYOUT")
+say "recorded layout: $(jq -c "$NORM" "$LAYOUT")"
+for o in "$OUT_A" "$OUT_B"; do
+    jq -e --arg n "$o" 'any(.[]; .name == $n)' "$LAYOUT" >/dev/null || fail "monitor $o not present"
+done
+
+OTHER=$(hyprctl layers -j | jq -c '[.. | objects | select(.namespace? == "lp-player") | .pid] | unique')
+[[ $OTHER == "[]" ]] || fail "another lp-player (pid $OTHER) already draws on this session; quit it first (ctl quit)"
+
+if pgrep -x mpvpaper >/dev/null; then
+    say "stopping the legacy wallpaper (mpvpaper)"
+    curl -s -X POST 127.0.0.1:5174/stop >/dev/null
+    for _ in $(seq 1 50); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
+    pgrep -x mpvpaper >/dev/null && fail "mpvpaper still running after /stop"
+fi
+
+if [[ -z ${LP_PLAYER_BIN:-} ]]; then
+    say "building lp-player (release)"
+    (cd "$REPO" && env -u LD_LIBRARY_PATH nix develop -c cargo build -q --release \
+        --manifest-path src/player/Cargo.toml) || fail "cargo build failed"
+    BIN=$CRATE/target/release/lp-player
+else
+    BIN=$LP_PLAYER_BIN
+fi
+[[ -x $BIN ]] || fail "no lp-player binary at $BIN"
+
+# Test media: synthetic clips (content doesn't matter).
+CLIP240=$SCRATCH/clip240.mp4
+CLIP60=$SCRATCH/clip60.mp4
+ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=240 -t 12 -c:v libx264 -preset ultrafast \
+    -pix_fmt yuv420p "$CLIP240" || fail "ffmpeg (240 fps clip)"
+ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=60 -t 12 -c:v libx264 -preset ultrafast \
+    -pix_fmt yuv420p "$CLIP60" || fail "ffmpeg (60 fps clip)"
+
+# ------------------------------------------------------------------ helpers
+centre_rgb() { # <output> → "r g b" of the centre pixel
+    grim -o "$1" -t ppm - | python3 -c '
+import sys
+d = sys.stdin.buffer.read()
+parts, i = [], 0
+while len(parts) < 4:
+    while d[i:i+1].isspace(): i += 1
+    if d[i:i+1] == b"#":
+        while d[i:i+1] != b"\n": i += 1
+        continue
+    j = i
+    while not d[j:j+1].isspace(): j += 1
+    parts.append(d[i:j]); i = j
+i += 1
+w, h = int(parts[1]), int(parts[2])
+o = i + ((h // 2) * w + w // 2) * 3
+print(d[o], d[o+1], d[o+2])'
+}
+near() { # <"r g b"> <r> <g> <b>
+    read -r r g b <<<"$1"
+    (( r >= $2 - 12 && r <= $2 + 12 && g >= $3 - 12 && g <= $3 + 12 && b >= $4 - 12 && b <= $4 + 12 ))
+}
+layer_level() { # <output> → hyprctl level of OUR serve's surface on it ("" if none)
+    hyprctl layers -j | jq -r --arg o "$1" --argjson pid "$SERVE_PID" \
+        '.[$o].levels // {} | to_entries[] | select(any(.value[]; .namespace == "lp-player" and .pid == $pid)) | .key' | head -n1
+}
+wait_level() { # <output> <level>
+    for _ in $(seq 1 30); do [[ $(layer_level "$1") == "$2" ]] && return 0; sleep 0.1; done
+    return 1
+}
+frames() { ctl probe '{"name":"frames"}'; }
+reset_frames() { ctl probe '{"name":"frames","args":{"reset":true}}' >/dev/null; }
+fstat() { # <json> <output> <jq path under the output>
+    jq -r --arg o "$2" ".outputs[] | select(.name == \$o) | $3" <<<"$1"
+}
+check_mean() { # <label> <json> <output> <want_ms>
+    local mean count p95 max missed
+    mean=$(fstat "$2" "$3" .paced.mean_ms)
+    count=$(fstat "$2" "$3" .paced.count)
+    p50=$(fstat "$2" "$3" .paced.p50_ms)
+    p95=$(fstat "$2" "$3" .paced.p95_ms)
+    max=$(fstat "$2" "$3" .paced.max_ms)
+    missed=$(fstat "$2" "$3" .paced.missed)
+    say "$1 $3: mean $mean ms p50 $p50 p95 $p95 max $max count $count missed $missed (want $4 ± $TOL_MS)"
+    python3 -c "import sys; m=float('$mean' if '$mean' != 'null' else 'nan'); sys.exit(0 if abs(m-$4) <= $TOL_MS and $count >= 50 else 1)" ||
+        fail "$1 $3: mean present interval $mean ms (count $count), want $4 ± $TOL_MS"
+}
+create_color() { ctl create "{\"kind\":\"source\",\"props\":{\"kind\":\"color\",\"color\":$1}}" | jq -r .id; }
+create_video() { ctl create "{\"kind\":\"source\",\"props\":{\"path\":\"$1\",\"loop\":true}}" | jq -r .id; }
+show() { ctl set "{\"path\":\"lay:$1:main.content\",\"value\":\"$2\"}" >/dev/null || fail "set lay:$1:main.content"; }
+wait_ready() { # <source id>
+    for _ in $(seq 1 100); do
+        [[ $(ctl get "{\"path\":\"$1.ready\"}" | jq -r .value) == true ]] && return 0
+        sleep 0.05
+    done
+    fail "$1 never became ready"
+}
+
+# ------------------------------------------------------------------ 1. serve on Wayland
+# Not through `lp` (a function call in the background would fork a subshell): `env` execs
+# lp-player, so $! is lp-player's own pid — the one hyprctl reports and the trap kills.
+env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$STATE" WAYLAND_DISPLAY="$WL" \
+    "$BIN" serve --ao null --log-level debug >"$SCRATCH/serve.log" 2>&1 &
+SERVE_PID=$!
+for _ in $(seq 1 100); do
+    [[ -S $RT/livepaper/lp-player.sock ]] && break
+    kill -0 "$SERVE_PID" 2>/dev/null || fail "lp-player serve exited early"
+    sleep 0.1
+done
+[[ -S $RT/livepaper/lp-player.sock ]] || fail "no lp-player socket after 10 s"
+HELLO=$(ctl hello) || fail "ctl hello: $HELLO"
+[[ $(jq -r .backend <<<"$HELLO") == wayland ]] || fail "backend is $(jq -r .backend <<<"$HELLO"), want wayland"
+
+STATE_JSON=$(ctl state) || fail "ctl state"
+for pair in "$OUT_A:$HZ_A" "$OUT_B:$HZ_B"; do
+    o=${pair%%:*}
+    hz=${pair##*:}
+    got=$(jq -r --arg id "out:$o" '.graph[$id].refresh_hz' <<<"$STATE_JSON")
+    [[ $got == "$hz" ]] || fail "out:$o refresh_hz = $got, want $hz"
+    say "out:$o refresh_hz $got, $(jq -r --arg id "out:$o" '.graph[$id] | "\(.width)x\(.height)"' <<<"$STATE_JSON")"
+    wait_level "$o" 0 || fail "no lp-player layer surface on the background level of $o"
+done
+say "layer surfaces mapped on the background level (hyprctl layers)"
+
+# ------------------------------------------------------------------ 2. colours + pixel check
+RED=$(create_color '[255,0,0]')
+BLUE=$(create_color '[0,0,255]')
+show "$OUT_A" "$RED"
+show "$OUT_B" "$BLUE"
+ctl set '{"path":"out:*.layer","value":"overlay"}' >/dev/null || fail "set out:*.layer overlay"
+for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 3 || fail "$o did not move to the overlay level live"; done
+sleep 0.3
+PA=$(centre_rgb "$OUT_A")
+PB=$(centre_rgb "$OUT_B")
+say "centre pixels: $OUT_A = $PA, $OUT_B = $PB"
+near "$PA" 255 0 0 || fail "$OUT_A centre is $PA, want red"
+near "$PB" 0 0 255 || fail "$OUT_B centre is $PB, want blue"
+# Pointer: the surface takes pointer input (input region = whole surface). Warp the cursor
+# over it while it is on top, read out:<c>.pointer, put the cursor back.
+CURSOR=$(hyprctl cursorpos -j | jq -c '{x, y}')
+AX=$(jq -r --arg n "$OUT_A" '.[] | select(.name == $n) | .x' "$LAYOUT")
+AY=$(jq -r --arg n "$OUT_A" '.[] | select(.name == $n) | .y' "$LAYOUT")
+pointer_is() { # <x> <y> → wait until out:OUT_A.pointer == [x, y, 0]
+    for _ in $(seq 1 30); do
+        [[ $(ctl get "{\"path\":\"out:$OUT_A.pointer\"}" | jq -c '.value | map(round)') == "[$1,$2,0]" ]] && return 0
+        sleep 0.05
+    done
+    return 1
+}
+BX=$(jq -r --arg n "$OUT_B" '.[] | select(.name == $n) | .x' "$LAYOUT")
+BY=$(jq -r --arg n "$OUT_B" '.[] | select(.name == $n) | .y' "$LAYOUT")
+cursor_to $((AX + 960)) $((AY + 540)) # enters our DP-1 surface
+pointer_is 960 540 || fail "out:$OUT_A.pointer is $(ctl get "{\"path\":\"out:$OUT_A.pointer\"}" | jq -c .value), want [960,540,0] after enter"
+# A warp inside the surface: Hyprland's simulated move sends wl_pointer.motion without a
+# wl_pointer.frame (real devices always frame), so the motion is delivered with the next
+# frame — the leave when the cursor goes to the other monitor.
+cursor_to $((AX + 100)) $((AY + 200))
+cursor_to $((BX + 960)) $((BY + 540))
+pointer_is 100 200 || fail "out:$OUT_A.pointer is $(ctl get "{\"path\":\"out:$OUT_A.pointer\"}" | jq -c .value), want [100,200,0] (motion, then leave)"
+PEV=$(ctl logs '{"kind_prefix":"input.pointer"}' | jq -c '[.events[] | select(.output == "'"$OUT_A"'") | .event] | unique')
+say "pointer: out:$OUT_A.pointer [960,540,0] on enter → [100,200,0] after motion + leave; input.pointer events $PEV"
+jq -e 'index("enter") != null and index("motion") != null and index("leave") != null' <<<"$PEV" >/dev/null ||
+    fail "input.pointer events missing enter/motion/leave: $PEV"
+restore_cursor
+
+ctl set '{"path":"out:*.layer","value":"background"}' >/dev/null || fail "set out:*.layer background"
+for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 0 || fail "$o did not return to the background level"; done
+say "layer change applied live: overlay → background"
+
+# ------------------------------------------------------------------ 3. static colour = idle
+sleep 0.5
+F0=$(frames)
+sleep 1
+F1=$(frames)
+for o in "$OUT_A" "$OUT_B"; do
+    idle=$(fstat "$F1" "$o" .idle)
+    d=$(( $(fstat "$F1" "$o" .totals.presents) - $(fstat "$F0" "$o" .totals.presents) ))
+    say "static colour $o: idle $idle, presents in 1 s: $d"
+    [[ $idle == true ]] || fail "$o is not idle on a static colour"
+    (( d <= 1 )) || fail "$o presented $d frames in 1 s of a static colour"
+done
+
+# ------------------------------------------------------------------ 4. pacing: animation
+ctl animate '{"path":"lay:*:main.opacity","from":1,"to":0.97,"duration_ms":6000}' >/dev/null ||
+    fail "animate opacity"
+sleep 0.5
+reset_frames
+sleep 2.5
+FA=$(frames)
+check_mean "animation" "$FA" "$OUT_A" "$MEAN_A"
+check_mean "animation" "$FA" "$OUT_B" "$MEAN_B"
+sleep 3.2 # let it finish
+ctl set '{"path":"lay:*:main.opacity","value":1}' >/dev/null
+
+# ------------------------------------------------------------------ 5. pacing: playing video
+V240=$(create_video "$CLIP240")
+wait_ready "$V240"
+show "$OUT_A" "$V240"
+show "$OUT_B" "$V240"
+sleep 0.5
+reset_frames
+sleep 2.5
+FV=$(frames)
+check_mean "video 240 fps" "$FV" "$OUT_A" "$MEAN_A"
+check_mean "video 240 fps" "$FV" "$OUT_B" "$MEAN_B"
+V60=$(create_video "$CLIP60")
+wait_ready "$V60"
+show "$OUT_A" "$V60"
+show "$OUT_B" "$V60"
+ctl destroy "{\"id\":\"$V240\"}" >/dev/null
+sleep 0.5
+reset_frames
+sleep 2.5
+FV6=$(frames)
+for o in "$OUT_A" "$OUT_B"; do
+    fps=$(fstat "$FV6" "$o" .all.fps)
+    say "video 60 fps $o: presents/s $fps, all-interval mean $(fstat "$FV6" "$o" .all.mean_ms) ms, idle $(fstat "$FV6" "$o" .idle)"
+    python3 -c "import sys; sys.exit(0 if 50 <= float('$fps') <= 70 else 1)" ||
+        fail "$o presented $fps frames/s of a 60 fps clip (content-paced: want ≈ 60)"
+done
+
+# ------------------------------------------------------------------ 6. hotplug
+show "$OUT_A" "$RED"
+show "$OUT_B" "$BLUE"
+ctl destroy "{\"id\":\"$V60\"}" >/dev/null
+sleep 0.3
+say "hotplug: disabling $OUT_A"
+hyprctl eval "hl.monitor({ output = \"$OUT_A\", disabled = true })" >/dev/null
+gone=0
+for _ in $(seq 1 50); do
+    if ! ctl state | jq -e --arg id "out:$OUT_A" '.graph | has($id)' >/dev/null; then gone=1; break; fi
+    sleep 0.1
+done
+[[ $gone == 1 ]] || fail "out:$OUT_A still in the graph after disabling it"
+kill -0 "$SERVE_PID" 2>/dev/null || fail "lp-player died when $OUT_A went away"
+ctl hello >/dev/null || fail "player unresponsive after $OUT_A went away"
+S2=$(ctl state)
+say "after unplug: outputs $(jq -c '[.outputs[].name]' <<<"$S2"), sources $(jq -c .sources <<<"$S2")"
+say "hotplug: re-enabling $OUT_A with its recorded mode"
+LUA=$(jq -r --arg n "$OUT_A" '.[] | select(.name == $n) | "hl.monitor({ output = \"\(.name)\", mode = \"\(.width)x\(.height)@\(.refreshRate)\", position = \"\(.x)x\(.y)\", scale = \(.scale)"
+    + (if .transform != 0 then ", transform = \(.transform)" else "" end) + ", disabled = false })"' "$LAYOUT")
+say "  hyprctl eval '$LUA'"
+hyprctl eval "$LUA" >/dev/null
+back=0
+for _ in $(seq 1 80); do
+    if ctl state | jq -e --arg id "out:$OUT_A" '.graph | has($id)' >/dev/null; then back=1; break; fi
+    sleep 0.1
+done
+[[ $back == 1 ]] || fail "out:$OUT_A did not come back"
+S3=$(ctl state)
+CONTENT=$(jq -r --arg l "lay:$OUT_A:main" '.graph[$l].content' <<<"$S3")
+say "after replug: lay:$OUT_A:main.content = $CONTENT (cur:$OUT_B = $BLUE)"
+[[ $CONTENT == "$BLUE" ]] || fail "re-added $OUT_A shows $CONTENT, want the current wallpaper $BLUE"
+wait_level "$OUT_A" 0 || fail "no layer surface on re-added $OUT_A"
+ctl set '{"path":"out:*.layer","value":"overlay"}' >/dev/null
+for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 3 || fail "$o not on overlay"; done
+sleep 0.4
+PA=$(centre_rgb "$OUT_A")
+say "re-added $OUT_A centre pixel = $PA"
+near "$PA" 0 0 255 || fail "re-added $OUT_A centre is $PA, want blue (the current wallpaper)"
+ctl set '{"path":"out:*.layer","value":"background"}' >/dev/null
+for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 0 || fail "$o not back on background"; done
+NOW=$(layout_now)
+[[ $NOW == "$(jq -c "$NORM" "$LAYOUT")" ]] || fail "layout after replug differs: $NOW"
+say "layout after replug identical to the record"
+jq -r 'select(.kind == "output.added" or .kind == "output.removed") | "  \(.kind) \(.output) content=\(.content // "-")"' \
+    "$STATE"/livepaper/lp-player/events.jsonl 2>/dev/null
+
+# ------------------------------------------------------------------ 7. quit
+ctl quit >/dev/null || fail "ctl quit"
+for _ in $(seq 1 50); do kill -0 "$SERVE_PID" 2>/dev/null || break; sleep 0.1; done
+kill -0 "$SERVE_PID" 2>/dev/null && fail "lp-player still running 5 s after quit"
+wait "$SERVE_PID"
+st=$?
+SERVE_PID=
+[[ $st == 0 ]] || fail "lp-player exited $st after quit"
+say "quit: exit 0"
+exit 0

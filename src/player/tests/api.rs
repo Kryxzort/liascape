@@ -1922,3 +1922,105 @@ fn ctl_times_out() {
     assert!(e["hint"].as_str().unwrap().contains("--timeout-ms"), "{e}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Task 13: the `frames` probe. Headless outputs compose on every tick (policy
+/// `every_tick`, never idle): both outputs report paced present intervals at the 60 Hz
+/// tick; `reset` clears the windows after reading.
+#[test]
+fn frames_probe_reports_present_intervals() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let list = c.ok("probe", json!({"name": "list"}));
+    assert!(
+        list["probes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "frames"),
+        "{list}"
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    let f = c.ok("probe", json!({"name": "frames", "args": {"reset": true}}));
+    assert_eq!(f["policy"], "every_tick", "{f}");
+    assert_eq!(f["backend"], "headless");
+    let outs = f["outputs"].as_array().unwrap();
+    let names: Vec<&str> = outs.iter().map(|o| o["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["VIRTUAL-1", "VIRTUAL-2"], "{f}");
+    let mut before = 0;
+    for o in outs {
+        assert_eq!(o["refresh_mhz"], 60_000, "{o}");
+        assert!(
+            (o["period_ms"].as_f64().unwrap() - 16.667).abs() < 0.01,
+            "{o}"
+        );
+        assert_eq!(o["idle"], false, "headless never idles: {o}");
+        let p = &o["paced"];
+        let n = p["count"].as_u64().unwrap();
+        assert!(n >= 20, "≥ 20 paced intervals in 0.7 s at 60 Hz: {o}");
+        let mean = p["mean_ms"].as_f64().unwrap();
+        assert!(
+            (12.0..=22.0).contains(&mean),
+            "mean {mean} ms at a 60 Hz tick: {o}"
+        );
+        for k in ["p50_ms", "p95_ms", "max_ms"] {
+            assert!(p[k].as_f64().unwrap() > 0.0, "{k}: {o}");
+        }
+        assert!(o["totals"]["presents"].as_u64().unwrap() > n);
+        before = before.max(n);
+    }
+    let f2 = c.ok("probe", json!({"name": "frames"}));
+    for o in f2["outputs"].as_array().unwrap() {
+        let n = o["paced"]["count"].as_u64().unwrap();
+        assert!(
+            n < before,
+            "reset cleared the window ({n} vs {before}): {o}"
+        );
+    }
+}
+
+/// Task 13: `serve` without `--headless` is the Wayland backend. `--outputs` is
+/// headless-only (exit 2), and an unreachable compositor is a clean failure — exit 1 with a
+/// hint, socket + lock removed — never a hang or a panic. (The real compositor is only
+/// touched by `tests/onmachine/outputs.sh`.)
+#[test]
+fn wayland_serve_args_and_missing_compositor() {
+    let root = new_root();
+    let run = |args: &[&str]| {
+        let mut c = Command::new(BIN);
+        die_with_parent(&mut c);
+        c.args(args)
+            .env("XDG_RUNTIME_DIR", root.join("run"))
+            .env("XDG_STATE_HOME", root.join("state"))
+            .env("WAYLAND_DISPLAY", root.join("no-such-wayland-0"))
+            .env_remove("WAYLAND_SOCKET")
+            .stdin(Stdio::null())
+            .output()
+            .expect("run lp-player")
+    };
+    let out = run(&["serve", "--outputs", "640x360@60"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{err}");
+    assert!(
+        err.contains("--outputs only applies with --headless"),
+        "{err}"
+    );
+
+    let t = Instant::now();
+    let out = run(&["serve", "--ao", "null"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains("can't connect to the Wayland display"),
+        "{err}"
+    );
+    assert!(
+        err.contains("--headless"),
+        "the hint names the alternative: {err}"
+    );
+    assert!(t.elapsed() < Duration::from_secs(10), "no hang");
+    let sock = root.join("run/livepaper/lp-player.sock");
+    assert!(!sock.exists(), "socket left behind");
+    assert!(!sock.with_extension("lock").exists(), "lock left behind");
+}

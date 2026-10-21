@@ -144,7 +144,10 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         .backend
         .outputs()
         .iter()
-        .map(|o| json!({"name": o.name, "width": o.width, "height": o.height, "hz": o.hz}))
+        .map(|o| {
+            json!({"name": o.name, "width": o.width, "height": o.height, "hz": o.hz,
+                   "refresh_mhz": o.refresh_mhz})
+        })
         .collect();
     Ok(json!({
         "graph": rt.graph.snapshot(),
@@ -590,11 +593,13 @@ fn headless_err() -> ApiError {
 }
 
 fn add_output(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    let hz = opt_f64(args, "hz")?.unwrap_or(60.0) as u32;
     let info = OutputInfo {
         name: arg_str(args, "name")?.to_string(),
         width: arg_f64(args, "width")? as u32,
         height: arg_f64(args, "height")? as u32,
-        hz: opt_f64(args, "hz")?.unwrap_or(60.0) as u32,
+        hz,
+        refresh_mhz: hz.saturating_mul(1000),
     };
     let name = info.name.clone();
     let gfx = &rt.gfx;
