@@ -64,9 +64,9 @@ unsafe extern "C" {
 /// waiting on it (no `glClientWaitSync` on 0), and `glDeleteSync(0)` is a GL no-op. What
 /// mpv's GL fences actually guard is *buffer reuse*: (a) direct rendering (`vd-lavc-dr`,
 /// decoder frames in GL-mapped buffers) — on the render API that needs
-/// `MPV_RENDER_PARAM_ADVANCED_CONTROL`, which lp-player never passes; (b) `gpu-pbo`
+/// `MPV_RENDER_PARAM_ADVANCED_CONTROL`, which lp-player never passes; (b) `opengl-pbo`
 /// uploads, where a PBO could be rewritten while the GPU still reads it — lp-player pins
-/// `gpu-pbo=no` (mpv's default) in `open`. **Neither may be enabled while this stub is in
+/// `opengl-pbo=no` (mpv's default) in `open`. **Neither may be enabled while this stub is in
 /// place.**
 unsafe extern "C" fn stub_fence_sync(_condition: u32, _flags: u32) -> *mut c_void {
     FENCE_STUB_CALLS.fetch_add(1, Ordering::Relaxed);
