@@ -106,6 +106,38 @@ fn assert_rgb(px: [u8; 4], want: [u8; 3], tol: i32, what: &str) {
     }
 }
 
+/// Pump until every async mpv request this source issued has been answered (≤ 2 s) —
+/// after this, raw `mpv_get_*` reads reflect every `apply` so far.
+fn settle(gfx: &Gfx, src: &mut MpvSource) -> Vec<SourceEvent> {
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(gfx, src, wake, Duration::from_secs(2), |_, s| {
+        s.requests_in_flight() == 0
+    });
+    assert!(ok, "async mpv requests never settled; events: {evs:?}");
+    evs
+}
+
+fn centre(gfx: &Gfx, src: &impl Source) -> [u8; 4] {
+    let tex = src.texture().expect("texture");
+    read_rgba(gfx, tex, tex.w / 2, tex.h / 2)
+}
+
+const BLUE_1S: ClipSpec = ClipSpec::Solid {
+    rgb: [0, 0, 255],
+    secs: 1.0,
+    tone_hz: 440.0,
+    tone_dbfs: -20.0,
+};
+
+fn errors(evs: &[SourceEvent]) -> Vec<String> {
+    evs.iter()
+        .filter_map(|e| match e {
+            SourceEvent::Error { reason } => Some(reason.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn open_ready(gfx: &Gfx, path: &str, o: Value) -> MpvSource {
     let mut src = MpvSource::open(gfx, path, &opts(o)).expect("MpvSource::open");
     let wake = Some(src.wake_fd());
@@ -295,6 +327,43 @@ fn ended_holds_last_frame() {
     let tex = src.texture().expect("texture held after end");
     let px = read_rgba(&gfx, tex, tex.w / 2, tex.h / 2);
     assert_rgb(px, [0, 0, 255], 3, "held last frame after Ended");
+    // keep-open-pause=no: mpv must not flip `pause` at EOF (the graph never asked).
+    assert_eq!(
+        src.read("paused"),
+        Some(PropValue::Bool(false)),
+        "EOF must not pause the source"
+    );
+
+    // A seek back after the end plays again: new frames, time advancing, a second Ended.
+    src.apply("position", &PropValue::F64(0.0)).unwrap();
+    let t0 = Instant::now();
+    let (mut frames, mut evs2) = (0, Vec::new());
+    while t0.elapsed() < Duration::from_secs(4) && !ended(&evs2) {
+        if src.update(&gfx) {
+            frames += 1;
+        }
+        evs2.extend(src.poll_events());
+        wait_wake(wake, 10);
+    }
+    assert!(
+        frames >= 5,
+        "only {frames} new frames after seeking back from the end"
+    );
+    assert!(
+        evs2.iter()
+            .any(|e| matches!(e, SourceEvent::Position(t) if *t > 0.3)),
+        "time_pos never advanced after the seek: {evs2:?}"
+    );
+    assert!(
+        ended(&evs2),
+        "no second Ended for the second play-through: {evs2:?}"
+    );
+    assert_rgb(
+        centre(&gfx, &src),
+        [0, 0, 255],
+        3,
+        "held after the second end",
+    );
 }
 
 #[test]
@@ -304,6 +373,7 @@ fn gain_maps_to_volume_gain() {
     let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     src.apply("gain.user", &PropValue::F64(-6.0)).unwrap();
     src.apply("gain.xfade", &PropValue::F64(-3.0103)).unwrap();
+    settle(&gfx, &mut src);
     let vg = src
         .mpv_get_f64("volume-gain")
         .expect("volume-gain readable");
@@ -315,6 +385,7 @@ fn gain_maps_to_volume_gain() {
     assert_eq!(src.read("gain.user"), Some(PropValue::F64(-6.0)));
     // Mute dominates down to the -96 dB floor (volume-gain-min=-96 lets mpv accept it).
     src.apply("gain.mute", &PropValue::F64(-96.0)).unwrap();
+    settle(&gfx, &mut src);
     assert_eq!(src.mpv_get_f64("volume-gain"), Some(-96.0));
 }
 
@@ -351,6 +422,7 @@ fn no_audio_live() {
     // `options/aid` is the raw option we set; the `aid` *property* reads back the
     // selected track id ("1") once `auto` has picked one, so it can't show "auto".
     src.apply("no_audio", &PropValue::Bool(true)).unwrap();
+    settle(&gfx, &mut src);
     assert_eq!(src.mpv_get_string("options/aid").as_deref(), Some("no"));
     assert_eq!(src.mpv_get_string("aid").as_deref(), Some("no"));
     let (_, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
@@ -359,6 +431,7 @@ fn no_audio_live() {
     assert!(ok, "audio-params still set after no_audio=true");
 
     src.apply("no_audio", &PropValue::Bool(false)).unwrap();
+    settle(&gfx, &mut src);
     assert_eq!(src.mpv_get_string("options/aid").as_deref(), Some("auto"));
     let (_, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
         audio_up(s)
@@ -381,42 +454,51 @@ fn property_map_reaches_mpv() {
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     let s = |src: &MpvSource, n: &str| src.mpv_get_string(n).unwrap_or_default();
+    // Every apply is async on the render thread; settle before reading mpv back.
+    let ap = |src: &mut MpvSource, p: &str, v: PropValue| {
+        src.apply(p, &v).unwrap();
+        settle(&gfx, src);
+    };
 
-    src.apply("loop", &PropValue::Bool(true)).unwrap();
+    ap(&mut src, "loop", PropValue::Bool(true));
     assert_eq!(s(&src, "loop-file"), "inf");
-    src.apply("loop", &PropValue::Bool(false)).unwrap();
+    ap(&mut src, "loop", PropValue::Bool(false));
     assert_eq!(s(&src, "loop-file"), "no");
-    src.apply("paused", &PropValue::Bool(true)).unwrap();
+    ap(&mut src, "paused", PropValue::Bool(true));
     assert_eq!(s(&src, "pause"), "yes");
-    src.apply("speed", &PropValue::F64(1.5)).unwrap();
+    ap(&mut src, "speed", PropValue::F64(1.5));
     assert_eq!(src.mpv_get_f64("speed"), Some(1.5));
-    src.apply("hwdec", &PropValue::Str("no".into())).unwrap();
+    ap(&mut src, "hwdec", PropValue::Str("no".into()));
     assert_eq!(s(&src, "hwdec"), "no");
-    src.apply("fps_cap", &PropValue::F64(24.0)).unwrap();
+    ap(&mut src, "fps_cap", PropValue::F64(24.0));
     assert!(s(&src, "vf").contains("fps"), "vf = {:?}", s(&src, "vf"));
-    src.apply("fps_cap", &PropValue::F64(0.0)).unwrap();
+    ap(&mut src, "fps_cap", PropValue::F64(0.0));
     assert_eq!(s(&src, "vf"), "");
-    src.apply("cache", &PropValue::Bool(false)).unwrap();
+    ap(&mut src, "cache", PropValue::Bool(false));
     assert_eq!(s(&src, "cache"), "no");
-    src.apply("demuxer_max_mib", &PropValue::F64(32.0)).unwrap();
+    // `cache: true` = mpv's normal policy (`auto`, the legacy engine's DisableCache=false),
+    // not a forced `yes` (which would RAM-cache every local wallpaper).
+    ap(&mut src, "cache", PropValue::Bool(true));
+    assert_eq!(s(&src, "cache"), "auto");
+    ap(&mut src, "cache", PropValue::Bool(false));
+    ap(&mut src, "demuxer_max_mib", PropValue::F64(32.0));
     assert_eq!(src.mpv_get_f64("demuxer-max-bytes"), Some(32.0 * 1048576.0));
-    src.apply("demuxer_max_mib", &PropValue::F64(1.5)).unwrap();
+    ap(&mut src, "demuxer_max_mib", PropValue::F64(1.5));
     assert_eq!(src.mpv_get_f64("demuxer-max-bytes"), Some(1.5 * 1048576.0));
-    src.apply("demuxer_max_mib", &PropValue::F64(0.0)).unwrap();
+    ap(&mut src, "demuxer_max_mib", PropValue::F64(0.0));
     assert_eq!(
         src.mpv_get_f64("demuxer-max-bytes"),
         Some(150.0 * 1048576.0),
         "0 = unset → mpv's default (legacy convention)"
     );
-    src.apply("demuxer_back_mib", &PropValue::F64(8.0)).unwrap();
+    ap(&mut src, "demuxer_back_mib", PropValue::F64(8.0));
     assert_eq!(
         src.mpv_get_f64("demuxer-max-back-bytes"),
         Some(8.0 * 1048576.0)
     );
-    src.apply("af", &PropValue::Str("lavfi=[anull]".into()))
-        .unwrap();
+    ap(&mut src, "af", PropValue::Str("lavfi=[anull]".into()));
     assert!(s(&src, "af").contains("anull"), "af = {:?}", s(&src, "af"));
-    src.apply("audio_delay", &PropValue::F64(0.25)).unwrap();
+    ap(&mut src, "audio_delay", PropValue::F64(0.25));
     assert_eq!(src.mpv_get_f64("audio-delay"), Some(0.25));
     // Every applied value reads back through the Source.
     assert_eq!(src.read("speed"), Some(PropValue::F64(1.5)));
@@ -439,10 +521,23 @@ fn path_change_is_live() {
         "last good frame held across the reload"
     );
     let wake = Some(src.wake_fd());
-    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+    let mut held_checks = 0;
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, s| {
+        if !ready(e) {
+            // Until the new file's Ready, update() keeps running but the texture must
+            // still be the OLD file's frame (never a blank/old redraw/half-loaded one).
+            held_checks += 1;
+            assert_rgb(
+                centre(&gfx, s),
+                [255, 0, 0],
+                3,
+                "old frame held before Ready",
+            );
+        }
         ready(e)
     });
     assert!(ok, "no second Ready after the path change: {evs:?}");
+    assert!(held_checks >= 1, "never observed the held frame");
     assert_eq!(src.kind(), "image");
     assert_eq!(src.read("duration"), None);
     let tex = src.texture().expect("texture");
@@ -452,6 +547,328 @@ fn path_change_is_live() {
         3,
         "new file shown",
     );
+}
+
+/// Fix round 1 (#1): after `open`, `apply` never makes a synchronous core call on the
+/// render thread. Provoke the window where a sync call would stall — frames queued that
+/// we don't render (vo_libmpv waits on the render thread) plus a seek (the core waits on
+/// the VO for the first frame after the restart) — and time a burst of per-frame-style
+/// gain changes.
+#[test]
+fn apply_never_blocks_the_render_thread() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_ready(&gfx, path_str(&clip), json!({"loop": true}));
+    std::thread::sleep(Duration::from_millis(80)); // render thread "busy": no update()
+    let t = Instant::now();
+    src.apply("position", &PropValue::F64(0.5)).unwrap();
+    let mut worst = t.elapsed();
+    let mut last = 0.0;
+    for i in 0..240 {
+        last = -(i as f64) * 0.1;
+        let t = Instant::now();
+        src.apply("gain.xfade", &PropValue::F64(last)).unwrap();
+        worst = worst.max(t.elapsed());
+    }
+    assert!(
+        worst <= Duration::from_millis(2),
+        "an apply blocked the render thread for {worst:?}"
+    );
+    let evs = settle(&gfx, &mut src);
+    assert!(errors(&evs).is_empty(), "burst produced errors: {evs:?}");
+    let vg = src.mpv_get_f64("volume-gain").unwrap();
+    // mpv stores volume-gain as a float option (single precision).
+    assert!(
+        (vg - last).abs() < 1e-4,
+        "final volume-gain {vg}, want {last}"
+    );
+}
+
+/// Fix round 1 (#1): a value mpv rejects (after the synchronous schema gate passed)
+/// surfaces as `SourceEvent::Error` naming the property — and `read` reverts.
+#[test]
+fn rejected_property_is_an_error_event() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_ready(&gfx, path_str(&clip), json!({}));
+    let before = src.read("af");
+    src.apply("af", &PropValue::Str("no_such_filter_lp".into()))
+        .expect("shape is valid: apply returns Ok, mpv's verdict arrives async");
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(2), |e, _| {
+        !errors(e).is_empty()
+    });
+    assert!(ok, "no Error event for a rejected af: {evs:?}");
+    let reason = errors(&evs).remove(0);
+    assert!(
+        reason.contains("af") && reason.contains("no_such_filter_lp"),
+        "Error must name the property and value: {reason}"
+    );
+    assert_eq!(
+        src.read("af"),
+        before,
+        "rejected value must not stick in read()"
+    );
+}
+
+/// Fix round 1 (#3a): a path change before the first pump — only the NEW file may ever
+/// produce `Ready`, exactly once, and the texture at that moment is the new file's.
+#[test]
+fn path_change_before_first_pump_shows_only_new_file() {
+    let Some(gfx) = headless_gl() else { return };
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    let blue = ensure_clip("solid_blue_1s", BLUE_1S);
+    let mut src =
+        MpvSource::open(&gfx, path_str(&red), &opts(json!({"loop": true}))).expect("open");
+    // Let A load fully — its FILE_LOADED / PLAYBACK_RESTART / first frame all queued —
+    // without pumping anything, then move on: every one of those is now stale.
+    std::thread::sleep(Duration::from_millis(300));
+    src.apply("path", &PropValue::Str(path_str(&blue).into()))
+        .unwrap();
+    let wake = Some(src.wake_fd());
+    let (mut readies, mut at_ready) = (0, Vec::new());
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_millis(2500) {
+        src.update(&gfx);
+        for e in src.poll_events() {
+            if e == SourceEvent::Ready {
+                readies += 1;
+                at_ready.push(centre(&gfx, &src));
+            }
+        }
+        wait_wake(wake, 10);
+    }
+    assert_eq!(
+        readies, 1,
+        "exactly one Ready (texture colours at Ready: {at_ready:?})"
+    );
+    assert_rgb(
+        at_ready[0],
+        [0, 0, 255],
+        3,
+        "texture at Ready must be the new file",
+    );
+}
+
+/// Fix round 1 (#3, stale END_FILE): a load that fails *after* the path already moved on
+/// must not be reported — least of all under the NEW path — and the new file plays.
+#[test]
+fn stale_load_error_is_not_reported_for_new_path() {
+    let Some(gfx) = headless_gl() else { return };
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    let missing = "/nonexistent/lp-player-stale-error.mkv";
+    let mut src = MpvSource::open(&gfx, missing, &opts(json!({"loop": true}))).expect("open");
+    std::thread::sleep(Duration::from_millis(300)); // A's END_FILE(ERROR) queued, unpumped
+    src.apply("path", &PropValue::Str(path_str(&red).into()))
+        .unwrap();
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ready(e)
+    });
+    assert!(ok, "no Ready for the new path: {evs:?}");
+    let (more, _) = pump(&gfx, &mut src, wake, Duration::from_millis(300), |_, _| {
+        false
+    });
+    let errs: Vec<String> = errors(&evs).into_iter().chain(errors(&more)).collect();
+    assert!(errs.is_empty(), "stale load error leaked: {errs:?}");
+    assert_rgb(centre(&gfx, &src), [255, 0, 0], 3, "new file shown");
+}
+
+/// Fix round 1 (#3b): a path change to a missing file reports an Error naming THAT
+/// path (the old frame stays), and changing back to a valid file recovers with Ready.
+#[test]
+fn path_change_to_missing_then_back() {
+    let Some(gfx) = headless_gl() else { return };
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
+    let mut src = open_ready(&gfx, path_str(&red), json!({"loop": true}));
+    let missing = "/nonexistent/lp-player-path-change-missing.mkv";
+    src.apply("path", &PropValue::Str(missing.into())).unwrap();
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        !errors(e).is_empty()
+    });
+    assert!(ok, "no Error for the missing path: {evs:?}");
+    let errs = errors(&evs);
+    assert!(
+        errs.len() == 1 && errs[0].contains(missing),
+        "one Error naming the missing path: {errs:?}"
+    );
+    assert!(!ready(&evs), "no Ready for a file that failed: {evs:?}");
+    assert_rgb(
+        centre(&gfx, &src),
+        [255, 0, 0],
+        3,
+        "old frame held after a failed load",
+    );
+
+    src.apply("path", &PropValue::Str(path_str(&green).into()))
+        .unwrap();
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ready(e)
+    });
+    assert!(ok, "no Ready after changing back to a valid file: {evs:?}");
+    assert!(
+        errors(&evs).is_empty(),
+        "stale errors after recovery: {evs:?}"
+    );
+    assert_rgb(centre(&gfx, &src), [0, 255, 0], 3, "recovered file shown");
+}
+
+/// Fix round 1 (#6): a string with an interior NUL is rejected — never silently
+/// truncated/stripped into a different path or filter.
+#[test]
+fn nul_bytes_are_rejected() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let code = |r: Result<(), lp_player::graph::ApiError>| r.unwrap_err().code;
+    let nul_path = format!("{}\0.png", path_str(&clip));
+    assert_eq!(
+        MpvSource::open(&gfx, &nul_path, &opts(json!({})))
+            .err()
+            .map(|e| e.code),
+        Some("out_of_range")
+    );
+    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    assert_eq!(
+        code(src.apply("path", &PropValue::Str(nul_path.clone()))),
+        "out_of_range"
+    );
+    assert_eq!(
+        code(src.apply("af", &PropValue::Str("anull\0x".into()))),
+        "out_of_range"
+    );
+    assert_eq!(
+        src.read("path"),
+        Some(PropValue::Str(path_str(&clip).into()))
+    );
+}
+
+/// Fix round 1 (#7): every schema default is pushed at open, so `read` and mpv agree
+/// before anything is applied.
+#[test]
+fn defaults_applied_at_open_match_mpv() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    settle(&gfx, &mut src);
+    let s = |n: &str| src.mpv_get_string(n).unwrap_or_default();
+    assert_eq!(src.read("cache"), Some(PropValue::Bool(true)));
+    assert_eq!(
+        s("cache"),
+        "auto",
+        "cache:true = mpv's normal (auto) policy"
+    );
+    assert_eq!(src.read("paused"), Some(PropValue::Bool(false)));
+    assert_eq!(s("pause"), "no");
+    assert_eq!(src.read("loop"), Some(PropValue::Bool(false)));
+    assert_eq!(s("loop-file"), "no");
+    assert_eq!(src.read("hwdec"), Some(PropValue::Str(String::new())));
+    assert_eq!(s("hwdec"), "no");
+    assert_eq!(s("vf"), "");
+    assert_eq!(s("af"), "");
+    assert_eq!(s("options/aid"), "auto");
+    assert_eq!(src.mpv_get_f64("speed"), Some(1.0));
+    assert_eq!(src.mpv_get_f64("audio-delay"), Some(0.0));
+    assert_eq!(
+        src.mpv_get_f64("demuxer-max-bytes"),
+        Some(150.0 * 1048576.0)
+    );
+    assert_eq!(
+        src.mpv_get_f64("demuxer-max-back-bytes"),
+        Some(50.0 * 1048576.0)
+    );
+    assert_eq!(src.mpv_get_f64("volume-gain"), Some(0.0));
+    assert_eq!(src.mpv_get_f64("volume"), Some(100.0));
+}
+
+/// Fix round 1 (#8): a wrong-typed `open` option is `bad_type`; an mpv rejection of a
+/// well-typed value at open is `out_of_range` (not `io`, which is for real I/O).
+#[test]
+fn open_error_codes() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let code = |o: Value| {
+        MpvSource::open(&gfx, path_str(&clip), &opts(o))
+            .err()
+            .map(|e| e.code)
+    };
+    assert_eq!(code(json!({"kind": 5})), Some("bad_type"));
+    assert_eq!(code(json!({"kind": "color"})), Some("out_of_range"));
+    let mut o = opts(json!({}));
+    o.insert("ao".into(), json!(5));
+    assert_eq!(
+        MpvSource::open(&gfx, path_str(&clip), &o)
+            .err()
+            .map(|e| e.code),
+        Some("bad_type")
+    );
+    assert_eq!(
+        code(json!({"af": "no_such_filter_lp"})),
+        Some("out_of_range")
+    );
+    assert_eq!(code(json!({"position": "x"})), Some("bad_type"));
+}
+
+/// Fix round 1 (#9, features-must-compose): start muted, unmute live → the AO really
+/// comes up (not just decoder-side audio-params), and mute again tears it down.
+#[test]
+fn start_muted_then_unmute_live() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_ready(
+        &gfx,
+        path_str(&clip),
+        json!({"loop": true, "no_audio": true}),
+    );
+    settle(&gfx, &mut src);
+    let ao_up = |s: &MpvSource| {
+        s.mpv_get_string("current-ao").as_deref() == Some("null")
+            && s.mpv_get_string("audio-out-params/samplerate").is_some()
+    };
+    assert!(!ao_up(&src), "no AO while started muted");
+    let wake = Some(src.wake_fd());
+
+    src.apply("no_audio", &PropValue::Bool(false)).unwrap();
+    let (_, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
+        ao_up(s)
+    });
+    assert!(ok, "AO never came up after unmuting a muted start");
+
+    src.apply("no_audio", &PropValue::Bool(true)).unwrap();
+    let (_, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
+        !ao_up(s)
+    });
+    assert!(ok, "AO still up after muting again");
+}
+
+/// Fix round 1 (#5): `open` makes its own context current for the render-context
+/// create, and `update` refuses a `Gfx` from a different context (UB per render.h)
+/// instead of rendering with it — then works again with the right one.
+#[test]
+fn update_with_foreign_context_is_refused() {
+    let Some(gfx1) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let gfx2 = headless_gl().expect("second context"); // now gfx2's context is current
+    let mut src = MpvSource::open(&gfx1, path_str(&clip), &opts(json!({}))).expect("open");
+    let t0 = Instant::now();
+    let mut evs = Vec::new();
+    while t0.elapsed() < Duration::from_millis(500) {
+        assert!(!src.update(&gfx2), "rendered through a foreign context");
+        evs.extend(src.poll_events());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let errs = errors(&evs);
+    assert!(
+        errs.len() == 1 && errs[0].contains("context"),
+        "one Error about the foreign context: {evs:?}"
+    );
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx1, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ready(e)
+    });
+    assert!(ok, "no Ready with the right context: {evs:?}");
+    drop(src); // with gfx2 current: Drop switches to gfx1's context and back
 }
 
 /// `apply` gates values through the graph's own schema (same codes, same order).

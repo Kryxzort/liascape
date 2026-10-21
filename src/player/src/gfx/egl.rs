@@ -115,9 +115,54 @@ impl Drop for Shared {
         // current on this thread) and terminate the display. Best-effort: there is no
         // meaningful recovery from any of these failing during teardown, and panicking in
         // `drop` would just mask whatever error got us here.
-        let _ = self.egl.make_current(self.display, None, None, None);
+        //
+        // Only release the context if it's *this* one that's current: another Gfx on the
+        // same display may be current here, and unbinding it would pull the rug from
+        // under it. Terminate only when this is the display's last user (see
+        // `display_release`).
+        if self.egl.get_current_context() == Some(self.context) {
+            let _ = self.egl.make_current(self.display, None, None, None);
+        }
         let _ = self.egl.destroy_context(self.display, self.context);
-        let _ = self.egl.terminate(self.display);
+        if display_release(self.display) {
+            let _ = self.egl.terminate(self.display);
+        }
+    }
+}
+
+/// Live [`Shared`]s per EGL display handle. **Every surfaceless `Gfx` in a process gets the
+/// same `EGLDisplay`** (`EGL_DEFAULT_DISPLAY` on one platform), and `eglInitialize` is not
+/// reference-counted (EGL 1.5), so an unconditional `eglTerminate` in one `Gfx`'s drop
+/// tore the display down under every other live `Gfx` on it: their non-current contexts
+/// were destroyed and any later `eglMakeCurrent` failed with `EGL_NOT_INITIALIZED` (found
+/// in Task 10's fix round, when a source first switched contexts with a second `Gfx`
+/// alive — `tests/gfx_basic.rs::two_gfx_on_one_display_survive_each_others_drop`).
+static DISPLAY_USERS: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn display_acquire(d: egl::Display) {
+    let key = d.as_ptr() as usize;
+    let mut users = DISPLAY_USERS.lock().unwrap_or_else(|e| e.into_inner());
+    match users.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, n)) => *n += 1,
+        None => users.push((key, 1)),
+    }
+}
+
+/// Drops one user of `d`; true when it was the last (the caller then terminates).
+fn display_release(d: egl::Display) -> bool {
+    let key = d.as_ptr() as usize;
+    let mut users = DISPLAY_USERS.lock().unwrap_or_else(|e| e.into_inner());
+    match users.iter().position(|(k, _)| *k == key) {
+        Some(i) => {
+            users[i].1 -= 1;
+            if users[i].1 == 0 {
+                users.swap_remove(i);
+                true
+            } else {
+                false
+            }
+        }
+        None => true,
     }
 }
 
@@ -192,6 +237,7 @@ impl Gfx {
 
         let gl = load_gl(&egl);
 
+        display_acquire(display);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -242,6 +288,7 @@ impl Gfx {
 
         let gl = load_gl(&egl);
 
+        display_acquire(display);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -448,6 +495,13 @@ impl GlKeepAlive {
             restore: Some(prev),
             ok,
         }
+    }
+
+    /// Whether `gfx` is the very context this keep-alive belongs to (same `Shared`). A
+    /// source must only ever render through the context it was created on — rendering
+    /// libmpv through another one is undefined behaviour (`render.h`).
+    pub fn is_for(&self, gfx: &Gfx) -> bool {
+        Rc::ptr_eq(&self.shared, &gfx.shared)
     }
 
     /// `glDeleteTextures` on `tex`. Call only while a [`CurrentGuard`] is current.

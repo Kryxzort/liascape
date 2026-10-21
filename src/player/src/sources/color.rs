@@ -59,6 +59,13 @@ impl Source for ColorSource {
         if !self.dirty {
             return false;
         }
+        // The texture lives in the context of the first `update`; never paint (or
+        // allocate) through another one.
+        if let Some((_, gl)) = &self.tex
+            && !gl.is_for(gfx)
+        {
+            return false;
+        }
         let (tex, _) = self
             .tex
             .get_or_insert_with(|| (gfx.tex(1, 1), gfx.keep_alive()));
