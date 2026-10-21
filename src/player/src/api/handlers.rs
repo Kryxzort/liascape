@@ -101,11 +101,10 @@ pub fn handle(
     req: &proto::Request,
 ) -> Option<Result<Value, ApiError>> {
     if req.cmd == "step" {
-        return match step_args(rt, &req.args) {
-            Ok(dt) => {
-                rt.queue_step(client, req.id.clone(), dt);
-                None
-            }
+        return match step_args(rt, &req.args)
+            .and_then(|dt| rt.queue_step(client, req.id.clone(), dt))
+        {
+            Ok(()) => None,
             Err(e) => Some(Err(e)),
         };
     }
@@ -154,6 +153,7 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "outputs": outputs,
         "backend": rt.backend.kind(),
         "sources": rt.host.ids(),
+        "parked": rt.parked.as_ref().map(|p| p.id.clone()),
     }))
 }
 
@@ -254,8 +254,26 @@ fn create(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
             "id {i:?}: ids are non-empty and contain no `.` or `*`"
         )));
     }
+    if kind == NodeKind::Effect
+        && let Some(eid) = props.get("effect_id")
+    {
+        check_effect(rt, eid)?;
+    }
     let id = rt.graph.create(kind, id, props)?;
     Ok(json!({ "id": id }))
+}
+
+/// R49 for every way an effect id gets in (`transition`, `create`, `set`): a non-empty
+/// string must name a catalogue effect.
+fn check_effect(rt: &Runtime, v: &Value) -> Result<(), ApiError> {
+    match v.as_str() {
+        Some(eid) if !eid.is_empty() && !rt.cat.ids().iter().any(|i| i == eid) => Err(ApiError {
+            code: "no_such_effect",
+            message: format!("effect_id {eid:?} is not in the catalogue"),
+            hint: hint("`lp-player ctl effects` lists every id; `effect_id: null` is a cut"),
+        }),
+        _ => Ok(()),
+    }
 }
 
 fn destroy(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
@@ -275,17 +293,30 @@ fn destroy(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         }
         _ => {}
     }
-    rt.graph.destroy(id)?;
-    Ok(json!({}))
+    if rt.graph.kind_of(id).is_none() {
+        rt.graph.destroy(id)?; // the graph's own no_such_node
+    }
+    // A source is ramped out first if it can be heard (core invariant); `ramp_ms` says
+    // how long until it's gone (0 = gone now).
+    let ramp = rt.retire(id);
+    Ok(json!({ "ramp_ms": ramp.as_secs_f64() * 1000.0 }))
 }
 
-/// The node kind a wildcard alias addresses (`srcs:*`, `cur:*`, `out:*`, `lay:*:main`).
-fn wildcard_kind(node_ref: &str) -> Option<NodeKind> {
+/// The node kind a broadcast alias addresses — `srcs:*`, `cur:*`, `out:*`, `lay:*:main`,
+/// and `srcs:<c>`/`cur:<c>` of an output that exists. `None` for anything else (an
+/// unknown connector stays `no_such_node`).
+fn wildcard_kind(rt: &Runtime, node_ref: &str) -> Option<NodeKind> {
     match node_ref {
         "srcs:*" | "cur:*" => Some(NodeKind::Source),
         "out:*" => Some(NodeKind::Output),
         "lay:*:main" => Some(NodeKind::Layer),
-        _ => None,
+        _ => {
+            let c = node_ref
+                .strip_prefix("srcs:")
+                .or_else(|| node_ref.strip_prefix("cur:"))?;
+            (rt.graph.kind_of(&format!("out:{c}")) == Some(NodeKind::Output))
+                .then_some(NodeKind::Source)
+        }
     }
 }
 
@@ -297,8 +328,14 @@ fn set(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let value = args
         .get("value")
         .ok_or_else(|| bad_request("args.value is required".into()))?;
+    if path
+        .split_once('.')
+        .is_some_and(|(_, prop)| prop == "effect_id")
+    {
+        check_effect(rt, value)?;
+    }
     if let Some((node_ref, prop)) = path.split_once('.')
-        && let Some(kind) = wildcard_kind(node_ref)
+        && let Some(kind) = wildcard_kind(rt, node_ref)
         && rt.graph.resolve(node_ref).is_empty()
     {
         crate::graph::Graph::typed_for_set(kind, prop, value)?;
@@ -353,6 +390,12 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let (node_ref, prop) = path
         .split_once('.')
         .ok_or_else(|| bad_request(format!("path {path:?} needs <node>.<prop>")))?;
+    if unit == AnimUnit::GainLinear && !prop.starts_with("gain.") {
+        return Err(bad_request(format!(
+            "unit gain_linear is for gain slots (`<source>.gain.<slot>`), not {prop:?}; \
+             use unit scalar"
+        )));
+    }
     let targets = rt.graph.resolve(node_ref);
     if targets.is_empty() {
         return Err(ApiError {
@@ -378,11 +421,14 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
                 ),
             });
         }
-        let emitted_to = match unit {
-            AnimUnit::Scalar => to,
-            AnimUnit::GainLinear => crate::units::lin_to_db(to),
+        let emitted = |v: f64| match unit {
+            AnimUnit::Scalar => v,
+            AnimUnit::GainLinear => crate::units::lin_to_db(v),
         };
-        props::validate_value(kind, prop, &PropValue::F64(emitted_to), true)?;
+        props::validate_value(kind, prop, &PropValue::F64(emitted(to)), true)?;
+        if let Some(f) = from {
+            props::validate_value(kind, prop, &PropValue::F64(emitted(f)), true)?;
+        }
         let cur = match rt.graph.get(&PropPath(format!("{id}.{prop}")))? {
             PropValue::F64(f) => f,
             PropValue::I64(i) => i as f64,
@@ -427,15 +473,8 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
              method? full-live|reveal|frozen, align? now|end)"
         ))
     })?;
-    if let Some(eid) = &req.effect_id
-        && !eid.is_empty()
-        && !rt.cat.ids().iter().any(|i| i == eid)
-    {
-        return Err(ApiError {
-            code: "no_such_effect",
-            message: format!("effect_id {eid:?} is not in the catalogue"),
-            hint: hint("`lp-player ctl effects` lists every id; `effect_id: null` is a cut"),
-        });
+    if let Some(eid) = &req.effect_id {
+        check_effect(rt, &json!(eid))?;
     }
     let now = rt.now();
     let corr = rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)?;

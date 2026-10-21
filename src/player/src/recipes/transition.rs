@@ -717,6 +717,128 @@ impl Transitions {
         std::mem::take(&mut self.outbox)
     }
 
+    /// R59 — a newly added output joins the live transition covering `like` (an existing
+    /// output): its main layer becomes one of that transition's layers (on `like`'s side,
+    /// so `like`'s A is not "shown outside" the request), it shows what the transition
+    /// shows now — A before Running, the effect while Running (A until the swap for a cut),
+    /// B after handoff — and cancel/failure/commit/handoff treat it like the original
+    /// outputs. `None` = no live transition covers `like` (the caller applies `cur:`).
+    pub fn adopt_output(&mut self, output: &str, like: &str, g: &mut Graph) -> Option<CorrId> {
+        let tr = self
+            .active
+            .iter_mut()
+            .rev()
+            .find(|t| t.phase != Phase::Done && t.outputs.iter().any(|o| o == like))?;
+        let corr = tr.corr.clone();
+        if tr.outputs.iter().any(|o| o == output) {
+            return Some(corr);
+        }
+        let (layer, like_layer) = (main_layer(output), main_layer(like));
+        let content = match tr.phase {
+            Phase::Handoff | Phase::Done => tr.b.clone(),
+            phase => match tr.sides.iter_mut().find(|s| s.layers.contains(&like_layer)) {
+                Some(side) => {
+                    side.layers.push(layer.clone());
+                    match (phase, &side.fx) {
+                        (Phase::Running, Some(fx)) => fx.clone(),
+                        _ => side.a.clone().unwrap_or_default(),
+                    }
+                }
+                None => get_str(g, &like_layer, "content"),
+            },
+        };
+        tr.outputs.push(output.to_string());
+        tr.outputs.sort();
+        gset(g, &corr, &layer, "content", PropValue::Str(content.clone()));
+        log::event(
+            "transition",
+            Level::Info,
+            "transition.output_adopted",
+            Some(corr.clone()),
+            json!({ "output": output, "like": like, "content": content }),
+        );
+        Some(corr)
+    }
+
+    /// R60 — output `output` is gone (its main layer already destroyed with it). Every live
+    /// transition on it forgets it; a side left with no layer drops its effect/snapshot and
+    /// releases its A (restored if shown elsewhere, else ramped out and destroyed); a
+    /// transition left with no output at all is committed at once — the effects go, the
+    /// A's are released, and B keeps its gains and pause state for the caller to park or
+    /// retire (nothing shows it). Returns `(corr, B)` of every transition so committed.
+    pub fn drop_output(
+        &mut self,
+        output: &str,
+        g: &mut Graph,
+        anim: &mut Animator,
+        now: Duration,
+    ) -> Vec<(CorrId, String)> {
+        let layer = main_layer(output);
+        let mut committed = Vec::new();
+        let mut active = std::mem::take(&mut self.active);
+        for tr in &mut active {
+            if !tr.outputs.iter().any(|o| o == output) {
+                continue;
+            }
+            tr.outputs.retain(|o| o != output);
+            if matches!(tr.phase, Phase::Handoff | Phase::Done) {
+                continue;
+            }
+            for i in 0..tr.sides.len() {
+                if !tr.sides[i].layers.contains(&layer) {
+                    continue;
+                }
+                tr.sides[i].layers.retain(|l| l != &layer);
+                if tr.sides[i].layers.is_empty() {
+                    if let Some(fx) = tr.sides[i].fx.take() {
+                        destroy_node(g, anim, &fx);
+                    }
+                    if let Some(h) = tr.sides[i].held.take() {
+                        destroy_node(g, anim, &h);
+                    }
+                    let (corr, outs, gain_end) = (tr.corr.clone(), tr.outputs.clone(), tr.gain_end);
+                    self.release(&corr, &outs, gain_end, &mut tr.sides[i], g, anim, now);
+                    tr.sides[i].a = None;
+                }
+            }
+            if tr.lead.is_some_and(|i| tr.sides[i].a.is_none()) {
+                tr.lead = tr.sides.iter().position(|s| s.a.is_some());
+                tr.end_est = None;
+                tr.last_tp = None;
+                tr.frame_dt = None;
+                tr.drop_at = None;
+                tr.target_end = None;
+                tr.boundary = None;
+            }
+            if tr.outputs.is_empty() {
+                self.commit_unseen(tr, g, anim, now);
+                committed.push((tr.corr.clone(), tr.b.clone()));
+            }
+        }
+        self.active = active;
+        committed
+    }
+
+    /// A transition nothing shows any more (every output gone): handoff now, committed —
+    /// effects/snapshots destroyed, A's released, B left exactly as it is.
+    fn commit_unseen(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
+        self.layers_to_b(tr, g, anim);
+        tr.pause_at = None;
+        tr.settle_until = now;
+        let from = self.release_all(tr, g, anim, now);
+        tr.phase = Phase::Handoff;
+        let (corr, b) = (tr.corr.clone(), tr.b.clone());
+        self.emit(
+            &corr,
+            now,
+            TransitionEventKind::Handoff {
+                to: b,
+                from,
+                committed: true,
+            },
+        );
+    }
+
     /// What the `srcs:` alias needs (R50): per requested output (`out:<c>`), the sources
     /// each live transition holds — its B and its outgoing A's — plus every grave (released
     /// sources about to be destroyed). The runtime hands this to

@@ -57,8 +57,21 @@ fn new_root() -> PathBuf {
     root
 }
 
+/// Kill the child if the spawning test thread goes away without its `Drop` (an abort,
+/// a killed test run): `PR_SET_PDEATHSIG` — no stray `serve` ever outlives its test.
+fn die_with_parent(c: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        c.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+}
+
 fn serve_cmd(root: &Path, extra: &[&str]) -> Command {
     let mut c = Command::new(BIN);
+    die_with_parent(&mut c);
     c.args([
         "serve",
         "--headless",
@@ -939,11 +952,30 @@ fn bad_client_isolated() {
         "oversized client not disconnected"
     );
 
-    // Half a line, then gone.
+    // Half a line, then gone: dropped (logged as such), everyone else unaffected.
     {
         let mut half = UnixStream::connect(&srv.sock).unwrap();
         half.write_all(br#"{"id":1,"cmd":"hel"#).unwrap();
     }
+    let t = Instant::now();
+    loop {
+        let l = good.ok("logs", json!({"kind_prefix": "api.client_dropped"}));
+        if l["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["reason"].as_str().unwrap_or("").contains("mid-line"))
+        {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(3),
+            "no mid-line drop: {l}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    good.ok("hello", json!({}));
+    bad.ok("hello", json!({}));
 
     // A client that floods requests and never reads: dropped on overflow.
     let flood_sock = srv.sock.clone();
@@ -1010,21 +1042,23 @@ fn destroy_never_stalls_the_loop() {
     for _ in 0..5 {
         c.step(16);
     }
-    // From here on, the longest synchronous stretch the loop spends anywhere (the
-    // post-dispatch sync that drops the source, then a whole step).
-    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
     c.ok("destroy", json!({"id": id}));
+    c.step(16);
+    c.step(16); // 30 ms ramp out (item 10)…
+    // …then the source goes: from here, the longest synchronous stretch anywhere (the
+    // post-dispatch sync that drops it, the step after).
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
     c.step(16);
     c.step(16);
     let lp = c.ok("probe", json!({"name": "loop"}));
     let busy = lp["max_busy_ms"].as_f64().expect("max_busy_ms");
     println!("R51 stepped: max busy {busy:.2} ms around the destroy");
     assert!(
-        busy < 20.0,
+        busy < 8.0,
         "the loop was busy {busy} ms around the destroy: {lp}"
     );
     let last = lp["last_tick_ms"].as_f64().expect("last_tick_ms");
-    assert!(last < 20.0, "a tick after the destroy took {last} ms: {lp}");
+    assert!(last < 8.0, "a tick after the destroy took {last} ms: {lp}");
     let probe = c.ok("probe", json!({"name": "sources"}));
     assert!(probe["sources"].as_array().unwrap().is_empty(), "{probe}");
 
@@ -1065,7 +1099,7 @@ fn destroy_never_stalls_the_loop() {
     let busy = lp["max_busy_ms"].as_f64().unwrap();
     println!("R51 real clock: max busy {busy:.2} ms around the destroy");
     assert!(
-        busy < 20.0,
+        busy < 8.0,
         "real clock: the loop was busy {busy} ms around the destroy: {lp}"
     );
     assert!(
@@ -1109,14 +1143,27 @@ fn ctl_cli() {
     assert!(out.contains("hint"), "{out}");
 
     // ctl subscribe streams events one per line until killed.
-    let mut sub = Command::new(BIN)
+    let mut sub = Command::new(BIN);
+    die_with_parent(&mut sub);
+    let mut sub = sub
         .args(["ctl", "subscribe", "transition."])
         .env("XDG_RUNTIME_DIR", srv.root.join("run"))
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    std::thread::sleep(Duration::from_millis(300));
     let mut c = srv.client();
+    let t = Instant::now();
+    while !c.ok("probe", json!({"name": "loop"}))["subscribed_topics"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("transition."))
+    {
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "ctl subscribe never subscribed"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let (corr, _) = color_transition(&mut c, 50);
     let mut out = sub.stdout.take().unwrap();
     let rd = std::thread::spawn(move || {
@@ -1187,4 +1234,691 @@ fn single_instance_stale_socket_and_quit() {
     srv.child = Some(serve_cmd(&srv.root, &[]).spawn().unwrap());
     srv.wait_up();
     srv.client().ok("hello", json!({}));
+}
+
+// ---------------------------------------------------------------- fix round 1
+
+fn create_src(c: &mut Client, props: Value) -> String {
+    c.ok("create", json!({"kind": "source", "props": props}))["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The raw `get` reply (ok or not).
+fn get(c: &mut Client, path: &str) -> Value {
+    c.call("get", json!({ "path": path }))
+}
+
+fn exists(c: &mut Client, id: &str) -> bool {
+    c.ok("state", json!({}))["graph"].get(id).is_some()
+}
+
+fn content(c: &mut Client, output: &str) -> String {
+    c.ok("get", json!({"path": format!("lay:{output}:main.content")}))["value"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Video sources that are playing and not silent.
+fn audible(c: &mut Client) -> Vec<String> {
+    let st = c.ok("state", json!({}));
+    let mut out = Vec::new();
+    for (id, n) in st["graph"].as_object().unwrap() {
+        // A source node's snapshot `kind` is its Source kind (video/image/color/snapshot);
+        // only sources carry `gain_effective_db`.
+        if n.get("gain_effective_db").is_some()
+            && n["kind"] == "video"
+            && n["paused"] == json!(false)
+            && n["gain_effective_db"].as_f64().unwrap_or(-96.0) > -95.99
+        {
+            out.push(id.clone());
+        }
+    }
+    out
+}
+
+fn srcs_targets(c: &mut Client, prop: &str, v: Value) -> Vec<String> {
+    let r = c.ok("set", json!({"path": format!("srcs:*.{prop}"), "value": v}));
+    let mut t: Vec<String> = r["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    t.sort();
+    t
+}
+
+/// R59: an output added before the transition runs joins it — at `done` every output
+/// shows B, A is gone, exactly one source is audible.
+#[test]
+fn hotplug_added_before_running_joins_transition() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 300}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let b = r["to"].as_str().unwrap().to_string();
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    assert_eq!(content(&mut c, "VIRTUAL-3"), a, "before Running: shows A");
+    let st = c.ok("state", json!({}));
+    assert!(
+        st["transitions"][0]["outputs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("out:VIRTUAL-3")),
+        "VIRTUAL-3 joined the transition: {st}"
+    );
+    c.step_until_event(16, 100, "transition.done", &corr);
+    c.step(16);
+    for o in ["VIRTUAL-1", "VIRTUAL-2", "VIRTUAL-3"] {
+        assert_eq!(content(&mut c, o), b, "{o} shows B at done");
+    }
+    assert!(!exists(&mut c, &a), "A destroyed");
+    assert_eq!(
+        audible(&mut c),
+        vec![b.clone()],
+        "exactly one audible source"
+    );
+}
+
+/// R59: an output added while the effect runs shows the effect; a cancel snaps every
+/// output back to A, B is destroyed, nothing dangles.
+#[test]
+fn hotplug_added_during_running_then_cancel() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 1000}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let b = r["to"].as_str().unwrap().to_string();
+    c.step_until_event(16, 100, "transition.started", &corr);
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    let fx = content(&mut c, "VIRTUAL-1");
+    assert!(fx.starts_with("fx"), "VIRTUAL-1 shows the effect: {fx}");
+    assert_eq!(
+        content(&mut c, "VIRTUAL-3"),
+        fx,
+        "during Running: shows the effect"
+    );
+    for _ in 0..3 {
+        c.step(16);
+    }
+    c.ok("cancel", json!({ "corr": corr }));
+    for _ in 0..5 {
+        c.step(16);
+    }
+    for o in ["VIRTUAL-1", "VIRTUAL-2", "VIRTUAL-3"] {
+        assert_eq!(content(&mut c, o), a, "{o} back on A");
+    }
+    assert!(!exists(&mut c, &b), "B destroyed");
+    assert!(!exists(&mut c, &fx), "effect destroyed");
+    assert_eq!(audible(&mut c), vec![a.clone()]);
+}
+
+/// R60: a removed output's own wallpaper (shown nowhere else) is ramped out and
+/// destroyed; `srcs:*` never targets it.
+#[test]
+fn remove_output_retires_what_only_it_showed() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let x = color(&mut c, [0, 255, 0]);
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-1:main.content", "value": x}),
+    );
+    let sv = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-2:main.content", "value": sv}),
+    );
+    for _ in 0..3 {
+        c.step(16);
+    }
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    assert_eq!(
+        srcs_targets(&mut c, "gain.user", json!(-3)),
+        vec![x.clone()]
+    );
+    c.step(16);
+    assert!(exists(&mut c, &sv), "ramping, not cut");
+    let ac = get(&mut c, &format!("{sv}.gain.anticlick"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(ac < -1.0 && ac > -96.0, "mid-ramp anticlick {ac}");
+    c.step(16);
+    c.step(16);
+    assert!(!exists(&mut c, &sv), "destroyed after its ramp");
+    let p = c.ok("probe", json!({"name": "sources"}));
+    assert!(
+        !p["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == sv),
+        "{p}"
+    );
+    assert_eq!(
+        content(&mut c, "VIRTUAL-1"),
+        x,
+        "the other output is untouched"
+    );
+}
+
+/// R60: with no output left the current wallpaper is parked (paused, silent, reachable by
+/// `srcs:*`); the next output shows it and it plays again.
+#[test]
+fn remove_all_outputs_parks_and_readd_resumes() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let sv = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &sv);
+    for _ in 0..3 {
+        c.step(16);
+    }
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    for _ in 0..3 {
+        c.step(16);
+    }
+    assert!(exists(&mut c, &sv), "parked, not destroyed");
+    assert_eq!(
+        get(&mut c, &format!("{sv}.paused"))["result"]["value"],
+        json!(true)
+    );
+    assert_eq!(
+        c.ok("state", json!({}))["graph"][&sv]["gain_effective_db"],
+        json!(-96.0),
+        "parked = silent"
+    );
+    assert_eq!(
+        srcs_targets(&mut c, "gain.user", json!(-4)),
+        vec![sv.clone()]
+    );
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    assert_eq!(
+        content(&mut c, "VIRTUAL-3"),
+        sv,
+        "the parked wallpaper is shown"
+    );
+    for _ in 0..3 {
+        c.step(16);
+    }
+    assert_eq!(
+        get(&mut c, &format!("{sv}.paused"))["result"]["value"],
+        json!(false)
+    );
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"][&sv]["gain_effective_db"], json!(-4.0), "{st}");
+    let t1 = c.ok("probe", json!({"name": "sources"}))["sources"][0]["virtual_t"]
+        .as_f64()
+        .unwrap();
+    c.step(100);
+    let t2 = c.ok("probe", json!({"name": "sources"}))["sources"][0]["virtual_t"]
+        .as_f64()
+        .unwrap();
+    assert!(t2 > t1 + 0.05, "it plays again: {t1} → {t2}");
+}
+
+/// R60: a transition whose outputs all disappear is committed; its B is parked.
+#[test]
+fn remove_all_outputs_mid_transition_commits_and_parks_b() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 1000}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let b = r["to"].as_str().unwrap().to_string();
+    c.step_until_event(16, 100, "transition.started", &corr);
+    c.step(16);
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    let evs = c.step_until_event(16, 20, "transition.done", &corr);
+    let handoff = evs
+        .iter()
+        .find(|e| e["event"] == "transition.handoff" && e["corr"] == corr)
+        .unwrap_or_else(|| panic!("no handoff: {evs:?}"));
+    assert_eq!(handoff["committed"], json!(true), "{handoff}");
+    for _ in 0..3 {
+        c.step(16);
+    }
+    assert!(!exists(&mut c, &a), "A destroyed");
+    assert!(exists(&mut c, &b), "B parked");
+    assert_eq!(
+        get(&mut c, &format!("{b}.paused"))["result"]["value"],
+        json!(true)
+    );
+    assert_eq!(srcs_targets(&mut c, "gain.user", json!(0)), vec![b.clone()]);
+    assert!(audible(&mut c).is_empty());
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    for _ in 0..3 {
+        c.step(16);
+    }
+    assert_eq!(content(&mut c, "VIRTUAL-3"), b);
+    assert_eq!(audible(&mut c), vec![b]);
+}
+
+/// Item 10: `destroy` of an audible source ramps it to silence before it goes.
+#[test]
+fn destroy_ramps_audible_source_out() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_in(new_root(), &["--clock", "real"], serial);
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source."]}));
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S))}),
+    );
+    show_all(&mut c, &id);
+    let t = Instant::now();
+    while !c
+        .events
+        .iter()
+        .any(|e| e["event"] == "source.ready" && e["id"] == id)
+    {
+        assert!(t.elapsed() < Duration::from_secs(5), "never ready");
+        let evs = c.drain_events();
+        c.events.extend(evs);
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    c.ok("destroy", json!({ "id": id }));
+    let mut seen = Vec::new();
+    let t = Instant::now();
+    loop {
+        let r = get(&mut c, &format!("{id}.gain.anticlick"));
+        if r["ok"] != json!(true) {
+            break;
+        }
+        seen.push(r["result"]["value"].as_f64().unwrap());
+        assert!(
+            t.elapsed() < Duration::from_secs(2),
+            "never destroyed: {seen:?}"
+        );
+    }
+    assert!(
+        seen.iter().any(|v| *v < -0.5 && *v > -95.0),
+        "no ramp seen between destroy and removal: {seen:?}"
+    );
+    let t = Instant::now();
+    let teardown = loop {
+        let l = c.ok("logs", json!({"kind_prefix": "source.teardown"}));
+        if let Some(e) = l["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+        {
+            break e.clone();
+        }
+        assert!(t.elapsed() < Duration::from_secs(2), "no source.teardown");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        teardown["gain_db"].as_f64().unwrap() <= -95.9,
+        "torn down while audible: {teardown}"
+    );
+}
+
+/// Item 14: create + destroy at once, 20× (destroyed before the VO is up), never stalls
+/// the loop and leaves nothing behind.
+#[test]
+fn rapid_create_destroy_never_stalls() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_in(new_root(), &["--clock", "real"], serial);
+    let mut c = srv.client();
+    let clip = ensure_clip("tr_red_10s", RED_10S);
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    for _ in 0..20 {
+        let id = create_src(&mut c, json!({"path": s(&clip)}));
+        show_all(&mut c, &id);
+        c.ok("destroy", json!({ "id": id }));
+    }
+    let t = Instant::now();
+    loop {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        if p["sources"].as_array().unwrap().is_empty() && p["dying"] == json!(0) {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(5), "left behind: {p}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let lp = c.ok("probe", json!({"name": "loop"}));
+    // Opening is synchronous (mpv init — a known cost, reported apart as max_open_ms);
+    // everything else, teardown included, stays under the bound.
+    let busy = lp["max_busy_excl_open_ms"].as_f64().unwrap();
+    println!(
+        "rapid create/destroy: max busy {busy:.2} ms excl. opens (opens ≤ {} ms)",
+        lp["max_open_ms"]
+    );
+    assert!(busy < 8.0, "loop busy {busy} ms: {lp}");
+}
+
+/// Item 8: a client's requests after a pending `step` are answered after it — a pipelined
+/// step + capture captures the post-step frame.
+#[test]
+fn pipelined_step_then_capture() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    // A video on VIRTUAL-2 makes every step wait for its frame (a deferred reply).
+    let v = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 }))}),
+    );
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-2:main.content", "value": v}),
+    );
+    c.step(16);
+    let id = color(&mut c, [0, 255, 0]);
+    let p = srv.path("pipe.png");
+    let batch = format!(
+        "{}\n{}\n{}\n",
+        json!({"id": 101, "cmd": "set", "args": {"path": "lay:VIRTUAL-1:main.content", "value": id}}),
+        json!({"id": 102, "cmd": "step", "args": {"ms": 16}}),
+        json!({"id": 103, "cmd": "capture", "args": {"target": "out:VIRTUAL-1", "path": s(&p)}}),
+    );
+    c.w.write_all(batch.as_bytes()).unwrap();
+    let mut ids = Vec::new();
+    while ids.len() < 3 {
+        let m = c.read_msg().expect("reply");
+        if m.get("event").is_none() {
+            assert_eq!(m["ok"], json!(true), "{m}");
+            ids.push(m["id"].as_u64().unwrap());
+        }
+    }
+    assert_eq!(ids, [101, 102, 103], "replies in request order");
+    near(
+        png_pixel(&p, 320, 180),
+        [0, 255, 0],
+        1,
+        "capture after the step",
+    );
+}
+
+/// Item 8: a client that half-closes after a `step` still gets the (deferred) reply.
+#[test]
+fn half_closed_client_gets_step_reply() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 }))}),
+    );
+    show_all(&mut c, &id);
+    c.step(16);
+    let mut h = srv.client();
+    h.w.write_all(format!("{}\n", json!({"id": 7, "cmd": "step", "args": {"ms": 500}})).as_bytes())
+        .unwrap();
+    h.w.shutdown(std::net::Shutdown::Write).unwrap();
+    let m = h
+        .read_msg()
+        .expect("the deferred step reply before the close");
+    assert_eq!(
+        (m["id"].clone(), m["ok"].clone()),
+        (json!(7), json!(true)),
+        "{m}"
+    );
+    assert!(h.read_msg().is_none(), "closed after the reply");
+}
+
+/// Item 4: two servers started at once on one socket → exactly one serves; the other
+/// names it.
+#[test]
+fn concurrent_starts_one_serves() {
+    let Some(_srv) = Serve::start() else { return };
+    for round in 0..5 {
+        let root = new_root();
+        let mut a = serve_cmd(&root, &[])
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut b = serve_cmd(&root, &[])
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // The loser exits quickly; the winner keeps serving.
+        let t = Instant::now();
+        let (loser, mut winner) = loop {
+            if let Some(st) = a.try_wait().unwrap() {
+                break ((a, st), b);
+            }
+            if let Some(st) = b.try_wait().unwrap() {
+                break ((b, st), a);
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(10),
+                "round {round}: both still up"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let (mut lchild, lst) = loser;
+        let mut err = String::new();
+        lchild
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut err)
+            .unwrap();
+        assert!(!lst.success(), "round {round}: loser exit {lst}");
+        let sock = root.join("run/livepaper/lp-player.sock");
+        let t = Instant::now();
+        let mut c = loop {
+            if let Ok(s) = UnixStream::connect(&sock) {
+                drop(s);
+                break Client::connect(&sock);
+            }
+            assert!(
+                winner.try_wait().unwrap().is_none(),
+                "round {round}: winner died too; loser said {err}"
+            );
+            assert!(
+                t.elapsed() < Duration::from_secs(10),
+                "round {round}: no socket"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let pid = c.ok("hello", json!({}))["pid"].as_u64().unwrap();
+        assert_eq!(pid, winner.id() as u64);
+        assert!(
+            err.contains(&format!("already running (pid {pid})")),
+            "round {round}: {err}"
+        );
+        let _ = winner.kill();
+        let _ = winner.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// Item 15: SIGTERM is a clean quit — exit 0, socket and lock file removed.
+#[test]
+fn sigterm_is_a_clean_exit() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S))}),
+    );
+    show_all(&mut c, &id);
+    c.step(16);
+    let lock = srv.sock.with_extension("lock");
+    assert!(lock.exists(), "lock file next to the socket");
+    let pid = srv.child.as_ref().unwrap().id() as i32;
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    let st = srv
+        .wait_exit(Duration::from_secs(5))
+        .expect("no exit on SIGTERM");
+    assert!(st.success(), "{st}");
+    assert!(!srv.sock.exists(), "socket left behind");
+    assert!(!lock.exists(), "lock left behind");
+}
+
+/// Item 15: a source capture is upright (top-red / bottom-blue clip).
+#[test]
+fn source_capture_is_upright() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let clip = ensure_clip(
+        "split_red_over_blue",
+        ClipSpec::SplitV {
+            top: [255, 0, 0],
+            bottom: [0, 0, 255],
+            secs: 1.0,
+        },
+    );
+    let id = create_src(&mut c, json!({ "path": s(&clip) }));
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let p = srv.path("split.png");
+    let r = c.ok("capture", json!({"target": id, "path": s(&p)}));
+    let h = r["height"].as_u64().unwrap() as u32;
+    near(png_pixel(&p, 100, 10), [255, 0, 0], 3, "source capture top");
+    near(
+        png_pixel(&p, 100, h - 10),
+        [0, 0, 255],
+        3,
+        "source capture bottom",
+    );
+    let p2 = srv.path("split_out.png");
+    c.ok(
+        "capture",
+        json!({"target": "out:VIRTUAL-1", "path": s(&p2)}),
+    );
+    near(png_pixel(&p2, 320, 10), [255, 0, 0], 3, "output top");
+    near(png_pixel(&p2, 320, 350), [0, 0, 255], 3, "output bottom");
+}
+
+/// Items 6, 11, 12: effect ids checked on create/set too; animate's `from`/`unit`
+/// checked; `srcs:<connector>` on an idle output is an empty broadcast.
+#[test]
+fn validation_round_1() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let e = c.err(
+        "create",
+        json!({"kind": "effect", "props": {"effect_id": "no_such_effect_xyz"}}),
+    );
+    assert_eq!(e["code"], "no_such_effect", "{e}");
+    let fx = c.ok(
+        "create",
+        json!({"kind": "effect", "props": {"effect_id": "fade"}}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let e = c.err(
+        "set",
+        json!({"path": format!("{fx}.effect_id"), "value": "nope_xyz"}),
+    );
+    assert_eq!(e["code"], "no_such_effect", "{e}");
+    assert!(e["hint"].as_str().unwrap().contains("effects"), "{e}");
+    c.ok(
+        "set",
+        json!({"path": format!("{fx}.effect_id"), "value": "fade"}),
+    );
+
+    let e = c.err(
+        "animate",
+        json!({"path": "lay:VIRTUAL-1:main.opacity", "to": 0.5, "from": 2.0, "duration_ms": 10}),
+    );
+    assert_eq!(e["code"], "out_of_range", "{e}");
+    let e = c.err(
+        "animate",
+        json!({"path": "lay:VIRTUAL-1:main.opacity", "to": 0.5, "duration_ms": 10, "unit": "gain_linear"}),
+    );
+    assert_eq!(e["code"], "bad_request", "{e}");
+
+    let r = c.ok(
+        "set",
+        json!({"path": "srcs:VIRTUAL-1.gain.user", "value": -2}),
+    );
+    assert_eq!(r["targets"], json!([]));
+    let e = c.err("set", json!({"path": "srcs:NOPE.gain.user", "value": -2}));
+    assert_eq!(e["code"], "no_such_node", "{e}");
+}
+
+/// Item 9: `ctl` gives up after `--timeout-ms` with a timeout error (and a hint).
+#[test]
+fn ctl_times_out() {
+    let root = new_root();
+    let sock = root.join("hang.sock");
+    let _l = std::os::unix::net::UnixListener::bind(&sock).unwrap(); // accepts, never answers
+    let t = Instant::now();
+    let out = Command::new(BIN)
+        .args(["ctl", "--timeout-ms", "300", "hello"])
+        .env("LP_PLAYER_SOCKET", &sock)
+        .output()
+        .unwrap();
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    assert_eq!(out.status.code(), Some(1));
+    let e: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(e["code"], "timeout", "{e}");
+    assert!(e["hint"].as_str().unwrap().contains("--timeout-ms"), "{e}");
+    let _ = std::fs::remove_dir_all(&root);
 }
