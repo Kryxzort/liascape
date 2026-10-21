@@ -47,3 +47,31 @@ fn clear_readback() {
 
     let _ = std::fs::remove_file(&out);
 }
+
+/// Task 10 fix round: every surfaceless `Gfx` in a process shares one `EGLDisplay`.
+/// Dropping one must not terminate that display under another: the survivor's context
+/// (not current at the time) must still be valid, re-currentable, and drawable.
+#[test]
+fn two_gfx_on_one_display_survive_each_others_drop() {
+    let Some(a) = headless_gl() else {
+        return;
+    };
+    let b = headless_gl().expect("second context"); // b is current now
+    let keep_a = a.keep_alive();
+    drop(b); // previously: eglTerminate(display) → a's context destroyed
+    let cur = keep_a.make_current();
+    assert!(
+        cur.is_current(),
+        "the surviving Gfx's context can't be made current after the other's drop"
+    );
+    let tex = a.tex(4, 4);
+    let fbo = a.fbo(&tex);
+    unsafe {
+        a.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo.id));
+        a.gl.viewport(0, 0, 4, 4);
+        a.gl.clear_color(0.0, 1.0, 0.0, 1.0);
+        a.gl.clear(glow::COLOR_BUFFER_BIT);
+        a.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+    }
+    assert_eq!(read_rgba(&a, &tex, 1, 1), [0, 255, 0, 255]);
+}

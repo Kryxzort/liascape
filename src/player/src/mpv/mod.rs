@@ -3,13 +3,24 @@
 //! properties, commands, property observation, events, and the render API.
 //!
 //! **Threading.** Nothing here is `Send`: lp-player drives each core from its single render
-//! thread (spec §4.1). That thread calls both render-API functions and synchronous core
-//! functions (`set_property`, `command`), which `render.h` permits as long as no
-//! `MPV_RENDER_PARAM_ADVANCED_CONTROL` is requested (we never do): the only wait the core
-//! can then have on the render thread is vo_libmpv's bounded "frame not rendered" timeout,
-//! so a synchronous call can at worst stall briefly — it can't deadlock. The non-blocking
-//! per-frame path (`RenderContext::update`/`render`, `Handle::wait_event(0.0)`) never
-//! waits on the core at all.
+//! thread (spec §4.1), the same thread that calls the render API. `render.h` ("Threading")
+//! forbids that thread from *waiting* on any core function not marked "Safe to be called
+//! from mpv render API threads": the core can itself be waiting on the render thread
+//! (vo_libmpv's flip waits for `mpv_render_context_render`; after a load/seek the core
+//! waits for that first frame to be shown), so a synchronous `mpv_set_property`/
+//! `mpv_command`/`mpv_get_property` from the render thread stalls until vo_libmpv's
+//! timeout breaks the cycle — measured 4–72 ms per call on this machine
+//! (`tests/sources.rs::apply_never_blocks_the_render_thread` against the first,
+//! synchronous version). So:
+//! - **live path** — [`Handle::set_property_async`], [`Handle::set_property_f64_async`],
+//!   [`Handle::command_async`] (render-thread-safe per `client.h`); results come back as
+//!   [`Event::SetPropertyReply`] / [`Event::CommandReply`] through `wait_event(0.0)`;
+//! - **synchronous calls** ([`Handle::set_property`], [`Handle::command`],
+//!   [`Handle::get_property`], …) only during setup before the first `loadfile` (no VO
+//!   exists yet, so the core can't be waiting on the render thread) and in tests/probes.
+//!
+//! Interior NUL bytes are rejected (`MPV_ERROR_INVALID_PARAMETER`), never stripped — a
+//! stripped path would silently name a different file.
 //!
 //! **Teardown order (caller's job, see `sources::mpv::MpvSource`'s `Drop`):** free the
 //! [`RenderContext`] first, with the GL context it was created on current, *then* drop the
@@ -68,10 +79,13 @@ fn check(code: c_int, context: impl FnOnce() -> String) -> Result<(), MpvError> 
     }
 }
 
-fn cstr(s: &str) -> CString {
-    // Interior NULs can't be expressed in a C string; mpv names/values never contain one,
-    // so strip rather than fail (an mpv-side "no such property" is the honest error then).
-    CString::new(s.replace('\0', "")).expect("NULs removed")
+fn cstr(s: &str) -> Result<CString, MpvError> {
+    CString::new(s).map_err(|_| {
+        MpvError::new(
+            ffi::mpv_error::MPV_ERROR_INVALID_PARAMETER,
+            format!("{s:?} contains a NUL byte"),
+        )
+    })
 }
 
 /// The value format to observe a property in ([`Handle::observe`]).
@@ -128,11 +142,16 @@ pub enum Event {
         level: String,
         text: String,
     },
-    StartFile,
+    /// A playlist entry starts loading (`playlist_entry_id`).
+    StartFile {
+        entry: i64,
+    },
     EndFile {
         reason: EndReason,
         /// The libmpv error code when `reason == Error` (`mpv_error`), else 0.
         error: c_int,
+        /// Which playlist entry ended.
+        entry: i64,
     },
     FileLoaded,
     PlaybackRestart,
@@ -141,8 +160,37 @@ pub enum Event {
         name: String,
         value: PropData,
     },
+    /// Reply to [`Handle::command_async`] `id`; `error` < 0 = mpv rejected it.
+    /// `playlist_entry_id` is filled from the result map when present (`loadfile`).
+    CommandReply {
+        id: u64,
+        error: c_int,
+        playlist_entry_id: Option<i64>,
+    },
+    /// Reply to [`Handle::set_property_async`]/[`Handle::set_property_f64_async`] `id`.
+    SetPropertyReply {
+        id: u64,
+        error: c_int,
+    },
     /// Any other event id (raw `mpv_event_id`).
     Other(u32),
+}
+
+/// `result["playlist_entry_id"]` from a command reply's result node, if it's a map that
+/// has one (`loadfile` returns `{playlist_entry_id: <int>}`).
+unsafe fn node_entry_id(node: &ffi::mpv_node) -> Option<i64> {
+    if node.format != fmt_::MPV_FORMAT_NODE_MAP {
+        return None;
+    }
+    let list = unsafe { node.u.list.as_ref() }?;
+    for i in 0..list.num.max(0) as usize {
+        let key = unsafe { CStr::from_ptr(*list.keys.add(i)) };
+        let val = unsafe { &*list.values.add(i) };
+        if key.to_bytes() == b"playlist_entry_id" && val.format == fmt_::MPV_FORMAT_INT64 {
+            return Some(unsafe { val.u.int64 });
+        }
+    }
+    None
 }
 
 unsafe fn owned(p: *const c_char) -> String {
@@ -174,7 +222,7 @@ impl Handle {
 
     /// `mpv_set_option_string` (before or after initialize).
     pub fn set_option(&self, name: &str, value: &str) -> Result<(), MpvError> {
-        let (n, v) = (cstr(name), cstr(value));
+        let (n, v) = (cstr(name)?, cstr(value)?);
         check(
             unsafe { ffi::mpv_set_option_string(self.raw(), n.as_ptr(), v.as_ptr()) },
             || format!("set option {name}={value}"),
@@ -189,7 +237,7 @@ impl Handle {
 
     /// `mpv_set_property_string` — synchronous.
     pub fn set_property(&self, name: &str, value: &str) -> Result<(), MpvError> {
-        let (n, v) = (cstr(name), cstr(value));
+        let (n, v) = (cstr(name)?, cstr(value)?);
         check(
             unsafe { ffi::mpv_set_property_string(self.raw(), n.as_ptr(), v.as_ptr()) },
             || format!("set {name}={value}"),
@@ -198,7 +246,7 @@ impl Handle {
 
     /// `mpv_set_property` with `MPV_FORMAT_DOUBLE` — synchronous, no string round trip.
     pub fn set_property_f64(&self, name: &str, value: f64) -> Result<(), MpvError> {
-        let n = cstr(name);
+        let n = cstr(name)?;
         let mut v = value;
         check(
             unsafe {
@@ -215,7 +263,7 @@ impl Handle {
 
     /// `mpv_get_property_string`; `None` if the property is unavailable or unknown.
     pub fn get_property(&self, name: &str) -> Option<String> {
-        let n = cstr(name);
+        let n = cstr(name).ok()?;
         unsafe {
             let p = ffi::mpv_get_property_string(self.raw(), n.as_ptr());
             if p.is_null() {
@@ -229,7 +277,7 @@ impl Handle {
 
     /// `mpv_get_property` as `MPV_FORMAT_DOUBLE`; `None` if unavailable/unknown.
     pub fn get_property_f64(&self, name: &str) -> Option<f64> {
-        let n = cstr(name);
+        let n = cstr(name).ok()?;
         let mut v = 0f64;
         let rc = unsafe {
             ffi::mpv_get_property(
@@ -244,7 +292,10 @@ impl Handle {
 
     /// `mpv_command` (synchronous) with string arguments.
     pub fn command(&self, args: &[&str]) -> Result<(), MpvError> {
-        let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
+        let owned = args
+            .iter()
+            .map(|a| cstr(a))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
         ptrs.push(ptr::null());
         check(
@@ -253,9 +304,62 @@ impl Handle {
         )
     }
 
+    /// `mpv_command_async` — never waits on the core (render-thread safe). The outcome
+    /// arrives as [`Event::CommandReply`] with `id`. Errors returned here are local
+    /// (NUL in an argument, event queue full), never mpv's verdict on the command.
+    pub fn command_async(&self, id: u64, args: &[&str]) -> Result<(), MpvError> {
+        let owned = args
+            .iter()
+            .map(|a| cstr(a))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        ptrs.push(ptr::null());
+        check(
+            unsafe { ffi::mpv_command_async(self.raw(), id, ptrs.as_mut_ptr()) },
+            || format!("command {args:?}"),
+        )
+    }
+
+    /// `mpv_set_property_async` with `MPV_FORMAT_STRING` (mpv copies the value before
+    /// returning). Outcome: [`Event::SetPropertyReply`] with `id`.
+    pub fn set_property_async(&self, id: u64, name: &str, value: &str) -> Result<(), MpvError> {
+        let (n, v) = (cstr(name)?, cstr(value)?);
+        let mut vp: *const c_char = v.as_ptr();
+        check(
+            unsafe {
+                ffi::mpv_set_property_async(
+                    self.raw(),
+                    id,
+                    n.as_ptr(),
+                    fmt_::MPV_FORMAT_STRING,
+                    &mut vp as *mut *const c_char as *mut c_void,
+                )
+            },
+            || format!("set {name}={value}"),
+        )
+    }
+
+    /// `mpv_set_property_async` with `MPV_FORMAT_DOUBLE`.
+    pub fn set_property_f64_async(&self, id: u64, name: &str, value: f64) -> Result<(), MpvError> {
+        let n = cstr(name)?;
+        let mut v = value;
+        check(
+            unsafe {
+                ffi::mpv_set_property_async(
+                    self.raw(),
+                    id,
+                    n.as_ptr(),
+                    fmt_::MPV_FORMAT_DOUBLE,
+                    &mut v as *mut f64 as *mut c_void,
+                )
+            },
+            || format!("set {name}={value}"),
+        )
+    }
+
     /// `mpv_observe_property`: changes arrive as [`Event::PropertyChange`] with this `id`.
     pub fn observe(&self, id: u64, name: &str, format: Format) -> Result<(), MpvError> {
-        let n = cstr(name);
+        let n = cstr(name)?;
         check(
             unsafe { ffi::mpv_observe_property(self.raw(), id, n.as_ptr(), format.raw()) },
             || format!("observe {name}"),
@@ -264,7 +368,7 @@ impl Handle {
 
     /// `mpv_request_log_messages` (`"no"`, `"fatal"`, `"error"`, `"warn"`, …).
     pub fn request_log_messages(&self, min_level: &str) -> Result<(), MpvError> {
-        let l = cstr(min_level);
+        let l = cstr(min_level)?;
         check(
             unsafe { ffi::mpv_request_log_messages(self.raw(), l.as_ptr()) },
             || format!("request_log_messages {min_level}"),
@@ -300,7 +404,24 @@ impl Handle {
                         text: owned(m.text),
                     }
                 }
-                ev::MPV_EVENT_START_FILE => Event::StartFile,
+                ev::MPV_EVENT_START_FILE => {
+                    let d = &*(e.data as *const ffi::mpv_event_start_file);
+                    Event::StartFile {
+                        entry: d.playlist_entry_id,
+                    }
+                }
+                ev::MPV_EVENT_COMMAND_REPLY => {
+                    let d = e.data as *const ffi::mpv_event_command;
+                    Event::CommandReply {
+                        id: e.reply_userdata,
+                        error: e.error,
+                        playlist_entry_id: d.as_ref().and_then(|d| node_entry_id(&d.result)),
+                    }
+                }
+                ev::MPV_EVENT_SET_PROPERTY_REPLY => Event::SetPropertyReply {
+                    id: e.reply_userdata,
+                    error: e.error,
+                },
                 ev::MPV_EVENT_END_FILE => {
                     let d = &*(e.data as *const ffi::mpv_event_end_file);
                     let reason = match d.reason {
@@ -314,6 +435,7 @@ impl Handle {
                     Event::EndFile {
                         reason,
                         error: d.error,
+                        entry: d.playlist_entry_id,
                     }
                 }
                 ev::MPV_EVENT_FILE_LOADED => Event::FileLoaded,

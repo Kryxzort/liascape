@@ -62,6 +62,22 @@ pub(crate) fn unsupported(msg: impl Into<String>) -> ApiError {
     }
 }
 
+pub(crate) fn bad_type(msg: impl Into<String>) -> ApiError {
+    ApiError {
+        code: "bad_type",
+        message: msg.into(),
+        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+    }
+}
+
+pub(crate) fn out_of_range(msg: impl Into<String>) -> ApiError {
+    ApiError {
+        code: "out_of_range",
+        message: msg.into(),
+        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+    }
+}
+
 pub(crate) fn io_error(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "io",

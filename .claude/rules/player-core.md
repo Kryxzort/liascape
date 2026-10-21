@@ -249,7 +249,17 @@ separately-`Rc`'d EGL instance — nothing kept the owning `Gfx` alive, so dropp
 first `eglTerminate`d the display while a `WindowTarget` about to call
 `eglDestroySurface` on it was still around: undefined behaviour. `gfx::GlKeepAlive` (`Gfx::keep_alive()`, Task 10) is a
 third holder of the same `Rc<Shared>`, for sources that must free GL objects in `Drop`
-(§ Sources). `make_current`/`swap`
+(§ Sources).
+
+**One `EGLDisplay` per process, refcounted terminate.** Every surfaceless `Gfx` gets the
+*same* `EGLDisplay` (`EGL_DEFAULT_DISPLAY` on one platform) and `eglInitialize` isn't
+reference-counted (EGL 1.5), so `Shared::drop` keeps a process-wide per-display user count
+(`display_acquire`/`display_release`) and calls `eglTerminate` only for the last user; it
+also only unbinds the context if *its own* context is the current one. Found in Task 10's
+fix round: the old unconditional terminate destroyed every other `Gfx`'s non-current
+context and made later `eglMakeCurrent` fail with `EGL_NOT_INITIALIZED` — invisible until
+a source first switched contexts with a second `Gfx` alive (and a latent race between
+parallel GPU tests). Pinned by `tests/gfx_basic.rs::two_gfx_on_one_display_survive_each_others_drop`. `make_current`/`swap`
 still take `gfx: &Gfx` (API shape unchanged) and read `gfx.shared.{egl,context}` — a
 `WindowTarget` created from a *different* `Gfx` would mismatch display/context and EGL
 itself rejects that, same as before.
@@ -564,11 +574,18 @@ read, poll_events }`; `SourceEvent::{Ready, Ended, Position(f64), Error{reason}}
   a stalled/reloading/ended source shows its last frame, never black.
 - `apply(prop, v)` first runs `graph::props::validate_value(Source, …)` — same codes and
   check order as `Graph::set` (`no_such_prop` > `read_only` > `bad_type`/`out_of_range`);
-  a live `kind` change is `unsupported` (create a new source). Every writable property is
-  live (project rule "settings apply live"), including `path` (reloads in place; `Ready`
-  fires again; the old frame is held until the new one renders).
-- `read(prop)`: `None` = unset/unknown — an image's `duration`, `time_pos` before
-  playback, `width`/`height` before mpv reports a size.
+  a string with an interior NUL is `out_of_range` (never stripped — a stripped path would
+  name a different file); a live `kind` change is `unsupported` (create a new source).
+  Every writable property is live (project rule "settings apply live"), including `path`.
+- `read(prop)` serves **cached/observed values only** — never a synchronous mpv call.
+  `None` = unset/unknown (an image's `duration`, `time_pos` before playback,
+  `width`/`height` before mpv reports a size). An applied value reads back immediately;
+  if mpv later rejects it, it reverts (see "Async core calls").
+- `update` only ever renders through the context the source was opened on:
+  `GlKeepAlive::is_for(gfx)` (`Rc::ptr_eq` on `Shared`) — a different `Gfx` gets no
+  render (libmpv through a foreign context is UB, `render.h`) and one `Error` event.
+  `update` and `open` both take a `GlKeepAlive::make_current()` guard (a no-op when the
+  context already is current), so another `Gfx` being current never misdirects GL calls.
 - **Orientation (R25): a source texture holds the image's TOP row at texture row 0**
   (`t = 0`, GL's bottom row) — what `gfx::compose`'s single flip expects. `MpvSource`
   renders with `MPV_RENDER_PARAM_FLIP_Y = 0` into its FBO and that lands exactly so on
@@ -578,89 +595,154 @@ read, poll_events }`; `SourceEvent::{Ready, Ended, Position(f64), Error{reason}}
 
 **`MpvSource::open(gfx, path, opts)`** — one mpv core + one render context per source.
 Fixed options: `vo=libmpv`, `config=no`, `terminal=no`, `keep-open=yes` (an ended video
-holds its last frame), `idle=yes` (the core survives a load error / waits for a `path`
-change), `volume=100`, `volume-gain-min=-96`, `image-display-duration=inf` (set always —
-it only affects single-frame images), `keepaspect=no` (the texture *is* the frame; fit is
-the compositor's), `osd-level=0`, `ytdl=no`, `audio-client-name=lp-player`. `opts` =
-any writable `Source` property (`position` → mpv `start`), plus `ao` (default
+holds its last frame) **with `keep-open-pause=no`** (keep-open's default also flips
+`pause` at EOF — `read("paused")` would then disagree with the graph and a seek back
+after the end would stay frozen), `idle=yes` (the core survives a load error / waits for
+a `path` change), `volume=100`, `volume-gain-min=-96`, `image-display-duration=inf` (set
+always — it only affects single-frame images), `keepaspect=no` (the texture *is* the
+frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, below),
+`osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`.
+`opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (the bus, Task 14), `kind` (`video`|`image`, default from the
-extension, then corrected by mpv's `current-tracks/video/image` flag after load). Load is
-async: a missing/broken file is `Ok` from `open`, then `Error{reason}` naming the path
-plus mpv's last error-log line.
+extension, then corrected by mpv's `current-tracks/video/image` flag after load).
+**Every writable property not in `opts` is applied at its schema default**, so `read`
+and mpv agree from the first moment. Error codes: a wrong-typed opt (`kind: 5`, `ao: 5`,
+`position: "x"`) is `bad_type`; a bad value (`kind: "color"`) or one mpv rejects at open
+(`af: "no_such_filter"`) is `out_of_range`; an unknown/unavailable mpv option/property is
+`unsupported`; `io` is kept for real setup/load/I/O failures (mpv init, render-context
+create, eventfd). `open` is synchronous only *before* the first `loadfile` (no VO exists
+yet, so nothing can wait on the render thread); the load itself is async: a missing or
+broken file is `Ok` from `open`, then `Error{reason}` naming the path plus mpv's last
+error-log line.
 
-**Property map** (graph name → mpv): `loop` → `loop-file` `inf`/`no`; `paused` → `pause`;
-`speed`; `position` → `seek <t> absolute exact` (or `start` before the file loads);
-`hwdec` (`""` → `no`); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` → `yes`/`no`;
+**Async core calls (render thread).** `render.h` forbids the render thread from waiting
+on core functions not marked render-thread-safe: the core can be waiting on the render
+thread (vo_libmpv's flip waits for `mpv_render_context_render`; after a load/seek the
+core waits for that first frame to be shown), so a synchronous `mpv_set_property`/
+`mpv_command` stalls until vo_libmpv's timeout — **measured 4–72 ms per call** with the
+first, synchronous version (`apply_never_blocks_the_render_thread`: 80 ms without
+`update()`, a seek, 240 gain applies). After `open`, every `apply` uses
+`mpv_set_property_async`/`mpv_command_async` (`client.h`: "Safe to be called from mpv
+render API threads") with a reply id: measured worst apply 120–160 µs in that same test.
+A reply with an error becomes `SourceEvent::Error{reason}` naming the mpv property/
+command, the value and the graph property (`af=no_such_filter_lp (af): …`), and
+`props` reverts to the previous value (only if no newer apply of that property is in
+flight). **Gains are coalesced:** at most one `volume-gain` request is in flight; gain
+changes while it is pending only mark it dirty and the latest sum is sent when the reply
+arrives — a per-frame gain ramp can't flood mpv's 1000-entry reply queue, and the final
+value always lands. `MpvSource::requests_in_flight()` (0 = everything applied has
+reached mpv) is for probes/tests; `mpv_get_string`/`mpv_get_f64` are synchronous and
+**tests/probes only**.
+
+**Property map** (graph name → mpv): `loop` → `loop-file` `inf`/`no`; `paused` → `pause`
+(observed `pause` changes are mirrored back into `read`); `speed`; `position` → `seek <t>
+absolute exact` (or `start` before the current file has loaded; a `path` change resets
+`start` to `none`); `hwdec` (`""` → `no`); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
+**`auto`** for `true` (mpv's normal policy — what the legacy engine runs with
+DisableCache=false; `yes` would RAM-cache every local wallpaper) and `no` for `false`;
 `demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
 `<n>MiB` (a fractional MiB goes as exact bytes — mpv rejects `1.5MiB`; `0` = unset →
 mpv's default 150/50 MiB, the legacy engine's convention); `af`; `no_audio` → `aid`
-`no`/`auto` (`auto` re-inits the AO even after a no-audio start; the `aid` *property*
-then reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`);
-`audio_delay` → `audio-delay`.
+`no`/`auto` (`auto` re-inits the AO even after a no-audio start — `current-ao` and
+`audio-out-params` come up, `start_muted_then_unmute_live`; the `aid` *property* then
+reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`); `audio_delay` →
+`audio-delay`.
 
 **Gains → `volume-gain`, `volume` stays 100.** Every `gain.<slot>` apply recomputes
 `units::Gains::effective_db()` and sets mpv `volume-gain` = `units::mpv_volume_gain(db)`
-(exact dB; `volume` is cubic — § Units). `volume-gain-min=-96` is what lets mpv accept
-the −96 dB floor. `open` pushes the initial sum too, so mpv never runs at its own default.
+(exact dB; `volume` is cubic — § Units; mpv stores it single-precision, so it reads back
+within ~1e-6 dB). `volume-gain-min=-96` is what lets mpv accept the −96 dB floor. `open`
+pushes the initial sum too, so mpv never runs at its own default.
 
-**Events.** `Ready` once per load = FILE_LOADED **and** a frame rendered after it
-(paused-at-start still renders frame 0). `Ended` once per play-through, from
-`eof-reached` (with `keep-open=yes` mpv never sends END_FILE/EOF; that path is handled
-too) — re-armed when `eof-reached` goes false (seek/reload); never with `loop=true`,
-never for an image. `Position(t)` from observed `time-pos`, rate-limited to 100 ms.
-`Error` from END_FILE/ERROR or a core shutdown.
+**Load fencing (live `path` changes).** Every `loadfile` is async; its reply carries the
+new playlist entry id (`playlist_entry_id` from the result map), START_FILE/END_FILE carry
+the entry they belong to, and FILE_LOADED / PLAYBACK_RESTART / observed properties are
+attributed to the entry between its START_FILE and END_FILE. Only the **current** load
+(newest `loadfile`'s entry, while mpv is playing it) counts: a superseded load's
+FILE_LOADED, PLAYBACK_RESTART, END_FILE (incl. ERROR — never reported under the new path),
+`eof-reached` and `time-pos` are ignored; `time-pos`/`eof-reached` count only after the
+current load's PLAYBACK_RESTART (a value delivered right after a path change may still
+describe the old file). Pinned by `path_change_before_first_pump_shows_only_new_file` and
+`stale_load_error_is_not_reported_for_new_path` (both RED against the first version: Ready
+fired on the old file's red frame; the old file's load error was reported under the new
+path), plus `path_change_to_missing_then_back` and `path_change_is_live`.
+
+**Events.** `Ready` once per load = the current load's PLAYBACK_RESTART **and** one of
+its frames rendered after its FILE_LOADED, **in either order** — both happen (measured:
+restart-first for paused clips and images; frame-first in 2 of 3 runs for a playing
+video). Requiring "a render *after* the restart" could wait forever on a paused source or
+an image whose single frame happened to render first. `Ended` once per play-through, from `eof-reached` (with `keep-open=yes` mpv
+never sends END_FILE/EOF; that path is handled too) — re-armed when `eof-reached` goes
+false (seek back/loop); never with `loop=true`, never for an image; a seek back after the
+end plays again and ends again (`ended_holds_last_frame`). `Position(t)` from observed
+`time-pos`, rate-limited to 100 ms. `Error` from END_FILE/ERROR of the current load, a
+failed async request, a foreign-context `update`, or a core shutdown.
+
+**Render targets: front + back.** `front` is what `texture()` returns. Until the current
+load is `Ready`, every frame (including any leftover of a superseded load) renders into a
+staging `back` target; at `Ready` the back is promoted to the front in the same `update`
+that pushes the event — so the texture at `Ready` is the new file's first frame, and
+until then the front still holds the old file's last frame (never a blank, never a stale
+redraw). After `Ready`, frames render straight into the front. Size: native display size
+(`dwidth`/`dheight`, observed), capped at 4096 on the long edge (aspect kept); a target is
+reallocated on a size change — render into the new one, swap only on success (a failed
+render keeps the old frame). After each render `reset_gl_state` unbinds FBO/program/VAO/
+buffer/texture, disables blend + scissor, resets colour mask and pixel-store alignment —
+libmpv leaves its own state behind.
 
 **Wakeup contract (Task 12 polls this).** `mpv_set_wakeup_callback` and
 `mpv_render_context_set_update_callback` both `write(2)` to one `EFD_NONBLOCK` eventfd
 (the fd number is the callback context — no allocation, no mpv calls in the callback);
 `MpvSource::wake_fd()` exposes it. On readability call `poll_events()` **and**
 `update()`; each drains the fd first, then pumps every queued mpv event
-(`wait_event(0)`), so a signal arriving mid-call re-arms the fd and nothing is lost.
-`update` uses `mpv_render_context_update` (level-triggered `UPDATE_FRAME`) and renders
-only when a frame is waiting, with `BLOCK_FOR_TARGET_TIME=0`; no
-`ADVANCED_CONTROL` (so synchronous `apply` calls on the same thread can at worst hit
-vo_libmpv's bounded frame-wait, never deadlock — `mpv/mod.rs` header).
-
-**Render target.** Native display size (`dwidth`/`dheight`, observed), capped at 4096 on
-the long edge (aspect kept); the `GL_RGBA8` FBO texture is reallocated on a size change —
-render into the new one, swap only on success (a failed render keeps the old frame).
-After each render `reset_gl_state` unbinds FBO/program/VAO/buffer/texture, disables
-blend + scissor, resets colour mask and pixel-store alignment — libmpv leaves its own
-state behind.
+(`wait_event(0)` — events and async replies), so a signal arriving mid-call re-arms the
+fd and nothing is lost. `update` uses `mpv_render_context_update` (level-triggered
+`UPDATE_FRAME`) and renders only when a frame is waiting, with
+`BLOCK_FOR_TARGET_TIME=0`; no `ADVANCED_CONTROL`.
 
 **Teardown with GL current (lp-transition gotcha).** `mpv_render_context_free` must run
 with its GL context current and before `mpv_terminate_destroy`. Sources get no `&Gfx` in
 `Drop`, so they hold a `gfx::GlKeepAlive` (`Gfx::keep_alive()`): an `Rc<Shared>` clone
 (same pattern as `WindowTarget`) that keeps the EGL context alive past the `Gfx`, plus
 `make_current()` (a guard that restores whatever was current before; a no-op when the
-context already is) and `glDelete{Textures,Framebuffers}` pointers. `MpvSource::drop`:
-make current → free render ctx → delete FBO/texture → clear wakeup cb → destroy core →
-close eventfd (in `open`, the eventfd is created before the core so error-path locals
-drop in the same order). Drop order vs the `Gfx` is irrelevant — pinned by
-`source_outlives_gfx_safely`. If the context somehow can't be made current, the core is
-`stop`ped (silent) and leaked rather than freed against the wrong context.
+context already is), `is_for(gfx)`, and `glDelete{Textures,Framebuffers}` pointers.
+`MpvSource::drop`: make current → free render ctx → delete both FBOs/textures → clear
+wakeup cb → destroy core → close eventfd (in `open`, the eventfd is created before the
+core so error-path locals drop in the same order). Drop order vs the `Gfx` is irrelevant —
+pinned by `source_outlives_gfx_safely`; dropping with another context current switches
+and restores (`update_with_foreign_context_is_refused`). If the context somehow can't be
+made current, the core is sent `stop` (silent), both callbacks are cleared, and it's
+leaked rather than freed against the wrong context.
 
 **Fence-leak mitigation** (technique from mpvpaper 1.9, PR #132 by manv-3, GPL-3.0;
 credited in Task 19): the `get_proc_address` given to `mpv_render_context_create` returns
 a stub for `glFenceSync` that returns 0 (a null sync); everything else comes from
-`eglGetProcAddress`. libmpv's render-API path otherwise accumulates one sync object per
-frame. Safe because the compositor samples the frame in the same GL context that
-rendered it (in-order command stream — no fence needed). `sources::mpv::fence_stub_calls()`
-counts stub calls; `fence_sync_stub_is_used` proves libmpv really calls it, and
-`first_frame_and_ready` checks no GL error is left behind.
+`eglGetProcAddress`. libmpv's render-API path otherwise accumulates sync objects. **Why
+it's safe:** mpv null-checks the fence before storing it or calling `glClientWaitSync` on
+it, and `glDeleteSync(0)` is a GL no-op — so the stub just turns fence bookkeeping off.
+What mpv's fences actually guard is buffer reuse: (a) direct rendering (`vd-lavc-dr`),
+which on the render API needs `MPV_RENDER_PARAM_ADVANCED_CONTROL` — never passed; (b) PBO
+uploads (`opengl-pbo`), where a PBO could be rewritten while the GPU still reads it —
+pinned `opengl-pbo=no` (mpv's default) in `open`. **Neither may be enabled while the stub
+is in place.** `sources::mpv::fence_stub_calls()` counts stub calls;
+`fence_sync_stub_is_used` proves libmpv really calls it, and `first_frame_and_ready`
+checks no GL error is left behind.
 
 **`ColorSource::new([r,g,b])`** (0–255, the graph's `color`): a 1×1 `RGBA8` texture
 (LINEAR + CLAMP_TO_EDGE → the colour everywhere), created lazily on the first `update`
-(construction has no `Gfx`) and repainted only when `color` changes. `Ready` is queued at
-construction (first `poll_events`). Every other writable property is accepted and stored
-(so an alias/global `set` never fails on a colour layer) and does nothing.
+(construction has no `Gfx`) and repainted only when `color` changes (never through a
+foreign context). `Ready` is queued at construction (first `poll_events`). Every other
+writable property is accepted and stored (so an alias/global `set` never fails on a
+colour layer) and does nothing.
 
 **Tests (`tests/sources.rs`) — always `ao: "null"` (R26)**, so a run is silent on the
-owner's speakers; `audio-params` still populate with the null AO. Media come from
-`tests/common::ensure_clip(name, ClipSpec)`: ffmpeg from PATH → `target/test-media/`,
-generated once (regenerated only if the `<name>.spec` stamp differs), via a temp name +
-rename, serialised by a mutex. Videos are 1920×1080@30 `libx264` `yuv420p`, built in
-`rgb24` and converted once with an explicit BT.709 limited-range matrix **and tagged**
-so mpv decodes with the same matrix — solid colours come back within ±3 (YUV round trip
-+ mpv's output dither), `FrameIndex`'s neutral-grey `(n,n,n)` marker within ±1 (ffmpeg
-itself decodes frame 119's marker as 118). Audio for `Solid` is PCM s16le (exact level).
+owner's speakers; `audio-params`/`current-ao` still populate with the null AO. Raw mpv
+reads after an `apply` first `settle()` (pump until `requests_in_flight() == 0`). Media
+come from `tests/common::ensure_clip(name, ClipSpec)`: ffmpeg from PATH →
+`target/test-media/`, generated once (regenerated only if the `<name>.spec` stamp
+differs), via a temp name + rename, serialised by a mutex. Videos are 1920×1080@30
+`libx264` `yuv420p`, built in `rgb24` and converted once with an explicit BT.709
+limited-range matrix **and tagged** so mpv decodes with the same matrix — solid colours
+come back within ±3 (YUV round trip + mpv's output dither), `FrameIndex`'s neutral-grey
+`(n,n,n)` marker within ±1 (ffmpeg itself decodes frame 119's marker as 118). Audio for
+`Solid` is PCM s16le (exact level).
