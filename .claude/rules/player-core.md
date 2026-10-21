@@ -228,6 +228,24 @@ builds a surfaceless one (used by every GPU test today), `Gfx::new_wayland` +
 `Gfx::window_target` build a real one on a `wl_surface` (implemented to compile against a
 stable API now, first exercised by Task 13 — R16).
 
+**`Gfx` and `WindowTarget` share EGL teardown via `Rc<Shared>`, not a borrow.** `Shared`
+(private, `egl.rs`) holds the EGL instance + `Display` + `Context` and is the one thing
+whose `Drop` actually tears EGL down (`eglMakeCurrent(none)` → `eglDestroyContext` →
+`eglTerminate`). `Gfx::window_target` clones `self.shared` into the `WindowTarget` it
+returns, rather than handing back a `&'a Gfx`-tied borrow — a borrow would force a
+self-referential struct the moment the runtime stores one `Gfx` and its live
+`WindowTarget` side by side per output, which is exactly how it's used. This means
+`Shared::drop` runs exactly once, whenever the *last* clone goes away, regardless of
+whether the `Gfx` or the `WindowTarget` is dropped first. **Reviewed finding this
+replaced:** an earlier version put `display`/`context` directly on `Gfx` with its own
+eager `Drop`, while `WindowTarget` kept only a *copy* of the `Display` value and a
+separately-`Rc`'d EGL instance — nothing kept the owning `Gfx` alive, so dropping it
+first `eglTerminate`d the display while a `WindowTarget` about to call
+`eglDestroySurface` on it was still around: undefined behaviour. `make_current`/`swap`
+still take `gfx: &Gfx` (API shape unchanged) and read `gfx.shared.{egl,context}` — a
+`WindowTarget` created from a *different* `Gfx` would mismatch display/context and EGL
+itself rejects that, same as before.
+
 **Display-selection order** (`Gfx::new_offscreen`, mirrors `spikes/lwe-core/host.cpp`'s
 `egl_init`, proven on this machine's NVIDIA 595.84):
 
