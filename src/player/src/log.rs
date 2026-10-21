@@ -454,6 +454,20 @@ pub fn recent(filter: &LogFilter, limit: usize) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// The instant `t_mono_ms` counts from (the global logger's start) — `None` before `init`.
+/// Anything that timestamps on "the player's monotonic clock" (the bus meter, Task 14)
+/// uses this base, so its times line up with every event's `t_mono_ms`.
+pub fn mono_start() -> Option<Instant> {
+    GLOBAL
+        .get()
+        .and_then(|l| l.state.lock().ok().map(|s| s.start))
+}
+
+/// Now on the `t_mono_ms` clock (`None` before `init`).
+pub fn mono_now() -> Option<std::time::Duration> {
+    mono_start().map(|s| s.elapsed())
+}
+
 /// Total events that failed to reach disk in the global log (write/flush failures, or
 /// disk logging suspended after a rotation failure) — see the module doc. `0` if `init`
 /// hasn't run yet. Every failure is also diagnosed on stderr once per failure burst.

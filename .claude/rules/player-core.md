@@ -42,7 +42,10 @@ happen regardless of timing.
   `handlers.rs` (the verbs). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
   and state paths. § Command API.
 - `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
-  `frames`, Task 13; Task 15 adds more). § Command API.
+  `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more).
+  § Command API.
+- `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `Audio` (what
+  `serve` runs, `mod.rs`). § Audio bus.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -667,7 +670,10 @@ always — it only affects single-frame images), `keepaspect=no` (the texture *i
 frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, below),
 `osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`.
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
-`pipewire`), `audio_device` (the bus, Task 14), `kind` (`video`|`image`, default from the
+`pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
+`audio_delay_bias` (seconds **added** to every `audio_delay` before it reaches mpv's
+`audio-delay`; `serve` passes −`Bus::latency()`; `read("audio_delay")` stays the graph
+value), `kind` (`video`|`image`, default from the
 extension, then corrected by mpv's `current-tracks/video/image` flag after load).
 **Every writable property not in `opts` is applied at its schema default**, so `read`
 and mpv agree from the first moment. Error codes: a wrong-typed opt (`kind: 5`, `ao: 5`,
@@ -1014,7 +1020,10 @@ handoff) are unit-tested graph-only in `recipes/transition.rs` (synthetic events
 Task 12). `lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
 [--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace]` — defaults
 `1920x1080@60`, `real`, mpv's lp-player default ao (`pipewire`), `info`. **`--ao null` in
-every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent.
+every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent —
+and no audio bus is created (§ Audio bus). With the default AO, `serve` creates the bus
+right after binding the socket (a second instance exits before touching PipeWire) and
+adds `audio_device` + `audio_delay_bias` to the base opts.
 Without `--headless` it draws on the compositor's outputs (§ Wayland); `--outputs` is
 then refused (exit 2).
 
@@ -1216,7 +1225,8 @@ gl_error|duplicate_output|pointer_error`, `input.pointer` (debug), `loop.failed`
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
 `step.timeout`, `mpv.reaped`, `mpv.reaper_stragglers`, `effects.missing`,
-`compose.failed` — i.e. every event-log kind
+`audio.bus.up|down|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
+`audio.meter.started`, `compose.failed` — i.e. every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
 
 **Global settings go to `srcs:*` (R50).** The backend (Task 17) sends every global setting
@@ -1247,7 +1257,9 @@ subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`; `frames` (Task 13,
 [{name, hz, refresh_mhz, period_ms, idle, frame_pending, since_present_ms, paced {count,
 mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
 missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
-Wayland → Frame pacing). A new probe = a file here + one `PROBES` entry.
+Wayland → Frame pacing); `bus` and `meter.window` (§ Audio bus). `sources` also has
+`mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
+one `PROBES` entry.
 
 **Isolation (`api/server.rs`).** Non-blocking, edge-triggered client sockets; per wake a
 client gets ≤ 256 KiB read and ≤ 32 requests handled (the rest next iteration, round
@@ -1415,3 +1427,144 @@ remain — checked), re-applies any monitor that differs from the record with it
 values and verifies `hyprctl monitors -j` matches, and moves workspaces back to their
 recorded monitors. Socket paths must stay < 108 bytes: the script uses `mktemp` in
 `$TMPDIR`/`/tmp`, not a long scratch path.
+
+## Audio bus
+
+`src/audio/` (spec §5.3 "(my call) Player audio bus", §4.4 auto-mute; Task 14). Every
+wallpaper's audio goes to one in-process PipeWire loopback sink owned by the player — the
+**bus** — forwarded at 0 dB to the user's current default sink (EasyEffects chains keep
+working); the **meter** captures the bus monitor: exactly what the wallpapers output, and
+nothing else (the dropout detector, Task 15, and auto-mute's self-exclusion, Task 17).
+
+```text
+ mpv src1 (audio-device=pipewire/lp-player-bus) ─┐
+ mpv src2 ─────────────────────────────────────┼─▶ lp-player-bus ──(same cycle)──▶ lp-player-bus.playback ──▶ default sink
+    …                                          ─┘   Audio/Sink        loopback      Stream/Output/Audio          (re-targeted on
+                                                        │                            node.target = default         default.audio.sink
+                                                        └─ monitor ──▶ lp-player-bus.meter (capture, the Meter)   changes)
+```
+
+**Identity contract (Task 17's auto-mute excludes the bus by it — verbatim):** playback
+stream `node.name = lp-player-bus.playback`, `application.name = lp-player`, `media.role =
+Wallpaper`; sink `node.name = lp-player-bus`, `node.description = "lp-player bus"`,
+`media.class = Audio/Sink`, `audio.position = [FL FR]`. Constants in `audio::bus`
+(`PLAYBACK_NAME`, `APP_NAME`, `MEDIA_ROLE`, `SINK_NAME`, `SINK_DESCRIPTION`). The meter is
+`lp-player-bus.meter` (a capture stream). Note mpv streams also carry `application.name =
+lp-player` (`audio-client-name`) — auto-mute must exclude by ownership/target, not that name
+alone (spec §4.4).
+
+**`Bus::create()`** (serve startup only; measured ~0.2 s, `Err` after 10 s — the thread
+stops at its next wait): thread `lp-bus` runs its own
+PipeWire main loop + context + core (nothing uses `RT_PROCESS`: every callback runs on that
+thread; capture buffers carry their cycle time, `pw_buffer.time`). Two roundtrips (globals,
+then the `default` metadata's properties) → `default.audio.sink` → `pw_context_load_module(
+"libpipewire-module-loopback", args)` (declared by hand — not in pipewire-sys's
+`wrapper.h`) with `capture.props = {media.class = Audio/Sink, node.name = lp-player-bus,
+node.description = "lp-player bus", audio.position = [FL FR]}` and `playback.props =
+{node.target = target.object = <default>, identity…}` → waits until the playback is linked
+to a sink → **latency** → `Ok`. `Bus::device()` = `pipewire/lp-player-bus`;
+`Bus::state()` = `Up | Retargeting | Down`; `Bus::info()` = everything the `bus` probe shows.
+`LP_PLAYER_BUS=off` disables it.
+
+**Re-target.** The bus thread watches `default.audio.sink` (a default naming the bus itself
+is ignored — it would loop) and moves the playback the way pavucontrol does: default
+metadata `target.node` (node id) + `target.object` (serial, `Spa:Id`) on the playback node
+→ WirePlumber relinks (metadata beats the node's own `node.target`). `audio.bus.retargeting
+{from, to}` → (link to `to` seen in the registry) `audio.bus.up {device, latency_ms, target,
+from, retarget_ms}`; not linked within 3 s → `audio.bus.retarget_failed {to, linked}`
+(warn; not retried until the default changes again). **Driven by "last requested vs
+default", never by the momentary link set:** links churn while WirePlumber relinks, and
+other clients' captures of the playback are links too — the legacy AudioMonitor's `parec`
+attaches to every sink-input, and counting it re-issued retargets in a loop (found here;
+`Seen::linked_targets` counts `Audio/Sink` nodes only). **Session policies win, never
+fought.** On this machine EasyEffects 8.2.9 ("process all output streams") re-writes
+`target.object` = its sink on *every* output stream the moment anyone moves it (verified
+with a plain `pw-cat` stream: moved to any other sink, it's back on `easyeffects_sink`
+within ms). Fighting that (re-issuing because "not linked to the default") oscillated. The
+bus tracks every `target.object` write on its playback in order (`Seen::meta_events`): its
+own write echoes back first; a later different value is another client's → `audio.bus.moved
+{requested, target (that client's choice), linked_now}` (warn), `bus` probe `overridden:
+true`, `target` = where it really is, and no retry until the default changes again (a
+retarget in flight completes as `audio.bus.up {requested, target, overridden: true}`).
+Someone moving it by hand (pavucontrol) is the same case. WirePlumber's
+`linking.follow-default-target = true` (this machine) also moves a stream whose metadata
+target was the default when the default changes, so a retarget back often completes at
+once (`retarget_ms` ≈ 0). Measured: relinked 25–107 ms after `pactl set-default-sink`;
+the meter's largest gap across it 28–30 ms (the bus subgraph changes driver; one 1 ms block
+of the bus may come out quiet then — `bus.sh` prints the count).
+
+**WirePlumber state opt-out (found in this task).** WirePlumber's `state-stream` keys
+saved volumes/targets by `application.name` — the same key (`Output/Audio:application.name:
+lp-player`) as every mpv source. Without care, our metadata re-targets were saved as a
+"user choice" target and would be restored onto any later lp-player stream without its own
+target (e.g. mpv in the fallback), pinning it to a stale sink. Every bus stream therefore
+carries `state.restore-props = false` + `state.restore-target = false` (the bus also
+always starts at 0 dB). `bus.sh` asserts no `target` gets saved. Don't set
+`application.id` on the context: it changes the key.
+
+**Latency rule.** `Bus::latency()` = what the bus adds, measured once at creation with an
+impulse: a probe stream plays one −60 dBFS sample (inaudible) into the bus while two
+captures watch the bus monitor (`stream.capture.sink`) and the bus playback's *output*
+(`target.object = lp-player-bus.playback` — WirePlumber links stream→stream); both are
+checked wired correctly first (else both would see the same signal and read 0), the
+arrival-time difference (same graph cycles → same clock) over 3 shots, median kept;
+`audio.bus.latency_shots {shots_ms, quantum_frames}` (debug). **Measured on this machine
+(PipeWire 1.6.9): 0 samples** — module-loopback triggers its playback from the capture's
+process (same cycle); the method reads an injected `target.delay.sec = 0.010` as
+9.999997 ms, so 0 is real. Gate (brief): ≤ 1 quantum + 5 ms. Sources get `audio_delay_bias
+= −latency` at open (§ Sources: the source's own `audio_delay` **adds** to it), so a
+non-zero bus latency on another PipeWire would be compensated; today it's 0.
+
+**Meter.** `Meter::start(&bus)` (a capture stream on the bus thread: 48 kHz F32 stereo,
+`node.latency = 480/48000` — a 10 ms *request*; the graph runs at the smallest request, on
+this machine 64 frames because the owner's Quickshell asks for it). `dbfs_1ms` = per 1 ms
+block (48 frames) the **max-channel** RMS (each channel's RMS, loudest wins — a mono sum
+cancels anti-phase content and reads a one-sided channel 6 dB low, a fake dip for a dropout
+detector), `20·log10`, floored at `units::SILENT_DB` (−96); a full-scale sine reads −3.01.
+Ring: 4 min (240 000 entries) of `(t_mono, dbfs_1ms)`; `t_mono` is the **`t_mono_ms` clock**
+(`log::mono_start()`; block time = its cycle's `pw_buffer.time` + its first frame's offset).
+The callback never blocks (staging buffer + `try_lock`). `Meter::window(from, to)`,
+`Meter::available()` (streaming, newest sample ≤ 500 ms old, no error), `Meter::status()`.
+
+**Probes.** `bus` → `{state, device, latency_ms, latency_samples, quantum_ms, target,
+default_sink, requested, overridden, playback_node, sink_node, retargets, reason, now_ms,
+meter {available,
+streaming, samples, last_ms, quantum_frames, dropped, error}}` (`now_ms` on the `t_mono_ms`
+clock). `meter.window {last_ms} | {from_ms, to_ms} [, samples: false]` → `{from_ms, to_ms,
+count, median_db, min_db, max_db, max_gap_ms, first_ms, last_ms, samples: [[t_ms, db]…]}`;
+an unavailable meter is an **`unsupported` error saying why** (never an empty "all quiet").
+
+**Fallback.** `--ao <anything but pipewire>` → no bus (`--ao null` would only add a sink to
+the owner's session for nothing). `Bus::create` failing (PipeWire unreachable, module
+missing, never linked) → `audio.bus.down {reason}` (warn), sources keep mpv's default
+device (no `audio_device`, no bias), the meter is unavailable. Both are logged exactly
+once; `ctl probe '{"name":"bus"}'` says why. A connection lost later → `audio.bus.down`;
+streams already on the bus fall back to the default sink (WirePlumber), the meter reports
+unavailable. Shutdown: `Runtime::shutdown` destroys every source first, then
+`Audio::close` (`audio.bus.down {reason: "shutdown"}`), so no stream is moved to the default
+sink on the way out; a killed player's sink goes with its PipeWire connection.
+
+**Tests.** `tests/api.rs::bus_down_falls_back_to_default_device` (PipeWire made
+unreachable: empty `PIPEWIRE_RUNTIME_DIR` + bogus `PIPEWIRE_REMOTE`; image source, so
+silent) and `ao_null_runs_without_bus`; unit tests in `meter.rs` (RMS/floor/max-channel/
+carry/ring/clock) and `bus.rs` (args, default parsing). **On-machine: `bash
+src/player/tests/onmachine/bus.sh`** (exit 0 = pass; real audio, R56): its own temp
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME` for the lp-player socket while PipeWire/Pulse reach the
+real session (`PIPEWIRE_RUNTIME_DIR=/run/user/$UID`, `PULSE_SERVER=unix:/run/user/$UID/
+pulse/native`), `--headless`, `WAYLAND_DISPLAY` unset (R55); stops a legacy mpvpaper first;
+a `trap … EXIT` restores the default sink exactly and checks no `lp-player-bus` sink is left
+(R57), deletes every `target.node`/`target.object` metadata entry on the nodes serve owned
+(live ones before quitting, dangling ones after — never an id another node reuses) and, if
+WirePlumber ever saved a `target` for lp-player, clears it (silent stream + `target.object
+-1`) — so a failed or interrupted run never leaves routing changed (verified with a SIGTERM
+mid-retarget). It checks the identity (pw-dump + `pactl list sink-inputs`), `pw-link -l`,
+the latency gate, a 440 Hz −20 dBFS clip's meter median (−23 ± 3; measured −22.98…−23.03),
+the source's mpv device/delay, `default_sink_change_retargets` and the WirePlumber state.
+**`default_sink_change_retargets`** first learns the session's policy with a control
+stream (a silent `pw-cat` moved to the new sink by metadata): no policy → the bus must be
+linked to the new sink and stay; a policy (here: EasyEffects) → the bus's links to the new
+sink must be *created* within 1 s (caught by a `pw-link -m -l` capture: the policy
+re-points it within ms, faster than polling `pw-link -l` can see), then `audio.bus.moved`
+to the policy's sink + `overridden` reported. Both: exactly one `audio.bus.retargeting` per
+default change (no fight), `audio.bus.up {requested}` ≤ 1 s, meter gap ≤ 50 ms across it
+(measured 8–34 ms), and back to the original default within 1 s.

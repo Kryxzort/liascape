@@ -33,7 +33,8 @@ pub const MAX_TEXTURE_EDGE: u32 = 4096;
 /// `Position` events are rate-limited to this interval (~10 Hz).
 const POSITION_INTERVAL: Duration = Duration::from_millis(100);
 
-/// The AO used when `opts` names none (spec §5.3; the bus `audio-device` arrives in Task 14).
+/// The AO used when `opts` names none (spec §5.3). `serve` routes it into the player bus
+/// (`audio_device` = `audio::bus::DEVICE`, Task 14).
 pub const DEFAULT_AO: &str = "pipewire";
 
 // Observed-property ids (`mpv_observe_property` reply_userdata).
@@ -270,6 +271,10 @@ pub struct MpvSource {
     /// The core is idle (VO uninitialised) after that `stop`: freeing the render context
     /// won't wait on the playloop.
     idle_after_stop: bool,
+    /// Seconds ADDED to every `audio_delay` the graph sets before it reaches mpv's
+    /// `audio-delay` (opt `audio_delay_bias`; `serve` passes −bus latency, Task 14).
+    /// `read("audio_delay")` stays the graph's value.
+    audio_delay_bias: f64,
 }
 
 impl MpvSource {
@@ -282,6 +287,8 @@ impl MpvSource {
     /// mpv agree from the start — plus:
     /// - `ao` — mpv audio output, default [`DEFAULT_AO`] (tests pass `"null"`, R26);
     /// - `audio_device` — mpv `audio-device` (the player bus, Task 14);
+    /// - `audio_delay_bias` — seconds added to every `audio_delay` before it reaches mpv's
+    ///   `audio-delay` (the bus's latency compensation: −`Bus::latency()`, Task 14);
     /// - `kind` — `"video"` | `"image"`; default inferred from the extension;
     /// - `stepped` — `true`: deterministic stepped mode (R48; mpv stays paused, frames come
     ///   from [`MpvSource::step_seek`] — see the field doc).
@@ -318,13 +325,21 @@ impl MpvSource {
             Some(other) => return Err(bad_type(format!("stepped must be a bool, got {other}"))),
         };
         let audio_device = opt_str("audio_device")?.map(str::to_string);
+        let audio_delay_bias = match opts.get("audio_delay_bias") {
+            None => 0.0,
+            Some(v) => v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| {
+                bad_type(format!(
+                    "audio_delay_bias must be a number of seconds, got {v}"
+                ))
+            })?,
+        };
 
         // Type every remaining opt up front (bad shapes fail before any mpv work).
         let mut given: BTreeMap<String, PropValue> = BTreeMap::new();
         let mut start: Option<f64> = None;
         for (k, v) in opts {
             match k.as_str() {
-                "ao" | "audio_device" | "kind" | "path" | "stepped" => {}
+                "ao" | "audio_device" | "audio_delay_bias" | "kind" | "path" | "stepped" => {}
                 "position" => {
                     start =
                         Some(v.as_f64().ok_or_else(|| {
@@ -463,6 +478,7 @@ impl MpvSource {
             teardown_at: None,
             teardown: None,
             idle_after_stop: false,
+            audio_delay_bias,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -1258,7 +1274,11 @@ impl Source for MpvSource {
             "af" => self.set(prop, "af", &s),
             // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
             "no_audio" => self.set(prop, "aid", if b { "no" } else { "auto" }),
-            "audio_delay" => self.set_f64(prop, "audio-delay", num(v)),
+            // The graph value is the user's offset; the bus compensation is added to it.
+            "audio_delay" => {
+                let d = num(v) + self.audio_delay_bias;
+                self.set_f64(prop, "audio-delay", d)
+            }
             other => Err(unsupported(format!(
                 "{other} has no live mapping on a {} source",
                 self.kind

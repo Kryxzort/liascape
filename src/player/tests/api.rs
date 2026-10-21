@@ -111,9 +111,21 @@ impl Serve {
     }
 
     fn spawn_in(root: PathBuf, extra: &[&str], serial: Option<MutexGuard<'static, ()>>) -> Serve {
-        let child = serve_cmd(&root, extra)
-            .spawn()
-            .expect("spawn lp-player serve");
+        Serve::spawn_env(root, extra, &[], serial)
+    }
+
+    /// [`Serve::spawn_in`] with extra environment variables for the child.
+    fn spawn_env(
+        root: PathBuf,
+        extra: &[&str],
+        env: &[(&str, &Path)],
+        serial: Option<MutexGuard<'static, ()>>,
+    ) -> Serve {
+        let mut cmd = serve_cmd(&root, extra);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let child = cmd.spawn().expect("spawn lp-player serve");
         let sock = root.join("run/livepaper/lp-player.sock");
         let mut s = Serve {
             child: Some(child),
@@ -2023,4 +2035,100 @@ fn wayland_serve_args_and_missing_compositor() {
     let sock = root.join("run/livepaper/lp-player.sock");
     assert!(!sock.exists(), "socket left behind");
     assert!(!sock.with_extension("lock").exists(), "lock left behind");
+}
+
+// ---------------------------------------------------------------- audio bus (Task 14)
+
+/// The bus fallback (spec §5.3): when the bus can't be created — here PipeWire is
+/// unreachable (an empty `PIPEWIRE_RUNTIME_DIR` and a socket name that doesn't exist) —
+/// `serve` still runs, logs `audio.bus.down {reason}`, the `bus` probe says `down` with
+/// that reason, sources open on the default device (mpv `audio-device` `auto`, no
+/// `audio-delay` bias), and the meter reports itself unavailable instead of passing
+/// silently. Default AO (`pipewire`, not `null`): that's what would route through the bus.
+/// The source is an image (no audio track), so the run stays silent (R26's intent).
+#[test]
+fn bus_down_falls_back_to_default_device() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let no_pw = root.join("no-pipewire");
+    std::fs::create_dir_all(&no_pw).unwrap();
+    let srv = Serve::spawn_env(
+        root,
+        &["--ao", "pipewire"],
+        &[
+            ("PIPEWIRE_RUNTIME_DIR", no_pw.as_path()),
+            (
+                "PIPEWIRE_REMOTE",
+                Path::new("lp-player-test-no-such-socket"),
+            ),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+
+    let down = c.ok("logs", json!({"kind_prefix": "audio.bus."}));
+    let evs = down["events"].as_array().unwrap();
+    let ev = evs
+        .iter()
+        .find(|e| e["kind"] == "audio.bus.down")
+        .unwrap_or_else(|| panic!("no audio.bus.down logged: {down}"));
+    let reason = ev["reason"].as_str().expect("audio.bus.down {reason}");
+    assert!(reason.contains("PipeWire"), "reason: {reason}");
+    assert!(
+        !evs.iter().any(|e| e["kind"] == "audio.bus.up"),
+        "bus up although PipeWire is unreachable: {down}"
+    );
+
+    let bus = c.ok("probe", json!({"name": "bus"}));
+    assert_eq!(bus["state"], "down", "{bus}");
+    assert_eq!(bus["reason"], json!(reason), "{bus}");
+    assert_eq!(bus["meter"]["available"], json!(false), "{bus}");
+
+    let e = c.err(
+        "probe",
+        json!({"name": "meter.window", "args": {"last_ms": 1000}}),
+    );
+    assert_eq!(e["code"], "unsupported", "{e}");
+    assert!(
+        e["message"].as_str().unwrap().contains("unavailable"),
+        "{e}"
+    );
+    assert!(e["hint"].as_str().unwrap().contains("bus"), "{e}");
+
+    let img = ensure_clip("bus_fallback_image", ClipSpec::Image { rgb: [10, 200, 30] });
+    let id = c.ok(
+        "create",
+        json!({"kind": "source", "props": {"path": s(&img)}}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    show_all(&mut c, &id);
+    c.step(16);
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    let src = &probe["sources"][0];
+    assert_eq!(src["id"], json!(id), "{probe}");
+    assert_eq!(src["mpv_audio_device"], "auto", "{probe}");
+    assert_eq!(src["mpv_audio_delay"], json!(0.0), "{probe}");
+}
+
+/// `--ao null` (every other test, R26): nothing would play through PipeWire, so no bus is
+/// created at all (nothing appears in the owner's session) — `bus` says why.
+#[test]
+fn ao_null_runs_without_bus() {
+    let Some(srv) = Serve::start() else {
+        return;
+    };
+    let mut c = srv.client();
+    let bus = c.ok("probe", json!({"name": "bus"}));
+    assert_eq!(bus["state"], "down", "{bus}");
+    assert!(
+        bus["reason"].as_str().unwrap_or("").contains("--ao null"),
+        "{bus}"
+    );
+    let logs = c.ok("logs", json!({"kind_prefix": "audio.bus.down"}));
+    assert_eq!(logs["events"].as_array().unwrap().len(), 1, "{logs}");
 }
