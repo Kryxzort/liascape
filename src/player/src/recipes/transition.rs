@@ -31,9 +31,8 @@ use crate::units::{GainSlot, SILENT_DB, db_to_lin};
 pub const ANTICLICK: Duration = Duration::from_millis(30);
 /// B that hasn't produced its first frame by then fails the transition (never park).
 pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
-/// reveal/frozen `align: end` on a shared, *looping* A (no `Ended` comes): the snapshot is
-/// taken once A's iteration has at most this long left — its last frame is showing.
-const LAST_FRAME_WINDOW_S: f64 = 0.05;
+/// Frame interval assumed until one is observed (the clips' 30 fps).
+const DEFAULT_FRAME_S: f64 = 1.0 / 30.0;
 
 /// Which sides hold their frame during the effect (spec §10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -133,9 +132,14 @@ pub enum TransitionEventKind {
         /// start up to one tick in the past so `progress` reaches 1 exactly at A's end).
         start_ms: f64,
     },
-    /// B is the layers' content now; A's removal is scheduled.
+    /// B is the layers' content now; A's removal is scheduled. `committed`: cut short by
+    /// a newer request (invariant #6) rather than reaching its end.
     #[serde(rename = "transition.handoff")]
-    Handoff { to: String, from: Vec<String> },
+    Handoff {
+        to: String,
+        from: Vec<String>,
+        committed: bool,
+    },
     #[serde(rename = "transition.done")]
     Done { to: String },
     #[serde(rename = "transition.cancelled")]
@@ -169,12 +173,14 @@ pub struct TransitionStatus {
     /// The outgoing sources (one per distinct A).
     pub from: Vec<String>,
     /// Sources this transition keeps paused on purpose: a pending B, held A's, a frozen
-    /// B, snapshots.
+    /// B, snapshots, and its graves (released A's / ramped-out B's not destroyed yet).
     pub held: Vec<String>,
 }
 
-/// What the recipe changed on an A, for exact restoration (cancel/failure before
-/// handoff). Only the first change of each is recorded.
+/// What the recipe changed on a source, for exact restoration (cancel/failure, or the
+/// source turning out to be shown elsewhere — R43). Only the first change of each is
+/// recorded, and a gain is recorded as the *target* of whatever animation was moving it
+/// then (R41), never a mid-ramp value.
 #[derive(Debug, Default)]
 struct Orig {
     looped: Option<bool>,
@@ -220,6 +226,8 @@ struct Tr {
     swap_at: Option<Duration>,
     /// Handoff → Done once this has passed (and A's grave is empty).
     settle_until: Duration,
+    /// When the gain animations begun at t0 end (≥ t0 + 30 ms whatever the duration, R42).
+    gain_end: Duration,
     // `align: end` tracking of the lead A.
     /// Earliest estimate of A's iteration end (player-clock seconds): every observation
     /// `now + (duration − time_pos)/speed` is ≥ the true end (time_pos lags), so the
@@ -229,10 +237,20 @@ struct Tr {
     frame_dt: Option<f64>,
     last_tp: Option<f64>,
     last_speed: Option<f64>,
-    wrapped: bool,
+    /// Looping A: when `time_pos` last dropped back (player-clock s). mpv already counts
+    /// the next iteration while the LAST frame is still on screen, so the visible
+    /// boundary is one frame after this (measured 33.9–34.3 ms at 30 fps).
+    drop_at: Option<f64>,
+    /// `time_pos` dropped in this very iteration (the last frame is on screen now).
+    dropped_now: bool,
+    /// Looping A, full-live: the boundary chosen for the effect to end on.
+    target_end: Option<f64>,
+    /// Looping A, reveal/frozen/cut: the boundary to start at (last frame copied).
+    boundary: Option<f64>,
     skip_iteration: bool,
     evaluated: bool,
-    snap_pending: bool,
+    /// reveal/frozen: the snapshots have been created (they're waited on until ready).
+    copies_made: bool,
 }
 
 impl Tr {
@@ -241,16 +259,21 @@ impl Tr {
     }
 }
 
-/// A source waiting to be destroyed once its ramp to silence is over.
+/// A source waiting to be destroyed once its ramp to silence is over. `orig` is what the
+/// recipe changed on it: if a layer shows it again before then, it's restored (R43).
 struct Grave {
     id: String,
     at: Duration,
     corr: CorrId,
     outputs: Vec<String>,
+    orig: Orig,
 }
 
 enum Outcome {
-    Cancelled(&'static str),
+    /// A newer request took over; it proceeds from A as it is now (R44: no rewind).
+    Superseded,
+    /// Cancelled; A stays current.
+    Cancelled,
     Failed(String),
 }
 
@@ -296,12 +319,13 @@ fn gain_db(g: &Graph, id: &str, slot: &str) -> f64 {
     get_f64(g, id, &format!("gain.{slot}")).unwrap_or(0.0)
 }
 
-/// No timeline to align to: an image, a colour, a snapshot, or no known duration.
+/// A picture that never changes: an image, a colour or a snapshot — by kind (mirrored
+/// from the live source). A video is never a still, even before its duration is known.
 fn is_still(g: &Graph, id: &str) -> bool {
     matches!(
         get_str(g, id, "kind").as_str(),
         "image" | "color" | "snapshot"
-    ) || get_f64(g, id, "duration").unwrap_or(0.0) <= 0.0
+    )
 }
 
 fn secs(d: Duration) -> f64 {
@@ -469,9 +493,14 @@ fn build_sides(g: &Graph, outputs: &[String]) -> Vec<Side> {
     sides
 }
 
-fn note_gain(side: &mut Side, g: &Graph, a: &str, slot: &'static str) {
-    if !side.orig.gains.iter().any(|(s, _)| *s == slot) {
-        side.orig.gains.push((slot, gain_db(g, a, slot)));
+/// Record `a.gain.<slot>` in `orig` (first change only): the target of the animation
+/// moving it, if one is, else its current value (R41).
+fn note_gain(orig: &mut Orig, g: &Graph, anim: &Animator, a: &str, slot: &'static str) {
+    if !orig.gains.iter().any(|(s, _)| *s == slot) {
+        let v = anim
+            .target_of(&path(a, &format!("gain.{slot}")))
+            .unwrap_or_else(|| gain_db(g, a, slot));
+        orig.gains.push((slot, v));
     }
 }
 
@@ -531,7 +560,7 @@ impl Transitions {
             let phase = self.active[i].phase;
             if overlaps && phase.pre_running() {
                 let mut tr = self.active.remove(i);
-                self.abort(&mut tr, g, anim, now, Outcome::Cancelled("superseded"));
+                self.abort(&mut tr, g, anim, now, Outcome::Superseded);
             } else if overlaps && phase == Phase::Running {
                 let mut tr = self.active.remove(i);
                 self.commit(&mut tr, g, anim, now);
@@ -562,14 +591,18 @@ impl Transitions {
             pause_at: None,
             swap_at: None,
             settle_until: now,
+            gain_end: now,
             end_est: None,
             frame_dt: None,
             last_tp: None,
             last_speed: None,
-            wrapped: false,
+            drop_at: None,
+            dropped_now: false,
+            target_end: None,
+            boundary: None,
             skip_iteration: false,
             evaluated: false,
-            snap_pending: false,
+            copies_made: false,
         };
         // align: end — A's current iteration is its last (unless shared, R34, or a still).
         if req.align == Align::End
@@ -621,12 +654,12 @@ impl Transitions {
         match self.active[i].phase {
             p if p.pre_running() => {
                 let mut tr = self.active.remove(i);
-                self.abort(&mut tr, g, anim, now, Outcome::Cancelled("cancelled"));
+                self.abort(&mut tr, g, anim, now, Outcome::Cancelled);
                 Ok(())
             }
             Phase::Running => {
                 let mut tr = self.active.remove(i);
-                self.snap_back(&mut tr, g, anim, now, Outcome::Cancelled("cancelled"));
+                self.snap_back(&mut tr, g, anim, now, Outcome::Cancelled);
                 Ok(())
             }
             _ => Err(api_err(
@@ -662,7 +695,7 @@ impl Transitions {
                         self.ended.remove(id);
                     }
                 }
-                SourceEvent::Error { .. } => {}
+                SourceEvent::Error { .. } | SourceEvent::Rejected { .. } => {}
             }
         }
         self.ended.retain(|id, _| is_source(g, id));
@@ -707,6 +740,12 @@ impl Transitions {
                             .filter_map(|s| s.a.clone()),
                     );
                 }
+                held.extend(
+                    self.graves
+                        .iter()
+                        .filter(|gr| gr.corr == t.corr)
+                        .map(|gr| gr.id.clone()),
+                );
                 TransitionStatus {
                     corr: t.corr.clone(),
                     phase: t.phase,
@@ -748,8 +787,11 @@ impl Transitions {
 
     fn emit_outcome(&mut self, tr: &Tr, now: Duration, outcome: Outcome) {
         let kind = match outcome {
-            Outcome::Cancelled(r) => TransitionEventKind::Cancelled {
-                reason: r.to_string(),
+            Outcome::Superseded => TransitionEventKind::Cancelled {
+                reason: "superseded".into(),
+            },
+            Outcome::Cancelled => TransitionEventKind::Cancelled {
+                reason: "cancelled".into(),
             },
             Outcome::Failed(reason) => TransitionEventKind::Failed {
                 path: tr.b_path.clone(),
@@ -759,13 +801,18 @@ impl Transitions {
         self.emit(&tr.corr, now, kind);
     }
 
-    /// Destroy every grave whose ramp is over (unless something shows it again).
+    /// Destroy every grave whose ramp is over. One that a layer shows again is not
+    /// destroyed but restored — playing, audible, its own loop (R43).
     fn bury(&mut self, g: &mut Graph, anim: &mut Animator, now: Duration) {
         let graves = std::mem::take(&mut self.graves);
         for gr in graves {
             if gr.at > now {
                 self.graves.push(gr);
-            } else if is_source(g, &gr.id) && !shown_outside(g, &gr.id, &[]) {
+            } else if !is_source(g, &gr.id) {
+                // already gone
+            } else if shown_outside(g, &gr.id, &[]) {
+                self.restore_a(&gr.id, gr.orig, false, &gr.corr, g, anim, now);
+            } else {
                 destroy_node(g, anim, &gr.id);
             }
         }
@@ -829,7 +876,6 @@ impl Transitions {
                 return true;
             }
             tr.phase = Phase::WaitingStart;
-            tr.wrapped = false;
         }
 
         if tr.phase == Phase::WaitingStart {
@@ -837,44 +883,29 @@ impl Transitions {
             if self.graves_on(&tr.outputs) {
                 return true;
             }
-            if tr.snap_pending {
-                let ready = tr
-                    .sides
-                    .iter()
-                    .filter_map(|s| s.held.as_deref())
-                    .all(|h| get_bool(g, h, "ready"));
-                if !ready {
-                    return true;
-                }
-                tr.snap_pending = false;
-                self.begin_running(tr, g, anim, now, now);
-            } else {
-                let Some(t0) = self.start_instant(tr, g, now) else {
-                    return true;
-                };
-                // Only a picture that can still change needs a copy: not a still
-                // (image/colour), not an A that has ended (it holds its last frame).
-                let to_copy: Vec<usize> = if tr.effect_id.is_some() && tr.method != Method::FullLive
-                {
-                    (0..tr.sides.len())
-                        .filter(|&i| {
-                            tr.sides[i]
-                                .a
-                                .as_deref()
-                                .is_some_and(|a| !is_still(g, a) && !self.ended.contains_key(a))
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+            // A shared looping A on `End` (reveal/frozen/cut start at its boundary): the
+            // drop marks its last frame on screen; the boundary is one frame later.
+            if tr.dropped_now && tr.boundary.is_none() && self.lead_loops_shared(tr, g) {
+                tr.boundary = tr.drop_at.map(|d| d + frame_s(tr, g));
+            }
+            let instant = self.start_instant(tr, g, now);
+            // reveal/frozen hold each A whose picture can still change as a still copy of
+            // the frame on screen ("held where it is"): pausing a source doesn't freeze its
+            // texture (a paused mpv presents queued frames ~100 ms late, measured 2–3
+            // frames), and a shared A keeps playing elsewhere anyway (R34). Stills and
+            // ended A's can't change and are held as themselves. The copy is taken at the
+            // start instant — or, for a shared looping A on `End`, while its last frame
+            // shows (the effect then starts at the boundary). The host makes the copy on
+            // its next `sync`; the effect starts once every copy is ready.
+            if !tr.copies_made {
+                let to_copy = self.changing_sides(tr, g);
                 if !to_copy.is_empty() {
-                    // reveal/frozen hold A's picture as a still copy of the frame on
-                    // screen now ("held where it is"). Pausing a source doesn't freeze
-                    // its texture: a paused mpv presents its queued frames late
-                    // (measured: 2–3 frames, ~100 ms after the pause, time_pos already
-                    // frozen). A shared A keeps playing elsewhere anyway (R34). Stills
-                    // and ended A's can't change and are held as themselves. The
-                    // effect starts once the copies exist (next iteration).
+                    // A shared looping A on `End`: copy at the drop (its last frame is on
+                    // screen), start one frame later at the boundary.
+                    let at_loop_end = tr.dropped_now && self.lead_loops_shared(tr, g);
+                    if instant.is_none() && !at_loop_end {
+                        return true;
+                    }
                     for i in to_copy {
                         let side = &mut tr.sides[i];
                         if let Some(a) = side.a.clone() {
@@ -894,11 +925,22 @@ impl Transitions {
                             }
                         }
                     }
-                    tr.snap_pending = true;
+                    tr.copies_made = true;
                     return true;
                 }
-                self.begin_running(tr, g, anim, t0, now);
             }
+            let copies_ready = tr
+                .sides
+                .iter()
+                .filter_map(|s| s.held.as_deref())
+                .all(|h| get_bool(g, h, "ready"));
+            if !copies_ready {
+                return true;
+            }
+            let Some(t0) = instant else {
+                return true;
+            };
+            self.begin_running(tr, g, anim, t0, now);
         }
 
         if tr.phase == Phase::Running {
@@ -966,43 +1008,50 @@ impl Transitions {
             if ended {
                 return Some(now);
             }
-            if shared_loop
-                && (tr.wrapped
-                    || tr
-                        .end_est
-                        .is_some_and(|e| e - secs(now) <= LAST_FRAME_WINDOW_S))
-            {
+            // A shared looping A never ends: start at its iteration boundary — one frame
+            // after the drop at which its last frame was copied.
+            if shared_loop && tr.boundary.is_some_and(|b| secs(now) >= b) {
                 return Some(now);
             }
             return None;
         }
         // full-live ENDS at A's end: start at end − duration.
         let d = secs(tr.dur);
-        if first && shared_loop {
+        let now_s = secs(now);
+        let end = if shared_loop {
             let speed = get_f64(g, &a, "speed").unwrap_or(1.0).max(0.01);
-            let len = get_f64(g, &a, "duration").unwrap_or(0.0) / speed;
-            if tr.end_est.is_some_and(|e| e - d < secs(now)) && len >= d {
-                // Too late for this iteration of a looping shared A: align to the next.
-                tr.skip_iteration = true;
-                tr.wrapped = false;
+            let len = (get_f64(g, &a, "duration").unwrap_or(0.0) / speed).max(frame_s(tr, g));
+            if let Some(b) = tr.target_end {
+                b
+            } else if let Some(dr) = tr.drop_at {
+                // Boundaries are drop + frame + k·length: the first one still reachable.
+                let mut b = dr + frame_s(tr, g);
+                while b - d < now_s {
+                    b += len;
+                }
+                tr.target_end = Some(b);
+                b
+            } else {
+                // No drop seen yet: the time_pos estimate, uncentred — on a looping file
+                // time_pos runs ahead of the picture (measured: the minimum lands ~half a
+                // frame before the visible boundary).
+                let e = tr.end_est?;
+                if first && e - d < now_s && len >= d {
+                    tr.skip_iteration = true; // too late for this iteration: the next one
+                }
+                if tr.skip_iteration {
+                    return None;
+                }
+                e
             }
-        }
-        if tr.skip_iteration {
-            if !tr.wrapped {
-                return None;
+        } else {
+            if ended {
+                return Some(now); // already holding its last frame
             }
-            tr.skip_iteration = false;
-        }
-        if ended {
-            return Some(now); // already holding its last frame
-        }
-        // `time_pos` is the shown frame's pts, so every sample over-estimates the end by
-        // its offset inside that frame (0…one frame): the true end lies in
-        // [end_est − frame, end_est]. Aim at the middle — error ≤ half a frame.
-        let speed = get_f64(g, &a, "speed").unwrap_or(1.0).max(0.01);
-        let half_frame = tr.frame_dt.map_or(0.0, |f| f / speed / 2.0);
-        let t = tr.end_est? - half_frame - d;
-        if t > secs(now) {
+            centered_end(tr, g, &a)?
+        };
+        let t = end - d;
+        if t > now_s {
             return None;
         }
         if first {
@@ -1010,6 +1059,27 @@ impl Transitions {
         }
         // At most one tick late: start the effect on schedule so it ends exactly at A's end.
         Some(Duration::from_secs_f64(t.max(0.0)).max(self.prev_now))
+    }
+
+    /// The lead A is shared and looping (so it never ends; End aligns to its boundaries).
+    fn lead_loops_shared(&self, tr: &Tr, g: &Graph) -> bool {
+        tr.lead.is_some_and(|i| tr.sides[i].shared)
+            && tr.lead_a().is_some_and(|a| get_bool(g, a, "loop"))
+    }
+
+    /// Sides whose A needs a still copy to be held (reveal/frozen only): a picture that
+    /// can still change — not a still, not an A that has ended.
+    fn changing_sides(&self, tr: &Tr, g: &Graph) -> Vec<usize> {
+        if tr.effect_id.is_none() || tr.method == Method::FullLive {
+            return Vec::new();
+        }
+        (0..tr.sides.len())
+            .filter(|&i| {
+                tr.sides[i].a.as_deref().is_some_and(|a| {
+                    is_source(g, a) && !is_still(g, a) && !self.ended.contains_key(a)
+                })
+            })
+            .collect()
     }
 
     fn begin_running(
@@ -1020,8 +1090,28 @@ impl Transitions {
         t0: Duration,
         now: Duration,
     ) {
+        // Sharing can change while waiting (R43): a side now shown outside the request is
+        // left alone — and gets back whatever was already changed on it (End's loop) — and
+        // one no longer shown elsewhere is ours to hold.
+        let layers: Vec<String> = tr.sides.iter().flat_map(|s| s.layers.clone()).collect();
+        for side in &mut tr.sides {
+            let Some(a) = side.a.clone() else {
+                continue;
+            };
+            let shared = is_source(g, &a) && shown_outside(g, &a, &layers);
+            if shared && !side.shared {
+                let orig = std::mem::take(&mut side.orig);
+                self.restore_a(&a, orig, false, &tr.corr, g, anim, now);
+            }
+            side.shared = shared;
+        }
+
         tr.phase = Phase::Running;
         tr.t0 = t0;
+        // R42: gains never move faster than a 30 ms ramp, whatever the duration (the
+        // picture may still cut instantly).
+        let gd = tr.dur.max(ANTICLICK);
+        tr.gain_end = t0 + gd;
         let corr = tr.corr.clone();
         let b = tr.b.clone();
         self.emit(
@@ -1034,27 +1124,23 @@ impl Transitions {
             },
         );
         let Some(eid) = tr.effect_id.clone() else {
-            // Cut: 30 ms ramp down A, swap, 30 ms ramp up B. On `align: end` A has
-            // already ended: no ramp on A, swap at once.
-            let lead_ended = tr.lead_a().is_some_and(|a| self.ended.contains_key(a));
-            let has_a = tr
-                .sides
-                .iter()
-                .any(|s| !s.shared && s.a.as_deref().is_some_and(|a| is_source(g, a)));
-            let ramp_a = has_a && !(tr.align == Align::End && lead_ended);
+            // Cut: 30 ms ramp down A, swap, 30 ms ramp up B — decided per A: one that has
+            // ended (End) or is paused is silent already and just gets the slot set.
+            let mut ramped = false;
             for side in &mut tr.sides {
                 if let (false, Some(a)) = (side.shared, side.a.clone())
                     && is_source(g, &a)
                 {
-                    note_gain(side, g, &a, "anticlick");
-                    if ramp_a {
-                        ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
-                    } else {
+                    note_gain(&mut side.orig, g, anim, &a, "anticlick");
+                    if self.ended.contains_key(&a) || get_bool(g, &a, "paused") {
                         gset(g, &corr, &a, "gain.anticlick", PropValue::F64(SILENT_DB));
+                    } else {
+                        ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
+                        ramped = true;
                     }
                 }
             }
-            let swap = if ramp_a { t0 + ANTICLICK } else { t0 };
+            let swap = if ramped { t0 + ANTICLICK } else { t0 };
             tr.swap_at = Some(swap);
             tr.settle_until = swap + ANTICLICK;
             anim_gain(
@@ -1105,7 +1191,6 @@ impl Transitions {
             }
         }
 
-        let d = tr.dur;
         match tr.method {
             Method::FullLive => {
                 gset(g, &corr, &b, "paused", PropValue::Bool(false));
@@ -1117,14 +1202,14 @@ impl Transitions {
                     0.0,
                     1.0,
                     t0,
-                    d,
+                    gd,
                     Curve::EqualPowerIn,
                 );
                 for side in &mut tr.sides {
                     if let (false, Some(a)) = (side.shared, side.a.clone())
                         && is_source(g, &a)
                     {
-                        note_gain(side, g, &a, "xfade");
+                        note_gain(&mut side.orig, g, anim, &a, "xfade");
                         // k·cos(x·π/2): equal-power out from wherever A's xfade is now.
                         let k = db_to_lin(gain_db(g, &a, "xfade"));
                         anim_gain(
@@ -1135,7 +1220,7 @@ impl Transitions {
                             0.0,
                             k,
                             t0,
-                            d,
+                            gd,
                             Curve::EqualPowerOut,
                         );
                     }
@@ -1146,7 +1231,7 @@ impl Transitions {
                     if let (false, Some(a)) = (side.shared, side.a.clone())
                         && is_source(g, &a)
                     {
-                        note_gain(side, g, &a, "anticlick");
+                        note_gain(&mut side.orig, g, anim, &a, "anticlick");
                         ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
                     }
                 }
@@ -1161,7 +1246,7 @@ impl Transitions {
                         0.0,
                         1.0,
                         t0,
-                        d,
+                        gd,
                         Curve::EqualPowerIn,
                     );
                 }
@@ -1190,44 +1275,83 @@ impl Transitions {
     /// Release every A after the picture moved to B; returns their ids.
     fn release_all(
         &mut self,
-        tr: &Tr,
+        tr: &mut Tr,
         g: &mut Graph,
         anim: &mut Animator,
         now: Duration,
     ) -> Vec<String> {
         let mut from = Vec::new();
-        for side in &tr.sides {
-            if let Some(a) = &side.a {
-                from.push(a.clone());
-                self.release(tr, g, anim, a, now);
+        for i in 0..tr.sides.len() {
+            if let Some(a) = tr.sides[i].a.clone() {
+                from.push(a);
             }
+            self.release(
+                &tr.corr,
+                &tr.outputs,
+                tr.gain_end,
+                &mut tr.sides[i],
+                g,
+                anim,
+                now,
+            );
         }
         from
     }
 
-    /// A no longer shown by these layers: if nothing else shows it, destroy it once it's
-    /// silent — now if it's paused or already at −96 dB, else after a 30 ms ramp.
-    fn release(&mut self, tr: &Tr, g: &mut Graph, anim: &mut Animator, a: &str, now: Duration) {
-        if !is_source(g, a) || self.graves.iter().any(|gr| gr.id == a) {
+    /// A no longer shown by these layers. Shown by some other layer → restored to how it
+    /// was (playing, audible, its own loop — R43). Otherwise destroyed once silent: at once
+    /// if paused; next iteration if already at −96 dB (its final value reaches the source
+    /// first); when its xfade lands at −96 if that's within 30 ms; else after a 30 ms
+    /// anti-click ramp.
+    #[allow(clippy::too_many_arguments)]
+    fn release(
+        &mut self,
+        corr: &CorrId,
+        outputs: &[String],
+        gain_end: Duration,
+        side: &mut Side,
+        g: &mut Graph,
+        anim: &mut Animator,
+        now: Duration,
+    ) {
+        let Some(a) = side.a.clone() else {
+            return;
+        };
+        if !is_source(g, &a) || self.graves.iter().any(|gr| gr.id == a) {
             return;
         }
-        if shown_outside(g, a, &[]) {
-            return; // still on another output: its picture (and audio) stay
+        let mut orig = std::mem::take(&mut side.orig);
+        if shown_outside(g, &a, &[]) {
+            self.restore_a(&a, orig, false, corr, g, anim, now);
+            return;
         }
-        let silent = get_bool(g, a, "paused")
-            || g.effective_gain_db(a)
-                .is_some_and(|db| db <= SILENT_DB + 1e-9);
-        let at = if silent {
+        if get_bool(g, &a, "paused") {
+            destroy_node(g, anim, &a);
+            return;
+        }
+        let at = if g
+            .effective_gain_db(&a)
+            .is_some_and(|db| db <= SILENT_DB + 1e-9)
+        {
             now
+        } else if anim
+            .target_of(&path(&a, "gain.xfade"))
+            .is_some_and(|t| t <= SILENT_DB)
+            && gain_end > now
+            && gain_end - now <= ANTICLICK
+        {
+            gain_end // its own fade-out lands within 30 ms: no second ramp on top
         } else {
-            ramp_slot(g, anim, &tr.corr, a, "anticlick", SILENT_DB, now, ANTICLICK);
+            note_gain(&mut orig, g, anim, &a, "anticlick");
+            ramp_slot(g, anim, corr, &a, "anticlick", SILENT_DB, now, ANTICLICK);
             now + ANTICLICK
         };
         self.graves.push(Grave {
-            id: a.to_string(),
+            id: a,
             at,
-            corr: tr.corr.clone(),
-            outputs: tr.outputs.clone(),
+            corr: corr.clone(),
+            outputs: outputs.to_vec(),
+            orig,
         });
     }
 
@@ -1236,7 +1360,7 @@ impl Transitions {
     fn handoff(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         let (corr, b) = (tr.corr.clone(), tr.b.clone());
-        tr.settle_until = now;
+        tr.settle_until = now.max(tr.gain_end);
         if tr.method == Method::Frozen && is_source(g, &b) {
             gset(g, &corr, &b, "gain.anticlick", PropValue::F64(SILENT_DB));
             gset(g, &corr, &b, "gain.xfade", PropValue::F64(0.0));
@@ -1252,11 +1376,19 @@ impl Transitions {
                 ANTICLICK,
                 Curve::Linear,
             );
-            tr.settle_until = now + ANTICLICK;
+            tr.settle_until = tr.settle_until.max(now + ANTICLICK);
         }
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
-        self.emit(&corr, now, TransitionEventKind::Handoff { to: b, from });
+        self.emit(
+            &corr,
+            now,
+            TransitionEventKind::Handoff {
+                to: b,
+                from,
+                committed: false,
+            },
+        );
     }
 
     /// Cut: the picture swaps to B (A is silent by now), B unpauses into its ramp.
@@ -1266,7 +1398,15 @@ impl Transitions {
         gset(g, &corr, &b, "paused", PropValue::Bool(false));
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
-        self.emit(&corr, now, TransitionEventKind::Handoff { to: b, from });
+        self.emit(
+            &corr,
+            now,
+            TransitionEventKind::Handoff {
+                to: b,
+                from,
+                committed: false,
+            },
+        );
     }
 
     /// Interrupt of a Running transition (brief step 7): B becomes current at once (held B
@@ -1285,37 +1425,61 @@ impl Transitions {
         tr.settle_until = now + ANTICLICK;
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
-        self.emit(&corr, now, TransitionEventKind::Handoff { to: b, from });
+        self.emit(
+            &corr,
+            now,
+            TransitionEventKind::Handoff {
+                to: b,
+                from,
+                committed: true,
+            },
+        );
     }
 
-    /// Put back exactly what the recipe changed on this side's A.
-    fn restore(
+    /// Put back exactly what the recipe changed on `a`: loop, pause, and each gain slot
+    /// (ramped over 30 ms to its recorded target, R41). `seek_if_ended`: an A whose loop
+    /// we turned off and that has ended because of it is rewound so it loops on — only when
+    /// it stays current (cancel/failure); a superseded A is proceeded from as it is (R44).
+    #[allow(clippy::too_many_arguments)]
+    fn restore_a(
         &self,
-        side: &mut Side,
+        a: &str,
+        orig: Orig,
+        seek_if_ended: bool,
         corr: &CorrId,
         g: &mut Graph,
         anim: &mut Animator,
         now: Duration,
     ) {
-        let Some(a) = side.a.clone() else {
-            return;
-        };
-        if !is_source(g, &a) {
+        if !is_source(g, a) {
             return;
         }
-        let orig = std::mem::take(&mut side.orig);
         if let Some(l) = orig.looped {
-            gset(g, corr, &a, "loop", PropValue::Bool(l));
-            if l && self.ended.contains_key(&a) {
-                // It ended only because we turned its loop off: resume the loop.
-                gset(g, corr, &a, "position", PropValue::F64(0.0));
+            gset(g, corr, a, "loop", PropValue::Bool(l));
+            if l && seek_if_ended && self.ended.contains_key(a) {
+                gset(g, corr, a, "position", PropValue::F64(0.0));
             }
         }
         if let Some(p) = orig.paused {
-            gset(g, corr, &a, "paused", PropValue::Bool(p));
+            gset(g, corr, a, "paused", PropValue::Bool(p));
         }
         for (slot, db) in orig.gains {
-            ramp_slot(g, anim, corr, &a, slot, db, now, ANTICLICK);
+            ramp_slot(g, anim, corr, a, slot, db, now, ANTICLICK);
+        }
+    }
+
+    fn restore(
+        &self,
+        side: &mut Side,
+        seek_if_ended: bool,
+        corr: &CorrId,
+        g: &mut Graph,
+        anim: &mut Animator,
+        now: Duration,
+    ) {
+        let orig = std::mem::take(&mut side.orig);
+        if let Some(a) = side.a.clone() {
+            self.restore_a(&a, orig, seek_if_ended, corr, g, anim, now);
         }
     }
 
@@ -1337,8 +1501,9 @@ impl Transitions {
         if is_source(g, &tr.b) {
             destroy_node(g, anim, &tr.b);
         }
+        let seek = !matches!(outcome, Outcome::Superseded);
         for side in &mut tr.sides {
-            self.restore(side, &tr.corr, g, anim, now);
+            self.restore(side, seek, &tr.corr, g, anim, now);
         }
         self.emit_outcome(tr, now, outcome);
     }
@@ -1370,13 +1535,15 @@ impl Transitions {
         }
         tr.pause_at = None;
         for side in &mut tr.sides {
-            self.restore(side, &corr, g, anim, now);
+            self.restore(side, true, &corr, g, anim, now);
         }
         let b = tr.b.clone();
         if is_source(g, &b) {
             if get_bool(g, &b, "paused") {
                 destroy_node(g, anim, &b);
             } else {
+                let mut orig = Orig::default();
+                note_gain(&mut orig, g, anim, &b, "anticlick");
                 anim.cancel_target(&path(&b, "gain.xfade"));
                 ramp_slot(g, anim, &corr, &b, "anticlick", SILENT_DB, now, ANTICLICK);
                 self.graves.push(Grave {
@@ -1384,11 +1551,31 @@ impl Transitions {
                     at: now + ANTICLICK,
                     corr: corr.clone(),
                     outputs: tr.outputs.clone(),
+                    orig,
                 });
             }
         }
         self.emit_outcome(tr, now, outcome);
     }
+}
+
+/// A's iteration end (player-clock s), centred: `time_pos` is the shown frame's pts, so
+/// every `end_est` sample over-estimates by its offset inside that frame (0…one frame) —
+/// the true end lies in [end_est − frame, end_est]; aim at the middle (error ≤ ½ frame).
+fn centered_end(tr: &Tr, g: &Graph, a: &str) -> Option<f64> {
+    let speed = get_f64(g, a, "speed").unwrap_or(1.0).max(0.01);
+    let half_frame = tr.frame_dt.map_or(0.0, |f| f / speed / 2.0);
+    Some(tr.end_est? - half_frame)
+}
+
+/// The lead A's frame interval in player-clock seconds (observed, else 30 fps).
+fn frame_s(tr: &Tr, g: &Graph) -> f64 {
+    let speed = tr
+        .lead_a()
+        .and_then(|a| get_f64(g, a, "speed"))
+        .unwrap_or(1.0)
+        .max(0.01);
+    tr.frame_dt.unwrap_or(DEFAULT_FRAME_S) / speed
 }
 
 /// `align: end` bookkeeping for the lead A (see `Tr::end_est`).
@@ -1410,9 +1597,12 @@ fn track_lead(tr: &mut Tr, g: &Graph, now: Duration) {
     {
         tr.frame_dt = Some(tr.frame_dt.map_or(tp - l, |f| f.min(tp - l)));
     }
+    tr.dropped_now = false;
     if tr.last_tp.is_some_and(|l| tp + 1e-3 < l) {
-        tr.wrapped = true; // looped (or seeked back): a new iteration
+        // Looped (or seeked back): a new iteration.
         tr.end_est = None;
+        tr.drop_at = Some(secs(now));
+        tr.dropped_now = true;
     }
     if paused || tr.last_speed.is_some_and(|s| (s - speed).abs() > 1e-9) {
         tr.end_est = None;
@@ -1424,4 +1614,241 @@ fn track_lead(tr: &mut Tr, g: &Graph, now: Duration) {
     }
     let est = secs(now) + (dur - tp).max(0.0) / speed;
     tr.end_est = Some(tr.end_est.map_or(est, |e| e.min(est)));
+}
+
+/// Graph-only state-machine tests: synthetic sources (observed props set by hand, events
+/// fed directly) — deterministic, no GPU, no mpv. The GPU/libmpv behaviour is covered by
+/// `tests/transition.rs`.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct H {
+        g: Graph,
+        anim: Animator,
+        tr: Transitions,
+        now: Duration,
+        changes: Vec<(PropPath, PropValue)>,
+        events: Vec<TransitionEvent>,
+    }
+
+    impl H {
+        fn new(outputs: &[&str]) -> H {
+            let mut g = Graph::new();
+            for o in outputs {
+                let mut p = Map::new();
+                p.insert("width".into(), json!(640));
+                p.insert("height".into(), json!(360));
+                g.create(NodeKind::Output, Some(format!("out:{o}")), p)
+                    .unwrap();
+            }
+            H {
+                g,
+                anim: Animator::new(),
+                tr: Transitions::new(),
+                now: Duration::ZERO,
+                changes: Vec::new(),
+                events: Vec::new(),
+            }
+        }
+
+        /// A playing, ready video source shown on `outputs`.
+        fn video(&mut self, outputs: &[&str], dur: f64, tp: f64) -> String {
+            let mut p = Map::new();
+            p.insert("path".into(), json!("/a.mkv"));
+            p.insert("loop".into(), json!(true));
+            let id = self.g.create(NodeKind::Source, None, p).unwrap();
+            self.observe(&id, "ready", PropValue::Bool(true));
+            self.observe(&id, "duration", PropValue::F64(dur));
+            self.observe(&id, "time_pos", PropValue::F64(tp));
+            for o in outputs {
+                self.g
+                    .set(
+                        &path(&format!("lay:{o}:main"), "content"),
+                        PropValue::Str(id.clone()),
+                    )
+                    .unwrap();
+            }
+            id
+        }
+
+        fn observe(&mut self, id: &str, prop: &str, v: PropValue) {
+            self.g.set_observed(&path(id, prop), v).unwrap();
+        }
+
+        fn start(&mut self, req: Value) -> CorrId {
+            let req: TransitionReq = serde_json::from_value(req).unwrap();
+            let c = self
+                .tr
+                .start(req, &mut self.g, &mut self.anim, self.now)
+                .unwrap();
+            self.changes.extend(self.g.drain_changes());
+            self.events.extend(self.tr.drain_events());
+            c
+        }
+
+        fn tick(&mut self, ms: u64, events: &[(String, SourceEvent)]) {
+            self.now += Duration::from_millis(ms);
+            for (p, v) in self.anim.tick(self.now) {
+                self.g.set(&p, PropValue::F64(v)).unwrap();
+            }
+            self.changes.extend(self.g.drain_changes());
+            self.tr.tick(&mut self.g, &mut self.anim, events, self.now);
+            self.changes.extend(self.g.drain_changes());
+            self.events.extend(self.tr.drain_events());
+        }
+
+        fn b_of(&self, corr: &CorrId) -> String {
+            self.events
+                .iter()
+                .find_map(|e| match &e.kind {
+                    TransitionEventKind::Scheduled { to, .. } if &e.corr == corr => {
+                        Some(to.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        }
+
+        fn has(&self, corr: &CorrId, name: &str) -> bool {
+            self.events
+                .iter()
+                .any(|e| &e.corr == corr && e.kind.name() == name)
+        }
+
+        fn bool(&self, id: &str, prop: &str) -> bool {
+            get_bool(&self.g, id, prop)
+        }
+
+        fn set_to(&self, id: &str, prop: &str) -> bool {
+            let p = path(id, prop);
+            self.changes.iter().any(|(q, _)| *q == p)
+        }
+    }
+
+    fn req(to: &str, method: &str, align: &str, effect: Option<&str>) -> Value {
+        json!({
+            "outputs": "out:*", "to": {"path": to}, "effect_id": effect,
+            "duration_ms": 500, "method": method, "align": align
+        })
+    }
+
+    /// R44: superseding an End-wait whose A already ended restores A's loop without a
+    /// rewind (the new request proceeds from A's held last frame); cancelling one (A stays
+    /// current) rewinds it so it loops on.
+    #[test]
+    fn supersede_does_not_rewind_cancel_does() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 3.0, 2.0);
+        let t1 = h.start(req("/b1.mkv", "reveal", "end", Some("fade")));
+        h.tick(16, &[]);
+        assert!(!h.bool(&a, "loop"), "End turns A's loop off");
+        // A ends while T1's B is still loading (no Ready ever comes).
+        h.tick(16, &[(a.clone(), SourceEvent::Ended)]);
+        h.changes.clear();
+        h.start(req("/b2.mkv", "full-live", "now", Some("fade")));
+        assert!(h.has(&t1, "transition.cancelled"));
+        assert!(h.bool(&a, "loop"), "supersede restores the loop");
+        assert!(
+            !h.set_to(&a, "position"),
+            "supersede must not rewind A: {:?}",
+            h.changes
+        );
+
+        let t3 = h.start(req("/b3.mkv", "frozen", "end", Some("fade")));
+        assert!(!h.bool(&a, "loop"));
+        h.changes.clear();
+        h.tr.cancel(&t3, &mut h.g, &mut h.anim, h.now).unwrap();
+        h.changes.extend(h.g.drain_changes());
+        assert!(h.bool(&a, "loop"), "cancel restores the loop");
+        assert!(
+            h.set_to(&a, "position"),
+            "cancel rewinds an A that ended only because its loop was off"
+        );
+    }
+
+    /// Item 10: a video whose duration isn't known yet is not a still — reveal/frozen hold
+    /// it with a snapshot (a still would be held as itself).
+    #[test]
+    fn video_with_unknown_duration_is_snapshot_held() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 0.0, 0.0);
+        let t = h.start(req("/b.mkv", "reveal", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snaps: Vec<String> =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .filter(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .collect();
+        assert_eq!(snaps.len(), 1, "a video A is held by a snapshot");
+        assert_eq!(get_str(&h.g, &snaps[0], "of"), a);
+        assert!(
+            !h.has(&t, "transition.started"),
+            "starts once the copy is ready"
+        );
+    }
+
+    /// Item 5: cut + End — the lead A has ended (no ramp), but another output's A is still
+    /// playing and must be ramped, not hard-muted.
+    #[test]
+    fn cut_end_ramps_each_playing_a() {
+        let mut h = H::new(&["V1", "V2"]);
+        let a1 = h.video(&["V1"], 3.0, 2.9);
+        let a2 = h.video(&["V2"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "full-live", "end", None));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        assert!(!h.has(&t, "transition.started"), "waits for A1's end");
+        h.tick(16, &[(a1.clone(), SourceEvent::Ended)]);
+        assert!(h.has(&t, "transition.started"));
+        assert_eq!(
+            gain_db(&h.g, &a1, "anticlick"),
+            SILENT_DB,
+            "ended A1: set at once"
+        );
+        assert!(
+            gain_db(&h.g, &a2, "anticlick") > SILENT_DB,
+            "playing A2 is ramped, not hard-muted"
+        );
+        assert_eq!(
+            h.anim.target_of(&path(&a2, "gain.anticlick")),
+            Some(SILENT_DB),
+            "A2 ramps to −96"
+        );
+        h.tick(10, &[]);
+        let mid = gain_db(&h.g, &a2, "anticlick");
+        assert!(mid > SILENT_DB && mid < 0.0, "A2 mid-ramp at +10 ms: {mid}");
+    }
+
+    /// Item 7: after a natural reveal handoff the held (paused) A is destroyed in the same
+    /// iteration — never a paused source outside any held method.
+    #[test]
+    fn held_a_destroyed_at_handoff() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "reveal", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        assert!(h.has(&t, "transition.started"));
+        h.tick(100, &[]);
+        assert!(h.bool(&a, "paused"), "A held");
+        h.tick(500, &[]);
+        assert!(h.has(&t, "transition.handoff"));
+        assert!(
+            h.g.kind_of(&a).is_none(),
+            "held A destroyed in the handoff iteration"
+        );
+        assert!(h.g.kind_of(&snap).is_none());
+    }
 }

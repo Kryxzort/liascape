@@ -57,8 +57,11 @@ fade.
 **Enforced by:** `units::GainSlot::AntiClick` (Task 4) and `recipes::transition`'s
 `ANTICLICK` (30 ms) ramps (Task 11): reveal/frozen ramp A's `gain.anticlick` to −96 dB
 before pausing it; frozen unpauses B into a 30 ms ramp-in; cuts, commits, cancels and
-restores all ramp over 30 ms. Tests: `reveal_holds_a_silent`, `frozen_silent_then_b_starts`
-(B at 0 dB exactly 30 ms after the end), `cut_without_effect`, `cancel_running_snaps_back`.
+restores all ramp over 30 ms, and no gain animation is shorter than 30 ms whatever the
+effect's duration (R42). Tests: `reveal_holds_a_silent`, `frozen_silent_then_b_starts`
+(B at 0 dB exactly 30 ms after the end), `cut_without_effect`, `cancel_running_snaps_back`,
+`zero_duration_gains_still_ramp_30ms` (duration 0: no gain moves faster than a 30 ms ramp),
+`cancel_held_methods_restore_a`, unit `cut_end_ramps_each_playing_a`.
 Caveat: the ramp is stepped once per loop iteration (≈ 4 steps at 144 Hz, 1–2 in the 60 Hz
 test harness) — a per-sample ramp would need the audio edge (Task 14).
 
@@ -78,9 +81,13 @@ A source still shown on an output outside the transition keeps its audio — its
 is still live there (R34): it is never paused, ramped, loop-changed or destroyed, and the
 held picture on the transitioning output is a `snapshot` copy instead.
 
-**Enforced by:** `recipes::transition::Transitions::begin_running`/`handoff`. Tests:
-`full_live_gains` (−3.0103 dB each at the midpoint), `reveal_holds_a_silent`,
-`frozen_silent_then_b_starts`, `shared_a_untouched`.
+A source a layer still shows is never left paused or silent by a transition: release and
+the graveyard restore it (R43).
+
+**Enforced by:** `recipes::transition::Transitions::begin_running`/`handoff`/`release`.
+Tests: `full_live_gains` (−3.0103 dB each at the midpoint), `reveal_holds_a_silent`,
+`frozen_silent_then_b_starts`, `shared_a_untouched`, `shared_a_align_end_boundary`,
+`align_end_full_live` (A still on VIRTUAL-2 comes back audible with its loop).
 
 ## 6. A new transition commits the in-flight one: never park, never stack
 
@@ -99,6 +106,8 @@ file can never leave the screen black or the audio silent.
 `abort`/`snap_back`), and the graveyard (a new transition waits until the committed A's
 ramp-out is over, so at most two streams play per output). Tests: `rapid_interrupt_chain`
 (10 starts 100 ms apart: ≤ 2 unpaused sources after every tick, no unexplained paused
-source, the 10th target ends current and alone), `bad_target_keeps_a`,
-`cancel_waiting_restores_a`, `cancel_running_snaps_back`.
+source, the 10th target ends current and alone; ≥ 1 commit and ≥ 1 supersede happen),
+`commit_running_each_method`, `b_error_mid_effect_snaps_back`, `bad_target_keeps_a`,
+`cancel_waiting_restores_a`, `cancel_running_snaps_back`, `restore_targets_not_mid_ramp`
+(R41), unit `supersede_does_not_rewind_cancel_does` (R44), `held_a_destroyed_at_handoff`.
 
