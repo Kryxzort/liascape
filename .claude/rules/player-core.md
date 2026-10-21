@@ -442,14 +442,27 @@ complementary viewports (`DP-1`: `[0,0,0.5,1]`, `DP-2`: `[0.5,0,0.5,1]`).
 
 **Coordinate conventions — GL bottom-left origin, matching `tests/common::read_rgba`.**
 Both halves of `UvRect` (`uv` into the source, `dst` into the output, pixels) use `(0,0)`
-as the bottom-left corner, never flipped anywhere in this module. Every texture this
-module draws (a live source texture, or an intermediate this module rendered into via an
-FBO) is sampled with the same convention it was written in, so `uv.y = 0` at the bottom
-needs no flip — unlike `transitions/wrap.frag.template`'s `getFromColor`/`getToColor`,
-which flip `v` for the gl-transitions top-down-image assumption. `compose.rs`'s own blit
-shader (`BLIT_VERT_SRC`/`BLIT_FRAG_SRC`) is a separate, from-scratch fullscreen-triangle
-shader for exactly this reason — not a reuse of `wrap.vert` — since `transitions/` is
-never edited by this crate and its flip is the wrong contract here.
+as the bottom-left corner. **Placement** (`fit_rect`/`axis`'s math, and `dst`'s effect on
+`gl.viewport`) is never flipped — bars/crop/centring land at the same screen position
+regardless of which texture is sampled. **Sampling is a separate concern, and it *is*
+flipped for raw textures.** A raw, caller-supplied source texture is assumed uploaded in
+standard top-down/PNG row order (buffer row 0 = image top), which GL's own texel
+addressing places at `t = 0` — the bottom-left-origin "bottom." Sampled uncorrected, a
+plain `Source` layer would render upside down, and would disagree with the same texture
+shown through an `Effect` (`effects::EffectProgram::draw`, via
+`transitions/wrap.frag.template`'s untouched `getFromColor`/`getToColor`, already flips
+when sampling its raw `from`/`to` inputs — this crate never edits `transitions/`).
+`compose.rs`'s own blit shader (`BLIT_VERT_SRC`/`BLIT_FRAG_SRC`, a separate from-scratch
+fullscreen-triangle shader, not a reuse of `wrap.vert`) carries a `flip_v` uniform that
+applies the same correction: `true` for every raw-source draw (a plain `Source` layer, and
+`render_side`'s `from`/`to` passes into their intermediates), `false` for the one texture
+this module both writes and re-reads itself — the effect's "result" intermediate, blitted
+into the target at the end of `draw_effect` — which is already in finished/screen
+orientation by the time it's sampled again, so a second flip there would un-correct it.
+Covered by `tests/compose.rs::y_axis_orientation_matches_image_top` (a top-red/bottom-blue
+source, both direct and through a `viewport` restricted to one half, plus a `write_png`
+round-trip through a decoded PNG) — the one test in the suite that's actually Y-asymmetric;
+everything else varies only in X (or is uniform), so none of it could have caught this.
 
 **Premultiplied-alpha opacity.** Every draw (`draw_rect`) goes through the blit shader,
 which outputs premultiplied colour (`rgb * opacity`, `a * opacity`) and blends with
@@ -471,9 +484,10 @@ currently dominates); binds a third ("result") intermediate and calls
 with blending explicitly disabled (a straight overwrite into a just-cleared, fully
 transparent target); then blits that result into the real `target` at identity `uv`
 (`[0,0,1,1]`, since the result intermediate already *is* the final-output composition
-pixel-for-pixel) and the layer's `opacity` — the one extra intermediate the task's
-"Decisions" explicitly allow for keeping opacity simple, rather than folding opacity into
-the effect draw itself.
+pixel-for-pixel) and the layer's `opacity`. A third intermediate is needed specifically
+because `EffectProgram::draw` has no opacity input of its own — it always draws fully
+opaque (or whatever alpha the effect shader itself produces) — so opacity has to be
+applied in this separate pass afterwards instead of folded into the effect draw.
 
 **A missing effect input is a transparent intermediate, not a literal 1×1 texture.**
 R19/R20 describe a missing effect-side input as "a transparent 1×1 texture" — implemented

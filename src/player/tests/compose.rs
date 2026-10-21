@@ -67,6 +67,62 @@ fn make_source(g: &mut Graph, id: &str) {
         .expect("create source");
 }
 
+/// Uploads a `w`×`h` texture directly (not via an FBO clear, since a uniform colour can't
+/// distinguish a Y flip): the **first** `h/2` rows of the pixel buffer handed to
+/// `glTexImage2D` are `top`, the rest `bottom` — i.e. "top" in the same sense a PNG
+/// decoder or any standard image loader uses it (row 0 of the raw data = the image's top
+/// row). Used by `y_axis_orientation_matches_image_top` to pin down whether
+/// `gfx::compose`'s sampling convention actually matches that, since nothing else in this
+/// file varies along Y.
+fn make_top_bottom_tex(gfx: &Gfx, w: u32, h: u32, top: [u8; 4], bottom: [u8; 4]) -> Tex {
+    let mut buf = vec![0u8; (w as usize) * (h as usize) * 4];
+    let half = (h / 2) as usize;
+    for row in 0..h as usize {
+        let colour = if row < half { top } else { bottom };
+        for col in 0..w as usize {
+            let i = (row * w as usize + col) * 4;
+            buf[i..i + 4].copy_from_slice(&colour);
+        }
+    }
+    unsafe {
+        let id = gfx.gl.create_texture().expect("create_texture");
+        gfx.gl.bind_texture(glow::TEXTURE_2D, Some(id));
+        gfx.gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&buf)),
+        );
+        gfx.gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR as i32,
+        );
+        gfx.gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+        gfx.gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gfx.gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gfx.gl.bind_texture(glow::TEXTURE_2D, None);
+        Tex { id, w, h }
+    }
+}
+
 /// Brief: source 1920×800 into a 1920×1080 output under `fit` → bars of 140px top and
 /// bottom; pixel (960,70) is in a bar (black), pixel (960,540) is in the content region
 /// (shows the source).
@@ -389,4 +445,153 @@ fn effect_fade_midpoint_through_graph() {
         "blue channel at progress=0.5 should be ~127, got {}",
         px[2]
     );
+}
+
+/// Review finding (Important): nothing above varies along Y (`fit_letterbox`'s bars are
+/// symmetric top/bottom, `fill_crops`/`opacity_half`/`effect_fade_midpoint_through_graph`
+/// are uniform in colour, `span_halves` only splits along X) — a silently Y-flipped
+/// sampling convention would have passed every one of them. This pins the whole chain
+/// (raw pixel upload → `Composer::compose_output` → `read_rgba` → `Gfx::write_png` →
+/// decoded PNG) against a source that's genuinely asymmetric in Y: the **first** half of
+/// the uploaded pixel rows (standard PNG/raster "top") is red, the second half (the
+/// image's "bottom") is blue — see `make_top_bottom_tex`.
+#[test]
+fn y_axis_orientation_matches_image_top() {
+    let Some((gfx, mut cat)) = setup() else {
+        return;
+    };
+    let mut composer = Composer::new(&gfx).expect("Composer::new");
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+
+    // --- Part 1: `stretch`, full (default) viewport. The image's top (red, the first
+    // uploaded rows) must land at the OUTPUT's visual top; its bottom (blue) at the
+    // output's visual bottom. In `read_rgba`'s bottom-left-origin coordinates that means
+    // a HIGH y reads red, a LOW y reads blue.
+    let out = {
+        let mut g = Graph::new();
+        make_output(&mut g, "out:DP-1", 64, 64);
+        make_source(&mut g, "src1");
+        g.set(
+            &p("lay:DP-1:main.fit"),
+            PropValue::Str("stretch".to_string()),
+        )
+        .unwrap();
+        g.set(
+            &p("lay:DP-1:main.content"),
+            PropValue::Str("src1".to_string()),
+        )
+        .unwrap();
+
+        let src_tex = make_top_bottom_tex(&gfx, 64, 64, RED, BLUE);
+        let target_tex = gfx.tex(64, 64);
+        let target_fbo = gfx.fbo(&target_tex);
+        let mut registry: HashMap<String, Tex> = HashMap::new();
+        registry.insert("src1".to_string(), src_tex);
+        let textures = |id: &str| registry.get(id);
+
+        composer
+            .compose_output(&gfx, &g, &mut cat, "out:DP-1", &textures, &target_fbo)
+            .expect("compose_output");
+
+        let top = read_rgba(&gfx, &target_tex, 32, 59);
+        assert_eq!(
+            top, RED,
+            "image top (the first uploaded pixel rows) must land at the output's visual \
+             top (high read_rgba y), got {top:?}"
+        );
+        let bottom = read_rgba(&gfx, &target_tex, 32, 4);
+        assert_eq!(
+            bottom, BLUE,
+            "image bottom must land at the output's visual bottom (low read_rgba y), got \
+             {bottom:?}"
+        );
+        target_tex
+    };
+
+    // --- write_png round trip on the same composed output: a decoded PNG is top-down by
+    // definition (`Gfx::write_png`'s documented contract), so its near-top rows must be
+    // red and its near-bottom rows blue — closing the loop end to end (upload convention
+    // → compose → read_rgba's GL convention → write_png's deliberate re-flip → the PNG a
+    // human would actually look at).
+    {
+        let path = std::env::temp_dir().join(format!(
+            "lp_player_compose_y_axis_{}.png",
+            std::process::id()
+        ));
+        gfx.write_png(&out, &path).expect("write_png failed");
+
+        let decoder = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(&path).expect("png file must exist and be openable"),
+        ));
+        let mut reader = decoder.read_info().expect("png must be decodable");
+        let mut buf = vec![
+            0u8;
+            reader
+                .output_buffer_size()
+                .expect("png must report a buffer size")
+        ];
+        let info = reader.next_frame(&mut buf).expect("png must decode");
+        let stride = info.width as usize * 4;
+
+        let top_row = &buf[2 * stride..2 * stride + 4];
+        assert_eq!(
+            top_row, RED,
+            "decoded PNG row 2 (near its top) must be red, got {top_row:?}"
+        );
+        let bottom_row_start = (info.height as usize - 3) * stride;
+        let bottom_row = &buf[bottom_row_start..bottom_row_start + 4];
+        assert_eq!(
+            bottom_row, BLUE,
+            "decoded PNG row near its bottom must be blue, got {bottom_row:?}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // --- Part 2: a `viewport` restricted to `[0, 0, 1, 0.5]` — per this module's
+    // documented convention, the source's *first* half (native-texel terms) — must
+    // select the image's actual top (red) half, not its bottom. If it did, the whole
+    // output would read uniformly red; sampled anywhere.
+    {
+        let mut g = Graph::new();
+        make_output(&mut g, "out:DP-2", 32, 32);
+        make_source(&mut g, "src2");
+        g.set(
+            &p("lay:DP-2:main.fit"),
+            PropValue::Str("stretch".to_string()),
+        )
+        .unwrap();
+        g.set(
+            &p("lay:DP-2:main.viewport"),
+            PropValue::List(vec![0.0, 0.0, 1.0, 0.5]),
+        )
+        .unwrap();
+        g.set(
+            &p("lay:DP-2:main.content"),
+            PropValue::Str("src2".to_string()),
+        )
+        .unwrap();
+
+        let src_tex = make_top_bottom_tex(&gfx, 64, 64, RED, BLUE);
+        let target_tex = gfx.tex(32, 32);
+        let target_fbo = gfx.fbo(&target_tex);
+        let mut registry: HashMap<String, Tex> = HashMap::new();
+        registry.insert("src2".to_string(), src_tex);
+        let textures = |id: &str| registry.get(id);
+
+        composer
+            .compose_output(&gfx, &g, &mut cat, "out:DP-2", &textures, &target_fbo)
+            .expect("compose_output");
+
+        for (x, y) in [(16, 4), (16, 27), (2, 16), (29, 16)] {
+            let px = read_rgba(&gfx, &target_tex, x, y);
+            assert_eq!(
+                px, RED,
+                "viewport [0,0,1,0.5] must select the image's actual top (red) half \
+                 everywhere, got {px:?} at ({x},{y})"
+            );
+        }
+    }
 }

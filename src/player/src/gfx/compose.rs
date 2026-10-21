@@ -26,20 +26,31 @@
 //! Both halves of [`UvRect`] — `uv` (a sub-rectangle of the *source* texture) and `dst` (a
 //! sub-rectangle of the *output*, in pixels) — use **GL's native bottom-left origin**:
 //! `(0, 0)` is the bottom-left corner, matching `tests/common::read_rgba` (`glReadPixels`'s
-//! own convention) and `gl_FragCoord`. This is *not* flipped anywhere in this module. Every
-//! pixel assertion in `tests/compose.rs` is read through `read_rgba`, so it inherits this
-//! origin directly — a test comment calls it out explicitly at the point it matters
-//! (`fit_letterbox`'s bar/content split is actually symmetric top/bottom for the chosen
-//! numbers, so that one test alone doesn't prove the origin choice; `span_halves`'s
-//! left/right split is the one that would catch a swapped x axis).
+//! own convention) and `gl_FragCoord`. **This placement math (`fit_rect`/`axis`, and
+//! `dst`'s effect on `gl.viewport`) is never flipped** — `dst`'s bars/crop/centring land
+//! at the same screen position regardless of which texture is being sampled. Every pixel
+//! assertion in `tests/compose.rs` is read through `read_rgba`, so it inherits this origin
+//! directly. `fit_letterbox`'s and `fill_crops`' fixtures vary only in X (uniform in Y) and
+//! `span_halves`' only tests an X split, so none of them can tell a correct Y placement
+//! from a swapped one — `y_axis_orientation_matches_image_top` (below) is the one that
+//! does, with a Y-asymmetric (top-red/bottom-blue) source.
 //!
-//! The textures this module draws (an output-sized intermediate rendered by this module
-//! itself, or a live source texture handed in by the caller) are always *written* through
-//! an FBO using this same bottom-left convention (an FBO's viewport-space y=0 is its
-//! bottom row), so sampling them with `uv.y = 0` at the bottom is simply "no flip, texture
-//! storage and sampling agree" — unlike `transitions/wrap.frag.template`'s `getFromColor`/
-//! `getToColor`, which flip `v` because the *gl-transitions* convention assumes top-down
-//! image data. This module's own blit shader (below) does no such flip.
+//! **Sampling, separately from placement, *is* flipped — but only for raw, caller-
+//! supplied source textures, never for a texture this module wrote itself.** A raw source
+//! texture is assumed uploaded in the standard top-down/PNG row order (buffer row 0 = the
+//! image's top row); GL's own texel addressing places that row at `t = 0`, i.e. the
+//! texture's bottom-left-origin "bottom." Sampled with no correction, a plain `Source`
+//! layer would therefore render upside down — and would disagree with `content` pointing
+//! at an `Effect` instead, because `effects::EffectProgram::draw` (via
+//! `transitions/wrap.frag.template`'s `getFromColor`/`getToColor`, untouched — this crate
+//! never edits `transitions/`) *already* flips when sampling its own raw `from`/`to`
+//! inputs. [`BLIT_FRAG_SRC`]'s `flip_v` uniform applies that same correction uniformly:
+//! `true` for every raw-source draw ([`render_side`]'s `from`/`to` passes, and a plain
+//! `Source` layer drawn straight into the target), `false` for the one texture this
+//! module writes and re-reads itself — the effect's "result" intermediate — which is
+//! already in finished/screen orientation by the time it's blitted into the target (a
+//! second flip there would *un*-correct it). See [`BLIT_FRAG_SRC`]'s own doc comment for
+//! the exact formula.
 //!
 //! ## Premultiplied-alpha opacity
 //!
@@ -196,19 +207,38 @@ void main() {
 }
 ";
 
-/// The blit/transform fragment shader: samples `tex` at `uv_rect.xy + vUv * uv_rect.zw`
+/// The blit/transform fragment shader: samples `tex` within the `uv_rect` sub-window
 /// (i.e. `vUv` walks the *currently bound viewport's* extent, which the caller has
 /// already restricted to the destination sub-rectangle — see [`draw_rect`]) and outputs
 /// premultiplied colour scaled by `opacity` (module doc comment's "Premultiplied-alpha
 /// opacity" section).
+///
+/// `flip_v` selects which of two textures this draw is sampling — see the module doc
+/// comment's "Coordinate conventions" section for the full reasoning:
+/// - `false` (pass-through, `ty = vUv.y`): the texture was *written* by this module
+///   through an FBO (an effect's "result" intermediate — see [`Composer::draw_effect`]),
+///   so it's already in finished/screen orientation; no correction needed.
+/// - `true` (`ty = 1.0 - vUv.y`, applied *within* the already-selected `uv_rect` window,
+///   not globally): the texture is a raw, caller-supplied source (a plain `Source` layer,
+///   or either side of an effect before it's rendered into its intermediate) that this
+///   module never wrote itself — assumed uploaded in the standard top-down/PNG row order
+///   (row 0 of the pixel buffer = the image's top row), which GL's own texel addressing
+///   places at `t = 0`, i.e. the texture's *bottom* in the same bottom-left sense
+///   `tests/common::read_rgba` uses. Without this correction a plain `Source` layer would
+///   render upside down relative to the *same* texture shown through an `Effect` layer,
+///   because `effects::EffectProgram::draw` (via `transitions/wrap.frag.template`'s
+///   `getFromColor`/`getToColor`, untouched — this crate never edits `transitions/`)
+///   already applies exactly this correction when it samples its own `from`/`to` inputs.
 const BLIT_FRAG_SRC: &str = "#version 330 core
 uniform sampler2D tex;
 uniform vec4 uv_rect;
 uniform float opacity;
+uniform bool flip_v;
 in vec2 vUv;
 out vec4 fragColor;
 void main() {
-    vec2 uv = uv_rect.xy + vUv * uv_rect.zw;
+    float ty = flip_v ? (1.0 - vUv.y) : vUv.y;
+    vec2 uv = vec2(uv_rect.x + vUv.x * uv_rect.z, uv_rect.y + ty * uv_rect.w);
     vec4 c = texture(tex, uv);
     fragColor = vec4(c.rgb * opacity, c.a * opacity);
 }
@@ -222,6 +252,7 @@ struct BlitProgram {
     tex_loc: Option<glow::UniformLocation>,
     uv_rect_loc: Option<glow::UniformLocation>,
     opacity_loc: Option<glow::UniformLocation>,
+    flip_v_loc: Option<glow::UniformLocation>,
 }
 
 impl BlitProgram {
@@ -230,11 +261,12 @@ impl BlitProgram {
         // SAFETY: `program` just linked successfully; `gfx`'s context is current on this
         // thread for `Gfx`'s lifetime, same precondition every other `gl.*` call in this
         // crate relies on.
-        let (tex_loc, uv_rect_loc, opacity_loc) = unsafe {
+        let (tex_loc, uv_rect_loc, opacity_loc, flip_v_loc) = unsafe {
             (
                 gfx.gl.get_uniform_location(program, "tex"),
                 gfx.gl.get_uniform_location(program, "uv_rect"),
                 gfx.gl.get_uniform_location(program, "opacity"),
+                gfx.gl.get_uniform_location(program, "flip_v"),
             )
         };
         Ok(BlitProgram {
@@ -242,6 +274,7 @@ impl BlitProgram {
             tex_loc,
             uv_rect_loc,
             opacity_loc,
+            flip_v_loc,
         })
     }
 
@@ -249,8 +282,10 @@ impl BlitProgram {
     /// draw-into-bound-FBO contract as `effects::EffectProgram::draw`. `uv` is the
     /// `[x,y,w,h]` sub-rectangle of `tex` to sample (`UvRect::uv`); the destination
     /// sub-rectangle is implicit in the caller's already-set `glViewport`, not a
-    /// parameter here.
-    fn draw(&self, gfx: &Gfx, tex: &Tex, uv: [f64; 4], opacity: f64) {
+    /// parameter here. `flip_v` is [`BLIT_FRAG_SRC`]'s orientation-correction switch —
+    /// `true` for a raw caller-supplied source texture, `false` for a texture this module
+    /// already wrote itself in finished orientation (see that constant's doc comment).
+    fn draw(&self, gfx: &Gfx, tex: &Tex, uv: [f64; 4], opacity: f64, flip_v: bool) {
         // SAFETY: same precondition as every other `gl.*` call in this crate.
         unsafe {
             gfx.gl.use_program(Some(self.program));
@@ -271,6 +306,9 @@ impl BlitProgram {
             if let Some(loc) = &self.opacity_loc {
                 gfx.gl.uniform_1_f32(Some(loc), opacity as f32);
             }
+            if let Some(loc) = &self.flip_v_loc {
+                gfx.gl.uniform_1_i32(Some(loc), flip_v as i32);
+            }
             gfx.gl.bind_vertex_array(Some(gfx.empty_vao()));
             gfx.gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
@@ -281,7 +319,9 @@ impl BlitProgram {
 /// itself stays exact `f64` math so its unit tests can assert precise fractions; only the
 /// actual GL draw rounds), enables premultiplied-alpha blending, draws, then disables
 /// blending again (so a later caller — e.g. `effects::EffectProgram::draw`, which never
-/// touches blend state itself — never inherits it by surprise).
+/// touches blend state itself — never inherits it by surprise). `flip_v` is threaded
+/// straight through to [`BlitProgram::draw`] — see [`BLIT_FRAG_SRC`]'s doc comment for
+/// which value each caller needs.
 fn draw_rect(
     gfx: &Gfx,
     blit: &BlitProgram,
@@ -289,6 +329,7 @@ fn draw_rect(
     uv: UvRect,
     opacity: f64,
     fbo: glow::Framebuffer,
+    flip_v: bool,
 ) {
     // SAFETY: standard `gl.*` precondition.
     unsafe {
@@ -302,7 +343,7 @@ fn draw_rect(
         gfx.gl.enable(glow::BLEND);
         gfx.gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
     }
-    blit.draw(gfx, tex, uv.uv, opacity);
+    blit.draw(gfx, tex, uv.uv, opacity, flip_v);
     // SAFETY: standard `gl.*` precondition.
     unsafe {
         gfx.gl.disable(glow::BLEND);
@@ -333,6 +374,10 @@ fn clear_transparent(gfx: &Gfx, fbo: glow::Framebuffer, w: u32, h: u32) {
 /// only ever samples a texture can't tell "transparent everywhere, size 1×1" from
 /// "transparent everywhere, size w×h" apart), without this module needing to keep a real
 /// 1×1 texture object around just for that case.
+///
+/// `tex` is always a *raw* caller-supplied source texture here (never something this
+/// module already wrote), so this always draws with `flip_v = true` — see
+/// [`BLIT_FRAG_SRC`]'s doc comment.
 fn render_side(
     gfx: &Gfx,
     blit: &BlitProgram,
@@ -347,7 +392,7 @@ fn render_side(
         return;
     };
     let uv = fit_rect((tex.w, tex.h), (w, h), fit, viewport);
-    draw_rect(gfx, blit, tex, uv, 1.0, fbo);
+    draw_rect(gfx, blit, tex, uv, 1.0, fbo, true);
 }
 
 /// The two input intermediates and one result intermediate an effect layer needs, all
@@ -405,8 +450,9 @@ impl Composer {
     ///   intermediate under the layer's `fit`/`viewport` ([`render_side`]), the effect
     ///   itself is drawn between those two intermediates into a third ("result")
     ///   intermediate at `ratio = width/height`, and that result is finally blitted into
-    ///   `target` at identity `uv` (`[0,0,1,1]`) and the layer's `opacity` — the one extra
-    ///   intermediate the brief's "Decisions" section allows for keeping opacity simple.
+    ///   `target` at identity `uv` (`[0,0,1,1]`) and the layer's `opacity` — a third
+    ///   intermediate is needed because `effects::EffectProgram::draw` has no opacity
+    ///   input of its own, so opacity is applied in this separate pass afterwards instead.
     ///
     /// Which of the two `content` cases applies is decided by trying to read
     /// `"{content}.effect_id"`: `Ok` means `content` is an `Effect` (only `Effect` nodes
@@ -475,10 +521,13 @@ impl Composer {
             Err(e) if e.code == "no_such_node" => Ok(()), // dangling content: stays transparent
             Err(e) if e.code == "no_such_prop" => {
                 // A Source (or at least: something with no `effect_id` — the schema gives
-                // `Layer.content` no other legal kind to point at).
+                // `Layer.content` no other legal kind to point at). `tex` is a raw
+                // caller-supplied texture, drawn straight into the final target, so this
+                // needs the orientation correction (`flip_v = true` — see
+                // `BLIT_FRAG_SRC`'s doc comment).
                 if let Some(tex) = textures(&content) {
                     let uv = fit_rect((tex.w, tex.h), (ow, oh), fit, viewport);
-                    draw_rect(gfx, &self.blit, tex, uv, opacity, target.id);
+                    draw_rect(gfx, &self.blit, tex, uv, opacity, target.id, true);
                 }
                 Ok(())
             }
@@ -581,6 +630,11 @@ impl Composer {
             },
             opacity,
             target.id,
+            // `result_tex` is the effect's own output, already in finished/screen
+            // orientation (it came out of `EffectProgram::draw`, which already corrects
+            // orientation when *it* samples its raw `from`/`to` inputs) — no further
+            // flip here, unlike `render_side`'s raw-source draws above.
+            false,
         );
         Ok(())
     }
