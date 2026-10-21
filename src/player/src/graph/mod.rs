@@ -353,12 +353,79 @@ impl Graph {
             props::validate_value(kind, prop, &value, true)?;
         }
         for id in &targets {
-            self.apply_set(id, prop, value.clone());
+            self.apply_set(id, prop, value.clone(), true);
         }
         Ok(())
     }
 
-    fn apply_set(&mut self, id: &str, prop: &str, value: PropValue) {
+    /// Writes an **observed** value (what a live source reports: `ready`, `duration`,
+    /// `time_pos`, `width`, `height`, and `paused` as mpv reports it — mirrored by
+    /// `sources::SourceHost::update`). Same resolution and type/range validation as
+    /// [`Graph::set`], but it bypasses the `read_only` check and is **not** recorded in
+    /// [`Graph::drain_changes`]: an observation must never be forwarded back to the source
+    /// it came from as if it were a command.
+    pub fn set_observed(&mut self, path: &PropPath, value: PropValue) -> Result<(), ApiError> {
+        let (node_ref, prop) = split_path(path)?;
+        let targets = self.resolve(node_ref);
+        if targets.is_empty() {
+            return Err(no_such_node(node_ref));
+        }
+        for id in &targets {
+            let kind = self.nodes.get(id).ok_or_else(|| no_such_node(id))?.kind;
+            props::validate_value(kind, prop, &value, false)?;
+        }
+        for id in &targets {
+            self.apply_set(id, prop, value.clone(), false);
+        }
+        Ok(())
+    }
+
+    /// The kind of node `id` (exact id, no alias resolution), or `None` if there is none.
+    pub fn kind_of(&self, id: &str) -> Option<NodeKind> {
+        self.nodes.get(id).map(|n| n.kind)
+    }
+
+    /// Every node id of `kind`, sorted.
+    pub fn ids_of(&self, kind: NodeKind) -> Vec<String> {
+        self.nodes
+            .values()
+            .filter(|n| n.kind == kind)
+            .map(|n| n.id.clone())
+            .collect()
+    }
+
+    /// Every property of node `id` (exact id) with its current value, plus — for a
+    /// `Source` — one `gain.<slot>` entry per gain slot that has been set. What
+    /// `sources::SourceHost` opens a live source from.
+    pub fn props_of(&self, id: &str) -> Option<Vec<(String, PropValue)>> {
+        let node = self.nodes.get(id)?;
+        let mut out: Vec<(String, PropValue)> = node
+            .props
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        for (slot, db) in &node.gain_slots {
+            out.push((format!("gain.{}", slot.as_str()), PropValue::F64(*db)));
+        }
+        Some(out)
+    }
+
+    /// A `Source` node's summed gain in dB (`units::Gains::effective_db`, clamped to
+    /// `[-96, 12]`) — the same number `snapshot()` reports as `gain_effective_db`. `None`
+    /// for a missing or non-`Source` node.
+    pub fn effective_gain_db(&self, id: &str) -> Option<f64> {
+        let node = self.nodes.get(id)?;
+        if node.kind != NodeKind::Source {
+            return None;
+        }
+        let mut gains = Gains::new();
+        for (slot, db) in &node.gain_slots {
+            gains.set(*slot, *db);
+        }
+        Some(gains.effective_db())
+    }
+
+    fn apply_set(&mut self, id: &str, prop: &str, value: PropValue, record: bool) {
         if let Some(slot_name) = prop.strip_prefix("gain.") {
             if let (Ok(slot), PropValue::F64(db)) = (slot_name.parse::<GainSlot>(), &value)
                 && let Some(node) = self.nodes.get_mut(id)
@@ -368,7 +435,9 @@ impl Graph {
         } else if let Some(node) = self.nodes.get_mut(id) {
             node.props.insert(prop.to_string(), value.clone());
         }
-        self.changes.push((PropPath(format!("{id}.{prop}")), value));
+        if record {
+            self.changes.push((PropPath(format!("{id}.{prop}")), value));
+        }
     }
 
     /// Gets one property. `path`'s node-id part is resolved via [`Graph::resolve`] first: no
@@ -775,6 +844,49 @@ mod tests {
             ]
         );
         assert!(g.drain_changes().is_empty(), "drain must empty the queue");
+    }
+
+    #[test]
+    fn set_observed_bypasses_read_only_and_is_not_a_change() {
+        let mut g = Graph::new();
+        src(&mut g, "src1");
+        g.set_observed(&p("src1.duration"), PropValue::F64(3.0))
+            .expect("observed write of a read-only prop");
+        assert_eq!(g.get(&p("src1.duration")).unwrap(), PropValue::F64(3.0));
+        g.set_observed(&p("src1.paused"), PropValue::Bool(true))
+            .unwrap();
+        assert!(
+            g.drain_changes().is_empty(),
+            "observations must never be forwarded back to the source"
+        );
+        // Still type-checked.
+        let err = g
+            .set_observed(&p("src1.duration"), PropValue::Str("x".into()))
+            .unwrap_err();
+        assert_eq!(err.code, "bad_type");
+        assert_eq!(
+            g.set_observed(&p("nope.duration"), PropValue::F64(1.0))
+                .unwrap_err()
+                .code,
+            "no_such_node"
+        );
+    }
+
+    #[test]
+    fn node_accessors() {
+        let mut g = Graph::new();
+        src(&mut g, "src1");
+        out(&mut g, "out:DP-1");
+        g.set(&p("src1.gain.xfade"), PropValue::F64(-96.0)).unwrap();
+        g.set(&p("src1.gain.user"), PropValue::F64(-6.0)).unwrap();
+        assert_eq!(g.kind_of("src1"), Some(NodeKind::Source));
+        assert_eq!(g.kind_of("nope"), None);
+        assert_eq!(g.ids_of(NodeKind::Source), vec!["src1".to_string()]);
+        let props = g.props_of("src1").unwrap();
+        assert!(props.contains(&("gain.xfade".to_string(), PropValue::F64(-96.0))));
+        assert!(props.iter().any(|(k, _)| k == "path"));
+        assert_eq!(g.effective_gain_db("src1"), Some(-96.0));
+        assert_eq!(g.effective_gain_db("out:DP-1"), None);
     }
 
     #[test]

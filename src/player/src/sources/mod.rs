@@ -3,18 +3,27 @@
 //!
 //! - [`MpvSource`] (`mpv.rs`) — video and image files through libmpv's render API.
 //! - [`ColorSource`] (`color.rs`) — a solid colour.
+//! - [`SnapshotSource`] (`snapshot.rs`) — a held still copy of another source's frame
+//!   (R34: what reveal/frozen show for an outgoing side that keeps playing elsewhere).
+//! - [`SourceHost`] (`host.rs`) — owns one live source per graph `Source` node: opens/
+//!   drops them as nodes come and go, forwards property changes, mirrors observed values
+//!   back into the graph, and collects events (R32).
 //!
-//! Every source implements [`Source`]. The runtime (Task 12) owns them, forwards graph
+//! Every source implements [`Source`]. [`SourceHost`] owns them: it forwards graph
 //! property changes (`graph::Graph::drain_changes`) to [`Source::apply`], calls
-//! [`Source::update`] each tick (never blocks), and turns [`Source::poll_events`] into
-//! the command API's `ready`/`ended`/`position`/`error` events. See
+//! [`Source::update`] each tick (never blocks), and collects [`Source::poll_events`] for
+//! the recipes and the command API's `ready`/`ended`/`position`/`error` events. See
 //! `.claude/rules/player-core.md` § Sources.
 
 pub mod color;
+pub mod host;
 pub mod mpv;
+pub mod snapshot;
 
 pub use color::ColorSource;
+pub use host::SourceHost;
 pub use mpv::MpvSource;
+pub use snapshot::SnapshotSource;
 
 use crate::gfx::{Gfx, Tex};
 use crate::graph::{ApiError, PropValue};
@@ -36,7 +45,7 @@ pub enum SourceEvent {
 /// One frame producer. Property names and value types are the graph's `Source` schema
 /// (`graph::props`); `apply` validates through the same gate the graph uses.
 pub trait Source {
-    /// `"video"`, `"image"` or `"color"`.
+    /// `"video"`, `"image"`, `"color"` or `"snapshot"`.
     fn kind(&self) -> &'static str;
     /// Render a new frame into the texture if one is available. **Never blocks**; returns
     /// whether the texture changed.

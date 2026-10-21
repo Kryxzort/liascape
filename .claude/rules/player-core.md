@@ -29,7 +29,10 @@ happen regardless of timing.
 - `src/log.rs` — the event log (below).
 - `src/units.rs` — audio units (below).
 - `src/mpv/` — libmpv FFI (`ffi.rs`, bindgen output) + safe wrapper (`mod.rs`). § Sources.
-- `src/sources/` — the `Source` trait, `MpvSource` (video/image), `ColorSource`. § Sources.
+- `src/sources/` — the `Source` trait, `MpvSource` (video/image), `ColorSource`,
+  `SnapshotSource`, and `SourceHost` (graph nodes ↔ live sources). § Sources.
+- `src/recipes/` — programs built only from the blocks; `transition.rs` (Task 11).
+  § Transition recipe.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -216,6 +219,14 @@ creation is **never** a change — there's no live source yet for a runtime hook
 it to. The runtime (a later task) drains this every tick and forwards each entry to
 whatever `PropHook` the target source has registered; nothing in `graph/` talks to a live
 source directly.
+
+**Observed values and node accessors (Task 11).** `Graph::set_observed(path, v)` writes
+what a live source *reports* (`SourceHost` mirrors `ready`/`duration`/`time_pos`/`width`/
+`height`/`paused`): same resolution and type checks as `set`, but it bypasses `read_only`
+and is **never** recorded in `drain_changes` — an observation must not be forwarded back to
+the source as a command. `kind_of(id)`, `ids_of(kind)`, `props_of(id)` (every prop + set
+`gain.<slot>`s, what a source is opened from) and `effective_gain_db(id)` are plain reads.
+`Source.kind` also allows `snapshot`, with read-only `of` (seeded at create).
 
 **Snapshot shape.** `Graph::snapshot()` is one JSON object keyed by node id; each node's
 object has `kind` plus **every** schema property (defaults included — a property is never
@@ -735,6 +746,27 @@ foreign context). `Ready` is queued at construction (first `poll_events`). Every
 writable property is accepted and stored (so an alias/global `set` never fails on a
 colour layer) and does nothing.
 
+**`SourceHost` (`sources/host.rs`, R32) — the only place a graph node becomes a live
+source.** `SourceHost::new(base_opts)` (merged into every `MpvSource::open`, e.g. `{"ao":
+"null"}` in tests). Per loop iteration, in this order: `sync(gfx, graph, changes)` drops
+sources whose node is gone, opens one for every new `Source` node from `props_of` (`color` →
+`ColorSource`, `snapshot` → `SnapshotSource` of `of`'s *current* texture, else `MpvSource`;
+colour/snapshot get every writable prop applied so `read` agrees with the node), then
+forwards each drained change to `apply` (skipping sources it just opened — their props
+already include it); an `Err` (open or apply) is logged and queued as that source's
+`SourceEvent::Error` (a failed open isn't retried until the node goes). `update(gfx,
+graph)` updates every source, collects its events, then mirrors observed values with
+`Graph::set_observed`. **`sync` must precede `update`** each iteration, or the mirror would
+overwrite a command not yet forwarded. `events()` drains `(node id, event)`; `texture(id)`
+is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime polls; `get`/
+`ids` for probes/tests.
+
+**`SnapshotSource` (`sources/snapshot.rs`)** — a still copy (`glBlitFramebuffer`, row order
+kept → image-top at `t = 0`) of another source's texture taken at creation; `Ready` at
+once; never changes; no audio. It exists because pausing doesn't freeze a texture: a paused
+mpv still presents its queued frames (measured 2–3 frames, ~100 ms after the pause, with
+`time_pos` already frozen). The transition recipe holds reveal/frozen pictures with it.
+
 **Tests (`tests/sources.rs`) — always `ao: "null"` (R26)**, so a run is silent on the
 owner's speakers; `audio-params`/`current-ao` still populate with the null AO. Raw mpv
 reads after an `apply` first `settle()` (pump until `requests_in_flight() == 0`). Media
@@ -746,3 +778,98 @@ limited-range matrix **and tagged** so mpv decodes with the same matrix — soli
 come back within ±3 (YUV round trip + mpv's output dither), `FrameIndex`'s neutral-grey
 `(n,n,n)` marker within ±1 (ffmpeg itself decodes frame 119's marker as 118). Audio for
 `Solid` is PCM s16le (exact level).
+
+## Transition recipe
+
+`src/recipes/transition.rs` (spec §4.3 "Transition A→B", §10 Transitions; invariants #1,
+#4, #5, #6). `Transitions::start(TransitionReq, graph, anim, now) -> CorrId` /
+`cancel(corr, graph, anim, now)` / `tick(graph, anim, &host.events(), now)` /
+`drain_events()` / `status()`. It only issues graph `create`/`set`/`destroy` and
+`Animator::add`/`cancel_target` — no rendering, no source access, no per-kind code.
+`TransitionReq { outputs (alias), to (B's create props incl. path, or kind color),
+effect_id (None = cut), params, duration_ms, method: full-live|reveal|frozen, align:
+now|end }` deserializes from the API's JSON (all but `outputs`/`to` default).
+
+**State machine** (one per request):
+
+```text
+start() → Scheduled → WaitingReady → WaitingStart → Running → Handoff → Done
+          B created    B Ready /      align instant;  effect     layers → B, fx +
+          paused,      graph ready    snapshots       animating  snapshots destroyed,
+          xfade −96    (10 s timeout) ready; no                  A released → graveyard
+                                      graves on outputs
+pre-Running  ── superseded / cancel / B failed ──▶ abort: B destroyed, A restored exactly
+Running      ── new start on an overlapping output ──▶ commit (→ Handoff)
+Running      ── cancel / B failed ──▶ snap back to A
+```
+
+**Per method** (t0 = effect start; D = duration; all gains in linear amplitude,
+`AnimUnit::GainLinear`):
+
+| method | picture | A (not shared) | B |
+|---|---|---|---|
+| full-live | fx `from = A` | `gain.xfade` k·cos over D (`EqualPowerOut`, k = its current level) | unpaused at t0; `gain.xfade` sin over D (`EqualPowerIn`) |
+| reveal | fx `from =` snapshot of A | `gain.anticlick` → −96 in 30 ms, then paused | unpaused at t0; `gain.xfade` sin over D |
+| frozen | fx `from =` snapshot of A | as reveal | stays paused (first frame, −96); at handoff: anticlick −96 + xfade 0, unpaused, anticlick ramp to 0 dB in 30 ms |
+| cut (`effect_id` null) | swap at t0+30 ms (t0 if no A to ramp) | anticlick → −96 over [t0, t0+30] | unpaused at the swap; xfade 0→1 linear over 30 ms → done at t0+60 |
+
+`fx.progress` is Linear 0→1 over [t0, t0+D]; handoff happens on the first tick ≥ t0+D.
+reveal/frozen snapshot only an A whose picture can still change: a still (image/colour)
+or an A that has ended (it holds its last frame) is held as itself. With snapshots the
+effect starts one iteration later (the host opens the copy on its next `sync`).
+
+**Align.** `Now` = when B is ready. `End` (lead A = the first requested output's A; a
+still/absent A → `Now`): non-shared A gets `loop=false` at `start` (restored on
+cancel/failure — and seeked to 0 if it ended because of it). full-live *ends* at A's end:
+start = end − D, where end is the minimum over ticks of `now + (duration − time_pos)/speed`
+minus half a frame (`time_pos` is the shown frame's pts, so each sample over-estimates by
+0…1 frame; the frame step is the smallest `time_pos` increment) — measured within ±17 ms of
+A's real `Ended`; if that instant passed between two ticks the effect starts backdated (≤ one
+tick) so it still ends on time; if it's already past at the first evaluation (A shorter
+than D, or B late) it starts at once and A holds its last frame. reveal/frozen/cut *start*
+at A's `Ended` (tracked from events: set on `Ended`, cleared on `Ready` or a `Position`
+going back — so an A that ended before the request counts too). Shared looping A (loop
+untouched, no `Ended`): full-live aims at the current iteration's end, or the next one if
+that is already too close; reveal/frozen/cut start when ≤ 50 ms of the iteration is left
+(or right after a wrap was missed).
+
+**Interrupt / cancel / failure** (R35/R36, invariant #6): `start` first creates B (a bad
+request changes nothing), then resolves every in-flight transition sharing any output:
+pre-Running → `abort` (`transition.cancelled {reason:"superseded"}`); Running → `commit`
+(layers → B, fx/snapshots destroyed, B unpaused with xfade/anticlick → 0 dB over 30 ms, A
+released); Handoff → left to settle. Only then is A captured (so it's the restored A, or the
+committed B). `cancel`: pre-Running → `abort` ("cancelled"); Running → `snap_back` (layers →
+A, A restored with gains ramped back over 30 ms, B → −96 over 30 ms then destroyed); after
+handoff → `unsupported`. B `Error` / destroyed / no Ready in 10 s before handoff → the same
+abort or snap-back with `transition.failed {path, reason}`; after handoff B's errors aren't
+the recipe's business; A's errors are ignored (its texture holds its last frame).
+
+**Release + graveyard.** At handoff/commit each A is released: if any layer still shows it
+(directly or as an effect side), it's left alone; else if it's paused or at −96 dB it's
+buried now, otherwise its anticlick ramps to −96 over 30 ms and it's buried then. The
+graveyard is processed at the *top* of `tick`, so a source's final −96 dB always reaches it
+(that iteration's `sync`) before its node is destroyed. A transition can't enter Running
+while a grave on its outputs is pending — at most two streams play per output.
+`transition.done` = settle time passed (frozen/cut ramp-ins) and no graves left.
+
+**Shared A (R34).** A per output = what its layer shows; one effect per distinct A (all `to =
+B`). An A shown by a layer outside the request is never paused, ramped, loop-changed or
+destroyed (its audio follows its picture there); reveal/frozen hold it via a snapshot.
+Mixing policy for two audible wallpapers is out of scope (docs/TODO.md).
+
+**Events (R37)** — outbox + `log::event("transition", …)`, each `{corr, at_ms, event,
+…}`: `transition.scheduled {outputs, to, path, method, align, effect_id, duration_ms}`,
+`.started {method, effect_id, start_ms}` (`start_ms` may be ≤ one tick before `at_ms`, see
+Align), `.handoff {to, from}`, `.done {to}`, `.cancelled {reason}`, `.failed {path,
+reason}`. Order per corr: scheduled, started, handoff, done — or scheduled[, started],
+cancelled|failed. `status()` lists live transitions with `held` = sources paused on
+purpose (pending B, held A's, frozen B, snapshots).
+
+**Tests (`tests/transition.rs`, harness `tests/common/harness.rs`)** — Graph + Animator +
+SteppedClock + Gfx + SourceHost + Transitions + Composer, virtual outputs `VIRTUAL-n`
+640×360, `ao: "null"`. Each tick waits ≤ 16.7 ms on the sources' wake fds and steps the
+clock by the wall delta (R33); `tick_to(t)` lands exactly on `t` (the excess is carried, so
+virtual time never drifts from mpv's wall time). One harness at a time (a process-wide lock
+it holds): a dozen parallel 1080p decoders starve each other's mpv cores. `FrameIndex`
+markers alias neighbours (limited-range luma: 4 reads as 3, 11 as 10) — ± 1 marker.
+

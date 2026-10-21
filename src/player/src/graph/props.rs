@@ -179,7 +179,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "kind",
                 def(
-                    PropType::Enum(&["video", "image", "color"]),
+                    PropType::Enum(&["video", "image", "color", "snapshot"]),
                     false,
                     PropValue::Str("video".to_string()),
                 ),
@@ -198,6 +198,13 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "color",
                 def(PropType::List3, false, PropValue::List(vec![0.0, 0.0, 0.0])),
+            ),
+            // `snapshot` sources only: the source node whose texture was copied at
+            // creation (`sources::SnapshotSource`). Fixed for the node's life, so
+            // read-only (seeded by `Graph::create`, which doesn't enforce read-only).
+            (
+                "of",
+                def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("ready", def(PropType::Bool, true, PropValue::Bool(false))),
             ("duration", def(PropType::F64, true, PropValue::F64(0.0))),
