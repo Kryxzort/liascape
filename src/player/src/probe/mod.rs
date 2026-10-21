@@ -10,7 +10,9 @@
 //!   last reset (`args: {"reset": true}` clears it after reading), wakes, clients.
 //! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
 //!   mean/p50/p95/max/count/missed; all: + fps), idle, frame callback state.
+//! - `bus`, `meter.window` (`audio.rs`, Task 14) — the player audio bus and its meter.
 
+mod audio;
 pub mod frames;
 
 use serde_json::{Map, Value, json};
@@ -39,6 +41,16 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         "frames",
         frames::frames,
         "per output: present intervals (mean/p50/p95/max/count/missed), fps, idle, callbacks",
+    ),
+    (
+        "bus",
+        audio::bus,
+        "the player audio bus: state, device, latency, target sink, meter status",
+    ),
+    (
+        "meter.window",
+        audio::meter_window,
+        "bus meter samples {last_ms | from_ms,to_ms}: [[t_ms, dbfs_1ms]…] + median/min/max/gap",
     ),
 ];
 
@@ -100,6 +112,14 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 json!(m.mpv_get_f64("volume-gain")),
             );
             o.insert("mpv_pause".into(), json!(m.mpv_get_string("pause")));
+            o.insert(
+                "mpv_audio_device".into(),
+                json!(m.mpv_get_string("audio-device")),
+            );
+            o.insert(
+                "mpv_audio_delay".into(),
+                json!(m.mpv_get_f64("audio-delay")),
+            );
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             o.insert("stepped".into(), json!(m.is_stepped()));
             o.insert(

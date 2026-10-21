@@ -41,6 +41,7 @@ use serde_json::{Map, Value, json};
 use crate::anim::{AnimUnit, Animation, Animator, Curve, PropPath};
 use crate::api::server::{ClientFd, EventTap, Server};
 use crate::api::{handlers, proto};
+use crate::audio::Audio;
 use crate::clock::{Clock, MonoClock, SteppedClock};
 use crate::gfx::{Catalogue, Composer, Gfx};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
@@ -239,6 +240,8 @@ pub struct Runtime {
     pub(crate) redraw: Redraw,
     /// Present timing per output (the `frames` probe).
     pub(crate) frames: BTreeMap<String, FrameStats>,
+    /// The player audio bus + its meter (Task 14), or why there is none.
+    pub(crate) audio: Audio,
 }
 
 fn p(s: &str) -> PropPath {
@@ -1051,6 +1054,8 @@ impl Runtime {
                 json!({ "count": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
             );
         }
+        // Every stream is gone: now the bus can go (nothing gets moved to the default sink).
+        self.audio.close();
         log::event(
             "runtime",
             Level::Info,
@@ -1544,9 +1549,20 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
     let tap = Arc::new(EventTap::new(ping));
     log::set_tap(Some(tap.clone()));
 
+    // The bus comes after the socket: a second instance exits above without touching
+    // PipeWire. Sources play into it unless `--ao` routes them elsewhere (then there's none).
+    let audio = Audio::start(opts.ao.as_deref());
     let mut base = Map::new();
     if let Some(ao) = &opts.ao {
         base.insert("ao".into(), json!(ao));
+    }
+    if let Some(bus) = &audio.bus {
+        base.insert("audio_device".into(), json!(bus.device()));
+        // Compensate what the bus adds; a source's own `audio_delay` adds to this.
+        base.insert(
+            "audio_delay_bias".into(),
+            json!(-bus.latency().as_secs_f64()),
+        );
     }
     let clock = match opts.clock {
         ClockMode::Real => ClockKind::Real(MonoClock::new()),
@@ -1589,6 +1605,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         started: Instant::now(),
         redraw: Redraw::new(),
         frames: BTreeMap::new(),
+        audio,
     };
     rt.apply_output_changes();
 
