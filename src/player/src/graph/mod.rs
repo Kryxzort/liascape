@@ -263,7 +263,14 @@ impl Graph {
             let lay_id = format!("lay:{connector}:main");
             let mut lay_props = Map::new();
             lay_props.insert("output".to_string(), Value::String(new_id.clone()));
-            self.create(NodeKind::Layer, Some(lay_id), lay_props)?;
+            // "Err means nothing was created" must hold for the Output too: if the nested
+            // main-layer create fails for any reason (today, only a pre-existing node
+            // already sitting on the reserved `lay:<connector>:main` id), roll back the
+            // Output we just inserted rather than leaving a layer-less Output committed.
+            if let Err(e) = self.create(NodeKind::Layer, Some(lay_id), lay_props) {
+                self.nodes.remove(&new_id);
+                return Err(e);
+            }
         }
 
         Ok(new_id)
@@ -339,7 +346,10 @@ impl Graph {
             return Err(no_such_node(node_ref));
         }
         for id in &targets {
-            let kind = self.nodes.get(id).expect("resolved id must exist").kind;
+            // `resolve` must never hand back a dangling id, but this is the one place a
+            // future resolve bug would otherwise turn into a panic instead of an error —
+            // treat a missing node as `no_such_node`, not an invariant violation.
+            let kind = self.nodes.get(id).ok_or_else(|| no_such_node(id))?.kind;
             props::validate_value(kind, prop, &value, true)?;
         }
         for id in &targets {
@@ -375,7 +385,11 @@ impl Graph {
     }
 
     fn get_one(&self, id: &str, prop: &str) -> Result<PropValue, ApiError> {
-        let node = self.nodes.get(id).expect("resolved id must exist");
+        // Same defense-in-depth as `set`: a dangling id from `resolve` must surface as
+        // `no_such_node`, never a panic.
+        let Some(node) = self.nodes.get(id) else {
+            return Err(no_such_node(id));
+        };
         if let Some(slot_name) = prop.strip_prefix("gain.") {
             if node.kind != NodeKind::Source {
                 return Err(props::no_such_prop(prop));
@@ -447,7 +461,13 @@ impl Graph {
         match self.nodes.get(content) {
             Some(n) if n.kind == NodeKind::Source => vec![content.clone()],
             Some(n) if n.kind == NodeKind::Effect => match n.props.get("to") {
-                Some(PropValue::Str(to)) if !to.is_empty() => vec![to.clone()],
+                // `to` must itself resolve to a real node — an effect whose incoming side
+                // was destroyed mid-transition (ordinary operation, not a corner case)
+                // must fall through to "nothing shown", never hand back a dangling id for
+                // `set`/`get` to choke on.
+                Some(PropValue::Str(to)) if !to.is_empty() && self.nodes.contains_key(to) => {
+                    vec![to.clone()]
+                }
                 _ => vec![],
             },
             _ => vec![],
@@ -627,6 +647,91 @@ mod tests {
         g.set(&p("lay:DP-1:main.content"), PropValue::Str(fx))
             .unwrap();
         assert_eq!(g.resolve("cur:DP-1"), vec!["src2".to_string()]);
+    }
+
+    #[test]
+    fn cur_through_destroyed_effect_to_side_never_panics() {
+        // Regression: destroying a transition's incoming side mid-effect (ordinary
+        // operation, not a corner case) must never hand `set`/`get` a dangling id via the
+        // `cur:` alias — `resolve` must come back empty, and `set`/`get` must turn that
+        // into `no_such_node`, not panic.
+        let mut g = Graph::new();
+        out(&mut g, "out:DP-1");
+        src(&mut g, "src1");
+        src(&mut g, "src2");
+
+        let mut props = Map::new();
+        props.insert("effect_id".to_string(), json!("wipe"));
+        props.insert("from".to_string(), json!("src1"));
+        props.insert("to".to_string(), json!("src2"));
+        let fx = g.create(NodeKind::Effect, None, props).unwrap();
+        g.set(&p("lay:DP-1:main.content"), PropValue::Str(fx))
+            .unwrap();
+
+        g.destroy("src2").unwrap();
+
+        assert_eq!(
+            g.resolve("cur:DP-1"),
+            Vec::<String>::new(),
+            "to-side destroyed: cur:DP-1 must resolve to nothing, not a dangling id"
+        );
+        assert_eq!(g.resolve("cur:*"), Vec::<String>::new());
+
+        let err = g.get(&p("cur:DP-1.speed")).unwrap_err();
+        assert_eq!(err.code, "no_such_node");
+        let err = g.get(&p("cur:*.speed")).unwrap_err();
+        assert_eq!(err.code, "no_such_node");
+
+        let err = g
+            .set(&p("cur:DP-1.speed"), PropValue::F64(2.0))
+            .unwrap_err();
+        assert_eq!(err.code, "no_such_node");
+        let err = g.set(&p("cur:*.speed"), PropValue::F64(2.0)).unwrap_err();
+        assert_eq!(err.code, "no_such_node");
+    }
+
+    #[test]
+    fn cur_with_directly_dangling_content_is_empty() {
+        // Same rule, one hop shorter: layer.content points straight at a Source (no
+        // Effect in between) that then gets destroyed.
+        let mut g = Graph::new();
+        out(&mut g, "out:DP-1");
+        src(&mut g, "src1");
+
+        g.set(
+            &p("lay:DP-1:main.content"),
+            PropValue::Str("src1".to_string()),
+        )
+        .unwrap();
+        g.destroy("src1").unwrap();
+
+        assert_eq!(g.resolve("cur:DP-1"), Vec::<String>::new());
+        let err = g.get(&p("cur:DP-1.speed")).unwrap_err();
+        assert_eq!(err.code, "no_such_node");
+    }
+
+    #[test]
+    fn create_output_rolls_back_on_main_layer_id_collision() {
+        // "Err means nothing was created" must hold across the auto-created main layer
+        // too: if something already occupies the reserved `lay:<connector>:main` id,
+        // creating the output must fail *and* leave no half-built Output behind.
+        let mut g = Graph::new();
+        g.create(
+            NodeKind::Layer,
+            Some("lay:DP-1:main".to_string()),
+            Map::new(),
+        )
+        .expect("pre-occupy the reserved main-layer id");
+
+        let err = g.create(NodeKind::Output, Some("out:DP-1".to_string()), Map::new());
+        assert!(
+            err.is_err(),
+            "creating the output must fail: its main-layer id is already taken"
+        );
+        assert!(
+            g.resolve("out:DP-1").is_empty(),
+            "a failed create must not leave the Output committed"
+        );
     }
 
     #[test]
