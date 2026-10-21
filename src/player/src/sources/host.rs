@@ -48,6 +48,9 @@ pub struct SourceHost {
     /// Time spent opening sources since the last `take_open_time` (opening is synchronous
     /// — mpv init + render context; the `loop` probe reports it apart).
     open_time: std::time::Duration,
+    /// Sources whose texture changed since the last `take_changed` (Task 13: the redraw
+    /// policy wakes only the outputs showing them).
+    changed: BTreeSet<String>,
 }
 
 impl SourceHost {
@@ -59,6 +62,7 @@ impl SourceHost {
             events: Vec::new(),
             dying: Vec::new(),
             open_time: std::time::Duration::ZERO,
+            changed: BTreeSet::new(),
         }
     }
 
@@ -253,7 +257,9 @@ impl SourceHost {
         self.reap_dying(false);
         let mut new_events = Vec::new();
         for (id, h) in &mut self.sources {
-            h.src.update(gfx);
+            if h.src.update(gfx) {
+                self.changed.insert(id.clone());
+            }
             for ev in h.src.poll_events() {
                 match &ev {
                     SourceEvent::Error { reason } => log::event(
@@ -301,6 +307,11 @@ impl SourceHost {
                 i += 1;
             }
         }
+    }
+
+    /// Sources whose texture changed (a new frame, a colour repaint) since the last call.
+    pub fn take_changed(&mut self) -> BTreeSet<String> {
+        std::mem::take(&mut self.changed)
     }
 
     /// Time spent in synchronous source opens since the last call (loop accounting).

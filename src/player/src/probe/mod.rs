@@ -8,6 +8,10 @@
 //!   and in-flight requests (libmpv sources), stepped-mode virtual time, last event.
 //! - `loop` — tick rate, recent tick durations + phases, the longest busy stretch since the
 //!   last reset (`args: {"reset": true}` clears it after reading), wakes, clients.
+//! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
+//!   mean/p50/p95/max/count/missed; all: + fps), idle, frame callback state.
+
+pub mod frames;
 
 use serde_json::{Map, Value, json};
 
@@ -30,6 +34,11 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         "loop",
         loop_stats,
         "tick rate, recent tick durations/phases, max busy ms since reset, wakes, clients",
+    ),
+    (
+        "frames",
+        frames::frames,
+        "per output: present intervals (mean/p50/p95/max/count/missed), fps, idle, callbacks",
     ),
 ];
 

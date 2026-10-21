@@ -269,6 +269,16 @@ impl Animator {
             .map(|e| e.anim.emitted_value(t))
     }
 
+    /// Whether an animation that has started by `now` and isn't finished yet targets a
+    /// path `pred` accepts — the redraw policy's "something moves" (Task 13,
+    /// `crate::redraw::animating`). A finished animation holding its final value doesn't
+    /// count: it emits nothing more.
+    pub fn any_live(&self, now: Duration, pred: impl Fn(&PropPath) -> bool) -> bool {
+        self.entries
+            .iter()
+            .any(|e| !e.done && e.anim.start <= now && pred(&e.anim.target))
+    }
+
     /// The value the animation on `path` ends at (what it emits at its own end — for a
     /// `GainLinear` animation, that end in dB), whether it has started, is running, or has
     /// finished and is holding it. `None` when nothing animates `path` (never added, or

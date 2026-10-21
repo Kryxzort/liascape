@@ -138,12 +138,19 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "layer",
                 def(
-                    PropType::Enum(&["background", "bottom"]),
+                    PropType::Enum(&["background", "bottom", "top", "overlay"]),
                     false,
                     PropValue::Str("background".to_string()),
                 ),
             ),
             ("paused", def(PropType::Bool, false, PropValue::Bool(false))),
+            // Task 13: the pointer over this output's surface, `[x, y, buttons]` in surface
+            // pixels (buttons: bit 0 left, 1 right, 2 middle, 3 side, 4 extra) — observed
+            // (`set_observed`) by the Wayland backend, for Phase 2's mouse-reactive sources.
+            (
+                "pointer",
+                def(PropType::List3, true, PropValue::List(vec![0.0, 0.0, 0.0])),
+            ),
         ],
         NodeKind::Layer => vec![
             (

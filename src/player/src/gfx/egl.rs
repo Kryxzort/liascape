@@ -9,9 +9,8 @@
 //!   test and by any worker that renders into FBOs only. This is the path exercised by
 //!   this task's test.
 //! - [`Gfx::new_wayland`] + [`Gfx::window_target`] — a real `wl_surface` on a real Wayland
-//!   compositor. Implemented to these signatures now so later tasks compile against a
-//!   stable API, but **not exercised by any test here** (Task 13 ruling R16: wires up the
-//!   real outputs and is the first task that can actually drive a Wayland display).
+//!   compositor, driven by the Wayland backend (`crate::wl`, Task 13) — exercised
+//!   on-machine by `tests/onmachine/outputs.sh` (no automated test can reach a compositor).
 //!
 //! Both paths request the same context: EGL 1.5, desktop OpenGL (`eglBindAPI
 //! (EGL_OPENGL_API)`, not OpenGL ES), core profile, version 3.3 — matched to what LWE
@@ -262,9 +261,9 @@ impl Gfx {
     /// Wayland connection) — this module never links or depends on `wayland-client`
     /// itself, it only hands the pointer straight to EGL.
     ///
-    /// Implemented to this signature now so later gfx/layer code compiles against a
-    /// stable API; the real wiring (owning a Wayland connection, pumping its event queue)
-    /// is Task 13's job, and so is the first test that actually calls this (R16).
+    /// The context starts current with no surface, so the default framebuffer's draw buffer
+    /// is `GL_NONE` until set: a caller drawing to a window must `glDrawBuffer(GL_BACK)`
+    /// (the Wayland backend does, in `present`). Wired up by `crate::wl` (Task 13).
     pub fn new_wayland(display_ptr: *mut c_void) -> Result<Gfx, String> {
         let egl = load_egl()?;
 
@@ -302,6 +301,17 @@ impl Gfx {
         })
     }
 
+    /// Make this context current with no surface — e.g. before destroying a window target
+    /// that may be the current draw surface (Task 13: a removed `wl_output`), so its
+    /// `eglDestroySurface` is immediate and GL deletes still have a context. Needs
+    /// `EGL_KHR_surfaceless_context` (present on NVIDIA's Wayland platform too).
+    pub fn make_current_surfaceless(&self) -> Result<(), String> {
+        self.shared
+            .egl
+            .make_current(self.shared.display, None, None, Some(self.shared.context))
+            .map_err(|e| format!("eglMakeCurrent (surfaceless) failed: {e}"))
+    }
+
     /// Create a window-backed render target for a `wl_surface` (raw `*mut wl_surface`
     /// from `libwayland-client`), sized `w`×`h`. Only valid on a [`Gfx`] built with
     /// [`new_wayland`](Self::new_wayland) (the config it chose has `EGL_WINDOW_BIT`;
@@ -312,8 +322,8 @@ impl Gfx {
     /// owns one `Gfx` and one `WindowTarget`) and dropped in whichever order the owning
     /// struct's fields happen to drop in, safely either way.
     ///
-    /// Not exercised by any test in this task (R16) — compiles and documents the contract
-    /// Task 13 builds the real output against.
+    /// First exercised by Task 13's Wayland backend (`crate::wl`, on-machine
+    /// `tests/onmachine/outputs.sh`).
     pub fn window_target(
         &self,
         wl_surface_ptr: *mut c_void,
@@ -334,7 +344,9 @@ impl Gfx {
                 self.shared.display,
                 self.config,
                 egl_window.ptr().cast_mut(),
-                &[],
+                // khronos-egl requires an ATTRIB_NONE-terminated list (an empty slice is
+                // rejected as EGL_BAD_PARAMETER — found when Task 13 first ran this).
+                &[egl::ATTRIB_NONE],
             )
         }
         .map_err(|e| format!("eglCreatePlatformWindowSurface failed: {e}"))?;
@@ -387,6 +399,18 @@ impl WindowTarget {
                 Some(gfx.shared.context),
             )
             .map_err(|e| format!("eglMakeCurrent (window) failed: {e}"))
+    }
+
+    /// `eglSwapInterval` for this surface (made current first). `0` = `eglSwapBuffers`
+    /// never blocks on the compositor: the Wayland backend paces every output with its own
+    /// frame callbacks instead, so a 144 Hz output's swap can't hold up a 240 Hz one on the
+    /// same thread (Task 13).
+    pub fn set_swap_interval(&self, gfx: &Gfx, interval: i32) -> Result<(), String> {
+        self.make_current(gfx)?;
+        gfx.shared
+            .egl
+            .swap_interval(self.shared.display, interval)
+            .map_err(|e| format!("eglSwapInterval({interval}) failed: {e}"))
     }
 
     /// Present the back buffer (`eglSwapBuffers`).

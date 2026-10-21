@@ -20,9 +20,9 @@ happen regardless of timing.
 
 ## Module map
 
-- `src/main.rs` — CLI entry point: `--version`, `serve` (§ Runtime), `ctl` (§ Command
-  API). `serve` without `--headless` exits 2 until Task 13 adds Wayland outputs; any other
-  invocation prints usage and exits 2.
+- `src/main.rs` — CLI entry point: `--version`, `serve` (§ Runtime; without `--headless`
+  = real Wayland outputs, § Wayland), `ctl` (§ Command API); any other invocation prints
+  usage and exits 2.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
@@ -34,13 +34,15 @@ happen regardless of timing.
   § Transition recipe.
 - `src/runtime.rs` — the running player: one calloop loop, ticks, stepped mode,
   hotplug, stop/quit. § Runtime.
-- `src/headless.rs` — the `OutputBackend` trait + `Headless` virtual outputs (Task 13
-  adds Wayland). § Runtime.
+- `src/headless.rs` — the `OutputBackend` trait + `Headless` virtual outputs. § Runtime.
+- `src/wl.rs` — the Wayland backend: one wlr-layer-shell surface per `wl_output`
+  (Task 13). § Wayland.
+- `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
   `handlers.rs` (the verbs). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
   and state paths. § Command API.
-- `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; Task 13/15 add
-  files). § Command API.
+- `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
+  `frames`, Task 13; Task 15 adds more). § Command API.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -253,6 +255,14 @@ it to. The runtime (a later task) drains this every tick and forwards each entry
 whatever `PropHook` the target source has registered; nothing in `graph/` talks to a live
 source directly.
 
+**`picture_rev()` (Task 13)** counts mutations that can change a picture: `create`,
+`destroy`, and every `set` except `gain.<slot>`; never `set_observed`. The Wayland redraw
+policy compares it with the revision an output last presented (§ Wayland).
+
+**Output props.** `name`/`width`/`height`/`refresh_hz` (read-only; kept current with
+`set_observed` on a mode change), `layer` = `background|bottom|top|overlay` (live, §
+Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland).
+
 **Observed values and node accessors (Task 11).** `Graph::set_observed(path, v)` writes
 what a live source *reports* (`SourceHost` mirrors `ready`/`duration`/`time_pos`/`width`/
 `height`/`paused`): same resolution and type checks as `set`, but it bypasses `read_only`
@@ -275,8 +285,10 @@ via EGL — chosen so the compositor can host LWE core if ever needed, since LWE
 renders with desktop GL loaded through glad (`docs/player/spikes/lwe-core.md` §2). `Gfx`
 owns the EGL display + context and the `glow::Context` loaded through it; `Gfx::new_offscreen`
 builds a surfaceless one (used by every GPU test today), `Gfx::new_wayland` +
-`Gfx::window_target` build a real one on a `wl_surface` (implemented to compile against a
-stable API now, first exercised by Task 13 — R16).
+`Gfx::window_target` build a real one on a `wl_surface` (first exercised by Task 13's
+Wayland backend — two latent bugs found then, see § Wayland → NVIDIA/EGL notes).
+`Gfx::make_current_surfaceless` and `WindowTarget::set_swap_interval` (Task 13) are the
+window path's two extra knobs.
 
 **`Gfx` and `WindowTarget` share EGL teardown via `Rc<Shared>`, not a borrow.** `Shared`
 (private, `egl.rs`) holds the EGL instance + `Display` + `Context` and is the one thing
@@ -1003,7 +1015,8 @@ Task 12). `lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock re
 [--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace]` — defaults
 `1920x1080@60`, `real`, mpv's lp-player default ao (`pipewire`), `info`. **`--ao null` in
 every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent.
-Without `--headless` it exits 2 (Wayland = Task 13).
+Without `--headless` it draws on the compositor's outputs (§ Wayland); `--outputs` is
+then refused (exit 2).
 
 **Paths (`src/paths.rs`).** Socket `$LP_PLAYER_SOCKET`, else
 `$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (else `/run/user/<uid>/…`); the socket is
@@ -1028,15 +1041,18 @@ eventfd — a **`dup`** of the source's fd (`F_DUPFD_CLOEXEC`), so a dropped sou
 its fd can never leave a dangling or reused-number registration —, a `Ping` for log events
 from other threads, a `signalfd` (SIGINT/SIGTERM blocked process-wide before any thread
 exists → a clean `quit`), and on the real clock a `Timer` at the max output refresh
-(`tick_period`, recomputed on hotplug; skips ahead if a tick overruns). Task 13 adds the
-Wayland fd and per-output frame callbacks.
+(`tick_period`, recomputed on hotplug; skips ahead if a tick overruns), and on Wayland the
+connection (§ Wayland). A failing dispatch (the compositor went away) logs `loop.failed`,
+silences + tears down every source (`stop_all(true)`, then the normal shutdown) and
+`serve` returns `Err` (exit 1).
 
 **Who runs what (R47).** The **timer tick** is the only place time-driven work runs:
 `Animator::tick` → `Graph::set` (a failed set — node gone — cancels that animation,
 `anim.dropped`) → due `stop` destroys → `sync_sources` (`drain_changes` → `SourceHost::sync`
 → wake-fd registrations) → `update_sources` (`SourceHost::update`; `source.ready`/`.ended`/
 `.position` logged) → `Transitions::tick(every source event since the last tick)` →
-`refresh_srcs` → compose + present every output. **A wake (mpv eventfd) only flags**;
+`refresh_srcs` → compose + present every output (paced outputs: only those due, §
+Wayland). **A wake (mpv eventfd) only flags**;
 after every dispatch the loop syncs pending graph changes to the sources and, if woken,
 updates them (textures, events) — never animation or recipes (ticking on wakes
 self-sustains: every gain push's reply wakes the fd). Handlers run inside the client's
@@ -1068,10 +1084,15 @@ gives byte-identical captures (`stepped_is_deterministic`: two servers, FrameInd
 markers 9 and 60 at 0.304 s and 2.032 s). Audio is silent in stepped mode (mpv paused).
 
 **Outputs (`OutputBackend`, R46).** `kind/outputs/take_changes/target/picture/present/
-as_headless_mut`. `Headless`: `VIRTUAL-1…n` in `--outputs` order, each an RGBA8 texture +
-FBO; `present` is a no-op, `capture` reads `picture`. Hotplug (`apply_output_changes`,
-after every dispatch and in the `headless.*` handlers) creates/destroys `out:<name>` (+ its
-main layer, `name/width/height/refresh_hz`):
+as_headless_mut`, plus (Task 13, defaulted for headless) `paced/frame_state/process/
+take_redraws/set_layer/take_pointer/as_wayland_mut`. `OutputInfo` carries `hz` (rounded)
+and `refresh_mhz` (exact); `OutputChange` is `Added | Removed | Changed` (size/refresh →
+read-only props via `set_observed`, `output.changed`). `Headless`: `VIRTUAL-1…n` in
+`--outputs` order, each an RGBA8 texture + FBO; `present` is a no-op, `capture` reads
+`picture`; it composes every output on every tick (not paced). Hotplug
+(`apply_output_changes` — `backend.process(gfx)` first —, after every dispatch and in the
+`headless.*` handlers) creates/destroys `out:<name>` (+ its main layer,
+`name/width/height/refresh_hz`); Wayland hotplug runs exactly this path:
 
 - **Added (R59):** the new output **joins the live transition covering the first other
   output** (`Transitions::adopt_output`, `transition.output_adopted`): it becomes one of
@@ -1168,7 +1189,7 @@ note on stderr and exits 0 (or stdout closes).
 | `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}`; `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
 | `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
-| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz}], backend, sources (hosted ids), parked}` | — | `ctl state` |
+| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
 | `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
 | `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
@@ -1189,7 +1210,10 @@ full), `io` (capture write, ctl connect).
 cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
 (runtime, `position` is debug-level ~10 Hz, every change in stepped mode),
 `source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
-(host), `transition.output_adopted`, `output.added|removed`, `anim.start|done|dropped`,
+(host), `transition.output_adopted`, `output.added|removed|changed|layer_failed|
+present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|layer|
+gl_error|duplicate_output|pointer_error`, `input.pointer` (debug), `loop.failed`,
+`anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
 `step.timeout`, `mpv.reaped`, `mpv.reaper_stragglers`, `effects.missing`,
 `compose.failed` — i.e. every event-log kind
@@ -1218,8 +1242,12 @@ total_ms}, max_busy_ms (longest synchronous stretch since the last
 `args: {"reset": true}`), max_busy_excl_open_ms + max_open_ms (the same with the
 synchronous source opens taken out / those opens alone — `MpvSource::open` is still
 synchronous on the loop, ms-scale), iterations, wakes, wake_pending, wake_fds, clients,
-subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`. A new probe = a file here +
-one `PROBES` entry.
+subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`; `frames` (Task 13,
+`probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000), outputs:
+[{name, hz, refresh_mhz, period_ms, idle, frame_pending, since_present_ms, paced {count,
+mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
+missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
+Wayland → Frame pacing). A new probe = a file here + one `PROBES` entry.
 
 **Isolation (`api/server.rs`).** Non-blocking, edge-triggered client sockets; per wake a
 client gets ≤ 256 KiB read and ≤ 32 requests handled (the rest next iteration, round
@@ -1242,3 +1270,148 @@ worst reply stays < 500 ms during a 40 000-request flood).
 4. `ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'` — look at the picture.
 5. Reproduce deterministically: `serve --headless --clock stepped --ao null`, replay the
    commands, `step`, `capture`.
+
+## Wayland
+
+`src/wl.rs` + `src/redraw.rs` + `src/probe/frames.rs` (spec §4.2 "Output", §5.1
+"Graphics"; Task 13). `lp-player serve` without `--headless` draws the wallpaper on every
+monitor of `$WAYLAND_DISPLAY` (a `wlr-layer-shell` compositor: Hyprland, Sway, …).
+
+**Backend.** `Wayland::connect()` (sctk 0.21, `default-features = false, features =
+["calloop"]` — no xkbcommon, a keyboard is never used) binds `wl_compositor`,
+`zwlr_layer_shell_v1` (missing → `Err` naming the compositors that have it and
+`--headless`), `wp_cursor_shape_manager_v1` (optional), sctk's `OutputState`/`SeatState`,
+then does two roundtrips (output info → surfaces created; first configures). Then
+`Gfx::new_wayland(display_ptr)` — **one EGL context for every output and every source**
+(R17 `Rc<Shared>`; mpv renders through it as before). The event queue goes into the loop as
+a `calloop_wayland_source::WaylandSource` (it flushes + `prepare_read`s before each sleep,
+so events EGL's own queue reads off the socket are never stranded); its callback dispatches
+into `Wayland::state` via `as_wayland_mut`. **sctk handlers only record** (outputs,
+configures, frame callbacks, pointer); GPU work and graph changes run after the dispatch:
+`apply_output_changes` (`backend.process(gfx)` → hotplug), `pointer_events`, `render_paced`.
+
+**One surface per `wl_output`** (`WlState::make_surface`):
+
+| what | value |
+|---|---|
+| namespace | `lp-player` (`hyprctl layers`) |
+| layer | `out:<c>.layer` (`background` default, `bottom`, `top`, `overlay`) — **live**: `set_layer` + a bare commit (layer-shell v2+; on v1 the surface is re-created) |
+| anchor / size | all four edges, size 0×0 → the compositor's configure size (× integer `wl_output` scale via `set_buffer_scale`) |
+| exclusive zone | −1 (covers the whole output, ignores bars' zones) |
+| keyboard | none |
+| input region | default = the whole surface (pointer accepted) |
+| opaque region | the whole surface (every pixel is written with alpha 1) |
+
+Names come from `wl_output` v4 `name` (`output_name`: `.`/`:`/`*`/spaces → `-`; none →
+`WL-<global id>`); size = the current mode rotated by the transform (`oriented_dims`);
+`refresh_hz` = the current mode's mHz rounded (`hz_from_mhz`: 143 981 → 144, 239 760 →
+240, 0 → 60), `refresh_mhz` exact. A size from the first configure that differs (scale) →
+`OutputChange::Changed`. Fractional scaling (`wp_fractional_scale_v1` + viewporter) is not
+implemented: a fractional output renders at the ceiling integer scale (the owner's
+outputs are scale 1). Pure mappings are unit-tested in `wl.rs`.
+
+**Rendering + present.** Each output owns an offscreen RGBA8 texture + FBO (`target`:
+`Composer::compose_output` draws there; also `picture` → `capture`) and a `WindowTarget`
+(swap interval 0) built in `process(gfx)` once the surface is configured (resized in place
+on a new size; a failed build isn't retried at the same size). `present`: make the window
+current, disable scissor + full viewport (compose leaves them at its last sub-rect),
+`glDrawBuffer(GL_BACK)`, blit FBO → back buffer, clear **alpha only** to 1 (the composite
+is premultiplied over transparent black, so its RGB already is the picture over black),
+request a frame callback, `eglSwapBuffers` (= attach + full damage + commit). The output
+is `ready` (`FrameState`) again when that callback arrives.
+
+**Frame pacing + redraw policy (decided — `redraw.rs`).** Every output presents on its own
+frame callbacks at its own refresh; nothing waits on another output. An output that can
+take a frame is drawn only if, since its last present: `Graph::picture_rev` moved (any
+create/destroy/non-gain set — conservative, wakes every output once), a source it shows
+(main-layer content or either effect side) has a new texture (`SourceHost::take_changed`),
+the backend asked (configure/resize/re-created surface), **or something animates** (a
+started, unfinished animation on a non-gain path — transitions, opacity ramps): then it
+presents on *every* callback, even between two animator ticks. Otherwise it is **idle** —
+no frame drawn, no callback requested, `frames` probe `idle: true` — so a static colour or
+image costs nothing, and a playing video presents at its own frame rate (each frame at the
+next refresh — same latency as redrawing every vblank, without the duplicates). The
+animator timer (R47) still ticks at the max output Hz (≈ 23 µs per idle tick measured, ~0 %
+CPU). Headless keeps composing every tick (`paced() == false`).
+
+**`frames` probe** (`probe/frames.rs`, rolling 2 s windows per output): `paced` = intervals
+between presents made back to back (the second drawn on the first one's callback, no idle
+in between) → mean/p50/p95/max/count + `missed` (> 1.5 refresh periods); `all` = every
+interval + `fps`; `idle`, `frame_pending`, totals (`presents`, `callbacks`, `missed`,
+`idle_gaps`). Measured on the owner's machine (`outputs.sh`, release build, background
+layer, the owner's windows covering it):
+
+| source (two runs) | DP-1 (143.981 Hz) paced mean / p95 / max | DP-2 (239.76 Hz) paced mean / p95 / max |
+|---|---|---|
+| opacity animation | 6.942, 6.946 / 7.77, 7.24 / 9.9, 8.1 ms; 0, 0 missed of 288 | 4.169, 4.171 / 4.78, 4.42 / 6.7, 5.5 ms; 3, 0 missed of 480 |
+| 240 fps test clip | 6.945, 6.947 / 7.93, 7.67 / 14.5, 8.4 ms; 3, 0 missed | 4.203, 4.176 / 4.91, 4.51 / 11.5, 5.6 ms; 4, 0 missed |
+| 60 fps test clip | 60.0 presents/s (content-paced, idle between frames) | 60.0 presents/s |
+| static colour | idle, 0 presents/s | idle, 0 presents/s |
+
+(Run 1 ran while another lane's test suite was busy on the machine — its outliers.)
+Hyprland keeps sending frame callbacks to fully covered surfaces (a full-screen top-layer
+surface on DP-1, a fullscreen window on DP-2): pacing above was measured that way.
+
+**Hotplug.** A new `wl_output` → a surface + `OutputChange::Added`; a removed one →
+`Removed`, its GPU side moved to a dead list and freed in `process` with the context made
+current **surfaceless** (`Gfx::make_current_surfaceless`, so `eglDestroySurface` is immediate
+and the FBO/texture deletes have a context), window target before its `wl_surface` (field
+order `gl` then `surface`). A `closed` layer surface whose output stays is re-created
+(`wl.surface_recreated`). The runtime runs the **same** add/remove path as headless
+hotplug (§ Runtime → Outputs: R59 adopt into a live transition, else `cur:` of the first
+output that has one — the same-wallpaper default the brief asks for —, else unpark; R60
+retire/park), plus `redraw.forget` + fresh `FrameStats`. A new output's `layer` starts at
+`background` (output props don't survive an unplug; the backend re-sends settings).
+
+**Pointer.** sctk `PointerHandler`: enter/leave/motion/press/release on our surface →
+`PointerSample {output, x, y, buttons}` (surface pixels = logical × scale; buttons: bit 0
+left, 1 right, 2 middle, 3 side, 4 extra; leave clears buttons, keeps x/y) → the runtime
+`set_observed`s `out:<c>.pointer` (never a picture change, never forwarded to sources yet —
+Phase 2's mouse-reactive scenes read it) and `input.pointer {output, event, x, y, buttons,
+button, suppressed}` is logged at debug (motion ≤ 10/s per output; `suppressed` counts the
+rest). On enter the cursor is set to the default shape (`wp_cursor_shape_v1`), else the
+compositor keeps whatever cursor it had. Axis events are ignored.
+
+**NVIDIA / EGL notes (595.84, egl-wayland, Hyprland 0.56.2 — measured).**
+- **`glDrawBuffer(GL_BACK)` before writing FBO 0.** `Gfx::new_wayland` makes the context
+  current surfaceless first; per `EGL_KHR_surfaceless_context` the default framebuffer's
+  draw/read buffers then start as `GL_NONE` and stay so when a window surface is bound —
+  every blit/clear to FBO 0 was silently dropped (back buffer read back `[0,0,0,0]`, the
+  surface showed nothing, no GL error). `present` sets it every time.
+- **`eglCreatePlatformWindowSurface` attrib list must be `ATTRIB_NONE`-terminated**:
+  khronos-egl rejects an empty slice as `EGL_BAD_PARAMETER` (the Task 7 code passed `&[]`;
+  fixed in `Gfx::window_target`).
+- **Swap interval 0** on every window (`WindowTarget::set_swap_interval`): with the
+  default 1, `eglSwapBuffers` on the 144 Hz output would block the single loop thread and
+  drag the 240 Hz output down; pacing is ours (frame callbacks).
+- **Explicit sync is egl-wayland's business**: it binds `wp_linux_drm_syncobj_manager_v1`
+  (and `wp_fifo_manager_v1`, `wp_commit_timing_manager_v1`) and sets an acquire point per
+  swap (seen with `WAYLAND_DEBUG=1`); nothing to do here. **Damage:** every present redraws
+  the whole surface and `eglSwapBuffers` posts full damage — no buffer-age/partial damage.
+- The EGL config has alpha 8, so the buffer is ARGB: alpha is forced to 1 at present (and
+  the opaque region set) so the compositor never blends what's below the wallpaper.
+
+**`tests/onmachine/outputs.sh` (run manually, exit 0 = pass; Hyprland + DP-1/DP-2 by
+default, `OUT_A`/`OUT_B`/`HZ_*`/`MEAN_*`/`TOL_MS` to adapt).** Builds the release binary
+(or `LP_PLAYER_BIN`), makes synthetic ffmpeg clips, stops the legacy wallpaper (`/stop`,
+waits for no `mpvpaper`), then runs `serve --ao null` with a **private
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME`** (its own socket + instance lock — lanes running
+`serve --headless` are unaffected) and an **absolute** `WAYLAND_DISPLAY`
+(`$XDG_RUNTIME_DIR/wayland-1` of the session; `hyprctl`/`grim` keep the real runtime dir).
+Checks: `hello.backend == wayland`; `out:DP-1` 144 Hz, `out:DP-2` 240 Hz; our namespace on
+the background level (`hyprctl layers -j`); red/blue `lay:<c>:main.content` → `out:*.layer
+= overlay` (the owner's windows cover the background) → `grim -o <c>` centre pixels →
+pointer (cursor warped over DP-1 → `out:DP-1.pointer` = `[960,540,0]` then `[100,200,0]`,
+`input.pointer` enter+motion) → back to `background`, level verified; static colour idle;
+pacing with an opacity animation and a 240 fps clip (6.9 ± 0.5 / 4.2 ± 0.5 ms, ≥ 50
+samples); a 60 fps clip ≈ 60 presents/s; hotplug: `hyprctl eval 'hl.monitor({ output =
+"DP-1", disabled = true })'` (this Hyprland has a Lua config: **`hyprctl keyword` is
+refused** — "keyword can't work with non-legacy parsers. Use eval." — and re-enabling needs
+an explicit **`disabled = false`**) → `out:DP-1` gone, player alive → re-enabled with the
+**recorded** mode/position/scale (never `preferred,auto`) → `out:DP-1` back showing
+`cur:DP-2`, pixel verified, layout identical to the record; `ctl quit` → exit 0. **Safety:**
+an `EXIT` trap restores the focused monitor + cursor, kills `serve` (no lp-player layer may
+remain — checked), re-applies any monitor that differs from the record with its exact
+values and verifies `hyprctl monitors -j` matches, and moves workspaces back to their
+recorded monitors. Socket paths must stay < 108 bytes: the script uses `mktemp` in
+`$TMPDIR`/`/tmp`, not a long scratch path.
