@@ -608,7 +608,8 @@ impl MpvSource {
             ReqKind::Gain => {
                 self.gain_inflight = false;
                 if error < 0 {
-                    self.pending.push(SourceEvent::Error {
+                    self.pending.push(SourceEvent::Rejected {
+                        prop: "gain".into(),
                         reason: format!("{}: {}", req.what, error_string(error)),
                     });
                 }
@@ -636,15 +637,14 @@ impl MpvSource {
                     self.prop_req.remove(&prop);
                 }
                 if error < 0 {
+                    let reason = format!("{}: {}", req.what, error_string(error));
                     if newest {
                         match prev {
-                            Some(p) => self.props.insert(prop, p),
+                            Some(p) => self.props.insert(prop.clone(), p),
                             None => self.props.remove(&prop),
                         };
                     }
-                    self.pending.push(SourceEvent::Error {
-                        reason: format!("{}: {}", req.what, error_string(error)),
-                    });
+                    self.pending.push(SourceEvent::Rejected { prop, reason });
                 }
             }
         }

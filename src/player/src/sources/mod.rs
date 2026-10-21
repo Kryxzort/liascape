@@ -38,8 +38,13 @@ pub enum SourceEvent {
     Ended,
     /// Playback position in seconds (rate-limited to ~10 Hz).
     Position(f64),
-    /// Loading or decoding failed; `reason` names the path.
+    /// Loading or decoding failed (or the source can't run at all); `reason` names the
+    /// path. The source is broken until something changes.
     Error { reason: String },
+    /// A property write was refused (synchronously by `apply`, or later by mpv's async
+    /// reply) and reverted; the source itself is fine and keeps playing (R45). `prop` is
+    /// the graph property (`gain` for the summed gain push).
+    Rejected { prop: String, reason: String },
 }
 
 /// One frame producer. Property names and value types are the graph's `Source` schema

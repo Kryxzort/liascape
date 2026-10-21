@@ -39,6 +39,10 @@ pub const FRAME: Duration = Duration::from_micros(33_333);
 /// Pumping at exactly the clips' 30 fps aliases with mpv's frame timing and drops frames;
 /// a real output refreshes at ≥ 60 Hz.
 pub const TICK_WAIT: Duration = Duration::from_micros(16_667);
+/// The shortest gap between ticks. Without it a gain ramp turns into a tick storm: every
+/// gain push gets an mpv reply, the reply wakes the fd, the next tick pushes again
+/// (measured: ~650 ticks in 30 ms).
+pub const MIN_TICK: Duration = Duration::from_millis(2);
 
 pub struct Harness {
     pub gfx: Gfx,
@@ -137,6 +141,10 @@ impl Harness {
 
     /// One iteration, the clock step capped at `cap` (R33).
     pub fn tick_capped(&mut self, cap: Option<Duration>) {
+        let since = self.last_wall.elapsed();
+        if since < MIN_TICK {
+            std::thread::sleep(MIN_TICK - since);
+        }
         let since = self.last_wall.elapsed();
         if since < TICK_WAIT {
             wait_fds(&self.host.wake_fds(), TICK_WAIT - since);

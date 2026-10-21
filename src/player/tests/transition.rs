@@ -259,24 +259,52 @@ fn align_end_full_live() {
     // Ground truth for "A's end" is A's own `Ended`. The start instant is fixed now; show
     // A on VIRTUAL-2 too, so the handoff keeps it alive (a source still shown elsewhere is
     // never destroyed) and its end can be observed.
+    // A's end = its `Ended`, or — once the handoff has restored its loop (R43, below) —
+    // the wrap into its next iteration: whichever comes first marks the boundary.
     h.show("VIRTUAL-2", &a);
-    let c = corr.clone();
-    let ok = h.tick_until(MS(4000), |h| {
-        h.src_event_at(&a, |e| *e == SourceEvent::Ended).is_some()
-            && h.event(&c, "transition.handoff").is_some()
-    });
-    assert!(ok, "A never ended / no handoff: {:?}", h.tr_events);
-    let ended = ms(h.src_event_at(&a, |e| *e == SourceEvent::Ended).unwrap());
+    let mut last_tp = h.f64(&format!("{a}.time_pos"));
+    let mut wrapped_at = None;
+    while h.event(&corr, "transition.handoff").is_none()
+        || (h.src_event_at(&a, |e| *e == SourceEvent::Ended).is_none() && wrapped_at.is_none())
+    {
+        assert!(
+            h.now() < t_req + MS(8000),
+            "A never ended / no handoff: {:?}",
+            h.tr_events
+        );
+        h.tick();
+        let tp = h.f64(&format!("{a}.time_pos"));
+        if wrapped_at.is_none() && tp + 0.5 < last_tp {
+            wrapped_at = Some(ms(h.now()));
+        }
+        last_tp = tp;
+    }
+    let ended = h
+        .src_event_at(&a, |e| *e == SourceEvent::Ended)
+        .map(ms)
+        .into_iter()
+        .chain(wrapped_at)
+        .fold(f64::INFINITY, f64::min);
     let handoff = h.event(&corr, "transition.handoff").expect("handoff");
     println!(
-        "align_end_full_live: progress=1 − A's Ended = {:+.1} ms (handoff tick {:+.1} ms)",
+        "align_end_full_live: progress=1 − A's end = {:+.1} ms (handoff tick {:+.1} ms)",
         progress_one - ended,
         handoff.at_ms - ended
     );
     assert!(
         (progress_one - ended).abs() <= 33.4,
-        "fx.progress reaches 1 at {progress_one:.1} ms, A's Ended at {ended:.1} ms"
+        "fx.progress reaches 1 at {progress_one:.1} ms, A's end at {ended:.1} ms"
     );
+    // R43: A is still shown on VIRTUAL-2, so the handoff gives it back — playing, audible,
+    // its own loop — instead of leaving it faded out with the End's loop change.
+    let th = from_ms(handoff.at_ms);
+    h.tick_to(th + MS(30));
+    h.tick();
+    assert!(h.exists(&a), "A still shown on VIRTUAL-2: never destroyed");
+    assert!(!h.bool(&format!("{a}.paused")), "A plays on VIRTUAL-2");
+    assert!(h.bool(&format!("{a}.loop")), "A's own loop is back");
+    close(h.gain(&a), 0.0, 1e-9, "A audible again on VIRTUAL-2");
+    assert_eq!(h.cur("VIRTUAL-2"), vec![a.clone()]);
 }
 
 #[test]
@@ -457,7 +485,15 @@ fn rapid_interrupt_chain() {
         return;
     };
     h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
-    let targets = [blue10(), green10()];
+    // Videos load in ~100 ms (so a start 100 ms later mostly supersedes); a colour is
+    // ready in one tick (so the next start commits it) — both paths get exercised.
+    let targets = [
+        json!({"path": s(&blue10()), "loop": true}),
+        json!({"kind": "color", "color": [0, 255, 0]}),
+        json!({"path": s(&green10()), "loop": true}),
+    ];
+    // Offset so the 10th (the one left to finish) is a held method (reveal): R38's
+    // "paused only while held" is exercised through a natural handoff too.
     let methods = ["full-live", "reveal", "frozen"];
 
     let check = |h: &Harness, when: &str| {
@@ -480,8 +516,8 @@ fn rapid_interrupt_chain() {
     let mut last_b = String::new();
     for i in 0..10 {
         let corr = h.start(json!({
-            "outputs": "out:*", "to": {"path": s(&targets[i % 2]), "loop": true},
-            "effect_id": "fade", "duration_ms": 1000, "method": methods[i % 3]
+            "outputs": "out:*", "to": targets[i % 3],
+            "effect_id": "fade", "duration_ms": 1000, "method": methods[(i + 1) % 3]
         }));
         last_b = h.to_of(&corr);
         let until = h.now() + MS(100);
@@ -495,6 +531,30 @@ fn rapid_interrupt_chain() {
         h.tr.status().is_empty()
     });
     assert!(ok, "the chain never settled: {:?}", h.tr.status());
+    let commits = h
+        .tr_events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                TransitionEventKind::Handoff {
+                    committed: true,
+                    ..
+                }
+            )
+        })
+        .count();
+    let supersedes = h
+        .tr_events
+        .iter()
+        .filter(|e| matches!(&e.kind, TransitionEventKind::Cancelled { reason } if reason == "superseded"))
+        .count();
+    println!("rapid_interrupt_chain: {commits} commits, {supersedes} supersedes");
+    assert!(commits >= 1, "no start ever committed a running transition");
+    assert!(
+        supersedes >= 1,
+        "no start ever superseded a waiting transition"
+    );
     h.tick();
     assert_eq!(
         h.cur("*"),
@@ -670,12 +730,23 @@ fn shared_a_untouched() {
         );
     };
     let mut held: Option<(String, u8)> = None;
+    // A's frame when the snapshot node appeared: the host copies A's texture as it stands
+    // at the end of that iteration (next `sync`, before any new frame renders).
+    let mut copied_from: Option<(String, u8)> = None;
     let mut a_corners = Vec::new();
     let mut v2_corners = Vec::new();
     while h.event(&corr, "transition.done").is_none() {
         assert!(h.now() < MS(30_000), "never done: {:?}", h.tr_events);
         h.tick();
         untouched(&h, "during");
+        if copied_from.is_none()
+            && let Some(sn) = h
+                .sources()
+                .into_iter()
+                .find(|s| h.str(&format!("{s}.kind")) == "snapshot")
+        {
+            copied_from = Some((sn, h.corner(&a).unwrap()));
+        }
         a_corners.push(h.corner(&a).unwrap());
         v2_corners.push(h.out_corner("VIRTUAL-2")[0]);
         let content = h.content("VIRTUAL-1");
@@ -688,7 +759,15 @@ fn shared_a_untouched() {
             assert_eq!(h.str(&format!("{from}.kind")), "snapshot");
             let c = h.corner(&from).expect("snapshot texture");
             match &held {
-                None => held = Some((from, c)),
+                None => {
+                    let (sn, at_copy) = copied_from.clone().expect("snapshot seen");
+                    assert_eq!(sn, from);
+                    assert_eq!(
+                        c, at_copy,
+                        "the snapshot is A's frame at the hold instant (marker {at_copy})"
+                    );
+                    held = Some((from, c));
+                }
                 Some((id, c0)) => {
                     assert_eq!(id, &from);
                     assert_eq!(c, *c0, "VIRTUAL-1's held picture changed");
@@ -796,4 +875,440 @@ fn cancel_waiting_restores_a() {
     assert!(h.bool(&format!("{a}.loop")), "supersede restores A's loop");
     h.wait_event(&second, "transition.done", MS(5000));
     assert_eq!(h.cur("*"), vec![h.to_of(&second)]);
+}
+
+/// R41 (fix round 1 #1): a restore puts a gain back to the TARGET of the animation that
+/// was moving it when it was recorded, never to the mid-ramp value. T1 (frozen) hands off
+/// — B1's anticlick ramps −96 → 0 dB over 30 ms — and 5 ms later T2 (a colour, ready in
+/// one tick; a cut, which records B1's anticlick before ramping it down) begins; T2 is
+/// cancelled → B1 must end at 0 dB, not the −15.6 dB it was at.
+#[test]
+fn restore_targets_not_mid_ramp() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let t1 = h.start(json!({
+        "outputs": "out:*", "to": {"path": s(&idx(300)), "loop": true},
+        "effect_id": "fade", "duration_ms": 300, "method": "frozen"
+    }));
+    let b1 = h.to_of(&t1);
+    let th = from_ms(h.wait_event(&t1, "transition.handoff", MS(5000)).at_ms);
+    let t2 = h.start(json!({
+        "outputs": "out:*", "to": {"kind": "color", "color": [0, 255, 0]},
+        "effect_id": null
+    }));
+    h.tick_to(th + MS(5));
+    assert!(
+        h.event(&t2, "transition.started").is_some(),
+        "T2 began 5 ms after T1's handoff: {:?}",
+        h.tr_events
+    );
+    let mid = h.f64(&format!("{b1}.gain.anticlick"));
+    assert!(
+        mid > SILENT_DB && mid < -3.0,
+        "B1's ramp-in was mid-way: {mid} dB"
+    );
+    h.cancel(&t2);
+    let tc = h.now();
+    h.tick_to(tc + MS(40));
+    close(
+        h.f64(&format!("{b1}.gain.anticlick")),
+        0.0,
+        1e-9,
+        "B1's anticlick back to its target, not the recorded mid-ramp value",
+    );
+    close(h.gain(&b1), 0.0, 1e-9, "B1 fully audible");
+    assert_eq!(h.cur("VIRTUAL-1"), vec![b1]);
+}
+
+/// R34 (fix round 1 #2a): `align: end` on a shared looping A (VIRTUAL-1 + VIRTUAL-2),
+/// transition on VIRTUAL-1 only. full-live ends — frozen starts — at A's iteration
+/// boundary (± 1 frame); A's loop never changes; A is never paused, silenced or destroyed
+/// and stays current (and audible) on VIRTUAL-2. Frozen holds A's last frame.
+#[test]
+fn shared_a_align_end_boundary() {
+    for method in ["full-live", "frozen"] {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1", "VIRTUAL-2"]) else {
+            return;
+        };
+        let a = h.play(&idx(90), json!({"loop": true}), &["VIRTUAL-1", "VIRTUAL-2"]);
+        let g0 = h.gain(&a);
+        let corr = h.start(json!({
+            "outputs": "out:VIRTUAL-1", "to": {"path": s(&blue10()), "loop": true},
+            "effect_id": "fade", "duration_ms": 1000, "method": method, "align": "end"
+        }));
+        let b = h.to_of(&corr);
+        // The visible boundary: the tick A's texture goes from its last frame to frame 0
+        // (mpv's time_pos drops a frame earlier, while the last frame is still shown).
+        let mut wraps = Vec::new();
+        let mut last_c = h.corner(&a).unwrap();
+        let mut held_marker = None;
+        while h.event(&corr, "transition.done").is_none() {
+            assert!(
+                h.now() < MS(30_000),
+                "{method}: never done: {:?}",
+                h.tr_events
+            );
+            h.tick();
+            assert!(h.exists(&a), "{method}: A destroyed");
+            assert!(!h.bool(&format!("{a}.paused")), "{method}: A paused");
+            assert!(h.bool(&format!("{a}.loop")), "{method}: A's loop changed");
+            assert_eq!(h.gain(&a), g0, "{method}: A's gain changed");
+            assert_eq!(
+                h.cur("VIRTUAL-2"),
+                vec![a.clone()],
+                "{method}: A left VIRTUAL-2"
+            );
+            let c = h.corner(&a).unwrap();
+            if c < 10 && last_c > 80 {
+                wraps.push(ms(h.now()));
+            }
+            last_c = c;
+            let fx = h.content("VIRTUAL-1");
+            if held_marker.is_none() && h.str(&format!("{fx}.effect_id")) == "fade" {
+                let from = h.str(&format!("{fx}.from"));
+                if from != a {
+                    held_marker = h.corner(&from);
+                }
+            }
+        }
+        // The effect can finish a moment before the visible wrap: keep watching A.
+        let watch_end = h.now() + MS(300);
+        while h.now() < watch_end {
+            h.tick();
+            let c = h.corner(&a).unwrap();
+            if c < 10 && last_c > 80 {
+                wraps.push(ms(h.now()));
+            }
+            last_c = c;
+        }
+        let started = h.event(&corr, "transition.started").unwrap();
+        let instant = if method == "full-live" {
+            ms(start_of(&started)) + 1000.0 // the effect ENDS at the boundary
+        } else {
+            started.at_ms // the effect STARTS at the boundary
+        };
+        let err = wraps
+            .iter()
+            .map(|w| instant - w)
+            .min_by(|x, y| x.abs().total_cmp(&y.abs()))
+            .unwrap_or_else(|| panic!("{method}: A never wrapped"));
+        println!("shared_a_align_end_boundary {method}: instant − A's visible wrap = {err:+.1} ms");
+        assert!(
+            err.abs() <= 33.4,
+            "{method}: {err:+.1} ms from A's iteration boundary"
+        );
+        if method == "frozen" {
+            let m = held_marker.expect("frozen holds a snapshot of the shared A");
+            assert!(
+                (87..=90).contains(&m),
+                "frozen holds A's last frame (89 ± 1), got {m}"
+            );
+        }
+        h.tick();
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b]);
+        assert_eq!(h.cur("VIRTUAL-2"), vec![a.clone()]);
+        assert!(!h.bool(&format!("{a}.paused")) && h.bool(&format!("{a}.loop")));
+    }
+}
+
+/// Invariant #6 (fix round 1 #2b): a start on an output whose transition is Running
+/// commits it, for every method — T1's B unpaused at once, its xfade/anticlick at 0 dB
+/// within 30 ms (rising monotonically), a frozen B released from its hold (advances); T1's
+/// A ramped out from where it was (monotone, no jump) and destroyed. T2 waits on B's end
+/// (seconds away), so it touches nothing on B while the commit ramps run.
+#[test]
+fn commit_running_each_method() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    for method in ["full-live", "reveal", "frozen"] {
+        let a = h.cur("VIRTUAL-1")[0].clone();
+        let t1 = h.start(json!({
+            "outputs": "out:*", "to": {"path": s(&idx(300)), "loop": true},
+            "effect_id": "fade", "duration_ms": 1000, "method": method
+        }));
+        let b = h.to_of(&t1);
+        let t0 = start_of(&h.wait_event(&t1, "transition.started", MS(5000)));
+        h.tick_to(t0 + MS(300));
+        let a_gain0 = h.gain(&a);
+        let b_corner0 = h.corner(&b).unwrap();
+        let t2 = h.start(json!({
+            "outputs": "out:*", "to": {"kind": "color", "color": [0, 255, 0]},
+            "effect_id": "fade", "duration_ms": 500, "method": "reveal", "align": "end"
+        }));
+        let tc = h.now();
+        assert!(
+            matches!(
+                h.event(&t1, "transition.handoff").map(|e| e.kind),
+                Some(TransitionEventKind::Handoff {
+                    committed: true,
+                    ..
+                })
+            ),
+            "{method}: T1 committed"
+        );
+        assert_eq!(h.content("VIRTUAL-1"), b, "{method}: B current at once");
+        assert!(
+            !h.bool(&format!("{b}.paused")),
+            "{method}: B unpaused at commit"
+        );
+        let mut a_gain = vec![a_gain0];
+        let mut b_x = vec![h.f64(&format!("{b}.gain.xfade"))];
+        let mut b_ac = vec![h.f64(&format!("{b}.gain.anticlick"))];
+        while h.now() < tc + MS(30) {
+            h.tick_toward(tc + MS(30));
+            if h.exists(&a) {
+                a_gain.push(h.gain(&a));
+            }
+            b_x.push(h.f64(&format!("{b}.gain.xfade")));
+            b_ac.push(h.f64(&format!("{b}.gain.anticlick")));
+        }
+        close(
+            *b_x.last().unwrap(),
+            0.0,
+            1e-9,
+            &format!("{method}: B xfade at +30 ms"),
+        );
+        close(
+            *b_ac.last().unwrap(),
+            0.0,
+            1e-9,
+            &format!("{method}: B anticlick at +30 ms"),
+        );
+        close(h.gain(&b), 0.0, 1e-9, &format!("{method}: B audible"));
+        assert!(
+            b_x.windows(2).all(|w| w[1] >= w[0]),
+            "{method}: B xfade rises: {b_x:?}"
+        );
+        assert!(
+            b_ac.windows(2).all(|w| w[1] >= w[0]),
+            "{method}: B anticlick: {b_ac:?}"
+        );
+        assert!(
+            a_gain.windows(2).all(|w| w[1] <= w[0] + 1e-9),
+            "{method}: A ramps out from where it was: {a_gain:?}"
+        );
+        h.tick();
+        assert!(!h.exists(&a), "{method}: T1's A destroyed");
+        let ok = h.tick_until(MS(1000), |h| {
+            h.corner(&b).is_some_and(|c| c >= b_corner0 + 5)
+        });
+        assert!(ok, "{method}: B plays after the commit");
+        h.cancel(&t2); // T2 turned B's loop off for its End wait; put it back
+        assert!(h.bool(&format!("{b}.loop")));
+        assert!(h.tick_until(MS(1000), |h| h.tr.status().is_empty()));
+    }
+}
+
+/// R35 (fix round 1 #2c): B fails mid-effect → snap back to A with `transition.failed`.
+/// Deterministic failure: B's `path` is swapped live for a missing file mid-effect, so
+/// mpv reports that load's error as B's `Error` (`path` in the event is B's requested
+/// path; `reason` names the file that failed).
+#[test]
+fn b_error_mid_effect_snaps_back() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let a = h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]);
+    for method in ["reveal", "full-live"] {
+        let b_path = s(&blue10()).to_string();
+        let t = h.start(json!({
+            "outputs": "out:*", "to": {"path": b_path, "loop": true},
+            "effect_id": "fade", "duration_ms": 1000, "method": method
+        }));
+        let b = h.to_of(&t);
+        let t0 = start_of(&h.wait_event(&t, "transition.started", MS(5000)));
+        h.tick_to(t0 + MS(200));
+        let fx = h.content("VIRTUAL-1");
+        let from = h.str(&format!("{fx}.from"));
+        let missing = "/nonexistent/lp-player-tr-mid-effect.mkv";
+        h.graph
+            .set(
+                &lp_player::anim::PropPath(format!("{b}.path")),
+                lp_player::graph::PropValue::Str(missing.into()),
+            )
+            .unwrap();
+        let failed = h.wait_event(&t, "transition.failed", MS(3000));
+        match failed.kind {
+            TransitionEventKind::Failed { path, reason } => {
+                assert_eq!(path, b_path, "{method}");
+                assert!(reason.contains(missing), "{method}: reason {reason}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(h.content("VIRTUAL-1"), a, "{method}: back to A");
+        assert!(!h.exists(&fx), "{method}: fx destroyed");
+        if from != a {
+            assert!(!h.exists(&from), "{method}: snapshot destroyed");
+        }
+        assert!(!h.bool(&format!("{a}.paused")), "{method}: A unpaused");
+        let tf = h.now();
+        h.tick_to(tf + MS(30));
+        close(h.f64(&format!("{a}.gain.xfade")), 0.0, 1e-9, method);
+        close(h.f64(&format!("{a}.gain.anticlick")), 0.0, 1e-9, method);
+        close(
+            h.gain(&a),
+            0.0,
+            1e-9,
+            &format!("{method}: A back at its recorded gains"),
+        );
+        h.tick();
+        assert!(!h.exists(&b), "{method}: B destroyed after its ramp-out");
+        assert_eq!(h.sources(), vec![a.clone()]);
+    }
+}
+
+/// R35 (fix round 1 #2d): cancelling reveal / frozen mid-effect → A unpaused, its
+/// anticlick back to 0 dB over 30 ms (monotone), no snapshot left alive, B gone.
+#[test]
+fn cancel_held_methods_restore_a() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let a = h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]);
+    for method in ["reveal", "frozen"] {
+        let t = h.start(json!({
+            "outputs": "out:*", "to": {"path": s(&blue10()), "loop": true},
+            "effect_id": "fade", "duration_ms": 1000, "method": method
+        }));
+        let b = h.to_of(&t);
+        let t0 = start_of(&h.wait_event(&t, "transition.started", MS(5000)));
+        h.tick_to(t0 + MS(200));
+        assert!(
+            h.bool(&format!("{a}.paused")) && h.gain(&a) <= -90.0,
+            "{method}: A held"
+        );
+        let snap = h.str(&format!("{}.from", h.content("VIRTUAL-1")));
+        assert_eq!(h.str(&format!("{snap}.kind")), "snapshot");
+        h.cancel(&t);
+        let tc = h.now();
+        assert_eq!(h.content("VIRTUAL-1"), a, "{method}");
+        assert!(!h.exists(&snap), "{method}: no snapshot left");
+        assert!(!h.bool(&format!("{a}.paused")), "{method}: A unpaused");
+        // A 30 ms linear ramp, not a jump: exactly 1/3 of the way (−9.54 dB) at +10 ms.
+        let mut ac = vec![h.f64(&format!("{a}.gain.anticlick"))];
+        h.tick_to(tc + MS(10));
+        let third = h.f64(&format!("{a}.gain.anticlick"));
+        close(
+            third,
+            -9.542,
+            0.01,
+            &format!("{method}: anticlick at +10 ms"),
+        );
+        ac.push(third);
+        while h.now() < tc + MS(30) {
+            h.tick_toward(tc + MS(30));
+            ac.push(h.f64(&format!("{a}.gain.anticlick")));
+        }
+        assert!(
+            ac.windows(2).all(|w| w[1] >= w[0]),
+            "{method}: ramps up: {ac:?}"
+        );
+        close(
+            *ac.last().unwrap(),
+            0.0,
+            1e-9,
+            &format!("{method}: anticlick at +30 ms"),
+        );
+        close(h.gain(&a), 0.0, 1e-9, method);
+        h.tick();
+        assert!(!h.exists(&b), "{method}: B gone");
+        assert_eq!(h.sources(), vec![a.clone()]);
+    }
+}
+
+/// R42 (fix round 1 #3): with `duration_ms: 0` the picture may cut, but no gain moves
+/// faster than a 30 ms ramp — sampled every 5 ms, the linear amplitude of every source
+/// never changes faster than a sin ramp over 30 ms ((π/2)/30 per ms).
+#[test]
+fn zero_duration_gains_still_ramp_30ms() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let max_slope = std::f64::consts::FRAC_PI_2 / 30.0 * 1.02; // per ms
+    for (method, to) in [("full-live", blue10()), ("reveal", green10())] {
+        let a = h.cur("VIRTUAL-1")[0].clone();
+        let t = h.start(json!({
+            "outputs": "out:*", "to": {"path": s(&to), "loop": true},
+            "effect_id": "fade", "duration_ms": 0, "method": method
+        }));
+        let b = h.to_of(&t);
+        let mut series: Vec<(String, Vec<(f64, f64)>)> =
+            vec![(a.clone(), Vec::new()), (b.clone(), Vec::new())];
+        while h.event(&t, "transition.done").is_none() {
+            assert!(h.now() < MS(30_000), "{method}: never done");
+            let next = h.now() + MS(5);
+            h.tick_to(next);
+            for (id, v) in &mut series {
+                if h.exists(id) {
+                    v.push((ms(h.now()), lp_player::units::db_to_lin(h.gain(id))));
+                }
+            }
+        }
+        for (id, v) in &series {
+            for w in v.windows(2) {
+                let slope = (w[1].1 - w[0].1).abs() / (w[1].0 - w[0].0);
+                assert!(
+                    slope <= max_slope,
+                    "{method}: {id}'s gain moved {:.3} → {:.3} in {:.1} ms (faster than a 30 ms ramp)",
+                    w[0].1,
+                    w[1].1,
+                    w[1].0 - w[0].0
+                );
+            }
+        }
+        close(h.gain(&b), 0.0, 1e-9, &format!("{method}: B at 0 dB"));
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b]);
+    }
+}
+
+/// R45 (fix round 1 #8): a property B refuses mid-transition (`af` mpv rejects
+/// asynchronously; a live `kind` change MpvSource refuses at once) is a `Rejected` event,
+/// not a failure — the transition completes.
+#[test]
+fn rejected_prop_on_b_keeps_transition() {
+    use lp_player::anim::PropPath;
+    use lp_player::graph::PropValue;
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let t = h.start(json!({
+        "outputs": "out:*", "to": {"path": s(&blue10()), "loop": true},
+        "effect_id": "fade", "duration_ms": 600, "method": "full-live"
+    }));
+    let b = h.to_of(&t);
+    let t0 = start_of(&h.wait_event(&t, "transition.started", MS(5000)));
+    h.tick_to(t0 + MS(100));
+    h.graph
+        .set(
+            &PropPath(format!("{b}.af")),
+            PropValue::Str("no_such_filter_lp".into()),
+        )
+        .unwrap();
+    h.graph
+        .set(
+            &PropPath(format!("{b}.kind")),
+            PropValue::Str("image".into()),
+        )
+        .unwrap();
+    h.wait_event(&t, "transition.done", MS(3000));
+    assert!(
+        h.event(&t, "transition.failed").is_none(),
+        "{:?}",
+        h.tr_events
+    );
+    for prop in ["af", "kind"] {
+        assert!(
+            h.src_events.iter().any(|(_, id, e)| id == &b
+                && matches!(e, SourceEvent::Rejected { prop: p, .. } if p == prop)),
+            "B's refused {prop} is reported as Rejected: {:?}",
+            h.src_events
+        );
+    }
+    assert_eq!(h.cur("VIRTUAL-1"), vec![b]);
 }

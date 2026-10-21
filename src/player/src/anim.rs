@@ -268,6 +268,19 @@ impl Animator {
             .find(|e| &e.anim.target == path && e.anim.start <= t)
             .map(|e| e.anim.emitted_value(t))
     }
+
+    /// The value the animation on `path` ends at (what it emits at its own end — for a
+    /// `GainLinear` animation, that end in dB), whether it has started, is running, or has
+    /// finished and is holding it. `None` when nothing animates `path` (never added, or
+    /// cancelled/superseded away). R41: a recipe that records a property to restore it
+    /// later records *this* when an animation is in flight, not the instantaneous value —
+    /// otherwise a restore lands mid-ramp and leaves the property there for good.
+    pub fn target_of(&self, path: &PropPath) -> Option<f64> {
+        self.entries
+            .iter()
+            .find(|e| &e.anim.target == path)
+            .map(|e| e.anim.emitted_value(e.anim.end()))
+    }
 }
 
 #[cfg(test)]
@@ -316,6 +329,40 @@ mod tests {
         assert_eq!(Curve::Step.eval(1.0), 1.0);
         assert_eq!(Curve::Step.eval(1.5), 1.0);
         assert_eq!(Curve::Linear.eval(-0.3), 0.0);
+    }
+
+    #[test]
+    fn target_of_is_the_end_value() {
+        let mut a = Animator::new();
+        let p = PropPath("src1.progress".to_string());
+        assert_eq!(a.target_of(&p), None);
+        a.add(anim("src1.progress", 0.2, 0.9, 100, 1000, Curve::Linear));
+        // Before it starts, mid-way, and after it finished: always the end value.
+        let near = |v: Option<f64>| v.is_some_and(|v| (v - 0.9).abs() < 1e-12);
+        assert!(near(a.target_of(&p)));
+        a.tick(Duration::from_millis(600));
+        assert!(near(a.target_of(&p)), "mid-way");
+        a.tick(Duration::from_millis(5000));
+        assert!(near(a.target_of(&p)), "finished, holding");
+
+        // GainLinear: the end in dB; an equal-power-out from 0 to k ends at k·cos(π/2) = 0
+        // → silent, a ramp in to 1.0 ends at 0 dB.
+        let g = PropPath("src1.gain.xfade".to_string());
+        a.add(Animation {
+            unit: AnimUnit::GainLinear,
+            ..anim("src1.gain.xfade", 0.0, 0.5, 0, 1000, Curve::EqualPowerOut)
+        });
+        assert_eq!(a.target_of(&g), Some(SILENT_DB));
+        a.add(Animation {
+            unit: AnimUnit::GainLinear,
+            ..anim("src1.gain.xfade", 0.1, 1.0, 0, 30, Curve::Linear)
+        });
+        assert!(
+            a.target_of(&g).unwrap().abs() < 1e-12,
+            "superseding ramp ends at 0 dB"
+        );
+        a.cancel_target(&g);
+        assert_eq!(a.target_of(&g), None);
     }
 
     #[test]

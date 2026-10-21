@@ -22,7 +22,11 @@ use crate::graph::{Graph, NodeKind};
 use crate::log::{self, Level};
 
 /// Observed values mirrored into the graph after every `update` (`Graph::set_observed`).
-const MIRRORED: [&str; 6] = ["ready", "duration", "time_pos", "width", "height", "paused"];
+/// `kind` too: an `MpvSource` infers image/video from the file (and corrects it after
+/// load), and recipes decide what is a still by it.
+const MIRRORED: [&str; 7] = [
+    "kind", "ready", "duration", "time_pos", "width", "height", "paused",
+];
 
 struct Hosted {
     src: Box<dyn Source>,
@@ -56,8 +60,9 @@ impl SourceHost {
     ///    props (`kind` `color` → [`ColorSource`], `snapshot` → [`SnapshotSource`] of
     ///    `of`'s current texture, anything else → [`MpvSource`]);
     /// 3. forward each change addressed to a hosted source to [`Source::apply`] — except
-    ///    to sources opened in step 2, whose props already include them. An `Err` is
-    ///    logged and queued as that source's [`SourceEvent::Error`].
+    ///    to sources opened in step 2, whose props already include them. A refused
+    ///    write is logged and queued as [`SourceEvent::Rejected`] (the source is fine,
+    ///    R45); a failed open as [`SourceEvent::Error`].
     pub fn sync(&mut self, gfx: &Gfx, graph: &Graph, changes: &[(PropPath, PropValue)]) {
         let gone: Vec<String> = self
             .sources
@@ -116,8 +121,21 @@ impl SourceHost {
                 continue;
             };
             if let Err(e) = h.src.apply(prop, v) {
-                let id = id.to_string();
-                self.error(&id, format!("apply {prop}: {e}"));
+                let reason = format!("apply {prop}: {e}");
+                log::event(
+                    "host",
+                    Level::Warn,
+                    "source.rejected",
+                    None,
+                    json!({ "id": id, "prop": prop, "reason": reason }),
+                );
+                self.events.push((
+                    id.to_string(),
+                    SourceEvent::Rejected {
+                        prop: prop.to_string(),
+                        reason,
+                    },
+                ));
             }
         }
     }
@@ -203,14 +221,22 @@ impl SourceHost {
         for (id, h) in &mut self.sources {
             h.src.update(gfx);
             for ev in h.src.poll_events() {
-                if let SourceEvent::Error { reason } = &ev {
-                    log::event(
+                match &ev {
+                    SourceEvent::Error { reason } => log::event(
                         "host",
                         Level::Warn,
                         "source.error",
                         None,
                         json!({ "id": id, "reason": reason }),
-                    );
+                    ),
+                    SourceEvent::Rejected { prop, reason } => log::event(
+                        "host",
+                        Level::Warn,
+                        "source.rejected",
+                        None,
+                        json!({ "id": id, "prop": prop, "reason": reason }),
+                    ),
+                    _ => {}
                 }
                 new_events.push((id.clone(), ev));
             }

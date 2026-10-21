@@ -129,6 +129,15 @@ const BLUE_1S: ClipSpec = ClipSpec::Solid {
     tone_dbfs: -20.0,
 };
 
+fn rejections(evs: &[SourceEvent]) -> Vec<String> {
+    evs.iter()
+        .filter_map(|e| match e {
+            SourceEvent::Rejected { prop, reason } => Some(format!("{prop}: {reason}")),
+            _ => None,
+        })
+        .collect()
+}
+
 fn errors(evs: &[SourceEvent]) -> Vec<String> {
     evs.iter()
         .filter_map(|e| match e {
@@ -575,7 +584,10 @@ fn apply_never_blocks_the_render_thread() {
         "an apply blocked the render thread for {worst:?}"
     );
     let evs = settle(&gfx, &mut src);
-    assert!(errors(&evs).is_empty(), "burst produced errors: {evs:?}");
+    assert!(
+        errors(&evs).is_empty() && rejections(&evs).is_empty(),
+        "burst produced errors: {evs:?}"
+    );
     let vg = src.mpv_get_f64("volume-gain").unwrap();
     // mpv stores volume-gain as a float option (single precision).
     assert!(
@@ -586,8 +598,9 @@ fn apply_never_blocks_the_render_thread() {
 
 /// Fix round 1 (#1): a value mpv rejects (after the synchronous schema gate passed)
 /// surfaces as `SourceEvent::Error` naming the property — and `read` reverts.
+/// R45: a refused write is `Rejected` (the source is fine), never a load `Error`.
 #[test]
-fn rejected_property_is_an_error_event() {
+fn rejected_property_is_a_rejected_event() {
     let Some(gfx) = headless_gl() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&clip), json!({}));
@@ -596,13 +609,17 @@ fn rejected_property_is_an_error_event() {
         .expect("shape is valid: apply returns Ok, mpv's verdict arrives async");
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(2), |e, _| {
-        !errors(e).is_empty()
+        !rejections(e).is_empty()
     });
-    assert!(ok, "no Error event for a rejected af: {evs:?}");
-    let reason = errors(&evs).remove(0);
+    assert!(ok, "no Rejected event for a rejected af: {evs:?}");
     assert!(
-        reason.contains("af") && reason.contains("no_such_filter_lp"),
-        "Error must name the property and value: {reason}"
+        errors(&evs).is_empty(),
+        "a refused write is not an Error: {evs:?}"
+    );
+    let reason = rejections(&evs).remove(0);
+    assert!(
+        reason.starts_with("af: ") && reason.contains("no_such_filter_lp"),
+        "Rejected must name the property and value: {reason}"
     );
     assert_eq!(
         src.read("af"),
@@ -963,4 +980,78 @@ fn color_source() {
         Some(PropValue::List(vec![255.0, 0.0, 0.0]))
     );
     assert_eq!(c.read("ready"), Some(PropValue::Bool(true)));
+}
+
+/// Fix round (T11 #9): a `SnapshotSource` is the source's frame at the moment it's made —
+/// pixel-identical, same size, same orientation (image top at low y, R25) — and it stays
+/// that frame while the source moves on.
+#[test]
+fn snapshot_copies_frame_and_orientation() {
+    use lp_player::sources::SnapshotSource;
+    let Some(gfx) = headless_gl() else { return };
+
+    // Orientation + exact copy: top red / bottom blue.
+    let clip = ensure_clip(
+        "split_red_over_blue",
+        ClipSpec::SplitV {
+            top: [255, 0, 0],
+            bottom: [0, 0, 255],
+            secs: 2.0,
+        },
+    );
+    let src = open_ready(&gfx, path_str(&clip), json!({"paused": true}));
+    let mut snap = SnapshotSource::new(&gfx, "src1", src.texture());
+    let (t, st) = (
+        src.texture().unwrap(),
+        snap.texture().expect("snapshot texture"),
+    );
+    assert_eq!((st.w, st.h), (t.w, t.h));
+    assert_rgb(
+        read_rgba(&gfx, st, st.w / 2, st.h / 8),
+        [255, 0, 0],
+        3,
+        "snapshot low y = image top",
+    );
+    assert_rgb(
+        read_rgba(&gfx, st, st.w / 2, st.h * 7 / 8),
+        [0, 0, 255],
+        3,
+        "snapshot high y = bottom",
+    );
+    for (x, y) in [
+        (5, 5),
+        (t.w / 2, t.h / 2 - 2),
+        (t.w - 3, t.h - 3),
+        (t.w / 3, t.h * 3 / 4),
+    ] {
+        assert_eq!(
+            read_rgba(&gfx, t, x, y),
+            read_rgba(&gfx, st, x, y),
+            "pixel ({x},{y})"
+        );
+    }
+    assert_eq!(snap.poll_events(), vec![SourceEvent::Ready]);
+    assert_eq!(snap.read("of"), Some(PropValue::Str("src1".into())));
+    assert_eq!(snap.read("kind"), Some(PropValue::Str("snapshot".into())));
+
+    // Frozen while the source advances.
+    let idx = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let mut src = open_ready(&gfx, path_str(&idx), json!({"paused": true}));
+    let at_copy = read_rgba(&gfx, src.texture().unwrap(), 32, 32)[0];
+    let snap = SnapshotSource::new(&gfx, "src2", src.texture());
+    src.apply("paused", &PropValue::Bool(false)).unwrap();
+    let wake = Some(src.wake_fd());
+    pump(&gfx, &mut src, wake, Duration::from_millis(500), |_, _| {
+        false
+    });
+    let now = read_rgba(&gfx, src.texture().unwrap(), 32, 32)[0];
+    assert!(
+        now >= at_copy + 8,
+        "the source advanced ({at_copy} → {now})"
+    );
+    assert_eq!(
+        read_rgba(&gfx, snap.texture().unwrap(), 32, 32)[0],
+        at_copy,
+        "the snapshot keeps the frame it copied"
+    );
 }
