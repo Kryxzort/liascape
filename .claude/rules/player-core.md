@@ -444,25 +444,44 @@ complementary viewports (`DP-1`: `[0,0,0.5,1]`, `DP-2`: `[0.5,0,0.5,1]`).
 Both halves of `UvRect` (`uv` into the source, `dst` into the output, pixels) use `(0,0)`
 as the bottom-left corner. **Placement** (`fit_rect`/`axis`'s math, and `dst`'s effect on
 `gl.viewport`) is never flipped — bars/crop/centring land at the same screen position
-regardless of which texture is sampled. **Sampling is a separate concern, and it *is*
-flipped for raw textures.** A raw, caller-supplied source texture is assumed uploaded in
-standard top-down/PNG row order (buffer row 0 = image top), which GL's own texel
-addressing places at `t = 0` — the bottom-left-origin "bottom." Sampled uncorrected, a
-plain `Source` layer would render upside down, and would disagree with the same texture
-shown through an `Effect` (`effects::EffectProgram::draw`, via
-`transitions/wrap.frag.template`'s untouched `getFromColor`/`getToColor`, already flips
-when sampling its raw `from`/`to` inputs — this crate never edits `transitions/`).
-`compose.rs`'s own blit shader (`BLIT_VERT_SRC`/`BLIT_FRAG_SRC`, a separate from-scratch
-fullscreen-triangle shader, not a reuse of `wrap.vert`) carries a `flip_v` uniform that
-applies the same correction: `true` for every raw-source draw (a plain `Source` layer, and
-`render_side`'s `from`/`to` passes into their intermediates), `false` for the one texture
-this module both writes and re-reads itself — the effect's "result" intermediate, blitted
-into the target at the end of `draw_effect` — which is already in finished/screen
-orientation by the time it's sampled again, so a second flip there would un-correct it.
-Covered by `tests/compose.rs::y_axis_orientation_matches_image_top` (a top-red/bottom-blue
-source, both direct and through a `viewport` restricted to one half, plus a `write_png`
-round-trip through a decoded PNG) — the one test in the suite that's actually Y-asymmetric;
-everything else varies only in X (or is uniform), so none of it could have caught this.
+regardless of which texture is sampled.
+
+**Sampling is a separate concern, and it *is* flipped — but exactly once per source,
+on exactly one of this module's three draw sites, never more.** A raw, caller-supplied
+source texture is assumed uploaded in standard top-down/PNG row order (buffer row 0 =
+image top), which GL's own texel addressing places at `t = 0` — the bottom-left-origin
+"bottom." Sampled uncorrected anywhere, a plain `Source` layer would render upside down.
+`compose.rs`'s own blit shader (`BLIT_VERT_SRC`/`BLIT_FRAG_SRC`, a from-scratch
+fullscreen-triangle shader, not a reuse of `wrap.vert`) carries a `flip_v` uniform that is
+`true` for exactly **one** call site and `false` everywhere else:
+
+- **`Composer::compose_output`'s plain-`Source` branch (raw texture → target directly):
+  `flip_v = true`.** Nothing else downstream corrects orientation for this draw, so it
+  must.
+- **`render_side`'s `from`/`to` passes (raw texture → an effect's intermediate):
+  `flip_v = false`.** The intermediate is consumed next by
+  `effects::EffectProgram::draw`, which *unconditionally* applies
+  `transitions/wrap.frag.template`'s own `getFromColor`/`getToColor` flip (untouched —
+  this crate never edits `transitions/`) when it samples `fromTex`/`toTex`. Pre-flipping
+  here too would compose two flips into the identity (flip∘flip = no correction at all),
+  silently reintroducing the upside-down bug for every transition while leaving plain
+  `Source` layers correct.
+- **The effect's "result" intermediate → target, end of `draw_effect`: `flip_v =
+  false`.** `EffectProgram::draw` already applied the one necessary correction (the
+  previous point) when it wrote this texture; it's already in finished/screen
+  orientation, so a further flip here would un-correct it.
+
+**This exact double-flip shipped once** in this module's first attempt at fixing the
+orientation bug (`flip_v = true` on `render_side` too, by the same, wrong "every raw
+source needs correcting" reasoning) — caught by review, not by any test running at the
+time, because the only Y-asymmetric test then (`y_axis_orientation_matches_image_top`)
+only exercises a plain `Source` layer; a Y-uniform-coloured effect test
+(`effect_fade_midpoint_through_graph`) can't distinguish a flip from no flip at all.
+The actual regression test for this (`tests/compose.rs::
+effect_progress_endpoints_match_plain_source`) asserts the property that matters: a
+transition at `progress = 0`/`1` must be pixel-identical (every row, Y-asymmetric
+sources) to the plain `Source` layer it starts/ends on — for both a full `stretch` and a
+`viewport`-restricted case.
 
 **Premultiplied-alpha opacity.** Every draw (`draw_rect`) goes through the blit shader,
 which outputs premultiplied colour (`rgb * opacity`, `a * opacity`) and blends with
