@@ -24,16 +24,22 @@ happen regardless of timing.
   from `CARGO_PKG_VERSION`); every other invocation, including no args, is a stub that
   prints `"not implemented yet"` to stderr and exits 2. Later tasks replace the stub
   branch with `serve`/`ctl`.
-- `src/lib.rs` — module wiring only (`pub mod log;`, `pub mod units;` for now). Add new
+- `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
 - `src/units.rs` — audio units (below).
+- `src/mpv/` — libmpv FFI (`ffi.rs`, bindgen output) + safe wrapper (`mod.rs`). § Sources.
+- `src/sources/` — the `Source` trait, `MpvSource` (video/image), `ColorSource`. § Sources.
 
-**No `build.rs` yet.** The design's file map pairs `Cargo.toml`/`build.rs` together
-(bindgen over `mpv/client.h` + `mpv/render_gl.h`), but that belongs with Task 10 (libmpv
-wrapper), not this scaffold — don't add bindgen before there's an FFI surface to generate.
-The flake's `lp-player` derivation already carries `rustPlatform.bindgenHook` +
-`pkg-config` in `nativeBuildInputs` so adding `build.rs` later needs no flake change.
+**`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
+`mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
+mpv 0.41 / API 2.5), allowlisting `mpv_.*` functions/types and `MPV_.*` vars. C enums are
+generated as **module consts** (`mpv_event_id::MPV_EVENT_FILE_LOADED`), never Rust
+`enum`s — a value a newer libmpv adds can't become UB. pkg-config also emits the
+`-lmpv` + `-L` that nixpkgs auto-rpaths (same mechanism as `khronos-egl`'s `static`
+feature, § GFX / EGL). The flake's `lp-player` derivation already carries
+`rustPlatform.bindgenHook` (libclang) + `pkg-config` + `mpv-unwrapped`, and the devShell
+inherits them, so neither needed a change.
 
 ## Event log
 
@@ -241,7 +247,9 @@ replaced:** an earlier version put `display`/`context` directly on `Gfx` with it
 eager `Drop`, while `WindowTarget` kept only a *copy* of the `Display` value and a
 separately-`Rc`'d EGL instance — nothing kept the owning `Gfx` alive, so dropping it
 first `eglTerminate`d the display while a `WindowTarget` about to call
-`eglDestroySurface` on it was still around: undefined behaviour. `make_current`/`swap`
+`eglDestroySurface` on it was still around: undefined behaviour. `gfx::GlKeepAlive` (`Gfx::keep_alive()`, Task 10) is a
+third holder of the same `Rc<Shared>`, for sources that must free GL objects in `Drop`
+(§ Sources). `make_current`/`swap`
 still take `gfx: &Gfx` (API shape unchanged) and read `gfx.shared.{egl,context}` — a
 `WindowTarget` created from a *different* `Gfx` would mismatch display/context and EGL
 itself rejects that, same as before.
@@ -542,3 +550,117 @@ provides — while every call site is still spelled exactly `&dyn Fn(&str) -> Op
 (so their own unit tests can assert precise fractions, e.g. the `fill_crops` 0.7407 uv
 span) — only `draw_rect`/`clear_transparent`/`render_side`, right where they call
 `gl.viewport`, round `UvRect::dst` to whole pixels.
+
+## Sources
+
+`src/sources/` + `src/mpv/` (spec §4.2 "Source", §5.1 libmpv gotchas, §5.3 audio): the
+frame producers the compositor samples (`Source::texture`) and the audio streams recipes
+ramp (`gain.<slot>`). `trait Source { kind, update(&Gfx) -> bool, texture, size, apply,
+read, poll_events }`; `SourceEvent::{Ready, Ended, Position(f64), Error{reason}}`.
+
+**Contract every source keeps.**
+- `update` **never blocks** and returns whether the texture changed. `texture()` keeps
+  the last good frame forever (R19's other half — `gfx::compose` has no frame memory):
+  a stalled/reloading/ended source shows its last frame, never black.
+- `apply(prop, v)` first runs `graph::props::validate_value(Source, …)` — same codes and
+  check order as `Graph::set` (`no_such_prop` > `read_only` > `bad_type`/`out_of_range`);
+  a live `kind` change is `unsupported` (create a new source). Every writable property is
+  live (project rule "settings apply live"), including `path` (reloads in place; `Ready`
+  fires again; the old frame is held until the new one renders).
+- `read(prop)`: `None` = unset/unknown — an image's `duration`, `time_pos` before
+  playback, `width`/`height` before mpv reports a size.
+- **Orientation (R25): a source texture holds the image's TOP row at texture row 0**
+  (`t = 0`, GL's bottom row) — what `gfx::compose`'s single flip expects. `MpvSource`
+  renders with `MPV_RENDER_PARAM_FLIP_Y = 0` into its FBO and that lands exactly so on
+  this build (mpv's "normal" render orientation is top-down; FLIP_Y=1 is for a GL
+  default framebuffer). Pinned by `tests/sources.rs::source_texture_holds_image_top_at_t0`
+  (top-red/bottom-blue clip: low y red, high y blue). Never flip in a source.
+
+**`MpvSource::open(gfx, path, opts)`** — one mpv core + one render context per source.
+Fixed options: `vo=libmpv`, `config=no`, `terminal=no`, `keep-open=yes` (an ended video
+holds its last frame), `idle=yes` (the core survives a load error / waits for a `path`
+change), `volume=100`, `volume-gain-min=-96`, `image-display-duration=inf` (set always —
+it only affects single-frame images), `keepaspect=no` (the texture *is* the frame; fit is
+the compositor's), `osd-level=0`, `ytdl=no`, `audio-client-name=lp-player`. `opts` =
+any writable `Source` property (`position` → mpv `start`), plus `ao` (default
+`pipewire`), `audio_device` (the bus, Task 14), `kind` (`video`|`image`, default from the
+extension, then corrected by mpv's `current-tracks/video/image` flag after load). Load is
+async: a missing/broken file is `Ok` from `open`, then `Error{reason}` naming the path
+plus mpv's last error-log line.
+
+**Property map** (graph name → mpv): `loop` → `loop-file` `inf`/`no`; `paused` → `pause`;
+`speed`; `position` → `seek <t> absolute exact` (or `start` before the file loads);
+`hwdec` (`""` → `no`); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` → `yes`/`no`;
+`demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
+`<n>MiB` (a fractional MiB goes as exact bytes — mpv rejects `1.5MiB`; `0` = unset →
+mpv's default 150/50 MiB, the legacy engine's convention); `af`; `no_audio` → `aid`
+`no`/`auto` (`auto` re-inits the AO even after a no-audio start; the `aid` *property*
+then reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`);
+`audio_delay` → `audio-delay`.
+
+**Gains → `volume-gain`, `volume` stays 100.** Every `gain.<slot>` apply recomputes
+`units::Gains::effective_db()` and sets mpv `volume-gain` = `units::mpv_volume_gain(db)`
+(exact dB; `volume` is cubic — § Units). `volume-gain-min=-96` is what lets mpv accept
+the −96 dB floor. `open` pushes the initial sum too, so mpv never runs at its own default.
+
+**Events.** `Ready` once per load = FILE_LOADED **and** a frame rendered after it
+(paused-at-start still renders frame 0). `Ended` once per play-through, from
+`eof-reached` (with `keep-open=yes` mpv never sends END_FILE/EOF; that path is handled
+too) — re-armed when `eof-reached` goes false (seek/reload); never with `loop=true`,
+never for an image. `Position(t)` from observed `time-pos`, rate-limited to 100 ms.
+`Error` from END_FILE/ERROR or a core shutdown.
+
+**Wakeup contract (Task 12 polls this).** `mpv_set_wakeup_callback` and
+`mpv_render_context_set_update_callback` both `write(2)` to one `EFD_NONBLOCK` eventfd
+(the fd number is the callback context — no allocation, no mpv calls in the callback);
+`MpvSource::wake_fd()` exposes it. On readability call `poll_events()` **and**
+`update()`; each drains the fd first, then pumps every queued mpv event
+(`wait_event(0)`), so a signal arriving mid-call re-arms the fd and nothing is lost.
+`update` uses `mpv_render_context_update` (level-triggered `UPDATE_FRAME`) and renders
+only when a frame is waiting, with `BLOCK_FOR_TARGET_TIME=0`; no
+`ADVANCED_CONTROL` (so synchronous `apply` calls on the same thread can at worst hit
+vo_libmpv's bounded frame-wait, never deadlock — `mpv/mod.rs` header).
+
+**Render target.** Native display size (`dwidth`/`dheight`, observed), capped at 4096 on
+the long edge (aspect kept); the `GL_RGBA8` FBO texture is reallocated on a size change —
+render into the new one, swap only on success (a failed render keeps the old frame).
+After each render `reset_gl_state` unbinds FBO/program/VAO/buffer/texture, disables
+blend + scissor, resets colour mask and pixel-store alignment — libmpv leaves its own
+state behind.
+
+**Teardown with GL current (lp-transition gotcha).** `mpv_render_context_free` must run
+with its GL context current and before `mpv_terminate_destroy`. Sources get no `&Gfx` in
+`Drop`, so they hold a `gfx::GlKeepAlive` (`Gfx::keep_alive()`): an `Rc<Shared>` clone
+(same pattern as `WindowTarget`) that keeps the EGL context alive past the `Gfx`, plus
+`make_current()` (a guard that restores whatever was current before; a no-op when the
+context already is) and `glDelete{Textures,Framebuffers}` pointers. `MpvSource::drop`:
+make current → free render ctx → delete FBO/texture → clear wakeup cb → destroy core →
+close eventfd (in `open`, the eventfd is created before the core so error-path locals
+drop in the same order). Drop order vs the `Gfx` is irrelevant — pinned by
+`source_outlives_gfx_safely`. If the context somehow can't be made current, the core is
+`stop`ped (silent) and leaked rather than freed against the wrong context.
+
+**Fence-leak mitigation** (technique from mpvpaper 1.9, PR #132 by manv-3, GPL-3.0;
+credited in Task 19): the `get_proc_address` given to `mpv_render_context_create` returns
+a stub for `glFenceSync` that returns 0 (a null sync); everything else comes from
+`eglGetProcAddress`. libmpv's render-API path otherwise accumulates one sync object per
+frame. Safe because the compositor samples the frame in the same GL context that
+rendered it (in-order command stream — no fence needed). `sources::mpv::fence_stub_calls()`
+counts stub calls; `fence_sync_stub_is_used` proves libmpv really calls it, and
+`first_frame_and_ready` checks no GL error is left behind.
+
+**`ColorSource::new([r,g,b])`** (0–255, the graph's `color`): a 1×1 `RGBA8` texture
+(LINEAR + CLAMP_TO_EDGE → the colour everywhere), created lazily on the first `update`
+(construction has no `Gfx`) and repainted only when `color` changes. `Ready` is queued at
+construction (first `poll_events`). Every other writable property is accepted and stored
+(so an alias/global `set` never fails on a colour layer) and does nothing.
+
+**Tests (`tests/sources.rs`) — always `ao: "null"` (R26)**, so a run is silent on the
+owner's speakers; `audio-params` still populate with the null AO. Media come from
+`tests/common::ensure_clip(name, ClipSpec)`: ffmpeg from PATH → `target/test-media/`,
+generated once (regenerated only if the `<name>.spec` stamp differs), via a temp name +
+rename, serialised by a mutex. Videos are 1920×1080@30 `libx264` `yuv420p`, built in
+`rgb24` and converted once with an explicit BT.709 limited-range matrix **and tagged**
+so mpv decodes with the same matrix — solid colours come back within ±3 (YUV round trip
++ mpv's output dither), `FrameIndex`'s neutral-grey `(n,n,n)` marker within ±1 (ffmpeg
+itself decodes frame 119's marker as 118). Audio for `Solid` is PCM s16le (exact level).

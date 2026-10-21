@@ -23,5 +23,5 @@ pub mod gl;
 
 pub use compose::{Composer, UvRect, fit_rect};
 pub use effects::{Catalogue, EffectProgram};
-pub use egl::{Gfx, WindowTarget};
+pub use egl::{CurrentGuard, Gfx, GlKeepAlive, WindowTarget};
 pub use gl::{Fbo, Tex};
