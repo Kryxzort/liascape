@@ -88,6 +88,8 @@ public static class ServerHost
         // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
         PlayerHelper.KillTimerDaemon();
         PlayerHelper.WriteGuiTimerPid();
+        // load the engine NOW (cached): /settings compares against what actually runs when it changes
+        _ = livepaper.Player.PlayerEngine.IsLpPlayer;
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
         // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
         // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
@@ -330,6 +332,9 @@ public static class ServerHost
             s.SteamAccountName = prev.SteamAccountName;
             s.SteamLoginSecure = prev.SteamLoginSecure;
             SettingsService.Save(s);
+            // PlayerEngine changed → stop the old engine, replay the session on the new one (else just
+            // refresh the cached engine + binary resolution). First, so everything below hits the new one.
+            PlayerHelper.SwitchEngineLive(prev, s);
             // live-apply the cheap ones, but respect the PLAYING wallpaper's per-item override so a global
             // change never clobbers an active override (effective = override ?? new global).
             var curPlaying = PlayerHelper.QueryCurrentPath();
@@ -376,6 +381,8 @@ public static class ServerHost
         });
         app.MapGet("/themes", () => Results.Json(ThemeService.All));
         app.MapGet("/mpv-preview", () => Results.Text(SettingsService.Load().BuildMpvOptions()));
+        // the Player engine row: what's asked for / running, whether lp-player can run (+ why not)
+        app.MapGet("/player-engine", () => Results.Json(livepaper.Player.PlayerEngine.Status()));
         app.MapGet("/lwe-preview", () => Results.Text(SettingsService.Load().BuildLweOptions()));
         app.MapPost("/library/import", async (ImportReq r) =>
         {
@@ -394,7 +401,12 @@ public static class ServerHost
         // Cheap vs hammering /library/volume per tick (which writes index.json + 2 IPC calls + a pactl spawn
         // for scenes, ×~60/s → backlog so the desktop only catches up on release). The UI throttles these and
         // gates on "the edited item is the playing one", then persists once on release via /library/{volume,speed}.
-        app.MapPost("/preview", (PreviewReq r) => { if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok(); });
+        app.MapPost("/preview", (PreviewReq r) =>
+        {
+            // lp-player: a per-item value → the playing item's source(s), not srcs:* (R61)
+            if (livepaper.Player.PlayerEngine.IsLpPlayer) { livepaper.Player.LpPlayerMedia.Preview(r.Volume, r.Speed); return Results.Ok(); }
+            if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
+        });
         app.MapPost("/library/whitelist", (WhitelistReq r) => { LibraryService.SetWhitelisted(r.Path, r.Value); return Results.Ok(); });
         app.MapPost("/library/sync", () =>
         {

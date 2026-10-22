@@ -103,6 +103,23 @@ public static class TransitionService
         return min;
     }
 
+    // lp-player (PlayerEngine=lp-player): the effect/params/duration/method for ONE switch — the same
+    // PickEffect/PickDuration as TryStart, no capture work, and no reveal-capable gate (every effect
+    // works with every method in lp-player). params = the manifest's uniform defaults. null = cut.
+    public static (string effectId, Dictionary<string, double[]> uniforms, int durationMs, string method)? Pick(Config cfg)
+    {
+        if (!cfg.Enabled) return null;
+        var effect = PickEffect(cfg);
+        if (effect == null) return null;
+        int durationMs = PickDuration(cfg);
+        string method = (SettingsService.Load().TransitionMethod ?? "reveal").ToLowerInvariant();
+        if (method != "frozen" && method != "full-live" && method != "reveal") method = "reveal";
+        var uniforms = new Dictionary<string, double[]>();
+        foreach (var u in Manifest().FirstOrDefault(e => e.Id == effect)?.Uniforms ?? [])
+            if (u.Default is { Count: > 0 }) uniforms[u.Name] = [.. u.Default];
+        return (effect, uniforms, durationMs, method);
+    }
+
     // Wall-clock tick after which the most-recently-started overlay's effect+teardown is done.
     // True while an overlay is animating → the timed advance-on-end re-arm waits this out before
     // reading mpv playtime-remaining (mid file-swap, mpv still reports the OUTGOING file's near-end

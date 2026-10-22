@@ -8,7 +8,7 @@ paths:
 
 ## Player
 
-`PlayerHelper` is the single entry point for mpvpaper. Kills all existing mpvpaper processes before starting a new one.
+`PlayerHelper` is the single entry point for mpvpaper. Under `PlayerEngine=lp-player` its media primitives dispatch to `src/livepaper/Player/` instead (`player-adapter.md`); everything below describes the legacy engine, unchanged. Kills all existing mpvpaper processes before starting a new one.
 
 **stdout/stderr redirection:**
 - **mpvpaper** (`Launch`), **timer daemon** (`SpawnTimerDaemon`), **restart daemon** (`SpawnRestartDaemon`): `RedirectStandardOutput/Error = true`, `BeginOutputReadLine/BeginErrorReadLine` called — required to drain pipes and prevent deadlock.

@@ -478,6 +478,8 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
   color: var(--text); border-radius: 8px; padding: 6px 10px; min-width: 92px; font: inherit;
   transition: border-color .15s, box-shadow .2s; }
 .sel:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.sel:disabled { cursor: not-allowed; }
+.sel:disabled:hover { border-color: var(--surface1); box-shadow: none; }
 .sel-caret { opacity: .7; flex-shrink: 0; }
 .sel-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sel-backdrop { position: fixed; inset: 0; z-index: 90; }
