@@ -387,7 +387,28 @@ impl Graph {
             props::validate_value(kind, prop, &value, true)?;
         }
         for id in &targets {
-            self.apply_set(id, prop, value.clone(), true);
+            self.apply_set(id, prop, value.clone(), true, true);
+        }
+        Ok(())
+    }
+
+    /// [`Graph::set`] for the Animator's per-tick values: recorded in
+    /// [`Graph::drain_changes`] like any set, but it does **not** move
+    /// [`Graph::picture_rev`] — the runtime marks only the outputs that show the animated
+    /// node for a redraw (`crate::redraw::Redraw::mark_nodes`), so an animation on one
+    /// output never wakes the others (Task 16, review item a).
+    pub fn set_animated(&mut self, path: &PropPath, value: PropValue) -> Result<(), ApiError> {
+        let (node_ref, prop) = split_path(path)?;
+        let targets = self.resolve(node_ref);
+        if targets.is_empty() {
+            return Err(no_such_node(node_ref));
+        }
+        for id in &targets {
+            let kind = self.nodes.get(id).ok_or_else(|| no_such_node(id))?.kind;
+            props::validate_value(kind, prop, &value, true)?;
+        }
+        for id in &targets {
+            self.apply_set(id, prop, value.clone(), true, false);
         }
         Ok(())
     }
@@ -408,7 +429,7 @@ impl Graph {
             vals.push(Self::typed_for_set(kind, prop, raw)?);
         }
         for (id, v) in targets.iter().zip(vals) {
-            self.apply_set(id, prop, v, true);
+            self.apply_set(id, prop, v, true, true);
         }
         Ok(targets)
     }
@@ -470,7 +491,7 @@ impl Graph {
             props::validate_value(kind, prop, &value, false)?;
         }
         for id in &targets {
-            self.apply_set(id, prop, value.clone(), false);
+            self.apply_set(id, prop, value.clone(), false, false);
         }
         Ok(())
     }
@@ -520,7 +541,7 @@ impl Graph {
         Some(gains.effective_db())
     }
 
-    fn apply_set(&mut self, id: &str, prop: &str, value: PropValue, record: bool) {
+    fn apply_set(&mut self, id: &str, prop: &str, value: PropValue, record: bool, bump: bool) {
         if let Some(slot_name) = prop.strip_prefix("gain.") {
             if let (Ok(slot), PropValue::F64(db)) = (slot_name.parse::<GainSlot>(), &value)
                 && let Some(node) = self.nodes.get_mut(id)
@@ -531,7 +552,7 @@ impl Graph {
             node.props.insert(prop.to_string(), value.clone());
         }
         if record {
-            if !prop.starts_with("gain.") {
+            if bump && !prop.starts_with("gain.") {
                 self.picture_rev += 1;
             }
             self.changes.push((PropPath(format!("{id}.{prop}")), value));
@@ -820,6 +841,31 @@ mod tests {
             .set(&p("out:DP-1.pointer"), PropValue::List(vec![0.0, 0.0, 0.0]))
             .unwrap_err();
         assert_eq!(err.code, "read_only", "pointer is observed, never set");
+    }
+
+    #[test]
+    fn set_animated_is_a_change_but_not_a_picture_rev() {
+        let mut g = Graph::new();
+        out(&mut g, "out:DP-1");
+        let r = g.picture_rev();
+        g.drain_changes();
+        g.set_animated(&p("lay:DP-1:main.opacity"), PropValue::F64(0.5))
+            .unwrap();
+        assert_eq!(
+            g.picture_rev(),
+            r,
+            "the runtime marks the showing outputs instead"
+        );
+        let ch = g.drain_changes();
+        assert_eq!(ch.len(), 1, "still forwarded like any set: {ch:?}");
+        assert_eq!(
+            g.get(&p("lay:DP-1:main.opacity")).unwrap(),
+            PropValue::F64(0.5)
+        );
+        let e = g
+            .set_animated(&p("lay:DP-1:main.opacity"), PropValue::F64(2.0))
+            .unwrap_err();
+        assert_eq!(e.code, "out_of_range");
     }
 
     #[test]

@@ -181,28 +181,7 @@ impl Logger {
         }
 
         let t_mono_ms = state.start.elapsed().as_secs_f64() * 1000.0;
-        let t_wall = wall_time_rfc3339();
-
-        let mut obj = Map::new();
-        obj.insert("t_mono_ms".to_string(), json!(t_mono_ms));
-        obj.insert("t_wall".to_string(), json!(t_wall));
-        obj.insert("comp".to_string(), json!(comp));
-        obj.insert(
-            "level".to_string(),
-            serde_json::to_value(level).expect("Level always serializes"),
-        );
-        obj.insert("kind".to_string(), json!(kind));
-        obj.insert(
-            "corr".to_string(),
-            corr.map(|c| Value::String(c.0)).unwrap_or(Value::Null),
-        );
-        if let Value::Object(extra) = fields {
-            for (k, v) in extra {
-                obj.insert(k, v);
-            }
-        }
-
-        let value = Value::Object(obj);
+        let value = build_record(t_mono_ms, comp, level, kind, corr, fields);
         let out = for_tap.then(|| value.clone());
         if keep {
             write_line(&mut state, &value);
@@ -226,6 +205,56 @@ impl Logger {
         let start = matched.len().saturating_sub(limit);
         matched[start..].to_vec()
     }
+}
+
+/// One event record (the module doc's shape): fixed keys, then `fields` merged on top.
+fn build_record(
+    t_mono_ms: f64,
+    comp: &str,
+    level: Level,
+    kind: &str,
+    corr: Option<CorrId>,
+    fields: Value,
+) -> Value {
+    let mut obj = Map::new();
+    obj.insert("t_mono_ms".to_string(), json!(t_mono_ms));
+    obj.insert("t_wall".to_string(), json!(wall_time_rfc3339()));
+    obj.insert("comp".to_string(), json!(comp));
+    obj.insert(
+        "level".to_string(),
+        serde_json::to_value(level).expect("Level always serializes"),
+    );
+    obj.insert("kind".to_string(), json!(kind));
+    obj.insert(
+        "corr".to_string(),
+        corr.map(|c| Value::String(c.0)).unwrap_or(Value::Null),
+    );
+    if let Value::Object(extra) = fields {
+        for (k, v) in extra {
+            obj.insert(k, v);
+        }
+    }
+    Value::Object(obj)
+}
+
+/// Append one record to `<dir>/events.jsonl` **without** the global logger — for a process
+/// that shares the player's event log but isn't the player (the supervisor, Task 16): open
+/// with `O_APPEND`, one `write` of the whole line, close. `t_mono_ms` is that process's own
+/// monotonic time. Never rotates (the player does); the line is written whole, so it can't
+/// interleave with the player's lines.
+pub fn append_detached(
+    dir: &Path,
+    t_mono_ms: f64,
+    comp: &str,
+    level: Level,
+    kind: &str,
+    fields: Value,
+) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let rec = build_record(t_mono_ms, comp, level, kind, None, fields);
+    let mut line = serde_json::to_string(&rec).unwrap_or_default();
+    line.push('\n');
+    open_append(&dir.join(EVENTS_FILE))?.write_all(line.as_bytes())
 }
 
 fn filter_matches(entry: &Value, filter: &LogFilter) -> bool {

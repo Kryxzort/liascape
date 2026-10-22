@@ -1,7 +1,9 @@
 //! Task 12: the runtime + command API end to end. Every test spawns the real binary —
-//! `lp-player serve --headless --outputs 640x360@60,320x180@60 --clock stepped --ao null`
-//! — with a temp `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` (never the real ones), talks JSON
-//! lines over its socket, and kills the child on drop (also on panic). Skips (prints
+//! `lp-player serve --no-supervise --headless --outputs 640x360@60,320x180@60 --clock
+//! stepped --ao null` — with a temp `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` (never the real
+//! ones), talks JSON lines over its socket, and kills the child on drop (also on panic).
+//! `--no-supervise` (Task 16): the spawned process *is* the compositor (pid checks, lock
+//! owner, SIGTERM); supervision has its own suite (`tests/supervise.rs`). Skips (prints
 //! `SKIP: …`) only without an EGL device or a `transitions/` catalogue.
 //!
 //! One server at a time (a process-wide lock): parallel 1080p decoders starve each other
@@ -74,6 +76,7 @@ fn serve_cmd(root: &Path, extra: &[&str]) -> Command {
     die_with_parent(&mut c);
     c.args([
         "serve",
+        "--no-supervise",
         "--headless",
         "--outputs",
         "640x360@60,320x180@60",
@@ -1990,6 +1993,85 @@ fn frames_probe_reports_present_intervals() {
             "reset cleared the window ({n} vs {before}): {o}"
         );
     }
+}
+
+/// Task 16 (Task 13 review items a + b): mixed content under the content redraw policy.
+/// Headless composes every tick by default, so this forces the Wayland policy with
+/// `--redraw-policy content` (no frame callbacks: an output that wants a frame presents on
+/// the next loop pass). A 30 fps video on VIRTUAL-1 presents at its frame rate while a
+/// static colour on VIRTUAL-2 stays idle — 0 presents — also while an opacity animation
+/// runs on VIRTUAL-1's layer only (an animation counts for the outputs showing its node).
+#[test]
+fn mixed_content_static_output_stays_idle() {
+    let Some(srv) = Serve::start_with(&["--clock", "real", "--redraw-policy", "content"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let v = create_src(&mut c, json!({"path": s(&clip), "loop": true}));
+    let blue = color(&mut c, [0, 0, 255]);
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-1:main.content", "value": v}),
+    );
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-2:main.content", "value": blue}),
+    );
+    let t = Instant::now();
+    while get(&mut c, &format!("{v}.ready"))["result"]["value"] != json!(true) {
+        assert!(t.elapsed() < Duration::from_secs(5), "video never ready");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    let presents = |f: &Value, o: &str| {
+        f["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == o)
+            .unwrap_or_else(|| panic!("no {o}: {f}"))["totals"]["presents"]
+            .as_u64()
+            .unwrap()
+    };
+    let window = |c: &mut Client| {
+        let f0 = c.ok("probe", json!({"name": "frames"}));
+        std::thread::sleep(Duration::from_millis(1000));
+        let f1 = c.ok("probe", json!({"name": "frames"}));
+        assert_eq!(f1["policy"], "content", "{f1}");
+        let d = |o: &str| presents(&f1, o) - presents(&f0, o);
+        (d("VIRTUAL-1"), d("VIRTUAL-2"), f1)
+    };
+    let (video, still, f) = window(&mut c);
+    println!("content policy, 1 s: video output {video} presents, colour output {still}");
+    assert!(
+        (20..=45).contains(&video),
+        "a 30 fps clip presents ≈ 30/s, got {video}: {f}"
+    );
+    assert_eq!(still, 0, "the static colour output stays idle: {f}");
+    let v2 = f["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["name"] == "VIRTUAL-2")
+        .unwrap();
+    assert_eq!(v2["idle"], true, "{v2}");
+
+    c.ok(
+        "animate",
+        json!({"path": "lay:VIRTUAL-1:main.opacity", "from": 1.0, "to": 0.5, "duration_ms": 4000}),
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    let (anim, still, f) = window(&mut c);
+    println!("opacity animation on VIRTUAL-1, 1 s: {anim} presents there, {still} on VIRTUAL-2");
+    assert!(
+        anim >= 50,
+        "an animating output presents every pass (≥ the 60 Hz tick): {anim}: {f}"
+    );
+    assert_eq!(
+        still, 0,
+        "VIRTUAL-1's animation doesn't wake VIRTUAL-2: {f}"
+    );
 }
 
 /// Task 13: `serve` without `--headless` is the Wayland backend. `--outputs` is

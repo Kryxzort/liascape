@@ -12,7 +12,9 @@
 //!
 //! `idle: true` = the output can take a frame (no callback outstanding) but has nothing new
 //! to show (redraw policy, `crate::redraw`). `args: {"reset": true}` clears the windows
-//! and the `missed` total after reading (like `loop`'s reset).
+//! and the `missed` total after reading (like `loop`'s reset). Failed presents (Task 16):
+//! `totals.present_failed`, `last_present_error`, and `retry_in_ms` while the backend backs
+//! off (`crate::wl::present_backoff`).
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -56,6 +58,9 @@ pub struct FrameStats {
     pub presents: u64,
     pub missed_total: u64,
     pub idle_gaps: u64,
+    /// Presents that returned an error, and the last error (Task 16, review item c).
+    pub present_failed: u64,
+    pub last_present_error: Option<String>,
 }
 
 impl FrameStats {
@@ -71,6 +76,8 @@ impl FrameStats {
             presents: 0,
             missed_total: 0,
             idle_gaps: 0,
+            present_failed: 0,
+            last_present_error: None,
         };
         s.set_refresh(refresh_mhz);
         s
@@ -108,6 +115,12 @@ impl FrameStats {
         self.last_present = Some(at);
         self.idle = false;
         self.prune(at);
+    }
+
+    /// A present failed with `error` (the backend backs off; see `frames` `retry_in_ms`).
+    pub fn on_present_failed(&mut self, error: &str) {
+        self.present_failed += 1;
+        self.last_present_error = Some(error.to_string());
     }
 
     /// The output could take a frame but had nothing new to show.
@@ -250,7 +263,10 @@ pub fn frames(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
                 "callbacks": fs.as_ref().map(|f| f.callbacks),
                 "missed": st.missed_total,
                 "idle_gaps": st.idle_gaps,
+                "present_failed": st.present_failed,
             },
+            "last_present_error": st.last_present_error,
+            "retry_in_ms": fs.as_ref().and_then(|f| f.retry_in_ms),
         }));
     }
     if args.get("reset").and_then(Value::as_bool) == Some(true) {

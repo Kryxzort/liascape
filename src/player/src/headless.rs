@@ -37,7 +37,7 @@ pub enum OutputChange {
 }
 
 /// Frame pacing state of one output on a paced backend ([`OutputBackend::frame_state`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameState {
     /// It can take a frame now: configured, a render target exists, no frame callback
     /// outstanding.
@@ -46,6 +46,11 @@ pub struct FrameState {
     pub pending: bool,
     /// Frame callbacks received so far.
     pub callbacks: u64,
+    /// Presents that failed (`eglSwapBuffers`) since the output appeared (Task 16).
+    pub failures: u64,
+    /// After a failed present the output backs off (100 ms, then 1 s while it keeps
+    /// failing): how long until it may try again; `None` = not backing off.
+    pub retry_in_ms: Option<f64>,
 }
 
 /// The pointer over an output's surface ([`OutputBackend::take_pointer`]): surface
@@ -122,6 +127,10 @@ struct VOut {
 pub struct Headless {
     outs: Vec<VOut>,
     changes: Vec<OutputChange>,
+    /// `--redraw-policy content` (Task 16): pace like Wayland — present only when the redraw
+    /// policy (`crate::redraw`) says the picture changed; every output can always take a
+    /// frame (there are no frame callbacks). Default: compose every output every tick.
+    content_paced: bool,
 }
 
 fn bad(msg: String) -> ApiError {
@@ -168,6 +177,7 @@ impl Headless {
         let mut h = Headless {
             outs: Vec::new(),
             changes: Vec::new(),
+            content_paced: false,
         };
         for (i, &(w, ht, hz)) in specs.iter().enumerate() {
             let info = OutputInfo {
@@ -180,6 +190,12 @@ impl Headless {
             h.add(gfx, info).expect("validated by parse_outputs");
         }
         h
+    }
+
+    /// Use the content redraw policy instead of composing every tick (`--redraw-policy
+    /// content`; a test/diagnostic knob for the policy without a compositor).
+    pub fn set_content_paced(&mut self, on: bool) {
+        self.content_paced = on;
     }
 
     /// Hotplug a virtual output (`headless.add_output`).
@@ -255,6 +271,22 @@ impl OutputBackend for Headless {
 
     fn present(&mut self, _gfx: &Gfx, _name: &str) -> Result<(), String> {
         Ok(())
+    }
+
+    fn paced(&self) -> bool {
+        self.content_paced
+    }
+
+    fn frame_state(&self, name: &str) -> Option<FrameState> {
+        (self.content_paced && self.outs.iter().any(|o| o.info.name == name)).then_some(
+            FrameState {
+                ready: true,
+                pending: false,
+                callbacks: 0,
+                failures: 0,
+                retry_in_ms: None,
+            },
+        )
     }
 
     fn as_headless_mut(&mut self) -> Option<&mut Headless> {
