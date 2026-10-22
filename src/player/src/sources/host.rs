@@ -51,6 +51,12 @@ pub struct SourceHost {
     /// Sources whose texture changed since the last `take_changed` (Task 13: the redraw
     /// policy wakes only the outputs showing them).
     changed: BTreeSet<String>,
+    /// R75 (Task 16b): the last `player_paused` [`SourceHost::sync`] saw. While true, the
+    /// `paused` mirror in [`SourceHost::update`] is suspended — every hosted source's
+    /// live `paused` is the OR'd *effective* value (what actually reached the source),
+    /// not the node's own intention, and mirroring that back would corrupt what the
+    /// recipe/user asked for (see `sync`'s doc).
+    player_paused: bool,
 }
 
 impl SourceHost {
@@ -63,6 +69,7 @@ impl SourceHost {
             dying: Vec::new(),
             open_time: std::time::Duration::ZERO,
             changed: BTreeSet::new(),
+            player_paused: false,
         }
     }
 
@@ -70,12 +77,33 @@ impl SourceHost {
     /// 1. drop every source whose node is gone (or is no longer a `Source`);
     /// 2. open a source for every `Source` node not hosted yet, from the node's current
     ///    props (`kind` `color` → [`ColorSource`], `snapshot` → [`SnapshotSource`] of
-    ///    `of`'s current texture, anything else → [`MpvSource`]);
+    ///    `of`'s current texture, anything else → [`MpvSource`]) — its initial `paused`
+    ///    is the *effective* one (R75: `node.paused || player_paused`), not the node's
+    ///    raw value;
     /// 3. forward each change addressed to a hosted source to [`Source::apply`] — except
-    ///    to sources opened in step 2, whose props already include them. A refused
-    ///    write is logged and queued as [`SourceEvent::Rejected`] (the source is fine,
-    ///    R45); a failed open as [`SourceEvent::Error`].
-    pub fn sync(&mut self, gfx: &Gfx, graph: &Graph, changes: &[(PropPath, PropValue)]) {
+    ///    to sources opened in step 2, whose props already include them; a `paused`
+    ///    change is composed with `player_paused` the same way. A refused write is
+    ///    logged and queued as [`SourceEvent::Rejected`] (the source is fine, R45); a
+    ///    failed open as [`SourceEvent::Error`];
+    /// 4. if `player_paused` itself changed since the last call, push every *other*
+    ///    hosted source's recomputed effective `paused` too (step 3 above only reaches a
+    ///    source whose own node changed this call).
+    ///
+    /// R75's effective pause is intentionally never written into `self.props["paused"]`
+    /// as the node's own truth would be: `Source::apply("paused", …)` is still the single
+    /// channel (mpv's real `pause` ends up OR'd either way — there's only one mpv
+    /// property to tell), but the *mirror* back into the graph (`SourceHost::update`) is
+    /// suspended for `paused` while `player_paused` is true, so the OR'd value a hosted
+    /// source now reports never overwrites the node's own `paused` — which the recipe
+    /// (and `release`/`is_still`'s own reads of it) depends on staying exactly what it
+    /// set, pause or no pause.
+    pub fn sync(
+        &mut self,
+        gfx: &Gfx,
+        graph: &Graph,
+        changes: &[(PropPath, PropValue)],
+        player_paused: bool,
+    ) {
         let gone: Vec<String> = self
             .sources
             .keys()
@@ -126,7 +154,7 @@ impl SourceHost {
                 continue;
             };
             let t_open = std::time::Instant::now();
-            let opened_src = self.open(gfx, &node);
+            let opened_src = self.open(gfx, &node, player_paused);
             self.open_time += t_open.elapsed();
             match opened_src {
                 Ok(h) => {
@@ -157,7 +185,14 @@ impl SourceHost {
             let Some(h) = self.sources.get_mut(id) else {
                 continue;
             };
-            if let Err(e) = h.src.apply(prop, v) {
+            // R75: a node-level `paused` change is composed with the current
+            // `player_paused` before it reaches the source — the source only ever sees
+            // the effective value.
+            let effective = (prop == "paused").then_some(PropValue::Bool(
+                matches!(v, PropValue::Bool(true)) || player_paused,
+            ));
+            let apply_v = effective.as_ref().unwrap_or(v);
+            if let Err(e) = h.src.apply(prop, apply_v) {
                 let reason = format!("apply {prop}: {e}");
                 log::event(
                     "host",
@@ -175,15 +210,63 @@ impl SourceHost {
                 ));
             }
         }
+
+        // R75: `player_paused` itself changed — every *other* hosted source (one whose
+        // own `paused` didn't just change above, and that wasn't just opened with the
+        // right value already) needs its effective pause recomputed and pushed too.
+        if player_paused != self.player_paused {
+            for id in graph.ids_of(NodeKind::Source) {
+                if opened.contains(&id)
+                    || changes.iter().any(|(p, _)| p.0 == format!("{id}.paused"))
+                {
+                    continue;
+                }
+                let Some(h) = self.sources.get_mut(&id) else {
+                    continue;
+                };
+                let node_paused = matches!(
+                    graph.get(&PropPath(format!("{id}.paused"))),
+                    Ok(PropValue::Bool(true))
+                );
+                let effective = PropValue::Bool(node_paused || player_paused);
+                if let Err(e) = h.src.apply("paused", &effective) {
+                    let reason = format!("apply paused: {e}");
+                    log::event(
+                        "host",
+                        Level::Warn,
+                        "source.rejected",
+                        None,
+                        json!({ "id": id, "prop": "paused", "reason": reason }),
+                    );
+                    self.events.push((
+                        id,
+                        SourceEvent::Rejected {
+                            prop: "paused".to_string(),
+                            reason,
+                        },
+                    ));
+                }
+            }
+        }
+        self.player_paused = player_paused;
     }
 
-    fn open(&self, gfx: &Gfx, node: &[(String, PropValue)]) -> Result<Hosted, String> {
+    fn open(
+        &self,
+        gfx: &Gfx,
+        node: &[(String, PropValue)],
+        player_paused: bool,
+    ) -> Result<Hosted, String> {
         let get = |k: &str| node.iter().find(|(n, _)| n == k).map(|(_, v)| v);
         let s = |k: &str| match get(k) {
             Some(PropValue::Str(s)) => s.clone(),
             _ => String::new(),
         };
         let kind = s("kind");
+        // R75: the source is opened already effectively paused if either the node asked
+        // for it or `player_paused` is on — never just the node's raw value.
+        let node_paused = matches!(get("paused"), Some(PropValue::Bool(true)));
+        let effective_paused = node_paused || player_paused;
         // Writable props (and set gain slots) a source is opened with / receives.
         let writable: Vec<&(String, PropValue)> = node
             .iter()
@@ -214,6 +297,7 @@ impl SourceHost {
                         opts.insert(k.clone(), v.to_json());
                     }
                 }
+                opts.insert("paused".into(), json!(effective_paused));
                 // `video` is the schema default, so only an explicit `image` is passed on;
                 // MpvSource infers from the extension and corrects itself after load.
                 if kind == "image" {
@@ -228,10 +312,15 @@ impl SourceHost {
             }
         };
         // Colour/snapshot: store every writable prop so `read` (and the mirror) agrees with
-        // the node from the start (e.g. `paused`).
+        // the node from the start (e.g. `paused`) — `paused` itself gets the effective
+        // value (R75), same as the mpv path above.
         for (k, v) in &writable {
             if !matches!(k.as_str(), "kind" | "color") {
-                let _ = src.apply(k, v);
+                if k == "paused" {
+                    let _ = src.apply(k, &PropValue::Bool(effective_paused));
+                } else {
+                    let _ = src.apply(k, v);
+                }
             }
         }
         Ok(Hosted { src, wake: None })
@@ -253,6 +342,9 @@ impl SourceHost {
     /// then mirror its observed values (`ready`, `duration`, `time_pos`, `width`, `height`,
     /// `paused` as the source reports it) into the graph via `Graph::set_observed` — never
     /// a change, so nothing loops back. An unknown value (`None`) leaves the graph as is.
+    /// R75: the `paused` mirror is skipped entirely while `player_paused` — every hosted
+    /// source's live `paused` is then the OR'd effective value, not the node's own
+    /// intention, and mirroring it back would corrupt that (`sync`'s doc).
     pub fn update(&mut self, gfx: &Gfx, graph: &mut Graph) {
         self.reap_dying(false);
         let mut new_events = Vec::new();
@@ -281,6 +373,9 @@ impl SourceHost {
                 new_events.push((id.clone(), ev));
             }
             for prop in MIRRORED {
+                if prop == "paused" && self.player_paused {
+                    continue;
+                }
                 if let Some(v) = h.src.read(prop) {
                     let _ = graph.set_observed(&PropPath(format!("{id}.{prop}")), v);
                 }

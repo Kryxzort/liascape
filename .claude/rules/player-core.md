@@ -285,6 +285,50 @@ omitted for being unset, so "every node with every property" holds without speci
 set, in dB — unset slots don't appear) and `gain_effective_db` (their dB sum via
 `units::Gains::effective_db`, clamped to `[-96, 12]`).
 
+**Player node `paused` (Task 16b, R75) — player-level pause.** A second, writable bool
+prop (default `false`) alongside `debug`, persisted in the snapshot's `player` object the
+same generic way (`snapshot::persistent`, no special-casing needed). "Features must
+compose" + "audio follows the picture" (project rules): pausing while a transition is
+in flight must not desync the two sides — the recipe un-pausing B when its effect starts
+is untouched (R41/the recipe's own holds still work exactly as before), so the pause
+can't just be `node.paused` on every source, or a resume would un-pause a source the
+*recipe* is deliberately holding.
+
+- **Effective pause.** `SourceHost` applies `node.paused || player.paused` to every
+  video/image (and colour/snapshot, harmlessly) source it hosts (`sources/host.rs`
+  `sync`/`open`) — never the node's raw value. The node's own `paused` is **never**
+  touched by this: it stays exactly what a `set`/the recipe put there, so a recipe-held
+  source (reveal/frozen) comes back held after a resume purely because its own
+  `node.paused` is still `true` (the recipe's own logic, completely unaware of
+  `player.paused`) — and so `release`/`is_still`'s own reads of `paused` (and every other
+  recipe decision keyed on it) are never corrupted by the override. The one place that
+  *would* corrupt it — `SourceHost::update`'s `paused` mirror (a hosted source's real,
+  OR'd state echoed back into the graph) — is suspended while `player_paused`; it
+  resumes the instant it's unpaused, so a genuine mpv-initiated flip (the pre-existing,
+  rare reason the mirror exists at all) is never missed outside the override window.
+- **Frozen time.** `Runtime::now()` excises every interval spent `player.paused` — the
+  same pause/resume algebra as `clock::OutputClock` (not reused directly: this is one
+  global pause, not a per-output clock needing its own `Rc<dyn Clock>`), inlined as two
+  fields (`paused_at`, `pause_offset`) on `Runtime`. The Animator and `Transitions::tick`
+  only ever see this `now`, so a transition's progress, gain ramps, `align:end` waits and
+  handoff timers all stop and resume exactly where they were — the recipe itself needs no
+  awareness of `player.paused` at all. `update_player_paused()` (one graph read, a no-op
+  if unchanged) runs at the top of `tick`/`begin_step`, *before* `now` is read for
+  `run_anims` — a pause applied this tick/step freezes it too, not one tick later — and
+  again (idempotently) in `sync_sources`, which runs after *every* dispatch
+  (`after_dispatch`, not only a timer/`step`) so a plain `set player.paused` reaches the
+  sources at once, between ticks.
+- **Stepped mode.** mpv itself stays paused for good regardless (§ Sources "Stepped
+  mode"), so `mpv_pause` can't show the override there; instead `Runtime::begin_step`'s
+  virtual-media-time advance is gated on `!player_paused` too (alongside the existing
+  per-node `!paused`) — `lt.t` (and so the seek target) doesn't move, and `step_seek` (§
+  Runtime "Stepped mode", "skipped when the target is unchanged") naturally no-ops.
+- **Observability.** `get`/`state` show `player.paused` directly (an ordinary prop); the
+  `sources` probe adds `effective_paused` (`node.paused || player.paused`, read from the
+  graph, independent of the live source) alongside the unchanged, node-raw `paused` —
+  deliberately a probe-only field, not a second graph property, so nothing with
+  `srcs:*.paused` semantics ever needs to know effective pause exists.
+
 ## GFX / EGL
 
 `src/gfx/egl.rs` + `src/gfx/gl.rs` (spec §5.1 "Graphics"): desktop OpenGL (core profile)
@@ -959,8 +1003,18 @@ committed B). `cancel`: pre-Running → `abort` ("cancelled"; an A that ended on
 loop off is rewound so it loops on, R44); Running → `snap_back` (layers → A, A restored
 with gains ramped back over 30 ms, B → −96 over 30 ms then destroyed); after handoff →
 `unsupported`. **Restores are exact (R41):** each gain is recorded as
-`Animator::target_of` its slot when a ramp is in flight (a predecessor's ramp-in, a
-commit's ramp, a snap-back), else its current value. B's `Rejected` events are ignored
+`Animator::live_target_of` its slot when a ramp is **still live** (a predecessor's
+ramp-in, a commit's ramp, a snap-back), else its current value — **not** `target_of`
+(Task 16b fix round): `target_of` keeps returning a *finished* animation's held end
+value even after a later direct `set` on that same path (a settings change landing after
+a ramp completed), which would make a restore land back on the stale target instead of
+what the `set` actually put there; `live_target_of` returns `None` once the animation is
+done, so `note_gain`'s `unwrap_or_else(|| gain_db(…))` fallback correctly reads the
+`set`'s value instead. Two call sites (`note_gain`'s own target; `release`'s "is A's own
+fade-out about to land within 30 ms" check) both switched; unit test
+`recipes::transition::tests::restore_uses_live_target_not_a_stale_finished_one`
+(animate a gain to −20 dB, let it finish, `set` it to −6 directly, start + cancel a
+transition → restores to −6, never the stale −20). B's `Rejected` events are ignored
 (R45) — only `Error` fails it. B `Error` / destroyed / no Ready in 10 s before handoff → the same
 abort or snap-back with `transition.failed {path, reason}`; after handoff B's errors aren't
 the recipe's business; A's errors are ignored (its texture holds its last frame).
@@ -1029,9 +1083,13 @@ mpv's lp-player default ao (`pipewire`), `info`. `serve` is **supervised** unles
 its child); `--restore` recreates `<state>/snapshot.json` (§ Snapshot);
 `--redraw-policy content` (headless only) presents like Wayland — only when the picture
 changed (§ Wayland → Frame pacing) — instead of composing every tick. **Exit codes:** 0
-clean (quit / SIGTERM / SIGINT), 1 refused or failed at startup (lock held, no compositor,
-no EGL, state dir), 2 usage, 3 the compositor connection was lost mid-run
-(`ServeError::Runtime`; restarted when supervised), 4 the supervisor gave up. **`--ao null` in
+clean (quit / SIGTERM / SIGINT), 1 refused at startup, never retried (lock held, an
+unusable socket/state dir — `ServeError::Startup`), 2 usage, 3 the compositor connection
+was lost mid-run (`ServeError::Runtime`; restarted when supervised), 4 the supervisor
+gave up (either the crash budget or `EXIT_NO_COMPOSITOR`'s own backoff, § Supervisor
+"Startup-failure classes"), 5 (`EXIT_NO_COMPOSITOR`, Task 16b) the compositor/EGL isn't
+available *yet* — `ServeError::NoCompositor`; retried with backoff when supervised,
+exit 1 straight through with `--no-supervise`. **`--ao null` in
 every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent —
 and no audio bus is created (§ Audio bus). With the default AO, `serve` creates the bus
 right after binding the socket (a second instance exits before touching PipeWire) and
@@ -1655,16 +1713,41 @@ binary as the supervisor even after a rebuild replaced the file.
   SIGCHLD/SIGINT/SIGTERM for `sigtimedwait`), `PR_SET_PDEATHSIG(SIGTERM)` then `getppid()`
   re-checked — a supervisor killed outright (SIGKILL) never leaves an orphan player: the
   child gets SIGTERM and quits cleanly.
+- **Startup-failure classes (Task 16b) — two, never conflated.** `ServeError::Startup`
+  (exit **1**): another instance already holds the lock, or the socket/state dir is
+  unusable — waiting never fixes either, so this is a **clean exit, never retried**
+  (`classify`), same as 0/2. `ServeError::NoCompositor` (exit **`EXIT_NO_COMPOSITOR`**,
+  5): the compositor/EGL genuinely isn't available *yet* — `wl::Wayland::connect`
+  failing (no `WAYLAND_DISPLAY`, `wl_display` connect refused) or `Gfx::new_wayland`/
+  `Gfx::new_offscreen` failing (EGL init before a GPU driver/device is ready). The two
+  can look identical from outside (`lp-player serve --ao null` on a session starting
+  before its compositor) but need opposite handling: "already running" burning the crash
+  budget would just waste restarts on something a restart can't fix, while a hard exit 1
+  on "not ready yet" would mean `lp-player` loses every boot race against its own
+  compositor coming up a moment later.
 - **Clean exits end supervision** (`classify`): child exit 0 (quit, SIGTERM/SIGINT), 1
-  (refused/failed at startup — another instance holds the lock, no compositor, no EGL, bad
-  state dir; restarting can't help, and the backend's "exit 1 = already running" rule keeps
-  working), 2 (usage). The supervisor exits with the same code.
+  (`ServeError::Startup`, above), 2 (usage). The supervisor exits with the same code.
+- **`EXIT_NO_COMPOSITOR` gets its own backoff, not the crash budget:** [`run`]'s loop
+  retries with a doubling delay — `COMPOSITOR_WAIT_INITIAL_DELAY` 0.5 s, then 1 s, 2 s,
+  4 s, … — logging `supervisor.waiting_for_compositor {pid, uptime_ms, delay_ms,
+  waited_ms, budget_ms}` (warn) before each sleep, until the *next* delay would push the
+  running total past `compositor_wait_budget()` (`COMPOSITOR_WAIT_BUDGET` 30 s in
+  production; the test-only env knob `LP_PLAYER_TEST_COMPOSITOR_WAIT_MS` shortens it so a
+  test doesn't really wait 30 s) — then `supervisor.giving_up {reason: "no_compositor",
+  pid, waited_ms, budget_ms, hint}` (error) and exit `EXIT_GAVE_UP` (4 — the same code the
+  crash-loop budget gives up with, distinguished by `reason`). Never counted against
+  `Budget`'s 5-per-60s (no `supervisor.child_exited`/`.restart` logged for these
+  attempts); a later real crash (`Exit::Abnormal`) resets the backoff streak back to its
+  start, since it's an independent concern. Test: `tests/supervise.rs::
+  gives_up_without_compositor_after_backoff` (a bogus `WAYLAND_DISPLAY`, the short test
+  budget: 2 retries then give-up).
 - **Crashes are restarted immediately:** death by a signal, a Rust panic (101),
   `EXIT_RUNTIME` 3 (the compositor connection was lost mid-run — `ServeError::Runtime`; if
-  the compositor is really gone the restarted child fails to connect, exits 1, and
-  supervision ends), any other code. The new child gets `--restore` (restores the snapshot,
-  § Snapshot) and `--restarted signal=N|code=N,count,total,died_ms,prev_pid,restore`, and
-  logs **`supervisor.restart {signal|code, count, total, since_ms, prev_pid, restore}`**
+  the compositor is really gone the restarted child gets `EXIT_NO_COMPOSITOR` instead,
+  which the backoff above handles — never ends supervision outright), any other code. The
+  new child gets `--restore` (restores the snapshot, § Snapshot) and `--restarted
+  signal=N|code=N,count,total,died_ms,prev_pid,restore`, and logs
+  **`supervisor.restart {signal|code, count, total, since_ms, prev_pid, restore}`**
   (warn) as its first event after the log opens (R73; `since_ms` = from the supervisor
   seeing the death, `CLOCK_MONOTONIC`, to that event). `hello.restart` repeats those fields
   — a client that reconnects after a restart (the backend adapter, Task 17) can't receive
@@ -1701,11 +1784,18 @@ binary as the supervisor even after a rebuild replaced the file.
   handler (DrKonqi) pops a notification per crash.
 - **Tests** (`tests/supervise.rs`, supervised headless real clock): `crash_restores`,
   `clean_quit_not_restarted` (quit; SIGTERM to the supervisor; SIGTERM to the child),
-  `gives_up_after_5_in_60s`, `corrupt_snapshot_starts_empty`,
+  `gives_up_after_5_in_60s`, `gives_up_without_compositor_after_backoff` (Task 16b: bogus
+  `WAYLAND_DISPLAY`, the short test budget — 2 retries then give-up, never the crash
+  budget's own events), `corrupt_snapshot_starts_empty`,
   `transition_in_flight_restores_as_b`, `parked_restores_parked`,
-  `output_props_survive_replug`. `tests/api.rs` runs `--no-supervise` (its pid/lock/SIGTERM
-  checks are about the compositor itself); `wayland_serve_args_and_missing_compositor`
-  stays supervised (exit 1 passes through, no restart).
+  `output_props_survive_replug`, `supervisor_sigkill_reaps_child_fast` (Task 16b: SIGKILL
+  the supervisor, assert the compositor child is gone within 300 ms — asserted directly,
+  no fallback kill of ours in the way; `Sup::drop`'s own, much more generous, teardown
+  fallback never gets the chance to mask a PDEATHSIG regression here). `tests/api.rs` runs
+  `--no-supervise` (its pid/lock/SIGTERM checks are about the compositor itself);
+  `wayland_serve_args_and_missing_compositor` now also passes `--no-supervise` for its
+  "not available yet" (exit `EXIT_NO_COMPOSITOR`, Task 16b) assertion — the supervised
+  retry-then-give-up case is `gives_up_without_compositor_after_backoff`'s job, above.
 
 ## Snapshot
 

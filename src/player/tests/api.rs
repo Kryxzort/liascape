@@ -26,6 +26,8 @@ use serde_json::{Value, json};
 const BIN: &str = env!("CARGO_BIN_EXE_lp-player");
 static SERIAL: Mutex<()> = Mutex::new(());
 static N: AtomicU32 = AtomicU32::new(0);
+/// `lp_player::supervise::EXIT_NO_COMPOSITOR` (black-box: spelled out).
+const EXIT_NO_COMPOSITOR: i32 = 5;
 
 // ---------------------------------------------------------------- server + client
 
@@ -913,6 +915,289 @@ fn stepped_align_end_reveal() {
         "started at {at} ms, A ends at 3000: {evs:?}"
     );
     c.step_until_event(100, 30, "transition.done", &corr);
+}
+
+/// Finds `id` in a `probe sources` reply.
+fn probe_source<'a>(probe: &'a Value, id: &str) -> &'a Value {
+    probe["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap_or_else(|| panic!("{id} not in {probe}"))
+}
+
+/// Task 16b, R75: player-level pause freezes the Animator and `Transitions` — a
+/// full-live transition's effect progress, both sides' `gain.xfade` and both sides'
+/// `time_pos` all stay exactly where they were through a full second of stepped time,
+/// and both are *effectively* paused (`probe sources`) even though neither side's own
+/// `paused` node prop ever changes (full-live never pauses either side — R34/§10). (d):
+/// `player.paused` is reflected in `get`, `state` and `probe sources` throughout. On
+/// resume the transition continues forward from where it paused (never restarts) and
+/// completes normally.
+#[test]
+fn player_pause_freezes_full_live_transition() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a_clip = ensure_clip("tr_red_10s", RED_10S);
+    let b_clip = ensure_clip("tr_blue_10s", BLUE_10S);
+    let a = c.ok(
+        "create",
+        json!({"kind": "source", "props": {"path": s(&a_clip), "loop": true}}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    show_all(&mut c, &a);
+    for _ in 0..5 {
+        c.step(16);
+    }
+
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&b_clip), "loop": true},
+               "effect_id": "fade", "duration_ms": 2000, "method": "full-live",
+               "align": "now"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let b = r["to"].as_str().unwrap().to_string();
+    c.step_until_event(16, 60, "transition.started", &corr);
+    let fx = content(&mut c, "VIRTUAL-1");
+
+    // Advance to ~50% progress.
+    loop {
+        let p = get(&mut c, &format!("{fx}.progress"))["result"]["value"]
+            .as_f64()
+            .unwrap();
+        if p >= 0.45 {
+            break;
+        }
+        c.step(32);
+    }
+
+    let progress_before = get(&mut c, &format!("{fx}.progress"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    let a_gain_before = get(&mut c, &format!("{a}.gain.xfade"))["result"]["value"].clone();
+    let b_gain_before = get(&mut c, &format!("{b}.gain.xfade"))["result"]["value"].clone();
+    let a_pos_before = get(&mut c, &format!("{a}.time_pos"))["result"]["value"].clone();
+    let b_pos_before = get(&mut c, &format!("{b}.time_pos"))["result"]["value"].clone();
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+
+    // (d) visible via get/state/probe sources.
+    assert_eq!(get(&mut c, "player.paused")["result"]["value"], json!(true));
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"]["player"]["paused"], json!(true), "{st}");
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    for id in [&a, &b] {
+        let src = probe_source(&probe, id);
+        assert_eq!(
+            src["paused"],
+            json!(false),
+            "the node's own paused is untouched: {src}"
+        );
+        assert_eq!(src["effective_paused"], json!(true), "{src}");
+    }
+
+    // A full second (stepped): nothing moves.
+    for _ in 0..32 {
+        c.step(32);
+    }
+    assert_eq!(
+        get(&mut c, &format!("{fx}.progress"))["result"]["value"],
+        json!(progress_before)
+    );
+    assert_eq!(
+        get(&mut c, &format!("{a}.gain.xfade"))["result"]["value"],
+        a_gain_before
+    );
+    assert_eq!(
+        get(&mut c, &format!("{b}.gain.xfade"))["result"]["value"],
+        b_gain_before
+    );
+    assert_eq!(
+        get(&mut c, &format!("{a}.time_pos"))["result"]["value"],
+        a_pos_before
+    );
+    assert_eq!(
+        get(&mut c, &format!("{b}.time_pos"))["result"]["value"],
+        b_pos_before
+    );
+
+    // Resume: continues forward from here (never restarts), then completes.
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    c.step(32);
+    let progress_after = get(&mut c, &format!("{fx}.progress"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        progress_after > progress_before,
+        "must continue forward from where it paused, not restart: \
+         {progress_before} -> {progress_after}"
+    );
+    c.step_until_event(32, 300, "transition.done", &corr);
+}
+
+/// Task 16b, R75: pausing mid-`frozen` hold must not disturb the recipe's own hold — A
+/// and B are already held (`paused: true`) by the method itself, the player-level
+/// override is a no-op on top of that, and the handoff (driven by the frozen clock) must
+/// not fire while paused even once real step-time well past `duration_ms` has gone by.
+/// Resuming lets it complete normally, at which point B's own handoff unpauses it
+/// (never the player-pause override).
+#[test]
+fn player_pause_freezes_frozen_hold() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a_clip = ensure_clip("tr_red_10s", RED_10S);
+    let b_clip = ensure_clip("tr_blue_10s", BLUE_10S);
+    let a = c.ok(
+        "create",
+        json!({"kind": "source", "props": {"path": s(&a_clip), "loop": true}}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    show_all(&mut c, &a);
+    for _ in 0..5 {
+        c.step(16);
+    }
+
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&b_clip), "loop": true},
+               "effect_id": "fade", "duration_ms": 300, "method": "frozen",
+               "align": "now"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let b = r["to"].as_str().unwrap().to_string();
+    c.step_until_event(16, 60, "transition.started", &corr);
+    // Frozen holds both A and B paused through the effect (the method itself, nothing to
+    // do with player.paused yet) — A pauses once its 30 ms anti-click ramp lands.
+    for _ in 0..5 {
+        c.step(16);
+    }
+    assert_eq!(
+        get(&mut c, &format!("{a}.paused"))["result"]["value"],
+        json!(true)
+    );
+    assert_eq!(
+        get(&mut c, &format!("{b}.paused"))["result"]["value"],
+        json!(true)
+    );
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    for id in [&a, &b] {
+        let src = probe_source(&probe, id);
+        assert_eq!(src["paused"], json!(true), "recipe-held already: {src}");
+        assert_eq!(src["effective_paused"], json!(true), "{src}");
+    }
+
+    // Step well past the 300 ms duration while paused: the handoff must not fire.
+    c.drain_events();
+    for _ in 0..40 {
+        c.step(100); // 4 s of (frozen) virtual time
+    }
+    let evs = c.drain_events();
+    assert!(
+        !evs.iter()
+            .any(|e| e["event"] == "transition.handoff" && e["corr"] == corr),
+        "handoff fired while paused: {evs:?}"
+    );
+    assert_eq!(
+        get(&mut c, &format!("{a}.paused"))["result"]["value"],
+        json!(true),
+        "still held exactly as the method wants"
+    );
+    assert_eq!(
+        get(&mut c, &format!("{b}.paused"))["result"]["value"],
+        json!(true)
+    );
+
+    // Resume: it completes, and B's own handoff (not the player-pause override) unpauses it.
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    c.step_until_event(32, 60, "transition.handoff", &corr);
+    c.step_until_event(32, 60, "transition.done", &corr);
+    assert_eq!(
+        get(&mut c, &format!("{b}.paused"))["result"]["value"],
+        json!(false),
+        "B's own handoff unpauses it once the effect is over"
+    );
+}
+
+/// Task 16b, R75: pausing during an `align: end` wait holds A (via the generic
+/// effective-pause override, not anything the recipe itself does) so it never reaches
+/// its own natural end while paused — the wait must not fire — and resumes once
+/// unpaused.
+#[test]
+fn player_pause_freezes_align_end_wait() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok(
+        "subscribe",
+        json!({"topics": ["transition.", "source.ended"]}),
+    );
+    let a_clip = ensure_clip("tr_red_3s", RED_3S);
+    let b_clip = ensure_clip("tr_blue_10s", BLUE_10S);
+    let a = c.ok(
+        "create",
+        json!({"kind": "source", "props": {"path": s(&a_clip)}}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(100); // A at 0.3 s
+    }
+
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&b_clip), "loop": true},
+               "effect_id": "fade", "duration_ms": 300, "method": "reveal",
+               "align": "end"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    for _ in 0..5 {
+        c.step(50); // B becomes ready; still waiting on A's own end (3 s)
+    }
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["transitions"][0]["phase"], "waiting_start", "{st}");
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    let src = probe_source(&probe, &a);
+    assert_eq!(src["paused"], json!(false), "A's own intent: still playing");
+    assert_eq!(src["effective_paused"], json!(true), "{src}");
+    let a_pos_before = get(&mut c, &format!("{a}.time_pos"))["result"]["value"].clone();
+
+    c.drain_events();
+    // Well past A's 3 s end, if it moved at all.
+    for _ in 0..40 {
+        c.step(100);
+    }
+    assert_eq!(
+        get(&mut c, &format!("{a}.time_pos"))["result"]["value"],
+        a_pos_before,
+        "A must never reach its own end while paused"
+    );
+    let evs = c.drain_events();
+    assert!(
+        !evs.iter()
+            .any(|e| e["event"] == "transition.started" && e["corr"] == corr),
+        "the align:end wait fired while paused: {evs:?}"
+    );
+
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let evs = c.step_until_event(100, 60, "transition.started", &corr);
+    assert!(
+        evs.iter()
+            .any(|e| e["event"] == "source.ended" && e["id"] == a),
+        "{evs:?}"
+    );
 }
 
 /// One bad client never affects another: garbage JSON gets an error (connection kept), a
@@ -2075,9 +2360,13 @@ fn mixed_content_static_output_stays_idle() {
 }
 
 /// Task 13: `serve` without `--headless` is the Wayland backend. `--outputs` is
-/// headless-only (exit 2), and an unreachable compositor is a clean failure — exit 1 with a
-/// hint, socket + lock removed — never a hang or a panic. (The real compositor is only
-/// touched by `tests/onmachine/outputs.sh`.)
+/// headless-only (exit 2), and an unreachable compositor is "not available yet" (Task
+/// 16b: exit [`EXIT_NO_COMPOSITOR`], not 1 — 1 is reserved for "never worth retrying",
+/// e.g. already running) with a hint, socket + lock removed — never a hang or a panic.
+/// `--no-supervise`: this checks the bare child's own behavior; the supervisor's retry
+/// of this same exit code has its own test, `tests/supervise.rs::
+/// gives_up_without_compositor_after_backoff`. (The real compositor is only touched by
+/// `tests/onmachine/outputs.sh`.)
 #[test]
 fn wayland_serve_args_and_missing_compositor() {
     let root = new_root();
@@ -2102,9 +2391,9 @@ fn wayland_serve_args_and_missing_compositor() {
     );
 
     let t = Instant::now();
-    let out = run(&["serve", "--ao", "null"]);
+    let out = run(&["serve", "--no-supervise", "--ao", "null"]);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert_eq!(out.status.code(), Some(EXIT_NO_COMPOSITOR), "{err}");
     assert!(
         err.contains("can't connect to the Wayland display"),
         "{err}"

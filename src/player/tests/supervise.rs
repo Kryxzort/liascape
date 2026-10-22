@@ -32,6 +32,8 @@ const RESTART_BUDGET: Duration = Duration::from_millis(1500);
 const TEST_CRASH_ENV: &str = "LP_PLAYER_TEST_CRASH";
 /// `lp_player::supervise::EXIT_GAVE_UP`.
 const EXIT_GAVE_UP: i32 = 4;
+/// `lp_player::supervise::TEST_COMPOSITOR_WAIT_ENV` (black-box: spelled out).
+const TEST_COMPOSITOR_WAIT_ENV: &str = "LP_PLAYER_TEST_COMPOSITOR_WAIT_MS";
 
 fn can_run() -> bool {
     if headless_gl().is_none() {
@@ -470,6 +472,38 @@ fn crash_restores() {
     assert_eq!(st["graph"][&nid]["gain"]["anticlick"], json!(0.0));
 }
 
+/// Task 16b leftover: SIGKILLing the supervisor must orphan nothing — its
+/// `PR_SET_PDEATHSIG(SIGTERM)` (set between fork and exec) fires from the kernel's own
+/// notice of the parent's death, not from any cleanup code of ours. Asserted directly
+/// (no fallback kill anywhere in this test masking a regression): the child must be gone
+/// within 300 ms of the SIGKILL, polled, never just "eventually" via `Sup::drop`'s own
+/// (much more generous) teardown fallback.
+#[test]
+fn supervisor_sigkill_reaps_child_fast() {
+    let Some(sup) = Sup::start(&[]) else {
+        return;
+    };
+    let child = sup.pid;
+    assert!(alive(child), "precondition: the compositor is up");
+    let sup_pid = sup.supervisor_pid();
+    assert_eq!(
+        unsafe { libc::kill(sup_pid as i32, libc::SIGKILL) },
+        0,
+        "kill -9 {sup_pid}"
+    );
+    let t = Instant::now();
+    while alive(child) && t.elapsed() < Duration::from_millis(300) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let elapsed = t.elapsed();
+    assert!(
+        !alive(child),
+        "compositor pid {child} still alive {elapsed:?} after SIGKILLing the supervisor \
+         (pid {sup_pid}) — PR_SET_PDEATHSIG should have reaped it almost immediately"
+    );
+    println!("child reaped {elapsed:?} after SIGKILLing the supervisor");
+}
+
 /// A clean exit is never restarted: `quit`, SIGTERM to the supervisor (forwarded), and
 /// SIGTERM to the child all end supervision with exit 0.
 #[test]
@@ -559,6 +593,78 @@ fn gives_up_after_5_in_60s() {
         "restarts are immediate"
     );
     assert!(sup.stderr().contains("giving up"), "{}", sup.stderr());
+}
+
+/// Task 16b: "compositor/EGL not available yet" (here: Wayland mode, a bogus
+/// `WAYLAND_DISPLAY`) is its own startup-failure class, distinct from "already running" —
+/// the supervisor retries it with backoff instead of passing the exit code straight
+/// through. `TEST_COMPOSITOR_WAIT_ENV` shortens the real 30 s budget so the test doesn't
+/// really wait that long: with it at 1600 ms the schedule is 500 ms (waited 500 ≤ 1600),
+/// 1000 ms (waited 1500 ≤ 1600), then the next 2000 ms would push the total to 3500 ms —
+/// past the budget — so it gives up after exactly those two retries. Not `Sup` (its
+/// `--headless` is hardcoded; this needs the Wayland path), so it drives the raw process
+/// and the shared event log directly, the way `tests/api.rs`'s own missing-compositor
+/// test does for the un-supervised case.
+#[test]
+fn gives_up_without_compositor_after_backoff() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let mut c = Command::new(BIN);
+    guard(&mut c);
+    c.args(["serve", "--ao", "null"])
+        .env("XDG_RUNTIME_DIR", root.join("run"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("WAYLAND_DISPLAY", "no-such-wayland-9")
+        .env(TEST_COMPOSITOR_WAIT_ENV, "1600")
+        .env_remove("WAYLAND_SOCKET")
+        .stdin(Stdio::null());
+    let t = Instant::now();
+    let out = c.output().expect("run lp-player");
+    let elapsed = t.elapsed();
+    println!("gave up without a compositor after {elapsed:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_GAVE_UP), "{err}");
+    assert!(elapsed < Duration::from_secs(10), "no hang: {err}");
+
+    let events: Vec<Value> = std::fs::read_to_string(state_dir(&root).join("events.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let waiting: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["kind"] == "supervisor.waiting_for_compositor")
+        .collect();
+    assert_eq!(waiting.len(), 2, "{events:?}");
+    let delays: Vec<f64> = waiting
+        .iter()
+        .map(|e| e["delay_ms"].as_f64().unwrap())
+        .collect();
+    assert_eq!(delays, [500.0, 1000.0], "the backoff doubles: {waiting:?}");
+    let gave_up: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["kind"] == "supervisor.giving_up")
+        .collect();
+    assert_eq!(gave_up.len(), 1, "{events:?}");
+    assert_eq!(
+        gave_up[0]["reason"],
+        json!("no_compositor"),
+        "{:?}",
+        gave_up[0]
+    );
+    assert!(err.contains("compositor"), "giving-up message: {err}");
+    // Never counted against the real crash-loop budget: no `supervisor.restart` and no
+    // `supervisor.child_exited` (those are the crash-loop's own events, R73) at all.
+    assert!(
+        !events
+            .iter()
+            .any(|e| e["kind"] == "supervisor.restart" || e["kind"] == "supervisor.child_exited"),
+        "{events:?}"
+    );
+    drop(serial);
 }
 
 /// A corrupt or unknown-version snapshot → `snapshot.invalid {reason}`, an empty player

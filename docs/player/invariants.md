@@ -111,3 +111,39 @@ source, the 10th target ends current and alone; ≥ 1 commit and ≥ 1 supersede
 `cancel_waiting_restores_a`, `cancel_running_snaps_back`, `restore_targets_not_mid_ramp`
 (R41), unit `supersede_does_not_rewind_cancel_does` (R44), `held_a_destroyed_at_handoff`.
 
+## 7. Pause freezes everything — picture, audio and time — and resume continues exactly
+
+**Why:** "features must compose" + "audio follows the picture" (project rules): the
+backend already paused by setting a source's own `paused` prop, but the transition
+recipe un-pauses B the instant its effect starts Running (R34/§10) — a player-level
+pause landing mid-transition would desync the two sides (A frozen, B playing) unless it
+reached every moving part, not just the one prop a naive implementation would touch.
+Resuming has to continue from exactly where it stopped — a transition that restarted, or
+a video whose position jumped, would be as visible a glitch as the desync itself.
+
+**Enforced by:** a second, writable Player node prop `paused` (R75, Task 16b), composed
+rather than substituted for the node-level one:
+- **Picture + audio:** `SourceHost` applies `node.paused || player.paused` to every
+  video/image source (`sources/host.rs`) — never touching the node's own `paused`, so a
+  recipe-held source (reveal/frozen) stays held after a resume purely because its own
+  `paused` never moved; the node mirror is suspended while paused so the OR'd (effective)
+  state a hosted source now reports can't corrupt it back.
+- **Time:** `Runtime::now()` excises every paused interval (two fields, same algebra as
+  `clock::OutputClock`'s pause/resume) — the Animator and `Transitions::tick` only ever
+  see this clock, so a transition's progress, gain ramps, `align:end` waits and handoff
+  timers all stop and resume exactly where they were, with the recipe itself needing no
+  awareness that `player.paused` exists at all. Stepped mode: the per-source virtual
+  media time (`Runtime::begin_step`'s `lt.t`) is gated on `player_paused` too, so a
+  stepped source can't advance (or reach its own natural end) while paused either.
+
+**Tests** (`tests/api.rs`): `player_pause_freezes_full_live_transition` (pause at
+progress ≈ 0.5, step a full second: progress/both gains/both `time_pos` unchanged, both
+`effective_paused` via `probe sources`; resume continues forward and completes —
+`player.paused` visible throughout via `get`/`state`/`probe sources`),
+`player_pause_freezes_frozen_hold` (pause mid-hold: A/B stay held exactly as `frozen`
+left them, the handoff doesn't fire 4 s of virtual time past `duration_ms`, resume
+completes and B's own handoff — never the override — unpauses it),
+`player_pause_freezes_align_end_wait` (pause during a `WaitingStart` wait: A — playing,
+not recipe-held — never reaches its own end while paused so `transition.started` never
+fires, resume lets it arrive and start normally).
+
