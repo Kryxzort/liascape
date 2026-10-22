@@ -56,10 +56,16 @@ src/livepaper/            # headless C# backend (CLI + daemons + --serve API). N
 ├── Services/             # IBgsProvider + one service per source; SteamWorkshopService
 ├── Helpers/              # PlayerHelper, DownloadHelper, LibraryService, LibraryStore, ImportService,
 │                         #   SettingsService, AudioMonitor, MonitorDetector, TransitionService, WorkshopDownloader, WorkshopUnsubQueue
+├── Player/               # lp-player adapter (PlayerEngine=lp-player) — .claude/rules/player-adapter.md
 └── Web/                  # ServerHost (minimal-API endpoints), AppOps (orchestration), EventBus (WS), SteamOps
-src/native/lp-transition/ # C: wlr-layer-shell + EGL/GLES transition renderer (built by install.sh)
-src/native/lp-audio/      # C: libpulse helper — event-driven scene-audio crossfade (built by install.sh)
-transitions/             # shared GLSL effect catalog (glsl/ + manifest.json + wrap.* + preview/) — UI previews + the renderer
+src/native/lp-transition/ # C: wlr-layer-shell + EGL/GLES transition renderer (built by install.sh) — legacy engine
+src/native/lp-audio/      # C: libpulse helper — event-driven scene-audio crossfade (built by install.sh) — legacy engine
+src/player/               # Rust: lp-player, the experimental compositor replacing mpvpaper + lp-transition +
+                          #   per-monitor LWE + lp-audio with one process. docs/player/architecture.md,
+                          #   .claude/rules/player-core.md
+transitions/             # shared GLSL effect catalog (glsl/ + manifest.json + wrap.* + preview/) — UI previews +
+                          #   the legacy renderer + lp-player's effect catalogue (credited in UPSTREAM.md)
+docs/player/              # AI-facing lp-player docs: architecture.md, invariants.md, spikes/
 app/
 ├── ui/                   # Vite + React 19 + TS + zustand + framer-motion (the renderer)
 └── shell/                # Electron main/preload + probes; spawns `livepaper --serve`, loads the UI same-origin
@@ -68,6 +74,16 @@ app/
 WE-style **transitions** animate every wallpaper switch (gl-transitions GLSL) — see `.claude/rules/player.md`. v1: video→video, **full-live** (both sides keep playing through the effect — libmpv decodes A+B in the renderer; frozen stills are the warmup/scene fallback).
 
 The Avalonia UI (`Views/`, `ViewModels/`, `App.axaml`) was **removed** in the Electron rewrite — don't reference it. `Web/` only wraps the unchanged scrapers/helpers/daemons; UI lives in `app/`. See `.claude/rules/web-backend.md` + `web-ui.md`.
+
+**Player engine.** `AppSettings.PlayerEngine` = `legacy` (default: mpvpaper + `lp-transition` + per-monitor LWE +
+`lp-audio`, described above) | `lp-player` (experimental: one Rust process owning every wallpaper type and
+transition, built so it never hands an audible/visible stream between owners — Phase 1 covers video/image/colour;
+scenes are skipped exactly like `AllowScenes=false`). Switch is live (Settings → Advanced → "Player engine").
+Dev: `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q` (the stray `LD_LIBRARY_PATH` this
+machine's shell carries breaks native links — see `.claude/rules/player-core.md` for why); `lp-player ctl state` /
+`ctl logs '{"corr":"..."}'` / `ctl probe '{"name":"sources"}'` inspect a running player. Full design, the block
+model and a debug-mode quickstart: `docs/player/architecture.md`. Per-module detail: `.claude/rules/player-core.md`
+(the Rust crate) and `.claude/rules/player-adapter.md` (the C# side). What's done vs pending: `docs/TODO.md` → "lp-player".
 
 ## Engineering Rules
 
