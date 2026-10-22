@@ -13,10 +13,13 @@
 //! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
 //!   mean/p50/p95/max/count/missed; all: + fps), idle, frame callback state.
 //! - `bus`, `meter.window` (`audio.rs`, Task 14) — the player audio bus and its meter.
+//! - `dropout` (`dropout.rs`, Task 15) — the reference-based dropout detector; runs on a
+//!   worker thread and replies `pending`, delivering `probe.dropout` as an event.
 //! - `snapshot` (`snapshot.rs`, Task 16) — the state snapshot: what would be saved now,
 //!   when it's next written, writer counters.
 
 mod audio;
+pub mod dropout;
 pub mod frames;
 mod snapshot;
 
@@ -62,6 +65,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         "meter.window",
         audio::meter_window,
         "bus meter samples {last_ms | from_ms,to_ms}: [[t_ms, dbfs_1ms]…] + median/min/max/gap",
+    ),
+    (
+        "dropout",
+        dropout::probe,
+        "re-run the reference dropout detector for a recent transition {corr}: replies \
+         pending, result follows as a probe.dropout event",
     ),
 ];
 

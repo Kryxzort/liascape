@@ -1312,7 +1312,10 @@ stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
 `snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|
 write_failed|write_recovered`, `test.crash`,
 `audio.bus.up|down|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
-`audio.meter.started`, `compose.failed` — i.e. every event-log kind
+`audio.meter.started`, `audio.meter.scratch_exceeded` (T14 residual — a negotiated quantum
+exceeded the meter's RT scratch cap, chunked rather than reallocated), `probe.dropout`
+(Task 15 — `{corr, report}` or `{corr, skipped}`), `probe.dropout_decode_failed`,
+`compose.failed` — i.e. every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
 
 **Global settings go to `srcs:*` (R50).** The backend (Task 17) sends every global setting
@@ -1344,7 +1347,10 @@ subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`; `frames` (Task 13,
 mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
 missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
 Wayland → Frame pacing; Task 16 adds `totals.present_failed`, `last_present_error`,
-`retry_in_ms`); `bus` and `meter.window` (§ Audio bus); `snapshot` (Task 16,
+`retry_in_ms`); `bus` and `meter.window` (§ Audio bus); `dropout` (Task 15,
+`probe/dropout.rs`) — `{corr, args}` → `{status: "pending", corr}`, the reference-based
+dropout detector's result following as a `probe.dropout {corr, report}` event (never
+deferred like `step`'s reply; `docs/player/debugging.md`); `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
@@ -1371,6 +1377,9 @@ worst reply stays < 500 ms during a 40 000-request flood).
 4. `ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'` — look at the picture.
 5. Reproduce deterministically: `serve --headless --clock stepped --ao null`, replay the
    commands, `step`, `capture`.
+6. Audio specifically (a dropout, a glitchy fade): `docs/player/debugging.md` — symptom →
+   probe/log query → likely cause, seeded with the bugs the reference monitor
+   (`probe dropout`, Task 15) found in the legacy engine, plus `meter.window`/`bus`.
 
 ## Wayland
 

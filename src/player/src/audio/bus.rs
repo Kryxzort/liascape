@@ -497,15 +497,87 @@ fn roundtrip(ml: &MainLoopRc, core: &CoreRc, seen: &Rc<RefCell<Seen>>) -> Result
     .map_err(|e| format!("PipeWire roundtrip: {e}"))
 }
 
-/// Interleaved F32 samples + the buffer's cycle time (ns) of one dequeued capture buffer.
-fn read_capture(stream: &pw::stream::Stream, scratch: &mut Vec<f32>) -> Option<i64> {
+/// Rate-limits the `audio.meter.scratch_exceeded` warning (T14 residual fix round): at
+/// most once per [`SCRATCH_WARN_EVERY`], regardless of which capture stream hit it.
+static SCRATCH_WARN_LAST: Mutex<Option<Instant>> = Mutex::new(None);
+const SCRATCH_WARN_EVERY: Duration = Duration::from_secs(5);
+
+fn scratch_cap_exceeded(frames: usize, cap_frames: usize) {
+    let mut last = SCRATCH_WARN_LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    if last.is_some_and(|t| now.duration_since(t) < SCRATCH_WARN_EVERY) {
+        return;
+    }
+    *last = Some(now);
+    drop(last);
+    log::event(
+        "audio",
+        Level::Warn,
+        "audio.meter.scratch_exceeded",
+        None,
+        json!({ "frames": frames, "cap_frames": cap_frames }),
+    );
+}
+
+/// Splits interleaved F32 `bytes` (one dequeued capture buffer, first frame at `t0_ns`)
+/// into pieces of at most `scratch`'s own capacity — **never grown** — each handed to
+/// `on_chunk` with its own `t_ns` advanced by its frame offset at [`RATE`], so a buffer
+/// bigger than the scratch (a negotiated quantum above PipeWire's default max,
+/// [`MAX_QUANTUM_FRAMES`] — T14 residual, found in review) is chunked rather than
+/// reallocating the RT callback's scratch, and no frame is dropped, only chunked. The
+/// pure half of [`read_capture`]'s chunking — unit-tested without PipeWire. `channels`
+/// keeps a chunk boundary frame-aligned.
+fn chunk_into(
+    bytes: &[u8],
+    t0_ns: i64,
+    channels: usize,
+    scratch: &mut Vec<f32>,
+    mut on_chunk: impl FnMut(&[f32], i64),
+) {
+    let channels = channels.max(1);
+    let total_samples = bytes.len() / 4;
+    let cap_samples = scratch.capacity().max(channels);
+    let step = (cap_samples / channels).max(1) * channels;
+    if total_samples > step {
+        scratch_cap_exceeded(total_samples / channels, step / channels);
+    }
+    let ns_per_frame = 1e9 / RATE as f64;
+    let mut pos = 0usize;
+    loop {
+        let n = (total_samples - pos).min(step);
+        scratch.clear();
+        scratch.extend(
+            bytes[pos * 4..(pos + n) * 4]
+                .chunks_exact(4)
+                .map(|w| f32::from_le_bytes([w[0], w[1], w[2], w[3]])),
+        );
+        let frame_offset = (pos / channels) as f64;
+        on_chunk(scratch, t0_ns + (frame_offset * ns_per_frame) as i64);
+        pos += n;
+        if pos >= total_samples {
+            break;
+        }
+    }
+}
+
+/// Dequeues one capture buffer and hands its interleaved F32 samples to `on_chunk` in
+/// pieces of at most `scratch`'s capacity ([`chunk_into`]); `channels` must match the
+/// stream's own format (2, here — stereo FL/FR). Returns `false` only when there was no
+/// buffer to dequeue (`on_chunk` is never called then).
+fn read_capture(
+    stream: &pw::stream::Stream,
+    scratch: &mut Vec<f32>,
+    channels: usize,
+    on_chunk: impl FnMut(&[f32], i64),
+) -> bool {
     unsafe {
         let b = stream.dequeue_raw_buffer();
         if b.is_null() {
-            return None;
+            return false;
         }
-        let t = (*b).time as i64;
-        scratch.clear();
+        let raw_t = (*b).time as i64;
+        let t0 = if raw_t > 0 { raw_t } else { mono_ns() };
+        let mut bytes: &[u8] = &[];
         let sb = (*b).buffer;
         if !sb.is_null() && (*sb).n_datas > 0 && !(*sb).datas.is_null() {
             let d = &*(*sb).datas;
@@ -514,16 +586,12 @@ fn read_capture(stream: &pw::stream::Stream, scratch: &mut Vec<f32>) -> Option<i
                 let max = d.maxsize as usize;
                 let off = (c.offset as usize).min(max);
                 let size = (c.size as usize).min(max - off);
-                let bytes = std::slice::from_raw_parts((d.data as *const u8).add(off), size);
-                scratch.extend(
-                    bytes
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-                );
+                bytes = std::slice::from_raw_parts((d.data as *const u8).add(off), size);
             }
         }
+        chunk_into(bytes, t0, channels, scratch, on_chunk);
         stream.queue_raw_buffer(b);
-        Some(if t > 0 { t } else { mono_ns() })
+        true
     }
 }
 
@@ -691,26 +759,25 @@ fn measure_latency(
         let l = s
             .add_local_listener_with_user_data(())
             .process(move |st, _| {
-                let Some(t) = read_capture(st, &mut scratch) else {
-                    return;
-                };
-                if monitor {
-                    sh.cycles.set(sh.cycles.get() + 1);
-                    sh.frames.set((scratch.len() / 2) as u64);
-                }
-                if !sh.fired.get() {
-                    return;
-                }
-                let slot = if monitor {
-                    &sh.at_monitor
-                } else {
-                    &sh.at_playback
-                };
-                if slot.get().is_none()
-                    && let Some(at) = find_impulse(&scratch, t)
-                {
-                    slot.set(Some(at));
-                }
+                read_capture(st, &mut scratch, 2, |buf, t| {
+                    if monitor {
+                        sh.cycles.set(sh.cycles.get() + 1);
+                        sh.frames.set((buf.len() / 2) as u64);
+                    }
+                    if !sh.fired.get() {
+                        return;
+                    }
+                    let slot = if monitor {
+                        &sh.at_monitor
+                    } else {
+                        &sh.at_playback
+                    };
+                    if slot.get().is_none()
+                        && let Some(at) = find_impulse(buf, t)
+                    {
+                        slot.set(Some(at));
+                    }
+                });
             })
             .register()
             .map_err(|e| format!("latency capture listener: {e}"))?;
@@ -1313,8 +1380,9 @@ impl Watch {
         };
         let mut rt = MeterRt::new(m.clone(), RATE, 2);
         // Sized for PipeWire's own default max quantum up front (`METER_SCRATCH_CAP`) —
-        // with no pinned `node.latency`, the graph can run at anything up to it, and this
-        // scratch buffer must never reallocate inside the RT process callback.
+        // with no pinned `node.latency`, the graph can run at anything up to it. Never
+        // reallocated inside the RT process callback: a buffer bigger than this capacity
+        // is chunked by `read_capture`/`chunk_into` instead (T14 residual fix round).
         let mut scratch = Vec::with_capacity(METER_SCRATCH_CAP);
         let m_state = m.clone();
         let l = stream
@@ -1327,9 +1395,9 @@ impl Watch {
                 }
             })
             .process(move |st, _| {
-                if let Some(t) = read_capture(st, &mut scratch) {
-                    rt.process(&scratch, t);
-                }
+                read_capture(st, &mut scratch, 2, |buf, t| {
+                    rt.process(buf, t);
+                });
             })
             .register();
         let l = match l {
@@ -1412,6 +1480,62 @@ mod tests {
             cap0,
             "RT scratch reallocated inside the process callback"
         );
+    }
+
+    #[test]
+    fn chunk_into_never_reallocates_and_meters_every_frame_past_3x_capacity() {
+        // T14 residual (found in review): a buffer more than `scratch`'s own capacity
+        // must be chunked, never grown — and every frame must still reach `on_chunk`,
+        // just split across more than one call.
+        let channels = 2usize;
+        let cap_frames = 64usize;
+        let mut scratch: Vec<f32> = Vec::with_capacity(cap_frames * channels);
+        let cap0 = scratch.capacity();
+        let total_frames = cap_frames * 3 + 7; // > 3x capacity, not an exact multiple
+        let bytes: Vec<u8> = (0..total_frames * channels)
+            .flat_map(|i| (i as f32).to_le_bytes())
+            .collect();
+        let mut frames_seen = 0usize;
+        let mut chunk_count = 0usize;
+        let mut max_chunk_frames = 0usize;
+        chunk_into(&bytes, 0, channels, &mut scratch, |buf, _t| {
+            assert_eq!(buf.len() % channels, 0);
+            let frames = buf.len() / channels;
+            max_chunk_frames = max_chunk_frames.max(frames);
+            frames_seen += frames;
+            chunk_count += 1;
+        });
+        assert_eq!(frames_seen, total_frames, "every frame must be metered");
+        assert!(
+            chunk_count >= 3,
+            "a >3x-capacity buffer must split into several chunks, got {chunk_count}"
+        );
+        assert!(
+            max_chunk_frames <= cap_frames,
+            "a chunk must never exceed the scratch capacity: {max_chunk_frames} > {cap_frames}"
+        );
+        assert_eq!(
+            scratch.capacity(),
+            cap0,
+            "RT scratch reallocated while chunking"
+        );
+    }
+
+    #[test]
+    fn chunk_into_advances_t_ns_per_chunk_by_its_frame_offset() {
+        let channels = 2usize;
+        let mut scratch: Vec<f32> = Vec::with_capacity(4 * channels);
+        let total_frames = 10usize; // > capacity (4): splits into chunks of 4,4,2
+        let bytes: Vec<u8> = vec![0u8; total_frames * channels * 4];
+        let ns_per_frame = 1e9 / RATE as f64;
+        let mut starts = Vec::new();
+        chunk_into(&bytes, 1_000_000, channels, &mut scratch, |_buf, t| {
+            starts.push(t);
+        });
+        assert_eq!(starts.len(), 3);
+        assert_eq!(starts[0], 1_000_000);
+        assert_eq!(starts[1], 1_000_000 + (4.0 * ns_per_frame) as i64);
+        assert_eq!(starts[2], 1_000_000 + (8.0 * ns_per_frame) as i64);
     }
 
     #[test]

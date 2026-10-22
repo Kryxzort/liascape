@@ -9,6 +9,6 @@
 pub mod transition;
 
 pub use transition::{
-    Align, Method, Phase, TransitionEvent, TransitionEventKind, TransitionReq, TransitionStatus,
-    Transitions,
+    Align, AudioSourceSnapshot, Method, Phase, TransitionEvent, TransitionEventKind, TransitionReq,
+    TransitionStatus, Transitions,
 };
