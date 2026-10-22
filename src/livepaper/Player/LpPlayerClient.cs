@@ -53,9 +53,17 @@ public sealed class LpPlayerClient
     public string SocketPath { get; }
     // EnsureRunning may `setsid lp-player serve` when nothing answers. Off for the self-test.
     public bool AutoSpawn { get; set; } = true;
-    // The player's pid from `hello` (refreshed on every new connection) — auto-mute ownership (R69).
+    // The COMPOSITOR's pid from `hello` (refreshed on every new connection) — auto-mute ownership (R69).
+    // Under a supervisor this is the supervisor's CHILD, not the process EnsureRunning/the self-test
+    // spawned — never signal this pid alone while SupervisorPid is set (the supervisor treats that as
+    // a crash and restarts it).
     public int? PlayerPid { get; private set; }
-    // Bumped whenever a connection reaches a different player process (a restart) → waiters re-check.
+    // The supervisor's own pid from `hello.supervisor_pid` — null when unsupervised (`--no-supervise`)
+    // or before the first `hello`. Kill/stop fallbacks target THIS pid when it's set (.claude/rules/
+    // player-core.md § Supervisor; player-adapter.md).
+    public int? SupervisorPid { get; private set; }
+    // Bumped whenever a connection reaches a different COMPOSITOR process (a restart, supervised or
+    // not — corr ids restart at tr-1 either way) → waiters re-check.
     public int Generation { get; private set; }
     // Last start/request failure, for /player-engine (null = fine).
     public string? LastError { get; private set; }
@@ -180,14 +188,31 @@ public sealed class LpPlayerClient
                         if (cmd == "hello" && result.ValueKind == JsonValueKind.Object && result.TryGetProperty("pid", out var pid))
                         {
                             int p = pid.GetInt32();
+                            int? sup = result.TryGetProperty("supervisor_pid", out var supEl) && supEl.ValueKind == JsonValueKind.Number
+                                ? supEl.GetInt32() : (int?)null;
                             if (PlayerPid != p)
                             {
                                 bool restarted = PlayerPid != null;
+                                // the supervisor stayed the same and only its child changed = a supervised
+                                // restart (the crash was restarted with `--restore`), not a fresh process
+                                // from EnsureRunning/an engine switch (which replaces the supervisor too).
+                                bool supervised = restarted && sup != null && sup == SupervisorPid;
+                                int? prevPid = PlayerPid;
                                 PlayerPid = p; Generation++;
                                 // corr ids are per player process (tr-1… again) → outcomes recorded for the
                                 // old one must not answer waits on the new one
-                                if (restarted) try { Restarted?.Invoke(); } catch (Exception ex) { Log($"restart handler threw: {ex.Message}"); }
+                                if (restarted)
+                                {
+                                    if (supervised)
+                                    {
+                                        string info = result.TryGetProperty("restart", out var ri) && ri.ValueKind == JsonValueKind.Object
+                                            ? ri.GetRawText() : "null";
+                                        Log($"lp-player supervised restart: compositor {prevPid} -> {p} (supervisor {sup}) restart={info}");
+                                    }
+                                    try { Restarted?.Invoke(); } catch (Exception ex) { Log($"restart handler threw: {ex.Message}"); }
+                                }
                             }
+                            SupervisorPid = sup;
                         }
                         Interlocked.Exchange(ref _stalledUntil, 0);
                         return result;
@@ -237,23 +262,34 @@ public sealed class LpPlayerClient
         try { return File.ReadAllText($"/proc/{pid}/cmdline").Contains("lp-player"); } catch { return false; }
     }
 
-    // Make sure the player process is GONE (engine switch away from lp-player): `quit`, then SIGTERM
-    // (a clean exit too), then SIGKILL — each step waits ≤ waitMs for the process to leave. A SIGSTOPped
-    // player gets SIGCONT first so it can handle the TERM.
+    // Make sure the player is GONE — supervisor AND compositor (engine switch away from lp-player):
+    // `quit` over the socket first (the compositor exits 0, the supervisor classifies that as a clean
+    // exit and exits too, no restart). If that didn't work, escalate against the SUPERVISOR (never the
+    // compositor alone — a supervisor that's still alive treats a dead/signalled child as a crash and
+    // RESTARTS it with `--restore`, which is exactly what an engine switch away from lp-player must not
+    // leave behind): SIGCONT+SIGTERM it (it forwards the TERM to its child and exits cleanly), then
+    // SIGKILL it (its child dies via PR_SET_PDEATHSIG) — and if the compositor pid is somehow still
+    // alive a short moment later (PDEATHSIG race / unsupervised), SIGKILL it directly too. Unsupervised
+    // (`--no-supervise`, SupervisorPid null): the compositor pid IS the only target throughout, same as
+    // before.
     public void QuitOrKill(int waitMs = 1500)
     {
-        int? pid = PlayerPid;
+        int? compositor = PlayerPid;
+        int? supervisor = SupervisorPid;
+        int? target = supervisor ?? compositor; // the supervisor when one exists, else the compositor itself
         if (SocketExists) { try { Call("quit", null, QuickMs); } catch (LpPlayerException) { } }
         StopEvents();
-        if (pid is not int p) return;
-        bool Gone(int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (!IsPlayerProcess(p)) return true; Thread.Sleep(25); } return !IsPlayerProcess(p); }
-        if (Gone(waitMs)) return;
-        Log($"lp-player (pid {p}) did not quit — SIGTERM");
-        kill(p, 18); kill(p, 15); // SIGCONT, SIGTERM
-        if (Gone(waitMs)) return;
-        Log($"lp-player (pid {p}) ignored SIGTERM — SIGKILL");
-        kill(p, 9);
-        Gone(waitMs);
+        if (target is not int t) return;
+        bool Gone(int pid, int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (!IsPlayerProcess(pid)) return true; Thread.Sleep(25); } return !IsPlayerProcess(pid); }
+        void FinishCompositor() { if (compositor is int c && c != t && IsPlayerProcess(c)) { kill(c, 9); Gone(c, 500); } }
+        if (Gone(t, waitMs)) { FinishCompositor(); return; }
+        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit — SIGTERM");
+        kill(t, 18); kill(t, 15); // SIGCONT, SIGTERM
+        if (Gone(t, waitMs)) { FinishCompositor(); return; }
+        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) ignored SIGTERM — SIGKILL");
+        kill(t, 9);
+        Gone(t, waitMs);
+        FinishCompositor();
     }
 
     public bool WaitForSocket(int timeoutMs)

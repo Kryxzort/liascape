@@ -129,9 +129,16 @@ public static class LpPlayerSelfTest
             LpPlayerClient.Shared = client; // LpPlayerMedia talks to the private server only
             if (!client.WaitForSocket(5000)) { fails.Add($"headless serve never opened its socket (exit={(serve.HasExited ? serve.ExitCode : -1)})"); return; }
 
+            // `serve` is the SUPERVISOR we spawned (serve forks+execs the compositor before anything else
+            // runs) — hello.pid is the compositor CHILD, a different pid; hello.supervisor_pid is serve.Id.
             var hello = client.Call("hello", null);
             if (hello.GetProperty("protocol").GetInt32() != 1) fails.Add("hello: protocol != 1");
-            if (client.PlayerPid != serve.Id) fails.Add($"hello: pid {client.PlayerPid} != spawned {serve.Id}");
+            int helloPid = hello.GetProperty("pid").GetInt32();
+            int? helloSup = hello.TryGetProperty("supervisor_pid", out var supEl) && supEl.ValueKind == JsonValueKind.Number ? supEl.GetInt32() : (int?)null;
+            if (helloPid == serve.Id) fails.Add("hello: pid equals the spawned supervisor pid — expected the compositor child's own pid");
+            if (helloSup != serve.Id) fails.Add($"hello: supervisor_pid {helloSup?.ToString() ?? "null"} != spawned supervisor {serve.Id}");
+            if (client.PlayerPid != helloPid) fails.Add($"client.PlayerPid {client.PlayerPid} != hello.pid {helloPid}");
+            if (client.SupervisorPid != helloSup) fails.Add($"client.SupervisorPid {client.SupervisorPid} != hello.supervisor_pid {helloSup}");
 
             // the stepped clock only moves on `step` → a pump on its own connection (pausable)
             var stepper = new LpPlayerClient(sock) { AutoSpawn = false };
@@ -206,9 +213,12 @@ public static class LpPlayerSelfTest
                 stepping.Set();
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add("cancel didn't leave A (b.mp4) on screen");
 
-                // a STOPPED player costs one quick timeout, then the stall breaker answers at once
+                // a STOPPED player costs one quick timeout, then the stall breaker answers at once.
+                // The COMPOSITOR holds the socket (the supervisor never does) — SIGSTOP/SIGCONT it, never
+                // the supervisor, which would see no effect at all and prove nothing.
+                int compositorPid = client.PlayerPid ?? serve.Id;
                 stepping.Reset(); Thread.Sleep(300);
-                kill(serve.Id, 19); // SIGSTOP
+                kill(compositorPid, 19); // SIGSTOP the compositor
                 try
                 {
                     var q = Stopwatch.StartNew();
@@ -221,13 +231,43 @@ public static class LpPlayerSelfTest
                     if (t3 > 50) fails.Add($"a property set blocked its caller {t3} ms (want queued: ≤ 50)");
                     Phase($"stopped player: query {t1} ms, then {t2} ms (breaker), set returned in {t3} ms");
                 }
-                finally { kill(serve.Id, 18); } // SIGCONT
+                finally { kill(compositorPid, 18); } // SIGCONT
                 stepping.Set();
                 Thread.Sleep(3300); // the breaker re-opens the line 3 s after the timeout
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add("no recovery after SIGCONT (+3 s breaker window)");
                 Phase("recovered after SIGCONT");
 
-                LpPlayerMedia.Stop();
+                // Supervised restart (Task 17 fix): SIGKILL the COMPOSITOR directly, never the supervisor
+                // — the supervisor must see this as a crash and restart its child with a NEW hello.pid
+                // (same supervisor_pid) within ~1.5 s (measured on-machine: 150-260 ms).
+                int deadCompositor = client.PlayerPid ?? -1;
+                int priorSupervisor = client.SupervisorPid ?? serve.Id;
+                kill(deadCompositor, 9);
+                int newCompositor = -1;
+                var rsw = Stopwatch.StartNew();
+                while (rsw.ElapsedMilliseconds < 1500)
+                {
+                    try
+                    {
+                        var h = client.Call("hello", null, 300);
+                        int hp = h.GetProperty("pid").GetInt32();
+                        if (hp != deadCompositor) { newCompositor = hp; break; }
+                    }
+                    catch (LpPlayerException) { }
+                    Thread.Sleep(30);
+                }
+                Phase($"supervised restart: compositor {deadCompositor} -> {newCompositor} in {rsw.ElapsedMilliseconds} ms");
+                if (newCompositor < 0) fails.Add($"killing the compositor (pid {deadCompositor}) did not yield a new hello.pid within 1.5 s");
+                else if (client.SupervisorPid != priorSupervisor) fails.Add($"after the supervised restart, supervisor_pid {client.SupervisorPid} != {priorSupervisor} (expected the SAME supervisor)");
+
+                // StopAndQuit afterwards must leave NO lp-player process — neither the (new) compositor
+                // nor the supervisor (the old adapter bug: signalling the compositor pid alone while its
+                // supervisor lived just made the supervisor restart it again).
+                LpPlayerMedia.StopAndQuit();
+                bool compositorAlive = StillRunning(newCompositor >= 0 ? newCompositor : deadCompositor);
+                bool supervisorAlive = StillRunning(priorSupervisor);
+                if (compositorAlive || supervisorAlive) fails.Add($"StopAndQuit left a process alive (compositor={compositorAlive}, supervisor={supervisorAlive})");
+                else Phase("StopAndQuit left no lp-player process (compositor and supervisor both gone)");
             }
             finally
             {
@@ -245,6 +285,13 @@ public static class LpPlayerSelfTest
     }
 
     [System.Runtime.InteropServices.DllImport("libc")] private static extern int kill(int pid, int sig);
+
+    // Is `pid` (still) an lp-player process? (same ownership check as LpPlayerClient.IsPlayerProcess,
+    // duplicated here since that one is private — guards against a recycled pid.)
+    private static bool StillRunning(int pid)
+    {
+        try { return File.ReadAllText($"/proc/{pid}/cmdline").Contains("lp-player"); } catch { return false; }
+    }
 
     private static bool Clip(string path, string pattern)
     {
