@@ -20,10 +20,66 @@ DESTDIR="${DESTDIR:-}"
 LIBDIR="$PREFIX/lib/livepaper"           # runtime location of backend + ui + shell + helpers
 BINDIR="$PREFIX/bin"
 APPSDIR="$PREFIX/share/applications"
+# Fixed (NOT $PREFIX-relative) shared-assets location — matches the hardcoded candidate dir
+# TransitionService.cs and lp-player's Catalogue::resolve_dir already fall back to for
+# transitions/binaries installed outside the main $PREFIX tree.
+WEBDIR="$HOME/.local/share/livepaper-web"
 # staging (where we write now) = $DESTDIR + runtime path
 S_LIB="$DESTDIR$LIBDIR"
 S_BIN="$DESTDIR$BINDIR"
 S_APPS="$DESTDIR$APPSDIR"
+S_WEB="$DESTDIR$WEBDIR"
+
+# lp-player (the Rust Wayland compositor, src/player/) needs the Rust toolchain to build. Preflight
+# this FIRST, before any build/publish side effect below — a missing toolchain must fail loud and
+# immediately, not after minutes of npm/dotnet work already done.
+echo "==> checking Rust toolchain (cargo/rustc — builds lp-player)"
+missing_rust=""
+command -v cargo >/dev/null 2>&1 || missing_rust="$missing_rust cargo"
+command -v rustc >/dev/null 2>&1 || missing_rust="$missing_rust rustc"
+if [ -n "$missing_rust" ]; then
+  cat >&2 <<MSG
+ERROR: missing Rust toolchain:$missing_rust
+  lp-player (the Wayland wallpaper compositor) is built from source — install it and re-run:
+    Arch:   sudo pacman -S rust
+    Debian: sudo apt install cargo rustc
+    Fedora: sudo dnf install cargo rust
+    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
+MSG
+  exit 1
+fi
+
+# Native helpers are REQUIRED, not optional: lp-transition renders every wallpaper switch
+# (transitions are a core feature, never a no-op) and lp-audio gapless-crossfades scene audio.
+# Preflight the toolchain and fail loudly with a fix — never silently ship a degraded build.
+# lp-player (Rust) links mpv/wayland/EGL/PipeWire/xkbcommon and runs bindgen (needs libclang).
+# Checked here, before any build/publish side effect below.
+echo "==> checking native build toolchain (lp-transition + lp-audio + lp-player)"
+missing=""
+command -v cc            >/dev/null 2>&1 || missing="$missing cc"
+command -v make          >/dev/null 2>&1 || missing="$missing make"
+command -v pkg-config    >/dev/null 2>&1 || missing="$missing pkg-config"
+command -v wayland-scanner >/dev/null 2>&1 || missing="$missing wayland-scanner"
+if command -v pkg-config >/dev/null 2>&1; then
+  for p in wayland-client wayland-egl egl glesv2 mpv libpulse libpipewire-0.3 xkbcommon; do
+    pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
+  done
+fi
+# bindgen (lp-player's libmpv bindings) loads libclang at build time
+if [ -z "${LIBCLANG_PATH:-}" ] && ! command -v clang >/dev/null 2>&1 && ! ldconfig -p 2>/dev/null | grep -q "libclang"; then
+  missing="$missing libclang"
+fi
+if [ -n "$missing" ]; then
+  cat >&2 <<MSG
+ERROR: missing native build dependencies:$missing
+  Transitions, scene-audio crossfade and the lp-player compositor are core, not optional — install these and re-run:
+    Arch:   sudo pacman -S base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang
+    Debian: sudo apt install build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev
+    Fedora: sudo dnf install gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel
+    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
+MSG
+  exit 1
+fi
 
 echo "==> building React UI"
 (cd "$ROOT/app/ui" && npm install && npm run build)
@@ -43,32 +99,6 @@ rm -rf "$S_LIB/shell"; mkdir -p "$S_LIB/shell"
 echo "==> staging transition assets (shaders + manifest + preview frames)"
 rm -rf "$S_LIB/transitions"; mkdir -p "$S_LIB/transitions"; cp -r "$ROOT/transitions/." "$S_LIB/transitions/"
 
-# Native helpers are REQUIRED, not optional: lp-transition renders every wallpaper switch
-# (transitions are a core feature, never a no-op) and lp-audio gapless-crossfades scene audio.
-# Preflight the toolchain and fail loudly with a fix — never silently ship a degraded build.
-echo "==> checking native build toolchain (lp-transition + lp-audio)"
-missing=""
-command -v cc            >/dev/null 2>&1 || missing="$missing cc"
-command -v make          >/dev/null 2>&1 || missing="$missing make"
-command -v pkg-config    >/dev/null 2>&1 || missing="$missing pkg-config"
-command -v wayland-scanner >/dev/null 2>&1 || missing="$missing wayland-scanner"
-if command -v pkg-config >/dev/null 2>&1; then
-  for p in wayland-client wayland-egl egl glesv2 mpv libpulse; do
-    pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
-  done
-fi
-if [ -n "$missing" ]; then
-  cat >&2 <<MSG
-ERROR: missing native build dependencies:$missing
-  Transitions and scene-audio crossfade are core features, not optional — install these and re-run:
-    Arch:   sudo pacman -S base-devel wayland wayland-protocols libglvnd mpv libpulse
-    Debian: sudo apt install build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev
-    Fedora: sudo dnf install gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel
-    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
-MSG
-  exit 1
-fi
-
 # Auto-discover every native helper (src/native/<name>/ with a Makefile producing a binary named
 # <name>) — adding a new one needs NO edit here. Each Makefile owns its own source list, so new .c
 # files are picked up automatically too. set -e aborts loudly on any build failure.
@@ -80,6 +110,10 @@ for d in "$ROOT"/src/native/*/; do
   make -C "$d" >/dev/null
   install -Dm755 "${d}${name}" "$S_LIB/$name"
 done
+
+echo "==> building lp-player (Rust compositor) → $WEBDIR/bin/lp-player"
+(cd "$ROOT" && cargo build --release --locked --manifest-path src/player/Cargo.toml)
+install -Dm755 "$ROOT/src/player/target/release/lp-player" "$S_WEB/bin/lp-player"
 
 echo "==> ensuring Electron is available for the GUI"
 # The GUI runs: <electron> <shell-dir>. By default use a system 'electron' (PATH) — the bundled
@@ -98,6 +132,7 @@ export LP_UI_DIR="$LIBDIR/ui"
 export LP_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$LIBDIR/lp-transition" ] && export LP_TRANSITION_BIN="$LIBDIR/lp-transition"
 [ -x "$LIBDIR/lp-audio" ] && export LP_AUDIO_BIN="$LIBDIR/lp-audio"
+[ -x "$WEBDIR/bin/lp-player" ] && export LP_PLAYER_BIN="$WEBDIR/bin/lp-player"
 [ \$# -eq 0 ] && exec "$BINDIR/livepaper-ui"
 exec "$LIBDIR/backend/livepaper" "\$@"
 WRAP
@@ -111,6 +146,7 @@ export LP_UI_DIR="$LIBDIR/ui"
 export LP_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$LIBDIR/lp-transition" ] && export LP_TRANSITION_BIN="$LIBDIR/lp-transition"
 [ -x "$LIBDIR/lp-audio" ] && export LP_AUDIO_BIN="$LIBDIR/lp-audio"
+[ -x "$WEBDIR/bin/lp-player" ] && export LP_PLAYER_BIN="$WEBDIR/bin/lp-player"
 exec "\${LP_ELECTRON:-electron}" "$LIBDIR/shell"
 WRAP
 chmod 755 "$S_BIN/livepaper-ui"
