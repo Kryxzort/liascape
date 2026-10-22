@@ -127,6 +127,17 @@ public sealed class LpPlayerClient
     private long _stalledUntil;
     public bool IsStalled => Environment.TickCount64 < Interlocked.Read(ref _stalledUntil);
 
+    // Any successful reply (ok or error — both are an answer) clears the breaker. R81: if it HAD been
+    // open, this is the "the player answered again" moment — fire Recovered so the adapter can re-push
+    // whatever a mutation dropped while the breaker was shut (the "New concern" in task-17-report.md:
+    // a set made while stalled is otherwise never replayed).
+    private void MarkAnswered()
+    {
+        if (Interlocked.Exchange(ref _stalledUntil, 0) != 0)
+            try { Recovered?.Invoke(); } catch (Exception ex) { Log($"recovered handler threw: {ex.Message}"); }
+    }
+    public event Action? Recovered;
+
     // One request → its reply's `result`. Throws LpPlayerException: the player's error object, or
     // `io` (no player / connection lost) / `timeout` (no reply within timeoutMs, the request connection
     // busy for longer than that, or the stall breaker open), each with a hint.
@@ -199,6 +210,7 @@ public sealed class LpPlayerClient
                                 bool supervised = restarted && sup != null && sup == SupervisorPid;
                                 int? prevPid = PlayerPid;
                                 PlayerPid = p; Generation++;
+                                _playerIdentity = ProcIdentity.Of(p); // R81/item5: captured once, re-checked before any signal
                                 // corr ids are per player process (tr-1… again) → outcomes recorded for the
                                 // old one must not answer waits on the new one
                                 if (restarted)
@@ -212,12 +224,13 @@ public sealed class LpPlayerClient
                                     try { Restarted?.Invoke(); } catch (Exception ex) { Log($"restart handler threw: {ex.Message}"); }
                                 }
                             }
+                            if (sup != SupervisorPid) _supervisorIdentity = sup is int sp2 ? ProcIdentity.Of(sp2) : null;
                             SupervisorPid = sup;
                         }
-                        Interlocked.Exchange(ref _stalledUntil, 0);
+                        MarkAnswered();
                         return result;
                     }
-                    Interlocked.Exchange(ref _stalledUntil, 0); // an error reply is still an answer
+                    MarkAnswered(); // an error reply is still an answer
                     var e = root.GetProperty("error");
                     throw new LpPlayerException(Prop(e, "code") ?? "error", Prop(e, "message") ?? "", Prop(e, "hint") ?? "");
                 }
@@ -256,10 +269,41 @@ public sealed class LpPlayerClient
 
     [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int sig);
 
-    // Is `pid` (still) an lp-player process? (guards against a recycled pid)
+    // item 5: a pid's identity — its `/proc/<pid>/exe` target (never argv/cmdline, which is
+    // attacker/third-party-controlled text and proves nothing) + its `/proc/<pid>/stat` start-time
+    // field (22nd, 0-based index 19 after the `)` that closes `comm`). Captured once, at the moment a
+    // `hello` tells us a pid (above); re-read and compared before every signal in QuitOrKill below, so a
+    // recycled pid (the lp-player process died and the kernel handed its number to something unrelated)
+    // is never signalled as if it were still ours.
+    private readonly record struct ProcIdentity(string? Exe, string Start)
+    {
+        public static ProcIdentity? Of(int pid)
+        {
+            try
+            {
+                string? exe = null;
+                try { exe = new FileInfo($"/proc/{pid}/exe").LinkTarget; } catch { }
+                var stat = File.ReadAllText($"/proc/{pid}/stat");
+                int close = stat.LastIndexOf(')');
+                if (close < 0 || close + 2 >= stat.Length) return null;
+                var fields = stat[(close + 2)..].Split(' ');
+                return fields.Length > 19 && fields[19].Length > 0 ? new ProcIdentity(exe, fields[19]) : null;
+            }
+            catch { return null; }
+        }
+        // the start time alone can't survive a pid recycle (a new process always gets a new one) —
+        // exe is kept for logging/diagnosis, not required for the comparison.
+        public bool StillIs(int pid) => Of(pid) is { } now && now.Start == Start;
+    }
+    private ProcIdentity? _playerIdentity;     // the compositor's identity, captured at its `hello`
+    private ProcIdentity? _supervisorIdentity; // the supervisor's, captured when its pid first appears
+
+    // Is `pid` CURRENTLY some lp-player process? (no prior identity to compare against — a liveness +
+    // name check via `/proc/<pid>/exe`, never a cmdline substring.)
     private static bool IsPlayerProcess(int pid)
     {
-        try { return File.ReadAllText($"/proc/{pid}/cmdline").Contains("lp-player"); } catch { return false; }
+        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget) == "lp-player"; }
+        catch { return false; }
     }
 
     // Make sure the player is GONE — supervisor AND compositor (engine switch away from lp-player):
@@ -276,19 +320,33 @@ public sealed class LpPlayerClient
     {
         int? compositor = PlayerPid;
         int? supervisor = SupervisorPid;
+        var compositorId = _playerIdentity;
+        var targetId = supervisor != null ? _supervisorIdentity : compositorId;
         int? target = supervisor ?? compositor; // the supervisor when one exists, else the compositor itself
         if (SocketExists) { try { Call("quit", null, QuickMs); } catch (LpPlayerException) { } }
         StopEvents();
         if (target is not int t) return;
-        bool Gone(int pid, int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (!IsPlayerProcess(pid)) return true; Thread.Sleep(25); } return !IsPlayerProcess(pid); }
-        void FinishCompositor() { if (compositor is int c && c != t && IsPlayerProcess(c)) { kill(c, 9); Gone(c, 500); } }
-        if (Gone(t, waitMs)) { FinishCompositor(); return; }
+        // item 5: re-check identity, not just liveness-by-name, before trusting `t` still means what it
+        // meant when we recorded it (no captured identity yet, e.g. a pid learned before this build —
+        // fall back to the name-only check rather than refusing to ever act).
+        bool StillTarget() => targetId is { } id ? id.StillIs(t) : IsPlayerProcess(t);
+        bool Gone(int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (!StillTarget()) return true; Thread.Sleep(25); } return !StillTarget(); }
+        void FinishCompositor()
+        {
+            if (compositor is not int c || c == t) return;
+            bool stillC = compositorId is { } cid ? cid.StillIs(c) : IsPlayerProcess(c);
+            if (!stillC) return;
+            kill(c, 9);
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 500 && (compositorId is { } cid2 ? cid2.StillIs(c) : IsPlayerProcess(c))) Thread.Sleep(25);
+        }
+        if (Gone(waitMs)) { FinishCompositor(); return; }
         Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit — SIGTERM");
-        kill(t, 18); kill(t, 15); // SIGCONT, SIGTERM
-        if (Gone(t, waitMs)) { FinishCompositor(); return; }
+        if (StillTarget()) { kill(t, 18); kill(t, 15); } // SIGCONT, SIGTERM
+        if (Gone(waitMs)) { FinishCompositor(); return; }
         Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) ignored SIGTERM — SIGKILL");
-        kill(t, 9);
-        Gone(t, waitMs);
+        if (StillTarget()) kill(t, 9);
+        Gone(waitMs);
         FinishCompositor();
     }
 
@@ -316,6 +374,18 @@ public sealed class LpPlayerClient
         lock (_spawnLock)
         {
             if (Reachable()) { LastError = null; return true; }
+            // item 4: a supervised restart briefly drops the socket (the dying child's bind + its
+            // instance lock go with it; the supervisor's replacement child rebinds in ~150-260 ms,
+            // measured) — a window with NO process holding the lock. If our last-known supervisor is
+            // still alive, that's what's happening: wait up to 2 s for its new child instead of racing
+            // it to spawn a SECOND `serve` into that gap (which would either lose the lock loudly, or —
+            // worse, if it won the race — start a second, orphaned player). Only the supervisor's own
+            // liveness matters here (the compositor child is, by definition, the one that's briefly gone).
+            if (SupervisorPid is int sup0 && (_supervisorIdentity?.StillIs(sup0) ?? IsPlayerProcess(sup0)))
+            {
+                if (WaitForSocket(2000)) { LastError = null; return true; }
+                Log($"lp-player supervisor (pid {sup0}) is alive but no child answered within 2 s — falling back to a fresh spawn");
+            }
             // a start that just failed isn't retried for 10 s — a broken player must not be respawned
             // on every switch attempt (the rotation's fallback retries once a second)
             if (_lastSpawnFail != 0 && Environment.TickCount64 - _lastSpawnFail < 10_000) return false;
@@ -352,12 +422,25 @@ public sealed class LpPlayerClient
             }
             if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
             string why = p is { HasExited: true }
-                ? $"`lp-player serve` exited {p.ExitCode}" + (p.ExitCode == 2 ? " (this build has no Wayland output backend yet, or bad arguments)" : "")
+                ? $"`lp-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
                 : "`lp-player serve` did not open its socket within 3 s";
             Fail($"{why} — see ~/.cache/livepaper/lp-player-serve.log, or run `{bin} serve` in a terminal");
             return false;
         }
     }
+
+    // item 3: lp-player's own exit codes (.claude/rules/player-core.md § Supervisor / § Runtime) — a
+    // giving-up/unavailable state must be SURFACED (this string ends up in LastError → `/player-engine`
+    // `reason` + this log line), never crash the backend.
+    private static string ExitHint(int code) => code switch
+    {
+        1 => " (already running on this socket, or its socket/state dir is unusable — never retried)",
+        2 => " (this build has no Wayland output backend yet, or bad arguments)",
+        3 => " (the compositor connection was lost mid-run; a supervised run restarts from this — this one didn't, or gave up)",
+        4 => " (its supervisor gave up: 5+ crashes in 60 s, or no Wayland compositor within its startup budget)",
+        5 => " (no Wayland compositor available yet — EXIT_NO_COMPOSITOR; retry once the session's compositor is up)",
+        _ => "",
+    };
 
     private long _lastSpawnFail;
     private void Fail(string why) { LastError = why; _lastSpawnFail = Environment.TickCount64; Log(why); }

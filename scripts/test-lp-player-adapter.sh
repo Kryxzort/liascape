@@ -103,6 +103,12 @@ U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
+# R75 (final): pause is PLAYER-level (`player.paused`), not a per-source prop — `cur:*.paused` (the
+# node's own raw value) never changes, by design (a recipe-held source must stay exactly as the
+# recipe left it; see player-core.md § Graph & properties "Player node paused").
+playerPaused() { ctl get '{"path":"player.paused"}' | jq -r .value; }
+srcPaused() { ctl probe '{"name":"sources"}' | jq -r --arg id "$1" '.sources[] | select(.id==$id) | .effective_paused'; }
+srcIdForPath() { ctl state | jq -r --arg p "$1" '.graph | to_entries[] | select(.value.path==$p) | .key' | head -1; }
 setting() { curl -sf -m 5 "$U/settings" | jq "$1" > "$T/s.json" && post /settings "$(cat "$T/s.json")" >/dev/null; }
 post_ms() { curl -s -m 10 -o /dev/null -w '%{time_total}' -X POST -H 'Content-Type: application/json' -d "$2" "$U$1" | python3 -c "import sys; print(int(float(sys.stdin.read())*1000))"; }
 
@@ -131,8 +137,8 @@ setting '.Loop = false'; sleep 0.3; [ "$(cur loop)" = false ] && ok "Loop off (s
 setting '.Loop = true | .Speed = 1 | .VideoFps = 0'; sleep 0.3
 post /mute '{"value":true,"user":true}' >/dev/null; sleep 0.3; near "$(cur gain.mute)" -96 && ok "user mute → gain.mute -96" || bad "mute → $(cur gain.mute)"
 post /mute '{"value":false,"user":true}' >/dev/null; sleep 0.3; near "$(cur gain.mute)" 0 && ok "unmute → 0" || bad "unmute → $(cur gain.mute)"
-post /pause '{}' >/dev/null; sleep 0.3; [ "$(cur paused)" = true ] && ok "/pause → paused" || bad "pause → $(cur paused)"
-post /pause '{}' >/dev/null; sleep 0.3; [ "$(cur paused)" = false ] && ok "/pause again → playing" || bad "unpause → $(cur paused)"
+post /pause '{}' >/dev/null; sleep 0.3; [ "$(playerPaused)" = true ] && ok "/pause → player.paused" || bad "pause → $(playerPaused)"
+post /pause '{}' >/dev/null; sleep 0.3; [ "$(playerPaused)" = false ] && ok "/pause again → playing" || bad "unpause → $(playerPaused)"
 post /volume '{"delta":5}' >/dev/null; sleep 0.3; near "$(cur gain.user)" "$(dB 55)" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; sleep 0.3; near "$(cur gain.user)" "$(dB 20)" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
 
@@ -175,13 +181,21 @@ gD=$(cur gain.user); gB=$(ctl get "{\"path\":\"$TB.gain.user\"}" | jq -r .value)
 near "$gD" "$(dB 30)" && ok "global Volume 70 keeps the playing item's override 30 (gain $gD)" || bad "playing item → $gD"
 near "$gB" "$(dB 40)" && ok "pending B ($TB) got ITS override 40 (gain $gB)" || bad "pending B → $gB"
 
-echo "== pause during an in-flight transition (R75a: direction from cur:*, write srcs:* → the pending B too)"
+echo "== pause during an in-flight transition (R75 final: ONE set player.paused freezes A and the pending B ($TB))"
+# $TB is still SCHEDULED (align:end, waiting for a 10 s clip to reach its end) — the recipe holds a
+# scheduled/pending B at frame 0 (its own `paused`, nothing to do with player.paused) regardless of our
+# toggle, same as before R75; it only comes off hold at its own handoff. So A is the one that proves the
+# toggle (it's genuinely playing, not recipe-held) — B's effective_paused must stay true continuously,
+# proving the hold survives an unrelated player.paused flip rather than fighting it (player-core.md §
+# Graph & properties "Player node paused": a recipe-held source's own `paused` is never touched by the
+# override, so a resume doesn't un-pause what the RECIPE is deliberately holding).
+TA=$(srcIdForPath "$LD")
 post /pause '{}' >/dev/null; sleep 0.4
-pa=$(cur paused); pb=$(ctl get "{\"path\":\"$TB.paused\"}" | jq -r .value)
-[ "$pa" = true ] && [ "$pb" = true ] && ok "/pause → A and pending B ($TB) both paused" || bad "pause: A=$pa B=$pb"
+pp=$(playerPaused); pa=$(srcPaused "$TA"); pb=$(srcPaused "$TB")
+[ "$pp" = true ] && [ "$pa" = true ] && [ "$pb" = true ] && ok "/pause → player.paused, A ($TA) and pending B ($TB) both effective_paused" || bad "pause: player=$pp A=$pa B=$pb"
 post /pause '{}' >/dev/null; sleep 0.4
-pa=$(cur paused); pb=$(ctl get "{\"path\":\"$TB.paused\"}" | jq -r .value)
-[ "$pa" = false ] && [ "$pb" = false ] && ok "/pause again → both unpaused" || bad "unpause: A=$pa B=$pb"
+pp=$(playerPaused); pa=$(srcPaused "$TA"); pb=$(srcPaused "$TB")
+[ "$pp" = false ] && [ "$pa" = false ] && [ "$pb" = true ] && ok "/pause again → player+A unpaused, B stays held (unaffected, still scheduled)" || bad "unpause: player=$pp A=$pa B=$pb"
 post /library/volume "{\"path\":\"$LD\",\"intValue\":null}" >/dev/null; sleep 0.3
 near "$(cur gain.user)" "$(dB 70)" && ok "clearing the override → global 70" || bad "cleared → $(cur gain.user)"
 
@@ -198,10 +212,14 @@ kill -CONT "$CP"
 sleep 3.5   # the breaker re-opens 3 s after the last timeout
 setting '.Volume = 50'; sleep 0.4
 near "$(cur gain.user)" -18.0618 && ok "after SIGCONT: /settings Volume 50 applies again" || bad "after SIGCONT → $(cur gain.user)"
-[ "$(cur paused)" = false ] || post /pause '{}' >/dev/null   # the /pause sent while stopped was dropped (breaker) — normalize
+[ "$(playerPaused)" = false ] || post /pause '{}' >/dev/null   # the /pause sent while stopped was dropped (breaker) — normalize
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== supervised restart (kill -9 the COMPOSITOR, never the supervisor): the backend reconnects"
+echo "== R81: the backend's current settings survive it (OnRestarted re-applies them)"
+post /apply "{\"path\":\"$A\"}" >/dev/null; sleep 1.2
+setting '.Volume = 37'; sleep 0.3
+near "$(cur gain.user)" "$(dB 37)" && ok "Volume 37 before the kill" || bad "pre-kill volume → $(cur gain.user)"
 # Killing $SP outright would tear down the WHOLE supervisor+child tree (PR_SET_PDEATHSIG) — no restart
 # at all. The real crash-recovery path is SIGKILLing the COMPOSITOR while its supervisor ($SP) lives:
 # the supervisor restarts it (--restore) with a NEW hello.pid, same hello.supervisor_pid, in ~150-260 ms.
@@ -210,6 +228,9 @@ for _ in $(seq 1 30); do CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$oldCP" ] &
 [ -n "$CP" ] && [ "$CP" != "$oldCP" ] && ok "compositor restarted: $oldCP -> $CP within 1.5 s" || bad "no new hello.pid within 1.5 s after killing $oldCP"
 [ "$(sup_pid)" = "$SP" ] && ok "same supervisor $SP after the restart" || bad "supervisor_pid $(sup_pid) != $SP after restart"
 kill -0 "$SP" 2>/dev/null && ok "supervisor $SP never died" || bad "supervisor $SP is gone — it should have survived its child's crash"
+sleep 0.6   # give the adapter's queued OnRestarted reapply a moment to run
+near "$(cur gain.user)" "$(dB 37)" && ok "R81: gain.user still 37% ($(cur gain.user)) after the supervised restart" || bad "R81: gain.user $(cur gain.user) after restart, want $(dB 37)"
+grep -q "re-applied effective settings" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null && ok "R81: adapter log shows a reapply after the restart" || bad "R81: no reapply log line found"
 n0=$(handoffs)   # the temp state dir's event log spans both the old and the restarted compositor
 post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0}}" >/dev/null; sleep 6
 nh=$(( $(handoffs) - n0 ))
