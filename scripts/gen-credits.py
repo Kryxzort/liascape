@@ -89,6 +89,10 @@ def parse_upstream(path):
         m = META_RE.match(line)
         if m:
             key, val = m.group(1), m.group(2)
+            # a wrapped bullet (indented continuation) would be silently truncated — refuse it
+            if i + 1 < len(lines) and re.match(r"^\s{2,}\S", lines[i + 1]):
+                sys.exit(f"{path}:{i + 2}: the **{key}** bullet wraps onto a continuation line; "
+                         "keep it on one line so CREDITS.md isn't truncated")
             if key == "Project":
                 cur["project"] = _strip_autolink(val)
             else:
