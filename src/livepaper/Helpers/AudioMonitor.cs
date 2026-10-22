@@ -367,11 +367,13 @@ public static class AudioMonitor
             var output = await proc.StandardOutput.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
             var lweClientIds = PlayerHelper.GetLweClientObjectIds();
-            return ParseNonMpvStreamIds(output, lweClientIds);
+            // lp-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
+            var isOwn = livepaper.Player.PlayerEngine.IsLpPlayer ? livepaper.Player.LpPlayerMedia.OwnStreamFilter() : null;
+            return ParseNonMpvStreamIds(output, lweClientIds, isOwn);
         }
     }
 
-    private static List<uint> ParseNonMpvStreamIds(string output, HashSet<string>? lweClientIds = null)
+    private static List<uint> ParseNonMpvStreamIds(string output, HashSet<string>? lweClientIds = null, Func<string, bool>? isOwn = null)
     {
         var result = new List<uint>();
         var blocks = output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries);
@@ -381,6 +383,7 @@ public static class AudioMonitor
             if (block.Contains("application.name = \"mpv\"")) continue;
             if (block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
             if (block.Contains("application.name = \"linux-wallpaperengine\"")) continue;
+            if (isOwn != null && isOwn(block)) continue;
             if (lweClientIds != null)
             {
                 string? clientId = null;

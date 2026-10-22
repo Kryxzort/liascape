@@ -75,6 +75,8 @@ export const Settings = memo(function Settings() {
   const [wipeArm, setWipeArm] = useState(-1);   // same arming pattern for "Clear settings"
   // auto-detected outputs (hyprctl/sway): name + current refresh rate + which is focused/primary
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
+  // lp-player availability for the "Player engine" row (binary found? last start error?)
+  const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -98,6 +100,11 @@ export const Settings = memo(function Settings() {
   // Monitor auto-detection feeds a datalist so the name fields autocomplete real outputs
   // instead of pure free-text guessing.
   useEffect(() => { api.monitors().then(setDetected).catch(() => {}); }, []);
+  // re-read after an engine change: the backend switches live (and may report a start failure)
+  useEffect(() => {
+    const t = setTimeout(() => api.playerEngine().then(setEngine).catch(() => {}), 600);
+    return () => clearTimeout(t);
+  }, [g("playerEngine", "legacy")]); // eslint-disable-line
 
   // interval H/M/S
   const iv = g("globalIntervalSeconds", 1800);
@@ -286,6 +293,19 @@ export const Settings = memo(function Settings() {
 
       <Section title="Advanced" icon={<Wrench size={15} />}>
         <Row label="Advanced settings" hint="show disable-cache, hardware decoding, demuxer, copy-files & the live command previews" rk="advancedSettings"><input type="checkbox" checked={adv} onChange={(e) => set("advancedSettings", e.target.checked)} /></Row>
+        {adv && (() => {
+          const wantLp = g<string>("playerEngine", "legacy") === "lp-player";
+          // binary missing → the row is disabled with the reason (switching back to Legacy always stays possible)
+          const unavailable = engine !== null && !engine.available;
+          const hint = unavailable ? engine!.reason ?? "lp-player is not available"
+            : wantLp && engine?.active !== "lp-player" ? "lp-player selected but not running — " + (engine?.reason ?? "starting…")
+            : wantLp && engine?.reason ? engine.reason
+            : "which player draws the wallpaper. lp-player is the new all-in-one player (experimental: videos & images only for now — scenes are skipped). Switches live.";
+          return <Row label="Player engine" hint={hint} disabled={unavailable && !wantLp} rk="playerEngine">
+            <Select value={g("playerEngine", "legacy")} disabled={unavailable && !wantLp} onChange={(v) => set("playerEngine", v)}
+              options={[{ value: "legacy", label: "Legacy" }, { value: "lp-player", label: "lp-player (experimental)" }]} />
+          </Row>;
+        })()}
         {adv && <Row label="Transition method" hint="how a wallpaper switch animates — Reveal: freeze the old, keep the new playing (recommended); Frozen: both sides still; Full-live: both play (heavy on 4K). Warp-style effects fall back to Frozen in Reveal." rk="transitionMethod">
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />

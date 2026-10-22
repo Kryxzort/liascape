@@ -1,0 +1,241 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using livepaper.Helpers;
+using livepaper.Models;
+
+namespace livepaper.Player;
+
+// Hidden `livepaper --lp-player-selftest`: MpvPropertyMap + stream-ownership assertions, then a
+// protocol round-trip against a PRIVATE `lp-player serve --headless --clock stepped --ao null`
+// (temp XDG_RUNTIME_DIR/XDG_STATE_HOME + its own socket, killed at the end). It never touches a
+// real running player: the shared client is pointed at the temp socket and never auto-spawns.
+// Prints `PASS` or `FAIL <reasons>`, exit 0/1.
+public static class LpPlayerSelfTest
+{
+    public static int Run()
+    {
+        var fails = new List<string>();
+        try
+        {
+            MapAssertions(fails);
+            OwnershipAssertions(fails);
+            if (fails.Count == 0) RoundTrip(fails);
+        }
+        catch (Exception e) { fails.Add($"{e.GetType().Name}: {e.Message}"); }
+        if (fails.Count == 0) { Console.WriteLine("PASS"); return 0; }
+        Console.WriteLine("FAIL " + string.Join("; ", fails));
+        return 1;
+    }
+
+    // ---- MpvPropertyMap ----------------------------------------------------------------------
+    private static void MapAssertions(List<string> fails)
+    {
+        void Num(object[] mpv, string prop, double want, double tol = 1e-3)
+        {
+            var t = MpvPropertyMap.Translate(mpv);
+            string label = string.Join(" ", mpv);
+            if (t == null) { fails.Add($"map `{label}` → null, want {prop}={want}"); return; }
+            if (t.Value.prop != prop) { fails.Add($"map `{label}` → prop {t.Value.prop}, want {prop}"); return; }
+            double got = Convert.ToDouble(t.Value.value, System.Globalization.CultureInfo.InvariantCulture);
+            if (Math.Abs(got - want) > tol) fails.Add($"map `{label}` → {prop}={got}, want {want}±{tol}");
+        }
+        void Eq(object[] mpv, string prop, object want)
+        {
+            var t = MpvPropertyMap.Translate(mpv);
+            string label = string.Join(" ", mpv);
+            if (t == null) { fails.Add($"map `{label}` → null, want {prop}={want}"); return; }
+            if (t.Value.prop != prop || !Equals(t.Value.value, want))
+                fails.Add($"map `{label}` → {t.Value.prop}={t.Value.value}, want {prop}={want}");
+        }
+        Num(["set_property", "volume", 50], "gain.user", -18.0618);
+        Num(["set_property", "volume", 100.0], "gain.user", 0);
+        Num(["set_property", "volume", 0], "gain.user", -96);
+        Eq(["set_property", "panscan", 0.0], "fit", "fit");
+        Eq(["set_property", "panscan", 1.0], "fit", "fill");
+        Eq(["set", "aid", "no"], "no_audio", true);
+        Eq(["set", "aid", "auto"], "no_audio", false);
+        Num(["set_property", "mute", true], "gain.mute", -96);
+        Num(["set_property", "mute", false], "gain.mute", 0);
+        Num(["set_property", "speed", 1.5], "speed", 1.5);
+        Eq(["set_property", "pause", true], "paused", true);
+        Eq(["set", "loop-file", "inf"], "loop", true);
+        Eq(["set", "loop-file", "no"], "loop", false);
+        Num(["set", "vf", "fps=30"], "fps_cap", 30);
+        Num(["set", "vf", ""], "fps_cap", 0);
+        Eq(["set", "hwdec", "vaapi"], "hwdec", "vaapi");
+        Eq(["set", "cache", "no"], "cache", false);
+        Eq(["set", "cache", "auto"], "cache", true);
+        Num(["set", "demuxer-max-bytes", "20MiB"], "demuxer_max_mib", 20);
+        Num(["set", "demuxer-max-back-bytes", "5MiB"], "demuxer_back_mib", 5);
+        Eq(["set", "af", "loudnorm=I=-14"], "af", "loudnorm=I=-14");
+        if (MpvPropertyMap.Translate(["set_property", "osd-level", 1]) != null)
+            fails.Add("map `set_property osd-level 1` → non-null, want null (unknown)");
+    }
+
+    // ---- R69: auto-mute excludes lp-player's OWN streams (by ownership, not just by name) ------
+    private static void OwnershipAssertions(List<string> fails)
+    {
+        static string Block(string app, string pid, string node, string sink) =>
+            $"7\n\tDriver: PipeWire\n\tSink: {sink}\n\tProperties:\n\t\tapplication.name = \"{app}\"\n" +
+            $"\t\tapplication.process.id = \"{pid}\"\n\t\tnode.name = \"{node}\"\n";
+        void Own(string label, string block, bool want)
+        {
+            bool got = LpPlayerMedia.IsOwnStream(block, playerPid: 4242, busSinkIndex: "57");
+            if (got != want) fails.Add($"ownership {label}: got {got}, want {want}");
+        }
+        Own("by pid", Block("mpv", "4242", "mpv", "12"), true);
+        Own("bus playback node", Block("x", "1", "lp-player-bus.playback", "12"), true);
+        Own("targets the bus sink", Block("x", "1", "y", "57"), true);
+        Own("application.name lp-player", Block("lp-player", "1", "y", "12"), true);
+        Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
+    }
+
+    // ---- protocol round-trip -----------------------------------------------------------------
+    private static void RoundTrip(List<string> fails)
+    {
+        var bin = PlayerEngine.ResolveBinary();
+        if (bin == null) { fails.Add("lp-player binary not found (set LP_PLAYER_BIN)"); return; }
+        var tmp = Path.Combine("/tmp", "lpst-" + Guid.NewGuid().ToString("N")[..8]); // socket path < 108 bytes
+        Directory.CreateDirectory(Path.Combine(tmp, "rt"));
+        Directory.CreateDirectory(Path.Combine(tmp, "st"));
+        var sock = Path.Combine(tmp, "rt", "lp.sock");
+        Process? serve = null;
+        try
+        {
+            string a = Path.Combine(tmp, "a.mp4"), b = Path.Combine(tmp, "b.mp4");
+            if (!Clip(a, "testsrc2") || !Clip(b, "smptebars")) { fails.Add("ffmpeg could not make the test clips"); return; }
+
+            var psi = new ProcessStartInfo(bin) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var x in new[] { "serve", "--headless", "--outputs", "640x360@60", "--clock", "stepped", "--ao", "null", "--socket", sock })
+                psi.ArgumentList.Add(x);
+            psi.Environment["XDG_RUNTIME_DIR"] = Path.Combine(tmp, "rt");
+            psi.Environment["XDG_STATE_HOME"] = Path.Combine(tmp, "st");
+            psi.Environment.Remove("LP_PLAYER_SOCKET");
+            psi.Environment.Remove("LD_LIBRARY_PATH"); // a stray one on this machine breaks the Nix binary's libs
+            if (TransitionService.ResolveDir() is { } tdir) psi.Environment["LP_TRANSITIONS_DIR"] = tdir;
+            var logPath = Path.Combine(tmp, "serve.log");
+            serve = Process.Start(psi)!;
+            serve.OutputDataReceived += (_, e) => { if (e.Data != null) try { File.AppendAllText(logPath, e.Data + "\n"); } catch { } };
+            serve.ErrorDataReceived += (_, e) => { if (e.Data != null) try { File.AppendAllText(logPath, e.Data + "\n"); } catch { } };
+            serve.BeginOutputReadLine(); serve.BeginErrorReadLine();
+
+            var client = new LpPlayerClient(sock) { AutoSpawn = false };
+            LpPlayerClient.Shared = client; // LpPlayerMedia talks to the private server only
+            if (!client.WaitForSocket(5000)) { fails.Add($"headless serve never opened its socket (exit={(serve.HasExited ? serve.ExitCode : -1)})"); return; }
+
+            var hello = client.Call("hello", null);
+            if (hello.GetProperty("protocol").GetInt32() != 1) fails.Add("hello: protocol != 1");
+            if (client.PlayerPid != serve.Id) fails.Add($"hello: pid {client.PlayerPid} != spawned {serve.Id}");
+
+            // the stepped clock only moves on `step` → a pump on its own connection (pausable)
+            var stepper = new LpPlayerClient(sock) { AutoSpawn = false };
+            var stepping = new ManualResetEventSlim(true);
+            using var stop = new CancellationTokenSource();
+            var pump = Task.Run(() =>
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    stepping.Wait(stop.Token);
+                    try { stepper.Call("step", new Dictionary<string, object?> { ["ms"] = 40 }, 10000); }
+                    catch (Exception e) when (!stop.IsCancellationRequested) { Thread.Sleep(20); _ = e; }
+                }
+            });
+            var sw = Stopwatch.StartNew();
+            void Phase(string what) { Console.Error.WriteLine($"  selftest {sw.ElapsedMilliseconds,6} ms  {what}"); }
+            try
+            {
+                var s = new AppSettings { Loop = true, NoAudio = false, Volume = 100 };
+
+                // A = colour (no previous picture), align now
+                var red = client.Call("transition", new Dictionary<string, object?>
+                {
+                    ["outputs"] = "out:*",
+                    ["to"] = new Dictionary<string, object?> { ["kind"] = "color", ["color"] = new[] { 1.0, 0.0, 0.0 } },
+                });
+                var redCorr = red.GetProperty("corr").GetString()!;
+                var redOut = LpPlayerMedia.WaitCorr(redCorr, CancellationToken.None, 10000).GetAwaiter().GetResult();
+                Phase("colour handoff");
+                if (redOut != "handoff") { fails.Add($"colour transition {redCorr}: {redOut}"); return; }
+
+                if (LpPlayerMedia.EventOutcomes != 0) fails.Add("an outcome arrived as an event before anything subscribed");
+                // colour → clip, align now, an effect when the catalogue resolves → transition.handoff
+                var cfg = new TransitionService.Config(true, ["fade"], 200, 0, false);
+                using (var to = new CancellationTokenSource(20000))
+                {
+                    bool ok = LpPlayerMedia.SwitchAndWaitHandoff(a, s, cfg, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    if (!ok) { fails.Add($"colour→clip (align now): no transition.handoff (corr {LpPlayerMedia.LastCorr})"); return; }
+                }
+                Phase("colour→clip handoff (align now)");
+                if (LpPlayerMedia.EventOutcomes < 1) fails.Add("colour→clip handoff came from the log poll, not the subscribed event");
+                if (LpPlayerMedia.CurrentPath() != a) fails.Add($"CurrentPath after colour→clip = {LpPlayerMedia.CurrentPath() ?? "null"}, want a.mp4");
+
+                // dispatch-level translation end to end: mpv `volume 50` → srcs:*.gain.user −18.06 dB
+                LpPlayerMedia.Mpv(["set_property", "volume", 50]);
+                var gu = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.gain.user" }).GetProperty("value").GetDouble();
+                if (Math.Abs(gu - (-18.0618)) > 1e-3) fails.Add($"volume 50 via Mpv → cur gain.user {gu}, want -18.06");
+                if (LpPlayerMedia.Query("time_pos") is not double) fails.Add("Query(time_pos) = null on a playing clip");
+
+                // transitions OFF + video end (the gapless branch): cut at A's end
+                using (var to = new CancellationTokenSource(30000))
+                {
+                    bool ok = LpPlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: true, to.Token).GetAwaiter().GetResult();
+                    if (!ok) { fails.Add($"clip→clip cut (align end): no transition.handoff (corr {LpPlayerMedia.LastCorr})"); return; }
+                }
+                Phase("clip→clip cut handoff (align end)");
+                if (LpPlayerMedia.CurrentPath() != b) fails.Add($"CurrentPath after cut = {LpPlayerMedia.CurrentPath() ?? "null"}, want b.mp4");
+
+                // caller cancel → `cancel {corr}` → false, and the player reports it cancelled
+                stepping.Reset(); // clock frozen → A never ends → the aligned switch stays pending
+                using (var cts = new CancellationTokenSource(400))
+                {
+                    bool ok = LpPlayerMedia.SwitchAndWaitHandoff(a, s, cfg, alignEnd: true, cts.Token).GetAwaiter().GetResult();
+                    if (ok) fails.Add("cancelled aligned switch returned true");
+                }
+                Phase("cancelled aligned switch returned");
+                var corr = LpPlayerMedia.LastCorr;
+                var logs = client.Call("logs", new Dictionary<string, object?> { ["corr"] = corr, ["kind_prefix"] = "transition." });
+                bool cancelled = logs.GetProperty("events").EnumerateArray().Any(e => e.GetProperty("kind").GetString() == "transition.cancelled");
+                if (!cancelled) fails.Add($"cancel {corr}: no transition.cancelled in its log");
+                stepping.Set();
+                if (LpPlayerMedia.CurrentPath() != b) fails.Add("cancel didn't leave A (b.mp4) on screen");
+
+                LpPlayerMedia.Stop();
+            }
+            finally
+            {
+                stop.Cancel(); stepping.Set();
+                try { pump.Wait(3000); } catch { }
+            }
+        }
+        finally
+        {
+            try { if (serve is { HasExited: false }) new LpPlayerClient(sock) { AutoSpawn = false }.Call("quit", null, 2000); } catch { }
+            try { if (serve is { HasExited: false } && !serve.WaitForExit(3000)) serve.Kill(true); } catch { }
+            LpPlayerClient.ResetShared();
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    private static bool Clip(string path, string pattern)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+            foreach (var x in new[] { "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", $"{pattern}=size=320x180:rate=30",
+                         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "2", "-c:v", "libx264",
+                         "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path })
+                psi.ArgumentList.Add(x);
+            using var p = Process.Start(psi)!;
+            p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd();
+            p.WaitForExit(20000);
+            return p.ExitCode == 0 && File.Exists(path);
+        }
+        catch { return false; }
+    }
+}

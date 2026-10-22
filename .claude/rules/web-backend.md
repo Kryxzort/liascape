@@ -30,14 +30,14 @@ and the daemons are **untouched** — do not change their behavior.
   (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time).
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
-`GET /health /sources /settings /themes /mpv-preview /library /current /workshop/queue /steam/status
+`GET /health /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
 /playlist/state /playlist/names /library/undo-depth /library/duration`,
 `POST /browse /detail /settings /apply /stop /next /prev /random /pause /volume /mute /download /open
 /preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo} /playlist/{state,save,load,play,play-from}
 /steam/{qr/start,qr/cancel,signout} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
-**Live-apply:** `/library/volume|speed` save the override (dropped when == global) then `PlayerHelper.ApplyOverrideLive` retargets the *playing* wallpaper instantly (mpv IPC / `pactl` for scenes). `/preview` is the throttled drag-preview twin — sets mpv/LWE volume|speed NOW with **no persist** (the modal throttles it during a slider drag, then persists once on release). `/settings` applies the *effective* (`override ?? global`) value so a global change never clobbers an active override; it also live-applies `VideoScale` (mpv `panscan`). `/open` reveals an item in the file manager (resolves the symlink / scene dir). `/library/duration` = ffprobe.
+**Live-apply:** `/library/volume|speed` save the override (dropped when == global) then `PlayerHelper.ApplyOverrideLive` retargets the *playing* wallpaper instantly (mpv IPC / `pactl` for scenes). `/preview` is the throttled drag-preview twin — sets mpv/LWE volume|speed NOW with **no persist** (the modal throttles it during a slider drag, then persists once on release). `/settings` applies the *effective* (`override ?? global`) value so a global change never clobbers an active override; it also live-applies `VideoScale` (mpv `panscan`). A `PlayerEngine` change in `/settings` switches the engine live (`PlayerHelper.SwitchEngineLive` — see `player-adapter.md`); under lp-player `/preview` targets the playing item's own source. `/open` reveals an item in the file manager (resolves the symlink / scene dir). `/library/duration` = ffprobe.
 
 ## WS event types
 `wallpaper-changed {path} · scene-crashed {path} · timed-stopped · download-progress {id,value,done?,status?}

@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using livepaper.Models;
+using livepaper.Player;
 
 namespace livepaper.Helpers;
 
@@ -52,9 +53,9 @@ public static class PlayerHelper
     private static volatile TaskCompletionSource<bool>? _speedChangeTcs;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
-    public static bool IsPlaying =>
+    public static bool IsPlaying => PlayerEngine.IsLpPlayer ? LpPlayerMedia.IsPlaying() : (
         (File.Exists(IpcSocket) && MpvpaperProcs().Length > 0) ||
-        IsLweRunning;
+        IsLweRunning);
 
     private static bool IsLweRunning
     {
@@ -422,6 +423,7 @@ public static class PlayerHelper
         // in-process restart timer, so don't spawn a competing daemon.
         if (IsGuiTimerAlive()) return;
         if (SettingsService.Load().RestartIntervalSeconds <= 0) return;
+        if (PlayerEngine.IsLpPlayer) return; // mpvpaper leak workaround — legacy only
 
         KillRestartDaemon();
         try
@@ -453,6 +455,7 @@ public static class PlayerHelper
         _restartTimer?.Dispose();
         _restartTimer = null;
         if (_daemonMode) return;
+        if (PlayerEngine.IsLpPlayer) return; // the leak-restart is an mpvpaper workaround — legacy only
         var settings = SettingsService.Load();
         if (settings.RestartIntervalSeconds <= 0) return;
         int intervalMs = settings.RestartIntervalSeconds * 1000;
@@ -504,6 +507,7 @@ public static class PlayerHelper
     // consumes a "restart" pending action.
     private static void RestartCurrentAndLaunch()
     {
+        if (PlayerEngine.IsLpPlayer) return; // a stale "restart" pending action — nothing leaks under lp-player
         if (_history == null || _historyIndex < 0 || _historyIndex >= _history.Count) return;
         var current = _history[_historyIndex];
         KillCurrentProcess();
@@ -551,6 +555,7 @@ public static class PlayerHelper
                 int intervalMs = settings.RestartIntervalSeconds * 1000;
                 Thread.Sleep(intervalMs);
                 settings = SettingsService.Load();
+                if (PlayerEngine.WouldBeLpPlayer(settings)) continue; // mpvpaper leak workaround — legacy only
                 if (IsTimedPlaylistActive() && !IsTimedPlaylistPaused())
                 {
                     var (count, cur) = ReadTimedSnapshot();
@@ -701,6 +706,8 @@ public static class PlayerHelper
         {
             if (IsScenePath(videoPath))
             {
+                if (PlayerEngine.IsLpPlayer)
+                    throw new InvalidOperationException("Scenes need the Legacy player engine for now — lp-player plays scenes in Phase 2 (Settings → Advanced → Player engine)");
                 var s = SettingsService.Load();
                 if (!s.AllowScenes)
                     throw new InvalidOperationException("Enable \"Allow scene support\" in Settings to play scenes");
@@ -733,7 +740,7 @@ public static class PlayerHelper
                 : videoPaths.ToArray();
 
             var settings = SettingsService.Load();
-            if (settings.AllowScenes && IsLweAvailable() && paths.Any(IsScenePath))
+            if (PlayerEngine.ScenesPlayable(settings) && paths.Any(IsScenePath))
             {
                 var secs = intervalSeconds > 0 ? intervalSeconds : settings.GlobalIntervalSeconds;
                 if (secs > 0)
@@ -1008,7 +1015,7 @@ public static class PlayerHelper
                     var cur = _history != null && _historyIndex >= 0 && _historyIndex < _history.Count ? _history[_historyIndex] : null;
                     var nxt = PeekNextTimed();
                     if (cur != null && !IsScenePath(cur) && nxt != null && IsScenePath(nxt)
-                        && SettingsService.Load().AllowScenes && TransitionService.CurrentConfig().Enabled)
+                        && !PlayerEngine.IsLpPlayer && SettingsService.Load().AllowScenes && TransitionService.CurrentConfig().Enabled)
                     {
                         AdvanceAndLaunch();
                         _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1069,6 +1076,20 @@ public static class PlayerHelper
     // readiness (mpvpaper: AV: line; LWE: SceneTransitionDelayMs).
     private static void SwitchToFile(string path, string mpvOptions)
     {
+        // lp-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
+        // no pre-launch crossover, no overlay, no IPC loadfile. Scenes are skipped in Phase 1 exactly
+        // like AllowScenes=false (which stops playback here).
+        if (PlayerEngine.IsLpPlayer)
+        {
+            if (IsScenePath(path)) { KillCurrentProcess(); return; }
+            var lpSettings = SettingsService.Load();
+            var lpCfg = TransitionService.CurrentConfig();
+            LpPlayerMedia.Switch(path, lpSettings, lpCfg.Enabled ? lpCfg : null, alignEnd: false);
+            _currentSpeed = ReadSpeedOverride(path) ?? lpSettings.Speed;
+            OnWallpaperChanged?.Invoke(path);
+            return;
+        }
+
         // Cancel any in-flight pre-launch transition from a previous switch.
         _prelaunchCts?.Cancel();
         _prelaunchCts = null;
@@ -1146,7 +1167,7 @@ public static class PlayerHelper
             if (nextIsScene)
             {
                 var settings = SettingsService.Load();
-                if (!settings.AllowScenes || !IsLweAvailable())
+                if (!PlayerEngine.ScenesPlayable(settings))
                 {
                     KillCurrentProcess();
                     return;
@@ -1441,6 +1462,7 @@ public static class PlayerHelper
     // whether the IPC succeeded so they can fall back to a fresh launch.
     private static bool TrySendCommand(params object[] args)
     {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.Mpv(args);
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return false;
         try
@@ -1488,6 +1510,7 @@ public static class PlayerHelper
 
     private static string? TryQueryCurrentPath()
     {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.CurrentPath();
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -1832,6 +1855,7 @@ public static class PlayerHelper
 
     private static double? TryQueryProperty(string prop)
     {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.QueryMpv(prop);
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -1861,6 +1885,7 @@ public static class PlayerHelper
 
     private static double? TryQueryTimePos()
     {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.Query("time_pos");
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -1883,6 +1908,7 @@ public static class PlayerHelper
 
     private static double? TryQueryTimeRemaining()
     {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.TimeRemaining();
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -1925,6 +1951,42 @@ public static class PlayerHelper
         bool nextIsScene = IsScenePath(next);
         bool prevIsScene = !prevIsVideo && IsLweRunning;
         TransitionService.TransLog($"DoVideoEndWait: next={System.IO.Path.GetFileName(next)} nextIsScene={nextIsScene} prevIsVideo={prevIsVideo} IsLweRunning={IsLweRunning} → prevIsScene={prevIsScene}");
+
+        // ── lp-player V→V (transitions on AND the transitions-off gapless branch): the PLAYER times the
+        //    switch — align:"end" makes full-live END at A's end and a cut/reveal/frozen START there — so
+        //    no playtime polling and no `_lastSwitchTarget` settle gate (legacy-only): the previous
+        //    switch's transition.handoff is the gate (a new request would supersede a pre-Running one).
+        //    Cancel (ct) → `cancel {corr}` inside SwitchAndWait.
+        if (PlayerEngine.IsLpPlayer && !nextIsScene && !prevIsScene)
+        {
+            await LpPlayerMedia.WaitLastHandoff(ct).ConfigureAwait(false);
+            if (ct.IsCancellationRequested) return;
+            var lpCfg = TransitionService.CurrentConfig();
+            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: true, ct).ConfigureAwait(false);
+            if (ct.IsCancellationRequested) return;
+            if (outcome != "handoff")
+            {
+                // failed / player unreachable / cancelled by someone else: back off (never a storm), then
+                // switch now — the legacy "mpv gone → switch immediately" fallback.
+                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: {outcome} → switching now");
+                try { await Task.Delay(1000, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+            }
+            lock (_lock)
+            {
+                if (!_waitingForVideoEnd || ct.IsCancellationRequested) return;
+                _waitingForVideoEnd = false;
+                _waitCts = null;
+                if (outcome == "handoff")
+                {
+                    _currentSpeed = ReadSpeedOverride(next) ?? SettingsService.Load().Speed;
+                    OnWallpaperChanged?.Invoke(next);
+                }
+                else SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
+                PostSwitch(next);
+            }
+            return;
+        }
 
         // In advance-on-end mode PostSwitch re-arms us the instant the overlay fired the switch — but
         // the IPC loadfile-B hasn't settled yet, so mpv still reports the OUTGOING file's near-end
@@ -2393,6 +2455,46 @@ public static class PlayerHelper
     public static void ApplyRotationLive(int intervalSeconds, bool waitForVideoEnd, bool advanceOnVideoEnd)
         => UpdateTimedSettings(_timedShuffle, intervalSeconds, waitForVideoEnd, advanceOnVideoEnd);
 
+    // PlayerEngine changed (/settings), live: stop the OLD engine's media, then replay on the new one —
+    // a running timed playlist resumes at the item it was on (timed_state.json), else LastSession.
+    // Nothing playing → nothing started. Unchanged engine → just refresh the cached engine/binary.
+    public static void SwitchEngineLive(AppSettings prev, AppSettings cur)
+    {
+        bool wasLp = PlayerEngine.IsLpPlayer;          // what actually runs (cached since serve start)
+        bool nowLp = PlayerEngine.WouldBeLpPlayer(cur);
+        if (wasLp == nowLp) { PlayerEngine.Refresh(cur); return; }
+        bool timed, playing;
+        lock (_lock)
+        {
+            timed = _timedPaths != null && !_timedTimerStopped;
+            playing = timed || IsPlaying;
+            SaveTimedState();       // the playlist position for the replay (no-op without a timed session)
+            TeardownTimer();        // state only — timed_state.json is kept
+            KillCurrentProcess();   // still the OLD engine (IsLpPlayer not refreshed yet)
+            if (wasLp) LpPlayerMedia.Quit();
+            PlayerEngine.Refresh(cur);
+        }
+        KillRestartDaemon();
+        TransitionService.ClearInProgress();
+        LpPlayerClient.Log($"PlayerEngine {(wasLp ? "lp-player" : "legacy")} → {(nowLp ? "lp-player" : "legacy")}: " +
+            (!playing ? "nothing was playing" : timed ? "resuming the timed playlist" : "replaying the last session"));
+        if (!playing) return;
+        try
+        {
+            if (timed && RestoreTimedPlaylist()) return;
+            var session = cur.LastSession;
+            if (session == null || session.Paths.Count == 0) return;
+            if (session.IsTimedPlaylist)
+            {
+                var paths = session.Shuffle ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList() : session.Paths;
+                ApplyTimedPlaylist(paths, cur.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd, session.AdvanceOnVideoEnd);
+            }
+            else if (session.IsPlaylist) ApplyPlaylist(session.Paths, cur.BuildMpvPlaylistOptions(), session.Shuffle);
+            else Apply(session.Paths[0], cur.BuildMpvOptions());
+        }
+        catch (Exception e) { LpPlayerClient.Log($"replaying the session on {(nowLp ? "lp-player" : "legacy")} failed: {e.Message}"); }
+    }
+
     public static void Stop()
     {
         lock (_lock)
@@ -2541,6 +2643,7 @@ public static class PlayerHelper
 
     public static void SendCommand(params object[] args)
     {
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.Mpv(args); return; }
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return;
         try
@@ -2608,6 +2711,12 @@ public static class PlayerHelper
     // the timed-playlist cache (_currentSpeed) in sync, so later ticks/advances use the new value too.
     public static void ApplyOverrideLive(string path)
     {
+        // lp-player: the source(s) showing THAT item (may be an in-flight transition's pending B)
+        if (PlayerEngine.IsLpPlayer)
+        {
+            if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
+            return;
+        }
         var cur = QueryCurrentPath();
         if (cur == null) return;
         try { if (Path.GetFullPath(cur) != Path.GetFullPath(path)) return; } catch { return; }
@@ -2636,6 +2745,11 @@ public static class PlayerHelper
     // launch-only (needed a stop/replay to take effect).
     public static void ApplyPlaybackSettingsLive(AppSettings prev, AppSettings cur, string? playingPath)
     {
+        if (PlayerEngine.IsLpPlayer)
+        {
+            LpPlayerMedia.ApplySettingsLive(prev, cur, loopAllowed: !_waitingForVideoEnd && !IsTimedPlaylistActive());
+            return;
+        }
         bool scene = IsLweRunning;
         bool mpvAlive = File.Exists(IpcSocket) && MpvpaperProcs().Length > 0;
 
@@ -2837,6 +2951,14 @@ public static class PlayerHelper
 
     private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
     {
+        // lp-player: a cold launch = a cut to `file` (whatever was on screen was just stopped)
+        if (PlayerEngine.IsLpPlayer)
+        {
+            _lastSwitchTarget = file;
+            LpPlayerMedia.Switch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
+            readyTcs?.TrySetResult(true);
+            return null;
+        }
         _lastSwitchTarget = file; // a cold launch makes `file` current too (see DoVideoEndWait's settle gate)
         var socketPath = IpcSocket;
         Directory.CreateDirectory(Path.GetDirectoryName(socketPath)!);
@@ -2943,6 +3065,8 @@ public static class PlayerHelper
 
     private static void KillCurrentProcess()
     {
+        // lp-player: `stop` (every source ramped out and retired); the player process stays up
+        if (PlayerEngine.IsLpPlayer) { StopPlaylistObserver(); LpPlayerMedia.Stop(); _current = null; return; }
         StopPlaylistObserver();
         foreach (var proc in MpvpaperProcs())
         {
@@ -3072,7 +3196,7 @@ public static class PlayerHelper
     {
         if (!IsScenePath(path)) return false;
         var s = SettingsService.Load();
-        return !s.AllowScenes || !IsLweAvailable();
+        return !PlayerEngine.ScenesPlayable(s);
     }
 
     // Spawns one linux-wallpaperengine process per monitor, writes new PIDs to
@@ -3397,6 +3521,12 @@ public static class PlayerHelper
     // switch). null/scene/no-socket → no-op. Unmeasured → clears the filter + kicks a background measure.
     public static void ApplyNormalizationLive(string? path)
     {
+        // lp-player: loudnorm is per item → that item's source(s)
+        if (PlayerEngine.IsLpPlayer)
+        {
+            if (path != null && !IsScenePath(path)) LpPlayerMedia.SetForPath(path, "af", NormalizeAf(path) ?? "");
+            return;
+        }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }

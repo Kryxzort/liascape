@@ -9,8 +9,8 @@ export interface Opt { value: string; label: string }
 // OS-rendered, can't be themed/translucent). Trade-off vs native: we own positioning, click-away and
 // keyboard. The list is portal'd to <body> (position:fixed) so it escapes the bars'/cards' overflow +
 // backdrop-filter containing blocks, with a transparent backdrop for click-away (matches .ctx-menu).
-export function Select({ value, options, onChange, className = "", title }: {
-  value: string | number; options: Opt[]; onChange: (v: string) => void; className?: string; title?: string;
+export function Select({ value, options, onChange, className = "", title, disabled }: {
+  value: string | number; options: Opt[]; onChange: (v: string) => void; className?: string; title?: string; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
@@ -34,8 +34,8 @@ export function Select({ value, options, onChange, className = "", title }: {
 
   return (
     <>
-      <button ref={btn} type="button" className={`sel ${className}`} title={title}
-        onClick={(e) => { e.stopPropagation(); if (open) { setOpen(false); return; } place(); setOpen(true); }}>
+      <button ref={btn} type="button" className={`sel ${className}`} title={title} disabled={disabled}
+        onClick={(e) => { e.stopPropagation(); if (disabled) return; if (open) { setOpen(false); return; } place(); setOpen(true); }}>
         <span className="sel-val">{cur?.label ?? ""}</span>
         <ChevronDown size={14} className="sel-caret" />
       </button>

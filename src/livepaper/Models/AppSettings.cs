@@ -90,6 +90,10 @@ public class AppSettings
     // cover, to cancel the per-machine settling drift (negative = aim slightly ahead). The renderer
     // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
     public int TransitionLagOffsetMs { get; set; } = -30;
+    // Which player drives the wallpaper: "legacy" (mpvpaper + lp-transition + LWE) or "lp-player" (the
+    // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
+    // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/player-adapter.md.
+    public string PlayerEngine { get; set; } = "legacy";
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoImportWallpaperEngine { get; set; } = false;
     public bool IsPlaylistCollapsed { get; set; } = false;

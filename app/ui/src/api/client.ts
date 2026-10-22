@@ -112,6 +112,8 @@ export const api = {
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
   saveSettings: (s: Record<string, unknown>) => jpost("/settings", s),
   mpvPreview: () => fetch(`${API}/mpv-preview`).then((r) => r.text()),
+  // Player engine row: asked-for vs running engine, whether lp-player can run (+ why not)
+  playerEngine: () => jget<{ engine: string; active: string; available: boolean; binary: string | null; reason: string | null }>("/player-engine"),
   lwePreview: () => fetch(`${API}/lwe-preview`).then((r) => r.text()),
   importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
   libraryClear: () => jpost("/library/clear"),

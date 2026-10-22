@@ -8,6 +8,10 @@ sealed class Program
 {
     public static void Main(string[] args)
     {
+        // hidden: MpvPropertyMap + protocol round-trip against a private headless lp-player (PASS/FAIL)
+        if (args.Contains("--lp-player-selftest"))
+            Environment.Exit(livepaper.Player.LpPlayerSelfTest.Run());
+
         PlayerHelper.LoadUserMuteState();
 
         if (args.Contains("--kill"))
