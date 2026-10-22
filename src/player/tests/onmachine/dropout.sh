@@ -11,6 +11,11 @@
 #      B starts only at handoff): its `probe.dropout` must report no drops for the window —
 #      the held silence is intended by the method, not a bug, even though both clips are
 #      loud files.
+#   2b. Review fix round (R80): a PLAIN retire — a bare source, not part of any
+#      transition, `ctl destroy`'d while playing — gets the exact same 30 ms anti-click
+#      ramp, and `Runtime::retire` registers it as a dropout window too (its own minted
+#      `corr`, carried on `source.retire`'s log event). Probed on demand once the meter
+#      has actually captured past the window's end: must show no drops either.
 #   3. System state: the default sink is `easyeffects_sink` before and after (never changed
 #      by this script — only the bus's own re-target logic ever touches *its* routing, and
 #      nothing here triggers a default-sink change at all); no `lp-player-bus` sink is left
@@ -197,6 +202,91 @@ DROPS2=$(jq '.drops | length' <<<"$REPORT2")
 echo "frozen report: $(jq -c '{lag_ms, fit_db, drops: (.drops|length), micro_gaps: (.micro_gaps|length)}' <<<"$REPORT2")"
 ((DROPS2 == 0)) || fail "frozen's intended held silence was flagged as $DROPS2 drop(s): $(jq -c .drops <<<"$REPORT2")"
 ok "frozen: 0 drops for the intended held silence"
+
+# R80 diagnostics: if a micro_gap still appears after the fix, dump the raw 1 ms meter
+# samples around it (not just the summary) so the report can cite exact numbers rather
+# than guessing — never silently discarded.
+dump_micro_gap_diagnostics() {
+    local corr=$1 report=$2 label=$3
+    local n
+    n=$(jq '.micro_gaps | length' <<<"$report")
+    ((n > 0)) || return 0
+    local started_t
+    started_t=$(ctl logs "{\"corr\":\"$corr\",\"kind_prefix\":\"transition.started\"}" \
+        | jq -r '.events[0].t_mono_ms // empty')
+    if [[ -z $started_t ]]; then
+        # Not a transition (the plain-retire case): `source.retire`'s own t_mono_ms is
+        # the window's `started_mono` equivalent.
+        started_t=$(ctl logs "{\"corr\":\"$corr\",\"kind_prefix\":\"source.retire\"}" \
+            | jq -r '.events[0].t_mono_ms // empty')
+    fi
+    echo "=== $label micro_gap diagnostics (corr=$corr, transition.started t_mono_ms=$started_t) ==="
+    jq -c '.micro_gaps[]' <<<"$report" | while read -r g; do
+        local at len under from to
+        at=$(jq -r .at_ms <<<"$g"); len=$(jq -r .len_ms <<<"$g"); under=$(jq -r .under_db <<<"$g")
+        echo "micro_gap at_ms=$at (rel. window start = started_t - 500ms) len_ms=$len under_db=$under"
+        if [[ -n $started_t ]]; then
+            from=$(jq -n --argjson s "$started_t" --argjson a "$at" '($s - 500 + $a - 15)')
+            to=$(jq -n --argjson s "$started_t" --argjson a "$at" --argjson l "$len" '($s - 500 + $a + $l + 15)')
+            echo "  absolute meter window ~[$from, $to] ms (t_mono_ms):"
+            ctl probe "{\"name\":\"meter.window\",\"args\":{\"from_ms\":$from,\"to_ms\":$to}}" \
+                | jq -c '{median_db, min_db, max_db, max_gap_ms, count, samples}'
+        fi
+    done
+    echo "=== end $label diagnostics ==="
+}
+dump_micro_gap_diagnostics "$CORR2" "$REPORT2" "frozen"
+
+# ---------------------------------------------------------------- 2b. plain retire ramp
+# A bare source (no transition at all) playing CLIP_B, destroyed outright: Runtime::retire
+# ramps it to silence over 30 ms (same anti-click primitive every method uses) and mints
+# its own dropout-probe corr (R79/R80 fix round) — exercising the fix outside the
+# transition machinery entirely.
+SRC_R=$(ctl create "{\"kind\":\"source\",\"props\":{\"path\":\"$CLIP_B\",\"loop\":true}}" | jq -r .id) \
+    || fail "create retire-test source"
+for _ in $(seq 50); do
+    T=$(ctl get "{\"path\":\"$SRC_R.time_pos\"}" 2>/dev/null | jq -r '.value // 0')
+    jq -e --argjson t "${T:-0}" -n '$t >= 1.0' >/dev/null && break
+    sleep 0.1
+done
+jq -e --argjson t "${T:-0}" -n '$t >= 1.0' >/dev/null || fail "retire-test source never reached 1.0 s (time_pos $T)"
+ok "retire-test source playing (660 Hz), time_pos $T s"
+DESTROY_RES=$(ctl destroy "{\"id\":\"$SRC_R\"}") || fail "destroy retire-test source"
+RAMP_R=$(jq -r .ramp_ms <<<"$DESTROY_RES")
+echo "destroyed $SRC_R: ramp_ms=$RAMP_R"
+CORR_R=
+for _ in $(seq 20); do
+    CORR_R=$(ctl logs '{"kind_prefix":"source.retire","limit":20}' \
+        | jq -r --arg id "$SRC_R" '[.events[] | select(.id == $id)] | last | .corr // empty')
+    [[ -n $CORR_R ]] && break
+    sleep 0.1
+done
+[[ -n $CORR_R ]] || fail "no corr recorded for source.retire of $SRC_R"
+echo "retire corr: $CORR_R"
+# The probe's window ends 500 ms after the ramp (`done_mono + WINDOW_POST`); give the
+# meter real wall-clock time to actually have captured that far before probing on demand.
+sleep 1.0
+ctl probe "{\"name\":\"dropout\",\"args\":{\"corr\":\"$CORR_R\"}}" >/dev/null \
+    || fail "probe dropout (retire, corr $CORR_R)"
+EV3=
+for _ in $(seq 100); do
+    EV3=$(ctl logs "{\"corr\":\"$CORR_R\",\"kind_prefix\":\"probe.dropout\"}" 2>/dev/null \
+        | jq -c '.events[-1] // empty')
+    [[ -n $EV3 ]] && break
+    sleep 0.1
+done
+[[ -n $EV3 ]] || fail "retire: no probe.dropout within 10s"
+echo "retire probe.dropout: $EV3"
+[[ $(jq -r 'has("skipped")' <<<"$EV3") == false ]] || fail "retire probe.dropout skipped: $(jq -r .skipped <<<"$EV3")"
+REPORT3=$(jq -c .report <<<"$EV3")
+DROPS3=$(jq '.drops | length' <<<"$REPORT3")
+GAPS3=$(jq '.micro_gaps | length' <<<"$REPORT3")
+echo "retire report: $(jq -c '{lag_ms, fit, fit_db, drops: (.drops|length), micro_gaps}' <<<"$REPORT3")"
+dump_micro_gap_diagnostics "$CORR_R" "$REPORT3" "retire"
+((DROPS3 == 0)) || fail "plain retire ramp flagged $DROPS3 drop(s): $(jq -c .drops <<<"$REPORT3")"
+ok "retire: 0 drops for the anti-click ramp ($GAPS3 micro_gap(s) — see report above; a \
+non-empty micro_gaps here is the owner's original 'flicker of silence' complaint and is \
+reported, not hidden, if it persists after the R80 fix"
 
 # ---------------------------------------------------------------- 3. clean exit
 ctl quit >/dev/null || fail "quit"

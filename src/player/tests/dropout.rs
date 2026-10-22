@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use common::{ClipSpec, ensure_clip};
 use lp_player::probe::dropout::{
-    DropoutReport, GainSchedule, SourceWindow, analyse, expected_envelope,
+    DropoutReport, FitStatus, GainSchedule, SourceWindow, analyse, expected_envelope,
 };
 use lp_player::units::{SILENT_DB, db_to_lin};
 
@@ -30,9 +30,13 @@ fn curve_a(k: i64) -> f64 {
 }
 
 /// A gentler version of [`curve_a`] for the longer `big_hole` window (keeps levels
-/// plausible over 650 ms instead of running away positive).
+/// plausible over 2000 ms instead of running away positive). Review fix round, R77:
+/// the coefficient was re-tuned (and the window extended from 650 ms to 2000 ms) so the
+/// window still has enough reliably-paired bins to clear the new, window-scaled lag
+/// guard even with its 446 ms drop silencing a big chunk of it — see that test's own
+/// comment.
 fn curve_b(k: i64) -> f64 {
-    -25.0 + 0.004 * (k * k) as f64
+    -25.0 + 0.0005 * (k * k) as f64
 }
 
 #[test]
@@ -126,10 +130,18 @@ fn held_method_silence_not_flagged_as_a_dropout() {
 
 #[test]
 fn big_hole_is_flagged_as_one_drop_of_about_440_to_450ms() {
-    let expected: Vec<(Duration, f64)> = (0..=65)
+    // Review fix round, R77: extended from the original 650 ms window to 2000 ms (200
+    // bins) — the 446 ms drop alone silences 44-45 of a 650-bin-ms window's bins for the
+    // lag search's own "is this bin's capture plausible" filter, which the OLD flat
+    // `MIN_LAG_PAIRS = 3` guard didn't care about but the new window-scaled guard does
+    // (it wants at least half of `expected`'s audible bins to have actually paired, up
+    // to 50). A 650 ms window where 68% of it is one drop is a pathological ratio no
+    // real transition produces; 2000 ms with the same 446 ms drop (23%) is realistic and
+    // leaves plenty of good signal to anchor the fit on either side of it.
+    let expected: Vec<(Duration, f64)> = (0..=200)
         .map(|k| (ms((k * 10) as u64), curve_b(k)))
         .collect();
-    let mut observed: Vec<(Duration, f64)> = (0..=650u64)
+    let mut observed: Vec<(Duration, f64)> = (0..=2000u64)
         .map(|t| {
             let k = (t / 10) as i64;
             (ms(t), curve_b(k))
@@ -140,6 +152,7 @@ fn big_hole_is_flagged_as_one_drop_of_about_440_to_450ms() {
         sample.1 = SILENT_DB;
     }
     let report = analyse(&observed, &expected);
+    assert_eq!(report.fit, FitStatus::Ok, "report = {report:?}");
     assert_eq!(report.drops.len(), 1, "drops = {:?}", report.drops);
     let d = &report.drops[0];
     assert!(
@@ -148,6 +161,27 @@ fn big_hole_is_flagged_as_one_drop_of_about_440_to_450ms() {
         d.len_ms
     );
     assert_eq!(d.at_ms, 100, "report = {report:?}");
+}
+
+#[test]
+fn sparse_window_is_insufficient_and_flags_nothing() {
+    // R77 (review fix round): only ~8 audible bins in the whole window — nowhere near
+    // enough to trust a lag/offset fit against. The report must say so plainly
+    // (`fit: Insufficient`, `lag_ms: 0`) rather than guess a lag and flag findings on
+    // top of a fit it can't actually vouch for.
+    let expected: Vec<(Duration, f64)> = (0..8).map(|k| (ms(k * 10), -20.0)).collect();
+    let observed: Vec<(Duration, f64)> = (0..80u64).map(|t| (ms(t), -20.0)).collect();
+    let report = analyse(&observed, &expected);
+    assert_eq!(report.fit, FitStatus::Insufficient, "report = {report:?}");
+    assert_eq!(report.lag_ms, 0, "report = {report:?}");
+    assert_eq!(report.fit_db, 0.0, "report = {report:?}");
+    assert_eq!(report.offset_db, 0.0, "report = {report:?}");
+    assert!(report.drops.is_empty(), "drops = {:?}", report.drops);
+    assert!(
+        report.micro_gaps.is_empty(),
+        "micro_gaps = {:?}",
+        report.micro_gaps
+    );
 }
 
 // ----------------------------------------------------------- expected_envelope() (ffmpeg)
@@ -177,6 +211,9 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
         id: "a".into(),
         path,
         position: 0.0,
+        speed: 1.0,
+        looped: false,
+        duration: None,
     };
     let mut schedule: GainSchedule = GainSchedule::new();
     schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]); // 0 dB: no suppression
@@ -192,6 +229,133 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
     }
     let mid = env[env.len() / 2].1;
     assert!((mid - (-20.0)).abs() < 0.5, "mid bin = {mid} dB");
+}
+
+/// Builds (once) a 2 s clip, silent for its first second and a −20 dBFS 1 kHz tone for
+/// its second, via the concat demuxer rather than a single `lavfi` filter graph — an
+/// `if(lt(t,1),…)` expression needs comma-escaping inside the graph description that's
+/// easy to get subtly wrong, while two one-second segments stitched with `-f concat -c
+/// copy` need none.
+fn ensure_speed_step_clip() -> std::path::PathBuf {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-media");
+    std::fs::create_dir_all(&dir).expect("create target/test-media");
+    let out = dir.join("dropout_speed_step.mkv");
+    if out.exists() {
+        return out;
+    }
+    let quiet = dir.join("dropout_speed_step_quiet.mkv");
+    let loud = dir.join("dropout_speed_step_loud.mkv");
+    let make = |path: &std::path::Path, audio: &str| {
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
+            .args(["-f", "lavfi", "-i", "color=c=black:s=64x64:r=10:d=1"])
+            .args(["-f", "lavfi", "-i", audio])
+            .args([
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "pcm_s16le",
+            ])
+            .arg(path)
+            .status()
+            .expect("spawn ffmpeg");
+        assert!(
+            status.success(),
+            "ffmpeg segment generation failed for {path:?}"
+        );
+    };
+    make(&quiet, "anullsrc=r=48000:cl=mono:d=1");
+    make(&loud, "aevalsrc=0.1*sin(2*PI*1000*t):s=48000:d=1");
+    let list = dir.join("dropout_speed_step.ffconcat");
+    std::fs::write(
+        &list,
+        format!("file '{}'\nfile '{}'\n", quiet.display(), loud.display()),
+    )
+    .expect("write concat list");
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-f", "concat", "-safe", "0", "-i"])
+        .arg(&list)
+        .args(["-c", "copy"])
+        .arg(&out)
+        .status()
+        .expect("spawn ffmpeg concat");
+    assert!(status.success(), "ffmpeg concat failed");
+    out
+}
+
+#[test]
+fn expected_envelope_maps_window_time_to_file_time_at_speed() {
+    // R78 (review fix round): a source played at speed=2.0 has its FILE position
+    // advance twice as fast as the window's own time (mpv's scaletempo keeps pitch, so
+    // this is a genuine time-compression, not a pitch shift). A clip silent for its
+    // first file-second and a tone for its second should show the level step at HALF
+    // the window-time offset it would at speed=1.0 — window t=0.5s ↔ file t=1.0s, not
+    // window t=1.0s.
+    let path = ensure_speed_step_clip();
+    let src = SourceWindow {
+        id: "a".into(),
+        path,
+        position: 0.0,
+        speed: 2.0,
+        looped: false,
+        duration: None,
+    };
+    let mut schedule: GainSchedule = GainSchedule::new();
+    schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]);
+    let window = (ms(0), ms(1000)); // 1 window-second = 2 file-seconds at speed 2.0
+    let env = expected_envelope(&[src], &schedule, window);
+    assert_eq!(env.len(), 100);
+    let quiet_quarter = &env[..20];
+    let loud_quarter = &env[80..];
+    assert!(
+        quiet_quarter.iter().all(|(_, db)| *db < -40.0),
+        "first quarter (window t < 200 ms, file t < 400 ms) should still be silent: \
+         {quiet_quarter:?}"
+    );
+    assert!(
+        loud_quarter.iter().all(|(_, db)| *db > -30.0),
+        "last quarter (window t ≥ 800 ms, file t ≥ 1600 ms) should already be audible: \
+         {loud_quarter:?}"
+    );
+}
+
+#[test]
+fn expected_envelope_wraps_a_looping_source_across_its_duration() {
+    // R78 (review fix round): a window spanning more than one lap of a short, looping
+    // source must stay continuous across the wrap — no artificial silence where
+    // `decode_power_bins` would otherwise treat crossing `duration` as "past EOF".
+    let path = ensure_clip(
+        "dropout_loop_tone",
+        ClipSpec::Solid {
+            rgb: [0, 0, 0],
+            secs: 0.3,
+            tone_hz: 1000.0,
+            tone_dbfs: -20.0,
+        },
+    );
+    let src = SourceWindow {
+        id: "a".into(),
+        path,
+        position: 0.0,
+        speed: 1.0,
+        looped: true,
+        duration: Some(0.3),
+    };
+    let mut schedule: GainSchedule = GainSchedule::new();
+    schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]);
+    let window = (ms(0), ms(700)); // > 2 laps of a 300 ms clip
+    let env = expected_envelope(&[src], &schedule, window);
+    assert_eq!(env.len(), 70);
+    for (i, (_, db)) in env.iter().enumerate() {
+        assert!(
+            (*db - (-20.0)).abs() < 1.5,
+            "bin {i} ({db} dB) should stay at the clip's own level across the loop wrap \
+             — no false drop at t ≈ 300 ms / 600 ms"
+        );
+    }
 }
 
 /// Trivial sanity on the report shape itself (serializes, round-trips the Debug impl a

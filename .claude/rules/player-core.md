@@ -1314,7 +1314,11 @@ write_failed|write_recovered`, `test.crash`,
 `audio.bus.up|down|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
 `audio.meter.started`, `audio.meter.scratch_exceeded` (T14 residual — a negotiated quantum
 exceeded the meter's RT scratch cap, chunked rather than reallocated), `probe.dropout`
-(Task 15 — `{corr, report}` or `{corr, skipped}`), `probe.dropout_decode_failed`,
+(Task 15 — `{corr, report}` or `{corr, skipped}`; review fix round: `report.fit` is
+`"ok"`/`"insufficient"`, `skipped` can be `"busy"` when 2 analyses are already running —
+R77/R79, `docs/player/debugging.md`), `probe.dropout_decode_failed`,
+`probe.dropout_analysis_stragglers` (R79 fix round — `Runtime::shutdown`'s bounded join
+of in-flight dropout analyses, mirroring `mpv.reaper_stragglers`),
 `compose.failed` — i.e. every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
 
