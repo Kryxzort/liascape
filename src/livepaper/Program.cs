@@ -17,6 +17,7 @@ sealed class Program
         if (args.Contains("--kill"))
         {
             PlayerHelper.Stop();
+            DrainLpPlayerBeforeExit();
             return;
         }
 
@@ -70,12 +71,14 @@ sealed class Program
                     PlayerHelper.AdjustVolume(-5);
                     break;
             }
+            DrainLpPlayerBeforeExit();
             return;
         }
 
         if (args.Contains("--random"))
         {
             PlayerHelper.ApplyRandom();
+            DrainLpPlayerBeforeExit();
             return;
         }
 
@@ -95,12 +98,26 @@ sealed class Program
         {
             RunHeadlessAutoSync();
             PlayerHelper.Restore();
+            DrainLpPlayerBeforeExit();
             return;
         }
 
         // Default + `--serve`: headless web backend for the Electron/React UI. Blocks. The Electron
         // shell spawns this and reads the chosen port from ~/.config/livepaper/serve.port.
         livepaper.Web.ServerHost.Run(args);
+    }
+
+    // lp-player mutations are queued (fire-and-forget off the caller's thread — see
+    // LpPlayerMedia.Queue / .claude/rules/player-adapter.md § Threading) so the long-lived `--serve`
+    // backend's _lock never waits on the player. A one-shot CLI invocation (--kill/--action=*/--random/
+    // --restore) has no such lifetime: if the process exits right after enqueueing a switch/set, the
+    // queued work may never actually run (the whole CLR goes with it) — the exact gap this closes,
+    // found by the on-machine acceptance round (`--action=volume-up` silently not reaching a live
+    // lp-player wallpaper). Bounded and a no-op under legacy/when nothing was queued.
+    internal static void DrainLpPlayerBeforeExit()
+    {
+        if (livepaper.Player.PlayerEngine.IsLpPlayer)
+            try { livepaper.Player.LpPlayerMedia.Drain().Wait(3000); } catch { }
     }
 
     // Runs WE auto-import + playlist auto-add on `--restore` and `--serve` startup, so the library

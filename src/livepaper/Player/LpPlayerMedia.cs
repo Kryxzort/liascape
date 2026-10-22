@@ -29,7 +29,13 @@ public static class LpPlayerMedia
             var c = LpPlayerClient.Shared;
             lock (_hookLock)
             {
-                if (!ReferenceEquals(c, _hooked)) { c.Event += OnEvent; c.Restarted += OnRestarted; _hooked = c; }
+                if (!ReferenceEquals(c, _hooked))
+                {
+                    c.Event += OnEvent;
+                    c.Restarted += OnRestarted;
+                    c.Recovered += OnRecovered;
+                    _hooked = c;
+                }
             }
             return c;
         }
@@ -39,19 +45,38 @@ public static class LpPlayerMedia
     // PlayerHelper calls its primitives while holding its _lock; nothing under that lock may wait on the
     // player (a stalled one would stall volume/speed/pause/tick). So switches, stop and property sets
     // are queued — one ordered worker, FIFO, off every caller's thread — and return at once. Queries stay
-    // synchronous with LpPlayerClient.QuickMs (≤ 300 ms, then the stall breaker fails them fast).
+    // synchronous with LpPlayerClient.QuickMs (≤ 300 ms, then the stall breaker fails them fast). Every
+    // queued command's OWN player.Call also uses QuickMs (item 6) — a queued set is a single property
+    // write, not worth 2000 ms; keeping it quick means a backlog (a stalled player) drains fast instead
+    // of each item eating the full default timeout one after another.
     private static readonly object _qLock = new();
     private static Task _tail = Task.CompletedTask;
+
+    // item 6: a hard cap on how many commands may be in flight (queued + currently running) at once. A
+    // stalled/overloaded player must never turn into unbounded memory growth here — once at the cap, a
+    // NEW command is logged and dropped outright (never enqueued, so the caller is never blocked and the
+    // chain never grows past this). Simpler and safer than hunting the chain for "the oldest SET to the
+    // same target" to evict instead; documented here and in player-adapter.md.
+    public const int MaxQueueDepth = 256;
+    private static int _queueDepth;
+    public static int QueueDepth => Volatile.Read(ref _queueDepth);
 
     public static Task<T> Queue<T>(Func<T> f)
     {
         lock (_qLock)
         {
+            if (Volatile.Read(ref _queueDepth) >= MaxQueueDepth)
+            {
+                LpPlayerClient.Log($"lp-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
+                return Task.FromResult(default(T)!);
+            }
+            Interlocked.Increment(ref _queueDepth);
             // never faults: a throwing command is logged and yields default, so the chain (and any await) goes on
             var t = _tail.ContinueWith(_ =>
             {
                 try { return f(); }
                 catch (Exception e) { LpPlayerClient.Log($"queued lp-player command threw: {e.GetBaseException().Message}"); return default!; }
+                finally { Interlocked.Decrement(ref _queueDepth); }
             }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             _tail = t;
             return t;
@@ -90,12 +115,70 @@ public static class LpPlayerMedia
 
     // The player restarted: its corr counter starts over, so every recorded outcome and pending wait
     // belongs to the dead process → forget them (the waits end as failed → the caller's fallback).
+    // R81: the new process's graph starts from its own snapshot (which may be stale — a save that
+    // hadn't caught up before the crash — or, from the 4th restart in a 60 s window, not restored at
+    // all, player-core.md § Supervisor "Budget") — never from what the backend's MODEL says should be
+    // showing. Re-apply every current effective setting through the ordered queue so neither gap can
+    // leave a stale value on screen. Fire-and-forget: this runs ON the client's event-reading callback
+    // (inside LpPlayerClient.Call's lock for the request-connection case), so it must never block —
+    // Queue(...) returns at once; ReapplyAllNow runs later, on the thread pool.
     private static void OnRestarted()
     {
         LpPlayerClient.Log("lp-player restarted (new pid) — pending switch waits end as failed");
         _recent.Clear();
         _lastCorr = null;
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
+        ReapplyAll();
+    }
+
+    // R81, the other half: a mutation made while the stall breaker was open is dropped, not queued
+    // (LpPlayerClient.QuickMs + the breaker — see the "Threading" section of player-adapter.md) and
+    // never replayed on its own. The breaker closing (the player answered again) is exactly the moment
+    // to catch up — same fire-and-forget Queue, same reasoning as OnRestarted above.
+    private static void OnRecovered()
+    {
+        LpPlayerClient.Log("lp-player answered again after a stall — re-applying settings (R81)");
+        ReapplyAll();
+    }
+
+    private static int _reapplyCount;
+    // how many times ReapplyAllNow has actually run — self-test/IT evidence that R81 fired.
+    public static int ReapplyCount => Volatile.Read(ref _reapplyCount);
+
+    // R81: push every current effective setting onto the live graph — globals (→ srcs:*, with the
+    // playing item's own override/global split the same way a live /settings change gets it), the
+    // layer fit, and the player-level pause flag — through the SAME ordered queue as every other
+    // mutation (so this can never race or reorder against a concurrent switch/set).
+    public static void ReapplyAll() => Queue(ReapplyAllNow);
+
+    private static void ReapplyAllNow()
+    {
+        var client = C;
+        if (!client.SocketExists) return;
+        Interlocked.Increment(ref _reapplyCount);
+        var s = SettingsService.Load();
+        var cur = CurrentPath();
+        double vol = cur != null ? LibraryService.ReadVolumeOverride(cur) ?? s.Volume : s.Volume;
+        double spd = cur != null ? LibraryService.ReadSpeedOverride(cur) ?? s.Speed : s.Speed;
+        // Set() already fixes up any OTHER source (a pending B) to ITS own effective value for
+        // gain.user/speed — same as a live /settings change (R61).
+        Set("gain.user", MpvPropertyMap.VolumeDb(vol));
+        Set("speed", Math.Clamp(spd, 0.1, 4.0));
+        Set("no_audio", s.NoAudio);
+        Set("hwdec", HwDec(s));
+        Set("fps_cap", (double)Math.Max(0, s.VideoFps));
+        Set("cache", !s.DisableCache);
+        Set("demuxer_max_mib", (double)Math.Max(0, s.DemuxerMaxBytes));
+        Set("demuxer_back_mib", (double)Math.Max(0, s.DemuxerMaxBackBytes));
+        Set("gain.mute", PlayerHelper.IsMuted ? MpvPropertyMap.SilentDb : 0.0);
+        Set("fit", Fit(s));
+        if (cur != null) SetForPath(cur, "af", NormalizeAf(cur, s) ?? "");
+        // the backend has no independent record of "should this be paused" beyond what it last told
+        // the player (there is no other authority for it, unlike volume/speed, which live in
+        // settings.json/the library index) — re-assert that, defensively, in case this restart's
+        // snapshot wasn't restored (budget-exhausted) or restored a stale value.
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = _wantPaused }, LpPlayerClient.QuickMs);
+        LpPlayerClient.Log("lp-player: re-applied effective settings" + (cur != null ? $" for {Path.GetFileName(cur)}" : " (nothing playing)"));
     }
 
     private static void Record(string corr, string outcome)
@@ -200,8 +283,9 @@ public static class LpPlayerMedia
         var client = C;
         if (!client.EnsureRunning()) return null;
         client.StartEvents();
-        // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch matches
-        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) });
+        // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch
+        // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LpPlayerClient.QuickMs);
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
@@ -281,7 +365,7 @@ public static class LpPlayerMedia
     public static void Stop()
     {
         var client = C;
-        if (client.SocketExists) client.TryCall("stop", null);
+        if (client.SocketExists) client.TryCall("stop", null, LpPlayerClient.QuickMs); // item 6
     }
 
     // Switching AWAY from lp-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
@@ -300,24 +384,26 @@ public static class LpPlayerMedia
     // A global setting → `srcs:*` (layer props → `lay:*:main`; mute ramps over 30 ms, never a step).
     // gain.user / speed: `/settings` passes the effective value (override ?? global) of the PLAYING item;
     // any other source in srcs:* (an in-flight transition's other side) then gets ITS own effective value.
+    // item 6: every call here uses QuickMs — a queued property set, never the 2000 ms default.
     public static List<string> Set(string prop, object value)
     {
         var client = C;
         if (!client.SocketExists) return []; // nothing plays → nothing to set (sources take settings at creation)
+        const int q = LpPlayerClient.QuickMs;
         try
         {
             if (prop is "fit" or "viewport" or "opacity")
-                return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"lay:*:main.{prop}", ["value"] = value }));
+                return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"lay:*:main.{prop}", ["value"] = value }, q));
             if (prop.StartsWith("gain.", StringComparison.Ordinal) && prop != "gain.user")
             {
                 try
                 {
                     return Targets(client.Call("animate", new Dictionary<string, object?>
-                    { ["path"] = $"srcs:*.{prop}", ["to"] = value, ["duration_ms"] = 30 }));
+                    { ["path"] = $"srcs:*.{prop}", ["to"] = value, ["duration_ms"] = 30 }, q));
                 }
                 catch (LpPlayerException e) when (e.Code == "no_such_node") { return []; } // no source right now
             }
-            var t = Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"srcs:*.{prop}", ["value"] = value }));
+            var t = Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"srcs:*.{prop}", ["value"] = value }, q));
             if (prop is "gain.user" or "speed" && t.Count > 0) FixupPerItem(client, prop, t);
             return t;
         }
@@ -339,7 +425,7 @@ public static class LpPlayerMedia
             object v = prop == "gain.user"
                 ? MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume)
                 : Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
-            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v });
+            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
         }
     }
 
@@ -349,7 +435,7 @@ public static class LpPlayerMedia
         var client = C;
         var ids = SourcesFor(client, path);
         foreach (var id in ids)
-            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = value });
+            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = value }, LpPlayerClient.QuickMs);
         return ids;
     }
 
@@ -415,16 +501,26 @@ public static class LpPlayerMedia
         return true;
     }
 
-    // Interim pause (controller ruling R75a): the direction comes from what's on screen (`cur:*.paused`),
-    // the write goes to `srcs:*.paused`, so an in-flight transition's pending B is paused too.
-    // TODO(lp-player: player-level pause): replace with a player-level `player.paused` that the Rust
-    // recipe + SourceHost honour (freezing transitions as well) — a separate Rust task the controller
-    // schedules after Task 17; then this becomes a single `set player.paused`.
+    // R75 (final): player-level pause. The Player node's `paused` (player-core.md § Graph & properties
+    // "Player node paused") freezes every source's EFFECTIVE pause (`node.paused || player.paused`,
+    // never the node's own raw value, so a recipe-held side like reveal/frozen's A stays exactly as the
+    // recipe left it) AND the transition recipe's own clock (`Runtime::now()` excises paused time), so
+    // one `set player.paused` now freezes a pending B and an in-flight effect too — the interim R75a
+    // `srcs:*.paused` ruling (write every source directly, nothing recipe-aware) is gone.
+    private static volatile bool _wantPaused; // R81: what we last told the player — reapplied after a
+                                               // restart whose snapshot wasn't restored/was stale.
     public static bool TogglePause()
     {
-        if (GetCur("paused") is not JsonElement { ValueKind: JsonValueKind.True or JsonValueKind.False } p) return false;
-        bool now = p.ValueKind != JsonValueKind.True;
-        return C.TryCall("set", new Dictionary<string, object?> { ["path"] = "srcs:*.paused", ["value"] = now }) != null;
+        var client = C;
+        if (!client.SocketExists) return false;
+        JsonElement v;
+        try { v = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value"); }
+        catch (LpPlayerException) { return false; }
+        if (v.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+        bool now = v.ValueKind != JsonValueKind.True;
+        if (client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LpPlayerClient.QuickMs) == null) return false;
+        _wantPaused = now;
+        return true;
     }
 
     // ---- queries -----------------------------------------------------------------------------------
@@ -479,7 +575,7 @@ public static class LpPlayerMedia
     private static JsonElement? Graph(LpPlayerClient client)
     {
         if (!client.SocketExists) return null;
-        try { return client.Call("state", null).GetProperty("graph"); }
+        try { return client.Call("state", null, LpPlayerClient.QuickMs).GetProperty("graph"); } // item 6
         catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return null; }
     }
 

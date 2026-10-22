@@ -25,6 +25,7 @@ public static class LpPlayerSelfTest
         {
             MapAssertions(fails);
             OwnershipAssertions(fails);
+            if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
         catch (Exception e) { fails.Add($"{e.GetType().Name}: {e.Message}"); }
@@ -94,6 +95,23 @@ public static class LpPlayerSelfTest
         Own("targets the bus sink", Block("x", "1", "y", "57"), true);
         Own("application.name lp-player", Block("lp-player", "1", "y", "12"), true);
         Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
+    }
+
+    // ---- item 6: queue depth cap, never blocks a caller --------------------------------------
+    // Needs no player at all — LpPlayerMedia.Queue is pure in-process chaining. One slow item clogs
+    // the single-worker FIFO deterministically (no timing race needed to "win" against the drain), so
+    // a burst enqueued right behind it piles up — the cap must bound it, and enqueueing itself must
+    // never block regardless of how clogged the chain is.
+    private static void QueueDepthAssertions(List<string> fails)
+    {
+        _ = LpPlayerMedia.Queue(() => { Thread.Sleep(1500); return 0; });
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < LpPlayerMedia.MaxQueueDepth + 60; i++) LpPlayerMedia.Queue(() => 0);
+        sw.Stop();
+        if (sw.ElapsedMilliseconds > 500) fails.Add($"enqueueing behind a clogged queue took {sw.ElapsedMilliseconds} ms (must never block the caller)");
+        if (LpPlayerMedia.QueueDepth > LpPlayerMedia.MaxQueueDepth) fails.Add($"queue depth {LpPlayerMedia.QueueDepth} exceeds the cap {LpPlayerMedia.MaxQueueDepth}");
+        try { LpPlayerMedia.Drain().Wait(8000); } catch { }
+        if (LpPlayerMedia.QueueDepth != 0) fails.Add($"queue depth {LpPlayerMedia.QueueDepth} after draining, want 0");
     }
 
     // ---- protocol round-trip -----------------------------------------------------------------
@@ -236,10 +254,20 @@ public static class LpPlayerSelfTest
                 Thread.Sleep(3300); // the breaker re-opens the line 3 s after the timeout
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add("no recovery after SIGCONT (+3 s breaker window)");
                 Phase("recovered after SIGCONT");
+                // R81: the breaker closing (this is exactly that — the first query above after it
+                // reopened) must have fired a reapply, catching up whatever the `volume 80` set during
+                // the stall (above) dropped. OnRecovered's Queue(...) is fire-and-forget (by design — it
+                // must never block the caller that happened to be the one to notice the recovery), so
+                // wait for the chain here before checking/moving on — otherwise this reapply races the
+                // NEXT phase's compositor kill below and runs against a player that's already dead again.
+                LpPlayerMedia.Drain().Wait(2000);
+                if (LpPlayerMedia.ReapplyCount < 1) fails.Add("R81: no settings reapply after the stall recovered (OnRecovered)");
+                else Phase($"R81: stall recovery triggered a reapply ({LpPlayerMedia.ReapplyCount}x so far)");
 
                 // Supervised restart (Task 17 fix): SIGKILL the COMPOSITOR directly, never the supervisor
                 // — the supervisor must see this as a crash and restart its child with a NEW hello.pid
                 // (same supervisor_pid) within ~1.5 s (measured on-machine: 150-260 ms).
+                int reapplyBeforeRestart = LpPlayerMedia.ReapplyCount;
                 int deadCompositor = client.PlayerPid ?? -1;
                 int priorSupervisor = client.SupervisorPid ?? serve.Id;
                 kill(deadCompositor, 9);
@@ -259,6 +287,14 @@ public static class LpPlayerSelfTest
                 Phase($"supervised restart: compositor {deadCompositor} -> {newCompositor} in {rsw.ElapsedMilliseconds} ms");
                 if (newCompositor < 0) fails.Add($"killing the compositor (pid {deadCompositor}) did not yield a new hello.pid within 1.5 s");
                 else if (client.SupervisorPid != priorSupervisor) fails.Add($"after the supervised restart, supervisor_pid {client.SupervisorPid} != {priorSupervisor} (expected the SAME supervisor)");
+
+                // R81: OnRestarted must have queued a reapply of the backend's current effective settings.
+                if (newCompositor >= 0)
+                {
+                    LpPlayerMedia.Drain().Wait(2000);
+                    if (LpPlayerMedia.ReapplyCount <= reapplyBeforeRestart) fails.Add("R81: no settings reapply after the supervised restart (OnRestarted)");
+                    else Phase($"R81: supervised restart triggered a reapply ({LpPlayerMedia.ReapplyCount}x so far)");
+                }
 
                 // StopAndQuit afterwards must leave NO lp-player process — neither the (new) compositor
                 // nor the supervisor (the old adapter bug: signalling the compositor pid alone while its
@@ -286,11 +322,12 @@ public static class LpPlayerSelfTest
 
     [System.Runtime.InteropServices.DllImport("libc")] private static extern int kill(int pid, int sig);
 
-    // Is `pid` (still) an lp-player process? (same ownership check as LpPlayerClient.IsPlayerProcess,
-    // duplicated here since that one is private — guards against a recycled pid.)
+    // Is `pid` (still) an lp-player process? item 5: via `/proc/<pid>/exe`'s link target (the real
+    // resolved binary path), never a cmdline substring — same check as LpPlayerClient.IsPlayerProcess,
+    // duplicated here since that one is private.
     private static bool StillRunning(int pid)
     {
-        try { return File.ReadAllText($"/proc/{pid}/cmdline").Contains("lp-player"); } catch { return false; }
+        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget) == "lp-player"; } catch { return false; }
     }
 
     private static bool Clip(string path, string pattern)
