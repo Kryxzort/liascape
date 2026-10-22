@@ -3,9 +3,11 @@
 //! `frames`, Task 15: the dropout detector) as files in this directory plus one entry here.
 //!
 //! - `list` — every probe with a one-line description.
-//! - `sources` — per hosted source: kind, path, ready, paused, time_pos, duration, the
-//!   graph's effective gain, the live source's own gain slots, mpv's actual `volume-gain`
-//!   and in-flight requests (libmpv sources), stepped-mode virtual time, last event.
+//! - `sources` — per hosted source: kind, path, ready, paused (the node's own raw value),
+//!   `effective_paused` (`paused || player.paused`, Task 16b, R75), time_pos, duration,
+//!   the graph's effective gain, the live source's own gain slots, mpv's actual
+//!   `volume-gain` and in-flight requests (libmpv sources), stepped-mode virtual time,
+//!   last event.
 //! - `loop` — tick rate, recent tick durations + phases, the longest busy stretch since the
 //!   last reset (`args: {"reset": true}` clears it after reading), wakes, clients.
 //! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
@@ -33,7 +35,8 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
     (
         "sources",
         sources,
-        "per source: kind, path, ready, paused, time_pos, gains (graph + live + mpv), last event",
+        "per source: kind, path, ready, paused, effective_paused, time_pos, gains \
+         (graph + live + mpv), last event",
     ),
     (
         "loop",
@@ -101,6 +104,13 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         o.insert(
             "gain_effective_db".into(),
             json!(rt.graph.effective_gain_db(&id)),
+        );
+        // R75: `paused` above is the node's own raw value (recipe/user intent — never
+        // corrupted by the player-level override); this is what the live source is
+        // actually held at (`node.paused || player.paused`).
+        o.insert(
+            "effective_paused".into(),
+            json!(g("paused") == json!(true) || rt.player_paused()),
         );
         if let Some(src) = rt.host.get(&id) {
             let mut gains = Map::new();

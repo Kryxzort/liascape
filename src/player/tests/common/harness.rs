@@ -210,7 +210,9 @@ impl Harness {
             }
         }
         let changes = self.graph.drain_changes();
-        self.host.sync(&self.gfx, &self.graph, &changes);
+        // This harness doesn't model player-level pause (R75): always unpaused. Tests for
+        // that go through the full binary (`tests/api.rs`), which drives it via `Runtime`.
+        self.host.sync(&self.gfx, &self.graph, &changes, false);
         self.host.update(&self.gfx, &mut self.graph);
         let evs = self.host.events();
         for (id, e) in &evs {

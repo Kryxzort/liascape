@@ -6,11 +6,33 @@
 //! touches EGL/PipeWire, and has no socket of its own.
 //!
 //! **Exit classification** ([`classify`]): exit codes 0 (quit / SIGTERM / SIGINT), 1
-//! (refused or failed at startup: another instance holds the lock, no compositor, no EGL,
-//! unusable state dir) and 2 (usage) are **clean** — not restarted, the supervisor exits
-//! with that code. Everything else is a crash and is restarted: death by a signal, a Rust
-//! panic (101), [`EXIT_RUNTIME`] (3 — the compositor connection was lost mid-run), any
-//! other code.
+//! (refused at startup: another instance already holds the lock, or an unusable socket
+//! dir/state dir) and 2 (usage) are **clean** — not restarted, the supervisor exits with
+//! that code. [`EXIT_NO_COMPOSITOR`] (5 — Task 16b) is its own, third class: the
+//! compositor/EGL genuinely isn't available *yet* (no Wayland compositor running, EGL
+//! init failing before a GPU driver/device is ready — the two can't be told apart from
+//! out here, and don't need to be) — handled below, not restarted through the crash
+//! budget. Everything else is a real crash and is restarted through [`Budget`]: death by
+//! a signal, a Rust panic (101), [`EXIT_RUNTIME`] (3 — the compositor connection was lost
+//! mid-run), any other code.
+//!
+//! **Startup-failure classes, why they're split:** "already running" can never be fixed
+//! by waiting — the other instance owns the lock until *it* exits — so retrying would
+//! only ever burn the crash budget on something a restart never helps. "No compositor
+//! yet" is the opposite: on a session starting at boot, `lp-player` can easily win the
+//! race against the compositor (or the GPU driver) coming up, and *will* succeed a moment
+//! later with no code change at all. [`EXIT_NO_COMPOSITOR`] gets its own backoff instead
+//! of either extreme (treating it as instantly fatal, or feeding the 5-per-60s crash
+//! budget meant for real crashes): [`run`] retries with a doubling delay (0.5 s, 1 s, 2 s,
+//! 4 s, …), logging `supervisor.waiting_for_compositor {pid, uptime_ms, delay_ms,
+//! waited_ms, budget_ms}` (warn) before each sleep, until the *next* delay would push the
+//! running total past [`compositor_wait_budget`] (30 s in production;
+//! [`TEST_COMPOSITOR_WAIT_ENV`] shortens it for tests) — then `supervisor.giving_up
+//! {reason: "no_compositor", pid, waited_ms, budget_ms, hint}` (error) and
+//! [`EXIT_GAVE_UP`] (4, the same code the crash-loop budget gives up with). A later real
+//! crash (`Exit::Abnormal`) resets this streak back to the start of the backoff — it's an
+//! independent concern from the crash budget, which stays exactly 5 restarts per 60 s
+//! regardless.
 //!
 //! **Restart** ([`Budget`]): immediately (well under the 1 s budget — measured in
 //! `tests/supervise.rs::crash_restores`), with `--restore` (the child restores
@@ -62,10 +84,31 @@ pub const STOP_WAIT: Duration = Duration::from_secs(10);
 pub const EXIT_RUNTIME: u8 = 3;
 /// The supervisor's exit code after giving up.
 pub const EXIT_GAVE_UP: u8 = 4;
+/// The child's exit code when the compositor/EGL isn't available *yet* (Task 16b):
+/// distinct from [`ServeError::Startup`](crate::runtime::ServeError::Startup)'s 1
+/// ("already running", or another startup refusal that waiting never fixes) — this one
+/// the supervisor retries with backoff ([`run`]'s module-doc "Startup-failure classes").
+pub const EXIT_NO_COMPOSITOR: u8 = 5;
 /// Child exit codes that end supervision (not restarted).
 pub const CLEAN_CODES: [i32; 3] = [0, 1, 2];
 /// Test-only: `startup` → every child aborts right after its first events.
 pub const TEST_CRASH_ENV: &str = "LP_PLAYER_TEST_CRASH";
+/// The real total backoff budget for [`EXIT_NO_COMPOSITOR`] retries, before giving up.
+pub const COMPOSITOR_WAIT_BUDGET: Duration = Duration::from_secs(30);
+/// The first retry delay; each later one doubles it.
+pub const COMPOSITOR_WAIT_INITIAL_DELAY: Duration = Duration::from_millis(500);
+/// Test-only: overrides [`COMPOSITOR_WAIT_BUDGET`] (milliseconds) so a test doesn't really
+/// wait 30 s for the give-up. Never set it outside tests.
+pub const TEST_COMPOSITOR_WAIT_ENV: &str = "LP_PLAYER_TEST_COMPOSITOR_WAIT_MS";
+
+/// [`COMPOSITOR_WAIT_BUDGET`], unless [`TEST_COMPOSITOR_WAIT_ENV`] overrides it.
+fn compositor_wait_budget() -> Duration {
+    std::env::var(TEST_COMPOSITOR_WAIT_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(COMPOSITOR_WAIT_BUDGET)
+}
 
 /// Why a child died abnormally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +141,8 @@ impl Reason {
 pub enum Exit {
     /// One of [`CLEAN_CODES`]: supervision ends with it.
     Clean(i32),
+    /// [`EXIT_NO_COMPOSITOR`]: handled by its own backoff, never the crash budget.
+    WaitingForCompositor,
     Abnormal(Reason),
 }
 
@@ -107,6 +152,7 @@ pub fn classify(st: ExitStatus) -> Exit {
     }
     match st.code() {
         Some(c) if CLEAN_CODES.contains(&c) => Exit::Clean(c),
+        Some(c) if c == EXIT_NO_COMPOSITOR as i32 => Exit::WaitingForCompositor,
         Some(c) => Exit::Abnormal(Reason::Code(c)),
         None => Exit::Abnormal(Reason::Code(-1)),
     }
@@ -426,6 +472,12 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
     let mut budget = Budget::default();
     let mut restore = restore;
     let mut restart: Option<RestartInfo> = None;
+    // EXIT_NO_COMPOSITOR's own backoff (module doc "Startup-failure classes") —
+    // independent of `budget`: it never counts against the 5-per-60s crash budget, and a
+    // real crash (`Exit::Abnormal`) resets it back to the start.
+    let compositor_budget = compositor_wait_budget();
+    let mut compositor_waited = Duration::ZERO;
+    let mut compositor_delay = COMPOSITOR_WAIT_INITIAL_DELAY;
     loop {
         let args = child_args(&user_args, restore, restart.as_ref());
         let started = Instant::now();
@@ -448,8 +500,52 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
         }
         let reason = match classify(st) {
             Exit::Clean(c) => return ExitCode::from(c as u8),
+            Exit::WaitingForCompositor => {
+                let next_total = compositor_waited + compositor_delay;
+                if next_total > compositor_budget {
+                    sup.event(
+                        Level::Error,
+                        "supervisor.giving_up",
+                        json!({
+                            "reason": "no_compositor",
+                            "pid": pid,
+                            "waited_ms": compositor_waited.as_secs_f64() * 1000.0,
+                            "budget_ms": compositor_budget.as_secs_f64() * 1000.0,
+                            "hint": "the compositor/EGL never became available; check \
+                                     WAYLAND_DISPLAY and the GPU driver, then run \
+                                     `lp-player serve --no-supervise` to see the error \
+                                     directly",
+                        }),
+                    );
+                    eprintln!(
+                        "lp-player supervisor: giving up after waiting {:?} for the \
+                         compositor/EGL to become available",
+                        compositor_waited
+                    );
+                    return ExitCode::from(EXIT_GAVE_UP);
+                }
+                sup.event(
+                    Level::Warn,
+                    "supervisor.waiting_for_compositor",
+                    json!({
+                        "pid": pid,
+                        "uptime_ms": started.elapsed().as_secs_f64() * 1000.0,
+                        "delay_ms": compositor_delay.as_secs_f64() * 1000.0,
+                        "waited_ms": compositor_waited.as_secs_f64() * 1000.0,
+                        "budget_ms": compositor_budget.as_secs_f64() * 1000.0,
+                    }),
+                );
+                std::thread::sleep(compositor_delay);
+                compositor_waited = next_total;
+                compositor_delay *= 2;
+                continue;
+            }
             Exit::Abnormal(r) => r,
         };
+        // A real crash: any compositor-wait streak so far no longer applies (this is an
+        // independent concern from it).
+        compositor_waited = Duration::ZERO;
+        compositor_delay = COMPOSITOR_WAIT_INITIAL_DELAY;
         let died = mono_ms();
         let mut fields = reason.fields();
         fields.insert("pid".into(), json!(pid));
@@ -527,6 +623,11 @@ mod tests {
         assert_eq!(
             classify(code(EXIT_RUNTIME as i32)),
             Exit::Abnormal(Reason::Code(3))
+        );
+        assert_eq!(
+            classify(code(EXIT_NO_COMPOSITOR as i32)),
+            Exit::WaitingForCompositor,
+            "no compositor yet: its own class, not a crash"
         );
         assert_eq!(
             classify(code(101)),

@@ -494,11 +494,13 @@ fn build_sides(g: &Graph, outputs: &[String]) -> Vec<Side> {
 }
 
 /// Record `a.gain.<slot>` in `orig` (first change only): the target of the animation
-/// moving it, if one is, else its current value (R41).
+/// *still moving* it, if one is live, else its current value (R41). `live_target_of`
+/// (not `target_of`) is deliberate (Task 16b): a *finished* animation's held target must
+/// never win over a later direct `set` on the same path — that `set` is the newer truth.
 fn note_gain(orig: &mut Orig, g: &Graph, anim: &Animator, a: &str, slot: &'static str) {
     if !orig.gains.iter().any(|(s, _)| *s == slot) {
         let v = anim
-            .target_of(&path(a, &format!("gain.{slot}")))
+            .live_target_of(&path(a, &format!("gain.{slot}")))
             .unwrap_or_else(|| gain_db(g, a, slot));
         orig.gains.push((slot, v));
     }
@@ -1474,7 +1476,7 @@ impl Transitions {
         {
             now
         } else if anim
-            .target_of(&path(&a, "gain.xfade"))
+            .live_target_of(&path(&a, "gain.xfade"))
             .is_some_and(|t| t <= SILENT_DB)
             && gain_end > now
             && gain_end - now <= ANTICLICK
@@ -1989,5 +1991,55 @@ mod tests {
             "held A destroyed in the handoff iteration"
         );
         assert!(h.g.kind_of(&snap).is_none());
+    }
+
+    /// Task 16b: `note_gain`'s R41 bookkeeping must use `Animator::live_target_of`, not
+    /// `target_of` — a *finished* animation's stale target must never win over a later
+    /// direct `set` on the same path. A's `gain.xfade` is animated to −20 dB and left to
+    /// finish, then `set` directly to −6 dB (e.g. a settings change); starting a
+    /// (non-shared) full-live transition records A's `gain.xfade` for restore, and
+    /// cancelling it must restore −6 dB, never the stale −20 dB target.
+    #[test]
+    fn restore_uses_live_target_not_a_stale_finished_one() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 10.0, 1.0);
+
+        h.anim.add(Animation {
+            target: path(&a, "gain.xfade"),
+            from: 1.0,
+            to: db_to_lin(-20.0),
+            start: Duration::ZERO,
+            duration: Duration::from_millis(100),
+            curve: Curve::Linear,
+            unit: AnimUnit::GainLinear,
+            corr: None,
+        });
+        h.tick(200, &[]); // past the ramp's end: finished, holding −20 dB
+        assert!((gain_db(&h.g, &a, "xfade") - (-20.0)).abs() < 1e-6);
+        // A direct `set` after the ramp finished — e.g. a settings change — must win.
+        h.g.set(&path(&a, "gain.xfade"), PropValue::F64(-6.0))
+            .unwrap();
+        assert!((gain_db(&h.g, &a, "xfade") - (-6.0)).abs() < 1e-9);
+
+        let t = h.start(req("/b.mkv", "full-live", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        assert!(
+            h.has(&t, "transition.started"),
+            "full-live + now starts at once"
+        );
+
+        h.tr.cancel(&t, &mut h.g, &mut h.anim, h.now).unwrap();
+        h.changes.extend(h.g.drain_changes());
+        h.events.extend(h.tr.drain_events());
+        h.tick(50, &[]); // past the 30 ms snap-back ramp
+
+        let restored = gain_db(&h.g, &a, "xfade");
+        assert!(
+            (restored - (-6.0)).abs() < 0.5,
+            "restore must land at the −6 dB direct set, not the stale −20 dB finished \
+             target: {restored}"
+        );
     }
 }

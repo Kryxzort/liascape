@@ -113,12 +113,17 @@ pub struct Supervised {
     pub restart: Option<RestartInfo>,
 }
 
-/// Why `serve` failed: at startup (exit 1 — not restarted by the supervisor) or while
-/// running (the compositor connection was lost: exit [`supervise::EXIT_RUNTIME`] —
-/// restarted).
+/// Why `serve` failed: at startup, never retried by the supervisor — another instance
+/// already holds the lock, or the socket/state dir is unusable (exit 1); at startup, but
+/// worth retrying — the compositor/EGL genuinely isn't available *yet* (Task 16b: no
+/// Wayland compositor running, EGL init failing before a GPU driver/device is ready; exit
+/// [`supervise::EXIT_NO_COMPOSITOR`], backed off and eventually given up on by the
+/// supervisor, § Supervisor "Startup-failure classes"); or while running (the compositor
+/// connection was lost: exit [`supervise::EXIT_RUNTIME`] — restarted).
 #[derive(Debug)]
 pub enum ServeError {
     Startup(String),
+    NoCompositor(String),
     Runtime(String),
 }
 
@@ -126,6 +131,7 @@ impl ServeError {
     pub fn exit_code(&self) -> u8 {
         match self {
             ServeError::Startup(_) => 1,
+            ServeError::NoCompositor(_) => supervise::EXIT_NO_COMPOSITOR,
             ServeError::Runtime(_) => supervise::EXIT_RUNTIME,
         }
     }
@@ -134,7 +140,9 @@ impl ServeError {
 impl std::fmt::Display for ServeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ServeError::Startup(m) | ServeError::Runtime(m) => f.write_str(m),
+            ServeError::Startup(m) | ServeError::NoCompositor(m) | ServeError::Runtime(m) => {
+                f.write_str(m)
+            }
         }
     }
 }
@@ -321,6 +329,17 @@ pub struct Runtime {
     /// not-yet-started `gain.anticlick` animation to 0 dB ([`RESTORE_FADE`] corr), so a
     /// recipe recording its gains (R41) sees the 0 dB it is heading to.
     fade_in: BTreeSet<String>,
+    /// R75 (Task 16b): the last `player.paused` [`Runtime::sync_sources`] saw — mirrors
+    /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
+    /// read the graph on every call. `paused_at`/`pause_offset` excise paused time from
+    /// `now()` exactly like [`crate::clock::OutputClock`]'s pause/resume (same algebra,
+    /// inlined here rather than reused: this is one global pause, not a per-output clock
+    /// needing its own `Rc<dyn Clock>`).
+    pub(crate) player_paused: bool,
+    /// `Some(base time at pause)` while paused; `None` while running.
+    paused_at: Option<Duration>,
+    /// Total time excised so far across every completed pause/resume cycle.
+    pause_offset: Duration,
 }
 
 fn p(s: &str) -> PropPath {
@@ -332,12 +351,51 @@ impl Runtime {
         matches!(self.clock, ClockKind::Stepped(_))
     }
 
+    /// The player's own virtual time: [`ClockKind::now`], with every interval spent
+    /// `player.paused` excised — never just frozen-and-jumped (R75). This is what the
+    /// Animator and `Transitions::tick` read, so a transition's progress, gain ramps,
+    /// `align:end` waits and handoff timers all stop and resume exactly where they were.
     pub(crate) fn now(&self) -> Duration {
-        self.clock.now()
+        let base = self.clock.now();
+        let frozen = self.paused_at.unwrap_or(base);
+        frozen.saturating_sub(self.pause_offset)
     }
 
     pub(crate) fn clock_name(&self) -> &'static str {
         if self.stepped() { "stepped" } else { "real" }
+    }
+
+    pub(crate) fn player_paused(&self) -> bool {
+        self.player_paused
+    }
+
+    /// Reacts to a `player.paused` change: freezes/unfreezes [`Runtime::now`]. Called at
+    /// the very top of [`Runtime::tick`]/`begin_step` — *before* `now` is read for
+    /// `run_anims`/`destroy_due` — so a pause applied this tick/step freezes it too,
+    /// never one tick later (the effective-pause push to every hosted source still
+    /// happens in [`Runtime::sync_sources`], which reads the now-current
+    /// `self.player_paused` this set). Cheap when nothing changed (one graph read).
+    fn update_player_paused(&mut self) {
+        let now_paused = matches!(
+            self.graph.get(&p("player.paused")),
+            Ok(PropValue::Bool(true))
+        );
+        if now_paused != self.player_paused {
+            let base = self.clock.now();
+            if now_paused {
+                self.paused_at.get_or_insert(base);
+            } else if let Some(at) = self.paused_at.take() {
+                self.pause_offset += base.saturating_sub(at);
+            }
+            self.player_paused = now_paused;
+            log::event(
+                "runtime",
+                Level::Info,
+                "player.paused",
+                None,
+                json!({ "paused": now_paused }),
+            );
+        }
     }
 
     // ------------------------------------------------------------------ one tick
@@ -345,6 +403,7 @@ impl Runtime {
     /// One full iteration (real clock: the timer; stepped: the end of a `step`).
     pub(crate) fn tick(&mut self) {
         let t = Instant::now();
+        self.update_player_paused();
         let now = self.now();
         self.run_anims(now);
         self.destroy_due(now);
@@ -412,6 +471,11 @@ impl Runtime {
     /// Forward graph changes to the live sources (and keep the wake-fd registrations in
     /// line with the hosted sources).
     pub(crate) fn sync_sources(&mut self) {
+        // R75: catch a `player.paused` change promptly even between ticks/steps — this
+        // runs after every dispatch (`after_dispatch`), not only on a timer/`step`, so a
+        // plain `set` pushes the effective pause to every source at once (a no-op if
+        // `tick`/`begin_step` already called this for `now`'s sake this iteration).
+        self.update_player_paused();
         let changes = self.graph.drain_changes();
         if !changes.is_empty() || self.graph.picture_rev() != self.snap.seen_rev {
             self.snap.seen_rev = self.graph.picture_rev();
@@ -445,7 +509,10 @@ impl Runtime {
                 );
             }
         }
-        self.host.sync(&self.gfx, &self.graph, &changes);
+        // `update_player_paused` already ran at the top of this tick/step, before `now`
+        // was read for `run_anims` — a pause applied this iteration freezes it too.
+        self.host
+            .sync(&self.gfx, &self.graph, &changes, self.player_paused);
         self.sync_wake_regs();
     }
 
@@ -1586,6 +1653,7 @@ impl Runtime {
         if let ClockKind::Stepped(c) = &self.clock {
             c.step(dt);
         }
+        self.update_player_paused();
         let now = self.now();
         self.run_anims(now);
         self.destroy_due(now);
@@ -1622,7 +1690,10 @@ impl Runtime {
             });
             if let Some(r) = lt.reset.take() {
                 lt.t = r;
-            } else if lt.steps > 0 && !paused {
+            } else if lt.steps > 0 && !paused && !self.player_paused {
+                // R75: player-level pause freezes virtual media time too, same as a
+                // node-level pause — `step_seek` below then sees an unchanged target and
+                // skips the seek entirely (§ Runtime "Stepped mode").
                 lt.t += dt_s * speed;
             }
             lt.steps += 1;
@@ -2031,13 +2102,17 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         std::process::abort(); // test knob (tests/supervise.rs): crash at startup
     }
     let (listener, mut socket_file) = crate::api::server::bind(&opts.socket, opts.own_socket_dir)?;
-    // Wayland: connect first (EGL needs the wl_display), then the context on it.
+    // Wayland: connect first (EGL needs the wl_display), then the context on it. Both
+    // failure classes here are "compositor/EGL not available yet" (Task 16b) — the
+    // supervisor retries these with backoff, unlike `bind`'s "already running" above.
     let (gfx, wl_source) = if opts.wayland {
-        let (wl, src) = crate::wl::Wayland::connect()?;
-        let gfx = Gfx::new_wayland(wl.display_ptr()).map_err(|e| format!("EGL on Wayland: {e}"))?;
+        let (wl, src) = crate::wl::Wayland::connect().map_err(ServeError::NoCompositor)?;
+        let gfx = Gfx::new_wayland(wl.display_ptr())
+            .map_err(|e| ServeError::NoCompositor(format!("EGL on Wayland: {e}")))?;
         (gfx, Some((wl, src)))
     } else {
-        let gfx = Gfx::new_offscreen().map_err(|e| format!("no EGL device: {e}"))?;
+        let gfx = Gfx::new_offscreen()
+            .map_err(|e| ServeError::NoCompositor(format!("no EGL device: {e}")))?;
         (gfx, None)
     };
     let cat = match Catalogue::resolve_dir() {
@@ -2137,6 +2212,9 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         supervised: opts.supervised.clone(),
         restart_event,
         fade_in: BTreeSet::new(),
+        player_paused: false,
+        paused_at: None,
+        pause_offset: Duration::ZERO,
     };
     rt.apply_output_changes();
     if opts.restore {

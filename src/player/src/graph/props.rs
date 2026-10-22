@@ -121,6 +121,12 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
     match kind {
         NodeKind::Player => vec![
             ("debug", def(PropType::Bool, false, PropValue::Bool(false))),
+            // R75 (Task 16b): player-level pause. `SourceHost` applies an *effective*
+            // pause (`node.paused || player.paused`) to every video/image source, and the
+            // runtime excises paused time from the clock it feeds the Animator and
+            // `Transitions` — see `.claude/rules/player-core.md` § Graph & properties
+            // "Player node `paused`" and § Runtime "Player-level pause".
+            ("paused", def(PropType::Bool, false, PropValue::Bool(false))),
             (
                 "version",
                 def(PropType::Str, true, PropValue::Str(String::new())),

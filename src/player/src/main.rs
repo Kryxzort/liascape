@@ -18,10 +18,12 @@
 //! process stays a small supervisor and runs the compositor as a child
 //! (`serve --supervised …`), restarting it with `--restore` after a crash. `--no-supervise`
 //! runs the compositor in this process (tests that don't test supervision). `--restore`
-//! restores `<state>/snapshot.json` (§ Snapshot). Exit codes: 0 clean, 1 refused/failed at
-//! startup, 2 usage, 3 compositor connection lost (restarted when supervised), 4 the
-//! supervisor gave up (5 restarts in 60 s). `--supervised` / `--restarted <spec>` are
-//! internal (the supervisor passes them).
+//! restores `<state>/snapshot.json` (§ Snapshot). Exit codes: 0 clean, 1 refused at
+//! startup (never retried — e.g. already running), 2 usage, 3 compositor connection lost
+//! mid-run (restarted when supervised), 4 the supervisor gave up (5 real crashes in 60 s,
+//! or the compositor/EGL never became available), 5 compositor/EGL not available *yet*
+//! (retried with backoff when supervised, § Supervisor "Startup-failure classes").
+//! `--supervised` / `--restarted <spec>` are internal (the supervisor passes them).
 
 use std::process::ExitCode;
 
