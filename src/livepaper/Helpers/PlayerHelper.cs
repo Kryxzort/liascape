@@ -1084,7 +1084,7 @@ public static class PlayerHelper
             if (IsScenePath(path)) { KillCurrentProcess(); return; }
             var lpSettings = SettingsService.Load();
             var lpCfg = TransitionService.CurrentConfig();
-            LpPlayerMedia.Switch(path, lpSettings, lpCfg.Enabled ? lpCfg : null, alignEnd: false);
+            LpPlayerMedia.QueueSwitch(path, lpSettings, lpCfg.Enabled ? lpCfg : null, alignEnd: false); // queued: we may hold _lock
             _currentSpeed = ReadSpeedOverride(path) ?? lpSettings.Speed;
             OnWallpaperChanged?.Invoke(path);
             return;
@@ -2463,17 +2463,20 @@ public static class PlayerHelper
         bool wasLp = PlayerEngine.IsLpPlayer;          // what actually runs (cached since serve start)
         bool nowLp = PlayerEngine.WouldBeLpPlayer(cur);
         if (wasLp == nowLp) { PlayerEngine.Refresh(cur); return; }
-        bool timed, playing;
+        bool timed, playing = IsPlaying;                // (an lp-player query → outside _lock)
         lock (_lock)
         {
             timed = _timedPaths != null && !_timedTimerStopped;
-            playing = timed || IsPlaying;
+            playing |= timed;
             SaveTimedState();       // the playlist position for the replay (no-op without a timed session)
-            TeardownTimer();        // state only — timed_state.json is kept
-            KillCurrentProcess();   // still the OLD engine (IsLpPlayer not refreshed yet)
-            if (wasLp) LpPlayerMedia.Quit();
-            PlayerEngine.Refresh(cur);
+            TeardownTimer();        // state only — timed_state.json is kept; the tick can't switch any more
+            if (!wasLp) KillCurrentProcess();             // legacy media: process kills, no socket waits
+            else { StopPlaylistObserver(); _current = null; }
         }
+        // lp-player OUTSIDE _lock, synchronously: the old engine is fully gone (stop → quit → TERM/KILL)
+        // before the new one starts — never both on screen
+        if (wasLp) LpPlayerMedia.StopAndQuit();
+        PlayerEngine.Refresh(cur);
         KillRestartDaemon();
         TransitionService.ClearInProgress();
         LpPlayerClient.Log($"PlayerEngine {(wasLp ? "lp-player" : "legacy")} → {(nowLp ? "lp-player" : "legacy")}: " +
@@ -2714,7 +2717,10 @@ public static class PlayerHelper
         // lp-player: the source(s) showing THAT item (may be an in-flight transition's pending B)
         if (PlayerEngine.IsLpPlayer)
         {
-            if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
+            LpPlayerMedia.Queue(() =>
+            {
+                if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
+            });
             return;
         }
         var cur = QueryCurrentPath();
@@ -2955,7 +2961,7 @@ public static class PlayerHelper
         if (PlayerEngine.IsLpPlayer)
         {
             _lastSwitchTarget = file;
-            LpPlayerMedia.Switch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
+            LpPlayerMedia.QueueSwitch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
             readyTcs?.TrySetResult(true);
             return null;
         }
@@ -3065,8 +3071,9 @@ public static class PlayerHelper
 
     private static void KillCurrentProcess()
     {
-        // lp-player: `stop` (every source ramped out and retired); the player process stays up
-        if (PlayerEngine.IsLpPlayer) { StopPlaylistObserver(); LpPlayerMedia.Stop(); _current = null; return; }
+        // lp-player: `stop` (every source ramped out and retired), queued — callers hold _lock (Stop/KillAll);
+        // the player process stays up
+        if (PlayerEngine.IsLpPlayer) { StopPlaylistObserver(); LpPlayerMedia.QueueStop(); _current = null; return; }
         StopPlaylistObserver();
         foreach (var proc in MpvpaperProcs())
         {
@@ -3524,7 +3531,7 @@ public static class PlayerHelper
         // lp-player: loudnorm is per item → that item's source(s)
         if (PlayerEngine.IsLpPlayer)
         {
-            if (path != null && !IsScenePath(path)) LpPlayerMedia.SetForPath(path, "af", NormalizeAf(path) ?? "");
+            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.Queue(() => LpPlayerMedia.SetForPath(path, "af", af)); }
             return;
         }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;

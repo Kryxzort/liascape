@@ -177,6 +177,7 @@ public static class LpPlayerSelfTest
 
                 // dispatch-level translation end to end: mpv `volume 50` → srcs:*.gain.user −18.06 dB
                 LpPlayerMedia.Mpv(["set_property", "volume", 50]);
+                LpPlayerMedia.Drain().Wait(5000); // property sets are queued (never on the caller's thread)
                 var gu = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.gain.user" }).GetProperty("value").GetDouble();
                 if (Math.Abs(gu - (-18.0618)) > 1e-3) fails.Add($"volume 50 via Mpv → cur gain.user {gu}, want -18.06");
                 if (LpPlayerMedia.Query("time_pos") is not double) fails.Add("Query(time_pos) = null on a playing clip");
@@ -205,6 +206,27 @@ public static class LpPlayerSelfTest
                 stepping.Set();
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add("cancel didn't leave A (b.mp4) on screen");
 
+                // a STOPPED player costs one quick timeout, then the stall breaker answers at once
+                stepping.Reset(); Thread.Sleep(300);
+                kill(serve.Id, 19); // SIGSTOP
+                try
+                {
+                    var q = Stopwatch.StartNew();
+                    var p1 = LpPlayerMedia.CurrentPath(); long t1 = q.ElapsedMilliseconds; q.Restart();
+                    var p2 = LpPlayerMedia.CurrentPath(); long t2 = q.ElapsedMilliseconds;
+                    LpPlayerMedia.Mpv(["set_property", "volume", 80]); long t3 = q.ElapsedMilliseconds - t2;
+                    if (p1 != null || p2 != null) fails.Add("a stopped player still answered");
+                    if (t1 > 450) fails.Add($"first query to a stopped player took {t1} ms (want ≤ 450: QuickMs + slack)");
+                    if (t2 > 50) fails.Add($"query after the timeout took {t2} ms (want the stall breaker: ≤ 50)");
+                    if (t3 > 50) fails.Add($"a property set blocked its caller {t3} ms (want queued: ≤ 50)");
+                    Phase($"stopped player: query {t1} ms, then {t2} ms (breaker), set returned in {t3} ms");
+                }
+                finally { kill(serve.Id, 18); } // SIGCONT
+                stepping.Set();
+                Thread.Sleep(3300); // the breaker re-opens the line 3 s after the timeout
+                if (LpPlayerMedia.CurrentPath() != b) fails.Add("no recovery after SIGCONT (+3 s breaker window)");
+                Phase("recovered after SIGCONT");
+
                 LpPlayerMedia.Stop();
             }
             finally
@@ -221,6 +243,8 @@ public static class LpPlayerSelfTest
             try { Directory.Delete(tmp, true); } catch { }
         }
     }
+
+    [System.Runtime.InteropServices.DllImport("libc")] private static extern int kill(int pid, int sig);
 
     private static bool Clip(string path, string pattern)
     {
