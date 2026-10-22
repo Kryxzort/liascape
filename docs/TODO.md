@@ -30,6 +30,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       and flags dropouts and 1 ms micro-gaps. Make the ffmpeg path come from PATH.
 - [ ] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`.
+- [ ] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
+      (bit an agent on 2026-10-22: ~15 fields incl. LweMonitors). Make it merge (PATCH semantics) or reject partial bodies.
 - [ ] Remove the dead `LweSilent` setting (no consumers).
 - [ ] Harden `AUDIO_SETTLE` in `lp-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
