@@ -91,18 +91,23 @@ fn full_live_gains() {
         "A.gain.xfade at 500 ms",
     );
     close(
-        h.f64(&format!("{b}.gain.xfade")),
-        -3.0103,
-        0.01,
-        "B.gain.xfade at 500 ms",
-    );
-    close(
         h.f64(&format!("{fx}.progress")),
         0.5,
         0.01,
         "fx.progress at 500 ms",
     );
     assert!(!h.bool(&format!("{a}.paused")) && !h.bool(&format!("{b}.paused")));
+    // R85 (Task 16c): B's own xfade-in is held until real audio confirms (bounded by
+    // `ONSET_TIMEOUT` = 150 ms) — its exact midpoint value now depends on when mpv's
+    // audio-out actually restarted (measured ~19 ms on the owner's machine), not t0, so
+    // only assert it is genuinely under way rather than the exact equal-power value: even
+    // at the worst-case 150 ms deferral it's at progress (500-150)/1000 = 0.35, well
+    // inside this window.
+    let b_mid = h.f64(&format!("{b}.gain.xfade"));
+    assert!(
+        b_mid > SILENT_DB + 1.0 && b_mid < -0.1,
+        "B.gain.xfade at 500 ms should be mid-ramp, not silent or already at 0 dB: {b_mid}"
+    );
 
     h.tick_to(t0 + MS(1000));
     h.wait_event(&corr, "transition.done", MS(1000));
@@ -215,8 +220,20 @@ fn frozen_silent_then_b_starts() {
 
     let th = from_ms(h.wait_event(&corr, "transition.handoff", MS(2000)).at_ms);
     assert!(!h.bool(&format!("{b}.paused")), "B starts at the end");
+    // R85 (Task 16c): this is the exact bug the owner reported — B un-pauses at handoff
+    // with essentially no lead time, so its anti-click ramp-in now waits for real audio
+    // (`SourceEvent::AudioFlowing`) instead of starting at the un-pause instant. Right at
+    // the 30 ms mark it must still be silent (never an unramped/early onset); it must
+    // still reach 0 dB well within `ONSET_TIMEOUT` (150 ms) + the ramp itself (30 ms).
     h.tick_to(th + MS(30));
-    close(h.gain(&b), 0.0, 1e-6, "B at 0 dB 30 ms after the end");
+    close(
+        h.gain(&b),
+        SILENT_DB,
+        1e-6,
+        "B still silent at 30 ms: onset waits for real audio",
+    );
+    let ok = h.tick_until(MS(500), |h| (h.gain(&b) - 0.0).abs() < 1e-6);
+    assert!(ok, "B never reached 0 dB (onset never confirmed/timed out)");
     let ok = h.tick_until(MS(1000), |h| h.corner(&b).is_some_and(|c| c >= cb + 5));
     assert!(
         ok,

@@ -116,10 +116,18 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         );
         // R75: `paused` above is the node's own raw value (recipe/user intent — never
         // corrupted by the player-level override); this is what the live source is
-        // actually held at (`node.paused || player.paused`).
+        // actually held at (`node.paused || player.paused`). Task 16c review fix: read
+        // `player.paused` straight off the graph here, never `rt.player_paused()` (the
+        // cached runtime field) — a pipelined `set player.paused` + `probe sources` in the
+        // same batch saw the *stale* cached value (it's only refreshed at the top of the
+        // next tick/step), even though `get`/`state` already read it live.
+        let player_paused_live = matches!(
+            rt.graph.get(&crate::anim::PropPath("player.paused".into())),
+            Ok(PropValue::Bool(true))
+        );
         o.insert(
             "effective_paused".into(),
-            json!(g("paused") == json!(true) || rt.player_paused()),
+            json!(g("paused") == json!(true) || player_paused_live),
         );
         if let Some(src) = rt.host.get(&id) {
             let mut gains = Map::new();

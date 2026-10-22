@@ -49,12 +49,13 @@ use crate::headless::{Headless, OutputBackend, OutputChange, OutputInfo};
 use crate::log::{self, CorrId, Level};
 use crate::probe::dropout::{self, GainHistory, PendingWindows};
 use crate::probe::frames::FrameStats;
+use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL, ONSET_TIMEOUT};
 use crate::recipes::{TransitionEventKind, Transitions};
 use crate::redraw::{self, Redraw};
 use crate::snapshot::{self, Snapshot};
 use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
 use crate::supervise::{self, RestartInfo};
-use crate::units::{SILENT_DB, db_to_lin};
+use crate::units::{SILENT_DB, db_to_lin, lin_to_db};
 
 /// The longest a `step` waits for every video source's frame.
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -355,6 +356,34 @@ pub struct Runtime {
     /// Recent transitions' audio windows (`transition.started`/`.done`), for the
     /// dropout probe's auto-trigger and its on-demand `probe dropout` verb.
     pub(crate) dropout_windows: PendingWindows,
+    /// Task 16c (R88): per-source anticlick gate for player-level pause/resume — see
+    /// [`PauseGate`]. Real wall-clock timed (`Instant`, never `Runtime::now()`, which
+    /// freezes the instant `player.paused` does): the Animator/graph clock can't drive a
+    /// ramp that has to run *while* time is otherwise frozen.
+    pause_gates: BTreeMap<String, PauseGate>,
+    /// The last `player_paused` [`Runtime::update_pause_gates`] itself saw — its own edge
+    /// detection, independent of `update_player_paused`'s (R75) bookkeeping.
+    pause_gate_prev: bool,
+    /// The dropout-probe `corr` minted for each gate still open, from `Pausing` through
+    /// `Resuming` — same pattern as `retire`'s own window (R79/R80), so `ctl probe
+    /// '{"name":"dropout","args":{"corr":…}}'` can check a whole pause/resume cycle once
+    /// it's done (`source.player_pause_gate`'s log event carries it).
+    pause_gate_corr: BTreeMap<String, CorrId>,
+}
+
+/// Task 16c (R88) — see `pause_gates`' doc and `.claude/rules/player-core.md` § Runtime
+/// "Player pause/resume anticlick gate".
+enum PauseGate {
+    /// Ramping `gain.anticlick` toward [`SILENT_DB`]; excluded from the `player_paused`
+    /// OR composition (`SourceHost::set_pause_exclusions`) until done.
+    Pausing { started: Instant, from_lin: f64 },
+    /// Silent and actually paused (`SourceHost::force_paused(id, true)` already sent).
+    Paused,
+    /// Un-paused (`force_paused(id, false)` already sent); waiting for
+    /// [`SourceEvent::AudioFlowing`] (bounded by [`ONSET_TIMEOUT`]).
+    AwaitingFlow { requested: Instant },
+    /// Ramping `gain.anticlick` back toward 0 dB; removed once done.
+    Resuming { started: Instant },
 }
 
 fn p(s: &str) -> PropPath {
@@ -469,6 +498,9 @@ impl Runtime {
         let tr_events = self.tr.drain_events();
         self.record_dropout_windows(&tr_events);
         self.refresh_srcs();
+        // R88 (Task 16c): resolve any `AwaitingFlow` gate against this tick's events —
+        // the other half runs earlier, from `sync_sources` (see its doc).
+        self.drive_pause_gates_post_update(&evs);
         let tr_d = t_tr.elapsed();
         let t_r = Instant::now();
         self.render();
@@ -584,6 +616,11 @@ impl Runtime {
         }
         // `update_player_paused` already ran at the top of this tick/step, before `now`
         // was read for `run_anims` — a pause applied this iteration freezes it too.
+        // R88 (Task 16c): the pause-ramp gate's exclusion set must land *before* `sync`
+        // composes `player_paused` for every source — a tick that both applies the edge
+        // and calls `sync` (every tick does) must never let `sync` see an un-excluded
+        // newly-eligible id even once, or it pauses it instantly before the gate exists.
+        self.drive_pause_gates_pre_sync();
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);
         self.sync_wake_regs();
@@ -650,6 +687,11 @@ impl Runtime {
                 SourceEvent::Rejected { prop, reason } => {
                     ("", Level::Warn, json!({ "prop": prop, "reason": reason }))
                 }
+                // Task 16c, R85: logged at debug — common (every un-pause) and only
+                // interesting when hunting an onset-timeout.
+                SourceEvent::AudioFlowing => {
+                    ("source.audio_flowing", Level::Debug, json!({ "id": id }))
+                }
             };
             if !kind.is_empty() {
                 log::event("source", level, kind, None, fields);
@@ -663,6 +705,7 @@ impl Runtime {
                 SourceEvent::Position(t) => format!("position {t:.3}"),
                 SourceEvent::Error { reason } => format!("error: {reason}"),
                 SourceEvent::Rejected { prop, reason } => format!("rejected {prop}: {reason}"),
+                SourceEvent::AudioFlowing => "audio_flowing".to_string(),
             };
             self.last_event.insert(id.clone(), name);
             self.src_events.push((id, ev));
@@ -671,6 +714,235 @@ impl Runtime {
             .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
         self.fade_in
             .retain(|id| self.graph.kind_of(id) == Some(NodeKind::Source));
+    }
+
+    /// Task 16c (R88): is `id` a video source with a real audio track? Mirrors
+    /// `recipes::transition::b_has_audio` — a `color`/`image`/`snapshot` source has no
+    /// `MpvSource` behind it at all (never reports `AudioFlowing`), and `no_audio` asked
+    /// mpv for `aid=no`.
+    fn source_has_audio(&self, id: &str) -> bool {
+        matches!(
+            self.graph.get(&p(&format!("{id}.kind"))),
+            Ok(PropValue::Str(k)) if k == "video"
+        ) && !matches!(
+            self.graph.get(&p(&format!("{id}.no_audio"))),
+            Ok(PropValue::Bool(true))
+        )
+    }
+
+    /// Task 16c (R88): advance every player-pause anticlick gate (see [`PauseGate`]).
+    /// Called once per tick/step, after `update_sources` (so this tick's source events,
+    /// incl. any [`SourceEvent::AudioFlowing`], are in `evs`) and before `sync_sources`
+    /// reads `pause_exclusions` on the *next* iteration.
+    ///
+    /// Split in two (R88 fix round): everything here except the `AwaitingFlow` ->
+    /// `Resuming` transition runs from [`Runtime::sync_sources`], *before*
+    /// `SourceHost::sync` — a tick that both applies a `player.paused` edge and calls
+    /// `sync` (every tick does) must never let `sync` compose the plain, un-excluded
+    /// `player_paused` for a newly-eligible id even once, or it gets paused instantly,
+    /// before the gate protecting it exists (found running `player_pause_ramps_a_plain_
+    /// source`: `sync_sources` → `host.sync` happens strictly before `finish_tick` →
+    /// `update_sources` in the same iteration). Resolving `AwaitingFlow` only needs this
+    /// tick's `evs`, which don't exist yet at that point, so it stays here, called from
+    /// `finish_tick` after `update_sources`.
+    fn drive_pause_gates_pre_sync(&mut self) {
+        let want_paused = self.player_paused();
+        let edge = want_paused != self.pause_gate_prev;
+        self.pause_gate_prev = want_paused;
+
+        // R34/invariant #7: a gate never fights the recipe's own holds. A gated id that a
+        // *new* transition request has since captured as its A or B (e.g. one gated
+        // `Paused` while idle, then targeted by a transition while the player stays
+        // paused) is abandoned here — unexcluded at once, so the very next `sync` composes
+        // the ordinary `node.paused || player.paused` for it like any other source, and
+        // whatever the recipe does to it from here on is never second-guessed by a stale
+        // gate deciding to `force_paused` underneath it later.
+        let (by_output, graves) = self.tr.held_sources();
+        let busy: BTreeSet<String> = by_output.into_values().flatten().chain(graves).collect();
+        let abandoned: Vec<String> = self
+            .pause_gates
+            .keys()
+            .filter(|id| busy.contains(*id))
+            .cloned()
+            .collect();
+        self.pause_gates.retain(|id, _| !busy.contains(id));
+        if !abandoned.is_empty() {
+            let mono = log::mono_now().unwrap_or_default();
+            for id in abandoned {
+                if let Some(corr) = self.pause_gate_corr.remove(&id) {
+                    self.dropout_windows.done(&corr.0, mono);
+                }
+            }
+        }
+
+        if want_paused {
+            // New eligible sources: a video with audio, not already recipe-held (its own
+            // picture/audio holds are never fought, R34/invariant #7), not already
+            // node-paused (nothing to do — "sources without audio pause immediately"
+            // extends naturally to "already paused"), not already gated. Scanning every
+            // call (not just the edge) also naturally picks up a source that stops being
+            // transition-held while the player stays paused.
+            for id in self.graph.ids_of(NodeKind::Source) {
+                if self.pause_gates.contains_key(&id) || busy.contains(&id) {
+                    continue;
+                }
+                if !self.source_has_audio(&id) {
+                    continue;
+                }
+                let node_paused = matches!(
+                    self.graph.get(&p(&format!("{id}.paused"))),
+                    Ok(PropValue::Bool(true))
+                );
+                if node_paused {
+                    continue;
+                }
+                let from_db = match self.graph.get(&p(&format!("{id}.gain.anticlick"))) {
+                    Ok(PropValue::F64(db)) => db,
+                    _ => 0.0,
+                };
+                // Dropout-probe window for the whole gesture (R79/R80's `retire` pattern):
+                // started now, `.done` once the gate fully clears (resume's ramp-in ends).
+                let corr = log::new_corr("pp");
+                let mono = log::mono_now().unwrap_or_default();
+                let a = crate::recipes::transition::snapshot_source(&self.graph, &id);
+                let b = crate::recipes::transition::AudioSourceSnapshot {
+                    id: String::new(),
+                    path: String::new(),
+                    position: 0.0,
+                    speed: 1.0,
+                    loop_: false,
+                    duration: None,
+                };
+                self.dropout_windows
+                    .started(corr.0.clone(), mono, vec![a], b);
+                self.pause_gate_corr.insert(id.clone(), corr);
+                self.pause_gates.insert(
+                    id,
+                    PauseGate::Pausing {
+                        started: Instant::now(),
+                        from_lin: db_to_lin(from_db),
+                    },
+                );
+            }
+        } else if edge {
+            // Resume: every `Paused` gate un-pauses right away and starts waiting for
+            // real audio; a `Pausing` gate that never finished fading out never actually
+            // reached mpv's `pause` (R85/R88: the source stayed excluded, so audio kept
+            // flowing all along) — ramp it back in directly, no un-pause/flow-wait needed.
+            let mut unpause_now = Vec::new();
+            for (id, st) in self.pause_gates.iter_mut() {
+                match st {
+                    PauseGate::Paused => {
+                        unpause_now.push(id.clone());
+                        *st = PauseGate::AwaitingFlow {
+                            requested: Instant::now(),
+                        };
+                    }
+                    PauseGate::Pausing { .. } => {
+                        *st = PauseGate::Resuming {
+                            started: Instant::now(),
+                        };
+                    }
+                    PauseGate::AwaitingFlow { .. } | PauseGate::Resuming { .. } => {}
+                }
+            }
+            for id in unpause_now {
+                self.host.force_paused(&id, false);
+            }
+        }
+
+        let mut exclude = BTreeSet::new();
+        let mut to_pause = Vec::new();
+        let mut to_drop = Vec::new();
+        for (id, st) in &mut self.pause_gates {
+            match st {
+                PauseGate::Pausing { started, from_lin } => {
+                    exclude.insert(id.clone());
+                    let el = started.elapsed();
+                    let db = if el >= ANTICLICK {
+                        SILENT_DB
+                    } else {
+                        let t = el.as_secs_f64() / ANTICLICK.as_secs_f64();
+                        lin_to_db(*from_lin * (1.0 - t))
+                    };
+                    let _ = self
+                        .graph
+                        .set(&p(&format!("{id}.gain.anticlick")), PropValue::F64(db));
+                    // Requirement #2: the ramp's own 30 ms plus a settle tail before the
+                    // source is actually paused — gain pushes are async and mpv's audio
+                    // buffering lags the graph value by a few ms.
+                    if el >= ANTICLICK + AUDIO_SETTLE_TAIL {
+                        to_pause.push(id.clone());
+                    }
+                }
+                PauseGate::Resuming { started } => {
+                    let el = started.elapsed();
+                    let t = (el.as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
+                    let _ = self.graph.set(
+                        &p(&format!("{id}.gain.anticlick")),
+                        PropValue::F64(lin_to_db(t)),
+                    );
+                    if el >= ANTICLICK {
+                        to_drop.push(id.clone());
+                    }
+                }
+                PauseGate::AwaitingFlow { .. } | PauseGate::Paused => {}
+            }
+        }
+        for id in to_pause {
+            self.host.force_paused(&id, true);
+            self.pause_gates.insert(id, PauseGate::Paused);
+        }
+        for id in to_drop {
+            self.pause_gates.remove(&id);
+            if let Some(corr) = self.pause_gate_corr.remove(&id) {
+                let mono = log::mono_now().unwrap_or_default();
+                self.dropout_windows.done(&corr.0, mono);
+                log::event(
+                    "runtime",
+                    Level::Debug,
+                    "player.pause_gate",
+                    Some(corr),
+                    json!({ "id": id }),
+                );
+            }
+        }
+        self.host.set_pause_exclusions(exclude);
+    }
+
+    /// The other half of the R88 gate (see `drive_pause_gates_pre_sync`'s doc): resolve
+    /// any `AwaitingFlow` gate against this tick's source events — bounded by
+    /// [`ONSET_TIMEOUT`], logged `player.pause_resume_onset_timeout` if hit.
+    fn drive_pause_gates_post_update(&mut self, evs: &[(String, SourceEvent)]) {
+        if self.pause_gates.is_empty() {
+            return;
+        }
+        let flowing: BTreeSet<&str> = evs
+            .iter()
+            .filter(|(_, e)| matches!(e, SourceEvent::AudioFlowing))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        for (id, st) in &mut self.pause_gates {
+            let PauseGate::AwaitingFlow { requested } = st else {
+                continue;
+            };
+            let timed_out = requested.elapsed() >= ONSET_TIMEOUT;
+            if !flowing.contains(id.as_str()) && !timed_out {
+                continue;
+            }
+            if timed_out && !flowing.contains(id.as_str()) {
+                log::event(
+                    "runtime",
+                    Level::Warn,
+                    "player.pause_resume_onset_timeout",
+                    None,
+                    json!({ "id": id, "waited_ms": requested.elapsed().as_secs_f64() * 1000.0 }),
+                );
+            }
+            *st = PauseGate::Resuming {
+                started: Instant::now(),
+            };
+        }
     }
 
     /// Feed the transition recipe's held sources into the `srcs:` alias (R50).
@@ -2329,6 +2601,9 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         pause_offset: Duration::ZERO,
         gain_history: GainHistory::new(),
         dropout_windows: PendingWindows::new(),
+        pause_gates: BTreeMap::new(),
+        pause_gate_prev: false,
+        pause_gate_corr: BTreeMap::new(),
     };
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));

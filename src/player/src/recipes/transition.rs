@@ -31,6 +31,23 @@ use crate::units::{GainSlot, SILENT_DB, db_to_lin};
 pub const ANTICLICK: Duration = Duration::from_millis(30);
 /// B that hasn't produced its first frame by then fails the transition (never park).
 pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// R85 (Task 16c): the longest an onset ramp (B un-paused, about to ramp its gain in)
+/// waits for [`SourceEvent::AudioFlowing`] before ramping anyway. Measured real restart
+/// latency (owner's machine, PipeWire/mpv) is ~19 ms; 150 ms gives comfortable headroom
+/// for a slow/cold audio-out restart while still being far short of anything a viewer
+/// would read as "the wallpaper froze" — past this, ramping unconfirmed is judged less
+/// bad than holding a transition's handoff open indefinitely. Logged `transition.onset_timeout`
+/// when hit.
+pub const ONSET_TIMEOUT: Duration = Duration::from_millis(150);
+/// Requirement #2 (Task 16c): the extra tail *after* a ramp-to-silence's own 30 ms before
+/// the source is actually paused — gain pushes are async and mpv's own audio buffering
+/// lags the graph value (dropout evidence: a ramp paused exactly at its nominal end
+/// truncated its last ~6 ms in the audio actually output). 15 ms is comfortably ≥ 2× the
+/// measured truncation while staying small against `ANTICLICK` itself; tuned against
+/// `tests/onmachine/dropout.sh`'s onset/micro_gap checks, not derived from a single mpv
+/// property (no generic "gain reply has landed in the audio domain" signal exists — the
+/// recipe only ever sees `SourceEvent`s, never mpv's own request-latency bookkeeping).
+pub const AUDIO_SETTLE_TAIL: Duration = Duration::from_millis(15);
 /// Frame interval assumed until one is observed (the clips' 30 fps).
 const DEFAULT_FRAME_S: f64 = 1.0 / 30.0;
 
@@ -277,12 +294,31 @@ struct Tr {
     evaluated: bool,
     /// reveal/frozen: the snapshots have been created (they're waited on until ready).
     copies_made: bool,
+    /// R85 (Task 16c): B's onset ramp, held until real audio confirms (or times out).
+    /// `None` once started, or never needed (a cut never goes through this path).
+    onset: Option<PendingOnset>,
 }
 
 impl Tr {
     fn lead_a(&self) -> Option<&str> {
         self.lead.and_then(|i| self.sides[i].a.as_deref())
     }
+}
+
+/// R85 (Task 16c): an onset ramp held until [`SourceEvent::AudioFlowing`] confirms real
+/// audio (or [`ONSET_TIMEOUT`] passes) — `id` has already been un-paused; its gain stays
+/// at [`SILENT_DB`] (the graph value `begin_running`/`handoff`/`commit` set before
+/// creating this) until the ramp actually starts.
+#[derive(Debug)]
+struct PendingOnset {
+    id: String,
+    slot: &'static str,
+    from: f64,
+    to: f64,
+    dur: Duration,
+    curve: Curve,
+    /// When the un-pause was requested (recipe clock) — what [`ONSET_TIMEOUT`] bounds.
+    requested: Duration,
 }
 
 /// A source waiting to be destroyed once its ramp to silence is over. `orig` is what the
@@ -446,6 +482,70 @@ fn ramp_slot(
         dur,
         Curve::Linear,
     );
+}
+
+/// R85: actually start a held onset ramp — called once [`SourceEvent::AudioFlowing`]
+/// confirms real audio, or [`ONSET_TIMEOUT`] passes. Bumps `settle_until` so a Handoff's
+/// `transition.done` can't fire before this ramp (started here, possibly well after the
+/// nominal effect end) actually finishes.
+fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration) {
+    let Some(onset) = tr.onset.take() else {
+        return;
+    };
+    anim_gain(
+        anim,
+        &tr.corr,
+        &onset.id,
+        onset.slot,
+        onset.from,
+        onset.to,
+        now,
+        onset.dur,
+        onset.curve,
+    );
+    tr.settle_until = tr.settle_until.max(now + onset.dur);
+}
+
+/// R85: does `id` have real audio worth holding an onset ramp for? Only a live `video`
+/// source (not `no_audio`) ever reports [`SourceEvent::AudioFlowing`] — `MpvSource::apply`
+/// fires it immediately for everything else (stepped mode, no audio track), and a
+/// `color`/`image`/`snapshot` source (no `MpvSource` behind it at all) never fires it in
+/// the first place. Checking here too (never scheduling a [`PendingOnset`] for one) avoids
+/// relying on a 150 ms [`ONSET_TIMEOUT`] for the completely ordinary case of a plain cut-
+/// like fade onto a colour/image B — ramp it in at once, exactly as before this task.
+fn b_has_audio(g: &Graph, id: &str) -> bool {
+    get_str(g, id, "kind") == "video" && !get_bool(g, id, "no_audio")
+}
+
+/// Un-pause `id` and either hold its onset ramp (R85, real audio) or start it at once (no
+/// audio to wait for) — the one seam every B-onset call site (full-live/reveal at
+/// `begin_running`, frozen at `handoff`, a `frozen` commit interrupt) goes through.
+#[allow(clippy::too_many_arguments)]
+fn schedule_onset(
+    tr: &mut Tr,
+    g: &Graph,
+    anim: &mut Animator,
+    id: String,
+    slot: &'static str,
+    from: f64,
+    to: f64,
+    dur: Duration,
+    curve: Curve,
+    now: Duration,
+) {
+    if b_has_audio(g, &id) {
+        tr.onset = Some(PendingOnset {
+            id,
+            slot,
+            from,
+            to,
+            dur,
+            curve,
+            requested: now,
+        });
+    } else {
+        anim_gain(anim, &tr.corr, &id, slot, from, to, now, dur, curve);
+    }
 }
 
 /// Destroy a node and drop every animation the recipe may have on it.
@@ -619,6 +719,26 @@ impl Transitions {
             }
         }
 
+        // R85: a node with another (unrelated, e.g. already-handed-off) transition's own
+        // pending onset is about to become *this* request's outgoing "A" — force that
+        // onset to start right now rather than leaving it to resolve invisibly later and
+        // fight whatever this transition does to the same gain slot (`note_gain`/`release`
+        // need a *live* animation to read a target from, not a silent gap). `build_sides`
+        // below computes the exact same `cur:<connector>` set.
+        let incoming: Vec<String> = outputs
+            .iter()
+            .filter_map(|o| {
+                g.resolve(&format!("cur:{}", o.strip_prefix("out:").unwrap_or(o)))
+                    .into_iter()
+                    .next()
+            })
+            .collect();
+        for tr in &mut self.active {
+            if tr.onset.as_ref().is_some_and(|o| incoming.contains(&o.id)) {
+                start_onset(tr, anim, now);
+            }
+        }
+
         let sides = build_sides(g, &outputs);
         let lead = sides.iter().position(|s| s.a.is_some());
         let mut tr = Tr {
@@ -651,6 +771,7 @@ impl Transitions {
             skip_iteration: false,
             evaluated: false,
             copies_made: false,
+            onset: None,
         };
         // align: end — A's current iteration is its last (unless shared, R34, or a still).
         if req.align == Align::End
@@ -744,6 +865,14 @@ impl Transitions {
                     }
                 }
                 SourceEvent::Error { .. } | SourceEvent::Rejected { .. } => {}
+                // R85: the onset ramp this id was waiting on (if any) starts now, for real.
+                SourceEvent::AudioFlowing => {
+                    for tr in &mut self.active {
+                        if tr.onset.as_ref().is_some_and(|o| &o.id == id) {
+                            start_onset(tr, anim, now);
+                        }
+                    }
+                }
             }
         }
         self.ended.retain(|id, _| is_source(g, id));
@@ -872,6 +1001,13 @@ impl Transitions {
     fn commit_unseen(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         tr.pause_at = None;
+        // R85: a reveal/full-live onset from an earlier `begin_running` may still be
+        // pending here — but nothing shows B any more ("B left exactly as it is"), so
+        // there is no audible reason left to wait on it: drop it without ever starting the
+        // ramp (B's gain stays exactly where `begin_running` set it, silent). Don't use the
+        // onset's own `dur` (up to the whole effect duration) to extend this transition's
+        // `done` for a ramp nobody will ever hear.
+        tr.onset = None;
         tr.settle_until = now;
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
@@ -1020,6 +1156,21 @@ impl Transitions {
         events: &[(String, SourceEvent)],
         now: Duration,
     ) -> bool {
+        // R85: an onset ramp still waiting past its bound starts anyway — never held
+        // open indefinitely for a confirmation that may never arrive.
+        if let Some(onset) = &tr.onset
+            && now >= onset.requested + ONSET_TIMEOUT
+        {
+            let (corr, id) = (tr.corr.clone(), onset.id.clone());
+            log::event(
+                "transition",
+                Level::Warn,
+                "transition.onset_timeout",
+                Some(corr),
+                json!({ "id": id, "waited_ms": ms(now - onset.requested) }),
+            );
+            start_onset(tr, anim, now);
+        }
         if tr.phase == Phase::Scheduled {
             tr.phase = Phase::WaitingReady;
         }
@@ -1160,6 +1311,7 @@ impl Transitions {
         }
 
         if tr.phase == Phase::Handoff
+            && tr.onset.is_none() // R85: never Done while B's onset ramp is still pending
             && now >= tr.settle_until
             && !self.graves.iter().any(|gr| gr.corr == tr.corr)
         {
@@ -1389,17 +1541,22 @@ impl Transitions {
 
         match tr.method {
             Method::FullLive => {
+                // R85: B is un-paused now, but its xfade-in ramp waits for real audio
+                // (`SourceEvent::AudioFlowing`) — un-pausing at the instant the gain ramp
+                // starts runs most of the ramp on no audio at all (the owner's "flicker
+                // of silence"), since mpv/PipeWire's own output restart measurably lags.
                 gset(g, &corr, &b, "paused", PropValue::Bool(false));
-                anim_gain(
+                schedule_onset(
+                    tr,
+                    g,
                     anim,
-                    &corr,
-                    &b,
+                    b.clone(),
                     "xfade",
                     0.0,
                     1.0,
-                    t0,
                     gd,
                     Curve::EqualPowerIn,
+                    now,
                 );
                 for side in &mut tr.sides {
                     if let (false, Some(a)) = (side.shared, side.a.clone())
@@ -1431,19 +1588,26 @@ impl Transitions {
                         ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
                     }
                 }
-                tr.pause_at = Some(t0 + ANTICLICK);
+                // Requirement #2 (Task 16c): A isn't actually paused until its ramp has
+                // settled in the audio *output*, not just the graph's own ANTICLICK
+                // schedule — gain pushes are async and mpv's audio buffering lags the
+                // graph value by a few ms (dropout evidence: a ramp paused right at its
+                // nominal end truncated its last ~6 ms in the real output).
+                tr.pause_at = Some(t0 + ANTICLICK + AUDIO_SETTLE_TAIL);
                 if tr.method == Method::Reveal {
+                    // R85: same held-onset treatment as full-live, above.
                     gset(g, &corr, &b, "paused", PropValue::Bool(false));
-                    anim_gain(
+                    schedule_onset(
+                        tr,
+                        g,
                         anim,
-                        &corr,
-                        &b,
+                        b.clone(),
                         "xfade",
                         0.0,
                         1.0,
-                        t0,
                         gd,
                         Curve::EqualPowerIn,
+                        now,
                     );
                 }
             }
@@ -1556,23 +1720,31 @@ impl Transitions {
     fn handoff(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         let (corr, b) = (tr.corr.clone(), tr.b.clone());
-        tr.settle_until = now.max(tr.gain_end);
+        // R85: never move `settle_until` backward (see `commit_unseen`'s note) — reveal's
+        // onset (begin_running, possibly resolved via `ONSET_TIMEOUT` well before this
+        // method's own natural handoff) may still be mid-ramp.
+        tr.settle_until = tr.settle_until.max(now).max(tr.gain_end);
         if tr.method == Method::Frozen && is_source(g, &b) {
+            // R85: this is *the* bug the owner reported — B has been paused through the
+            // whole effect; at handoff it un-pauses with essentially zero lead time for
+            // mpv/PipeWire's audio-out to actually restart before a ramp needs it. Hold
+            // the anticlick ramp-in until `SourceEvent::AudioFlowing` confirms it (or
+            // `ONSET_TIMEOUT`), never at the instant of un-pause.
             gset(g, &corr, &b, "gain.anticlick", PropValue::F64(SILENT_DB));
             gset(g, &corr, &b, "gain.xfade", PropValue::F64(0.0));
             gset(g, &corr, &b, "paused", PropValue::Bool(false));
-            anim_gain(
+            schedule_onset(
+                tr,
+                g,
                 anim,
-                &corr,
-                &b,
+                b.clone(),
                 "anticlick",
                 0.0,
                 1.0,
-                now,
                 ANTICLICK,
                 Curve::Linear,
+                now,
             );
-            tr.settle_until = tr.settle_until.max(now + ANTICLICK);
         }
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
@@ -1611,14 +1783,39 @@ impl Transitions {
         self.layers_to_b(tr, g, anim);
         let (corr, b) = (tr.corr.clone(), tr.b.clone());
         if is_source(g, &b) {
+            // R85: a `frozen` transition interrupted mid-Running still has B genuinely
+            // paused (it only ever un-pauses at its own handoff) — committing it here is
+            // the same real un-pause/onset-wait as `handoff`'s Frozen branch, never an
+            // immediate ramp. reveal/full-live already un-paused B back at `begin_running`
+            // (its own onset, possibly still pending — left alone: it resolves exactly as
+            // scheduled, committing changes nothing about *when* B's audio is real).
+            let was_paused = get_bool(g, &b, "paused");
             gset(g, &corr, &b, "paused", PropValue::Bool(false));
-            ramp_slot(g, anim, &corr, &b, "xfade", 0.0, now, ANTICLICK);
-            if gain_db(g, &b, "anticlick") != 0.0 {
-                ramp_slot(g, anim, &corr, &b, "anticlick", 0.0, now, ANTICLICK);
+            if was_paused && tr.onset.is_none() {
+                gset(g, &corr, &b, "gain.xfade", PropValue::F64(0.0));
+                let from = db_to_lin(gain_db(g, &b, "anticlick"));
+                schedule_onset(
+                    tr,
+                    g,
+                    anim,
+                    b.clone(),
+                    "anticlick",
+                    from,
+                    1.0,
+                    ANTICLICK,
+                    Curve::Linear,
+                    now,
+                );
+            } else if tr.onset.is_none() {
+                ramp_slot(g, anim, &corr, &b, "xfade", 0.0, now, ANTICLICK);
+                if gain_db(g, &b, "anticlick") != 0.0 {
+                    ramp_slot(g, anim, &corr, &b, "anticlick", 0.0, now, ANTICLICK);
+                }
             }
         }
         tr.pause_at = None;
-        tr.settle_until = now + ANTICLICK;
+        // R85: `.max` — never shorten a reveal/full-live onset's already-committed wait.
+        tr.settle_until = tr.settle_until.max(now + ANTICLICK);
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
         self.emit(
@@ -2096,5 +2293,140 @@ mod tests {
             "restore must land at the −6 dB direct set, not the stale −20 dB finished \
              target: {restored}"
         );
+    }
+
+    /// R85 (Task 16c): `frozen`'s B un-pauses at handoff with essentially zero lead time
+    /// for real audio — its anticlick ramp-in must not start (no `Animator` target at
+    /// all) until `SourceEvent::AudioFlowing` confirms it, even though the picture/graph
+    /// clock has already moved well past the nominal handoff instant.
+    #[test]
+    fn frozen_onset_waits_for_audio_flowing() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        assert!(h.has(&t, "transition.started"));
+        h.tick(600, &[]); // past duration_ms = 500: handoff fires
+        assert!(h.has(&t, "transition.handoff"));
+        assert!(!h.bool(&b, "paused"), "B un-paused at handoff");
+        assert_eq!(
+            gain_db(&h.g, &b, "anticlick"),
+            SILENT_DB,
+            "silent until real audio confirms"
+        );
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            None,
+            "no ramp scheduled yet — un-pause alone must never start it"
+        );
+        assert!(
+            !h.has(&t, "transition.done"),
+            "done waits for the onset too"
+        );
+
+        // A few more ticks with no confirmation yet: still silent, still no ramp.
+        h.tick(50, &[]);
+        assert_eq!(gain_db(&h.g, &b, "anticlick"), SILENT_DB);
+        assert_eq!(h.anim.target_of(&path(&b, "gain.anticlick")), None);
+
+        // Real audio confirms: the ramp starts now (not backdated to the handoff instant).
+        h.tick(5, &[(b.clone(), SourceEvent::AudioFlowing)]);
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            Some(0.0),
+            "the ramp is scheduled the instant audio is confirmed flowing"
+        );
+        h.tick(40, &[]); // past the 30 ms ramp
+        assert!((gain_db(&h.g, &b, "anticlick") - 0.0).abs() < 1e-6);
+        assert!(h.has(&t, "transition.done"), "done once the onset resolved");
+    }
+
+    /// R85: unconfirmed past [`ONSET_TIMEOUT`], the onset ramps anyway rather than holding
+    /// the transition's `done` open forever.
+    #[test]
+    fn onset_timeout_ramps_anyway() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        h.tick(600, &[]); // handoff
+        assert!(h.has(&t, "transition.handoff"));
+        assert_eq!(h.anim.target_of(&path(&b, "gain.anticlick")), None);
+
+        // No AudioFlowing ever arrives: past ONSET_TIMEOUT it ramps anyway.
+        h.tick(200, &[]);
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            Some(0.0),
+            "timed out — ramps unconfirmed rather than holding forever"
+        );
+    }
+
+    /// R85: `full-live`/`reveal` un-pause B at `Running`'s very start (effect duration
+    /// ahead as lead time) — the same held-onset treatment applies there too.
+    #[test]
+    fn full_live_onset_waits_for_audio_flowing() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "full-live", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        assert!(h.has(&t, "transition.started"));
+        assert!(!h.bool(&b, "paused"), "un-paused immediately at Running");
+        assert_eq!(gain_db(&h.g, &b, "xfade"), SILENT_DB);
+        assert_eq!(h.anim.target_of(&path(&b, "gain.xfade")), None);
+
+        h.tick(5, &[(b.clone(), SourceEvent::AudioFlowing)]);
+        assert_eq!(h.anim.target_of(&path(&b, "gain.xfade")), Some(0.0));
+    }
+
+    /// Requirement #2 (Task 16c): A's hold-then-pause (reveal/frozen) must not pause until
+    /// its anticlick ramp has settled — `ANTICLICK` elapsing alone is not enough; the extra
+    /// `AUDIO_SETTLE_TAIL` must pass too.
+    #[test]
+    fn a_pause_waits_for_audio_settle_tail() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "reveal", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]); // Running begins (t0 = now = 32 ms)
+        assert!(h.has(&t, "transition.started"));
+
+        h.tick(31, &[]); // now = 63: past the 30 ms ramp, before the settle tail (+15 ms)
+        assert_eq!(gain_db(&h.g, &a, "anticlick"), SILENT_DB, "ramp is done");
+        assert!(
+            !h.bool(&a, "paused"),
+            "must not pause until the settle tail elapses too"
+        );
+
+        h.tick(20, &[]); // now = 83: past ANTICLICK + AUDIO_SETTLE_TAIL (77)
+        assert!(h.bool(&a, "paused"), "settle tail elapsed: paused now");
     }
 }

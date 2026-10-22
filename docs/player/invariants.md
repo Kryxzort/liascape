@@ -147,3 +147,89 @@ completes and B's own handoff — never the override — unpauses it),
 not recipe-held — never reaches its own end while paused so `transition.started` never
 fires, resume lets it arrive and start normally).
 
+**R88 (Task 16c) — a *plain* source (not recipe-held) pauses/resumes with the same
+anticlick ramp as invariant #8, not an instant mpv `pause`.** The composition above still
+applies instantly to `node.paused`'s OR for a transition-held source (the three tests
+above are unaffected — a transition-held source is never gate-eligible, see `source_has_
+audio`/`held_sources` exclusion in `Runtime::drive_pause_gates_pre_sync`); a source with
+real audio that isn't currently part of any transition instead gets `Runtime`'s player-
+pause anticlick gate: ramp `gain.anticlick` to silence (+ the same settle tail as #8) over
+real wall-clock time — deliberately `Instant`, not `Runtime::now()`, which this very
+invariant freezes the instant `player.paused` does — *then* the mpv `pause` lands
+(`SourceHost::force_paused`, bypassing the normal `node.paused || player.paused`
+composition via a temporary exclusion, `SourceHost::pause_exclusions`); resume un-pauses
+at once and ramps back in once `SourceEvent::AudioFlowing` confirms (#8 again), bounded by
+`ONSET_TIMEOUT`. A source with no audio, or already paused, is untouched (instant, as
+before this task). Test: `tests/api.rs::player_pause_ramps_a_plain_source` (`--clock
+real` — the gate's own wall-clock timing has nothing to pace against under `--clock
+stepped`'s virtual time; harmless there since every existing stepped-mode player-pause
+test pauses mid-transition, i.e. never gate-eligible in the first place).
+
+## 8. No audio onset or offset without a ramp the listener can hear — ramps run on audio that is actually flowing
+
+**Why:** invariant #4's ≤ 30 ms anti-click ramp assumes the stream is already producing
+audio the instant the ramp starts (an onset) or keeps producing it until the ramp ends (an
+offset). Neither is true for real hardware: un-pausing mpv doesn't mean PipeWire's output
+has actually restarted yet (owner's "flicker of silence" report, Task 15's dropout
+detector measured ~19 ms of true digital silence after un-pause before any audio at all,
+with the ramp's early portion simply never produced — `docs/player/debugging.md`'s
+frozen-onset row), and a gain push reaching mpv is itself async, lagging the graph value
+by a few ms (measured ~6 ms truncation of a ramp-to-silence's last moments, right before a
+pause cut it off). Starting/trusting a ramp against the *graph clock* alone — never
+checking whether the *device* is actually there yet — produces exactly the symptom this
+whole invariant exists to prevent: an unramped click (onset) or a truncated tail
+(offset), despite invariant #4's ramp nominally running the whole time.
+
+**Enforced by (Task 16c):**
+- **Onset (R85).** `SourceEvent::AudioFlowing` (`sources/mod.rs`) — `MpvSource` arms it on
+  a genuine paused → un-paused edge (`apply("paused", false)`) and fires it once
+  `audio-pts` actually changes (man mpv: "takes into account the audio driver delay",
+  unlike `time-pos`, which doesn't distinguish a held stream from the audio-out restart
+  lag) — immediately for a source with no audio track, an image, or stepped mode (mpv
+  stays paused for good there; audio is always silent, so there's nothing to wait for).
+  `recipes::transition::Transitions` holds every B-onset ramp (reveal/full-live at
+  `Running`; frozen at `handoff`; a `frozen` interrupted mid-Running, in `commit`) as a
+  `PendingOnset` — gain set to `SILENT_DB` and the source un-paused, but the `Animator`
+  ramp itself not added — until `AudioFlowing` arrives or `ONSET_TIMEOUT` (150 ms) passes
+  (logged `transition.onset_timeout`); a B with no real audio (`color`/`image`/`snapshot`,
+  or `no_audio`) skips the wait entirely (`recipes::transition::b_has_audio`) — ramping
+  it at once is already correct, nothing to confirm. A node with its own still-pending
+  onset captured as a *different* transition's outgoing side (`Transitions::start`) has
+  it force-started immediately, never left to resolve invisibly underneath whatever that
+  new transition does to the same gain slot. `Runtime`'s player-pause gate (invariant #7's
+  R88) reuses the same primitive for a resume.
+- **Offset (requirement #2).** A ramp-to-silence immediately followed by a pause/destroy
+  waits for the ramp's nominal duration *plus* `AUDIO_SETTLE_TAIL` (15 ms — comfortably ≥
+  2× the measured ~6 ms truncation, small against the 30 ms ramp itself) before the pause
+  actually lands: `recipes::transition`'s `tr.pause_at` (reveal/frozen's A-hold) and
+  `Runtime`'s player-pause gate's `Pausing → Paused` transition both add this tail. No
+  single mpv property reports "this gain push has landed in the audio actually output"
+  (the recipe/runtime only ever see `SourceEvent`s, never mpv's own async request
+  bookkeeping), so this is a measured fixed tail, not derived from a live confirmation —
+  documented here rather than invented in place, and tuned against
+  `tests/onmachine/dropout.sh`'s onset/micro_gap checks, not a single property read.
+
+**Tests:** unit (`recipes::transition`, synthetic events, no GPU) —
+`frozen_onset_waits_for_audio_flowing` (no `Animator` target at all until `AudioFlowing`,
+`transition.done` waits for it too), `onset_timeout_ramps_anyway`,
+`full_live_onset_waits_for_audio_flowing`, `a_pause_waits_for_audio_settle_tail` (ramp
+done at `ANTICLICK` but not yet paused; paused once `AUDIO_SETTLE_TAIL` elapses too).
+Real GPU + libmpv (`tests/transition.rs`): `frozen_silent_then_b_starts` (B stays exactly
+`SILENT_DB` at the old "30 ms after the end" mark; reaches 0 dB well within
+`ONSET_TIMEOUT` + the ramp), `full_live_gains` (B's midpoint is only asserted "genuinely
+mid-ramp", not the exact equal-power value, since the real onset lag shifts it slightly),
+`restore_targets_not_mid_ramp` (a node with its own pending onset captured as another
+transition's A gets it force-started, so `note_gain`'s live-target read has something
+real to capture). On-machine (`tests/onmachine/dropout.sh`, real audio): full-live,
+frozen, reveal, a plain retire, and the `Runtime` player-pause gate (below) each assert
+`drops == 0` and `micro_gaps == 0`, plus an onset check (first 10 ms after audio appears
+must not exceed the ramp's own settled level by > 6 dB) for every case with a real onset.
+**Not fully green yet** — see `docs/player/debugging.md`'s two frozen rows: the onset fix
+(R85) eliminated the original ~15–35 ms unramped-click window (verified: 3 clean
+on-machine runs with the old symptom gone), but a small ~5–7 ms residual `micro_gaps`
+entry persists on *both* the offset (A's hold) and the onset (B's rise), reproducibly,
+root-caused to the `Animator`'s pre-existing tick-rate coarseness (a 30 ms ramp gets only
+1–2 evaluations at 60 Hz — the real fix is a per-sample audio-thread ramp, Task 14's
+"audio edge", out of scope here) rather than anything R85/requirement #2 control. Reported
+with raw evidence rather than loosening the detector's thresholds to force a pass.
+

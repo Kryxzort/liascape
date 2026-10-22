@@ -46,6 +46,8 @@ const OBS_EOF: u64 = 5;
 const OBS_PAUSE: u64 = 6;
 const OBS_IMAGE: u64 = 7;
 const OBS_IDLE: u64 = 8;
+/// Task 16c (R85): "real audio flowing" detector — see `MpvSource::arm_audio_flowing`.
+const OBS_AUDIO_PTS: u64 = 9;
 /// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
 const TEARDOWN_MAX: Duration = Duration::from_millis(500);
 
@@ -275,7 +277,43 @@ pub struct MpvSource {
     /// `audio-delay` (opt `audio_delay_bias`; `serve` passes −bus latency, Task 14).
     /// `read("audio_delay")` stays the graph's value.
     audio_delay_bias: f64,
+    /// Task 16c (R85): armed by `apply("paused", false)` on a source that was paused —
+    /// waiting for `audio-pts` to actually move before reporting [`SourceEvent::AudioFlowing`].
+    /// `audio-pts` ("Current audio playback position... takes into account the audio
+    /// driver delay", man mpv) only changes once samples are really flowing — unlike
+    /// `time-pos`, it does not move while held/paused, so the very next change after
+    /// arming is the real thing, not a stale carry-over.
+    ///
+    /// **Measured on-machine (review fix round, 4 runs): not quite true.** `audio-pts`'s
+    /// *first* change after an un-pause lands anywhere from ~4 ms to ~65 ms later (highly
+    /// variable), and — regardless of how long that itself took — the bus meter then
+    /// shows a further ~12–33 ms of true digital silence *after* that change before any
+    /// real sample arrives (one run: change at +65 ms, first real audio at +85 ms; another:
+    /// change at +34 ms, first real audio at +67 ms). So
+    /// `audio-pts` changing reflects the decoder/demuxer position catching up, not the AO
+    /// actually emitting samples yet — a ramp gated on the first change alone (or even a
+    /// minimum delay since *arming*, tried first and also measured insufficient here)
+    /// still reproduces the exact bug R85 exists to fix. Fixed by requiring
+    /// [`FLOWING_CONFIRM_MARGIN`] of real time *since that first change itself* (see its
+    /// own doc) before trusting it — `audio-pts` changing at all is still required (a
+    /// never-playing/stuck core must never falsely confirm), it just isn't trusted the
+    /// instant it happens, and the recipe/runtime's own `ONSET_TIMEOUT` (150 ms) remains
+    /// the outer safety net regardless.
+    awaiting_flowing: bool,
+    /// When `audio-pts` was *first* seen to change since arming (`Instant`, paired with
+    /// [`FLOWING_CONFIRM_MARGIN`]) — `None` until that first change.
+    flowing_confirmed_at: Option<Instant>,
 }
+
+/// Task 16c (R85 review fix round): the real time required *after* `audio-pts`'s first
+/// post-un-pause change before it's trusted as "audio is really flowing" — see
+/// `awaiting_flowing`'s doc for the measurement (observed 12–33 ms of continued silence
+/// after that first change, across 4 on-machine runs; a 25 ms margin still left a ~2.6 ms
+/// residual gap in the worst of those). 40 ms gives real margin over the worst case seen
+/// while staying small against `ONSET_TIMEOUT` (150 ms), so a source whose restart is
+/// genuinely slower than this still gets its ramp started by the outer timeout rather
+/// than this constant silently absorbing an even larger lag.
+const FLOWING_CONFIRM_MARGIN: Duration = Duration::from_millis(40);
 
 impl MpvSource {
     /// Create an mpv core rendering through `gfx`'s GL context and start loading `path`
@@ -406,6 +444,7 @@ impl MpvSource {
             (OBS_PAUSE, "pause", Format::Flag),
             (OBS_IMAGE, "current-tracks/video/image", Format::Flag),
             (OBS_IDLE, "idle-active", Format::Flag),
+            (OBS_AUDIO_PTS, "audio-pts", Format::F64),
         ] {
             handle.observe(id, name, f).map_err(api_err)?;
         }
@@ -479,6 +518,8 @@ impl MpvSource {
             teardown: None,
             idle_after_stop: false,
             audio_delay_bias,
+            awaiting_flowing: false,
+            flowing_confirmed_at: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -747,7 +788,26 @@ impl MpvSource {
         self.duration = None;
         self.load_failed = None;
         self.step = None;
+        self.awaiting_flowing = false;
+        self.flowing_confirmed_at = None;
         Ok(())
+    }
+
+    /// R85: arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
+    /// un-pause request is queued. Nothing to wait for (fires at once) when: stepped mode
+    /// (mpv stays paused for good there — audio is always silent, § Sources "Stepped
+    /// mode"), no audio track (`no_audio` asked for `aid=no`), or an image (no audio
+    /// concept at all). Otherwise armed — `audio-pts`'s first change starts a
+    /// [`FLOWING_CONFIRM_MARGIN`] countdown (`on_prop`) before it fires; the caller (a
+    /// recipe/the runtime) bounds the whole wait itself (`ONSET_TIMEOUT`).
+    fn arm_audio_flowing(&mut self) {
+        let no_audio = matches!(self.props.get("no_audio"), Some(PropValue::Bool(true)));
+        if self.stepped || self.kind != "video" || no_audio {
+            self.pending.push(SourceEvent::AudioFlowing);
+            return;
+        }
+        self.awaiting_flowing = true;
+        self.flowing_confirmed_at = None;
     }
 
     /// Push `gains.effective_db()` to mpv `volume-gain`. Live: coalesced — at most one
@@ -1001,6 +1061,21 @@ impl MpvSource {
                 self.props
                     .insert("kind".into(), PropValue::Str(self.kind.into()));
             }
+            // R85 (review fix round): the *first* change confirms something resumed
+            // (decode/demux), but not reliably that the AO itself has yet — record it and
+            // only fire once `FLOWING_CONFIRM_MARGIN` has passed *since that change*
+            // (`awaiting_flowing`'s doc: real output measured arriving a further 12-20 ms
+            // after it). `audio-pts` updates "more often than once per frame", so later
+            // changes keep re-checking the margin; if none ever come, the caller's own
+            // `ONSET_TIMEOUT` is the real backstop.
+            (OBS_AUDIO_PTS, PropData::F64(_)) if live && self.awaiting_flowing => {
+                let confirmed_at = self.flowing_confirmed_at.get_or_insert_with(Instant::now);
+                if confirmed_at.elapsed() >= FLOWING_CONFIRM_MARGIN {
+                    self.awaiting_flowing = false;
+                    self.flowing_confirmed_at = None;
+                    self.pending.push(SourceEvent::AudioFlowing);
+                }
+            }
             _ => {}
         }
     }
@@ -1221,9 +1296,31 @@ impl Source for MpvSource {
                 self.set("path", "start", "none")
                     .and_then(|()| self.load(&s))
             }
-            // Stepped: logical only (mpv stays paused; the runtime seeks each step).
-            "paused" | "position" if self.stepped => Ok(()),
-            "paused" => self.set(prop, "pause", yes_no(b)),
+            // Stepped: logical only (mpv stays paused; the runtime seeks each step). A
+            // paused -> un-paused edge still arms the R85 flowing-wait — which fires at
+            // once (`arm_audio_flowing`'s own `self.stepped` check): there is never real
+            // audio to wait for in stepped mode, so a recipe holding an onset ramp on
+            // this id must not block on a confirmation that can never arrive.
+            "paused" if self.stepped => {
+                let was_paused = matches!(&prev, Some(PropValue::Bool(true)));
+                if was_paused && !b {
+                    self.arm_audio_flowing();
+                }
+                Ok(())
+            }
+            "position" if self.stepped => Ok(()),
+            "paused" => {
+                // R85: arm the real-audio-flowing wait on a genuine paused -> un-paused
+                // edge, before the (async, so unconfirmed yet) un-pause request is even
+                // sent — `prev` is what `apply` observed last, i.e. the value *before*
+                // this call (captured above `self.props.insert`).
+                let was_paused = matches!(&prev, Some(PropValue::Bool(true)));
+                let r = self.set(prop, "pause", yes_no(b));
+                if r.is_ok() && was_paused && !b {
+                    self.arm_audio_flowing();
+                }
+                r
+            }
             "speed" => self.set_f64(prop, "speed", num(v)),
             "loop" => self.set(prop, "loop-file", if b { "inf" } else { "no" }),
             "position" => {
