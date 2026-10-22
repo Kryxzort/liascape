@@ -21,7 +21,11 @@ type Handler = fn(&mut Runtime, u64, &Value) -> Result<Value, ApiError>;
 
 /// Every verb: name, handler, one-line summary (`hello` lists them).
 pub const VERBS: &[(&str, Handler, &str)] = &[
-    ("hello", hello, "version, pid, capabilities, clock, verbs"),
+    (
+        "hello",
+        hello,
+        "version, pid, supervisor_pid, restart, capabilities, clock, verbs",
+    ),
     ("create", create, "create a node {kind, id?, props}"),
     ("destroy", destroy, "destroy a node {id}"),
     (
@@ -136,6 +140,9 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "clock": rt.clock_name(),
         "backend": rt.backend.kind(),
         "verbs": verb_names(),
+        // Task 16: `pid` is this compositor (the supervisor's child when supervised).
+        "supervisor_pid": rt.supervised.as_ref().map(|s| s.pid),
+        "restart": rt.restart_event,
     }))
 }
 

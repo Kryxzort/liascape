@@ -3,23 +3,37 @@
 //! ```text
 //! lp-player --version
 //! lp-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
-//!                 [--log-level error|warn|info|debug|trace]          (Wayland outputs)
-//! lp-player serve --headless [--outputs 1920x1080@60[,…]] [same options]
+//!                 [--log-level error|warn|info|debug|trace] [--restore]
+//!                 [--no-supervise]                                  (Wayland outputs)
+//! lp-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
+//!                 [same options]
 //! lp-player ctl <verb> ['<json args>']
 //! lp-player ctl subscribe <prefix…>
 //! ```
 //!
 //! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (Task 13,
 //! `.claude/rules/player-core.md` § Wayland). See § Command API for `ctl`.
+//!
+//! `serve` is **supervised** by default (Task 16, `supervise.rs`, § Supervisor): this
+//! process stays a small supervisor and runs the compositor as a child
+//! (`serve --supervised …`), restarting it with `--restore` after a crash. `--no-supervise`
+//! runs the compositor in this process (tests that don't test supervision). `--restore`
+//! restores `<state>/snapshot.json` (§ Snapshot). Exit codes: 0 clean, 1 refused/failed at
+//! startup, 2 usage, 3 compositor connection lost (restarted when supervised), 4 the
+//! supervisor gave up (5 restarts in 60 s). `--supervised` / `--restarted <spec>` are
+//! internal (the supervisor passes them).
 
 use std::process::ExitCode;
 
 use lp_player::log::Level;
-use lp_player::runtime::{ClockMode, ServeOpts, serve};
+use lp_player::runtime::{ClockMode, ServeOpts, Supervised, serve};
+use lp_player::supervise::{self, RestartInfo};
 
-const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[,…]]] \
-                           [--clock real|stepped] [--ao <mpv ao>] [--socket <path>] \
-                           [--log-level error|warn|info|debug|trace]";
+const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[,…]] \
+                           [--redraw-policy content|every_tick]] [--clock real|stepped] \
+                           [--ao <mpv ao>] [--socket <path>] \
+                           [--log-level error|warn|info|debug|trace] [--restore] \
+                           [--no-supervise]";
 
 fn serve_main(args: &[String]) -> ExitCode {
     let mut headless = false;
@@ -29,6 +43,11 @@ fn serve_main(args: &[String]) -> ExitCode {
     let mut ao = None;
     let mut socket = None;
     let mut level = Level::Info;
+    let mut restore = false;
+    let mut no_supervise = false;
+    let mut supervised = false;
+    let mut restarted = None;
+    let mut redraw_content = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| -> Result<String, String> {
@@ -51,6 +70,21 @@ fn serve_main(args: &[String]) -> ExitCode {
                     }
                 }
                 "--ao" => ao = Some(val("--ao")?),
+                "--restore" => restore = true,
+                "--no-supervise" => no_supervise = true,
+                "--supervised" => supervised = true,
+                "--restarted" => restarted = Some(RestartInfo::parse(&val("--restarted")?)?),
+                "--redraw-policy" => {
+                    redraw_content = match val("--redraw-policy")?.as_str() {
+                        "content" => true,
+                        "every_tick" => false,
+                        other => {
+                            return Err(format!(
+                                "--redraw-policy {other:?}: expected content|every_tick"
+                            ));
+                        }
+                    }
+                }
                 "--socket" => socket = Some(std::path::PathBuf::from(val("--socket")?)),
                 "--log-level" => {
                     let l = val("--log-level")?;
@@ -74,6 +108,19 @@ fn serve_main(args: &[String]) -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if !headless && redraw_content {
+        eprintln!(
+            "lp-player serve: --redraw-policy only applies with --headless (Wayland outputs \
+             always use the content policy)\n{SERVE_USAGE}"
+        );
+        return ExitCode::from(2);
+    }
+    if restarted.is_some() && !supervised {
+        eprintln!(
+            "lp-player serve: --restarted is internal (the supervisor passes it)\n{SERVE_USAGE}"
+        );
+        return ExitCode::from(2);
+    }
     let outputs = match lp_player::headless::parse_outputs(&outputs) {
         Ok(o) => o,
         Err(e) => {
@@ -81,6 +128,16 @@ fn serve_main(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if !no_supervise && !supervised {
+        // The supervisor: nothing but fork + exec + wait from here on (no thread, no EGL,
+        // no PipeWire, no socket — R72).
+        let child: Vec<String> = args.iter().filter(|a| *a != "--restore").cloned().collect();
+        return supervise::run(child, restore, &lp_player::paths::state_dir());
+    }
+    if supervised {
+        // Exec'd as /proc/self/exe: comm would be "exe".
+        unsafe { libc::prctl(libc::PR_SET_NAME, c"lp-player".as_ptr()) };
+    }
     let opts = ServeOpts {
         outputs,
         clock,
@@ -90,12 +147,18 @@ fn serve_main(args: &[String]) -> ExitCode {
         state_dir: lp_player::paths::state_dir(),
         log_level: level,
         wayland: !headless,
+        restore,
+        supervised: supervised.then(|| Supervised {
+            pid: unsafe { libc::getppid() } as u32,
+            restart: restarted,
+        }),
+        redraw_content,
     };
     match serve(opts) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("lp-player serve: {e}");
-            ExitCode::from(1)
+            ExitCode::from(e.exit_code())
         }
     }
 }

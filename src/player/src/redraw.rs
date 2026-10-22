@@ -2,16 +2,22 @@
 //! frame only when its picture can have changed — never 240 fps of a static colour.
 //!
 //! An output **wants a frame** when any of these holds since its last present:
-//! - the graph's [`Graph::picture_rev`] moved (a create/destroy or a non-gain `set` —
-//!   conservative: any picture change anywhere wakes every output once);
+//! - the graph's [`Graph::picture_rev`] moved (a create/destroy or a non-gain `set` other
+//!   than the Animator's — conservative: such a change anywhere wakes every output once);
+//! - an animated value changed on a node it shows ([`Redraw::mark_nodes`]: the Animator's
+//!   per-tick sets go through `Graph::set_animated`, which doesn't move `picture_rev`, and
+//!   mark only the outputs whose [`shown_nodes`] contain the animated node — Task 16);
 //! - a source it shows (main layer `content`, or either side of the effect there) produced
 //!   a new texture ([`Redraw::mark_shown`], from `SourceHost::take_changed`) — a playing
 //!   video presents at its own frame rate, each frame at the next refresh;
 //! - the backend asked for one (first configure, resize, re-created surface —
 //!   [`Redraw::mark`]);
-//! - or something **animates** ([`animating`]: a started, unfinished animation on a
-//!   non-gain path, e.g. a transition's `progress` or an opacity ramp) — then it presents
-//!   on *every* frame callback, at its own refresh, even between two animator ticks.
+//! - or something **animates on it** ([`animating_on`]: a started, unfinished animation on
+//!   a non-gain path of a node it shows — its `out:` node, its main layer, the layer's
+//!   content (a source or an effect) or either side of that effect; e.g. a transition's
+//!   `progress` or an opacity ramp) — then it presents on *every* frame callback, at its
+//!   own refresh, even between two animator ticks. An animation on another output's
+//!   nodes doesn't count (Task 16, review item a).
 //!
 //! Otherwise it is **idle**: no frame is drawn and no frame callback requested (the
 //! `frames` probe reports `idle: true`). Headless outputs don't use this — they compose on
@@ -60,6 +66,22 @@ impl Redraw {
         }
     }
 
+    /// The Animator just set values on `nodes` (`Graph::set_animated`): mark every output
+    /// that shows one of them ([`shown_nodes`]).
+    pub fn mark_nodes(&mut self, graph: &Graph, nodes: &BTreeSet<String>) {
+        if nodes.is_empty() {
+            return;
+        }
+        for out in graph.ids_of(NodeKind::Output) {
+            let Some(name) = out.strip_prefix("out:") else {
+                continue;
+            };
+            if shown_nodes(graph, name).iter().any(|n| nodes.contains(n)) {
+                self.dirty.insert(name.to_string());
+            }
+        }
+    }
+
     /// Whether output `name` should present now (given it can take a frame): the graph's
     /// picture moved since its last present (`rev` = [`Graph::picture_rev`]), it is
     /// marked, or something animates.
@@ -90,6 +112,36 @@ pub fn audio_only(path: &PropPath) -> bool {
 /// Something visible moves: a started, unfinished animation on a non-gain path.
 pub fn animating(anim: &Animator, now: Duration) -> bool {
     anim.any_live(now, |p| !audio_only(p))
+}
+
+/// The node an animation path targets (`lay:DP-1:main.opacity` → `lay:DP-1:main`).
+pub fn node_of(path: &PropPath) -> &str {
+    path.0.split_once('.').map_or(path.0.as_str(), |(n, _)| n)
+}
+
+/// Every node whose (non-gain) animation changes what output `name` shows: `out:<name>`,
+/// its main layer, that layer's content (a source or an effect) and the effect's sides.
+pub fn shown_nodes(graph: &Graph, name: &str) -> BTreeSet<String> {
+    let layer = format!("lay:{name}:main");
+    let mut s = shown_by(graph, &layer);
+    if let Ok(PropValue::Str(c)) = graph.get(&PropPath(format!("{layer}.content")))
+        && !c.is_empty()
+    {
+        s.insert(c);
+    }
+    s.insert(layer);
+    s.insert(format!("out:{name}"));
+    s
+}
+
+/// Something visible moves **on output `name`**: a started, unfinished, non-gain animation
+/// on one of its [`shown_nodes`].
+pub fn animating_on(anim: &Animator, now: Duration, graph: &Graph, name: &str) -> bool {
+    if !animating(anim, now) {
+        return false; // cheap common case: nothing moves anywhere
+    }
+    let nodes = shown_nodes(graph, name);
+    anim.any_live(now, |p| !audio_only(p) && nodes.contains(node_of(p)))
 }
 
 /// The sources layer `layer` shows: its `content` if that is a source, or both sides of
@@ -257,6 +309,73 @@ mod tests {
             unit: AnimUnit::Scalar,
             corr: None,
         }
+    }
+
+    /// Review item a: an animation counts only for the outputs that show its node.
+    #[test]
+    fn animating_is_scoped_per_output() {
+        let ms = Duration::from_millis;
+        let mut g = two_outputs();
+        let mut a = Animator::new();
+        a.add(anim("lay:DP-1:main.opacity", 0, 1000));
+        assert!(animating_on(&a, ms(10), &g, "DP-1"));
+        assert!(
+            !animating_on(&a, ms(10), &g, "DP-2"),
+            "DP-2 shows b, not DP-1's layer"
+        );
+
+        // An effect shown on DP-2 only (its progress animating), with a on one side.
+        let mut props = Map::new();
+        props.insert("effect_id".into(), json!("fade"));
+        props.insert("from".into(), json!("b"));
+        props.insert("to".into(), json!("c"));
+        g.create(NodeKind::Source, Some("c".into()), Map::new())
+            .unwrap();
+        g.create(NodeKind::Effect, Some("fx1".into()), props)
+            .unwrap();
+        g.set(&p("lay:DP-2:main.content"), PropValue::Str("fx1".into()))
+            .unwrap();
+        let mut a = Animator::new();
+        a.add(anim("fx1.progress", 0, 1000));
+        assert!(animating_on(&a, ms(10), &g, "DP-2"));
+        assert!(!animating_on(&a, ms(10), &g, "DP-1"));
+        assert_eq!(
+            shown_nodes(&g, "DP-2"),
+            set(&["b", "c", "fx1", "lay:DP-2:main", "out:DP-2"])
+        );
+
+        // A source's own (non-gain) animation: the outputs showing it; a gain never counts.
+        let mut a = Animator::new();
+        a.add(anim("a.speed", 0, 1000));
+        assert!(animating_on(&a, ms(10), &g, "DP-1"));
+        assert!(!animating_on(&a, ms(10), &g, "DP-2"));
+        let mut a = Animator::new();
+        a.add(anim("c.gain.xfade", 0, 1000));
+        assert!(!animating_on(&a, ms(10), &g, "DP-2"), "audio only");
+        // A node no output shows: nobody animates.
+        let mut a = Animator::new();
+        a.add(anim("lay9.opacity", 0, 1000));
+        assert!(!animating_on(&a, ms(10), &g, "DP-1") && !animating_on(&a, ms(10), &g, "DP-2"));
+    }
+
+    #[test]
+    fn animated_sets_mark_only_the_outputs_showing_the_node() {
+        let mut g = two_outputs();
+        let mut r = Redraw::new();
+        let rev = g.picture_rev();
+        r.drawn("DP-1", rev);
+        r.drawn("DP-2", rev);
+        g.set_animated(&p("lay:DP-1:main.opacity"), PropValue::F64(0.5))
+            .unwrap();
+        assert_eq!(g.picture_rev(), rev);
+        r.mark_nodes(&g, &set(&["lay:DP-1:main"]));
+        assert!(
+            r.wants("DP-1", g.picture_rev(), false),
+            "its final value gets drawn"
+        );
+        assert!(!r.wants("DP-2", g.picture_rev(), false), "DP-2 stays idle");
+        r.mark_nodes(&g, &set(&["b"]));
+        assert!(r.wants("DP-2", g.picture_rev(), false));
     }
 
     #[test]

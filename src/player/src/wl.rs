@@ -15,7 +15,10 @@
 //!   composer draws there; also `picture` for `capture`) and a [`WindowTarget`] on its
 //!   `wl_surface` (swap interval 0). `present` blits the FBO to the window's back buffer,
 //!   forces alpha to 1, requests a frame callback and swaps (which commits). The output
-//!   can take its next frame when that callback arrives ([`FrameState::ready`]).
+//!   can take its next frame when that callback arrives ([`FrameState::ready`]). A failed
+//!   swap (no commit) keeps the one requested callback for the next commit — never a
+//!   second request — and backs off ([`present_backoff`]: 100 ms, then 1 s while it keeps
+//!   failing; `frames` probe `present_failed`/`retry_in_ms`).
 //! - **Hotplug:** a new `wl_output` → a surface + [`OutputChange::Added`]; a removed one →
 //!   [`OutputChange::Removed`] and its GPU side freed in [`OutputBackend::process`] with the
 //!   context current (surfaceless), window target before `wl_surface`. A `closed` layer
@@ -119,6 +122,16 @@ pub fn layer_from_str(s: &str) -> Option<Layer> {
 }
 
 /// A Linux input button code (`BTN_*`) → its bit in `out:<c>.pointer`'s mask.
+/// How long an output waits before presenting again after `streak` failed presents in a
+/// row: 100 ms after the first, then 1 s (no swap storm at the refresh rate).
+pub fn present_backoff(streak: u32) -> Duration {
+    match streak {
+        0 => Duration::ZERO,
+        1 => Duration::from_millis(100),
+        _ => Duration::from_secs(1),
+    }
+}
+
 pub fn button_bit(code: u32) -> u32 {
     match code {
         0x110 => 1,  // BTN_LEFT
@@ -160,7 +173,14 @@ struct WlOut {
     /// Surface size from the last configure (logical); `None` until the first.
     configured: Option<(u32, u32)>,
     frame_pending: bool,
+    /// A frame callback was requested on the surface but no commit has carried it yet
+    /// (the swap failed): the next present must not request another one.
+    frame_armed: bool,
     callbacks: u64,
+    /// Failed presents in a row, total, and when the next attempt may run.
+    fail_streak: u32,
+    failures: u64,
+    retry_at: Option<Instant>,
     /// The buffer size a window target last failed to build at (not retried until the
     /// size changes — no error storm).
     gl_failed: Option<(u32, u32)>,
@@ -174,6 +194,27 @@ struct WlOut {
 impl WlOut {
     fn is_surface(&self, s: &wl_surface::WlSurface) -> bool {
         self.surface.as_ref().is_some_and(|l| l.wl_surface() == s)
+    }
+
+    /// A present failed: back off ([`present_backoff`]) and say when it retries.
+    fn present_failed(&mut self, e: String) -> String {
+        self.fail_streak += 1;
+        self.failures += 1;
+        let back = present_backoff(self.fail_streak);
+        self.retry_at = Some(Instant::now() + back);
+        format!(
+            "{e} (failure {} in a row; retrying in {} ms)",
+            self.fail_streak,
+            back.as_millis()
+        )
+    }
+
+    /// The surface is new (or re-created): nothing pending, nothing armed.
+    fn reset_frames(&mut self) {
+        self.frame_pending = false;
+        self.frame_armed = false;
+        self.retry_at = None;
+        self.fail_streak = 0;
     }
 }
 
@@ -389,7 +430,9 @@ impl OutputBackend for Wayland {
         let (Some(gl), Some(surface)) = (o.gl.as_ref(), o.surface.as_ref()) else {
             return Err(format!("output {name:?} has no surface yet"));
         };
-        gl.target.make_current(gfx)?;
+        if let Err(e) = gl.target.make_current(gfx) {
+            return Err(o.present_failed(e));
+        }
         let (w, h) = (gl.size.0 as i32, gl.size.1 as i32);
         unsafe {
             let g = &gfx.gl;
@@ -424,14 +467,25 @@ impl OutputBackend for Wayland {
             g.clear(glow::COLOR_BUFFER_BIT);
             g.color_mask(true, true, true, true);
         }
-        let ws = surface.wl_surface();
-        ws.frame(&qh, FrameCallbackData(ws.clone()));
-        match gl.target.swap(gfx) {
+        // `wl_surface.frame` is double-buffered state: it must be requested before the
+        // commit that eglSwapBuffers makes, and it rides on that commit. If the swap fails
+        // (no commit), the request stays pending for the next commit — so request it only
+        // when none is armed, and count the frame as pending only once a commit succeeded.
+        if !o.frame_armed {
+            let ws = surface.wl_surface();
+            ws.frame(&qh, FrameCallbackData(ws.clone()));
+        }
+        let swapped = gl.target.swap(gfx);
+        o.frame_armed = true;
+        match swapped {
             Ok(()) => {
+                o.frame_armed = false;
                 o.frame_pending = true;
+                o.fail_streak = 0;
+                o.retry_at = None;
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(e) => Err(o.present_failed(e)),
         }
     }
 
@@ -442,10 +496,14 @@ impl OutputBackend for Wayland {
     fn frame_state(&self, name: &str) -> Option<FrameState> {
         let o = self.out(name)?;
         let usable = o.gl.is_some() && o.surface.is_some() && o.configured.is_some();
+        let now = Instant::now();
+        let retry_in = o.retry_at.filter(|t| *t > now).map(|t| t - now);
         Some(FrameState {
-            ready: usable && !o.frame_pending,
+            ready: usable && !o.frame_pending && retry_in.is_none(),
             pending: o.frame_pending,
             callbacks: o.callbacks,
+            failures: o.failures,
+            retry_in_ms: retry_in.map(|d| d.as_secs_f64() * 1000.0),
         })
     }
 
@@ -482,7 +540,7 @@ impl OutputBackend for Wayland {
                 let o = &mut st.outs[i];
                 o.surface = Some(ls);
                 o.configured = None;
-                o.frame_pending = false;
+                o.reset_frames();
                 log::event(
                     "wl",
                     Level::Info,
@@ -516,15 +574,27 @@ impl OutputBackend for Wayland {
             let r = match o.gl.take() {
                 Some(mut gl) => {
                     gl.target.resize(size.0, size.1);
-                    unsafe {
-                        gfx.gl.delete_framebuffer(gl.fbo.id);
-                        gfx.gl.delete_texture(gl.tex.id);
+                    // The FBO/texture deletes + creates need the context current: make it
+                    // explicitly this window's (it is on whatever surface presented last,
+                    // or surfaceless) — never rely on what happens to be bound (review d).
+                    match gl.target.make_current(gfx) {
+                        Ok(()) => {
+                            unsafe {
+                                gfx.gl.delete_framebuffer(gl.fbo.id);
+                                gfx.gl.delete_texture(gl.tex.id);
+                            }
+                            gl.tex = gfx.tex(size.0, size.1);
+                            gl.fbo = gfx.fbo(&gl.tex);
+                            gl.size = size;
+                            Ok(gl)
+                        }
+                        Err(e) => {
+                            o.gl = Some(gl); // keep the old size's targets
+                            Err(e)
+                        }
                     }
-                    gl.tex = gfx.tex(size.0, size.1);
-                    gl.fbo = gfx.fbo(&gl.tex);
-                    gl.size = size;
-                    Ok(gl)
                 }
+                // `set_swap_interval` makes the new window current before tex/fbo are made.
                 None => gfx
                     .window_target(ws.id().as_ptr().cast(), size.0, size.1)
                     .and_then(|target| {
@@ -544,7 +614,7 @@ impl OutputBackend for Wayland {
                     o.gl = Some(gl);
                     o.gl_failed = None;
                     o.redraw = true;
-                    o.frame_pending = false;
+                    o.reset_frames();
                     log::event(
                         "wl",
                         Level::Info,
@@ -597,13 +667,19 @@ impl OutputBackend for Wayland {
             SurfaceKind::Wlr(w) => w.version() >= 2,
             _ => false,
         });
-        if v2 {
+        // Not mapped yet (no configure / no first frame): a `set_layer` + bare commit then
+        // was lost on Hyprland 0.56 (a re-plugged output whose remembered layer was applied
+        // right after the surface was made stayed on background — measured). Re-create
+        // the surface on the new layer instead: nothing is on screen yet.
+        let mapped = o.configured.is_some() && o.gl.is_some();
+        if v2 && mapped {
             let s = o.surface.as_ref().expect("checked");
             s.set_layer(l);
             s.commit(); // double-buffered: applies at this commit, the buffer is kept
             o.redraw = true;
         } else {
-            // layer-shell v1 has no set_layer: re-create the surface on the new layer.
+            // layer-shell v1 has no set_layer (or not mapped yet): re-create the surface
+            // on the new layer (`process`).
             let (gl, surface) = (o.gl.take(), o.surface.take());
             o.configured = None;
             st.bury(gl, surface);
@@ -613,7 +689,7 @@ impl OutputBackend for Wayland {
             Level::Info,
             "wl.layer",
             None,
-            json!({ "output": name, "layer": layer, "recreated": !v2 }),
+            json!({ "output": name, "layer": layer, "recreated": !(v2 && mapped) }),
         );
         Ok(())
     }
@@ -658,6 +734,7 @@ impl CompositorHandler for WlState {
     ) {
         if let Some(o) = self.outs.iter_mut().find(|o| o.is_surface(surface)) {
             o.frame_pending = false;
+            o.frame_armed = false;
             o.callbacks += 1;
         }
     }
@@ -711,7 +788,11 @@ impl OutputHandler for WlState {
             surface: Some(surface),
             configured: None,
             frame_pending: false,
+            frame_armed: false,
             callbacks: 0,
+            fail_streak: 0,
+            failures: 0,
+            retry_at: None,
             gl_failed: None,
             redraw: true,
             buttons: 0,
@@ -783,7 +864,7 @@ impl LayerShellHandler for WlState {
         );
         let (gl, surface) = (o.gl.take(), o.surface.take());
         o.configured = None;
-        o.frame_pending = false;
+        o.reset_frames();
         self.bury(gl, surface); // re-created in `process` if the output stays
     }
 
@@ -994,5 +1075,13 @@ mod tests {
         assert_eq!(button_bit(0x113), 8);
         assert_eq!(button_bit(0x114), 16);
         assert_eq!(button_bit(0x115), 0);
+    }
+
+    #[test]
+    fn failed_presents_back_off() {
+        assert_eq!(present_backoff(0), Duration::ZERO);
+        assert_eq!(present_backoff(1), Duration::from_millis(100));
+        assert_eq!(present_backoff(2), Duration::from_secs(1));
+        assert_eq!(present_backoff(50), Duration::from_secs(1));
     }
 }

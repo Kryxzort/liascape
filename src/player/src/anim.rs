@@ -279,6 +279,27 @@ impl Animator {
             .any(|e| !e.done && e.anim.start <= now && pred(&e.anim.target))
     }
 
+    /// [`target_of`](Self::target_of), but only while the animation is **live** (not yet
+    /// started, or running) — a finished one is ignored: the property's own value is then
+    /// the truth (a direct `set` after the animation finished must win). For callers that
+    /// fall back to the current value (the snapshot, anti-click ramps).
+    pub fn live_target_of(&self, path: &PropPath) -> Option<f64> {
+        self.entries
+            .iter()
+            .find(|e| &e.anim.target == path && !e.done)
+            .map(|e| e.anim.emitted_value(e.anim.end()))
+    }
+
+    /// The correlation id of the animation on `path` (started or not), if any — lets a
+    /// caller tell whether an animation it added is still the one on `path` (not
+    /// superseded by a later `add`).
+    pub fn corr_of(&self, path: &PropPath) -> Option<&CorrId> {
+        self.entries
+            .iter()
+            .find(|e| &e.anim.target == path)
+            .and_then(|e| e.anim.corr.as_ref())
+    }
+
     /// The value the animation on `path` ends at (what it emits at its own end — for a
     /// `GainLinear` animation, that end in dB), whether it has started, is running, or has
     /// finished and is holding it. `None` when nothing animates `path` (never added, or
@@ -350,10 +371,12 @@ mod tests {
         // Before it starts, mid-way, and after it finished: always the end value.
         let near = |v: Option<f64>| v.is_some_and(|v| (v - 0.9).abs() < 1e-12);
         assert!(near(a.target_of(&p)));
+        assert!(near(a.live_target_of(&p)), "not started yet: live");
         a.tick(Duration::from_millis(600));
         assert!(near(a.target_of(&p)), "mid-way");
         a.tick(Duration::from_millis(5000));
         assert!(near(a.target_of(&p)), "finished, holding");
+        assert_eq!(a.live_target_of(&p), None, "finished: not live");
 
         // GainLinear: the end in dB; an equal-power-out from 0 to k ends at k·cos(π/2) = 0
         // → silent, a ramp in to 1.0 ends at 0 dB.

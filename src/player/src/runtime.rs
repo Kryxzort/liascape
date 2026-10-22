@@ -50,7 +50,9 @@ use crate::log::{self, CorrId, Level};
 use crate::probe::frames::FrameStats;
 use crate::recipes::Transitions;
 use crate::redraw::{self, Redraw};
+use crate::snapshot::{self, Snapshot};
 use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
+use crate::supervise::{self, RestartInfo};
 use crate::units::{SILENT_DB, db_to_lin};
 
 /// The longest a `step` waits for every video source's frame.
@@ -65,6 +67,8 @@ pub const STEP_QUEUE_MAX: usize = 64;
 const WARN_EVERY: Duration = Duration::from_secs(5);
 /// Tick durations the `loop` probe keeps.
 const TICK_HISTORY: usize = 64;
+/// The corr of a restored source's pending fade-in (`Runtime::fade_in`).
+const RESTORE_FADE: &str = "restore-fade";
 
 /// `--clock`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +95,54 @@ pub struct ServeOpts {
     /// Real outputs: one layer-shell surface per `wl_output` (`crate::wl`); `false` =
     /// headless virtual outputs from [`outputs`](Self::outputs).
     pub wayland: bool,
+    /// `--restore`: recreate what `<state>/snapshot.json` saved (`crate::snapshot`).
+    pub restore: bool,
+    /// Run by the supervisor (`--supervised`, `crate::supervise`): its pid, and why this is
+    /// a restart (`--restarted`).
+    pub supervised: Option<Supervised>,
+    /// Headless only: `--redraw-policy content` (present only on picture changes, like
+    /// Wayland) instead of composing every output every tick.
+    pub redraw_content: bool,
+}
+
+/// This compositor runs under the supervisor (Task 16).
+#[derive(Debug, Clone)]
+pub struct Supervised {
+    pub pid: u32,
+    /// Set when this child replaces one that crashed.
+    pub restart: Option<RestartInfo>,
+}
+
+/// Why `serve` failed: at startup (exit 1 — not restarted by the supervisor) or while
+/// running (the compositor connection was lost: exit [`supervise::EXIT_RUNTIME`] —
+/// restarted).
+#[derive(Debug)]
+pub enum ServeError {
+    Startup(String),
+    Runtime(String),
+}
+
+impl ServeError {
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            ServeError::Startup(_) => 1,
+            ServeError::Runtime(_) => supervise::EXIT_RUNTIME,
+        }
+    }
+}
+
+impl std::fmt::Display for ServeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ServeError::Startup(m) | ServeError::Runtime(m) => f.write_str(m),
+        }
+    }
+}
+
+impl From<String> for ServeError {
+    fn from(m: String) -> ServeError {
+        ServeError::Startup(m)
+    }
 }
 
 enum ClockKind {
@@ -151,6 +203,22 @@ pub(crate) struct Parked {
     settle_at: Option<Duration>,
     /// The ramp end has been reached once (its final value sent): pause next.
     armed: bool,
+    /// The connector it was parked for (a restored snapshot's output that isn't present):
+    /// that connector shows it when it appears, whatever else is on screen. `None` = the
+    /// R60 "no output left" park (the next output shows it).
+    pub connector: Option<String>,
+}
+
+/// When the snapshot is written (§ Snapshot): `due` = 250 ms after the first unsaved
+/// change, `last_write` for the 2 s refresh while a video plays, `frozen` once the final
+/// (clean-exit) snapshot is queued.
+pub(crate) struct SnapState {
+    pub writer: snapshot::Writer,
+    pub due: Option<Instant>,
+    pub last_write: Option<Instant>,
+    pub seen_rev: u64,
+    pub frozen: bool,
+    timer: Option<RegistrationToken>,
 }
 
 /// Counters for the `loop` probe.
@@ -242,6 +310,17 @@ pub struct Runtime {
     pub(crate) frames: BTreeMap<String, FrameStats>,
     /// The player audio bus + its meter (Task 14), or why there is none.
     pub(crate) audio: Audio,
+    /// Settable output props (`layer`, `paused`) of connectors that are not present —
+    /// re-applied when the connector comes back (Task 16).
+    pub(crate) out_props: BTreeMap<String, Map<String, Value>>,
+    pub(crate) snap: SnapState,
+    pub(crate) supervised: Option<Supervised>,
+    /// The `supervisor.restart` fields this child logged at startup (`hello.restart`).
+    pub(crate) restart_event: Option<Value>,
+    /// Restored sources that start silent and ramp in over 30 ms once ready: each has a
+    /// not-yet-started `gain.anticlick` animation to 0 dB ([`RESTORE_FADE`] corr), so a
+    /// recipe recording its gains (R41) sees the 0 dB it is heading to.
+    fade_in: BTreeSet<String>,
 }
 
 fn p(s: &str) -> PropPath {
@@ -302,8 +381,13 @@ impl Runtime {
     }
 
     fn run_anims(&mut self, now: Duration) {
+        let mut moved = BTreeSet::new();
         for (path, v) in self.anim.tick(now) {
-            if let Err(e) = self.graph.set(&path, PropValue::F64(v)) {
+            if !redraw::audio_only(&path) {
+                moved.insert(redraw::node_of(&path).to_string());
+            }
+            // Not a `picture_rev` move: only the outputs showing the node redraw (below).
+            if let Err(e) = self.graph.set_animated(&path, PropValue::F64(v)) {
                 // The node went away under the animation (destroyed, output unplugged).
                 self.anim.cancel_target(&path);
                 log::event(
@@ -315,6 +399,7 @@ impl Runtime {
                 );
             }
         }
+        self.redraw.mark_nodes(&self.graph, &moved);
         for (_, corr) in self.anim.finished() {
             if let Some(c) = corr
                 && c.0.starts_with("an-")
@@ -328,6 +413,10 @@ impl Runtime {
     /// line with the hosted sources).
     pub(crate) fn sync_sources(&mut self) {
         let changes = self.graph.drain_changes();
+        if !changes.is_empty() || self.graph.picture_rev() != self.snap.seen_rev {
+            self.snap.seen_rev = self.graph.picture_rev();
+            self.snapshot_dirty();
+        }
         if self.stepped() {
             for (path, v) in &changes {
                 if let Some((id, prop)) = path.0.split_once('.')
@@ -425,6 +514,9 @@ impl Runtime {
             if !kind.is_empty() {
                 log::event("source", level, kind, None, fields);
             }
+            if matches!(ev, SourceEvent::Ready) && self.fade_in.remove(&id) {
+                self.start_restore_fade(&id);
+            }
             let name = match &ev {
                 SourceEvent::Ready => "ready".to_string(),
                 SourceEvent::Ended => "ended".to_string(),
@@ -437,6 +529,8 @@ impl Runtime {
         }
         self.last_event
             .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
+        self.fade_in
+            .retain(|id| self.graph.kind_of(id) == Some(NodeKind::Source));
     }
 
     /// Feed the transition recipe's held sources into the `srcs:` alias (R50).
@@ -485,28 +579,34 @@ impl Runtime {
                     .entry(o.name.clone())
                     .or_insert_with(|| FrameStats::new(o.refresh_mhz, now))
                     .on_present(now),
-                Err(e) => log::event(
-                    "output",
-                    Level::Warn,
-                    "output.present_failed",
-                    None,
-                    json!({ "output": o.name, "error": e }),
-                ),
+                Err(e) => {
+                    if let Some(st) = self.frames.get_mut(&o.name) {
+                        st.on_present_failed(&e);
+                    }
+                    log::event(
+                        "output",
+                        Level::Warn,
+                        "output.present_failed",
+                        None,
+                        json!({ "output": o.name, "error": e }),
+                    )
+                }
             }
         }
     }
 
     /// Paced presenting (Wayland): every output that can take a frame (its last frame
     /// callback arrived) is composed + presented if its picture changed since its last
-    /// present or something animates (`crate::redraw`); otherwise it goes idle. Runs after
-    /// every dispatch and at the end of each tick.
+    /// present or something animates on it (`crate::redraw`); otherwise it goes idle. Runs
+    /// after every dispatch and at the end of each tick.
     pub(crate) fn render_paced(&mut self) {
-        let animating = redraw::animating(&self.anim, self.now());
+        let now = self.now();
         let rev = self.graph.picture_rev();
         for o in self.backend.outputs() {
             if !self.backend.frame_state(&o.name).is_some_and(|f| f.ready) {
                 continue;
             }
+            let animating = redraw::animating_on(&self.anim, now, &self.graph, &o.name);
             let stats = self
                 .frames
                 .entry(o.name.clone())
@@ -546,13 +646,18 @@ impl Runtime {
                     }
                     self.redraw.drawn(&o.name, rev);
                 }
-                Err(e) => warn_limited(
-                    &mut self.warned,
-                    format!("output.present_failed {id}"),
-                    "output",
-                    "output.present_failed",
-                    json!({ "output": id, "error": e }),
-                ),
+                Err(e) => {
+                    if let Some(st) = self.frames.get_mut(&o.name) {
+                        st.on_present_failed(&e);
+                    }
+                    warn_limited(
+                        &mut self.warned,
+                        format!("output.present_failed {id}"),
+                        "output",
+                        "output.present_failed",
+                        json!({ "output": id, "error": e }),
+                    )
+                }
             }
         }
     }
@@ -572,11 +677,13 @@ impl Runtime {
     /// Apply the backend's hotplug (graph `out:<name>` + its main layer; the timer period
     /// follows the max refresh).
     ///
-    /// **Added (R59/R60):** the new output joins the live transition covering the first
-    /// other output, if any (`Transitions::adopt_output` — it shows what that transition
-    /// shows and goes through cancel/commit/handoff with it); else it shows `cur:` of the
-    /// first output that has one; else, if a wallpaper is parked (no output was left), it
-    /// shows that, unpaused and ramped back in over 30 ms.
+    /// **Added (R59/R60):** its remembered output props (`layer`, …) are re-applied (Task
+    /// 16). If the parked wallpaper was parked *for this connector* (a restored snapshot's
+    /// output that wasn't present), it shows that; else it joins the live transition
+    /// covering the first other output, if any (`Transitions::adopt_output` — it shows
+    /// what that transition shows and goes through cancel/commit/handoff with it); else it
+    /// shows `cur:` of the first output that has one; else, if a wallpaper is parked (no
+    /// output was left), it shows that, unpaused and ramped back in over 30 ms.
     ///
     /// **Removed (R60):** the node + layer go; every live transition forgets the output
     /// (`Transitions::drop_output` — one left with no output is committed); then whatever
@@ -638,11 +745,25 @@ impl Runtime {
             );
             return;
         }
+        if let Some(props) = self.out_props.remove(&info.name) {
+            self.apply_props(&id, &props);
+        }
         let layer = format!("lay:{}:main.content", info.name);
-        let adopted = others
-            .iter()
-            .find_map(|o| self.tr.adopt_output(&id, o, &mut self.graph));
-        let content = if adopted.is_some() {
+        let own_parked = self
+            .parked
+            .as_ref()
+            .is_some_and(|pk| pk.connector.as_deref() == Some(info.name.as_str()));
+        let adopted = if own_parked {
+            None
+        } else {
+            others
+                .iter()
+                .find_map(|o| self.tr.adopt_output(&id, o, &mut self.graph))
+        };
+        let content = if own_parked && let Some(pk) = self.unpark() {
+            let _ = self.graph.set(&p(&layer), PropValue::Str(pk.clone()));
+            Some(json!(pk))
+        } else if adopted.is_some() {
             self.graph.get(&p(&layer)).ok().map(|v| v.to_json())
         } else if let Some(cur) = &current {
             let _ = self.graph.set(&p(&layer), PropValue::Str(cur.clone()));
@@ -689,9 +810,48 @@ impl Runtime {
         );
     }
 
+    /// `set_json` every prop of `props` on node `id` (snapshot / remembered values; a value
+    /// the schema rejects is logged and skipped).
+    fn apply_props(&mut self, id: &str, props: &Map<String, Value>) {
+        for (k, v) in props {
+            if let Err(e) = self.graph.set_json(&p(&format!("{id}.{k}")), v) {
+                log::event(
+                    "runtime",
+                    Level::Warn,
+                    "snapshot.prop_rejected",
+                    None,
+                    json!({ "node": id, "prop": k, "value": v, "error": e.to_string() }),
+                );
+            }
+        }
+    }
+
+    /// Output `out:<name>`'s settable props that differ from their defaults.
+    fn output_props(&self, name: &str) -> Map<String, Value> {
+        let mut m = Map::new();
+        for (prop, pd) in crate::graph::props::schema_for_kind(NodeKind::Output) {
+            if pd.readonly {
+                continue;
+            }
+            if let Ok(v) = self.graph.get(&p(&format!("out:{name}.{prop}")))
+                && v != pd.default
+            {
+                m.insert(prop.to_string(), v.to_json());
+            }
+        }
+        m
+    }
+
     fn output_removed(&mut self, name: &str) {
         let id = format!("out:{name}");
         let layer = format!("lay:{name}:main");
+        // Its settings outlive it: re-applied if this connector comes back (Task 16).
+        let props = self.output_props(name);
+        if props.is_empty() {
+            self.out_props.remove(name);
+        } else {
+            self.out_props.insert(name.to_string(), props);
+        }
         // What only this output may have shown or held.
         let mut candidates: BTreeSet<String> = self.shown_by(&layer);
         let (held, _) = self.tr.held_sources();
@@ -723,7 +883,7 @@ impl Runtime {
             if let Some((pk, was_pending)) = last
                 && self.graph.kind_of(&pk) == Some(NodeKind::Source)
             {
-                self.park(&pk, was_pending);
+                self.park(&pk, was_pending, None);
                 candidates.remove(&pk);
             }
         } else {
@@ -786,9 +946,11 @@ impl Runtime {
     /// over 30 ms, starting now.
     fn ramp_anticlick(&mut self, id: &str, to_db: f64, corr: Option<CorrId>) {
         let path = p(&format!("{id}.gain.anticlick"));
+        // A live ramp's target, else the value itself (a finished ramp's target is stale
+        // once something `set` the slot directly — e.g. a silent park's −96).
         let cur = self
             .anim
-            .target_of(&path)
+            .live_target_of(&path)
             .unwrap_or(match self.graph.get(&path) {
                 Ok(PropValue::F64(f)) => f,
                 _ => 0.0,
@@ -853,8 +1015,13 @@ impl Runtime {
 
     /// R60: no output is left — keep the current wallpaper, silent and paused, until one
     /// comes back. `pending_b`: it's a transition's B that was never shown (it starts
-    /// playing when unparked, whatever its pause state now).
-    fn park(&mut self, id: &str, pending_b: bool) {
+    /// playing when unparked, whatever its pause state now). `connector`: parked for that
+    /// connector (a restored output that isn't present) — shown when it appears.
+    fn park(&mut self, id: &str, pending_b: bool, connector: Option<String>) {
+        if self.fade_in.remove(id) && self.restore_fade_pending(id) {
+            // Parked = silent; unpark ramps it in from −96.
+            self.anim.cancel_target(&p(&format!("{id}.gain.anticlick")));
+        }
         let resume_paused = !pending_b && self.bool_prop(id, "paused");
         let silent = self.is_silent(id);
         if silent {
@@ -871,6 +1038,7 @@ impl Runtime {
             resume_paused,
             settle_at: Some(settle_at),
             armed: silent,
+            connector,
         });
         self.graph.set_parked(Some(id.to_string()));
         self.settle_parked(self.now());
@@ -879,7 +1047,8 @@ impl Runtime {
             Level::Info,
             "source.parked",
             None,
-            json!({ "id": id, "resume_paused": resume_paused }),
+            json!({ "id": id, "resume_paused": resume_paused,
+                    "connector": self.parked.as_ref().and_then(|pk| pk.connector.clone()) }),
         );
     }
 
@@ -1024,6 +1193,8 @@ impl Runtime {
             None,
             json!({ "why": why }),
         );
+        // What was on screen, not the empty graph `stop` leaves (a later `--restore`).
+        self.snapshot_final();
         let instant = self.stepped();
         self.stop_all(instant);
         self.quit_at = Some(Instant::now() + STOP_RAMP * 4);
@@ -1056,6 +1227,10 @@ impl Runtime {
         }
         // Every stream is gone: now the bus can go (nothing gets moved to the default sink).
         self.audio.close();
+        self.snap.writer.finish(); // the final snapshot is on disk
+        if let Some(tok) = self.snap.timer.take() {
+            self.handle.remove(tok);
+        }
         log::event(
             "runtime",
             Level::Info,
@@ -1068,6 +1243,319 @@ impl Runtime {
             c.flush();
         }
         left
+    }
+
+    // ------------------------------------------------------------------ snapshot
+
+    /// A graph change: save [`snapshot::DEBOUNCE`] after the first unsaved one (a burst of
+    /// changes = one write; a continuous animation can't postpone it).
+    fn snapshot_dirty(&mut self) {
+        if self.snap.frozen || self.snap.due.is_some() {
+            return;
+        }
+        self.snap.due = Some(Instant::now() + snapshot::DEBOUNCE);
+        if self.snap.timer.is_none() {
+            // Only wakes the loop (the stepped clock has no tick timer); `after_dispatch`
+            // writes it.
+            self.snap.timer = self
+                .handle
+                .insert_source(
+                    Timer::from_duration(snapshot::DEBOUNCE),
+                    |_, _, rt: &mut Runtime| {
+                        rt.snap.timer = None;
+                        TimeoutAction::Drop
+                    },
+                )
+                .ok();
+        }
+    }
+
+    /// Write the snapshot if it's due: the debounce is over, or [`snapshot::REFRESH`]
+    /// passed while a video plays (positions move without graph changes).
+    pub(crate) fn snapshot_maybe(&mut self) {
+        if self.snap.frozen {
+            return;
+        }
+        let now = Instant::now();
+        let due = match self.snap.due {
+            Some(d) => now >= d,
+            None => {
+                self.snap
+                    .last_write
+                    .is_none_or(|t| now.duration_since(t) >= snapshot::REFRESH)
+                    && self.video_playing()
+            }
+        };
+        if due {
+            self.write_snapshot();
+        }
+    }
+
+    fn video_playing(&self) -> bool {
+        self.graph.ids_of(NodeKind::Source).iter().any(|id| {
+            self.str_prop(id, "kind") == "video"
+                && self.bool_prop(id, "ready")
+                && !self.bool_prop(id, "paused")
+        })
+    }
+
+    /// What `snapshot.json` would hold now (`crate::snapshot::capture`).
+    pub(crate) fn capture_snapshot(&self) -> Snapshot {
+        let status = self.tr.status();
+        snapshot::capture(&snapshot::Capture {
+            graph: &self.graph,
+            anim: &self.anim,
+            transitions: &status,
+            parked: self.parked.as_ref().map(|pk| snapshot::ParkedSnap {
+                id: pk.id.clone(),
+                resume_paused: pk.resume_paused,
+                connector: pk.connector.clone(),
+            }),
+            remembered: &self.out_props,
+        })
+    }
+
+    fn write_snapshot(&mut self) {
+        let bytes = self.capture_snapshot().to_bytes();
+        self.snap.writer.send(bytes);
+        self.snap.last_write = Some(Instant::now());
+        self.snap.due = None;
+        if let Some(tok) = self.snap.timer.take() {
+            self.handle.remove(tok);
+        }
+    }
+
+    /// Exit (quit / SIGTERM / a lost compositor): queue the snapshot of what is on screen
+    /// now and write no more — the teardown that follows empties the graph.
+    fn snapshot_final(&mut self) {
+        if self.snap.frozen {
+            return;
+        }
+        self.write_snapshot();
+        self.snap.frozen = true;
+    }
+
+    /// `--restore`: load `<state>/snapshot.json` and recreate it; a corrupt or
+    /// unknown-version file is moved aside (`snapshot.invalid.json`) and the player starts
+    /// empty — never a crash loop over a bad file.
+    fn restore_from_disk(&mut self, dir: &std::path::Path) {
+        match snapshot::load(dir) {
+            Ok(Some(s)) => self.restore_snapshot(s),
+            Ok(None) => log::event(
+                "snapshot",
+                Level::Info,
+                "snapshot.none",
+                None,
+                json!({ "dir": dir.display().to_string() }),
+            ),
+            Err(reason) => {
+                let moved = snapshot::set_aside(dir);
+                log::event(
+                    "snapshot",
+                    Level::Warn,
+                    "snapshot.invalid",
+                    None,
+                    json!({ "reason": reason,
+                            "moved_to": moved.map(|m| m.display().to_string()),
+                            "hint": "starting empty; the next snapshot replaces it" }),
+                );
+            }
+        }
+    }
+
+    /// Recreate a snapshot (§ Snapshot): player props; each saved connector that is
+    /// present gets its output props, main-layer settings and content (fresh source ids,
+    /// at the saved positions); a saved connector that is missing keeps its props for
+    /// when it appears, and its content — unless a present output shows it — is parked
+    /// for that connector (R60: never lost); the saved parked wallpaper is shown on the
+    /// outputs that show nothing, else parked again; a present connector the snapshot
+    /// didn't know shows the current wallpaper (as hotplug would). Audible sources start
+    /// silent and ramp in over 30 ms once ready.
+    fn restore_snapshot(&mut self, snap: Snapshot) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        let age_ms = now_ms.saturating_sub(snap.saved_unix_ms);
+        self.apply_props("player", &snap.player);
+        let present: BTreeSet<String> = self
+            .graph
+            .ids_of(NodeKind::Output)
+            .iter()
+            .filter_map(|o| o.strip_prefix("out:"))
+            .map(str::to_string)
+            .collect();
+        let empty =
+            |rt: &Runtime, c: &str| rt.str_prop(&format!("lay:{c}:main"), "content").is_empty();
+        let mut made: BTreeMap<String, String> = BTreeMap::new();
+        let mut outputs = Vec::new();
+        let mut missing = Vec::new();
+        for (conn, o) in &snap.outputs {
+            if !present.contains(conn) {
+                if !o.props.is_empty() {
+                    self.out_props.insert(conn.clone(), o.props.clone());
+                }
+                if let Some(c) = &o.content {
+                    missing.push((conn.clone(), c.clone()));
+                }
+                continue;
+            }
+            self.apply_props(&format!("out:{conn}"), &o.props);
+            self.apply_props(&format!("lay:{conn}:main"), &o.layer);
+            if let Some(c) = &o.content
+                && let Some(id) = self.restored_source(&snap, c, &mut made)
+            {
+                let _ = self
+                    .graph
+                    .set(&p(&format!("lay:{conn}:main.content")), PropValue::Str(id));
+            }
+            outputs.push(conn.clone());
+        }
+        for (conn, props) in &snap.output_props {
+            if present.contains(conn) {
+                self.apply_props(&format!("out:{conn}"), props);
+            } else {
+                self.out_props.insert(conn.clone(), props.clone());
+            }
+        }
+        let mut dropped = Vec::new();
+        for (conn, c) in missing {
+            if made.contains_key(&c) {
+                continue; // a present output shows it
+            }
+            if self.parked.is_some() {
+                dropped.push(c);
+                continue;
+            }
+            if let Some(id) = self.restored_source(&snap, &c, &mut made) {
+                self.park(&id, false, Some(conn));
+            }
+        }
+        if let Some(pk) = &snap.parked
+            && !made.contains_key(&pk.id)
+        {
+            let blank: Vec<String> = present.iter().filter(|c| empty(self, c)).cloned().collect();
+            if !blank.is_empty() {
+                if let Some(id) = self.restored_source(&snap, &pk.id, &mut made) {
+                    for c in blank {
+                        let _ = self.graph.set(
+                            &p(&format!("lay:{c}:main.content")),
+                            PropValue::Str(id.clone()),
+                        );
+                    }
+                }
+            } else if self.parked.is_none() {
+                if let Some(id) = self.restored_source(&snap, &pk.id, &mut made) {
+                    self.park(&id, false, pk.connector.clone());
+                }
+            } else {
+                dropped.push(pk.id.clone());
+            }
+        }
+        for conn in &present {
+            if !snap.outputs.contains_key(conn)
+                && empty(self, conn)
+                && let Some(cur) = self.current_wallpaper()
+            {
+                let _ = self
+                    .graph
+                    .set(&p(&format!("lay:{conn}:main.content")), PropValue::Str(cur));
+            }
+        }
+        if !dropped.is_empty() {
+            log::event(
+                "snapshot",
+                Level::Warn,
+                "snapshot.dropped",
+                None,
+                json!({ "sources": dropped,
+                        "why": "saved for connectors that aren't present, and only one wallpaper can be parked" }),
+            );
+        }
+        log::event(
+            "snapshot",
+            Level::Info,
+            "snapshot.restored",
+            None,
+            json!({ "sources": made.len(), "outputs": outputs, "age_ms": age_ms,
+                    "parked": self.parked.as_ref().map(|pk| pk.id.clone()), "ids": made }),
+        );
+    }
+
+    /// Whether `id`'s `gain.anticlick` animation is still the restore fade-in (not
+    /// superseded by a recipe's or a park's ramp).
+    fn restore_fade_pending(&self, id: &str) -> bool {
+        self.anim
+            .corr_of(&p(&format!("{id}.gain.anticlick")))
+            .is_some_and(|c| c.0 == RESTORE_FADE)
+    }
+
+    /// A restored source is ready: start its 30 ms ramp in — unless something else took
+    /// its `gain.anticlick` meanwhile (a transition's hold ramp: that one rules).
+    fn start_restore_fade(&mut self, id: &str) {
+        if !self.restore_fade_pending(id) {
+            return;
+        }
+        self.anim.add(Animation {
+            target: p(&format!("{id}.gain.anticlick")),
+            from: db_to_lin(SILENT_DB),
+            to: 1.0,
+            start: self.now(),
+            duration: STOP_RAMP,
+            curve: Curve::Linear,
+            unit: AnimUnit::GainLinear,
+            corr: Some(CorrId(RESTORE_FADE.into())),
+        });
+    }
+
+    /// Create (once per saved id) the source the snapshot saved as `saved`. An audible one
+    /// (a playing video) starts at `gain.anticlick` −96 and ramps in over 30 ms once ready
+    /// (core invariant: a stream that will be heard starts silent): until then a
+    /// not-yet-started animation to 0 dB holds its place (`fade_in`).
+    fn restored_source(
+        &mut self,
+        snap: &Snapshot,
+        saved: &str,
+        made: &mut BTreeMap<String, String>,
+    ) -> Option<String> {
+        if let Some(id) = made.get(saved) {
+            return Some(id.clone());
+        }
+        let s = snap.sources.get(saved)?;
+        let mut props = s.create_props();
+        let audible = s.kind == "video" && !s.paused;
+        if audible {
+            props.insert("gain.anticlick".into(), json!(SILENT_DB));
+        }
+        match self.graph.create(NodeKind::Source, None, props) {
+            Ok(id) => {
+                if audible {
+                    // Starts "never" until `start_restore_fade` re-adds it at Ready.
+                    self.anim.add(Animation {
+                        target: p(&format!("{id}.gain.anticlick")),
+                        from: db_to_lin(SILENT_DB),
+                        to: 1.0,
+                        start: self.now() + Duration::from_secs(365 * 24 * 3600),
+                        duration: STOP_RAMP,
+                        curve: Curve::Linear,
+                        unit: AnimUnit::GainLinear,
+                        corr: Some(CorrId(RESTORE_FADE.into())),
+                    });
+                    self.fade_in.insert(id.clone());
+                }
+                made.insert(saved.to_string(), id.clone());
+                Some(id)
+            }
+            Err(e) => {
+                log::event(
+                    "snapshot",
+                    Level::Warn,
+                    "snapshot.source_failed",
+                    None,
+                    json!({ "source": saved, "path": s.path, "error": e.to_string() }),
+                );
+                None
+            }
+        }
     }
 
     // ------------------------------------------------------------------ stepped mode
@@ -1437,6 +1925,7 @@ impl Runtime {
             drop(c); // closes the socket, after its registration is gone
         }
         self.tap.set_topics(self.server.topics());
+        self.snapshot_maybe();
     }
 
     fn has_more_input(&self) -> bool {
@@ -1507,7 +1996,8 @@ fn signal_fd() -> Result<OwnedFd, String> {
 
 /// `lp-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
 /// connection is lost — then every source is silenced and torn down, and it returns `Err`).
-pub fn serve(opts: ServeOpts) -> Result<(), String> {
+pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
+    supervise::make_sent_faults_fatal(); // `kill -SEGV` crashes, never shrugged off
     let sigfd = signal_fd()?;
     log::init(&opts.state_dir, opts.log_level).map_err(|e| {
         format!(
@@ -1515,6 +2005,31 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
             opts.state_dir.display()
         )
     })?;
+    // R73: a restarted child says why, first thing (the supervisor has no socket).
+    let restart_event = opts
+        .supervised
+        .as_ref()
+        .and_then(|s| s.restart.as_ref())
+        .map(|r| r.event_fields(supervise::mono_ms()));
+    if let Some(f) = &restart_event {
+        log::event(
+            "supervisor",
+            Level::Warn,
+            "supervisor.restart",
+            None,
+            f.clone(),
+        );
+    }
+    if std::env::var(supervise::TEST_CRASH_ENV).as_deref() == Ok("startup") {
+        log::event(
+            "runtime",
+            Level::Warn,
+            "test.crash",
+            None,
+            json!({ "env": supervise::TEST_CRASH_ENV }),
+        );
+        std::process::abort(); // test knob (tests/supervise.rs): crash at startup
+    }
     let (listener, mut socket_file) = crate::api::server::bind(&opts.socket, opts.own_socket_dir)?;
     // Wayland: connect first (EGL needs the wl_display), then the context on it.
     let (gfx, wl_source) = if opts.wayland {
@@ -1573,7 +2088,11 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
     };
     let (backend, wl_source): (Box<dyn OutputBackend>, _) = match wl_source {
         Some((wl, src)) => (Box::new(wl), Some(src)),
-        None => (Box::new(Headless::new(&gfx, &opts.outputs)), None),
+        None => {
+            let mut h = Headless::new(&gfx, &opts.outputs);
+            h.set_content_paced(opts.redraw_content);
+            (Box::new(h), None)
+        }
     };
     let mut rt = Runtime {
         gfx,
@@ -1606,8 +2125,26 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         redraw: Redraw::new(),
         frames: BTreeMap::new(),
         audio,
+        out_props: BTreeMap::new(),
+        snap: SnapState {
+            writer: snapshot::Writer::start(&opts.state_dir),
+            due: None,
+            last_write: None,
+            seen_rev: 0,
+            frozen: false,
+            timer: None,
+        },
+        supervised: opts.supervised.clone(),
+        restart_event,
+        fade_in: BTreeSet::new(),
     };
     rt.apply_output_changes();
+    if opts.restore {
+        rt.restore_from_disk(&opts.state_dir);
+    }
+    // Always save the starting state soon: a crash right after a fresh (non-restore) start
+    // must not bring back an older session's snapshot.
+    rt.snapshot_dirty();
 
     let ins = |e: calloop::InsertError<_>| format!("event loop: {}", e.error);
     handle
@@ -1704,6 +2241,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
                 json!({ "error": e.to_string(), "backend": rt.backend.kind() }),
             );
             fatal = Some(format!("event loop ({} backend): {e}", rt.backend.kind()));
+            rt.snapshot_final(); // the restarted player (exit 3) restores what was shown
             rt.stop_all(true);
             break;
         }
@@ -1728,5 +2266,5 @@ pub fn serve(opts: ServeOpts) -> Result<(), String> {
         unsafe { libc::_exit(0) };
     }
     drop(socket_file);
-    fatal.map_or(Ok(()), Err)
+    fatal.map_or(Ok(()), |m| Err(ServeError::Runtime(m)))
 }

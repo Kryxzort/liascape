@@ -21,8 +21,8 @@ happen regardless of timing.
 ## Module map
 
 - `src/main.rs` — CLI entry point: `--version`, `serve` (§ Runtime; without `--headless`
-  = real Wayland outputs, § Wayland), `ctl` (§ Command API); any other invocation prints
-  usage and exits 2.
+  = real Wayland outputs, § Wayland; supervised unless `--no-supervise`, § Supervisor),
+  `ctl` (§ Command API); any other invocation prints usage and exits 2.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
@@ -46,6 +46,10 @@ happen regardless of timing.
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `Audio` (what
   `serve` runs, `mod.rs`). § Audio bus.
+- `src/supervise.rs` — the supervisor (`serve` without `--no-supervise`): spawns, waits
+  for and restarts the compositor child (Task 16). § Supervisor.
+- `src/snapshot.rs` — the persisted state snapshot (`<state>/snapshot.json`, `--restore`)
+  + its writer thread (Task 16). § Snapshot.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -1018,8 +1022,16 @@ handoff) are unit-tested graph-only in `recipes/transition.rs` (synthetic events
 
 `src/runtime.rs` + `src/headless.rs` (spec §4.1/§4.2, §9 "headless deterministic mode";
 Task 12). `lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
-[--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace]` — defaults
-`1920x1080@60`, `real`, mpv's lp-player default ao (`pipewire`), `info`. **`--ao null` in
+[--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace] [--restore]
+[--no-supervise] [--redraw-policy content|every_tick]` — defaults `1920x1080@60`, `real`,
+mpv's lp-player default ao (`pipewire`), `info`. `serve` is **supervised** unless
+`--no-supervise` (§ Supervisor: the process you start is the supervisor, the compositor is
+its child); `--restore` recreates `<state>/snapshot.json` (§ Snapshot);
+`--redraw-policy content` (headless only) presents like Wayland — only when the picture
+changed (§ Wayland → Frame pacing) — instead of composing every tick. **Exit codes:** 0
+clean (quit / SIGTERM / SIGINT), 1 refused or failed at startup (lock held, no compositor,
+no EGL, state dir), 2 usage, 3 the compositor connection was lost mid-run
+(`ServeError::Runtime`; restarted when supervised), 4 the supervisor gave up. **`--ao null` in
 every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent —
 and no audio bus is created (§ Audio bus). With the default AO, `serve` creates the bus
 right after binding the socket (a second instance exits before touching PipeWire) and
@@ -1103,7 +1115,12 @@ read-only props via `set_observed`, `output.changed`). `Headless`: `VIRTUAL-1…
 `headless.*` handlers) creates/destroys `out:<name>` (+ its main layer,
 `name/width/height/refresh_hz`); Wayland hotplug runs exactly this path:
 
-- **Added (R59):** the new output **joins the live transition covering the first other
+- **Added (R59):** its **remembered output props** are re-applied first (Task 16:
+  `Runtime::out_props` — the settable `out:` props, `layer`/`paused`, that differed from
+  their defaults when that connector was removed, or that a restored snapshot saved for a
+  connector that wasn't present; `output_props_survive_replug`). If the parked wallpaper
+  was parked **for this connector** (`Parked::connector`, only set by a restore), it shows
+  that. Else the new output **joins the live transition covering the first other
   output** (`Transitions::adopt_output`, `transition.output_adopted`): it becomes one of
   that transition's outputs on that output's side (so its A is not "shown outside"), shows
   what the transition shows now (A before Running, the effect while Running, B after
@@ -1138,6 +1155,13 @@ one goes at once. `MpvSource` then sends its teardown `stop` only once its last 
 has reached mpv, and `source.teardown {id, source_kind, gain_db}` records the level it
 went at (`destroy_ramps_audible_source_out` asserts ≤ −95.9 and a ramp seen in between).
 Parking pauses one tick after its ramp for the same reason.
+
+**Runtime ↔ snapshot/supervisor (Task 16).** `sync_sources` marks the snapshot dirty on
+any drained change or `picture_rev` move; `after_dispatch` writes it when due (§
+Snapshot); `begin_quit` and the `loop.failed` path queue the **final** snapshot before
+`stop_all` empties the graph. The Animator's per-tick values go through
+`Graph::set_animated` (recorded, but not a `picture_rev` move) and `Redraw::mark_nodes`
+marks only the outputs showing the animated node (§ Wayland → Frame pacing).
 
 **stop / quit.** `stop`: every live transition dropped (`transition.cancelled {reason:
 "stopped"}`), animator reset, the parked wallpaper forgotten, every layer emptied,
@@ -1190,7 +1214,7 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid, protocol: 1, capabilities: [video, image, color, transition, headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
 | `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
@@ -1225,6 +1249,10 @@ gl_error|duplicate_output|pointer_error`, `input.pointer` (debug), `loop.failed`
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
 `step.timeout`, `mpv.reaped`, `mpv.reaper_stragglers`, `effects.missing`,
+`supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
+stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
+`snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|
+write_failed|write_recovered`, `test.crash`,
 `audio.bus.up|down|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
 `audio.meter.started`, `compose.failed` — i.e. every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
@@ -1257,7 +1285,10 @@ subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`; `frames` (Task 13,
 [{name, hz, refresh_mhz, period_ms, idle, frame_pending, since_present_ms, paced {count,
 mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
 missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
-Wayland → Frame pacing); `bus` and `meter.window` (§ Audio bus). `sources` also has
+Wayland → Frame pacing; Task 16 adds `totals.present_failed`, `last_present_error`,
+`retry_in_ms`); `bus` and `meter.window` (§ Audio bus); `snapshot` (Task 16,
+`probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
+due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
 one `PROBES` entry.
 
@@ -1307,7 +1338,7 @@ configures, frame callbacks, pointer); GPU work and graph changes run after the 
 | what | value |
 |---|---|
 | namespace | `lp-player` (`hyprctl layers`) |
-| layer | `out:<c>.layer` (`background` default, `bottom`, `top`, `overlay`) — **live**: `set_layer` + a bare commit (layer-shell v2+; on v1 the surface is re-created) |
+| layer | `out:<c>.layer` (`background` default, `bottom`, `top`, `overlay`) — **live**: `set_layer` + a bare commit (layer-shell v2+, surface mapped); on v1, or while the surface isn't mapped yet (no configure / no window target), the surface is **re-created** on the new layer — on Hyprland 0.56 a `set_layer` before mapping was lost (a re-plugged output's remembered layer stayed background; measured, Task 16) |
 | anchor / size | all four edges, size 0×0 → the compositor's configure size (× integer `wl_output` scale via `set_buffer_scale`) |
 | exclusive zone | −1 (covers the whole output, ignores bars' zones) |
 | keyboard | none |
@@ -1332,19 +1363,45 @@ is premultiplied over transparent black, so its RGB already is the picture over 
 request a frame callback, `eglSwapBuffers` (= attach + full damage + commit). The output
 is `ready` (`FrameState`) again when that callback arrives.
 
+**Failed presents (Task 16, review c).** `wl_surface.frame` is double-buffered state that
+rides on the next commit, which `eglSwapBuffers` makes — so it has to be requested before
+the swap. A swap that fails makes no commit and leaves that request pending: the output
+keeps it **armed** (`WlOut::frame_armed`, cleared by the callback or a successful swap) and
+never requests a second one; `frame_pending` is set only once a swap succeeded. A failed
+present (`make_current` or swap) backs off — `present_backoff`: 100 ms after the first,
+then 1 s while it keeps failing (`frame_state.ready` is false meanwhile, `retry_in_ms`) —
+and is logged rate-limited (`output.present_failed`, ≤ 1 per 5 s per output with
+`suppressed`); the `frames` probe shows `totals.present_failed`, `last_present_error`,
+`retry_in_ms`. **Resize (review d):** the FBO/texture re-create on a new size makes the
+window's context current explicitly first (on failure the old targets are kept, the size
+marked failed); a new window target is current from `set_swap_interval` on.
+
 **Frame pacing + redraw policy (decided — `redraw.rs`).** Every output presents on its own
 frame callbacks at its own refresh; nothing waits on another output. An output that can
 take a frame is drawn only if, since its last present: `Graph::picture_rev` moved (any
-create/destroy/non-gain set — conservative, wakes every output once), a source it shows
-(main-layer content or either effect side) has a new texture (`SourceHost::take_changed`),
-the backend asked (configure/resize/re-created surface), **or something animates** (a
-started, unfinished animation on a non-gain path — transitions, opacity ramps): then it
-presents on *every* callback, even between two animator ticks. Otherwise it is **idle** —
-no frame drawn, no callback requested, `frames` probe `idle: true` — so a static colour or
-image costs nothing, and a playing video presents at its own frame rate (each frame at the
-next refresh — same latency as redrawing every vblank, without the duplicates). The
-animator timer (R47) still ticks at the max output Hz (≈ 23 µs per idle tick measured, ~0 %
-CPU). Headless keeps composing every tick (`paced() == false`).
+create/destroy/non-gain set other than the Animator's — conservative, wakes every output
+once), an **animated value changed on a node it shows** (the Animator's per-tick sets go
+through `Graph::set_animated`, which doesn't move `picture_rev`; `Redraw::mark_nodes` marks
+only the outputs whose `shown_nodes` — `out:<c>`, its main layer, that layer's content
+(source or effect), the effect's sides — contain the animated node, so the final value is
+drawn too), a source it shows has a new texture (`SourceHost::take_changed`), the backend
+asked (configure/resize/re-created surface), **or something animates on it**
+(`animating_on`: a started, unfinished, non-gain animation on one of its `shown_nodes` —
+transitions, opacity ramps): then it presents on *every* callback, even between two
+animator ticks. **Per output (Task 16, review a):** an animation on DP-1's layer never
+wakes DP-2 — before, one global "animating" flag (and the animated sets' `picture_rev`
+bumps) presented every output at its refresh. Otherwise it is **idle** — no frame drawn,
+no callback requested, `frames` probe `idle: true` — so a static colour or image costs
+nothing, and a playing video presents at its own frame rate (each frame at the next
+refresh — same latency as redrawing every vblank, without the duplicates). Headless keeps
+composing every tick (`paced() == false`) unless `--redraw-policy content` (then it uses
+this policy with every output always able to take a frame — no frame callbacks, so an
+animating output presents on every loop pass; `mixed_content_static_output_stays_idle`).
+
+**Idle animator timer (decided: keep).** The R47 tick timer keeps ticking at the max output
+Hz even when every output is idle: ≈ 23 µs per idle tick (measured, Task 13), ~0 % CPU.
+Stopping it when nothing animates would need every animation start, transition phase,
+step and stop deadline to re-arm it — more ways to stall than it saves.
 
 **`frames` probe** (`probe/frames.rs`, rolling 2 s windows per output): `paced` = intervals
 between presents made back to back (the second drawn on the first one's callback, no idle
@@ -1359,6 +1416,8 @@ layer, the owner's windows covering it):
 | 240 fps test clip | 6.945, 6.947 / 7.93, 7.67 / 14.5, 8.4 ms; 3, 0 missed | 4.203, 4.176 / 4.91, 4.51 / 11.5, 5.6 ms; 4, 0 missed |
 | 60 fps test clip | 60.0 presents/s (content-paced, idle between frames) | 60.0 presents/s |
 | static colour | idle, 0 presents/s | idle, 0 presents/s |
+| mixed (Task 16): 60 fps clip on DP-1, static colour on DP-2 | 62–64 presents/s | idle, 0 presents in 1 s |
+| mixed + opacity animation on DP-1's layer only (two runs) | 6.944, 6.943 / 7.95, 7.86 / 8.5, 8.6 ms; 0 missed of 288 | idle, 0 presents in 2 s |
 
 (Run 1 ran while another lane's test suite was busy on the machine — its outliers.)
 Hyprland keeps sending frame callbacks to fully covered surfaces (a full-screen top-layer
@@ -1372,8 +1431,10 @@ order `gl` then `surface`). A `closed` layer surface whose output stays is re-cr
 (`wl.surface_recreated`). The runtime runs the **same** add/remove path as headless
 hotplug (§ Runtime → Outputs: R59 adopt into a live transition, else `cur:` of the first
 output that has one — the same-wallpaper default the brief asks for —, else unpark; R60
-retire/park), plus `redraw.forget` + fresh `FrameStats`. A new output's `layer` starts at
-`background` (output props don't survive an unplug; the backend re-sends settings).
+retire/park), plus `redraw.forget` + fresh `FrameStats`. A re-plugged connector gets its
+remembered output props back (`layer` …, Task 16 — before, it came back on `background`);
+a connector never seen starts at the defaults. Verified on-machine: `out:DP-1.layer =
+bottom` → unplug → replug → `bottom`, hyprctl level 1.
 
 **Pointer.** sctk `PointerHandler`: enter/leave/motion/press/release on our surface →
 `PointerSample {output, x, y, buttons}` (surface pixels = logical × scale; buttons: bit 0
@@ -1421,7 +1482,17 @@ samples); a 60 fps clip ≈ 60 presents/s; hotplug: `hyprctl eval 'hl.monitor({ 
 refused** — "keyword can't work with non-legacy parsers. Use eval." — and re-enabling needs
 an explicit **`disabled = false`**) → `out:DP-1` gone, player alive → re-enabled with the
 **recorded** mode/position/scale (never `preferred,auto`) → `out:DP-1` back showing
-`cur:DP-2`, pixel verified, layout identical to the record; `ctl quit` → exit 0. **Safety:**
+`cur:DP-2` with its remembered `layer` (`bottom`, set before the unplug), pixel verified,
+layout identical to the record; **mixed content** (Task 16: 60 fps clip on DP-1, colour on
+DP-2 → DP-2 idle, then an opacity animation on DP-1 only → DP-1 paced 6.9 ms, DP-2 still 0
+presents); **crash → restart** (`kill -SEGV` the compositor child → `hello` from a new pid
+≤ 1.5 s — measured 151/164 ms — both outputs restored, pixels verified, background level
+again); `ctl quit` → exit 0. `serve` runs supervised: `SERVE_PID` is the supervisor,
+`PLAYER_PID` (`hello.pid`) the child that owns the surfaces (layer checks use it). It runs
+under `prlimit --core=1:1`: RLIMIT_CORE 1 makes the kernel skip the piped core handler
+(with 0, systemd-coredump still runs and DrKonqi pops a crash notification). Pixel checks
+fall back to the (¼ w, ¾ h) pixel if the centre is covered (the owner's shell put a
+notification popup over DP-2's centre on the overlay level). **Safety:**
 an `EXIT` trap restores the focused monitor + cursor, kills `serve` (no lp-player layer may
 remain — checked), re-applies any monitor that differs from the record with its exact
 values and verifies `hyprctl monitors -j` matches, and moves workspaces back to their
@@ -1568,3 +1639,130 @@ re-points it within ms, faster than polling `pw-link -l` can see), then `audio.b
 to the policy's sink + `overridden` reported. Both: exactly one `audio.bus.retargeting` per
 default change (no fight), `audio.bus.up {requested}` ≤ 1 s, meter gap ≤ 50 ms across it
 (measured 8–34 ms), and back to the original default within 1 s.
+
+## Supervisor
+
+`src/supervise.rs` + `main.rs` (spec §4.1 "Supervision"; Task 16, R72/R73). `lp-player
+serve …` **is the supervisor** unless `--no-supervise`: before any thread, GL context or
+PipeWire connection exists it fork+execs `/proc/self/exe serve --supervised [--restore]
+[--restarted <spec>] <the user's options>` (argv[0] kept; the child sets its comm back to
+`lp-player` — exec of `/proc/self/exe` would make it `exe`), then only waits and forwards
+signals. It never binds the socket or takes the instance lock (the child does, as before),
+never touches EGL/PipeWire, has no socket. `/proc/self/exe` means a restart runs the same
+binary as the supervisor even after a rebuild replaced the file.
+
+- **Child setup (between fork and exec):** empty signal mask (the supervisor blocks
+  SIGCHLD/SIGINT/SIGTERM for `sigtimedwait`), `PR_SET_PDEATHSIG(SIGTERM)` then `getppid()`
+  re-checked — a supervisor killed outright (SIGKILL) never leaves an orphan player: the
+  child gets SIGTERM and quits cleanly.
+- **Clean exits end supervision** (`classify`): child exit 0 (quit, SIGTERM/SIGINT), 1
+  (refused/failed at startup — another instance holds the lock, no compositor, no EGL, bad
+  state dir; restarting can't help, and the backend's "exit 1 = already running" rule keeps
+  working), 2 (usage). The supervisor exits with the same code.
+- **Crashes are restarted immediately:** death by a signal, a Rust panic (101),
+  `EXIT_RUNTIME` 3 (the compositor connection was lost mid-run — `ServeError::Runtime`; if
+  the compositor is really gone the restarted child fails to connect, exits 1, and
+  supervision ends), any other code. The new child gets `--restore` (restores the snapshot,
+  § Snapshot) and `--restarted signal=N|code=N,count,total,died_ms,prev_pid,restore`, and
+  logs **`supervisor.restart {signal|code, count, total, since_ms, prev_pid, restore}`**
+  (warn) as its first event after the log opens (R73; `since_ms` = from the supervisor
+  seeing the death, `CLOCK_MONOTONIC`, to that event). `hello.restart` repeats those fields
+  — a client that reconnects after a restart (the backend adapter, Task 17) can't receive
+  an event logged before it subscribed, so it reads `hello.restart` or `ctl logs
+  '{"kind_prefix":"supervisor."}'`.
+- **Budget:** 5 restarts per sliding 60 s (`Budget`); the 6th crash in the window →
+  `supervisor.giving_up {signal|code, pid, restarts, window_s, hint}` (error) and exit 4.
+  From the 4th restart in the window the child starts **without** `--restore` (a snapshot
+  that crashes the player at startup must not take supervision down; `restore: false` in
+  `supervisor.restart`).
+- **Stop:** SIGTERM/SIGINT to the supervisor are forwarded to the child; it waits ≤ 10 s
+  (`STOP_WAIT`; then SIGKILL, `supervisor.stop_timeout`) and exits with the child's status
+  — never a restart.
+- **The supervisor's log lines** (`supervisor.child_exited {pid, signal|code, uptime_ms}`
+  warn on every crash, `giving_up`, `stop_timeout`, `spawn_failed`) are appended to the
+  shared `events.jsonl` with `log::append_detached` (one `O_APPEND` write per line, never
+  rotates; `t_mono_ms` is the supervisor's own clock, `comp: "supervisor"`), plus one
+  stderr line per restart / give-up.
+- **A sent SIGSEGV/SIGBUS is a crash** (`make_sent_faults_fatal`, first thing in `serve`):
+  Rust's runtime handles SIGSEGV/SIGBUS for its stack-overflow check and, for anything else,
+  resets the handler and *returns* — a real fault re-faults and dies, but a `kill -SEGV`
+  (si_code ≤ 0) was survived once (measured: the child kept running). Our handler re-raises
+  a sent one with the default action and hands real faults back to Rust's handler.
+- **Measured restart latency** (SIGSEGV → `hello` answers from the new pid): headless tests
+  145–200 ms (`crash_restores`, `RLIMIT_CORE` 1), on-machine Wayland 151 / 164 ms
+  (`outputs.sh`); `since_ms` 25–35 ms; the rest is the kernel tearing the old process down
+  (+ ~200 ms more when systemd-coredump takes a core: 232–259 ms measured with cores on)
+  and the new child's startup (~50 ms headless). On Wayland the old surfaces vanish with the
+  old process, so the desktop behind shows for that ~0.2 s.
+- **Test knob:** `LP_PLAYER_TEST_CRASH=startup` → every child logs `test.crash` and aborts
+  right after `supervisor.restart` (`gives_up_after_5_in_60s`). Tests set `RLIMIT_CORE` 1
+  for every spawned process: the kernel then skips a piped `core_pattern` entirely ("RLIMIT_CORE
+  is set to 1, aborting core"); with 0, systemd-coredump still runs and the desktop's crash
+  handler (DrKonqi) pops a notification per crash.
+- **Tests** (`tests/supervise.rs`, supervised headless real clock): `crash_restores`,
+  `clean_quit_not_restarted` (quit; SIGTERM to the supervisor; SIGTERM to the child),
+  `gives_up_after_5_in_60s`, `corrupt_snapshot_starts_empty`,
+  `transition_in_flight_restores_as_b`, `parked_restores_parked`,
+  `output_props_survive_replug`. `tests/api.rs` runs `--no-supervise` (its pid/lock/SIGTERM
+  checks are about the compositor itself); `wayland_serve_args_and_missing_compositor`
+  stays supervised (exit 1 passes through, no restart).
+
+## Snapshot
+
+`src/snapshot.rs` + `Runtime` (spec §4.1; Task 16, R74). What the player shows, persisted
+to `<state>/snapshot.json` so a restarted player comes back with the same wallpaper at the
+same place.
+
+- **Format (`version` 1, pretty JSON):** `saved_unix_ms`; `player` (settable Player props:
+  `debug`); `outputs` — per present connector `{content: <source key>|null, props
+  (settable output props ≠ default: layer, paused), layer (main layer fit, viewport,
+  opacity)}`; `output_props` — remembered props of connectors not present; `sources` — per
+  referenced source `{kind, path, position, paused, speed, loop, gains (set slots except
+  xfade/anticlick), props (every other settable source prop: color, hwdec, fps_cap, cache,
+  demuxer_*, af, no_audio, audio_delay), playing, transition_target}`; `parked` — `{id,
+  resume_paused, connector}`. Source keys are references inside the file only: a restore
+  mints fresh ids (`snapshot.restored.ids` maps old → new).
+- **Excluded:** effects, `snapshot`-kind sources, sources no output shows (graves, held A's,
+  anything created but not shown), every in-flight transition's scaffolding. **A transition
+  in flight is saved as its target B** on the outputs it covers (`transition_target: true`,
+  `paused: false`, no xfade/anticlick, its position = its requested start until it plays);
+  an effect shown without a transition is saved as its `to` side.
+- **Values:** an animating number (gain, opacity, speed) is saved at the animation's target
+  while it is **live** (`Animator::live_target_of`), else the value itself — a finished
+  animation's target is stale once something `set` the prop (outputs.sh caught 0.97
+  restored after `animate` → 0.97 then `set` 1). Position = `time_pos` once a video is
+  ready, else the requested `position`.
+- **When:** `DEBOUNCE` 250 ms after the first unsaved change (any drained graph change or
+  `picture_rev` move — sets, creates, destroys; a burst is one write, a continuous
+  animation can't postpone it; a one-shot calloop timer wakes a stepped-clock loop), every
+  `REFRESH` 2 s while a video plays (positions move without changes), at startup (a fresh
+  start must not leave an older session's snapshot for the next crash), and once more on
+  exit: `quit`/SIGTERM and the `loop.failed` path queue the **final** snapshot *before*
+  `stop_all` empties the graph, then no more writes (`frozen`) — so a later `serve
+  --restore` brings back what was on screen; `stop` itself is a change → an empty snapshot.
+- **Writing:** on the `lp-snapshot` thread (latest queued wins): `snapshot.json.tmp` +
+  `fsync`, rename, `fsync` the dir — a crash mid-write leaves the previous file. Failures:
+  `snapshot.write_failed` once per streak (+ hint), `write_recovered`; `snapshot.saved
+  {bytes, write_ms}` at debug. The writer is joined in `shutdown`.
+- **`--restore`:** missing file → `snapshot.none`; unreadable/corrupt JSON/unknown
+  `version`/dangling reference → `snapshot.invalid {reason, moved_to}`, the file moved to
+  `snapshot.invalid.json`, the player starts empty (never a crash loop over a bad file).
+  Otherwise, after the initial outputs exist: player props; each saved connector that is
+  present gets its output props, main-layer settings and content at the saved position
+  (**exactly** the saved position — no elapsed-time compensation; the 2 s refresh bounds
+  the drift); a saved connector that is missing keeps its props for when it appears, and its
+  content — unless a present output shows it — is **parked for that connector**
+  (`Parked::connector`; shown when that connector appears, before any other rule; only one
+  wallpaper can be parked — further ones `snapshot.dropped`); the saved parked wallpaper is
+  shown on the outputs that show nothing, else parked again; a present connector the
+  snapshot didn't know shows the current wallpaper (as hotplug would). Then
+  `snapshot.restored {sources, outputs, age_ms, parked, ids}`. A value the schema rejects
+  is `snapshot.prop_rejected` / `snapshot.source_failed` and skipped.
+- **Audio on restore (core invariant):** a restored playing video starts at
+  `gain.anticlick` −96 with a *not-yet-started* animation to 0 dB (corr `restore-fade`);
+  at `source.ready` that animation is re-added from now (30 ms ramp in). Until then
+  `target_of` reports 0 dB, so a transition starting meanwhile records (R41) the 0 dB it is
+  heading to; a recipe's own anticlick ramp supersedes it (the restore fade then does
+  nothing); parking cancels it (unpark ramps from −96).
+- **`snapshot` probe:** `{path, writes, failures, last_write_ms, since_last_write_ms,
+  due_in_ms, frozen, current}` — `current` is what would be written now.

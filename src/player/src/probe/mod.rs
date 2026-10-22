@@ -11,9 +11,12 @@
 //! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
 //!   mean/p50/p95/max/count/missed; all: + fps), idle, frame callback state.
 //! - `bus`, `meter.window` (`audio.rs`, Task 14) — the player audio bus and its meter.
+//! - `snapshot` (`snapshot.rs`, Task 16) — the state snapshot: what would be saved now,
+//!   when it's next written, writer counters.
 
 mod audio;
 pub mod frames;
+mod snapshot;
 
 use serde_json::{Map, Value, json};
 
@@ -41,6 +44,11 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         "frames",
         frames::frames,
         "per output: present intervals (mean/p50/p95/max/count/missed), fps, idle, callbacks",
+    ),
+    (
+        "snapshot",
+        snapshot::snapshot,
+        "the state snapshot: what would be saved now, next write, writes/failures",
     ),
     (
         "bus",
