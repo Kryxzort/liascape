@@ -109,12 +109,31 @@ public sealed class LpPlayerClient
         _rd = null; _sock = null;
     }
 
+    // Synchronous queries (PlayerHelper may ask while holding its _lock) never wait longer than this.
+    public const int QuickMs = 300;
+
+    // Stall breaker: after a request times out, every request fails fast with `timeout` for StallMs —
+    // a stopped/stalled player costs ONE timeout, not one per caller (a SIGSTOPped player must not make
+    // /settings take seconds). The first request after the window tries for real.
+    private const int StallMs = 3000;
+    private long _stalledUntil;
+    public bool IsStalled => Environment.TickCount64 < Interlocked.Read(ref _stalledUntil);
+
     // One request → its reply's `result`. Throws LpPlayerException: the player's error object, or
-    // `io` (no player / connection lost) / `timeout` (no reply within timeoutMs), each with a hint.
+    // `io` (no player / connection lost) / `timeout` (no reply within timeoutMs, the request connection
+    // busy for longer than that, or the stall breaker open), each with a hint.
     public JsonElement Call(string cmd, object? args, int timeoutMs = 2000)
     {
-        lock (_cmdLock)
+        // waiting for the connection counts against the same timeout (a query must not sit behind a
+        // switch that waits out its own 2 s on a stalled player)
+        if (!Monitor.TryEnter(_cmdLock, Math.Max(1, timeoutMs)))
+            throw new LpPlayerException("timeout", $"`{cmd}`: the request connection stayed busy for {timeoutMs} ms",
+                "another request is waiting on a slow player — `lp-player ctl probe '{\"name\":\"loop\"}'`");
+        try
         {
+            if (IsStalled)
+                throw new LpPlayerException("timeout", $"`{cmd}`: lp-player is not responding (a request timed out < {StallMs / 1000} s ago)",
+                    "is it stopped or stalled? `lp-player ctl probe '{\"name\":\"loop\"}'` — requests resume on their own once it answers");
             if (!EnsureConnected())
                 throw new LpPlayerException("io", $"no lp-player answering on {SocketPath}",
                     "select Player engine = lp-player (livepaper starts it) or run `lp-player serve`");
@@ -170,8 +189,10 @@ public sealed class LpPlayerClient
                                 if (restarted) try { Restarted?.Invoke(); } catch (Exception ex) { Log($"restart handler threw: {ex.Message}"); }
                             }
                         }
+                        Interlocked.Exchange(ref _stalledUntil, 0);
                         return result;
                     }
+                    Interlocked.Exchange(ref _stalledUntil, 0); // an error reply is still an answer
                     var e = root.GetProperty("error");
                     throw new LpPlayerException(Prop(e, "code") ?? "error", Prop(e, "message") ?? "", Prop(e, "hint") ?? "");
                 }
@@ -181,11 +202,15 @@ public sealed class LpPlayerClient
             {
                 Disconnect();
                 if (ex is TimeoutException || ex.InnerException is SocketException { SocketErrorCode: SocketError.TimedOut } || ex is IOException { InnerException: SocketException { SocketErrorCode: SocketError.TimedOut } })
+                {
+                    Interlocked.Exchange(ref _stalledUntil, Environment.TickCount64 + StallMs);
                     throw new LpPlayerException("timeout", $"no reply to `{cmd}` within {timeoutMs} ms",
                         "pass a longer timeout; is the loop stalled? `lp-player ctl probe '{\"name\":\"loop\"}'`");
+                }
                 throw new LpPlayerException("io", $"`{cmd}`: {ex.Message}", "the player went away — `lp-player ctl hello` to check, livepaper restarts it on the next switch");
             }
         }
+        finally { Monitor.Exit(_cmdLock); }
     }
 
     // Call that logs the error (with its hint) instead of throwing → null.
@@ -202,6 +227,33 @@ public sealed class LpPlayerClient
     {
         if (!File.Exists(SocketPath)) return false;
         try { Call("hello", null, 1000); return true; } catch (LpPlayerException) { return false; }
+    }
+
+    [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int sig);
+
+    // Is `pid` (still) an lp-player process? (guards against a recycled pid)
+    private static bool IsPlayerProcess(int pid)
+    {
+        try { return File.ReadAllText($"/proc/{pid}/cmdline").Contains("lp-player"); } catch { return false; }
+    }
+
+    // Make sure the player process is GONE (engine switch away from lp-player): `quit`, then SIGTERM
+    // (a clean exit too), then SIGKILL — each step waits ≤ waitMs for the process to leave. A SIGSTOPped
+    // player gets SIGCONT first so it can handle the TERM.
+    public void QuitOrKill(int waitMs = 1500)
+    {
+        int? pid = PlayerPid;
+        if (SocketExists) { try { Call("quit", null, QuickMs); } catch (LpPlayerException) { } }
+        StopEvents();
+        if (pid is not int p) return;
+        bool Gone(int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (!IsPlayerProcess(p)) return true; Thread.Sleep(25); } return !IsPlayerProcess(p); }
+        if (Gone(waitMs)) return;
+        Log($"lp-player (pid {p}) did not quit — SIGTERM");
+        kill(p, 18); kill(p, 15); // SIGCONT, SIGTERM
+        if (Gone(waitMs)) return;
+        Log($"lp-player (pid {p}) ignored SIGTERM — SIGKILL");
+        kill(p, 9);
+        Gone(waitMs);
     }
 
     public bool WaitForSocket(int timeoutMs)
@@ -231,6 +283,8 @@ public sealed class LpPlayerClient
             // a start that just failed isn't retried for 10 s — a broken player must not be respawned
             // on every switch attempt (the rotation's fallback retries once a second)
             if (_lastSpawnFail != 0 && Environment.TickCount64 - _lastSpawnFail < 10_000) return false;
+            // alive but not answering (stopped/stalled): a second `serve` would only lose the instance lock
+            if (IsStalled && SocketExists) { LastError = "lp-player is not responding"; return false; }
             var bin = PlayerEngine.ResolveBinary();
             if (bin == null) { Fail(PlayerEngine.UnavailableReason); return false; }
             Process? p;

@@ -100,9 +100,12 @@ export const Settings = memo(function Settings() {
   // Monitor auto-detection feeds a datalist so the name fields autocomplete real outputs
   // instead of pure free-text guessing.
   useEffect(() => { api.monitors().then(setDetected).catch(() => {}); }, []);
-  // re-read after an engine change: the backend switches live (and may report a start failure)
+  // read at once on mount, then again after an engine change (the backend switches live and may
+  // report a start failure). Unreachable → not available, with the reason.
   useEffect(() => {
-    const t = setTimeout(() => api.playerEngine().then(setEngine).catch(() => {}), 600);
+    const t = setTimeout(() => api.playerEngine().then(setEngine)
+      .catch(() => setEngine({ active: "legacy", available: false, reason: "couldn't read the engine status from the backend" })),
+      engine === null ? 0 : 600);
     return () => clearTimeout(t);
   }, [g("playerEngine", "legacy")]); // eslint-disable-line
 
@@ -295,14 +298,18 @@ export const Settings = memo(function Settings() {
         <Row label="Advanced settings" hint="show disable-cache, hardware decoding, demuxer, copy-files & the live command previews" rk="advancedSettings"><input type="checkbox" checked={adv} onChange={(e) => set("advancedSettings", e.target.checked)} /></Row>
         {adv && (() => {
           const wantLp = g<string>("playerEngine", "legacy") === "lp-player";
-          // binary missing → the row is disabled with the reason (switching back to Legacy always stays possible)
-          const unavailable = engine !== null && !engine.available;
-          const hint = unavailable ? engine!.reason ?? "lp-player is not available"
-            : wantLp && engine?.active !== "lp-player" ? "lp-player selected but not running — " + (engine?.reason ?? "starting…")
-            : wantLp && engine?.reason ? engine.reason
+          // status not read yet → disabled ("checking…"); binary missing → disabled with the reason
+          // (switching back to Legacy always stays possible)
+          const loading = engine === null;
+          const unavailable = !loading && !engine.available;
+          const off = loading || (unavailable && !wantLp);
+          const hint = loading ? "checking lp-player…"
+            : unavailable ? engine.reason ?? "lp-player is not available"
+            : wantLp && engine.active !== "lp-player" ? "lp-player selected but not running — " + (engine.reason ?? "starting…")
+            : wantLp && engine.reason ? engine.reason
             : "which player draws the wallpaper. lp-player is the new all-in-one player (experimental: videos & images only for now — scenes are skipped). Switches live.";
-          return <Row label="Player engine" hint={hint} disabled={unavailable && !wantLp} rk="playerEngine">
-            <Select value={g("playerEngine", "legacy")} disabled={unavailable && !wantLp} onChange={(v) => set("playerEngine", v)}
+          return <Row label="Player engine" hint={hint} disabled={off} rk="playerEngine">
+            <Select value={g("playerEngine", "legacy")} disabled={off} onChange={(v) => set("playerEngine", v)}
               options={[{ value: "legacy", label: "Legacy" }, { value: "lp-player", label: "lp-player (experimental)" }]} />
           </Row>;
         })()}

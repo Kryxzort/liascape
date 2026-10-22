@@ -35,6 +35,39 @@ public static class LpPlayerMedia
         }
     }
 
+    // ---- the command queue: every lp-player MUTATION from PlayerHelper runs here ------------------
+    // PlayerHelper calls its primitives while holding its _lock; nothing under that lock may wait on the
+    // player (a stalled one would stall volume/speed/pause/tick). So switches, stop and property sets
+    // are queued — one ordered worker, FIFO, off every caller's thread — and return at once. Queries stay
+    // synchronous with LpPlayerClient.QuickMs (≤ 300 ms, then the stall breaker fails them fast).
+    private static readonly object _qLock = new();
+    private static Task _tail = Task.CompletedTask;
+
+    public static Task<T> Queue<T>(Func<T> f)
+    {
+        lock (_qLock)
+        {
+            // never faults: a throwing command is logged and yields default, so the chain (and any await) goes on
+            var t = _tail.ContinueWith(_ =>
+            {
+                try { return f(); }
+                catch (Exception e) { LpPlayerClient.Log($"queued lp-player command threw: {e.GetBaseException().Message}"); return default!; }
+            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            _tail = t;
+            return t;
+        }
+    }
+
+    public static Task Queue(Action a) => Queue<bool>(() => { a(); return true; });
+
+    // completes when everything queued so far has run
+    public static Task Drain() { lock (_qLock) return _tail; }
+
+    public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd) =>
+        Queue(() => Switch(path, s, tcfg, alignEnd));
+
+    public static void QueueStop() => Queue(Stop);
+
     // ---- transition outcomes, by corr (events + a log-poll safety net) ------------------------
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _waiters = new();
     private static readonly ConcurrentDictionary<string, (string outcome, long at)> _recent = new();
@@ -217,7 +250,7 @@ public static class LpPlayerMedia
         client.StartEvents();
         client.WaitSubscribed(2000); // so the handoff event can't slip past before we listen (the poll covers it anyway)
         if (ct.IsCancellationRequested) return "caller-cancelled";
-        var corr = Switch(path, s, tcfg, alignEnd);
+        var corr = await Queue(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets
         if (corr == null) return "failed:request refused";
         var outcome = await WaitCorr(corr, ct, alignEnd ? -1 : 60_000).ConfigureAwait(false);
         if (outcome == "caller-cancelled")
@@ -238,6 +271,8 @@ public static class LpPlayerMedia
     // one (its B would never show).
     public static async Task WaitLastHandoff(CancellationToken ct)
     {
+        try { await Drain().WaitAsync(ct).ConfigureAwait(false); } // a still-queued switch counts
+        catch (OperationCanceledException) { return; }
         var corr = _lastCorr;
         if (corr == null || !C.SocketExists) return;
         await WaitCorr(corr, ct, 30_000).ConfigureAwait(false);
@@ -249,12 +284,16 @@ public static class LpPlayerMedia
         if (client.SocketExists) client.TryCall("stop", null);
     }
 
-    // switching away from lp-player: stop playback and let the process go
-    public static void Quit()
+    // Switching AWAY from lp-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
+    // queued runs (bounded), playback stops, the process is gone (quit → SIGTERM → SIGKILL) — so the
+    // other engine never starts while lp-player still shows something.
+    public static void StopAndQuit()
     {
         var client = C;
-        if (client.SocketExists) client.TryCall("quit", null);
-        client.StopEvents();
+        try { Drain().Wait(3000); } catch { }
+        if (client.SocketExists) { try { client.Call("stop", null, LpPlayerClient.QuickMs); } catch (LpPlayerException) { } }
+        client.QuitOrKill();
+        _lastCorr = null;
     }
 
     // ---- properties --------------------------------------------------------------------------------
@@ -327,7 +366,9 @@ public static class LpPlayerMedia
     }
 
     // /preview (drag twin, no persist): the playing item's source(s), literal values.
-    public static void Preview(int? volume, double? speed)
+    public static void Preview(int? volume, double? speed) => Queue(() => PreviewNow(volume, speed));
+
+    private static void PreviewNow(int? volume, double? speed)
     {
         var cur = CurrentPath();
         if (cur == null) return;
@@ -338,7 +379,10 @@ public static class LpPlayerMedia
     // ApplyPlaybackSettingsLive's lp-player twin: every changed decode/buffer/audio setting, live.
     // Loop keeps the legacy guard (single, non-timed video only): during rotation the recipe owns A's
     // loop (align:end turns it off until the switch) and new sources take settings.Loop at creation.
-    public static void ApplySettingsLive(AppSettings prev, AppSettings cur, bool loopAllowed)
+    public static void ApplySettingsLive(AppSettings prev, AppSettings cur, bool loopAllowed) =>
+        Queue(() => ApplySettingsNow(prev, cur, loopAllowed));
+
+    private static void ApplySettingsNow(AppSettings prev, AppSettings cur, bool loopAllowed)
     {
         if (prev.NoAudio != cur.NoAudio) Set("no_audio", cur.NoAudio);
         if (loopAllowed && prev.Loop != cur.Loop) Set("loop", cur.Loop);
@@ -360,23 +404,27 @@ public static class LpPlayerMedia
         var name = args.Length > 1 ? args[1] as string ?? args[1]?.ToString() ?? "" : "";
         switch (cmd)
         {
-            case "cycle" when name == "pause": return TogglePause();
+            case "cycle" when name == "pause": Queue(() => TogglePause()); return true;
             case "loadfile" or "playlist-clear" or "playlist-next" or "playlist-prev" or "playlist-shuffle" or "playlist-unshuffle":
                 return true;
             case "set" or "set_property" when name is "loop-file" or "loop-playlist":
                 return true;
         }
         if (MpvPropertyMap.Translate(args) is not { } t) return false;
-        Set(t.prop, t.value);
+        Queue(() => Set(t.prop, t.value)); // ordered, never on the caller's thread (it may hold PlayerHelper's _lock)
         return true;
     }
 
-    // pause/unpause what's on screen (`cur:*` — never an in-flight transition's held B)
+    // Interim pause (controller ruling R75a): the direction comes from what's on screen (`cur:*.paused`),
+    // the write goes to `srcs:*.paused`, so an in-flight transition's pending B is paused too.
+    // TODO(lp-player: player-level pause): replace with a player-level `player.paused` that the Rust
+    // recipe + SourceHost honour (freezing transitions as well) — a separate Rust task the controller
+    // schedules after Task 17; then this becomes a single `set player.paused`.
     public static bool TogglePause()
     {
         if (GetCur("paused") is not JsonElement { ValueKind: JsonValueKind.True or JsonValueKind.False } p) return false;
         bool now = p.ValueKind != JsonValueKind.True;
-        return C.TryCall("set", new Dictionary<string, object?> { ["path"] = "cur:*.paused", ["value"] = now }) != null;
+        return C.TryCall("set", new Dictionary<string, object?> { ["path"] = "srcs:*.paused", ["value"] = now }) != null;
     }
 
     // ---- queries -----------------------------------------------------------------------------------
@@ -412,15 +460,16 @@ public static class LpPlayerMedia
     {
         var client = C;
         if (!client.SocketExists) return null;
-        try { return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:*.{prop}" }).GetProperty("value"); }
+        const int q = LpPlayerClient.QuickMs;
+        try { return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:*.{prop}" }, q).GetProperty("value"); }
         catch (LpPlayerException e) when (e.Code == "ambiguous")
         {
             try
             {
-                var st = client.Call("state", null);
+                var st = client.Call("state", null, q);
                 var first = st.GetProperty("outputs").EnumerateArray().Select(o => Str(o, "name")).FirstOrDefault(n => n.Length > 0);
                 if (first == null) return null;
-                return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:{first}.{prop}" }).GetProperty("value");
+                return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:{first}.{prop}" }, q).GetProperty("value");
             }
             catch (LpPlayerException) { return null; }
         }
@@ -491,7 +540,7 @@ public static class LpPlayerMedia
     {
         var client = C;
         int? pid = client.PlayerPid;
-        if (pid == null && client.SocketExists) { client.TryCall("hello", null, 1000); pid = client.PlayerPid; }
+        if (pid == null && client.SocketExists) { client.TryCall("hello", null, LpPlayerClient.QuickMs); pid = client.PlayerPid; }
         string? bus = null;
         try
         {
