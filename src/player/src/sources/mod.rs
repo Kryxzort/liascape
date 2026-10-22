@@ -46,6 +46,16 @@ pub enum SourceEvent {
     /// reply) and reverted; the source itself is fine and keeps playing (R45). `prop` is
     /// the graph property (`gain` for the summed gain push).
     Rejected { prop: String, reason: String },
+    /// Real audio output is flowing after this source's most recent un-pause (Task 16c,
+    /// R85): the owner's "flicker of silence" report measured mpv/PipeWire's own audio-out
+    /// restart lagging the `pause -> no` request by ~19 ms — an onset gain ramp that
+    /// starts at the instant of un-pause runs mostly on no audio at all, then jumps to an
+    /// already-part-way gain with no ramp the listener can hear. Recipes/the runtime hold
+    /// an onset ramp until this fires (bounded: see `recipes::transition::ONSET_TIMEOUT`).
+    /// Fires once per un-pause; a source with no audio track, or in stepped mode (mpv
+    /// stays paused for good there — audio is always silent), fires it immediately since
+    /// there is nothing to wait for.
+    AudioFlowing,
 }
 
 /// One frame producer. Property names and value types are the graph's `Source` schema

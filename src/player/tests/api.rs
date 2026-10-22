@@ -1200,6 +1200,188 @@ fn player_pause_freezes_align_end_wait() {
     );
 }
 
+/// Task 16c (R88): player-level pause/resume on a *plain* source (not part of any
+/// transition) ramps `gain.anticlick` to silence over the ANTICLICK + settle-tail window
+/// before the source is actually paused, and — on resume — un-pauses immediately then
+/// ramps back in once real audio is confirmed flowing. Real clock (not stepped): the gate
+/// is timed off the wall clock on purpose (never the player clock, which freezes the
+/// instant `player.paused` does — R75), so it needs real time to pace against, the same
+/// reason `destroy_ramps_audible_source_out` (above) uses `--clock real` too.
+#[test]
+fn player_pause_ramps_a_plain_source() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_in(new_root(), &["--clock", "real"], serial);
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    let t = Instant::now();
+    loop {
+        let v = get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+            .as_f64()
+            .unwrap_or(0.0);
+        if v >= 0.3 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "never started playing"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+
+    // `probe sources`: `mpv_pause` is a synchronous, real read of mpv's own property —
+    // unlike `get id.paused` (the *node's* raw intent, deliberately never touched by R75
+    // and so never reflects the gate either, same as the existing
+    // `player_pause_freezes_*` tests' own `src["paused"]` checks).
+    let mpv_paused = |c: &mut Client| -> bool {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        probe_source(&p, &id)["mpv_pause"].as_str() == Some("yes")
+    };
+
+    // Must see the anticlick ramp genuinely under way *while the source is still
+    // un-paused* — never jumping straight from 0 dB to paused=true.
+    let mut saw_ramping_while_unpaused = false;
+    let mut saw_paused = false;
+    let t = Instant::now();
+    while !saw_paused {
+        assert!(t.elapsed() < Duration::from_secs(2), "never paused");
+        let anticlick = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+            .as_f64()
+            .unwrap();
+        let paused = mpv_paused(&mut c);
+        if !paused && anticlick < -0.5 && anticlick > -95.0 {
+            saw_ramping_while_unpaused = true;
+        }
+        if paused {
+            saw_paused = true;
+            assert!(
+                anticlick <= -95.9,
+                "paused before the ramp reached silence: {anticlick} dB"
+            );
+        }
+    }
+    assert!(
+        saw_ramping_while_unpaused,
+        "never observed a mid-ramp, still-unpaused sample — pause must not be instant"
+    );
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(
+        probe_source(&probe, &id)["effective_paused"],
+        json!(true),
+        "{probe}"
+    );
+
+    // Frozen: time_pos must not move once actually paused.
+    let held = get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(80));
+    assert_eq!(
+        get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+            .as_f64()
+            .unwrap(),
+        held,
+        "picture moved while player-paused"
+    );
+
+    // Resume: un-pauses right away (not held hostage by the onset wait), then ramps back
+    // in once real audio is confirmed flowing.
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let t = Instant::now();
+    loop {
+        if !mpv_paused(&mut c) {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_millis(500), "never un-paused");
+    }
+    let t = Instant::now();
+    loop {
+        let anticlick = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+            .as_f64()
+            .unwrap();
+        if (anticlick - 0.0).abs() < 1e-6 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_millis(500),
+            "never ramped back in: {anticlick} dB"
+        );
+    }
+    let before = get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(
+        get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+            .as_f64()
+            .unwrap()
+            > before,
+        "picture never resumed"
+    );
+}
+
+/// Task 16b/16c review fix: `probe sources`' `effective_paused` must read `player.paused`
+/// straight off the graph, never the runtime's own cached field — which is only refreshed
+/// at the top of the next tick/step. A `set player.paused true` immediately followed by
+/// `probe sources`, *pipelined on the wire* (both written before either reply is read, so
+/// the server very likely handles both within the same dispatch), must already see the
+/// new value.
+#[test]
+fn effective_paused_is_live_even_pipelined() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let a_clip = ensure_clip("tr_red_10s", RED_10S);
+    let a = create_src(&mut c, json!({"path": s(&a_clip), "loop": true}));
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(16);
+    }
+
+    // Pipeline: write both requests before reading either reply.
+    let id1 = c.id + 1;
+    let id2 = c.id + 2;
+    c.id = id2;
+    let l1 = json!({"id": id1, "cmd": "set", "args": {"path": "player.paused", "value": true}})
+        .to_string();
+    let l2 = json!({"id": id2, "cmd": "probe", "args": {"name": "sources"}}).to_string();
+    c.w.write_all(l1.as_bytes()).unwrap();
+    c.w.write_all(b"\n").unwrap();
+    c.w.write_all(l2.as_bytes()).unwrap();
+    c.w.write_all(b"\n").unwrap();
+
+    let mut r1 = None;
+    let mut r2 = None;
+    while r1.is_none() || r2.is_none() {
+        let m = c.read_msg().unwrap_or_else(|| panic!("no response"));
+        if m.get("event").is_some() {
+            continue;
+        } else if m["id"] == json!(id1) {
+            r1 = Some(m);
+        } else if m["id"] == json!(id2) {
+            r2 = Some(m);
+        }
+    }
+    let r1 = r1.unwrap();
+    let r2 = r2.unwrap();
+    assert_eq!(r1["ok"], json!(true), "{r1}");
+    assert_eq!(r2["ok"], json!(true), "{r2}");
+    let src = probe_source(&r2["result"], &a);
+    assert_eq!(
+        src["effective_paused"],
+        json!(true),
+        "pipelined probe saw a stale effective_paused: {src}"
+    );
+}
+
 /// One bad client never affects another: garbage JSON gets an error (connection kept), a
 /// line over 1 MiB or a mid-line disconnect gets dropped, a client that never reads its
 /// replies is dropped once its bounded queue overflows — the good client is answered

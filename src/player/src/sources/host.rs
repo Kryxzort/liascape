@@ -57,6 +57,12 @@ pub struct SourceHost {
     /// not the node's own intention, and mirroring that back would corrupt what the
     /// recipe/user asked for (see `sync`'s doc).
     player_paused: bool,
+    /// Task 16c (R88): ids `Runtime`'s player-pause anticlick gate is still ramping down —
+    /// excluded from the `player_paused` OR composition below (treated as if
+    /// `player_paused` were `false` for them specifically) until the gate itself decides
+    /// the ramp has settled and calls [`SourceHost::force_paused`]. Set each tick by
+    /// `Runtime` via [`SourceHost::set_pause_exclusions`]; consulted only inside `sync`.
+    pause_exclusions: BTreeSet<String>,
 }
 
 impl SourceHost {
@@ -70,6 +76,44 @@ impl SourceHost {
             open_time: std::time::Duration::ZERO,
             changed: BTreeSet::new(),
             player_paused: false,
+            pause_exclusions: BTreeSet::new(),
+        }
+    }
+
+    /// Task 16c (R88): set the ids `Runtime`'s player-pause anticlick gate is still
+    /// ramping down this tick — `sync` treats `player_paused` as `false` for exactly
+    /// these ids (never touching the node's own `paused`, same as every other R75 path)
+    /// until the gate calls [`SourceHost::force_paused`]. Cheap to call every tick even
+    /// when empty (the common case).
+    pub fn set_pause_exclusions(&mut self, ids: BTreeSet<String>) {
+        self.pause_exclusions = ids;
+    }
+
+    /// Task 16c (R88): push `paused` straight to one hosted source, bypassing the
+    /// `player_paused`/node composition entirely — used only by `Runtime`'s player-pause
+    /// anticlick gate, once *it* (real wall-clock timed, never the possibly-frozen player
+    /// clock) decides the ramp has settled enough to actually pause, or that a resume
+    /// should un-pause right away. A rejection is logged/queued exactly like `sync`'s own.
+    pub fn force_paused(&mut self, id: &str, paused: bool) {
+        let Some(h) = self.sources.get_mut(id) else {
+            return;
+        };
+        if let Err(e) = h.src.apply("paused", &PropValue::Bool(paused)) {
+            let reason = format!("apply paused: {e}");
+            log::event(
+                "host",
+                Level::Warn,
+                "source.rejected",
+                None,
+                json!({ "id": id, "prop": "paused", "reason": reason }),
+            );
+            self.events.push((
+                id.to_string(),
+                SourceEvent::Rejected {
+                    prop: "paused".to_string(),
+                    reason,
+                },
+            ));
         }
     }
 
@@ -187,9 +231,12 @@ impl SourceHost {
             };
             // R75: a node-level `paused` change is composed with the current
             // `player_paused` before it reaches the source — the source only ever sees
-            // the effective value.
+            // the effective value. Task 16c (R88): an id the pause-anticlick gate is still
+            // ramping down is excluded from that OR — `player_paused` reads as `false`
+            // for it specifically until the gate itself calls `force_paused`.
             let effective = (prop == "paused").then_some(PropValue::Bool(
-                matches!(v, PropValue::Bool(true)) || player_paused,
+                matches!(v, PropValue::Bool(true))
+                    || (player_paused && !self.pause_exclusions.contains(id)),
             ));
             let apply_v = effective.as_ref().unwrap_or(v);
             if let Err(e) = h.src.apply(prop, apply_v) {
@@ -228,7 +275,9 @@ impl SourceHost {
                     graph.get(&PropPath(format!("{id}.paused"))),
                     Ok(PropValue::Bool(true))
                 );
-                let effective = PropValue::Bool(node_paused || player_paused);
+                let effective = PropValue::Bool(
+                    node_paused || (player_paused && !self.pause_exclusions.contains(&id)),
+                );
                 if let Err(e) = h.src.apply("paused", &effective) {
                     let reason = format!("apply paused: {e}");
                     log::event(

@@ -800,6 +800,25 @@ foreign-context `update`, or a core shutdown; a failed async property/command re
 frame is still on screen; the visible boundary (frame 0) follows one frame later (measured
 33.9–34.3 ms at 30 fps).
 
+**`AudioFlowing` (Task 16c, R85, invariant #8) — real audio output confirmed, not just
+un-paused.** `apply("paused", false)` on a source that was paused arms a wait
+(`awaiting_flowing`) rather than assuming audio starts the instant mpv's `pause` flips:
+the owner's "flicker of silence" report measured mpv/PipeWire's own audio-out restart
+lagging an un-pause by ~19 ms (Task 15's dropout detector), so a caller that starts an
+onset gain ramp at the instant of un-pause runs most of the ramp's early portion on no
+audio at all. Fires immediately (never actually waits) for: stepped mode (`self.stepped`
+— the core is paused for good there, § "Stepped mode" below; audio is always silent, so
+nothing to confirm — including the stepped-logical `"paused"` branch itself, which still
+arms/fires through the same `arm_audio_flowing` so a caller holding a ramp on a stepped
+source's un-pause is never stuck), an image, or `no_audio`. Otherwise armed: the next
+`audio-pts` property change (a *new* observed property, `OBS_AUDIO_PTS`) reports it —
+man mpv: "Current audio playback position... takes into account the audio driver delay"
+— unlike `time-pos`, it doesn't move while held/paused, so the very next change after
+arming is the real thing. `load` (a `path` change) resets `awaiting_flowing` — a new load
+supersedes everything. Callers (the transition recipe, `Runtime`'s player-pause gain)
+bound the wait themselves (`recipes::transition::ONSET_TIMEOUT`) — the source itself
+never times out; it either confirms or waits.
+
 **Render targets: front + back.** `front` is what `texture()` returns. Until the current
 load is `Ready`, every frame (including any leftover of a superseded load) renders into a
 staging `back` target; at `Ready` the back is promoted to the front in the same `update`
@@ -959,13 +978,57 @@ Running      ── cancel / B failed ──▶ snap back to A
 
 | method | picture | A (not shared) | B |
 |---|---|---|---|
-| full-live | fx `from = A` | `gain.xfade` k·cos over max(D, 30 ms) (`EqualPowerOut`, k = its current level) | unpaused at t0; `gain.xfade` sin over max(D, 30 ms) (`EqualPowerIn`) |
-| reveal | fx `from =` snapshot of A | `gain.anticlick` → −96 in 30 ms, then paused | unpaused at t0; `gain.xfade` sin over max(D, 30 ms) |
-| frozen | fx `from =` snapshot of A | as reveal | stays paused (first frame, −96); at handoff: anticlick −96 + xfade 0, unpaused, anticlick ramp to 0 dB in 30 ms |
-| cut (`effect_id` null) | swap at t0+30 ms (t0 if no A was ramped) | per A: still playing → anticlick → −96 over [t0, t0+30]; ended/paused → set at once | unpaused at the swap; xfade 0→1 linear over 30 ms → done at t0+60 |
+| full-live | fx `from = A` | `gain.xfade` k·cos over max(D, 30 ms) (`EqualPowerOut`, k = its current level) | unpaused at t0; `gain.xfade` sin over max(D, 30 ms) (`EqualPowerIn`) — **held** (R85, below) |
+| reveal | fx `from =` snapshot of A | `gain.anticlick` → −96 in 30 ms + `AUDIO_SETTLE_TAIL`, *then* paused (requirement #2, below) | unpaused at t0; `gain.xfade` sin over max(D, 30 ms) — **held** (R85) |
+| frozen | fx `from =` snapshot of A | as reveal | stays paused (first frame, −96); at handoff: anticlick −96 + xfade 0, unpaused, anticlick ramp to 0 dB in 30 ms — **held** (R85) |
+| cut (`effect_id` null) | swap at t0+30 ms (t0 if no A was ramped) | per A: still playing → anticlick → −96 over [t0, t0+30]; ended/paused → set at once | unpaused at the swap; xfade 0→1 linear over 30 ms → done at t0+60 — never held (R85 applies only to an onset that follows an un-pause; a cut's B was never paused by the recipe in a way that needs confirming — it's created paused and unpaused exactly once, same instant as its ramp) |
 
 **R42:** gain animations never run shorter than 30 ms, whatever D is (D = 0 cuts the
 picture instantly; `done` waits for the gains). `zero_duration_gains_still_ramp_30ms`.
+
+**R85 (Task 16c, invariant #8) — "held" B-onset ramps wait for real audio.** Each "held"
+cell above doesn't call `Animator::add` at the same instant it un-pauses B; it unpauses,
+sets the gain to `SILENT_DB`, and records a `PendingOnset { id, slot, from, to, dur,
+curve, requested }` on the `Tr` (`tr.onset`) — a transition has at most one at a time.
+`Transitions::tick`'s own event loop resolves it the instant a `SourceEvent::AudioFlowing`
+for that id arrives (`start_onset`: *now* adds the `Animation`, with `start` = the
+confirmation instant, never backdated to the un-pause); `step()`'s own top-of-call check
+resolves it unconfirmed once `ONSET_TIMEOUT` (150 ms) passes, logging
+`transition.onset_timeout`. `recipes::transition::b_has_audio` (kind == `video` && not
+`no_audio`) skips the whole mechanism for a `color`/`image`/`snapshot` B, or one explicitly
+muted — nothing to confirm, ramp it in at once exactly as before this task
+(`schedule_onset` is the one seam every call site goes through). `Phase::Handoff`'s
+`transition.done` check requires `tr.onset.is_none()` too — never fires while a
+confirmed-but-still-ramping (or still-unconfirmed) onset is outstanding; every
+`settle_until` write downstream of a `begin_running`/`handoff` that scheduled one uses
+`.max()`, never a plain assignment, so a *later*, unrelated settle-time recompute
+(`handoff`'s own, `commit`'s, `commit_unseen`'s) can't accidentally shorten the wait for
+an onset that resolved earlier and is still mid-ramp (`commit_unseen` is the one
+exception — nothing shows B any more there, so a still-pending onset is dropped outright,
+never started, rather than extending `done` for a ramp nobody will ever hear).
+`Transitions::start` also force-starts any *other* transition's still-pending onset on a
+node about to become *this* request's outgoing A (`cur:<connector>`, the same set
+`build_sides` computes) — the node is about to be captured and ramped by someone else;
+leaving the first onset to resolve invisibly later would fight whatever the second
+transition does to the same `gain` slot. `commit` (a `frozen` transition interrupted
+mid-Running, B still genuinely paused) creates its own `PendingOnset` the same way
+`handoff`'s Frozen branch does, rather than ramping immediately like every other
+`commit` case — the one place besides `begin_running`/`handoff` where B's `paused` is
+a *real* edge, not a re-assertion of something already false.
+
+**Requirement #2 (Task 16c, invariant #8) — A's hold-then-pause waits for the ramp to
+settle, not just its nominal 30 ms.** `tr.pause_at` (reveal/frozen's A-hold) is
+`t0 + ANTICLICK + AUDIO_SETTLE_TAIL` (15 ms), not `t0 + ANTICLICK` — the gain push
+reaching mpv is async and mpv's own audio buffering lags the graph value by a few ms, so
+the pause must not land before the ramp has actually settled. `AUDIO_SETTLE_TAIL` is a
+measured fixed tail (documented at its `pub const`), not a live confirmation — no
+`SourceEvent` reports "this gain push has landed in the audio actually output" the way
+`AudioFlowing` does for an onset. **This fix is real but doesn't close every A-hold
+dropout**: on-machine evidence (`docs/player/debugging.md`'s offset row) shows a
+different, ~5–7 ms gap at A's ramp tail that occurs *before* `pause_at` even fires —
+root-caused to the `Animator`'s tick-rate coarseness on a 30 ms ramp (invariant #4's own
+caveat), not the pause timing this fix controls. Left as a documented, out-of-scope
+finding (Task 14's "audio edge"), not papered over by loosening the detector.
 
 `fx.progress` is Linear 0→1 over [t0, t0+D]; handoff happens on the first tick ≥ t0+D.
 reveal/frozen snapshot only an A whose picture can still change: a still (by **kind** —
