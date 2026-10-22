@@ -101,6 +101,7 @@
         nativeBuildInputs = [
           pkgs.pkg-config
           pkgs.rustPlatform.bindgenHook
+          pkgs.makeWrapper
         ];
         buildInputs = [
           pkgs.mpv-unwrapped
@@ -109,6 +110,14 @@
           pkgs.libxkbcommon
           pkgs.pipewire
         ];
+        # R86: libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
+        # NixOS lives outside the Nix store at /run/opengl-driver/lib (the standard impure
+        # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
+        # (not --set) so a caller's own LD_LIBRARY_PATH is extended, not clobbered; harmless on
+        # non-NVIDIA machines (the path simply doesn't exist, so the prefix contributes nothing).
+        postInstall = ''
+          wrapProgram $out/bin/lp-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib
+        '';
       };
 
       # 4) Electron shell sources (plain JS; electron comes from nixpkgs, not the bundled prebuilt
@@ -141,6 +150,7 @@
             --set LP_TRANSITIONS_DIR $out/share/livepaper/transitions \
             --set LP_TRANSITION_BIN ${lp-transition}/bin/lp-transition \
             --set LP_AUDIO_BIN ${lp-audio}/bin/lp-audio \
+            --set LP_PLAYER_BIN ${lp-player}/bin/lp-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           # Headless CLI (--restore/--action/daemons/--serve). Bare `livepaper` opens the GUI.
@@ -149,6 +159,7 @@
             --set LP_TRANSITIONS_DIR $out/share/livepaper/transitions \
             --set LP_TRANSITION_BIN ${lp-transition}/bin/lp-transition \
             --set LP_AUDIO_BIN ${lp-audio}/bin/lp-audio \
+            --set LP_PLAYER_BIN ${lp-player}/bin/lp-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           cat > $out/bin/livepaper <<EOF
