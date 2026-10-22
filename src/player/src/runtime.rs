@@ -1134,10 +1134,32 @@ impl Runtime {
             self.parked = None;
             self.graph.set_parked(None);
         }
+        let mut corr = None;
         let ramp = if self.is_silent(id) {
             let _ = self.graph.destroy(id);
             Duration::ZERO
         } else {
+            // R80 (review fix round): a plain retire's own 30 ms anti-click ramp is a
+            // dropout-probe window too — same mechanism as a transition's A, with a
+            // silent/empty "B" (its decode is trivially silence, same as any other
+            // empty-path source — no new case needed). Recorded unconditionally (not
+            // gated on `player.debug`, same rule as a transition's — R70), so `ctl probe
+            // '{"name":"dropout","args":{"corr":…}}'` can check any recent retire once
+            // the meter has actually captured past its window's end.
+            let a = crate::recipes::transition::snapshot_source(&self.graph, id);
+            let b = crate::recipes::transition::AudioSourceSnapshot {
+                id: String::new(),
+                path: String::new(),
+                position: 0.0,
+                speed: 1.0,
+                loop_: false,
+                duration: None,
+            };
+            let mono = log::mono_now().unwrap_or_default();
+            let c = log::new_corr("rt");
+            self.dropout_windows.started(c.0.clone(), mono, vec![a], b);
+            self.dropout_windows.done(&c.0, mono + STOP_RAMP);
+            corr = Some(c);
             self.ramp_anticlick(id, SILENT_DB, None);
             let at = self.now() + STOP_RAMP;
             self.pending_destroy.push((at, id.to_string(), false));
@@ -1147,7 +1169,7 @@ impl Runtime {
             "runtime",
             Level::Debug,
             "source.retire",
-            None,
+            corr,
             json!({ "id": id, "ramp_ms": ramp.as_secs_f64() * 1000.0 }),
         );
         ramp
@@ -1363,6 +1385,23 @@ impl Runtime {
                 "mpv.reaper_stragglers",
                 None,
                 json!({ "count": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+            );
+        }
+        // R79 (review fix round): kills any in-flight dropout-probe ffmpeg decode
+        // outright and joins its analysis thread, bounded the same way as the mpv
+        // reaper above.
+        let t_dropout = Instant::now();
+        let dropout_left = dropout::shutdown(REAPER_WAIT);
+        if dropout_left > 0 {
+            log::event(
+                "runtime",
+                Level::Warn,
+                "probe.dropout_analysis_stragglers",
+                None,
+                json!({
+                    "count": dropout_left,
+                    "waited_ms": t_dropout.elapsed().as_secs_f64() * 1000.0,
+                }),
             );
         }
         // Every stream is gone: now the bus can go (nothing gets moved to the default sink).

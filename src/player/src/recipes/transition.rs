@@ -103,12 +103,19 @@ impl Phase {
 /// detector (Task 15, `probe::dropout`) needs to decode the matching stretch of the file
 /// and weight it by the recorded gain schedule. `position` is the observed `time_pos`
 /// (seconds); `path` is the graph `path` — both read straight off the graph, never a
-/// synchronous mpv call.
+/// synchronous mpv call. Review fix round, R78: also carries `speed`, `loop_` (wire name
+/// `"loop"`) and `duration`, so the dropout detector can map window time to FILE time at
+/// this source's own speed and wrap a looping decode at this `duration` instead of
+/// treating every window-crossing-EOF as silence.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AudioSourceSnapshot {
     pub id: String,
     pub path: String,
     pub position: f64,
+    pub speed: f64,
+    #[serde(rename = "loop")]
+    pub loop_: bool,
+    pub duration: Option<f64>,
 }
 
 /// One outbox entry (R37): written to the event log too, forwarded to API subscribers by
@@ -337,14 +344,20 @@ fn is_source(g: &Graph, id: &str) -> bool {
 /// R70: `id`'s path + observed `time_pos` right now, for the dropout detector's gain
 /// schedule — falls back to the (writable) `position` target, then `0.0`, so a source
 /// that hasn't produced its first frame yet (B, just created) still gets a sane start
-/// point instead of `None` collapsing to a silent gap in the recorded schedule.
-fn snapshot_source(g: &Graph, id: &str) -> AudioSourceSnapshot {
+/// point instead of `None` collapsing to a silent gap in the recorded schedule. R78
+/// (review fix round): also reads `speed`/`loop`/`duration` off the graph at this same
+/// instant. `pub(crate)` so `Runtime::retire` (R79's plain-retire dropout window) can
+/// reuse the exact same snapshot shape without duplicating it.
+pub(crate) fn snapshot_source(g: &Graph, id: &str) -> AudioSourceSnapshot {
     AudioSourceSnapshot {
         id: id.to_string(),
         path: get_str(g, id, "path"),
         position: get_f64(g, id, "time_pos")
             .or_else(|| get_f64(g, id, "position"))
             .unwrap_or(0.0),
+        speed: get_f64(g, id, "speed").unwrap_or(1.0),
+        loop_: get_bool(g, id, "loop"),
+        duration: get_f64(g, id, "duration").filter(|d| *d > 0.0),
     }
 }
 
