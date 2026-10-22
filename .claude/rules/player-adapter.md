@@ -68,7 +68,8 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   `player-core.md` § Runtime, but a switch is a heavier, rarer operation than a plain set — no reason to
   shave its margin).
 - **Queue depth is capped** (`LpPlayerMedia.MaxQueueDepth` = 256, `QueueDepth`): once at the cap, a NEW
-  command is logged and dropped **without being enqueued at all** — never the oldest one evicted (that
+  property-set command is logged and dropped (a **switch or stop is never dropped** — `QueueSwitch` /
+  `QueueStop` go through `QueueEssential`, which bypasses the cap but still counts toward the depth) **without being enqueued at all** — never the oldest one evicted (that
   would need the chain to support mid-list removal; a continuation chain doesn't, so admission is
   refused instead) — so a caller is never blocked and the chain never grows past this regardless of how
   long a stall lasts.
