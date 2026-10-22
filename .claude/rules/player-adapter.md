@@ -20,8 +20,15 @@ instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy
   `io`/`timeout` with a hint); `TryCall` logs instead. One persistent request connection (serialized,
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
   connection on a background thread (`transition.`, `source.`, `supervisor.` — the last arrives with
-  Task 16, absence is fine), reconnect with backoff 250 ms → 5 s; `hello` on every new connection keeps
-  `PlayerPid` and bumps `Generation` when the pid changes (= the player restarted). `EnsureRunning()`.
+  Task 16, absence is fine), reconnect with backoff 250 ms → 5 s.
+  **Two pids from `hello`** (player-core.md § Supervisor / § Command API `hello`): `PlayerPid` = the
+  COMPOSITOR (`hello.pid`, what every `cur:`/`srcs:`/mpv-ownership query is really about) and
+  `SupervisorPid` = `hello.supervisor_pid` (null = unsupervised, `--no-supervise`). `Generation` bumps
+  whenever `PlayerPid` changes (= the compositor restarted, supervised or not — corr ids reset to
+  `tr-1`). **Restart awareness**: when the pid changes AND `supervisor_pid` stayed the same as before,
+  that's a *supervised* restart (a crash, not a fresh process) — logged with `hello.restart`'s fields
+  (the restart event itself was emitted before any client could subscribe, so this is the only way to
+  see it) before the existing `Restarted` event fires. `EnsureRunning()`.
 - **`LpPlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
 - **`MpvPropertyMap.cs`** — mpv IPC property sets → lp-player properties.
 - **`LpPlayerSelfTest.cs`** — `livepaper --lp-player-selftest`.
@@ -47,8 +54,9 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged).
 - `SwitchEngineLive` reads `IsPlaying` before taking `_lock`, tears the session state down under it,
   and talks to lp-player only AFTER releasing it: `StopAndQuit()` (drain the queue ≤ 3 s, `stop`, `quit`,
-  then SIGCONT+SIGTERM, then SIGKILL — each waiting ≤ 1.5 s for the process to go) runs synchronously
-  before the new engine starts, so legacy and lp-player are never both on screen.
+  then escalate against the **supervisor** — SIGCONT+SIGTERM, then SIGKILL, each waiting ≤ 1.5 s for the
+  process to go; see `LpPlayerClient.QuitOrKill` below) runs synchronously before the new engine starts,
+  so legacy and lp-player are never both on screen.
 
 ## Binary resolution (`PlayerEngine.ResolveBinary`)
 env `LP_PLAYER_BIN` → next to the running livepaper executable (`Environment.ProcessPath` dir, then
@@ -66,6 +74,14 @@ back to Legacy always stays possible).
 - Socket: `$LP_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (mirrors `paths.rs`).
 - `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from lp-player =
   `StopAndQuit` (stop → quit → TERM → KILL, synchronous, outside `_lock`).
+- **`LpPlayerClient.QuitOrKill` targets the SUPERVISOR, never the compositor alone.** Order: `quit`
+  over the socket (the compositor exits 0 → the supervisor classifies that as a clean exit and exits
+  too — no restart) → else SIGCONT+SIGTERM the **supervisor pid** (`SupervisorPid ?? PlayerPid` —
+  unsupervised falls back to the compositor, same as before Task 16) → else SIGKILL the supervisor
+  (its child dies via `PR_SET_PDEATHSIG`; if the compositor pid is somehow still alive a moment later,
+  SIGKILL it directly too). **Never SIGTERM/SIGKILL the compositor pid while its supervisor is still
+  alive** — the supervisor treats a dead/signalled child as a crash and restarts it with `--restore`,
+  which is exactly what an engine switch away from lp-player must not leave running.
 - `SwitchEngineLive(prev, cur)`: `IsPlaying` (outside `_lock`); under `_lock` — `SaveTimedState`,
   `TeardownTimer` (state only), and for a LEGACY old engine `KillCurrentProcess` (process kills only);
   after `_lock` — for an lp-player old engine `StopAndQuit`; then `Refresh`, then replay on the new
@@ -94,7 +110,9 @@ code below it is unchanged)
 
 `AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under lp-player
 `LpPlayerMedia.OwnStreamFilter()` excludes the player's own streams **by ownership (R69)** —
-`application.process.id` == the player's pid (from `hello`), `node.name` starting `lp-player-bus`,
+`application.process.id` == `PlayerPid`, the **compositor's** pid (from `hello.pid` — libmpv runs
+in-process inside the compositor, never the supervisor, so this is the right pid unchanged by Task 16),
+`node.name` starting `lp-player-bus`,
 `target.object`/`Sink:` = the `lp-player-bus` sink (index via `pactl list short sinks`), or
 `application.name == "lp-player"` (an extra match, not the only one). Legacy: unchanged.
 
@@ -166,20 +184,32 @@ HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`
 (interval 20 s + Wait + Advance, 2 s clips → align:end advances); `/next` mid-wait; `/stop`;
 `/library/volume|speed` on the playing item; a pending B getting its OWN override while the global
 changes; pause during an in-flight transition (A and pending B both paused, R75a); a SIGSTOPped player
-(`/settings` Volume, `/pause`, `/volume` each answer < 500 ms; recovery after SIGCONT); kill -9 + restart
-of the player (rotation resumes, no switch storm); lp-player → legacy with nothing playing (the player
-quits, no mpvpaper started/killed); no settings dump in the logs.
+(`/settings` Volume, `/pause`, `/volume` each answer < 500 ms; recovery after SIGCONT) — **SIGSTOP/
+SIGCONT target the COMPOSITOR pid (`ctl hello | jq .pid`), never the spawned supervisor**, which would
+feel nothing and prove nothing; a `kill -9` + restart **of the compositor pid** (the supervisor stays
+up throughout, `SP` unchanged — this is the supervised-restart path, not a brand-new `serve`; rotation
+resumes, no switch storm); lp-player → legacy with nothing playing (the player quits — **cleanup kills
+the supervisor `SP` / uses `ctl quit`, never just the old compositor pid**, so nothing restarts after
+the test — no mpvpaper started/killed); no settings dump in the logs.
 
 ## Self-test
 `LP_PLAYER_BIN=<repo>/src/player/target/debug/lp-player dotnet run --project src/livepaper --
 --lp-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
-assertions on synthetic `pactl` blocks, then a round-trip against a **private** `lp-player serve
---headless --outputs 640x360@60 --clock stepped --ao null` (temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`
+assertions on synthetic `pactl` blocks, then a round-trip against a **private, supervised** `lp-player
+serve --headless --outputs 640x360@60 --clock stepped --ao null` (temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`
 under `/tmp` — a unix socket path must be < 108 bytes — own `--socket`, `LD_LIBRARY_PATH` removed,
 `quit` + kill at the end; the shared client is swapped to it with `AutoSpawn=false`, so a real player
-is never touched): `hello`; colour → clip with `align:now` + `fade` gets `transition.handoff` **as a
-subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; a cut with `align:end` hands off
-at A's end; a cancelled aligned switch → `cancel {corr}` → `transition.cancelled`, A stays; a
-SIGSTOPped server: the first query returns in ≤ 450 ms (QuickMs), the next in ≤ 50 ms (stall breaker),
-a property set returns at once (queued), and it recovers after SIGCONT. A pump steps the stepped clock
-(40 ms) on its own connection. ~15 s.
+is never touched). **The spawned `.NET Process` is the SUPERVISOR** (serve forks its compositor
+child before anything else runs) — `hello.pid` (→ `client.PlayerPid`) is the compositor, a different
+pid; `hello.supervisor_pid` (→ `client.SupervisorPid`) is the spawned pid. Covers: `hello` asserts
+both pids against the spawned process + each other; colour → clip with `align:now` + `fade` gets
+`transition.handoff` **as a subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; a cut
+with `align:end` hands off at A's end; a cancelled aligned switch → `cancel {corr}` →
+`transition.cancelled`, A stays; a SIGSTOPped **compositor** (never the supervisor — it would feel
+nothing): the first query returns in ≤ 450 ms (QuickMs), the next in ≤ 50 ms (stall breaker), a
+property set returns at once (queued), and it recovers after SIGCONT; a SIGKILLed **compositor**
+yields a NEW `hello.pid` within 1.5 s with the SAME `supervisor_pid` (the supervised restart, Task 16
+§ Supervisor); then `LpPlayerMedia.StopAndQuit()` must leave NO lp-player process — neither the new
+compositor nor the supervisor (the regression this fixes: killing only the compositor while its
+supervisor lived just made the supervisor restart it again). A pump steps the stepped clock (40 ms) on
+its own connection. ~17 s.

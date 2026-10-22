@@ -3,11 +3,13 @@
 # See .claude/rules/player-adapter.md § Integration test.
 #
 # It runs the REAL `livepaper --serve` backend against a PRIVATE `lp-player serve --headless --clock
-# real --ao null` and drives everything over HTTP, checking the result with `lp-player ctl`:
+# real --ao null` (SUPERVISED — `$SP` is the supervisor, `$CP`/`comp_pid` is its compositor child, see
+# player-core.md § Supervisor) and drives everything over HTTP, checking the result with `lp-player ctl`:
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
-#   align:end · /next mid-wait · /stop · a SIGSTOPped player (/settings must still answer < 500 ms) ·
-#   a kill -9 + restart of the player · switching the engine lp-player → legacy with nothing playing.
+#   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
+#   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
+#   engine lp-player → legacy with nothing playing.
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
 # XDG_STATE_HOME (so its own settings.json, library, lp-player socket + event log) and its own random
@@ -15,7 +17,8 @@
 # settings.json, never connects to the real lp-player socket, never starts or kills mpvpaper (it aborts
 # before any playback call unless the backend reports `active: lp-player`). Display/compositor env is
 # unset; audio is `--ao null`. Everything it started is stopped and its temp dir removed on every exit
-# path (EXIT/INT/TERM/HUP trap; a SIGSTOPped player is SIGCONTed first).
+# path (EXIT/INT/TERM/HUP trap; a SIGSTOPped compositor is SIGCONTed first; cleanup kills the SUPERVISOR
+# `$SP` — never just a compositor pid, which would only make it restart again).
 #
 # Usage (from anywhere; uses the binaries of the tree this script lives in):
 #   scripts/test-lp-player-adapter.sh             # builds lp-player (cargo, via the flake devShell when
@@ -50,12 +53,16 @@ export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cach
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
-SP=""; BP=""
+SP=""; CP=""; BP=""
 cleanup() {
   trap - EXIT INT TERM HUP
+  # SIGCONT both the compositor (it may be SIGSTOPped by the stall test) and the supervisor (no-op if
+  # it was never stopped) before anything else, so a `quit`/TERM below can actually be handled.
+  [ -n "$CP" ] && kill -CONT "$CP" 2>/dev/null
   [ -n "$SP" ] && kill -CONT "$SP" 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
-  "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
+  "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
+  # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
   case "$T" in /tmp/lpit-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
@@ -63,6 +70,8 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
 ctl() { "$B" ctl --timeout-ms 3000 "$@"; }
+comp_pid() { ctl hello 2>/dev/null | jq -r '.pid // empty'; }
+sup_pid()  { ctl hello 2>/dev/null | jq -r '.supervisor_pid // empty'; }
 pass=0; fail=0
 ok()  { echo "  ok   $*"; pass=$((pass+1)); }
 bad() { echo "  FAIL $*"; fail=$((fail+1)); }
@@ -84,6 +93,9 @@ EOF
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
 start_player 1
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
+CP=$(comp_pid)   # the compositor — `$SP` (spawned by `start_player`) is its SUPERVISOR, a different pid
+[ -n "$CP" ] && [ "$CP" != "$SP" ] && ok "hello.pid ($CP) is the compositor, != the spawned supervisor $SP" || bad "hello.pid = $CP, spawned supervisor = $SP"
+[ "$(sup_pid)" = "$SP" ] && ok "hello.supervisor_pid == spawned supervisor $SP" || bad "hello.supervisor_pid $(sup_pid) != spawned $SP"
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
@@ -175,10 +187,12 @@ near "$(cur gain.user)" "$(dB 70)" && ok "clearing the override → global 70" |
 
 echo "== a SIGSTOPped player never stalls the backend (no player I/O under PlayerHelper's _lock; stall breaker)"
 body60=$(curl -sf -m 5 "$U/settings" | jq -c '.Volume = 60'); body61=$(echo "$body60" | jq -c '.Volume = 61')
-kill -STOP "$SP"
+# The COMPOSITOR ($CP) holds the socket — the supervisor never answers requests — so IT must be the one
+# stopped; stopping $SP (the supervisor) instead would feel nothing and prove nothing.
+kill -STOP "$CP"
 m1=$(post_ms /settings "$body60"); m2=$(post_ms /settings "$body61")
 m3=$(post_ms /pause '{}'); m4=$(post_ms /volume '{"delta":-5}')
-kill -CONT "$SP"
+kill -CONT "$CP"
 [ "$m1" -lt 500 ] && [ "$m2" -lt 500 ] && ok "/settings Volume with the player stopped: ${m1} ms, then ${m2} ms (< 500)" || bad "/settings took ${m1} / ${m2} ms"
 [ "$m3" -lt 500 ] && [ "$m4" -lt 500 ] && ok "/pause ${m3} ms, /volume ${m4} ms with the player stopped (< 500)" || bad "/pause ${m3} ms, /volume ${m4} ms"
 sleep 3.5   # the breaker re-opens 3 s after the last timeout
@@ -187,10 +201,16 @@ near "$(cur gain.user)" -18.0618 && ok "after SIGCONT: /settings Volume 50 appli
 [ "$(cur paused)" = false ] || post /pause '{}' >/dev/null   # the /pause sent while stopped was dropped (breaker) — normalize
 post /stop '{}' >/dev/null; sleep 0.6
 
-echo "== player restart (kill -9): the backend reconnects (request + event connections)"
-kill -9 "$SP"; wait "$SP" 2>/dev/null; sleep 0.3
-start_player 2; for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
-n0=$(handoffs)   # the temp state dir's event log spans both processes
+echo "== supervised restart (kill -9 the COMPOSITOR, never the supervisor): the backend reconnects"
+# Killing $SP outright would tear down the WHOLE supervisor+child tree (PR_SET_PDEATHSIG) — no restart
+# at all. The real crash-recovery path is SIGKILLing the COMPOSITOR while its supervisor ($SP) lives:
+# the supervisor restarts it (--restore) with a NEW hello.pid, same hello.supervisor_pid, in ~150-260 ms.
+oldCP=$CP; kill -9 "$CP"
+for _ in $(seq 1 30); do CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$oldCP" ] && break; sleep 0.05; done
+[ -n "$CP" ] && [ "$CP" != "$oldCP" ] && ok "compositor restarted: $oldCP -> $CP within 1.5 s" || bad "no new hello.pid within 1.5 s after killing $oldCP"
+[ "$(sup_pid)" = "$SP" ] && ok "same supervisor $SP after the restart" || bad "supervisor_pid $(sup_pid) != $SP after restart"
+kill -0 "$SP" 2>/dev/null && ok "supervisor $SP never died" || bad "supervisor $SP is gone — it should have survived its child's crash"
+n0=$(handoffs)   # the temp state dir's event log spans both the old and the restarted compositor
 post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0}}" >/dev/null; sleep 6
 nh=$(( $(handoffs) - n0 ))
 gaps=$(ctl logs '{"kind_prefix":"transition.handoff","limit":10000}' | jq -c --argjson n "$n0" '[.events[$n:] | map(.t_mono_ms) | . as $t | range(1; length) | ($t[.] - $t[.-1] | floor)]')
@@ -202,7 +222,8 @@ post /stop '{}' >/dev/null; sleep 0.6
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"
-kill -0 "$SP" 2>/dev/null && bad "lp-player still running after the switch away" || ok "lp-player quit on switch away"
+kill -0 "$SP" 2>/dev/null && bad "lp-player supervisor still running after the switch away" || ok "lp-player supervisor quit on switch away"
+kill -0 "$CP" 2>/dev/null && bad "lp-player compositor still running after the switch away" || ok "lp-player compositor quit on switch away"
 [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "no mpvpaper started/killed" || bad "mpvpaper count changed"
 grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 
