@@ -54,18 +54,24 @@ public static class LpPlayerMedia
 
     // item 6: a hard cap on how many commands may be in flight (queued + currently running) at once. A
     // stalled/overloaded player must never turn into unbounded memory growth here — once at the cap, a
-    // NEW command is logged and dropped outright (never enqueued, so the caller is never blocked and the
+    // NEW property set is logged and dropped outright (switch/stop are exempt — QueueEssential) (never enqueued, so the caller is never blocked and the
     // chain never grows past this). Simpler and safer than hunting the chain for "the oldest SET to the
     // same target" to evict instead; documented here and in player-adapter.md.
     public const int MaxQueueDepth = 256;
     private static int _queueDepth;
     public static int QueueDepth => Volatile.Read(ref _queueDepth);
 
-    public static Task<T> Queue<T>(Func<T> f)
+    public static Task<T> Queue<T>(Func<T> f) => Enqueue(f, essential: false);
+
+    // A switch or a stop is user intent, not a coalescible property write: it is never dropped at the
+    // cap (it still counts toward the depth, so a flood of sets can't grow without bound behind it).
+    public static Task QueueEssential(Action a) => Enqueue<bool>(() => { a(); return true; }, essential: true);
+
+    private static Task<T> Enqueue<T>(Func<T> f, bool essential)
     {
         lock (_qLock)
         {
-            if (Volatile.Read(ref _queueDepth) >= MaxQueueDepth)
+            if (!essential && Volatile.Read(ref _queueDepth) >= MaxQueueDepth)
             {
                 LpPlayerClient.Log($"lp-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
                 return Task.FromResult(default(T)!);
@@ -89,9 +95,9 @@ public static class LpPlayerMedia
     public static Task Drain() { lock (_qLock) return _tail; }
 
     public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd) =>
-        Queue(() => Switch(path, s, tcfg, alignEnd));
+        QueueEssential(() => Switch(path, s, tcfg, alignEnd));
 
-    public static void QueueStop() => Queue(Stop);
+    public static void QueueStop() => QueueEssential(Stop);
 
     // ---- transition outcomes, by corr (events + a log-poll safety net) ------------------------
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _waiters = new();
