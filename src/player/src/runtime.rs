@@ -47,8 +47,9 @@ use crate::gfx::{Catalogue, Composer, Gfx};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
 use crate::headless::{Headless, OutputBackend, OutputChange, OutputInfo};
 use crate::log::{self, CorrId, Level};
+use crate::probe::dropout::{self, GainHistory, PendingWindows};
 use crate::probe::frames::FrameStats;
-use crate::recipes::Transitions;
+use crate::recipes::{TransitionEventKind, Transitions};
 use crate::redraw::{self, Redraw};
 use crate::snapshot::{self, Snapshot};
 use crate::sources::{SourceEvent, SourceHost, StepStatus, reaper};
@@ -103,6 +104,10 @@ pub struct ServeOpts {
     /// Headless only: `--redraw-policy content` (present only on picture changes, like
     /// Wayland) instead of composing every output every tick.
     pub redraw_content: bool,
+    /// `--debug`: starts with `player.debug = true` (Task 15 — the dropout probe's
+    /// auto-trigger after every `transition.done`); equivalent to `set player.debug true`
+    /// once running.
+    pub debug: bool,
 }
 
 /// This compositor runs under the supervisor (Task 16).
@@ -340,6 +345,16 @@ pub struct Runtime {
     paused_at: Option<Duration>,
     /// Total time excised so far across every completed pause/resume cycle.
     pause_offset: Duration,
+    /// Per-source `effective_gain_db` history, one entry per tick (Task 15, R70) — what
+    /// `probe::dropout::expected_envelope` weights decoded source audio by. Recorded on
+    /// the log's real `t_mono_ms` clock (`log::mono_now()`, § `record_gain_history`) —
+    /// the same time base the bus meter's samples use — never `Runtime::now()`, which is
+    /// the paused-adjusted animation/transition clock (R75) and would disagree with the
+    /// meter during a player-level pause.
+    pub(crate) gain_history: GainHistory,
+    /// Recent transitions' audio windows (`transition.started`/`.done`), for the
+    /// dropout probe's auto-trigger and its on-demand `probe dropout` verb.
+    pub(crate) dropout_windows: PendingWindows,
 }
 
 fn p(s: &str) -> PropPath {
@@ -398,6 +413,15 @@ impl Runtime {
         }
     }
 
+    /// `player.debug` (Task 15: gates the dropout probe's auto-trigger after
+    /// `transition.done`; `serve --debug` or `set player.debug true`).
+    pub(crate) fn debug_mode(&self) -> bool {
+        matches!(
+            self.graph.get(&p("player.debug")),
+            Ok(PropValue::Bool(true))
+        )
+    }
+
     // ------------------------------------------------------------------ one tick
 
     /// One full iteration (real clock: the timer; stepped: the end of a `step`).
@@ -406,11 +430,29 @@ impl Runtime {
         self.update_player_paused();
         let now = self.now();
         self.run_anims(now);
+        self.record_gain_history();
         self.destroy_due(now);
         let t_sync = Instant::now();
         self.sync_sources();
         let sync_ms = t_sync.elapsed();
         self.finish_tick(t.elapsed(), sync_ms);
+    }
+
+    /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
+    /// real `t_mono_ms` clock — **not** `self.now()`, which may be the stepped/virtual
+    /// clock and would disagree with the bus meter's real-time samples.
+    fn record_gain_history(&mut self) {
+        let t = log::mono_now().unwrap_or_default();
+        let readings: Vec<(String, f64)> = self
+            .graph
+            .ids_of(NodeKind::Source)
+            .into_iter()
+            .filter_map(|id| {
+                let db = self.graph.effective_gain_db(&id)?;
+                Some((id, db))
+            })
+            .collect();
+        self.gain_history.record(t, readings.into_iter());
     }
 
     /// The second half of a tick: update sources, run the recipes on every source event
@@ -422,7 +464,10 @@ impl Runtime {
         let t_tr = Instant::now();
         let evs = std::mem::take(&mut self.src_events);
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
-        self.tr.drain_events(); // already in the event log → subscribers via the tap
+        // Already in the event log → subscribers via the tap; the dropout probe (Task 15,
+        // R71) also watches for Started/Done here to track each transition's audio window.
+        let tr_events = self.tr.drain_events();
+        self.record_dropout_windows(&tr_events);
         self.refresh_srcs();
         let tr_d = t_tr.elapsed();
         let t_r = Instant::now();
@@ -464,6 +509,34 @@ impl Runtime {
                 && c.0.starts_with("an-")
             {
                 log::event("runtime", Level::Info, "anim.done", Some(c), json!({}));
+            }
+        }
+    }
+
+    /// Task 15 (R70/R71): track each transition's audio window from its own
+    /// `transition.started`/`.done` events, and — once `done` arrives, if `player.debug`
+    /// is on — kick off the dropout probe's auto-trigger (never blocks: it only snapshots
+    /// cheap data and spawns a worker thread, `probe::dropout::spawn_analysis`).
+    fn record_dropout_windows(&mut self, events: &[crate::recipes::TransitionEvent]) {
+        if events.is_empty() {
+            return;
+        }
+        let mono = log::mono_now().unwrap_or_default();
+        for ev in events {
+            match &ev.kind {
+                TransitionEventKind::Started { a, b, .. } => {
+                    self.dropout_windows
+                        .started(ev.corr.0.clone(), mono, a.clone(), b.clone());
+                }
+                TransitionEventKind::Done { .. } => {
+                    self.dropout_windows.done(&ev.corr.0, mono);
+                    if self.debug_mode()
+                        && let Some(pending) = self.dropout_windows.get(&ev.corr.0)
+                    {
+                        dropout::spawn_analysis(self, ev.corr.clone(), pending);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -2215,7 +2288,12 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         player_paused: false,
         paused_at: None,
         pause_offset: Duration::ZERO,
+        gain_history: GainHistory::new(),
+        dropout_windows: PendingWindows::new(),
     };
+    if opts.debug {
+        let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
+    }
     rt.apply_output_changes();
     if opts.restore {
         rt.restore_from_disk(&opts.state_dir);

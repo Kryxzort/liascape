@@ -3,7 +3,7 @@
 //! ```text
 //! lp-player --version
 //! lp-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
-//!                 [--log-level error|warn|info|debug|trace] [--restore]
+//!                 [--log-level error|warn|info|debug|trace] [--restore] [--debug]
 //!                 [--no-supervise]                                  (Wayland outputs)
 //! lp-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
 //!                 [same options]
@@ -35,7 +35,7 @@ const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[
                            [--redraw-policy content|every_tick]] [--clock real|stepped] \
                            [--ao <mpv ao>] [--socket <path>] \
                            [--log-level error|warn|info|debug|trace] [--restore] \
-                           [--no-supervise]";
+                           [--no-supervise] [--debug]";
 
 fn serve_main(args: &[String]) -> ExitCode {
     let mut headless = false;
@@ -50,6 +50,7 @@ fn serve_main(args: &[String]) -> ExitCode {
     let mut supervised = false;
     let mut restarted = None;
     let mut redraw_content = false;
+    let mut debug = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| -> Result<String, String> {
@@ -87,6 +88,7 @@ fn serve_main(args: &[String]) -> ExitCode {
                         }
                     }
                 }
+                "--debug" => debug = true,
                 "--socket" => socket = Some(std::path::PathBuf::from(val("--socket")?)),
                 "--log-level" => {
                     let l = val("--log-level")?;
@@ -155,6 +157,7 @@ fn serve_main(args: &[String]) -> ExitCode {
             restart: restarted,
         }),
         redraw_content,
+        debug,
     };
     match serve(opts) {
         Ok(()) => ExitCode::SUCCESS,

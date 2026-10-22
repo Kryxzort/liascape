@@ -99,6 +99,18 @@ impl Phase {
     }
 }
 
+/// A source's identity + playback position at some instant (R70): what the dropout
+/// detector (Task 15, `probe::dropout`) needs to decode the matching stretch of the file
+/// and weight it by the recorded gain schedule. `position` is the observed `time_pos`
+/// (seconds); `path` is the graph `path` — both read straight off the graph, never a
+/// synchronous mpv call.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AudioSourceSnapshot {
+    pub id: String,
+    pub path: String,
+    pub position: f64,
+}
+
 /// One outbox entry (R37): written to the event log too, forwarded to API subscribers by
 /// the runtime. Serializes flat: `{"corr", "at_ms", "event": "transition.…", …fields}`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -131,6 +143,13 @@ pub enum TransitionEventKind {
         /// The effect's own start instant (= `at_ms`, except `align: end` full-live may
         /// start up to one tick in the past so `progress` reaches 1 exactly at A's end).
         start_ms: f64,
+        /// R70 (Task 15, the dropout detector): every distinct outgoing A (one per
+        /// `Side`, in request order — not shared/held distinction, the recipe's own A id
+        /// regardless of whether a snapshot is fronting it), each with its graph `path`
+        /// and observed `time_pos` (seconds) at this instant.
+        a: Vec<AudioSourceSnapshot>,
+        /// B, the same shape.
+        b: AudioSourceSnapshot,
     },
     /// B is the layers' content now; A's removal is scheduled. `committed`: cut short by
     /// a newer request (invariant #6) rather than reaching its end.
@@ -313,6 +332,20 @@ fn get_bool(g: &Graph, id: &str, prop: &str) -> bool {
 
 fn is_source(g: &Graph, id: &str) -> bool {
     g.kind_of(id) == Some(NodeKind::Source)
+}
+
+/// R70: `id`'s path + observed `time_pos` right now, for the dropout detector's gain
+/// schedule — falls back to the (writable) `position` target, then `0.0`, so a source
+/// that hasn't produced its first frame yet (B, just created) still gets a sane start
+/// point instead of `None` collapsing to a silent gap in the recorded schedule.
+fn snapshot_source(g: &Graph, id: &str) -> AudioSourceSnapshot {
+    AudioSourceSnapshot {
+        id: id.to_string(),
+        path: get_str(g, id, "path"),
+        position: get_f64(g, id, "time_pos")
+            .or_else(|| get_f64(g, id, "position"))
+            .unwrap_or(0.0),
+    }
 }
 
 fn gain_db(g: &Graph, id: &str, slot: &str) -> f64 {
@@ -1255,6 +1288,13 @@ impl Transitions {
         tr.gain_end = t0 + gd;
         let corr = tr.corr.clone();
         let b = tr.b.clone();
+        let a_snapshots: Vec<AudioSourceSnapshot> = tr
+            .sides
+            .iter()
+            .filter_map(|s| s.a.clone())
+            .map(|a| snapshot_source(g, &a))
+            .collect();
+        let b_snapshot = snapshot_source(g, &b);
         self.emit(
             &corr,
             now,
@@ -1262,6 +1302,8 @@ impl Transitions {
                 method: tr.method,
                 effect_id: tr.effect_id.clone(),
                 start_ms: ms(t0),
+                a: a_snapshots,
+                b: b_snapshot,
             },
         );
         let Some(eid) = tr.effect_id.clone() else {
