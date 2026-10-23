@@ -19,8 +19,11 @@ instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy
   timeoutMs=2000)` throws `LpPlayerException {Code, Message, Hint}` (the player's error object, or
   `io`/`timeout` with a hint); `TryCall` logs instead. One persistent request connection (serialized,
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
-  connection on a background thread (`transition.`, `source.`, `supervisor.` — the last arrives with
-  Task 16, absence is fine), reconnect with backoff 250 ms → 5 s.
+  connection on a background thread — **only the kinds it consumes** (final review M11):
+  `transition.handoff`, `transition.cancelled`, `transition.failed` (a switch's terminal
+  outcome); `source.` used to stream every debug `source.position` (~10 Hz per source) only to be
+  discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
+  250 ms → 5 s.
   **Two pids from `hello`** (player-core.md § Supervisor / § Command API `hello`): `PlayerPid` = the
   COMPOSITOR (`hello.pid`, what every `cur:`/`srcs:`/mpv-ownership query is really about) and
   `SupervisorPid` = `hello.supervisor_pid` (null = unsupervised, `--no-supervise`). `Generation` bumps
@@ -128,7 +131,7 @@ code below it is unchanged)
 |---|---|
 | `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}`; scene path → `KillCurrentProcess` (AllowScenes=false parity) |
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
-| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else) → 1 s back-off, then `SwitchToFile(next)` now. `ct` cancel → `cancel {corr}`. The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
+| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled), except while the player has **no output** (`state.outputs` empty — monitors off): the player then holds the aligned switch until an output shows it (player-core.md § Runtime, I4), and the wait keeps going. `ct` cancel → `cancel {corr}`. The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → `Set`; `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
 | `KillCurrentProcess` (→ `KillAll`, `Stop`) | a queued `stop` (callers hold `_lock`) |
@@ -161,22 +164,31 @@ in-process inside the compositor, never the supervisor, so this is the right pid
   hotplugged output matches).
 - **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → `animate srcs:*.gain.mute` over
   30 ms, never a step.
+- **Pause — the contract (final review I1/I3).** The PLAYER owns pause: `player.paused`, persisted
+  in its snapshot and restored with it across a crash restart. The backend keeps **no copy**:
+  `TogglePause` reads `get player.paused` and sets the opposite (so a keybind's one-shot
+  `--action=toggle-pause` CLI process and the serve backend always agree), and R81's reapply
+  reads it (logged) but never re-asserts it. A pause belongs to its **session**: `stop` clears it
+  on the player side, and a new session — `Apply`, `ApplyPlaylist`, a cold `Launch` — queues `set
+  player.paused false` (`LpPlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
+  fresh, playing mpvpaper; next/prev and rotation keep it. mpv's `pause` property maps to
+  `player.paused` too (M7).
 - **Pause (R75, final)**: ONE `set player.paused` — the Player node's `paused` (player-core.md §
   Graph & properties "Player node paused", Task 16b) freezes every source's EFFECTIVE pause
   (`node.paused || player.paused`, never the node's own raw value — a recipe-held side, e.g. reveal's
   held A, stays exactly as the recipe left it) AND the recipe's own clock (`Runtime::now()` excises
   paused time), so a pending B and an in-flight effect freeze too, not just `cur:*`. Direction comes
   from `get player.paused` (not `cur:*.paused` any more — the node's raw value is never touched by the
-  override, so it wouldn't reflect the current pause state). `TogglePause` tracks what it last set
-  (`_wantPaused`) so R81 (below) can re-assert it after a restart whose snapshot wasn't restored/was
-  stale. The interim R75a ruling (write every `srcs:*.paused` directly) is gone.
+  override, so it wouldn't reflect the current pause state). The interim R75a ruling (write every
+  `srcs:*.paused` directly) is gone.
 - New sources (`SourceProps`) carry every setting at creation: path, kind (image by extension, else
   video), loop, speed, `gain.user`, `gain.mute`, no_audio, hwdec, fps_cap, cache, demuxer_*, af.
 
 ## Property map (`MpvPropertyMap.Translate(object[] mpvArgs) → (prop, value)?`)
 `["set_property", name, v]` / `["set", name, "v"]`:
 volume N → `gain.user` = **60·log10(N/100) dB** (the cubic curve users know: 50 → −18.06), N ≤ 0 → −96 ·
-speed → `speed` · mute → `gain.mute` −96 / 0 · pause → `paused` · loop-file inf/yes/no → `loop` ·
+speed → `speed` · mute → `gain.mute` −96 / 0 · pause → **`player.paused`** (M7: the player-level
+pause; `Set` sends it as `set player.paused`, never `srcs:*.paused`) · loop-file inf/yes/no → `loop` ·
 panscan ≥ 0.5 → layer `fit:"fill"`, else `"fit"` · vf `fps=N` / "" → `fps_cap` N / 0 · hwdec → `hwdec` ·
 cache no → `cache:false`, else true · demuxer-max-bytes / -back-bytes ("20MiB", KiB/GiB/bytes) →
 `demuxer_max_mib` / `demuxer_back_mib` · af → `af` · aid no → `no_audio:true`, else false.
@@ -197,9 +209,10 @@ never `Drain().Wait()` inside the handler, which runs on the client's own callba
 concurrent switch/set): the playing item's effective `gain.user`/`speed` (→ `srcs:*`, with `Set`'s own
 `FixupPerItem` then giving a pending B its own effective value, same split as a live `/settings`
 change, R61), `no_audio`/`hwdec`/`fps_cap`/`cache`/`demuxer_max_mib`/`demuxer_back_mib`, `gain.mute`,
-the layer `fit`, the playing item's `af`, and `player.paused` (from `_wantPaused` — the one thing with
-no OTHER authority to re-derive from; volume/speed/etc. come from settings.json/the library index,
-pause has only "what we last told the player"). `LpPlayerMedia.ReapplyCount` counts how many times it's
+the layer `fit`, the playing item's `af` — and **not** `player.paused` (I3: the player is its
+authority and restores it from its snapshot; re-asserting a backend copy flipped the pause after a
+crash/stall when the toggle came from a keybind's CLI process or a restarted backend). The reapply
+logs the player's value (`… (player.paused = true, kept)`). `LpPlayerMedia.ReapplyCount` counts how many times it's
 actually run (self-test/IT evidence).
 
 ## Event flow
@@ -239,7 +252,11 @@ SIGCONTs + stops the player and the backend and removes the temp dir. Covers: `/
 full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps,
 HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
 (interval 20 s + Wait + Advance, 2 s clips → align:end advances); `/next` mid-wait; `/stop`;
-`/library/volume|speed` on the playing item; a pending B getting its OWN override while the global
+`/library/volume|speed` on the playing item; **final review**: a CLI `--action=toggle-pause` (a
+separate process) surviving a compositor kill -9 + the backend's reapply (I3), pause → `/stop` →
+`/apply` and pause → `/apply` both playing (I1), all outputs removed during an advance-on-end
+rotation → no switch storm (≤ 2 requests in 8 s), the last target parked and shown on replug,
+rotation resuming (I4); a pending B getting its OWN override while the global
 changes; pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
 pending B — `cur:*.paused`/a source's own raw `paused` never changes, by design); a SIGSTOPped player
@@ -276,7 +293,9 @@ it recovers after SIGCONT — **R81**: that recovery (`Recovered`) must have bum
 `LpPlayerMedia.ReapplyCount` (waited for via `Drain()` before checking, since `Queue(...)` from an
 event handler is fire-and-forget by design); a SIGKILLed **compositor** yields a NEW `hello.pid`
 within 1.5 s with the SAME `supervisor_pid` (the supervised restart, Task 16 § Supervisor) — **R81**
-again: `OnRestarted` must also have bumped `ReapplyCount`; then `LpPlayerMedia.StopAndQuit()` must
+again: `OnRestarted` must also have bumped `ReapplyCount`; **I3**: a pause set just before by a
+second, independent client (another process's toggle) is still on after the restart + reapply,
+and one `TogglePause` then resumes; then `LpPlayerMedia.StopAndQuit()` must
 leave NO lp-player process — neither the new compositor nor the supervisor (the regression this fixes:
 killing only the compositor while its supervisor lived just made the supervisor restart it again). A
 pump steps the stepped clock (40 ms) on its own connection. ~16 s.

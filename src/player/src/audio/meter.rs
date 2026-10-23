@@ -190,6 +190,13 @@ impl MeterShared {
             *g = Some(e.into());
         }
     }
+
+    /// I7: the bus reconnected and the meter's capture stream is re-created.
+    pub fn clear_error(&self) {
+        if let Ok(mut g) = self.error.lock() {
+            *g = None;
+        }
+    }
 }
 
 /// CLOCK_MONOTONIC in ns (what `Instant` and PipeWire's `pw_time.now` both use on Linux).

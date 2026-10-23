@@ -240,6 +240,49 @@ echo "     handoff gaps (ms): $gaps"
 echo "$gaps" | jq -e '.[1:] | all(. >= 1200)' >/dev/null && ok "no switch storm after the restart (aligned gaps ≥ 1.2 s)" || bad "storm: gaps $gaps"
 post /stop '{}' >/dev/null; sleep 0.6
 
+echo "== I3: a keybind's toggle-pause (a separate one-shot CLI process) survives a compositor restart"
+post /apply "{\"path\":\"$A\"}" >/dev/null; sleep 1.0
+[ "$(playerPaused)" = false ] && ok "a new session (/apply) plays" || bad "/apply left player.paused $(playerPaused)"
+"$DOTNET" "$DLL" --action=toggle-pause > "$T/cli1.log" 2>&1
+[ "$(playerPaused)" = true ] && ok "CLI --action=toggle-pause → player.paused" || bad "CLI toggle → $(playerPaused)"
+sleep 0.6   # the player's snapshot (which carries player.paused) is written 250 ms after a change
+oldCP=$CP; kill -9 "$CP"
+for _ in $(seq 1 30); do CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$oldCP" ] && break; sleep 0.05; done
+sleep 1.0   # the backend's OnRestarted reapply runs meanwhile
+[ "$(playerPaused)" = true ] && ok "pause survived the restart + the backend's reapply (not flipped)" || bad "after restart: player.paused $(playerPaused)"
+"$DOTNET" "$DLL" --action=toggle-pause > "$T/cli2.log" 2>&1
+[ "$(playerPaused)" = false ] && ok "a second CLI toggle resumes" || bad "second CLI toggle → $(playerPaused)"
+
+echo "== I1: pause → /stop → /apply: the new session plays (legacy semantics)"
+post /pause '{}' >/dev/null; sleep 0.3
+post /stop '{}' >/dev/null; sleep 0.6
+[ "$(playerPaused)" = false ] && ok "/stop cleared player.paused" || bad "after /stop: player.paused $(playerPaused)"
+post /apply "{\"path\":\"$Bc\"}" >/dev/null; sleep 1.2
+tb=$(srcIdForPath "$Bc")
+[ "$(cur path)" = "$Bc" ] && [ "$(srcPaused "$tb")" = false ] && ok "/apply after pause+stop plays b ($tb)" || bad "/apply after stop: cur $(cur path) effective_paused $(srcPaused "$tb")"
+post /pause '{}' >/dev/null; sleep 0.3
+post /apply "{\"path\":\"$A\"}" >/dev/null; sleep 1.2
+[ "$(playerPaused)" = false ] && [ "$(cur path)" = "$A" ] && ok "pause → /apply (no stop): the new session plays" || bad "pause → /apply: player.paused $(playerPaused), cur $(cur path)"
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== I4: every output gone (monitors off): an advance-on-end rotation never spins, the last target shows on replug"
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\",\"$C\"],\"settings\":{\"Order\":0}}" >/dev/null; sleep 3
+ctl headless.remove_output '{"name":"VIRTUAL-1"}' >/dev/null; ctl headless.remove_output '{"name":"VIRTUAL-2"}' >/dev/null
+sleep 1
+ns0=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length')
+sleep 8
+ns1=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length')
+[ $((ns1 - ns0)) -le 2 ] && ok "no switch storm with no output: $((ns1 - ns0)) switch request(s) in 8 s" || bad "with no output: $((ns1 - ns0)) switch requests in 8 s (a spin)"
+pk=$(ctl state | jq -r .parked); last=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r '.events[-1].to')
+[ "$pk" = "$last" ] && ok "the last requested target ($last) is the parked wallpaper" || bad "parked $pk, last target $last"
+nh0=$(handoffs)
+ctl headless.add_output '{"name":"VIRTUAL-3","width":640,"height":360,"hz":60}' >/dev/null; sleep 0.5
+[ "$(ctl get '{"path":"lay:VIRTUAL-3:main.content"}' | jq -r .value)" = "$last" ] && ok "replug shows the last target" || bad "replug shows $(ctl get '{"path":"lay:VIRTUAL-3:main.content"}' | jq -r .value)"
+sleep 5
+[ $(handoffs) -gt $nh0 ] && ok "rotation resumes after the replug" || bad "rotation stalled after the replug"
+post /stop '{}' >/dev/null; sleep 0.6
+ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
+
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"

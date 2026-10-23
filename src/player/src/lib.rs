@@ -19,6 +19,7 @@ pub mod graph;
 pub mod headless;
 pub mod log;
 pub mod mpv;
+pub mod onset;
 pub mod paths;
 pub mod probe;
 pub mod recipes;

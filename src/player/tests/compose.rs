@@ -712,3 +712,71 @@ fn effect_progress_endpoints_match_plain_source() {
         }
     }
 }
+
+/// M3 (final review): an effect this driver can't compile draws as a cut (the side the
+/// progress is nearer), never a black output — and the failure is cached: the next call
+/// doesn't re-read or re-compile (`Catalogue::failed`).
+#[test]
+fn uncompilable_effect_draws_a_cut_not_black() {
+    let Some((gfx, _cat)) = setup() else {
+        return;
+    };
+    let Some(src) = Catalogue::resolve_dir() else {
+        return;
+    };
+    // A catalogue copy whose `fade` body is broken GLSL (the shared assets stay untouched).
+    let dir = std::env::temp_dir().join(format!("lp-broken-cat-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("glsl")).unwrap();
+    for f in ["manifest.json", "wrap.vert", "wrap.frag.template"] {
+        std::fs::copy(src.join(f), dir.join(f)).unwrap();
+    }
+    std::fs::write(dir.join("glsl/fade.glsl"), "this is not glsl {").unwrap();
+    let mut cat = Catalogue::load(&dir).expect("load the copy");
+    let mut composer = Composer::new(&gfx).expect("Composer::new");
+
+    let mut g = Graph::new();
+    make_output(&mut g, "out:DP-1", 64, 64);
+    make_source(&mut g, "src1");
+    make_source(&mut g, "src2");
+    let mut fx_props = Map::new();
+    fx_props.insert("effect_id".to_string(), json!("fade"));
+    fx_props.insert("from".to_string(), json!("src1"));
+    fx_props.insert("to".to_string(), json!("src2"));
+    fx_props.insert("progress".to_string(), json!(0.25));
+    let fx = g.create(NodeKind::Effect, None, fx_props).unwrap();
+    g.set(&p("lay:DP-1:main.content"), PropValue::Str(fx.clone()))
+        .unwrap();
+
+    let from_tex = gfx.tex(64, 64);
+    clear_to(&gfx, &from_tex, [1.0, 0.0, 0.0, 1.0]); // red
+    let to_tex = gfx.tex(64, 64);
+    clear_to(&gfx, &to_tex, [0.0, 0.0, 1.0, 1.0]); // blue
+    let target_tex = gfx.tex(64, 64);
+    let target_fbo = gfx.fbo(&target_tex);
+    let mut registry: HashMap<String, Tex> = HashMap::new();
+    registry.insert("src1".to_string(), from_tex);
+    registry.insert("src2".to_string(), to_tex);
+    let textures = |id: &str| registry.get(id);
+
+    composer
+        .compose_output(&gfx, &g, &mut cat, "out:DP-1", &textures, &target_fbo)
+        .expect("a broken effect is a cut, not a compose error");
+    let px = read_rgba(&gfx, &target_tex, 32, 32);
+    assert!(
+        px[0] > 250 && px[2] < 5,
+        "progress 0.25 → from (red), got {px:?}"
+    );
+    assert!(cat.failed("fade"), "the failure is cached");
+
+    g.set(&p(&format!("{fx}.progress")), PropValue::F64(0.75))
+        .unwrap();
+    composer
+        .compose_output(&gfx, &g, &mut cat, "out:DP-1", &textures, &target_fbo)
+        .unwrap();
+    let px = read_rgba(&gfx, &target_tex, 32, 32);
+    assert!(
+        px[2] > 250 && px[0] < 5,
+        "progress 0.75 → to (blue), got {px:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

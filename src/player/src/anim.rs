@@ -292,16 +292,36 @@ impl Animator {
         out
     }
 
-    /// Whether any not-yet-finished animation targets a `gain.*` path, started or not
-    /// (R90): the fast gain timer arms (and stays armed) iff this is true — independent
-    /// of `now`, since a not-yet-started gain ramp still needs the timer already running
-    /// so it can start emitting the instant its own `start` arrives, rather than wait for
-    /// the next main tick to notice. Cheap: one scan of the (small, bounded by live
-    /// animations) entry list, no allocation.
-    pub fn has_live_gain(&self) -> bool {
+    /// Whether a not-yet-finished animation targets a `gain.*` path and has started or
+    /// starts within `horizon` of `now` (R90; M1 of the final review): the fast gain timer
+    /// arms (and stays armed) iff this is true. The horizon (the caller passes one main
+    /// tick period — the next main tick re-checks) lets the timer be running already when
+    /// a ramp's own `start` arrives, without staying armed at 1 kHz for one that starts
+    /// far in the future (a restored source's placeholder fade-in starts "never").
+    /// Cheap: one scan of the (small) entry list, no allocation.
+    pub fn has_live_gain(&self, now: Duration, horizon: Duration) -> bool {
+        let until = now.saturating_add(horizon);
         self.entries
             .iter()
-            .any(|e| !e.done && is_gain_path(&e.anim.target))
+            .any(|e| !e.done && e.anim.start <= until && is_gain_path(&e.anim.target))
+    }
+
+    /// How many animations are held (live or finished-and-holding) — the `loop` probe's
+    /// `bounds` (C1).
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether no animation is held.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Drop every animation whose target `keep` rejects (a node that no longer exists):
+    /// one that never started — e.g. a restored source's placeholder fade-in — would
+    /// otherwise sit here forever (M1).
+    pub fn retain_targets(&mut self, keep: impl Fn(&PropPath) -> bool) {
+        self.entries.retain(|e| keep(&e.anim.target));
     }
 
     /// Drains and returns every `(AnimId, Option<CorrId>)` that has completed (not
@@ -470,16 +490,25 @@ mod tests {
     // reflect only the gain one's presence.
     fn tick_gains_ignores_scalar_paths() {
         let mut a = Animator::new();
-        assert!(!a.has_live_gain(), "nothing added yet");
+        assert!(
+            !a.has_live_gain(Duration::ZERO, Duration::from_millis(100)),
+            "nothing added yet"
+        );
 
         a.add(anim("fx2.progress", 0.0, 1.0, 0, 1000, Curve::Linear));
-        assert!(!a.has_live_gain(), "a scalar animation is not a gain one");
+        assert!(
+            !a.has_live_gain(Duration::ZERO, Duration::from_millis(100)),
+            "a scalar animation is not a gain one"
+        );
 
         a.add(Animation {
             unit: AnimUnit::GainLinear,
             ..anim("src1.gain.anticlick", 0.0, 1.0, 0, 30, Curve::Linear)
         });
-        assert!(a.has_live_gain(), "the gain animation is now live");
+        assert!(
+            a.has_live_gain(Duration::ZERO, Duration::from_millis(100)),
+            "the gain animation is now live"
+        );
 
         let gains = a.tick_gains(Duration::from_millis(15));
         assert_eq!(gains.len(), 1, "only the gain path, never fx2.progress");
@@ -505,12 +534,22 @@ mod tests {
             unit: AnimUnit::GainLinear,
             ..anim("src1.gain.xfade", 0.0, 1.0, 5_000, 30, Curve::Linear)
         });
-        assert!(a.has_live_gain(), "not started yet, but still live");
+        assert!(
+            a.has_live_gain(Duration::from_millis(4_990), Duration::from_millis(16)),
+            "starts within the horizon: live"
+        );
+        assert!(
+            !a.has_live_gain(Duration::ZERO, Duration::from_millis(16)),
+            "starts far beyond the horizon: the 1 kHz timer must not stay armed for it (M1)"
+        );
         assert!(
             a.tick_gains(Duration::ZERO).is_empty(),
             "nothing emitted before start"
         );
-        assert!(a.has_live_gain(), "still live: it just hasn't started");
+        assert!(
+            a.has_live_gain(Duration::from_millis(4_995), Duration::from_millis(16)),
+            "still live: it just hasn't started"
+        );
     }
 
     #[test]
@@ -528,11 +567,17 @@ mod tests {
         // Fast-tick path drives it all the way to its end.
         let at_29 = a.tick_gains(Duration::from_millis(29));
         assert_eq!(at_29.len(), 1);
-        assert!(a.has_live_gain(), "not finished yet at 29ms");
+        assert!(
+            a.has_live_gain(Duration::ZERO, Duration::from_millis(100)),
+            "not finished yet at 29ms"
+        );
 
         let at_30 = a.tick_gains(Duration::from_millis(30));
         assert_eq!(at_30.len(), 1, "the exact final value, once");
-        assert!(!a.has_live_gain(), "finished: no longer live");
+        assert!(
+            !a.has_live_gain(Duration::ZERO, Duration::from_millis(100)),
+            "finished: no longer live"
+        );
         assert_eq!(a.finished(), vec![(id, None)]);
 
         // The ordinary main-tick `tick()` must see it as already done: no re-emission,

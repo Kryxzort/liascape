@@ -179,12 +179,15 @@ public static class LpPlayerMedia
         Set("gain.mute", PlayerHelper.IsMuted ? MpvPropertyMap.SilentDb : 0.0);
         Set("fit", Fit(s));
         if (cur != null) SetForPath(cur, "af", NormalizeAf(cur, s) ?? "");
-        // the backend has no independent record of "should this be paused" beyond what it last told
-        // the player (there is no other authority for it, unlike volume/speed, which live in
-        // settings.json/the library index) — re-assert that, defensively, in case this restart's
-        // snapshot wasn't restored (budget-exhausted) or restored a stale value.
-        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = _wantPaused }, LpPlayerClient.QuickMs);
-        LpPlayerClient.Log("lp-player: re-applied effective settings" + (cur != null ? $" for {Path.GetFileName(cur)}" : " (nothing playing)"));
+        // I3 (final review): pause is NOT re-asserted. Its one authority is the player itself
+        // (`player.paused`, persisted in its snapshot and restored with it): a keybind toggle runs
+        // in a separate one-shot CLI process, and a restarted backend has no memory of it, so any
+        // copy kept here goes stale and flipped the pause on its own after a crash/stall.
+        bool? paused = null;
+        try { paused = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value").ValueKind == JsonValueKind.True; }
+        catch (LpPlayerException) { }
+        LpPlayerClient.Log("lp-player: re-applied effective settings" + (cur != null ? $" for {Path.GetFileName(cur)}" : " (nothing playing)")
+            + $" (player.paused = {(paused is bool b ? b.ToString().ToLowerInvariant() : "?")}, kept)");
     }
 
     private static void Record(string corr, string outcome)
@@ -340,9 +343,27 @@ public static class LpPlayerMedia
         client.StartEvents();
         client.WaitSubscribed(2000); // so the handoff event can't slip past before we listen (the poll covers it anyway)
         if (ct.IsCancellationRequested) return "caller-cancelled";
+        // M2 (final review): an aligned wait is bounded too — A's remaining play time + slack (the
+        // player's own fallback, `transition.align_fallback`, fires 10 s after A's end; ours is a
+        // backstop behind it). While no output exists (R60 parked) the player holds an aligned
+        // switch until one shows it (I4) — then the backstop keeps waiting instead of giving up.
+        var remaining = alignEnd ? await Task.Run(TimeRemaining).ConfigureAwait(false) : null;
         var corr = await Queue(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets
         if (corr == null) return "failed:request refused";
-        var outcome = await WaitCorr(corr, ct, alignEnd ? -1 : 60_000).ConfigureAwait(false);
+        int bound = alignEnd ? (int)Math.Min(int.MaxValue - 1, ((remaining ?? 0) + AlignBackstopSlackSec) * 1000) : 60_000;
+        string outcome;
+        while (true)
+        {
+            outcome = await WaitCorr(corr, ct, bound).ConfigureAwait(false);
+            if (outcome == "timeout" && alignEnd && !await Task.Run(() => HasOutputs(client)).ConfigureAwait(false)) continue;
+            break;
+        }
+        if (outcome == "timeout")
+        {
+            LpPlayerClient.Log($"aligned switch {corr} not handed off within {bound} ms — cancelling it (the caller switches now)");
+            try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
+            catch (LpPlayerException) { } // already handed off / superseded meanwhile
+        }
         if (outcome == "caller-cancelled")
         {
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
@@ -351,6 +372,33 @@ public static class LpPlayerMedia
         }
         return outcome;
     }
+
+    // Seconds past A's remaining play time an aligned switch is waited for (M2) — behind the
+    // player's own 10 s `align_fallback`, so the player normally resolves it first.
+    public const double AlignBackstopSlackSec = 15;
+
+    // Whether the player has any output (false = R60 parked: monitors off / unplugged).
+    private static bool HasOutputs(LpPlayerClient client)
+    {
+        try
+        {
+            var st = client.Call("state", null, LpPlayerClient.QuickMs);
+            return st.TryGetProperty("outputs", out var o) && o.ValueKind == JsonValueKind.Array && o.GetArrayLength() > 0;
+        }
+        catch (LpPlayerException) { return true; } // unknown → treat as shown (don't wait forever)
+    }
+
+    // I4 (final review): consecutive switches that didn't hand off (refused / failed / timed out)
+    // back off 1 s, 2 s, 4 s … ≤ 30 s before the playlist advances — a player refusing for any
+    // reason can never make rotation (and OnWallpaperChanged) spin. A handoff resets it.
+    private static int _failStreak;
+    public static int FailStreak => Volatile.Read(ref _failStreak);
+    public static TimeSpan NextFailureBackoff()
+    {
+        int n = Interlocked.Increment(ref _failStreak);
+        return TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(n - 1, 5))));
+    }
+    public static void ResetFailureBackoff() => Interlocked.Exchange(ref _failStreak, 0);
 
     // Completes on `transition.handoff` of this switch; false on cancel / failure.
     public static async Task<bool> SwitchAndWaitHandoff(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct) =>
@@ -400,6 +448,9 @@ public static class LpPlayerMedia
         {
             if (prop is "fit" or "viewport" or "opacity")
                 return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"lay:*:main.{prop}", ["value"] = value }, q));
+            // M7: mpv `pause` → the player-level pause (R75), never a node's own `paused`
+            if (prop == "player.paused")
+                return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = value }, q));
             if (prop.StartsWith("gain.", StringComparison.Ordinal) && prop != "gain.user")
             {
                 try
@@ -513,8 +564,8 @@ public static class LpPlayerMedia
     // recipe left it) AND the transition recipe's own clock (`Runtime::now()` excises paused time), so
     // one `set player.paused` now freezes a pending B and an in-flight effect too — the interim R75a
     // `srcs:*.paused` ruling (write every source directly, nothing recipe-aware) is gone.
-    private static volatile bool _wantPaused; // R81: what we last told the player — reapplied after a
-                                               // restart whose snapshot wasn't restored/was stale.
+    // I3: no copy of the pause state lives here — `get player.paused` is the truth (it survives
+    // a player restart via its snapshot, and a toggle from any process).
     public static bool TogglePause()
     {
         var client = C;
@@ -524,10 +575,19 @@ public static class LpPlayerMedia
         catch (LpPlayerException) { return false; }
         if (v.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
         bool now = v.ValueKind != JsonValueKind.True;
-        if (client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LpPlayerClient.QuickMs) == null) return false;
-        _wantPaused = now;
-        return true;
+        return client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LpPlayerClient.QuickMs) != null;
     }
+
+    // I1 (final review): a NEW wallpaper session (Apply / ApplyPlaylist / a cold Launch) starts
+    // playing, as with legacy (a fresh mpvpaper is never paused) — a pause belongs to the session
+    // it was made in. Queued (callers hold PlayerHelper's _lock), ahead of the session's switch.
+    // (`stop` clears the player's pause on its own.)
+    public static void QueueNewSession() => QueueEssential(() =>
+    {
+        var client = C;
+        if (client.SocketExists)
+            client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = false }, LpPlayerClient.QuickMs);
+    });
 
     // ---- queries -----------------------------------------------------------------------------------
     public static bool IsPlaying() => CurrentPath() != null;

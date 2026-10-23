@@ -11,12 +11,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::fd::RawFd;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 
-use super::{ColorSource, MpvSource, SnapshotSource, Source, SourceEvent};
+use super::{ColorSource, MpvSource, PreparedCore, SnapshotSource, Source, SourceEvent};
 use crate::anim::PropPath;
 use crate::gfx::{Gfx, Tex};
+use crate::graph::ApiError;
 use crate::graph::props::{self, PropValue};
 use crate::graph::{Graph, NodeKind};
 use crate::log::{self, Level};
@@ -40,6 +43,29 @@ const MIRRORED: [&str; 8] = [
 struct Hosted {
     src: Box<dyn Source>,
     wake: Option<RawFd>,
+}
+
+/// I5 (final review): wakes the loop when an async open's core is ready.
+pub type OpenWaker = Arc<dyn Fn() + Send + Sync>;
+
+type OpenSlot = Arc<Mutex<Option<Result<PreparedCore, ApiError>>>>;
+
+/// An mpv source whose core is being created on a worker thread (`MpvSource::
+/// prepare_core`); it becomes a hosted source — from its node's props *at that moment* —
+/// on the first `sync` after the worker is done.
+struct Opening {
+    slot: OpenSlot,
+    /// The audio route generation its core was prepared with (I7).
+    route_gen: u64,
+}
+
+/// Async-open workers still running (process-wide) — `finish_teardown` waits for them
+/// (bounded) and the runtime counts a straggler as a reaper straggler.
+static OPENING: AtomicUsize = AtomicUsize::new(0);
+
+/// I5: async-open workers still creating a core.
+pub fn opening_pending() -> usize {
+    OPENING.load(Ordering::SeqCst)
 }
 
 /// Owns one live [`Source`] per graph `Source` node.
@@ -72,6 +98,12 @@ pub struct SourceHost {
     /// the ramp has settled and calls [`SourceHost::force_paused`]. Set each tick by
     /// `Runtime` via [`SourceHost::set_pause_exclusions`]; consulted only inside `sync`.
     pause_exclusions: BTreeSet<String>,
+    /// I5: `Some` = open mpv cores on a worker thread (the real-clock runtime); `None` =
+    /// synchronously (stepped mode — determinism — and the test harnesses).
+    async_open: Option<OpenWaker>,
+    opening: BTreeMap<String, Opening>,
+    /// I7: bumped by every `set_audio_route` (a core prepared before it is re-routed).
+    route_gen: u64,
 }
 
 impl SourceHost {
@@ -86,7 +118,59 @@ impl SourceHost {
             changed: BTreeSet::new(),
             player_paused: false,
             pause_exclusions: BTreeSet::new(),
+            async_open: None,
+            opening: BTreeMap::new(),
+            route_gen: 0,
         }
+    }
+
+    /// I7 (final review): the audio bus went down (`device = None`: mpv's default device)
+    /// or came back (`Some(bus device)`, `bias` = −bus latency) — every source opened from
+    /// now on uses it, and every hosted mpv source is re-routed live. Returns the ids
+    /// re-routed.
+    pub fn set_audio_route(&mut self, device: Option<String>, bias: f64) -> Vec<String> {
+        self.route_gen += 1;
+        match &device {
+            Some(d) => {
+                self.base_opts.insert("audio_device".into(), json!(d));
+                self.base_opts
+                    .insert("audio_delay_bias".into(), json!(bias));
+            }
+            None => {
+                self.base_opts.remove("audio_device");
+                self.base_opts.remove("audio_delay_bias");
+            }
+        }
+        let mut n = Vec::new();
+        for (id, h) in &mut self.sources {
+            let Some(m) = h.src.as_mpv_mut() else {
+                continue;
+            };
+            n.push(id.clone());
+            if let Err(e) = m.set_audio_route(device.as_deref(), bias) {
+                log::event(
+                    "host",
+                    Level::Warn,
+                    "source.rejected",
+                    None,
+                    json!({ "id": id, "prop": "audio_device", "reason": e.to_string() }),
+                );
+            }
+        }
+        n
+    }
+
+    /// I5 (final review): create mpv cores off the loop. `waker` is called (from the
+    /// worker) when a core is ready, so the loop picks it up at once; the source then opens
+    /// on the next `sync` (render context, props, `loadfile` — the GL half stays on the
+    /// loop thread). `None` = synchronous opens (the default).
+    pub fn set_async_open(&mut self, waker: Option<OpenWaker>) {
+        self.async_open = waker;
+    }
+
+    /// Sources whose core is still being created (probes/bounds).
+    pub fn opening(&self) -> usize {
+        self.opening.len()
     }
 
     /// Task 16c (R88): set the ids `Runtime`'s player-pause anticlick gate is still
@@ -230,15 +314,85 @@ impl SourceHost {
         }
         self.failed
             .retain(|id| graph.kind_of(id) == Some(NodeKind::Source));
+        // I5: a node gone while its core is still being made — the worker's result is
+        // dropped with the slot (`PreparedCore::drop` hands the core to the reaper).
+        self.opening
+            .retain(|id, _| graph.kind_of(id) == Some(NodeKind::Source));
 
         let mut opened = BTreeSet::new();
+        // I5: cores the workers finished since the last sync become sources now, from
+        // their nodes' *current* props (every change while opening is already in them).
+        let ready: Vec<String> = self
+            .opening
+            .iter()
+            .filter(|(_, o)| o.slot.lock().unwrap_or_else(|e| e.into_inner()).is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ready {
+            let Some(o) = self.opening.remove(&id) else {
+                continue;
+            };
+            let stale_route = o.route_gen != self.route_gen;
+            let result = o
+                .slot
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .expect("filtered on is_some");
+            let Some(node) = graph.props_of(&id) else {
+                continue;
+            };
+            let t_open = std::time::Instant::now();
+            let opened_src = result
+                .map_err(|e| e.to_string())
+                .and_then(|core| self.open_mpv(gfx, &node, player_paused, Some(core)));
+            self.open_time += t_open.elapsed();
+            match opened_src {
+                Ok(mut h) => {
+                    // I7: the bus went down/up while this core was being made — its
+                    // `audio-device` is the old one.
+                    if stale_route && let Some(m) = h.src.as_mpv_mut() {
+                        let dev = self
+                            .base_opts
+                            .get("audio_device")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let bias = self
+                            .base_opts
+                            .get("audio_delay_bias")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0);
+                        let _ = m.set_audio_route(dev.as_deref(), bias);
+                    }
+                    log::event(
+                        "host",
+                        Level::Debug,
+                        "source.open",
+                        None,
+                        json!({ "id": id, "source_kind": h.src.kind(), "async": true }),
+                    );
+                    self.sources.insert(id.clone(), h);
+                    opened.insert(id);
+                }
+                Err(reason) => {
+                    self.error(&id, reason);
+                    self.failed.insert(id);
+                }
+            }
+        }
         for id in graph.ids_of(NodeKind::Source) {
-            if self.sources.contains_key(&id) || self.failed.contains(&id) {
+            if self.sources.contains_key(&id)
+                || self.failed.contains(&id)
+                || self.opening.contains_key(&id)
+            {
                 continue;
             }
             let Some(node) = graph.props_of(&id) else {
                 continue;
             };
+            if self.start_async_open(&id, &node) {
+                continue;
+            }
             let t_open = std::time::Instant::now();
             let opened_src = self.open(gfx, &node, player_paused);
             self.open_time += t_open.elapsed();
@@ -381,26 +535,7 @@ impl SourceHost {
                 let from = self.sources.get(&of).and_then(|h| h.src.texture());
                 Box::new(SnapshotSource::new(gfx, &of, from))
             }
-            _ => {
-                let mut opts = self.base_opts.clone();
-                for (k, v) in &writable {
-                    if !matches!(k.as_str(), "kind" | "path" | "color") {
-                        opts.insert(k.clone(), v.to_json());
-                    }
-                }
-                opts.insert("paused".into(), json!(effective_paused));
-                // `video` is the schema default, so only an explicit `image` is passed on;
-                // MpvSource infers from the extension and corrects itself after load.
-                if kind == "image" {
-                    opts.insert("kind".into(), json!("image"));
-                }
-                let m = MpvSource::open(gfx, &s("path"), &opts).map_err(|e| e.to_string())?;
-                let wake = Some(m.wake_fd());
-                return Ok(Hosted {
-                    src: Box::new(m),
-                    wake,
-                });
-            }
+            _ => return self.open_mpv(gfx, node, player_paused, None),
         };
         // Colour/snapshot: store every writable prop so `read` (and the mirror) agrees with
         // the node from the start (e.g. `paused`) — `paused` itself gets the effective
@@ -415,6 +550,93 @@ impl SourceHost {
             }
         }
         Ok(Hosted { src, wake: None })
+    }
+
+    /// The `MpvSource` for `node`: its opts (base + every writable prop, `paused` the
+    /// effective one, R75), on `core` if one was prepared off the loop (I5), else a core
+    /// made here.
+    fn open_mpv(
+        &self,
+        gfx: &Gfx,
+        node: &[(String, PropValue)],
+        player_paused: bool,
+        core: Option<PreparedCore>,
+    ) -> Result<Hosted, String> {
+        let get = |k: &str| node.iter().find(|(n, _)| n == k).map(|(_, v)| v);
+        let s = |k: &str| match get(k) {
+            Some(PropValue::Str(s)) => s.clone(),
+            _ => String::new(),
+        };
+        let node_paused = matches!(get("paused"), Some(PropValue::Bool(true)));
+        let mut opts = self.base_opts.clone();
+        for (k, v) in node.iter().filter(|(k, _)| {
+            k.starts_with("gain.")
+                || props::schema_for(NodeKind::Source, k).is_some_and(|d| !d.readonly)
+        }) {
+            if !matches!(k.as_str(), "kind" | "path" | "color") {
+                opts.insert(k.clone(), v.to_json());
+            }
+        }
+        opts.insert("paused".into(), json!(node_paused || player_paused));
+        // `video` is the schema default, so only an explicit `image` is passed on;
+        // MpvSource infers from the extension and corrects itself after load.
+        if s("kind") == "image" {
+            opts.insert("kind".into(), json!("image"));
+        }
+        let m = match core {
+            Some(core) => MpvSource::open_with_core(gfx, &s("path"), &opts, core),
+            None => MpvSource::open(gfx, &s("path"), &opts),
+        }
+        .map_err(|e| e.to_string())?;
+        let wake = Some(m.wake_fd());
+        Ok(Hosted {
+            src: Box::new(m),
+            wake,
+        })
+    }
+
+    /// I5: start making `id`'s mpv core on a worker thread, if opens are async and it is
+    /// an mpv source. `false` = open it synchronously instead.
+    fn start_async_open(&mut self, id: &str, node: &[(String, PropValue)]) -> bool {
+        let Some(waker) = self.async_open.clone() else {
+            return false;
+        };
+        let kind = node
+            .iter()
+            .find(|(n, _)| n == "kind")
+            .and_then(|(_, v)| match v {
+                PropValue::Str(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+        if matches!(kind, "color" | "snapshot") {
+            return false;
+        }
+        let slot: OpenSlot = Arc::new(Mutex::new(None));
+        let worker_slot = slot.clone();
+        let opts = self.base_opts.clone();
+        OPENING.fetch_add(1, Ordering::SeqCst);
+        let spawned = std::thread::Builder::new()
+            .name("lp-open".into())
+            .spawn(move || {
+                let r = MpvSource::prepare_core(&opts);
+                *worker_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+                drop(worker_slot);
+                OPENING.fetch_sub(1, Ordering::SeqCst);
+                waker();
+            });
+        if spawned.is_err() {
+            OPENING.fetch_sub(1, Ordering::SeqCst);
+            return false;
+        }
+        self.opening.insert(
+            id.to_string(),
+            Opening {
+                slot,
+                route_gen: self.route_gen,
+            },
+        );
+        true
     }
 
     fn error(&mut self, id: &str, reason: String) {
@@ -514,6 +736,12 @@ impl SourceHost {
     /// (shutdown).
     pub fn finish_teardown(&mut self, max: std::time::Duration) {
         let t = std::time::Instant::now();
+        // I5: cores still being made go too (a worker finishing later hands its core to
+        // the reaper itself).
+        self.opening.clear();
+        while opening_pending() > 0 && t.elapsed() < max {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
         while !self.dying.is_empty() && t.elapsed() < max {
             self.reap_dying(false);
             if !self.dying.is_empty() {

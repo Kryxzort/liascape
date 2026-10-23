@@ -407,6 +407,26 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         )));
     }
     let targets = rt.graph.resolve(node_ref);
+    // M13 (final review): a broadcast alias that matches nothing right now is a broadcast
+    // to nobody — `{targets: []}`, exactly like `set` — after the same schema check.
+    if targets.is_empty()
+        && let Some(kind) = wildcard_kind(rt, node_ref)
+    {
+        let numeric = prop.starts_with("gain.")
+            || props::schema_for(kind, prop).is_some_and(|d| matches!(d.ty, PropType::F64));
+        if !numeric {
+            props::validate_value(kind, prop, &PropValue::F64(to), true)?;
+            return Err(ApiError {
+                code: "bad_type",
+                message: format!(
+                    "{node_ref}.{prop} is not a numeric property; only numbers animate"
+                ),
+                hint: hint("animate numbers and gain slots"),
+            });
+        }
+        crate::graph::Graph::typed_for_set(kind, prop, &json!(to))?;
+        return Ok(json!({ "corr": log::new_corr("an"), "targets": [] }));
+    }
     if targets.is_empty() {
         return Err(ApiError {
             code: "no_such_node",
@@ -485,6 +505,12 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
     })?;
     if let Some(eid) = &req.effect_id {
         check_effect(rt, &json!(eid))?;
+    }
+    // I4 (final review): no output at all (R60 parked) — accepted, B replaces the parked
+    // wallpaper (`Runtime::transition_parked`); never refused, so a rotation can't spin.
+    if req.outputs.starts_with("out:") && rt.graph.ids_of(NodeKind::Output).is_empty() {
+        let (corr, to) = rt.transition_parked(req)?;
+        return Ok(json!({ "corr": corr, "to": to, "parked": true }));
     }
     let now = rt.now();
     let corr = rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)?;

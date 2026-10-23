@@ -47,9 +47,10 @@ use crate::gfx::{Catalogue, Composer, Gfx};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
 use crate::headless::{Headless, OutputBackend, OutputChange, OutputInfo};
 use crate::log::{self, CorrId, Level};
+use crate::onset::{self, ONSET_TIMEOUT, Onsets, PendingOnset};
 use crate::probe::dropout::{self, GainHistory, PendingWindows};
 use crate::probe::frames::FrameStats;
-use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL, ONSET_TIMEOUT};
+use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL};
 use crate::recipes::{TransitionEventKind, Transitions};
 use crate::redraw::{self, Redraw};
 use crate::snapshot::{self, Snapshot};
@@ -225,7 +226,8 @@ pub(crate) struct Parked {
     pub id: String,
     /// Its pause state to restore (a pending B always resumes playing).
     resume_paused: bool,
-    /// When its park ramp is over (then it's paused); `None` = settled.
+    /// When its park ramp is over (then it's paused); `None` = settled. On the *unpaused*
+    /// base clock (I1: a park ramp completes even while the player is paused).
     settle_at: Option<Duration>,
     /// The ramp end has been reached once (its final value sent): pause next.
     armed: bool,
@@ -233,6 +235,25 @@ pub(crate) struct Parked {
     /// that connector shows it when it appears, whatever else is on screen. `None` = the
     /// R60 "no output left" park (the next output shows it).
     pub connector: Option<String>,
+}
+
+/// I4 (final review): an `align: end` transition requested while no output exists — its
+/// B already replaced the parked wallpaper; its handoff is reported when an output comes
+/// back and shows it (the parked A is paused, so its end can't come before), or it is
+/// superseded by the next parked request.
+#[derive(Debug, Clone)]
+pub(crate) struct ParkedReq {
+    pub corr: CorrId,
+    pub b: String,
+    pub from: Option<String>,
+}
+
+/// A restored source's fade-in waiting to start (`Runtime::fade_in`, I6): it starts once
+/// the source is `Ready` **and** its audio flows — or `ONSET_TIMEOUT` after `Ready`.
+#[derive(Debug, Clone, Default)]
+struct FadeWait {
+    ready_at: Option<Duration>,
+    flowed: bool,
 }
 
 /// When the snapshot is written (§ Snapshot): `due` = 250 ms after the first unsaved
@@ -339,8 +360,22 @@ pub struct Runtime {
     pub(crate) local: BTreeMap<String, LocalTime>,
     /// `stop`/`quit`: sources to destroy once their anti-click ramp is over.
     /// `(ramp end, id, armed)`: armed at the first tick at/after the ramp end — whose sync
-    /// sends the final −96 dB to the live source — and destroyed at the next one.
+    /// sends the final −96 dB to the live source — and destroyed at the next one. The ramp
+    /// end is on the *unpaused* base clock (I1): teardown completes while paused.
     pending_destroy: Vec<(Duration, String, bool)>,
+    /// I1 (final review): teardown ramps — `retire` (destroy / stop / output removal) and
+    /// `park` — on the **unpaused** base clock (`ClockKind::now`), so they finish while
+    /// the player is paused (the main Animator's `Runtime::now` freezes then). Only ever
+    /// holds `gain.anticlick` ramps of sources being retired/parked; a source in here is
+    /// excluded from the player-pause composition until its ramp is done (it keeps
+    /// playing into silence, then goes).
+    teardown_anim: Animator,
+    /// I6: the runtime's own held onsets (unpark) — `crate::onset`.
+    onsets: Onsets,
+    /// I4: an `align: end` request made while no output exists, waiting for one.
+    parked_req: Option<ParkedReq>,
+    /// I7: the bus route (`Bus::route`) the sources were last pointed at.
+    bus_route: (bool, u64),
     /// `quit` requested: exit once the ramps are done (or this instant passes).
     quit_at: Option<Instant>,
     /// R60: the wallpaper parked while no output exists.
@@ -365,7 +400,7 @@ pub struct Runtime {
     /// Restored sources that start silent and ramp in over 30 ms once ready: each has a
     /// not-yet-started `gain.anticlick` animation to 0 dB ([`RESTORE_FADE`] corr), so a
     /// recipe recording its gains (R41) sees the 0 dB it is heading to.
-    fade_in: BTreeSet<String>,
+    fade_in: BTreeMap<String, FadeWait>,
     /// R75 (Task 16b): the last `player.paused` [`Runtime::sync_sources`] saw — mirrors
     /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
     /// read the graph on every call. `paused_at`/`pause_offset` excise paused time from
@@ -414,18 +449,48 @@ pub struct Runtime {
 }
 
 /// Task 16c (R88) — see `pause_gates`' doc and `.claude/rules/player-core.md` § Runtime
-/// "Player pause/resume anticlick gate".
+/// "Player pause/resume anticlick gate". Final review (I2): the gate ramps its **own**
+/// slot, `gain.pause` — never `gain.anticlick`, which the recipe, retire and park ramp on
+/// other clocks — so it composes with every transition phase (a source waiting on an
+/// `align: end` switch, both sides of a full-live crossfade, a ramping grave) and nothing
+/// ever has to be restored when a transition takes a gated source over.
 enum PauseGate {
-    /// Ramping `gain.anticlick` toward [`SILENT_DB`]; excluded from the `player_paused`
-    /// OR composition (`SourceHost::set_pause_exclusions`) until done.
+    /// Ramping `gain.pause` toward [`SILENT_DB`] from `from_lin`; excluded from the
+    /// `player_paused` OR composition (`SourceHost::set_pause_exclusions`) until done.
     Pausing { started: Instant, from_lin: f64 },
-    /// Silent and actually paused (`SourceHost::force_paused(id, true)` already sent).
+    /// Silent and actually paused (`gain.pause` −96; mpv paused).
     Paused,
     /// Un-paused (`force_paused(id, false)` already sent); waiting for
-    /// [`SourceEvent::AudioFlowing`] (bounded by [`ONSET_TIMEOUT`]).
+    /// [`SourceEvent::AudioFlowing`] (bounded by [`ONSET_TIMEOUT`]) — `crate::onset`.
     AwaitingFlow { requested: Instant },
-    /// Ramping `gain.anticlick` back toward 0 dB; removed once done.
-    Resuming { started: Instant },
+    /// Ramping `gain.pause` back toward 0 dB from `from_lin`; removed once done.
+    Resuming { started: Instant, from_lin: f64 },
+}
+
+impl PauseGate {
+    /// Its `gain.pause` value now (wall clock), for a ramping state.
+    fn ramp_db(&self) -> Option<f64> {
+        match self {
+            PauseGate::Pausing { started, from_lin } => {
+                let t = (started.elapsed().as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
+                Some(if t >= 1.0 {
+                    SILENT_DB
+                } else {
+                    lin_to_db(*from_lin * (1.0 - t))
+                })
+            }
+            PauseGate::Resuming { started, from_lin } => {
+                let t = (started.elapsed().as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
+                Some(lin_to_db(*from_lin + (1.0 - *from_lin) * t))
+            }
+            PauseGate::AwaitingFlow { .. } | PauseGate::Paused => None,
+        }
+    }
+
+    /// Audio still flows through it (mpv not paused) while the player is paused.
+    fn flowing(&self) -> bool {
+        matches!(self, PauseGate::Pausing { .. } | PauseGate::Resuming { .. })
+    }
 }
 
 fn p(s: &str) -> PropPath {
@@ -445,6 +510,43 @@ impl Runtime {
         let base = self.clock.now();
         let frozen = self.paused_at.unwrap_or(base);
         frozen.saturating_sub(self.pause_offset)
+    }
+
+    /// The **unpaused** base clock (I1): what teardown ramps (`teardown_anim`), their
+    /// destroy deadlines and park settling run on, so they complete while paused.
+    fn base_now(&self) -> Duration {
+        self.clock.now()
+    }
+
+    /// C1 / long-run bounds: the size of every per-source collection (`loop` probe).
+    pub(crate) fn bounds(&self) -> Value {
+        let (gh_tracks, gh_samples) = self.gain_history.stats();
+        let (active, graves, ended, restore_onsets) = self.tr.bounds();
+        json!({
+            "graph_nodes": self.graph.node_count(),
+            "gain_history_tracks": gh_tracks,
+            "gain_history_samples": gh_samples,
+            "anim_entries": self.anim.len(),
+            "teardown_anim_entries": self.teardown_anim.len(),
+            "pending_destroy": self.pending_destroy.len(),
+            "onsets": self.onsets.len(),
+            "fade_in": self.fade_in.len(),
+            "dropout_windows": self.dropout_windows.len(),
+            "dropout_due": self.dropout_due.len(),
+            "pause_gates": self.pause_gates.len(),
+            "pause_gate_corr": self.pause_gate_corr.len(),
+            "last_event": self.last_event.len(),
+            "local": self.local.len(),
+            "wake_regs": self.wake_regs.len(),
+            "warned": self.warned.len(),
+            "hosted": self.host.ids().len(),
+            "opening": self.host.opening(),
+            "dying": self.host.dying(),
+            "transitions": active,
+            "graves": graves,
+            "ended": ended,
+            "restore_onsets": restore_onsets,
+        })
     }
 
     pub(crate) fn clock_name(&self) -> &'static str {
@@ -511,15 +613,82 @@ impl Runtime {
     pub(crate) fn tick(&mut self) {
         let t = Instant::now();
         self.update_player_paused();
+        self.track_bus_route();
         let now = self.now();
         self.run_anims(now);
         self.record_gain_history();
-        self.destroy_due(now);
+        self.destroy_due(self.base_now());
         let t_sync = Instant::now();
         self.sync_sources();
         let sync_ms = t_sync.elapsed();
         self.finish_tick(t.elapsed(), sync_ms);
         dropout::run_due(self);
+    }
+
+    /// I7 (final review): the bus lost its PipeWire connection (down — sources go to mpv's
+    /// default device so they keep playing) or was re-created after one (up, a new
+    /// generation — every source back onto the bus, the meter resumes on its own). Every
+    /// hosted mpv source gets an async `audio-device` set, new ones open with the route.
+    fn track_bus_route(&mut self) {
+        let Some(bus) = &self.audio.bus else {
+            return;
+        };
+        let route = bus.route();
+        if route == self.bus_route {
+            return;
+        }
+        let (dev, bias) = if route.0 {
+            (Some(bus.device()), -bus.latency().as_secs_f64())
+        } else {
+            (None, 0.0)
+        };
+        self.bus_route = route;
+        let ids = self.host.set_audio_route(dev.clone(), bias);
+        // The re-route rebuilds each source's audio chain (its output died with the
+        // server): invariant #8 — silent until its audio really flows, then 30 ms in, on
+        // its own `gain.pause` slot (a player-pause gate, if one is open, owns that slot and
+        // its resume does the same).
+        let now = self.now();
+        let mut held = 0;
+        for id in &ids {
+            // Down: the server is gone, nothing can flow until it's back (and the bus with
+            // it — the up re-route holds the ramp then).
+            if !route.0
+                || self.player_paused
+                || self.pause_gates.contains_key(id)
+                || self.bool_prop(id, "paused")
+                || !onset::has_audio(&self.graph, id)
+            {
+                continue;
+            }
+            let _ = self
+                .graph
+                .set(&p(&format!("{id}.gain.pause")), PropValue::F64(SILENT_DB));
+            self.onsets.schedule(
+                &self.graph,
+                &mut self.anim,
+                PendingOnset {
+                    id: id.clone(),
+                    slot: "pause",
+                    from: 0.0,
+                    to: 1.0,
+                    dur: STOP_RAMP,
+                    curve: Curve::Linear,
+                    requested: now,
+                    corr: None,
+                },
+                now,
+            );
+            held += 1;
+        }
+        log::event(
+            "audio",
+            Level::Info,
+            "audio.bus.sources_rerouted",
+            None,
+            json!({ "device": dev.unwrap_or_else(|| "auto".into()), "sources": ids.len(),
+                    "onsets_held": held, "generation": route.1 }),
+        );
     }
 
     /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
@@ -547,6 +716,7 @@ impl Runtime {
         self.update_sources();
         let t_tr = Instant::now();
         let evs = std::mem::take(&mut self.src_events);
+        self.drive_onsets(&evs, now);
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
         // Already in the event log → subscribers via the tap; the dropout probe (Task 15,
         // R71) also watches for Started/Done here to track each transition's audio window.
@@ -590,6 +760,19 @@ impl Runtime {
                 );
             }
         }
+        // I1: teardown ramps on the unpaused base clock (gain-only, never a redraw).
+        for (path, v) in self.teardown_anim.tick(self.base_now()) {
+            if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
+                self.teardown_anim.cancel_target(&path);
+            }
+        }
+        self.teardown_anim.finished();
+        // M1: an animation on a node that is gone never emits again (a placeholder that
+        // never started would otherwise sit — and keep the gain timer armed — forever).
+        let g = &self.graph;
+        let alive = |p: &PropPath| g.kind_of(redraw::node_of(p)).is_some();
+        self.anim.retain_targets(alive);
+        self.teardown_anim.retain_targets(alive);
         self.redraw.mark_nodes(&self.graph, &moved);
         for (_, corr) in self.anim.finished() {
             if let Some(c) = corr
@@ -674,7 +857,16 @@ impl Runtime {
         // composes `player_paused` for every source — a tick that both applies the edge
         // and calls `sync` (every tick does) must never let `sync` see an un-excluded
         // newly-eligible id even once, or it pauses it instantly before the gate exists.
-        self.drive_pause_gates_pre_sync();
+        let mut exclude = self.drive_pause_gates_pre_sync();
+        // I1: a source ramping out (retire) or into its park keeps playing into silence on
+        // the unpaused clock — a pause landing mid-ramp must not cut it.
+        exclude.extend(self.pending_destroy.iter().map(|(_, id, _)| id.clone()));
+        if let Some(pk) = &self.parked
+            && pk.settle_at.is_some()
+        {
+            exclude.insert(pk.id.clone());
+        }
+        self.host.set_pause_exclusions(exclude);
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);
         self.sync_wake_regs();
@@ -695,10 +887,7 @@ impl Runtime {
     /// it's a no-op: one bounded scan of the `Animator`'s own (small) entry list plus
     /// one of `pause_gates` (equally small), no allocation.
     fn arm_gain_timer_if_needed(&mut self) {
-        if self.gain_timer_armed
-            || self.stepped()
-            || (!self.anim.has_live_gain() && !self.has_active_pause_gate_ramp())
-        {
+        if self.gain_timer_armed || self.stepped() || !self.gain_work_pending() {
             return;
         }
         self.gain_timer_armed = true;
@@ -715,6 +904,19 @@ impl Runtime {
                 json!({ "error": e.to_string() }),
             );
         }
+    }
+
+    /// Whether the fast gain timer has anything to push (M1, final review): a gain
+    /// animation that is live **and moving** — started or starting within one main tick
+    /// (the next main tick re-checks), and not frozen by the player pause (the main
+    /// Animator's clock stops then; a teardown ramp's doesn't) — or a pause gate mid-ramp.
+    /// A placeholder far in the future (a restored source's fade-in before `Ready`) or a
+    /// transition paused mid-ramp no longer keeps 1000 wakeups/s going.
+    fn gain_work_pending(&self) -> bool {
+        let horizon = self.tick_period;
+        (!self.player_paused && self.anim.has_live_gain(self.now(), horizon))
+            || self.teardown_anim.has_live_gain(self.base_now(), horizon)
+            || self.has_active_pause_gate_ramp()
     }
 
     /// R90: one fire of the fast gain timer — evaluates only `gain.*` animations at the
@@ -754,6 +956,12 @@ impl Runtime {
         // read, a no-op if nothing changed) closes it the same way the main `tick()`
         // does as its own first line.
         self.update_player_paused();
+        // I1: teardown ramps run on the unpaused clock — pushed whether paused or not.
+        for (path, v) in self.teardown_anim.tick_gains(self.base_now()) {
+            if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
+                self.teardown_anim.cancel_target(&path);
+            }
+        }
         if !self.player_paused {
             let now = self.now();
             for (path, v) in self.anim.tick_gains(now) {
@@ -805,7 +1013,7 @@ impl Runtime {
             // lifetime as the fast timer itself), never a sustained 1 kHz cost.
             self.record_gain_history();
         }
-        if !self.anim.has_live_gain() && !self.has_active_pause_gate_ramp() {
+        if !self.gain_work_pending() {
             self.gain_timer_armed = false;
             return TimeoutAction::Drop;
         }
@@ -822,43 +1030,20 @@ impl Runtime {
     /// `Resuming`) — the fast gain timer's other arming condition alongside
     /// `Animator::has_live_gain`, since the gate's ramp isn't an Animator animation.
     fn has_active_pause_gate_ramp(&self) -> bool {
-        self.pause_gates
-            .values()
-            .any(|st| matches!(st, PauseGate::Pausing { .. } | PauseGate::Resuming { .. }))
+        self.pause_gates.values().any(PauseGate::flowing)
     }
 
-    /// R90 fix round: pushes the current wall-clock-computed value for every open
-    /// `Pausing`/`Resuming` gate — the exact same formula
-    /// `drive_pause_gates_pre_sync` itself uses for its own (still 60 Hz) write, so
-    /// the two never disagree at the instant the main tick samples it. Deliberately
-    /// does **not** transition a gate's state (`Pausing` → `Paused`,
-    /// `Resuming` → removed) — that stays `drive_pause_gates_pre_sync`'s job alone, so
-    /// a state transition is never more than one main tick late; only the gain
-    /// *value* in between is now smooth. `graph.set` (not `set_animated`) exactly like
-    /// the existing per-tick write — both are identical for `gain.*` paths
-    /// (`apply_set`'s `bump` is unconditionally skipped for them).
+    /// R90 fix round: pushes the current wall-clock-computed `gain.pause` value for every
+    /// open `Pausing`/`Resuming` gate — the same formula (`PauseGate::ramp_db`)
+    /// `drive_pause_gates_pre_sync` uses for its own per-tick write, so the two never
+    /// disagree. State transitions stay `drive_pause_gates_pre_sync`'s job alone.
     fn push_pause_gate_ramps(&mut self) {
         for (id, st) in &self.pause_gates {
-            let db = match st {
-                PauseGate::Pausing { started, from_lin } => {
-                    let el = started.elapsed();
-                    if el >= ANTICLICK {
-                        SILENT_DB
-                    } else {
-                        let t = el.as_secs_f64() / ANTICLICK.as_secs_f64();
-                        lin_to_db(*from_lin * (1.0 - t))
-                    }
-                }
-                PauseGate::Resuming { started } => {
-                    let el = started.elapsed();
-                    let t = (el.as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
-                    lin_to_db(t)
-                }
-                PauseGate::AwaitingFlow { .. } | PauseGate::Paused => continue,
-            };
-            let _ = self
-                .graph
-                .set(&p(&format!("{id}.gain.anticlick")), PropValue::F64(db));
+            if let Some(db) = st.ramp_db() {
+                let _ = self
+                    .graph
+                    .set(&p(&format!("{id}.gain.pause")), PropValue::F64(db));
+            }
         }
     }
 
@@ -932,9 +1117,6 @@ impl Runtime {
             if !kind.is_empty() {
                 log::event("source", level, kind, None, fields);
             }
-            if matches!(ev, SourceEvent::Ready) && self.fade_in.remove(&id) {
-                self.start_restore_fade(&id);
-            }
             let name = match &ev {
                 SourceEvent::Ready => "ready".to_string(),
                 SourceEvent::Ended => "ended".to_string(),
@@ -949,141 +1131,150 @@ impl Runtime {
         self.last_event
             .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
         self.fade_in
-            .retain(|id| self.graph.kind_of(id) == Some(NodeKind::Source));
+            .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
     }
 
-    /// Task 16c (R88)/R92: is `id` a video source with a real audio track? Mirrors
-    /// `recipes::transition::b_has_audio` — a `color`/`image`/`snapshot` source has no
-    /// `MpvSource` behind it at all (never reports `AudioFlowing`), `no_audio` asked mpv
-    /// for `aid=no`, and `has_audio` (R92, defaults `true` until a real source observes
-    /// otherwise) is what mpv itself resolved — a video file with literally no audio
-    /// stream must never be gated (R88's anticlick gate) or waited on (R85's onset) as
-    /// if it had one.
-    fn source_has_audio(&self, id: &str) -> bool {
-        matches!(
-            self.graph.get(&p(&format!("{id}.kind"))),
-            Ok(PropValue::Str(k)) if k == "video"
-        ) && !matches!(
-            self.graph.get(&p(&format!("{id}.no_audio"))),
-            Ok(PropValue::Bool(true))
-        ) && !matches!(
-            self.graph.get(&p(&format!("{id}.has_audio"))),
-            Ok(PropValue::Bool(false))
-        )
-    }
-
-    /// Task 16c (R88): advance every player-pause anticlick gate (see [`PauseGate`]).
-    /// Called once per tick/step, after `update_sources` (so this tick's source events,
-    /// incl. any [`SourceEvent::AudioFlowing`], are in `evs`) and before `sync_sources`
-    /// reads `pause_exclusions` on the *next* iteration.
-    ///
-    /// Split in two (R88 fix round): everything here except the `AwaitingFlow` ->
-    /// `Resuming` transition runs from [`Runtime::sync_sources`], *before*
-    /// `SourceHost::sync` — a tick that both applies a `player.paused` edge and calls
-    /// `sync` (every tick does) must never let `sync` compose the plain, un-excluded
-    /// `player_paused` for a newly-eligible id even once, or it gets paused instantly,
-    /// before the gate protecting it exists (found running `player_pause_ramps_a_plain_
-    /// source`: `sync_sources` → `host.sync` happens strictly before `finish_tick` →
-    /// `update_sources` in the same iteration). Resolving `AwaitingFlow` only needs this
-    /// tick's `evs`, which don't exist yet at that point, so it stays here, called from
-    /// `finish_tick` after `update_sources`.
-    fn drive_pause_gates_pre_sync(&mut self) {
-        // R93 (review, minor): explicitly inert under the stepped clock — never opens a
-        // gate there at all, rather than happening to be harmless only because every
-        // existing stepped player-pause test pauses mid-transition (gate-ineligible via
-        // `busy` anyway). Two independent reasons this is correct, not just convenient:
-        // mpv itself stays paused for good in stepped mode (§ Sources "Stepped mode"),
-        // so there is no real "live audio" an anticlick ramp protects; and the gate's
-        // own ramp is deliberately wall-clock (`Instant`) timed (R88's doc) — stepped
-        // mode's virtual time has no relationship to wall-clock progression for it to
-        // pace against. Since this check runs on every call and gates are the only way
-        // `self.pause_gates` is ever populated, it staying empty here for the whole
-        // process's life is guaranteed, not just true today.
-        if self.stepped() {
+    /// I6 (final review): resolve this iteration's held onsets — the runtime's own
+    /// (`onsets`: unpark) and every restored source's fade-in (`fade_in`), which starts
+    /// once the source is `Ready` **and** its audio flows (or `ONSET_TIMEOUT` after
+    /// `Ready`; at once for a source with no audio). A restored source that errors
+    /// instead has its placeholder dropped (M1).
+    fn drive_onsets(&mut self, evs: &[(String, SourceEvent)], now: Duration) {
+        let g = &self.graph;
+        self.onsets
+            .retain(|id| g.kind_of(id) == Some(NodeKind::Source));
+        self.onsets.tick(evs, &mut self.anim, now, "runtime");
+        if self.fade_in.is_empty() {
             return;
+        }
+        let mut start = Vec::new();
+        let mut failed = Vec::new();
+        for (id, w) in self.fade_in.iter_mut() {
+            for (eid, ev) in evs {
+                if eid != id {
+                    continue;
+                }
+                match ev {
+                    SourceEvent::Ready => {
+                        w.ready_at.get_or_insert(now);
+                    }
+                    SourceEvent::AudioFlowing => w.flowed = true,
+                    SourceEvent::Error { .. } => failed.push(id.clone()),
+                    _ => {}
+                }
+            }
+            let Some(ready_at) = w.ready_at else {
+                continue;
+            };
+            let no_audio = !onset::has_audio(&self.graph, id);
+            if w.flowed || no_audio {
+                start.push((id.clone(), if no_audio { "no_audio" } else { "flowed" }));
+            } else if now >= ready_at + ONSET_TIMEOUT {
+                log::event(
+                    "runtime",
+                    Level::Warn,
+                    "runtime.onset_timeout",
+                    Some(CorrId(RESTORE_FADE.into())),
+                    json!({ "id": id, "slot": "anticlick" }),
+                );
+                start.push((id.clone(), "timeout"));
+            }
+        }
+        for id in failed {
+            self.fade_in.remove(&id);
+            if self.restore_fade_pending(&id) {
+                self.anim.cancel_target(&p(&format!("{id}.gain.anticlick")));
+            }
+        }
+        for (id, reason) in start {
+            self.fade_in.remove(&id);
+            self.start_restore_fade(&id, reason);
+        }
+    }
+
+    /// Task 16c (R88): advance every player-pause anticlick gate (see [`PauseGate`]) and
+    /// return the ids to exclude from the `player_paused` composition this sync (the
+    /// gates still ramping down). Runs from [`Runtime::sync_sources`], *before*
+    /// `SourceHost::sync` — a tick that both applies a `player.paused` edge and calls
+    /// `sync` must never let `sync` compose the plain, un-excluded `player_paused` for a
+    /// newly-eligible id even once, or it gets paused instantly, before the gate
+    /// protecting it exists. Resolving `AwaitingFlow` needs this tick's events, so it
+    /// stays in `drive_pause_gates_post_update` (from `finish_tick`).
+    ///
+    /// **Eligibility (final review I2).** Every source with audio that is playing (not
+    /// node-paused — a source the recipe holds paused is silent already), not being
+    /// retired, not parked. The gate ramps its own `gain.pause` slot, so it composes with
+    /// whatever the recipe does to the same source on `xfade`/`anticlick` (a pending
+    /// `align: end` switch's A, both sides of a running full-live crossfade, a ramping
+    /// grave): the recipe's clock is frozen while paused, the gate's isn't, and the slots
+    /// sum. At the pause edge a playing, ready source gets a `Pausing` ramp; a source
+    /// that becomes eligible later (opened, un-paused by the recipe, unparked — all while
+    /// the player is already paused, so composed paused at once) starts `Paused`
+    /// (`gain.pause` −96, silent), so its resume is a flow-gated ramp in like every other.
+    fn drive_pause_gates_pre_sync(&mut self) -> BTreeSet<String> {
+        // R93: explicitly inert under the stepped clock — mpv stays paused for good there
+        // and the gate's wall-clock ramp has nothing to pace against.
+        if self.stepped() {
+            return BTreeSet::new();
         }
         let want_paused = self.player_paused();
         let edge = want_paused != self.pause_gate_prev;
         self.pause_gate_prev = want_paused;
 
-        // R34/invariant #7: a gate never fights the recipe's own holds. A gated id that a
-        // *new* transition request has since captured as its A or B (e.g. one gated
-        // `Paused` while idle, then targeted by a transition while the player stays
-        // paused) is abandoned here — unexcluded at once, so the very next `sync` composes
-        // the ordinary `node.paused || player.paused` for it like any other source, and
-        // whatever the recipe does to it from here on is never second-guessed by a stale
-        // gate deciding to `force_paused` underneath it later.
-        //
-        // R93 (review): also abandon any gate whose node is simply gone — a defensive
-        // backstop alongside `retire`'s own explicit `abandon_pause_gate` call (the
-        // primary fix: it runs *before* a competing write ever happens). This one only
-        // ever fires if some other path destroyed a gated source's node without going
-        // through `retire` — it exists so a gate can never write `gain.anticlick` to a
-        // node that no longer exists, not to be the only cleanup path.
-        let (by_output, graves) = self.tr.held_sources();
-        let busy: BTreeSet<String> = by_output.into_values().flatten().chain(graves).collect();
+        let destroying: BTreeSet<String> = self
+            .pending_destroy
+            .iter()
+            .map(|(_, id, _)| id.clone())
+            .collect();
+        let parked = self.parked.as_ref().map(|pk| pk.id.clone());
+        // R93: a gate never outlives its node, and never competes with a teardown/park.
         let abandoned: Vec<String> = self
             .pause_gates
             .keys()
-            .filter(|id| busy.contains(*id) || self.graph.kind_of(id) != Some(NodeKind::Source))
+            .filter(|id| {
+                self.graph.kind_of(id) != Some(NodeKind::Source)
+                    || destroying.contains(*id)
+                    || parked.as_deref() == Some(id.as_str())
+            })
             .cloned()
             .collect();
-        self.pause_gates
-            .retain(|id, _| !busy.contains(id) && self.graph.kind_of(id) == Some(NodeKind::Source));
-        if !abandoned.is_empty() {
-            let mono = log::mono_now().unwrap_or_default();
-            for id in abandoned {
-                if let Some(corr) = self.pause_gate_corr.remove(&id) {
-                    self.dropout_windows.done(&corr.0, mono);
-                }
-            }
+        for id in abandoned {
+            self.abandon_pause_gate(&id);
         }
 
         if want_paused {
-            // New eligible sources: a video with audio, not already recipe-held (its own
-            // picture/audio holds are never fought, R34/invariant #7), not already
-            // node-paused (nothing to do — "sources without audio pause immediately"
-            // extends naturally to "already paused"), not already gated. Scanning every
-            // call (not just the edge) also naturally picks up a source that stops being
-            // transition-held while the player stays paused.
-            // R93 (review): `retire` already owns these ids' `gain.anticlick` (its own
-            // Animator-based ramp to silence, queued for destruction once it ends) — a
-            // gate must never be (re-)opened for one, or the two fight over the same
-            // slot exactly like a gate `abandon_pause_gate` just removed would (found
-            // this way: `destroy` called with zero delay right after `set
-            // player.paused true` recreated a *second* gate here, one `sync_sources`
-            // call later, for the id `retire` had already started ramping down — its
-            // own wall-clock `Resuming` ramp then drove the source straight back to 0
-            // dB while `retire`'s frozen-time ramp sat stuck, so the node tore down
-            // fully audible; `tests/api.rs::r93_destroy_mid_gate_never_leaks` pins it).
-            let destroying: BTreeSet<&str> = self
-                .pending_destroy
-                .iter()
-                .map(|(_, id, _)| id.as_str())
-                .collect();
+            if edge {
+                // A gate still resuming from the previous pause turns straight back.
+                let mut repause = Vec::new();
+                for (id, st) in self.pause_gates.iter_mut() {
+                    match st {
+                        PauseGate::Resuming { .. } => {
+                            let from_lin = db_to_lin(st.ramp_db().unwrap_or(0.0));
+                            *st = PauseGate::Pausing {
+                                started: Instant::now(),
+                                from_lin,
+                            };
+                        }
+                        PauseGate::AwaitingFlow { .. } => {
+                            repause.push(id.clone());
+                            *st = PauseGate::Paused;
+                        }
+                        PauseGate::Pausing { .. } | PauseGate::Paused => {}
+                    }
+                }
+                for id in repause {
+                    self.host.force_paused(&id, true);
+                }
+            }
             for id in self.graph.ids_of(NodeKind::Source) {
                 if self.pause_gates.contains_key(&id)
-                    || busy.contains(&id)
-                    || destroying.contains(id.as_str())
+                    || destroying.contains(&id)
+                    || parked.as_deref() == Some(id.as_str())
+                    || !onset::has_audio(&self.graph, &id)
+                    || self.bool_prop(&id, "paused")
                 {
                     continue;
                 }
-                if !self.source_has_audio(&id) {
-                    continue;
-                }
-                let node_paused = matches!(
-                    self.graph.get(&p(&format!("{id}.paused"))),
-                    Ok(PropValue::Bool(true))
-                );
-                if node_paused {
-                    continue;
-                }
-                let from_db = match self.graph.get(&p(&format!("{id}.gain.anticlick"))) {
-                    Ok(PropValue::F64(db)) => db,
-                    _ => 0.0,
-                };
-                // Dropout-probe window for the whole gesture (R79/R80's `retire` pattern):
-                // started now, `.done` once the gate fully clears (resume's ramp-in ends).
                 let corr = log::new_corr("pp");
                 let mono = log::mono_now().unwrap_or_default();
                 let a = crate::recipes::transition::snapshot_source(&self.graph, &id);
@@ -1097,34 +1288,49 @@ impl Runtime {
                 };
                 self.dropout_windows
                     .started(corr.0.clone(), mono, vec![a], b);
-                // R93 (review): logged on *open*, not only on the normal completion
-                // (`player.pause_gate`, below) — so a test/operator can find this gate's
-                // corr and its dropout window while it's still in flight, including the
-                // "destroyed mid-gate" case this event exists to make observable at all.
                 log::event(
                     "runtime",
                     Level::Debug,
                     "player.pause_gate_opened",
                     Some(corr.clone()),
-                    json!({ "id": id }),
+                    json!({ "id": id, "playing": edge && self.bool_prop(&id, "ready") }),
                 );
                 self.pause_gate_corr.insert(id.clone(), corr);
-                self.pause_gates.insert(
-                    id,
+                let st = if edge && self.bool_prop(&id, "ready") {
+                    let from_db = match self.graph.get(&p(&format!("{id}.gain.pause"))) {
+                        Ok(PropValue::F64(db)) => db,
+                        _ => 0.0,
+                    };
                     PauseGate::Pausing {
                         started: Instant::now(),
                         from_lin: db_to_lin(from_db),
-                    },
-                );
+                    }
+                } else {
+                    // Composed paused already (or never played): silent — hold it at −96
+                    // so the resume ramps it in on flowing audio.
+                    let _ = self
+                        .graph
+                        .set(&p(&format!("{id}.gain.pause")), PropValue::F64(SILENT_DB));
+                    PauseGate::Paused
+                };
+                self.pause_gates.insert(id, st);
             }
         } else if edge {
-            // Resume: every `Paused` gate un-pauses right away and starts waiting for
-            // real audio; a `Pausing` gate that never finished fading out never actually
-            // reached mpv's `pause` (R85/R88: the source stayed excluded, so audio kept
-            // flowing all along) — ramp it back in directly, no un-pause/flow-wait needed.
+            // Resume: every `Paused` gate un-pauses and waits for real audio (unless its
+            // own node got paused meanwhile — a park — then it's silent for good: drop it,
+            // `gain.pause` back to 0 dB while mpv stays paused); a `Pausing` one that never
+            // reached its pause ramps back from where it is.
             let mut unpause_now = Vec::new();
+            let mut drop_now = Vec::new();
+            let node_paused: BTreeSet<String> = self
+                .pause_gates
+                .keys()
+                .filter(|id| self.bool_prop(id, "paused"))
+                .cloned()
+                .collect();
             for (id, st) in self.pause_gates.iter_mut() {
                 match st {
+                    PauseGate::Paused if node_paused.contains(id) => drop_now.push(id.clone()),
                     PauseGate::Paused => {
                         unpause_now.push(id.clone());
                         *st = PauseGate::AwaitingFlow {
@@ -1132,59 +1338,56 @@ impl Runtime {
                         };
                     }
                     PauseGate::Pausing { .. } => {
+                        let from_lin = db_to_lin(st.ramp_db().unwrap_or(SILENT_DB));
                         *st = PauseGate::Resuming {
                             started: Instant::now(),
+                            from_lin,
                         };
                     }
                     PauseGate::AwaitingFlow { .. } | PauseGate::Resuming { .. } => {}
                 }
             }
             for id in unpause_now {
+                onset::held(&id, "pause", self.pause_gate_corr.get(&id).cloned());
                 self.host.force_paused(&id, false);
+            }
+            for id in drop_now {
+                self.abandon_pause_gate(&id);
+                let _ = self
+                    .graph
+                    .set(&p(&format!("{id}.gain.pause")), PropValue::F64(0.0));
             }
         }
 
         let mut exclude = BTreeSet::new();
         let mut to_pause = Vec::new();
         let mut to_drop = Vec::new();
-        for (id, st) in &mut self.pause_gates {
+        for (id, st) in &self.pause_gates {
+            let Some(db) = st.ramp_db() else {
+                continue;
+            };
+            let _ = self
+                .graph
+                .set(&p(&format!("{id}.gain.pause")), PropValue::F64(db));
             match st {
-                PauseGate::Pausing { started, from_lin } => {
+                PauseGate::Pausing { started, .. } => {
                     exclude.insert(id.clone());
-                    let el = started.elapsed();
-                    let db = if el >= ANTICLICK {
-                        SILENT_DB
-                    } else {
-                        let t = el.as_secs_f64() / ANTICLICK.as_secs_f64();
-                        lin_to_db(*from_lin * (1.0 - t))
-                    };
-                    let _ = self
-                        .graph
-                        .set(&p(&format!("{id}.gain.anticlick")), PropValue::F64(db));
                     // Requirement #2: the ramp's own 30 ms plus a settle tail before the
-                    // source is actually paused — gain pushes are async and mpv's audio
-                    // buffering lags the graph value by a few ms.
-                    if el >= ANTICLICK + AUDIO_SETTLE_TAIL {
+                    // source is actually paused (gain pushes are async).
+                    if started.elapsed() >= ANTICLICK + AUDIO_SETTLE_TAIL {
                         to_pause.push(id.clone());
                     }
                 }
-                PauseGate::Resuming { started } => {
-                    let el = started.elapsed();
-                    let t = (el.as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
-                    let _ = self.graph.set(
-                        &p(&format!("{id}.gain.anticlick")),
-                        PropValue::F64(lin_to_db(t)),
-                    );
-                    if el >= ANTICLICK {
-                        to_drop.push(id.clone());
-                    }
+                PauseGate::Resuming { started, .. } if started.elapsed() >= ANTICLICK => {
+                    to_drop.push(id.clone());
                 }
-                PauseGate::AwaitingFlow { .. } | PauseGate::Paused => {}
+                _ => {}
             }
         }
         for id in to_pause {
             self.host.force_paused(&id, true);
-            self.pause_gates.insert(id, PauseGate::Paused);
+            self.pause_gates.insert(id.clone(), PauseGate::Paused);
+            exclude.remove(&id);
         }
         for id in to_drop {
             self.pause_gates.remove(&id);
@@ -1200,30 +1403,27 @@ impl Runtime {
                 );
             }
         }
-        self.host.set_pause_exclusions(exclude);
+        exclude
     }
 
     /// The other half of the R88 gate (see `drive_pause_gates_pre_sync`'s doc): resolve
-    /// any `AwaitingFlow` gate against this tick's source events — bounded by
-    /// [`ONSET_TIMEOUT`], logged `player.pause_resume_onset_timeout` if hit.
+    /// any `AwaitingFlow` gate against this tick's source events — the same flow test and
+    /// bound as every onset (`crate::onset`), on the gate's own wall clock; logged
+    /// `player.pause_resume_onset_timeout` if the bound is hit.
     fn drive_pause_gates_post_update(&mut self, evs: &[(String, SourceEvent)]) {
         if self.pause_gates.is_empty() {
             return;
         }
-        let flowing: BTreeSet<&str> = evs
-            .iter()
-            .filter(|(_, e)| matches!(e, SourceEvent::AudioFlowing))
-            .map(|(id, _)| id.as_str())
-            .collect();
         for (id, st) in &mut self.pause_gates {
             let PauseGate::AwaitingFlow { requested } = st else {
                 continue;
             };
+            let flowing = onset::flowed(evs, id);
             let timed_out = requested.elapsed() >= ONSET_TIMEOUT;
-            if !flowing.contains(id.as_str()) && !timed_out {
+            if !flowing && !timed_out {
                 continue;
             }
-            if timed_out && !flowing.contains(id.as_str()) {
+            if !flowing {
                 log::event(
                     "runtime",
                     Level::Warn,
@@ -1232,8 +1432,16 @@ impl Runtime {
                     json!({ "id": id, "waited_ms": requested.elapsed().as_secs_f64() * 1000.0 }),
                 );
             }
+            onset::started(
+                id,
+                "pause",
+                if flowing { "flowed" } else { "timeout" },
+                requested.elapsed(),
+                self.pause_gate_corr.get(id).cloned(),
+            );
             *st = PauseGate::Resuming {
                 started: Instant::now(),
+                from_lin: 0.0,
             };
         }
     }
@@ -1647,60 +1855,49 @@ impl Runtime {
             .find_map(|c| self.graph.resolve(&format!("cur:{c}")).into_iter().next())
     }
 
-    /// Ramp `id`'s `gain.anticlick` from where it is (or where it's heading) to `to_db`
-    /// over 30 ms, starting now.
-    fn ramp_anticlick(&mut self, id: &str, to_db: f64, corr: Option<CorrId>) {
+    /// I1: ramp `id`'s `gain.anticlick` from its current value to silence over 30 ms on
+    /// the **unpaused** base clock (`teardown_anim`) — the retire/park teardown, which
+    /// must finish while the player is paused. The main Animator's ramp on the same slot
+    /// (and any held onset of it) is dropped: one writer.
+    fn teardown_ramp(&mut self, id: &str) {
         let path = p(&format!("{id}.gain.anticlick"));
-        // A live ramp's target, else the value itself (a finished ramp's target is stale
-        // once something `set` the slot directly — e.g. a silent park's −96).
-        let cur = self
-            .anim
-            .live_target_of(&path)
-            .unwrap_or(match self.graph.get(&path) {
-                Ok(PropValue::F64(f)) => f,
-                _ => 0.0,
-            });
-        let now = self.now();
-        self.anim.add(Animation {
+        let cur = match self.graph.get(&path) {
+            Ok(PropValue::F64(f)) => f,
+            _ => 0.0,
+        };
+        self.anim.cancel_target(&path);
+        self.onsets.cancel(id);
+        self.tr.cancel_restore_onset(id);
+        let now = self.base_now();
+        self.teardown_anim.add(Animation {
             target: path,
             from: db_to_lin(cur),
-            to: db_to_lin(to_db),
+            to: 0.0,
             start: now,
             duration: STOP_RAMP,
             curve: Curve::Linear,
             unit: AnimUnit::GainLinear,
-            corr,
+            corr: None,
         });
     }
 
-    /// Whether `id` can make no sound right now (so it may go without a ramp): paused,
-    /// not ready yet (never played), at −96 dB, or a kind without audio.
-    fn is_silent(&self, id: &str) -> bool {
-        matches!(
-            self.str_prop(id, "kind").as_str(),
-            "color" | "snapshot" | "image"
-        ) || self.bool_prop(id, "paused")
-            || !self.bool_prop(id, "ready")
-            || self
-                .graph
-                .effective_gain_db(id)
-                .is_some_and(|db| db <= SILENT_DB + 1e-9)
+    /// Drop every animation and held onset on `id` (it's going now).
+    fn forget_source_anims(&mut self, id: &str) {
+        for slot in crate::units::GainSlot::ALL {
+            let path = p(&format!("{id}.gain.{}", slot.as_str()));
+            self.anim.cancel_target(&path);
+            self.teardown_anim.cancel_target(&path);
+        }
+        self.onsets.cancel(id);
+        self.tr.cancel_restore_onset(id);
+        self.fade_in.remove(id);
     }
 
-    /// R93 (review of Task 16c/16d): drop `id`'s player-pause anticlick gate (if any)
-    /// outright — closing its own dropout-probe window — called wherever a gated source
-    /// is about to be retired/destroyed (`retire`, every path: `destroy`, `stop`, output
-    /// removal). Without this, a gate still `Pausing`/`Resuming` keeps writing
-    /// `gain.anticlick` directly (`drive_pause_gates_pre_sync`) on the very same tick
-    /// `retire` adds its *own* Animator-based ramp on the identical path — two writers
-    /// racing for the same property, "safe" only by incidental drain order — and once
-    /// the node is actually destroyed, a gate in ANY state (including `Paused`/
-    /// `AwaitingFlow`, which don't write but also never clean up on their own) is never
-    /// removed from `pause_gates`/`pause_gate_corr` at all: a permanent leak, and a
-    /// dropout-probe window left open forever. Mirrors the existing "a gate never fights
-    /// the recipe's own holds" abandon in `drive_pause_gates_pre_sync` (R34/invariant
-    /// #7) — same shape, a different trigger (here: the source is going away outright,
-    /// not merely captured by a transition).
+    /// R93 (review of Task 16c/16d): drop `id`'s player-pause gate (if any) outright —
+    /// closing its own dropout-probe window — wherever a gated source is retired,
+    /// destroyed or parked. The gate's `gain.pause` value is left as it is (the caller
+    /// decides: retire/park ramp `anticlick` to silence on top of it; a resume on a
+    /// node-paused source resets it while silent).
     fn abandon_pause_gate(&mut self, id: &str) {
         if self.pause_gates.remove(id).is_none() {
             return;
@@ -1713,11 +1910,17 @@ impl Runtime {
 
     /// Remove a source without a click (core invariant, item 10): an audible one is ramped
     /// to −96 over 30 ms (`gain.anticlick`) and destroyed when the ramp is over; a silent
-    /// one goes at once. Returns the ramp length. Used by `destroy`, `stop`, output removal.
+    /// one — including one the player-level pause holds paused (I1) — goes at once.
+    /// Returns the ramp length. Used by `destroy`, `stop`, output removal. The ramp runs on
+    /// the unpaused clock and the source is kept out of the pause composition meanwhile,
+    /// so a retire completes (and frees its decoder) while the player is paused.
     pub(crate) fn retire(&mut self, id: &str) -> Duration {
-        // R93: before anything else — `retire` is about to become the sole writer of
-        // `id.gain.anticlick` (directly, below, or via its own ramp); a still-open R88
-        // gate must never compete with or outlive that, in any of its states.
+        if let Some((at, _, _)) = self.pending_destroy.iter().find(|(_, i, _)| i == id) {
+            return at.saturating_sub(self.base_now()); // already on its way out
+        }
+        // Its audio still flows while paused only through a gate mid-ramp — decided
+        // before the gate goes (R93: retire becomes the sole writer from here).
+        let flowing_gate = self.pause_gates.get(id).is_some_and(PauseGate::flowing);
         self.abandon_pause_gate(id);
         if self.graph.kind_of(id) != Some(NodeKind::Source) {
             let _ = self.graph.destroy(id);
@@ -1727,18 +1930,15 @@ impl Runtime {
             self.parked = None;
             self.graph.set_parked(None);
         }
+        let effectively_paused = self.player_paused && !flowing_gate;
         let mut corr = None;
-        let ramp = if self.is_silent(id) {
+        let ramp = if !onset::audible(&self.graph, id, effectively_paused) {
+            self.forget_source_anims(id);
             let _ = self.graph.destroy(id);
             Duration::ZERO
         } else {
-            // R80 (review fix round): a plain retire's own 30 ms anti-click ramp is a
-            // dropout-probe window too — same mechanism as a transition's A, with a
-            // silent/empty "B" (its decode is trivially silence, same as any other
-            // empty-path source — no new case needed). Recorded unconditionally (not
-            // gated on `player.debug`, same rule as a transition's — R70), so `ctl probe
-            // '{"name":"dropout","args":{"corr":…}}'` can check any recent retire once
-            // the meter has actually captured past its window's end.
+            // R80: a plain retire's own 30 ms anti-click ramp is a dropout-probe window
+            // too — same mechanism as a transition's A, with a silent/empty "B".
             let a = crate::recipes::transition::snapshot_source(&self.graph, id);
             let b = crate::recipes::transition::AudioSourceSnapshot {
                 id: String::new(),
@@ -1751,10 +1951,11 @@ impl Runtime {
             let mono = log::mono_now().unwrap_or_default();
             let c = log::new_corr("rt");
             self.dropout_windows.started(c.0.clone(), mono, vec![a], b);
+            // Real time: the ramp runs on the unpaused clock (I1).
             self.dropout_windows.done(&c.0, mono + STOP_RAMP);
             corr = Some(c);
-            self.ramp_anticlick(id, SILENT_DB, None);
-            let at = self.now() + STOP_RAMP;
+            self.teardown_ramp(id);
+            let at = self.base_now() + STOP_RAMP;
             self.pending_destroy.push((at, id.to_string(), false));
             STOP_RAMP
         };
@@ -1771,23 +1972,28 @@ impl Runtime {
     /// R60: no output is left — keep the current wallpaper, silent and paused, until one
     /// comes back. `pending_b`: it's a transition's B that was never shown (it starts
     /// playing when unparked, whatever its pause state now). `connector`: parked for that
-    /// connector (a restored output that isn't present) — shown when it appears.
+    /// connector (a restored output that isn't present) — shown when it appears. The park
+    /// ramp runs on the unpaused clock (I1).
     fn park(&mut self, id: &str, pending_b: bool, connector: Option<String>) {
-        if self.fade_in.remove(id) && self.restore_fade_pending(id) {
+        if self.fade_in.remove(id).is_some() && self.restore_fade_pending(id) {
             // Parked = silent; unpark ramps it in from −96.
             self.anim.cancel_target(&p(&format!("{id}.gain.anticlick")));
         }
+        let flowing_gate = self.pause_gates.get(id).is_some_and(PauseGate::flowing);
+        self.abandon_pause_gate(id);
+        self.onsets.cancel(id);
         let resume_paused = !pending_b && self.bool_prop(id, "paused");
-        let silent = self.is_silent(id);
+        let silent = !onset::audible(&self.graph, id, self.player_paused && !flowing_gate);
         if silent {
+            self.anim.cancel_target(&p(&format!("{id}.gain.anticlick")));
             let _ = self.graph.set(
                 &p(&format!("{id}.gain.anticlick")),
                 PropValue::F64(SILENT_DB),
             );
         } else {
-            self.ramp_anticlick(id, SILENT_DB, None);
+            self.teardown_ramp(id);
         }
-        let settle_at = self.now() + if silent { Duration::ZERO } else { STOP_RAMP };
+        let settle_at = self.base_now() + if silent { Duration::ZERO } else { STOP_RAMP };
         self.parked = Some(Parked {
             id: id.to_string(),
             resume_paused,
@@ -1796,7 +2002,7 @@ impl Runtime {
             connector,
         });
         self.graph.set_parked(Some(id.to_string()));
-        self.settle_parked(self.now());
+        self.settle_parked(self.base_now());
         log::event(
             "runtime",
             Level::Info,
@@ -1809,6 +2015,7 @@ impl Runtime {
 
     /// Once the park ramp is over: pause it, and put a transition's `xfade` at its final
     /// 0 dB (silent anyway at anticlick −96) so unparking only has to ramp anticlick back.
+    /// `now` is the unpaused base clock.
     fn settle_parked(&mut self, now: Duration) {
         let Some(pk) = self.parked.as_mut() else {
             return;
@@ -1831,37 +2038,227 @@ impl Runtime {
     }
 
     /// Show the parked wallpaper again: unpaused (unless it was paused before), ramped
-    /// back in over 30 ms. Returns its id.
+    /// back in over 30 ms — on audio that is actually flowing (I6: the ramp waits for
+    /// `AudioFlowing`, bounded). Returns its id.
     fn unpark(&mut self) -> Option<String> {
         let pk = self.parked.take()?;
         self.graph.set_parked(None);
         if self.graph.kind_of(&pk.id) != Some(NodeKind::Source) {
             return None;
         }
-        if pk.settle_at.is_some() {
-            // Unparked mid-ramp: its xfade may still be animating — leave it.
-        }
+        let id = pk.id.clone();
+        let anticlick = p(&format!("{id}.gain.anticlick"));
+        // The park ramp (if it's still running) stops here; `gain.pause` (a gate it had)
+        // goes back to 0 dB while anticlick still holds it silent.
+        self.teardown_anim.cancel_target(&anticlick);
+        let _ = self
+            .graph
+            .set(&p(&format!("{id}.gain.pause")), PropValue::F64(0.0));
+        let was_held = self.bool_prop(&id, "paused");
         let _ = self.graph.set(
-            &p(&format!("{}.paused", pk.id)),
+            &p(&format!("{id}.paused")),
             PropValue::Bool(pk.resume_paused),
         );
-        self.ramp_anticlick(&pk.id, 0.0, None);
+        let now = self.now();
+        let cur = match self.graph.get(&anticlick) {
+            Ok(PropValue::F64(f)) => f,
+            _ => SILENT_DB,
+        };
+        if was_held && !pk.resume_paused {
+            // A real un-pause: silent until its audio flows, then 30 ms in.
+            let _ = self.graph.set(&anticlick, PropValue::F64(SILENT_DB));
+            self.onsets.schedule(
+                &self.graph,
+                &mut self.anim,
+                PendingOnset {
+                    id: id.clone(),
+                    slot: "anticlick",
+                    from: 0.0,
+                    to: 1.0,
+                    dur: STOP_RAMP,
+                    curve: Curve::Linear,
+                    requested: now,
+                    corr: None,
+                },
+                now,
+            );
+        } else {
+            // Unparked mid-park-ramp (still playing) or staying paused: ramp back from
+            // where it is — no un-pause, nothing to wait for.
+            self.anim.add(Animation {
+                target: anticlick,
+                from: db_to_lin(cur),
+                to: 1.0,
+                start: now,
+                duration: STOP_RAMP,
+                curve: Curve::Linear,
+                unit: AnimUnit::GainLinear,
+                corr: None,
+            });
+        }
         log::event(
             "runtime",
             Level::Info,
             "source.unparked",
             None,
-            json!({ "id": pk.id }),
+            json!({ "id": id }),
         );
-        Some(pk.id)
+        self.finish_parked_req(&id);
+        Some(id)
+    }
+
+    /// I4: the `align: end` request parked with `b` is handed off now (an output shows
+    /// it), or cancelled if `b` is no longer the parked wallpaper.
+    fn finish_parked_req(&mut self, shown: &str) {
+        let Some(req) = self.parked_req.take() else {
+            return;
+        };
+        let at_ms = self.now().as_secs_f64() * 1000.0;
+        if req.b == shown {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.handoff",
+                Some(req.corr.clone()),
+                json!({ "at_ms": at_ms, "to": req.b, "from": req.from.into_iter().collect::<Vec<_>>(),
+                        "committed": true, "parked": true }),
+            );
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.done",
+                Some(req.corr),
+                json!({ "at_ms": at_ms, "to": req.b, "parked": true }),
+            );
+        } else {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.cancelled",
+                Some(req.corr),
+                json!({ "at_ms": at_ms, "reason": "superseded", "parked": true }),
+            );
+        }
+    }
+
+    /// I4 (final review): a `transition` while **no output exists** (R60 parked). It is
+    /// accepted: B is created paused and silent and becomes the parked wallpaper (the old
+    /// one is retired — it's paused and silent, so it goes at once), so a rotation keeps
+    /// its place and the *last* target is what an output shows when one comes back. An
+    /// `align: now` request is handed off at once; an `align: end` one waits for that
+    /// output (the parked A is paused — its end can't come before), and a newer parked
+    /// request supersedes it. Events: `transition.scheduled` → `.handoff {committed,
+    /// parked}` → `.done` (or `.cancelled {reason: "superseded"}`), corr `tr-<n>`.
+    pub(crate) fn transition_parked(
+        &mut self,
+        req: crate::recipes::TransitionReq,
+    ) -> Result<(CorrId, String), ApiError> {
+        let kind = req.to.get("kind").and_then(Value::as_str).unwrap_or("");
+        let path = req.to.get("path").and_then(Value::as_str).unwrap_or("");
+        let hint =
+            "see .claude/rules/player-core.md \u{a7} Runtime \"Outputs\"; `lp-player ctl state`";
+        if req.effect_id.as_deref() == Some("") {
+            return Err(ApiError {
+                code: "out_of_range",
+                message: "effect_id must be a catalogue id, or null for a cut".into(),
+                hint: hint.into(),
+            });
+        }
+        if kind == "snapshot" {
+            return Err(ApiError {
+                code: "unsupported",
+                message: "a transition's target can't be a snapshot source".into(),
+                hint: hint.into(),
+            });
+        }
+        if kind != "color" && path.is_empty() {
+            return Err(ApiError {
+                code: "out_of_range",
+                message: "to.path must name a file (or set to.kind = \"color\")".into(),
+                hint: hint.into(),
+            });
+        }
+        let mut props = req.to.clone();
+        props.insert("paused".into(), json!(true));
+        props.insert("gain.anticlick".into(), json!(SILENT_DB));
+        let b = self.graph.create(NodeKind::Source, None, props)?;
+        let corr = log::new_corr("tr");
+        let at_ms = self.now().as_secs_f64() * 1000.0;
+        log::event(
+            "transition",
+            Level::Info,
+            "transition.scheduled",
+            Some(corr.clone()),
+            json!({ "at_ms": at_ms, "outputs": [], "to": b, "path": path, "method": req.method,
+                    "align": req.align, "effect_id": req.effect_id,
+                    "duration_ms": req.duration_ms, "parked": true }),
+        );
+        let old = self.parked.take().map(|pk| pk.id);
+        self.graph.set_parked(None);
+        if let Some(prev) = self.parked_req.take() {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.cancelled",
+                Some(prev.corr),
+                json!({ "at_ms": at_ms, "reason": "superseded", "parked": true }),
+            );
+        }
+        self.parked = Some(Parked {
+            id: b.clone(),
+            resume_paused: false,
+            settle_at: None,
+            armed: true,
+            connector: None,
+        });
+        self.graph.set_parked(Some(b.clone()));
+        if let Some(old) = &old
+            && old != &b
+        {
+            self.retire(old);
+        }
+        if req.align == crate::recipes::transition::Align::End {
+            self.parked_req = Some(ParkedReq {
+                corr: corr.clone(),
+                b: b.clone(),
+                from: old,
+            });
+        } else {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.handoff",
+                Some(corr.clone()),
+                json!({ "at_ms": at_ms, "to": b, "from": old.into_iter().collect::<Vec<_>>(),
+                        "committed": true, "parked": true }),
+            );
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.done",
+                Some(corr.clone()),
+                json!({ "at_ms": at_ms, "to": b, "parked": true }),
+            );
+        }
+        log::event(
+            "runtime",
+            Level::Info,
+            "source.parked",
+            Some(corr.clone()),
+            json!({ "id": b, "resume_paused": false, "connector": null, "replaced": true }),
+        );
+        Ok((corr, b))
     }
 
     // ------------------------------------------------------------------ stop / quit
 
     /// `stop`: every in-flight transition is dropped (`transition.cancelled {reason:
     /// "stopped"}`), every layer emptied, every source ramped to silence over 30 ms
-    /// (invariant #4) and then destroyed. `instant` (stepped clock / quit): silence and
-    /// destroy now — virtual time won't move on by itself.
+    /// (invariant #4) and then destroyed — a source the player pause holds paused is
+    /// silent and goes at once (I1). Then `player.paused` is cleared (I1, final review):
+    /// as with legacy, a stop ends the session and the next wallpaper starts playing.
+    /// `instant` (stepped clock / quit): silence and destroy now — virtual time won't move
+    /// on by itself.
     pub(crate) fn stop_all(&mut self, instant: bool) -> Vec<String> {
         let now = self.now();
         for st in self.tr.status() {
@@ -1873,8 +2270,18 @@ impl Runtime {
                 json!({ "reason": "stopped", "at_ms": now.as_secs_f64() * 1000.0 }),
             );
         }
+        if let Some(req) = self.parked_req.take() {
+            log::event(
+                "transition",
+                Level::Info,
+                "transition.cancelled",
+                Some(req.corr),
+                json!({ "reason": "stopped", "at_ms": now.as_secs_f64() * 1000.0, "parked": true }),
+            );
+        }
         self.tr = Transitions::new();
         self.anim = Animator::new();
+        self.onsets = Onsets::new();
         for l in self.graph.ids_of(NodeKind::Layer) {
             let _ = self
                 .graph
@@ -1894,15 +2301,20 @@ impl Runtime {
             }
             self.sync_sources(); // the −96 reaches mpv before the source goes
             for id in &ids {
+                self.forget_source_anims(id);
                 let _ = self.graph.destroy(id);
             }
             self.pending_destroy.clear();
+            self.teardown_anim = Animator::new();
             self.sync_sources();
         } else {
             for id in &ids {
                 self.retire(id);
             }
         }
+        // I1: the session ends here — whatever comes next plays (the stop ramps above
+        // run on the unpaused clock, so they complete either way).
+        let _ = self.graph.set(&p("player.paused"), PropValue::Bool(false));
         self.refresh_srcs();
         log::event(
             "runtime",
@@ -1914,6 +2326,8 @@ impl Runtime {
         ids
     }
 
+    /// Destroy every retired source whose ramp is over — `now` is the unpaused base
+    /// clock (I1) — then settle a parked wallpaper whose park ramp is over.
     fn destroy_due(&mut self, now: Duration) {
         let mut due = Vec::new();
         for (at, id, armed) in &mut self.pending_destroy {
@@ -1927,10 +2341,7 @@ impl Runtime {
         }
         self.pending_destroy.retain(|(_, id, _)| !due.contains(id));
         for id in due {
-            for slot in crate::units::GainSlot::ALL {
-                self.anim
-                    .cancel_target(&p(&format!("{id}.gain.{}", slot.as_str())));
-            }
+            self.forget_source_anims(&id);
             let _ = self.graph.destroy(&id);
         }
         self.settle_parked(now);
@@ -1970,7 +2381,8 @@ impl Runtime {
         self.sync_sources();
         let t = Instant::now();
         self.host.finish_teardown(Duration::from_millis(500));
-        let left = reaper::shutdown(REAPER_WAIT);
+        // I5: an async open still creating its core counts like a reaper straggler.
+        let left = reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending();
         if left > 0 {
             log::event(
                 "runtime",
@@ -2263,10 +2675,17 @@ impl Runtime {
 
     /// A restored source is ready: start its 30 ms ramp in — unless something else took
     /// its `gain.anticlick` meanwhile (a transition's hold ramp: that one rules).
-    fn start_restore_fade(&mut self, id: &str) {
+    fn start_restore_fade(&mut self, id: &str, reason: &str) {
         if !self.restore_fade_pending(id) {
             return;
         }
+        onset::started(
+            id,
+            "anticlick",
+            reason,
+            Duration::ZERO,
+            Some(CorrId(RESTORE_FADE.into())),
+        );
         self.anim.add(Animation {
             target: p(&format!("{id}.gain.anticlick")),
             from: db_to_lin(SILENT_DB),
@@ -2312,7 +2731,7 @@ impl Runtime {
                         unit: AnimUnit::GainLinear,
                         corr: Some(CorrId(RESTORE_FADE.into())),
                     });
-                    self.fade_in.insert(id.clone());
+                    self.fade_in.insert(id.clone(), FadeWait::default());
                 }
                 made.insert(saved.to_string(), id.clone());
                 Some(id)
@@ -2859,6 +3278,15 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             json!(-bus.latency().as_secs_f64()),
         );
     }
+    // I5: mpv's GL shader cache under the player's state dir (repeat opens skip the
+    // shader compile that otherwise dominates a switch's loop time).
+    let shader_cache = opts.state_dir.join("shader-cache");
+    if std::fs::create_dir_all(&shader_cache).is_ok() {
+        base.insert(
+            "shader_cache_dir".into(),
+            json!(shader_cache.display().to_string()),
+        );
+    }
     let clock = match opts.clock {
         ClockMode::Real => ClockKind::Real(MonoClock::new()),
         ClockMode::Stepped => {
@@ -2897,6 +3325,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         step_queue: VecDeque::new(),
         local: BTreeMap::new(),
         pending_destroy: Vec::new(),
+        teardown_anim: Animator::new(),
+        onsets: Onsets::new(),
+        parked_req: None,
+        bus_route: (true, 1),
         quit_at: None,
         parked: None,
         warned: BTreeMap::new(),
@@ -2916,7 +3348,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         },
         supervised: opts.supervised.clone(),
         restart_event,
-        fade_in: BTreeSet::new(),
+        fade_in: BTreeMap::new(),
         player_paused: false,
         paused_at: None,
         pause_offset: Duration::ZERO,
@@ -2930,6 +3362,9 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     };
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
+    }
+    if let Some(bus) = &rt.audio.bus {
+        rt.bus_route = bus.route();
     }
     rt.apply_output_changes();
     if opts.restore {
@@ -2979,6 +3414,16 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| format!("event loop: {}", e.error))?;
     }
     if opts.clock == ClockMode::Real {
+        // I5 (final review): mpv cores are created on a worker thread; its ping wakes the
+        // loop, whose next `sync_sources` opens the source (GL half on this thread).
+        // Stepped mode keeps synchronous opens (its frames must be deterministic).
+        let (open_ping, open_ping_src) =
+            calloop::ping::make_ping().map_err(|e| format!("ping: {e}"))?;
+        handle
+            .insert_source(open_ping_src, |_, _, _: &mut Runtime| {})
+            .map_err(|e| format!("event loop: {}", e.error))?;
+        rt.host
+            .set_async_open(Some(Arc::new(move || open_ping.ping())));
         let period = rt.tick_period;
         handle
             .insert_source(

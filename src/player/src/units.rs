@@ -88,13 +88,18 @@ pub enum GainSlot {
     Xfade,
     /// The short anti-click ramp at a hold boundary (≤ 30 ms).
     AntiClick,
+    /// The player-pause anti-click gate's own ramp (R88; final review I2): a slot of its
+    /// own so the gate — wall-clock timed while the player clock is frozen — never
+    /// shares a writer with the recipe/retire/park ramps on `anticlick`, and can gate any
+    /// playing source whatever transition it's part of.
+    Pause,
 }
 
 impl GainSlot {
-    /// All seven slots, in declaration order — used by the round-trip test and by any
+    /// All eight slots, in declaration order — used by the round-trip test and by any
     /// future caller that needs to enumerate every slot (e.g. building a default
     /// `Gains` or listing `gain.*` property paths).
-    pub const ALL: [GainSlot; 7] = [
+    pub const ALL: [GainSlot; 8] = [
         GainSlot::User,
         GainSlot::Override,
         GainSlot::Normalize,
@@ -102,6 +107,7 @@ impl GainSlot {
         GainSlot::AutoMute,
         GainSlot::Xfade,
         GainSlot::AntiClick,
+        GainSlot::Pause,
     ];
 
     /// The lowercase string form used in property paths (`gain.<slot>`) and JSON.
@@ -114,6 +120,7 @@ impl GainSlot {
             GainSlot::AutoMute => "automute",
             GainSlot::Xfade => "xfade",
             GainSlot::AntiClick => "anticlick",
+            GainSlot::Pause => "pause",
         }
     }
 }
@@ -124,7 +131,7 @@ impl fmt::Display for GainSlot {
     }
 }
 
-/// Error returned by [`GainSlot::from_str`] for a string that isn't one of the seven
+/// Error returned by [`GainSlot::from_str`] for a string that isn't one of the eight
 /// lowercase slot names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseGainSlotError(pub String);
@@ -149,6 +156,7 @@ impl FromStr for GainSlot {
             "automute" => Ok(GainSlot::AutoMute),
             "xfade" => Ok(GainSlot::Xfade),
             "anticlick" => Ok(GainSlot::AntiClick),
+            "pause" => Ok(GainSlot::Pause),
             other => Err(ParseGainSlotError(other.to_string())),
         }
     }

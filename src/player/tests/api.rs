@@ -1254,7 +1254,7 @@ fn player_pause_ramps_a_plain_source() {
     let t = Instant::now();
     while !saw_paused {
         assert!(t.elapsed() < Duration::from_secs(2), "never paused");
-        let anticlick = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+        let anticlick = get(&mut c, &format!("{id}.gain.pause"))["result"]["value"]
             .as_f64()
             .unwrap();
         let paused = mpv_paused(&mut c);
@@ -1305,7 +1305,7 @@ fn player_pause_ramps_a_plain_source() {
     }
     let t = Instant::now();
     loop {
-        let anticlick = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+        let anticlick = get(&mut c, &format!("{id}.gain.pause"))["result"]["value"]
             .as_f64()
             .unwrap();
         if (anticlick - 0.0).abs() < 1e-6 {
@@ -1349,8 +1349,9 @@ fn r93_destroy_mid_gate_never_leaks() {
         let p = c.ok("probe", json!({"name": "sources"}));
         probe_source(&p, id)["mpv_pause"].as_str() == Some("yes")
     };
+    // The gate ramps its own slot (final review I2).
     let anticlick = |c: &mut Client, id: &str| -> f64 {
-        get(c, &format!("{id}.gain.anticlick"))["result"]["value"]
+        get(c, &format!("{id}.gain.pause"))["result"]["value"]
             .as_f64()
             .unwrap()
     };
@@ -1414,14 +1415,9 @@ fn r93_destroy_mid_gate_never_leaks() {
         }
 
         c.ok("destroy", json!({ "id": id }));
-        // `player.paused` freezes *every* animation (R75, invariant #7) — including
-        // `retire`'s own teardown ramp, if the player is still paused when `destroy`
-        // was issued ("Pausing"/"Paused" above left it `true`; "AwaitingFlow"/
-        // "Resuming" already turned it back off before destroying). That's the correct,
-        // consistent behaviour (everything freezes together), not something this test
-        // should fight — un-pause so the ramp (and so the destroy) can actually
-        // complete, the same way a real session would eventually resume.
-        c.ok("set", json!({"path": "player.paused", "value": false}));
+        // I1 (final review): the teardown runs on the unpaused clock — "Pausing"/"Paused"
+        // left the player paused, and the destroy must still complete (decoder freed)
+        // without a resume.
 
         // The node must actually go (retire's own ramp, or an instant destroy).
         let t = Instant::now();
@@ -1473,6 +1469,25 @@ fn r93_destroy_mid_gate_never_leaks() {
             "{state}: torn down while still audible (a second writer fought the ramp): \
              {teardown}"
         );
+        // Fully torn down while (still) paused: no longer hosted.
+        let t = Instant::now();
+        loop {
+            let p = c.ok("probe", json!({"name": "sources"}));
+            let hosted = p["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["id"] == json!(id));
+            if !hosted {
+                break;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(2),
+                "{state}: still hosted"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        c.ok("set", json!({"path": "player.paused", "value": false}));
     }
 }
 
@@ -3090,6 +3105,20 @@ fn gain_fast_timer_dense_pushes_at_60hz() {
         "expected >= {MIN_FAST_PUSHES} distinct values, got {}: {dbs:?}",
         distinct.len()
     );
+    // M6 (final review): the count above can't tell 500 Hz from 1 kHz — the median
+    // interval between consecutive pushes can: ≤ 1.5 ms (1 kHz; a 500 Hz timer is 2 ms).
+    let ts: Vec<f64> = recent.iter().map(|p| p[0].as_f64().unwrap()).collect();
+    let mut gaps: Vec<f64> = ts.windows(2).map(|w| w[1] - w[0]).collect();
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = gaps[gaps.len() / 2];
+    println!(
+        "R90: median inter-push interval {median:.3} ms over {} gaps",
+        gaps.len()
+    );
+    assert!(
+        median <= 1.5,
+        "median inter-push interval {median:.3} ms > 1.5 ms (not a 1 kHz timer): {ts:?}"
+    );
     // A linear-amplitude ramp to 0 dB (unity) is monotonically increasing in dB too.
     for w in dbs.windows(2) {
         assert!(w[1] >= w[0] - 1e-9, "not monotonic: {dbs:?}");
@@ -3141,9 +3170,11 @@ fn gain_fast_timer_paused_makes_no_progress() {
     let value_baseline = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
         .as_f64()
         .unwrap();
+    // M1 (final review): a gain animation frozen by the player pause isn't moving — the
+    // 1 kHz timer disarms for the pause instead of firing 1000×/s for nothing.
     assert!(
-        before["gain_timer_armed"] == json!(true),
-        "the animation hasn't finished: the timer must still be armed: {before}"
+        before["gain_timer_armed"] == json!(false),
+        "paused mid-ramp: the fast timer must be disarmed: {before}"
     );
 
     // Sample repeatedly across a 160 ms window: every sample must match the settled
@@ -3159,6 +3190,8 @@ fn gain_fast_timer_paused_makes_no_progress() {
             .as_u64()
             .unwrap();
         assert_eq!(p, pushes_baseline, "no new pushes while paused");
+        let armed = c.ok("probe", json!({"name": "loop"}))["gain_timer_armed"].clone();
+        assert_eq!(armed, json!(false), "still disarmed while paused");
         assert!(
             (v - value_baseline).abs() < 1e-9,
             "gain.anticlick must not move while paused: {value_baseline} vs {v}"
@@ -3190,5 +3223,833 @@ fn gain_fast_timer_paused_makes_no_progress() {
         done["gain_timer_armed"],
         json!(false),
         "disarmed once finished: {done}"
+    );
+}
+
+// ---------------------------------------------------------------- final review fixes
+
+/// Poll `f` every 5 ms until it returns `Some`, failing after `limit`.
+fn wait_for<T>(limit: Duration, what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+    let t = Instant::now();
+    loop {
+        if let Some(v) = f() {
+            return v;
+        }
+        assert!(
+            t.elapsed() < limit,
+            "timed out after {limit:?} waiting for {what}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn f64_of(c: &mut Client, path: &str) -> Option<f64> {
+    get(c, path)["result"]["value"].as_f64()
+}
+
+/// A real-clock server (`extra` appended, e.g. `--log-level debug`).
+fn real_serve(extra: &[&str]) -> Option<Serve> {
+    let mut srv = Serve::start()?;
+    let serial = srv._serial.take();
+    drop(srv);
+    let mut args = vec!["--clock", "real"];
+    args.extend_from_slice(extra);
+    Some(Serve::spawn_in(new_root(), &args, serial))
+}
+
+/// Wait until `id` has played past `t` seconds.
+fn wait_playing(c: &mut Client, id: &str, t: f64) {
+    wait_for(Duration::from_secs(5), "playback", || {
+        (f64_of(c, &format!("{id}.time_pos")).unwrap_or(0.0) >= t).then_some(())
+    });
+}
+
+fn mpv_pause_of(c: &mut Client, id: &str) -> Option<String> {
+    let p = c.ok("probe", json!({"name": "sources"}));
+    p["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == json!(id))
+        .and_then(|s| s["mpv_pause"].as_str().map(str::to_string))
+}
+
+/// C1 (final review): 200 create → transition → destroy cycles; every per-source
+/// collection the `loop` probe's `bounds` reports stays bounded — `GainHistory` (tracks
+/// and samples) by its caps, everything else back to a handful.
+#[test]
+fn c1_long_run_switches_stay_bounded() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let first = color(&mut c, [10, 10, 10]);
+    show_all(&mut c, &first);
+    for i in 0..200u32 {
+        let rgb = [(i % 250) as u8, 0, 255 - (i % 250) as u8];
+        let corr = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"kind": "color", "color": rgb},
+                   "effect_id": null}),
+        )["corr"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        wait_for(Duration::from_secs(5), "transition done", || {
+            let st = c.ok("state", json!({}));
+            let live = st["transitions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["corr"] == json!(corr));
+            (!live).then_some(())
+        });
+        if i % 10 == 9 {
+            // and an explicit destroy of something created and never shown
+            let x = color(&mut c, [1, 2, 3]);
+            c.ok("destroy", json!({ "id": x }));
+        }
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let b = c.ok("probe", json!({"name": "loop"}))["bounds"].clone();
+    println!("C1 bounds after 200 switches: {b}");
+    let n = |k: &str| b[k].as_u64().unwrap_or_else(|| panic!("bounds.{k}: {b}"));
+    // GainHistory: dead tracks linger (post-roll analysis) but never past the caps.
+    assert!(n("gain_history_tracks") <= 64, "{b}");
+    assert!(n("gain_history_samples") <= 131_072, "{b}");
+    // The graph holds 2 outputs + 2 layers + the player + the one current source.
+    assert!(n("graph_nodes") <= 8, "{b}");
+    for k in [
+        "anim_entries",
+        "teardown_anim_entries",
+        "pending_destroy",
+        "onsets",
+        "fade_in",
+        "pause_gates",
+        "transitions",
+        "graves",
+        "ended",
+        "restore_onsets",
+        "dying",
+    ] {
+        assert!(n(k) <= 4, "bounds.{k} grew: {b}");
+    }
+    assert!(n("hosted") <= 2, "{b}");
+    assert!(n("last_event") <= 4, "{b}");
+    assert!(n("dropout_windows") <= 64, "{b}");
+}
+
+/// I1 (final review): `stop` ends the session's pause — pause → stop → a new switch plays
+/// and is audible (legacy semantics), and the stop's teardown finishes while paused.
+#[test]
+fn i1_pause_stop_then_switch_plays() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    wait_for(Duration::from_secs(2), "A paused", || {
+        (mpv_pause_of(&mut c, &a).as_deref() == Some("yes")).then_some(())
+    });
+    c.ok("stop", json!({}));
+    assert_eq!(
+        get(&mut c, "player.paused")["result"]["value"],
+        json!(false),
+        "stop clears player.paused"
+    );
+    // The teardown completed although the player had been paused.
+    wait_for(Duration::from_secs(2), "A torn down", || {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        p["sources"].as_array().unwrap().is_empty().then_some(())
+    });
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)),
+               "loop": true}, "effect_id": "fade", "duration_ms": 200}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    wait_playing(&mut c, &b, 0.5);
+    wait_for(Duration::from_secs(2), "B audible", || {
+        let st = c.ok("state", json!({}));
+        (st["graph"][&b]["gain_effective_db"] == json!(0.0)).then_some(())
+    });
+    assert_eq!(mpv_pause_of(&mut c, &b).as_deref(), Some("no"));
+    assert_eq!(content(&mut c, "VIRTUAL-1"), b);
+}
+
+/// I2 (a): a source waiting on a pending `align: end` switch (the advance-on-end mode)
+/// is playing and audible — a pause ramps it out (gain.pause mid-ramp while mpv still
+/// plays) and a resume ramps it back in, never an unramped cut or onset. The pending
+/// switch stays pending throughout.
+#[test]
+fn i2_pause_while_align_end_pending_is_ramped_both_ways() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    let corr = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S))},
+               "effect_id": "fade", "duration_ms": 500, "align": "end"}),
+    )["corr"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(Duration::from_secs(5), "waiting_start", || {
+        let st = c.ok("state", json!({}));
+        (st["transitions"][0]["phase"] == json!("waiting_start")).then_some(())
+    });
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let mut mid_down = false;
+    wait_for(Duration::from_secs(2), "A paused", || {
+        let g = f64_of(&mut c, &format!("{a}.gain.pause")).unwrap_or(0.0);
+        let paused = mpv_pause_of(&mut c, &a).as_deref() == Some("yes");
+        if !paused && g < -0.5 && g > -95.0 {
+            mid_down = true;
+        }
+        if paused {
+            assert!(g <= -95.9, "paused before the ramp reached silence: {g}");
+        }
+        paused.then_some(())
+    });
+    assert!(mid_down, "A paused without a ramp (an unramped cut)");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let mut mid_up = false;
+    wait_for(Duration::from_secs(2), "A back", || {
+        let g = f64_of(&mut c, &format!("{a}.gain.pause")).unwrap_or(-96.0);
+        if g > -95.0 && g < -0.5 {
+            mid_up = true;
+        }
+        (g.abs() < 1e-6).then_some(())
+    });
+    assert!(mid_up, "A resumed without a ramp (an unramped onset)");
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["transitions"][0]["corr"], json!(corr));
+    assert_eq!(
+        st["transitions"][0]["phase"],
+        json!("waiting_start"),
+        "{st}"
+    );
+    assert_eq!(st["graph"][&a]["gain_effective_db"], json!(0.0), "{st}");
+}
+
+/// I2 (b): pause mid-gate, then a switch that fails / is cancelled / is superseded while
+/// paused — after the resume nothing that plays is left silent (no `anticlick` −96 on a
+/// playing source), and the current wallpaper is audible.
+#[test]
+fn i2_switch_while_gated_never_leaves_a_playing_source_silent() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    for case in ["failed", "cancelled", "superseded"] {
+        c.ok("set", json!({"path": "player.paused", "value": true}));
+        let cur = content(&mut c, "VIRTUAL-1");
+        wait_for(Duration::from_secs(2), "gated", || {
+            (mpv_pause_of(&mut c, &cur).as_deref() == Some("yes")).then_some(())
+        });
+        match case {
+            "failed" => {
+                c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": "/no/such/file.mkv"},
+                           "effect_id": "fade", "duration_ms": 300, "method": "reveal"}),
+                );
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            "cancelled" => {
+                let corr = c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": blue, "loop": true},
+                           "effect_id": "fade", "duration_ms": 400}),
+                )["corr"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                std::thread::sleep(Duration::from_millis(300));
+                c.ok("cancel", json!({ "corr": corr }));
+            }
+            _ => {
+                c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": blue, "loop": true},
+                           "effect_id": "fade", "duration_ms": 400, "method": "reveal",
+                           "align": "end"}),
+                );
+                std::thread::sleep(Duration::from_millis(100));
+                c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": red, "loop": true},
+                           "effect_id": null}),
+                );
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        c.ok("set", json!({"path": "player.paused", "value": false}));
+        // Every transition settles; then whatever is shown plays at 0 dB.
+        wait_for(Duration::from_secs(5), "settled", || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let st = c.ok("state", json!({}));
+        let shown = content(&mut c, "VIRTUAL-1");
+        assert_eq!(
+            st["graph"][&shown]["gain_effective_db"],
+            json!(0.0),
+            "{case}: the current wallpaper must be audible: {st}"
+        );
+        for (id, n) in st["graph"].as_object().unwrap() {
+            if n.get("gain_effective_db").is_some() && n["paused"] == json!(false) {
+                assert!(
+                    n["gain_effective_db"].as_f64().unwrap() > -95.0,
+                    "{case}: {id} plays at −96 (a gate left its slot silent): {st}"
+                );
+            }
+        }
+        assert_eq!(
+            mpv_pause_of(&mut c, &shown).as_deref(),
+            Some("no"),
+            "{case}"
+        );
+    }
+}
+
+/// I4 (final review): with no output at all, `transition` is accepted — each target
+/// replaces the parked wallpaper — and when an output comes back the LAST target is shown
+/// and plays; an `align: end` request made meanwhile hands off only then.
+#[test]
+fn i4_transitions_while_no_output_replace_the_parked_wallpaper() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    std::thread::sleep(Duration::from_millis(100));
+    let mut last = String::new();
+    let mut corrs = Vec::new();
+    for (i, path) in [&blue, &red, &blue].into_iter().enumerate() {
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": path, "loop": true},
+                   "effect_id": "fade", "duration_ms": 300,
+                   "align": if i == 2 { "end" } else { "now" }}),
+        );
+        assert_eq!(r["parked"], json!(true), "{r}");
+        last = r["to"].as_str().unwrap().to_string();
+        corrs.push(r["corr"].as_str().unwrap().to_string());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["parked"], json!(last), "the last target is parked: {st}");
+    let sources: Vec<&String> = st["graph"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, n)| n.get("gain_effective_db").is_some())
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(sources, vec![&last], "every earlier target retired: {st}");
+    let evs = c.drain_events();
+    let handed = |evs: &[Value], corr: &str| {
+        evs.iter()
+            .any(|e| e["corr"] == json!(corr) && e["event"] == "transition.handoff")
+    };
+    assert!(
+        handed(&evs, &corrs[0]) && handed(&evs, &corrs[1]),
+        "{evs:?}"
+    );
+    assert!(
+        !handed(&evs, &corrs[2]),
+        "align:end waits for an output: {evs:?}"
+    );
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    assert_eq!(content(&mut c, "VIRTUAL-3"), last);
+    wait_playing(&mut c, &last, 0.3);
+    wait_for(Duration::from_secs(2), "audible", || {
+        let st = c.ok("state", json!({}));
+        (st["graph"][&last]["gain_effective_db"] == json!(0.0)).then_some(())
+    });
+    let evs = c.drain_events();
+    assert!(handed(&evs, &corrs[2]), "handed off once shown: {evs:?}");
+}
+
+/// The `onset.started` record for `id` (and the last `source.audio_flowing` of `id`
+/// before it): invariant #8 — the ramp-in began on flowing audio, never before.
+fn onset_after_flow(c: &mut Client, id: &str, slot: &str, after_ms: f64) -> Value {
+    wait_for(Duration::from_secs(3), "onset.started", || {
+        let evs = c.ok(
+            "logs",
+            json!({"kind_prefix": "", "min_level": "debug", "limit": 10000}),
+        )["events"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let started = evs.iter().find(|e| {
+            e["kind"] == "onset.started"
+                && e["id"] == json!(id)
+                && e["slot"] == json!(slot)
+                && e["t_mono_ms"].as_f64().unwrap() > after_ms
+        })?;
+        let t = started["t_mono_ms"].as_f64().unwrap();
+        let flowed = evs.iter().any(|e| {
+            e["kind"] == "source.audio_flowing"
+                && e["id"] == json!(id)
+                && (after_ms..=t).contains(&e["t_mono_ms"].as_f64().unwrap())
+        });
+        assert_eq!(
+            started["reason"],
+            json!("flowed"),
+            "{id}/{slot}: the ramp-in didn't wait for flowing audio: {started}"
+        );
+        assert!(
+            flowed,
+            "{id}/{slot}: started before any source.audio_flowing: {started}"
+        );
+        Some(started.clone())
+    })
+}
+
+fn now_ms(c: &mut Client) -> f64 {
+    c.ok("probe", json!({"name": "loop"}))["uptime_ms"]
+        .as_f64()
+        .unwrap()
+}
+
+/// I6 (final review): every un-pause-then-ramp-in path holds its ramp until the source's
+/// audio flows — unpark, snap-back (`restore_a`), the R88 resume, a frozen B's onset, and
+/// a restored source's fade-in — checked through `onset.started {reason}` against the
+/// source's own `source.audio_flowing`, with the slot silent meanwhile.
+#[test]
+fn i6_every_onset_waits_for_flowing_audio() {
+    let Some(srv) = real_serve(&["--log-level", "debug"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+
+    // Unpark.
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    wait_for(Duration::from_secs(2), "parked + paused", || {
+        (mpv_pause_of(&mut c, &a).as_deref() == Some("yes")).then_some(())
+    });
+    let t0 = now_ms(&mut c);
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-1", "width": 640, "height": 360, "hz": 60}),
+    );
+    assert_eq!(
+        f64_of(&mut c, &format!("{a}.gain.anticlick")),
+        Some(-96.0),
+        "unpark: silent until the audio flows"
+    );
+    onset_after_flow(&mut c, &a, "anticlick", t0);
+
+    // Snap-back of a reveal (A held paused, then restored).
+    wait_for(Duration::from_secs(2), "A audible", || {
+        (c.ok("state", json!({}))["graph"][&a]["gain_effective_db"] == json!(0.0)).then_some(())
+    });
+    let corr = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": blue, "loop": true},
+               "effect_id": "fade", "duration_ms": 3000, "method": "reveal"}),
+    )["corr"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(Duration::from_secs(3), "A held", || {
+        (mpv_pause_of(&mut c, &a).as_deref() == Some("yes")).then_some(())
+    });
+    let t1 = now_ms(&mut c);
+    c.ok("cancel", json!({ "corr": corr }));
+    onset_after_flow(&mut c, &a, "anticlick", t1);
+
+    // The R88 resume.
+    wait_for(Duration::from_secs(3), "settled", || {
+        let st = c.ok("state", json!({}));
+        st["transitions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+            .then_some(())
+    });
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    wait_for(Duration::from_secs(2), "gated", || {
+        (mpv_pause_of(&mut c, &a).as_deref() == Some("yes")).then_some(())
+    });
+    let t2 = now_ms(&mut c);
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    onset_after_flow(&mut c, &a, "pause", t2);
+
+    // A frozen B's onset at handoff.
+    let t3 = now_ms(&mut c);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": blue, "loop": true},
+               "effect_id": "fade", "duration_ms": 200, "method": "frozen"}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    onset_after_flow(&mut c, &b, "anticlick", t3);
+
+    // A restored source's fade-in (quit → serve --restore on the same state dir).
+    wait_for(Duration::from_secs(3), "settled", || {
+        let st = c.ok("state", json!({}));
+        st["transitions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+            .then_some(())
+    });
+    wait_playing(&mut c, &b, 0.5);
+    drop(c);
+    let mut srv = srv;
+    srv.client().ok("quit", json!({}));
+    assert!(srv.wait_exit(Duration::from_secs(5)).is_some(), "quit");
+    let root = srv.root.clone();
+    let serial = srv._serial.take();
+    srv.child = None;
+    std::mem::forget(srv); // keep the state dir for the restore
+    let srv2 = Serve::spawn_in(
+        root,
+        &["--clock", "real", "--log-level", "debug", "--restore"],
+        serial,
+    );
+    let mut c2 = srv2.client();
+    let restored = wait_for(Duration::from_secs(5), "restored source", || {
+        let v = content(&mut c2, "VIRTUAL-1");
+        (!v.is_empty()).then_some(v)
+    });
+    let st = onset_after_flow(&mut c2, &restored, "anticlick", 0.0);
+    println!("restore fade-in: {st}");
+}
+
+/// I5 (final review): what one switch costs the loop — per switch, the longest
+/// synchronous stretch (`max_busy_ms`) and the synchronous source-open share
+/// (`max_open_ms`) around a cut to a fresh 1080p video. Prints every switch (the report's
+/// before/after numbers); asserts the bound the async open buys: with the core created on
+/// a worker, the open share is small and a warm switch never blocks presentation for
+/// more than a few frames' worth.
+#[test]
+fn i5_switch_loop_busy() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    let mut busy = Vec::new();
+    let mut open = Vec::new();
+    for i in 0..10 {
+        std::thread::sleep(Duration::from_millis(300));
+        c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+        let path = if i % 2 == 0 { &blue } else { &red };
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": path, "loop": true},
+                   "effect_id": if i % 4 < 2 { json!(null) } else { json!("fade") },
+                   "duration_ms": 300}),
+        );
+        let b = r["to"].as_str().unwrap().to_string();
+        wait_playing(&mut c, &b, 0.2);
+        wait_for(Duration::from_secs(5), "done", || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        });
+        let lp = c.ok("probe", json!({"name": "loop"}));
+        busy.push(lp["max_busy_ms"].as_f64().unwrap());
+        open.push(lp["max_open_ms"].as_f64().unwrap());
+    }
+    println!("I5 per-switch max_busy_ms: {busy:.1?}");
+    println!("I5 per-switch max_open_ms: {open:.1?}");
+    let mut warm = busy[1..].to_vec();
+    warm.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    println!(
+        "I5 warm median max_busy_ms {:.1}, worst {:.1}",
+        warm[warm.len() / 2],
+        warm[warm.len() - 1]
+    );
+    if std::env::var("LP_I5_BASELINE").is_err() {
+        // Before (sync open, fruit dither): opens 3–14 ms, per-switch busy 32–54 ms
+        // (median 36–44). After: the core is made on a worker (opens 1–8 ms: render
+        // context + applies + loadfile) and the first render is cheaper.
+        assert!(
+            open.iter().all(|o| *o < 12.0),
+            "the mpv core open must be off the loop: {open:?}"
+        );
+        assert!(
+            warm[warm.len() / 2] < 30.0,
+            "a warm switch still blocks the loop: {busy:?}"
+        );
+    }
+}
+
+/// I7 (final review): a **private, hermetic** PipeWire + WirePlumber (their own runtime/
+/// config/state dirs, no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/V4L2
+/// monitors, so no real device is ever touched; one null sink as the only output). The
+/// owner's PipeWire is never involved: `PIPEWIRE_RUNTIME_DIR` points every client of this
+/// test (the bus, mpv's AO) at the private socket.
+struct PrivatePw {
+    dir: PathBuf,
+    procs: Vec<Child>,
+}
+
+impl PrivatePw {
+    fn available() -> bool {
+        ["pipewire", "wireplumber"].iter().all(|b| {
+            Command::new(b)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+    }
+
+    fn new(dir: PathBuf) -> PrivatePw {
+        for d in ["run", "state", "cfg/wireplumber/wireplumber.conf.d"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(
+            dir.join("pw.conf"),
+            r#"context.properties = { core.daemon = true core.name = pipewire-0
+  default.clock.rate = 48000 support.dbus = false log.level = 1 }
+context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
+context.modules = [
+  { name = libpipewire-module-protocol-native } { name = libpipewire-module-profiler }
+  { name = libpipewire-module-access } { name = libpipewire-module-metadata }
+  { name = libpipewire-module-spa-device-factory } { name = libpipewire-module-spa-node-factory }
+  { name = libpipewire-module-client-node } { name = libpipewire-module-client-device }
+  { name = libpipewire-module-adapter } { name = libpipewire-module-link-factory } ]
+context.objects = [
+  { factory = spa-node-factory args = { factory.name = support.node.driver node.name = Dummy-Driver
+      node.group = pipewire.dummy priority.driver = 20000 } }
+  { factory = adapter args = { factory.name = support.null-audio-sink node.name = hermetic-sink
+      node.description = "hermetic sink" media.class = Audio/Sink audio.position = [ FL FR ]
+      monitor.channel-volumes = true node.group = pipewire.dummy priority.driver = 21000 } } ]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("cfg/wireplumber/wireplumber.conf.d/99-hermetic.conf"),
+            "wireplumber.profiles = { policy = { support.reserve-device = disabled \
+             monitor.alsa.reserve-device = disabled support.portal-permissionstore = disabled \
+             script.client.access-portal = disabled support.logind = disabled \
+             monitor.bluez.seat-monitoring = disabled hooks.device.profile.state = disabled \
+             hooks.device.routes.state = disabled } }\n",
+        )
+        .unwrap();
+        PrivatePw {
+            dir,
+            procs: Vec::new(),
+        }
+    }
+
+    fn run_dir(&self) -> PathBuf {
+        self.dir.join("run")
+    }
+
+    fn spawn(&self, bin: &str, args: &[&str]) -> Child {
+        let mut c = Command::new(bin);
+        die_with_parent(&mut c);
+        c.args(args)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", &self.dir)
+            .env("XDG_RUNTIME_DIR", self.run_dir())
+            .env("PIPEWIRE_RUNTIME_DIR", self.run_dir())
+            .env("XDG_CONFIG_HOME", self.dir.join("cfg"))
+            .env("XDG_STATE_HOME", self.dir.join("state"))
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        c.spawn().expect("spawn private pipewire")
+    }
+
+    fn start(&mut self) {
+        let conf = self.dir.join("pw.conf");
+        let pw = self.spawn("pipewire", &["-c", conf.to_str().unwrap()]);
+        wait_for(Duration::from_secs(5), "private pipewire socket", || {
+            self.run_dir().join("pipewire-0").exists().then_some(())
+        });
+        let wp = self.spawn("wireplumber", &["-p", "policy"]);
+        self.procs = vec![pw, wp];
+        std::thread::sleep(Duration::from_millis(700));
+    }
+
+    /// The audio server "restarts": both daemons die at once.
+    fn kill(&mut self) {
+        for mut p in self.procs.drain(..) {
+            let _ = p.kill();
+            let _ = p.wait();
+        }
+    }
+}
+
+impl Drop for PrivatePw {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+#[test]
+fn i7_bus_reconnects_after_pipewire_restart() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    pw.start();
+    let run = pw.run_dir();
+    let srv = Serve::spawn_env(
+        root,
+        &[
+            "--ao",
+            "pipewire",
+            "--clock",
+            "real",
+            "--log-level",
+            "debug",
+        ],
+        &[("PIPEWIRE_RUNTIME_DIR", run.as_path())],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let bus_state = |c: &mut Client| c.ok("probe", json!({"name": "bus"}))["state"].clone();
+    wait_for(Duration::from_secs(5), "bus up", || {
+        (bus_state(&mut c) == json!("up")).then_some(())
+    });
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    let loud = |c: &mut Client| {
+        let r = c.call(
+            "probe",
+            json!({"name": "meter.window", "args": {"last_ms": 200, "samples": false}}),
+        );
+        r["result"]["median_db"]
+            .as_f64()
+            .is_some_and(|db| db > -40.0)
+    };
+    let device = |c: &mut Client, id: &str| {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        p["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == json!(id))
+            .map(|s| (s["mpv_audio_device"].clone(), s["mpv_current_ao"].clone()))
+    };
+    wait_for(Duration::from_secs(3), "the tone on the bus", || {
+        loud(&mut c).then_some(())
+    });
+
+    pw.kill();
+    wait_for(Duration::from_secs(3), "bus down", || {
+        (bus_state(&mut c) == json!("down")).then_some(())
+    });
+    wait_for(Duration::from_secs(2), "re-routed to mpv's default", || {
+        (device(&mut c, &id).map(|d| d.0) == Some(json!("auto"))).then_some(())
+    });
+    let t_down = now_ms(&mut c);
+
+    pw.start();
+    wait_for(Duration::from_secs(10), "bus back up", || {
+        (bus_state(&mut c) == json!("up")).then_some(())
+    });
+    wait_for(Duration::from_secs(3), "re-routed to the bus", || {
+        let d = device(&mut c, &id)?;
+        (d.0 == json!("pipewire/lp-player-bus") && d.1 == json!("pipewire")).then_some(())
+    });
+    wait_for(Duration::from_secs(5), "the tone on the bus again", || {
+        loud(&mut c).then_some(())
+    });
+    let evs = c.ok("logs", json!({"kind_prefix": "audio.bus.", "limit": 1000}))["events"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let kinds: Vec<&str> = evs.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    println!("I7 bus events: {kinds:?}");
+    let pos = |k: &str| kinds.iter().position(|x| *x == k);
+    assert!(pos("audio.bus.down").is_some(), "{kinds:?}");
+    assert!(
+        evs.iter()
+            .any(|e| e["kind"] == "audio.bus.up" && e["reconnected"] == json!(true)),
+        "{evs:?}"
+    );
+    assert!(
+        pos("audio.bus.reconnecting") > pos("audio.bus.down"),
+        "{kinds:?}"
+    );
+    // The re-routed source ramps back in on flowing audio (invariant #8).
+    onset_after_flow(&mut c, &id, "pause", t_down);
+}
+
+/// M13 (final review): `animate` on a broadcast alias that matches nothing is a broadcast
+/// to nobody — `{targets: []}`, exactly like `set` — after the same schema check.
+#[test]
+fn m13_animate_and_set_agree_on_an_empty_wildcard() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let set = c.ok("set", json!({"path": "srcs:*.gain.mute", "value": -96.0}));
+    assert_eq!(set["targets"], json!([]));
+    let an = c.ok(
+        "animate",
+        json!({"path": "srcs:*.gain.mute", "to": -96.0, "duration_ms": 30}),
+    );
+    assert_eq!(an["targets"], json!([]), "{an}");
+    let e = c.err(
+        "animate",
+        json!({"path": "srcs:*.path", "to": 1.0, "duration_ms": 30}),
+    );
+    assert_eq!(e["code"], "bad_type", "{e}");
+    let e = c.err(
+        "animate",
+        json!({"path": "src999.gain.mute", "to": 0.0, "duration_ms": 30}),
+    );
+    assert_eq!(
+        e["code"], "no_such_node",
+        "a concrete id still has to exist: {e}"
     );
 }

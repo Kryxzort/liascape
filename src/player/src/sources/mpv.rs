@@ -198,6 +198,30 @@ struct StepSeek {
 /// One FBO-backed render target.
 type Target = (Tex, Fbo);
 
+/// I5 (final review): an mpv core created, configured and initialized by
+/// [`MpvSource::prepare_core`] — on any thread — and not yet given a render context or a
+/// file. [`MpvSource::open_with_core`] turns it into a source on the loop thread; dropped
+/// unused (its node went away while it was being prepared), its wakeup callback is cleared
+/// and the core handed to the reaper before its eventfd closes.
+pub struct PreparedCore {
+    handle: Option<Handle>,
+    wake: Option<OwnedFd>,
+}
+
+// SAFETY: libmpv's client API is thread-safe (`client.h`); a prepared core has no render
+// context yet and is only ever moved between threads, never used from two at once.
+unsafe impl Send for PreparedCore {}
+
+impl Drop for PreparedCore {
+    fn drop(&mut self) {
+        if let Some(h) = self.handle.take() {
+            // No write to the eventfd once this returns; the fd closes after (field drop).
+            unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
+            super::reaper::reap(h);
+        }
+    }
+}
+
 /// A libmpv-backed video/image [`Source`].
 pub struct MpvSource {
     // Teardown order is explicit in `Drop` (render ctx with GL current → core → fd).
@@ -306,11 +330,18 @@ pub struct MpvSource {
     /// When `audio-pts` was *first* seen to change since arming (`Instant`, paired with
     /// [`FLOWING_CONFIRM_MARGIN`]) — `None` until that first change.
     flowing_confirmed_at: Option<Instant>,
+    /// M4: `audio-pts` is observed (only while `awaiting_flowing`), and the value of its
+    /// first notification since observing — mpv reports the current value right away on
+    /// `observe`, which is not a change.
+    pts_observed: bool,
+    flowing_last_pts: Option<f64>,
     /// R92 (review of Task 16c/16d): whether the *current load* actually has an audio
     /// track mpv selected — unlike `no_audio` (our own request to disable it) or
     /// `kind == "video"` (just "this isn't a still image"), this is what mpv itself
-    /// resolved after the file loaded (`current-tracks/audio/id`: a real id = has one,
-    /// unavailable = none). `None` = not yet known (no file loaded, or no notification
+    /// resolved after the file loaded: the observed `aid` property (`OBS_AUDIO_SELECTED`
+    /// — a track number = has one, the literal `"no"` = none, `"auto"` = not resolved
+    /// yet; `current-tracks/audio/id` was tried first and never re-notifies for a file
+    /// without audio). `None` = not yet known (no file loaded, or no notification
     /// seen yet for this load) — every caller treats that as "has audio" (the
     /// conservative default: never falsely skip a ramp/wait a real stream needs).
     /// Without this, a video file with literally no audio stream (common for subtly
@@ -351,20 +382,18 @@ impl MpvSource {
     /// rejected with the graph's own error codes; a value mpv rejects here is
     /// `out_of_range`/`unsupported` (setup is synchronous — no file is loaded yet).
     pub fn open(gfx: &Gfx, path: &str, opts: &Map<String, Value>) -> Result<MpvSource, ApiError> {
-        if path.contains('\0') {
-            return Err(out_of_range(format!("path {path:?} contains a NUL byte")));
-        }
-        let kind = match opts.get("kind") {
-            None => infer_kind(path),
-            Some(Value::String(k)) if k == "video" => "video",
-            Some(Value::String(k)) if k == "image" => "image",
-            Some(Value::String(k)) => {
-                return Err(out_of_range(format!(
-                    "MpvSource kind must be \"video\" or \"image\", got {k:?}"
-                )));
-            }
-            Some(other) => return Err(bad_type(format!("kind must be a string, got {other}"))),
-        };
+        let core = MpvSource::prepare_core(opts)?;
+        MpvSource::open_with_core(gfx, path, opts, core)
+    }
+
+    /// I5 (final review): the part of [`open`](Self::open) that needs no GL context and no
+    /// node props — the eventfd, `mpv_create`, the fixed options, `mpv_initialize`, the
+    /// property observers and the wakeup callback — measured 2–8 ms per source, so the
+    /// runtime runs it on a worker thread (`SourceHost`'s async open) and only the render
+    /// context, the property applies and the `loadfile` stay on the loop
+    /// ([`open_with_core`](Self::open_with_core)). Reads `ao`, `audio_device` and
+    /// `shader_cache_dir` from `opts`; everything else is ignored here.
+    pub fn prepare_core(opts: &Map<String, Value>) -> Result<PreparedCore, ApiError> {
         let opt_str = |k: &str| -> Result<Option<&str>, ApiError> {
             match opts.get(k) {
                 None => Ok(None),
@@ -373,42 +402,13 @@ impl MpvSource {
             }
         };
         let ao = opt_str("ao")?.unwrap_or(DEFAULT_AO).to_string();
-        let stepped = match opts.get("stepped") {
-            None => false,
-            Some(Value::Bool(b)) => *b,
-            Some(other) => return Err(bad_type(format!("stepped must be a bool, got {other}"))),
-        };
         let audio_device = opt_str("audio_device")?.map(str::to_string);
-        let audio_delay_bias = match opts.get("audio_delay_bias") {
-            None => 0.0,
-            Some(v) => v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| {
-                bad_type(format!(
-                    "audio_delay_bias must be a number of seconds, got {v}"
-                ))
-            })?,
-        };
+        // I5: mpv's GL shader cache — the first render of a new render context compiles
+        // its shaders; with a cache dir the program binaries are reused across sources.
+        let shader_cache_dir = opt_str("shader_cache_dir")?.map(str::to_string);
 
-        // Type every remaining opt up front (bad shapes fail before any mpv work).
-        let mut given: BTreeMap<String, PropValue> = BTreeMap::new();
-        let mut start: Option<f64> = None;
-        for (k, v) in opts {
-            match k.as_str() {
-                "ao" | "audio_device" | "audio_delay_bias" | "kind" | "path" | "stepped" => {}
-                "position" => {
-                    start =
-                        Some(v.as_f64().ok_or_else(|| {
-                            bad_type(format!("position must be a number, got {v}"))
-                        })?);
-                }
-                _ => {
-                    given.insert(k.clone(), json_prop(k, v)?);
-                }
-            }
-        }
-
-        // The eventfd is created before the core, so as a local it drops *after* it: on an
-        // early-return error path the core (and its wakeup callback) is gone before the
-        // fd closes — the callback can never write to a closed (or reused) fd number.
+        // The eventfd outlives the core: `PreparedCore`/`MpvSource` clear the wakeup
+        // callback and hand the core away before the fd closes.
         let raw_fd = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
         if raw_fd < 0 {
             return Err(io_error(format!(
@@ -419,7 +419,7 @@ impl MpvSource {
         let wake = unsafe { OwnedFd::from_raw_fd(raw_fd) };
         let wake_ctx = raw_fd as usize as *mut c_void;
         let handle = Handle::create().map_err(api_err)?;
-        let fixed: [(&str, &str); 16] = [
+        let fixed: [(&str, &str); 17] = [
             ("vo", "libmpv"),
             ("config", "no"),
             ("terminal", "no"),
@@ -441,6 +441,11 @@ impl MpvSource {
             ("ytdl", "no"),
             ("input-default-bindings", "no"),
             ("audio-client-name", "lp-player"),
+            // I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
+            // the first render of every render context — measured ~25–30 ms on the loop
+            // per switch (with it: first `update` 33–65 ms; `ordered`: 6–19 ms). Ordered
+            // dithering of the same 8-bit target is visually equivalent for wallpapers.
+            ("dither", "ordered"),
             ("ao", &ao),
         ];
         for (k, v) in fixed {
@@ -448,6 +453,14 @@ impl MpvSource {
         }
         if let Some(dev) = &audio_device {
             handle.set_option("audio-device", dev).map_err(api_err)?;
+        }
+        if let Some(dir) = &shader_cache_dir {
+            handle
+                .set_option("gpu-shader-cache", "yes")
+                .map_err(api_err)?;
+            handle
+                .set_option("gpu-shader-cache-dir", dir)
+                .map_err(api_err)?;
         }
         handle.initialize().map_err(api_err)?;
         handle.request_log_messages("error").map_err(api_err)?;
@@ -460,14 +473,84 @@ impl MpvSource {
             (OBS_PAUSE, "pause", Format::Flag),
             (OBS_IMAGE, "current-tracks/video/image", Format::Flag),
             (OBS_IDLE, "idle-active", Format::Flag),
-            (OBS_AUDIO_PTS, "audio-pts", Format::F64),
+            // `audio-pts` (OBS_AUDIO_PTS) is observed only while an `AudioFlowing`
+            // confirmation is armed (M4): it changes at the audio-buffer rate, and every
+            // change wakes the loop.
             (OBS_AUDIO_SELECTED, "aid", Format::Str),
         ] {
             handle.observe(id, name, f).map_err(api_err)?;
         }
-
-        // SAFETY: the fd stays open until after the core is destroyed (see Drop).
+        // SAFETY: the fd stays open until after the callback is cleared (PreparedCore /
+        // MpvSource Drop).
         unsafe { handle.set_wakeup_callback(Some(on_wake), wake_ctx) };
+        Ok(PreparedCore {
+            handle: Some(handle),
+            wake: Some(wake),
+        })
+    }
+
+    /// The loop-thread half of [`open`](Self::open) on a core from
+    /// [`prepare_core`](Self::prepare_core): validate the node opts, create the render
+    /// context (GL current), apply every property, `loadfile`.
+    pub fn open_with_core(
+        gfx: &Gfx,
+        path: &str,
+        opts: &Map<String, Value>,
+        mut core: PreparedCore,
+    ) -> Result<MpvSource, ApiError> {
+        if path.contains('\0') {
+            return Err(out_of_range(format!("path {path:?} contains a NUL byte")));
+        }
+        let kind = match opts.get("kind") {
+            None => infer_kind(path),
+            Some(Value::String(k)) if k == "video" => "video",
+            Some(Value::String(k)) if k == "image" => "image",
+            Some(Value::String(k)) => {
+                return Err(out_of_range(format!(
+                    "MpvSource kind must be \"video\" or \"image\", got {k:?}"
+                )));
+            }
+            Some(other) => return Err(bad_type(format!("kind must be a string, got {other}"))),
+        };
+        let stepped = match opts.get("stepped") {
+            None => false,
+            Some(Value::Bool(b)) => *b,
+            Some(other) => return Err(bad_type(format!("stepped must be a bool, got {other}"))),
+        };
+        let audio_delay_bias = match opts.get("audio_delay_bias") {
+            None => 0.0,
+            Some(v) => v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| {
+                bad_type(format!(
+                    "audio_delay_bias must be a number of seconds, got {v}"
+                ))
+            })?,
+        };
+
+        // Type every remaining opt up front (bad shapes fail before any more mpv work).
+        let mut given: BTreeMap<String, PropValue> = BTreeMap::new();
+        let mut start: Option<f64> = None;
+        for (k, v) in opts {
+            match k.as_str() {
+                "ao" | "audio_device" | "audio_delay_bias" | "kind" | "path" | "stepped"
+                | "shader_cache_dir" => {}
+                "position" => {
+                    start =
+                        Some(v.as_f64().ok_or_else(|| {
+                            bad_type(format!("position must be a number, got {v}"))
+                        })?);
+                }
+                _ => {
+                    given.insert(k.clone(), json_prop(k, v)?);
+                }
+            }
+        }
+
+        // The fd is declared first, so on an early return it closes *after* the core
+        // (and its wakeup callback) is gone.
+        let wake = core.wake.take().expect("a prepared core has its eventfd");
+        let handle = core.handle.take().expect("a prepared core has its handle");
+        drop(core);
+        let wake_ctx = wake.as_raw_fd() as usize as *mut c_void;
 
         // The render context must be created with *this* Gfx's context current — don't
         // assume it is (another Gfx may have been made current since).
@@ -537,6 +620,8 @@ impl MpvSource {
             audio_delay_bias,
             awaiting_flowing: false,
             flowing_confirmed_at: None,
+            pts_observed: false,
+            flowing_last_pts: None,
             has_audio: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
@@ -568,6 +653,37 @@ impl MpvSource {
         src.live = true;
         src.load(path)?;
         Ok(src)
+    }
+
+    /// I7 (final review): live re-route of this source's audio — `device` = mpv
+    /// `audio-device` (`None` = `auto`, mpv's default device: the bus is down), `bias` =
+    /// the new `audio_delay_bias` (−bus latency). mpv reloads its audio output on an
+    /// `audio-device` change; async, like every live apply.
+    pub fn set_audio_route(&mut self, device: Option<&str>, bias: f64) -> Result<(), ApiError> {
+        self.prev_value = None;
+        self.set("audio_device", "audio-device", device.unwrap_or("auto"))?;
+        // A dead server takes mpv's audio output with it, and mpv then *deselects* the
+        // audio track ("Audio: no audio") — an `audio-device` change alone doesn't bring it
+        // back (measured: `current-ao` stayed unset after the bus returned, and so did a
+        // plain `aid=auto`). Deselecting and re-selecting the track does: the audio chain
+        // is rebuilt on the new device.
+        if !matches!(self.props.get("no_audio"), Some(PropValue::Bool(true))) {
+            for v in ["no", "auto"] {
+                self.prev_value = self.props.get("no_audio").cloned();
+                self.set("no_audio", "aid", v)?;
+            }
+            // Its audio restarts: a caller holding a ramp-in learns when it really flows.
+            if !matches!(self.props.get("paused"), Some(PropValue::Bool(true))) {
+                self.arm_audio_flowing();
+            }
+        }
+        if (bias - self.audio_delay_bias).abs() > 1e-9 {
+            self.audio_delay_bias = bias;
+            let d = self.props.get("audio_delay").map_or(0.0, num) + bias;
+            self.prev_value = self.props.get("audio_delay").cloned();
+            self.set_f64("audio_delay", "audio-delay", d)?;
+        }
+        Ok(())
     }
 
     /// The eventfd the runtime polls (Task 12): it becomes readable whenever mpv has a new
@@ -806,9 +922,26 @@ impl MpvSource {
         self.duration = None;
         self.load_failed = None;
         self.step = None;
+        self.disarm_audio_flowing();
+        // A load that plays (not paused) starts audio too: arm so a caller holding a ramp
+        // on it (a restored source's fade-in, I6) learns when its audio really flows.
+        if !matches!(self.props.get("paused"), Some(PropValue::Bool(true))) {
+            self.arm_audio_flowing();
+        }
+        Ok(())
+    }
+
+    /// Stop waiting for `AudioFlowing` and stop observing `audio-pts` (M4).
+    fn disarm_audio_flowing(&mut self) {
         self.awaiting_flowing = false;
         self.flowing_confirmed_at = None;
-        Ok(())
+        self.flowing_last_pts = None;
+        if self.pts_observed {
+            self.pts_observed = false;
+            if let Some(h) = &self.handle {
+                let _ = h.unobserve(OBS_AUDIO_PTS);
+            }
+        }
     }
 
     /// R85: arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
@@ -829,6 +962,13 @@ impl MpvSource {
         }
         self.awaiting_flowing = true;
         self.flowing_confirmed_at = None;
+        self.flowing_last_pts = None;
+        if !self.pts_observed
+            && let Some(h) = &self.handle
+            && h.observe(OBS_AUDIO_PTS, "audio-pts", Format::F64).is_ok()
+        {
+            self.pts_observed = true;
+        }
     }
 
     /// Push `gains.effective_db()` to mpv `volume-gain`. Live: coalesced — at most one
@@ -1116,11 +1256,18 @@ impl MpvSource {
             // after it). `audio-pts` updates "more often than once per frame", so later
             // changes keep re-checking the margin; if none ever come, the caller's own
             // `ONSET_TIMEOUT` is the real backstop.
-            (OBS_AUDIO_PTS, PropData::F64(_)) if live && self.awaiting_flowing => {
+            (OBS_AUDIO_PTS, PropData::F64(v)) if live && self.awaiting_flowing => {
+                // M4: the first notification after `observe` is its current value, not a
+                // change — remember it; only a different value counts.
+                let Some(last) = self.flowing_last_pts.replace(v) else {
+                    return;
+                };
+                if last == v {
+                    return;
+                }
                 let confirmed_at = self.flowing_confirmed_at.get_or_insert_with(Instant::now);
                 if confirmed_at.elapsed() >= FLOWING_CONFIRM_MARGIN {
-                    self.awaiting_flowing = false;
-                    self.flowing_confirmed_at = None;
+                    self.disarm_audio_flowing();
                     self.pending.push(SourceEvent::AudioFlowing);
                 }
             }

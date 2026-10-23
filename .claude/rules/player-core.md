@@ -50,6 +50,9 @@ happen regardless of timing.
   for and restarts the compositor child (Task 16). § Supervisor.
 - `src/snapshot.rs` — the persisted state snapshot (`<state>/snapshot.json`, `--restore`)
   + its writer thread (Task 16). § Snapshot.
+- `src/onset.rs` — invariant #8's one onset helper (`PendingOnset`/`Onsets`: ramp-ins held
+  until the source's audio flows, bounded by `ONSET_TIMEOUT`) and the one "can it be heard"
+  predicate (`has_audio`, `audible`). § Runtime "Onsets" (final review I6/M12).
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -69,9 +72,12 @@ JSON Lines, one object per event, schema:
 {"t_mono_ms": 123.4, "t_wall": "2026-10-20T12:00:00.000Z", "comp": "mpv", "level": "info", "kind": "source.load", "corr": "tr-12", "...fields": "merged at top level"}
 ```
 
-- `t_mono_ms` — `f64` milliseconds since process start, from `Instant` (a true monotonic
-  clock, never wall time) — monotonic across every event in a process, even across
-  rotation.
+- `t_mono_ms` — `f64` milliseconds since the logger's init (`log::mono_start()`, the first
+  thing `serve` does — effectively process start), from `Instant` (a true monotonic clock,
+  never wall time) — monotonic across every event in a process, even across rotation. The
+  supervisor's own lines (`log::append_detached`) use the supervisor's clock. Not to be
+  confused with the transition events' `at_ms`/`start_ms`, which are on the
+  **pause-excised player clock** (`Runtime::now`, invariant #7).
 - `t_wall` — RFC3339 wall time (`time::OffsetDateTime::now_utc()` +
   `format_description::well_known::Rfc3339`).
 - `comp` — the emitting component (`&'static str`, e.g. `"mpv"`, `"graph"`).
@@ -158,7 +164,9 @@ cubic (measured `volume=50` → −18.07 dB), so the player drives mpv via `volu
 (exact dB) and keeps `volume` at 100 — see `units::mpv_volume_gain` /
 `units::pulse_volume_from_db`. `units::SILENT_DB` (−96) is the one floor everything
 clamps to; `units::Gains` sums `GainSlot`s (`user`/`override`/`normalize`/`mute`/
-`automute`/`xfade`/`anticlick`, lowercase in `gain.<slot>` paths and JSON) in dB.
+`automute`/`xfade`/`anticlick`/`pause`, lowercase in `gain.<slot>` paths and JSON) in dB.
+`pause` is the player-pause gate's own slot (final review I2, § Runtime) — like `xfade`/
+`anticlick` it is transient and never saved in the snapshot.
 Crossfades use `units::equal_power` (cos/sin). See `docs/player/invariants.md` #2–#4.
 
 ## Clocks and Animation
@@ -188,6 +196,10 @@ cos/sin), `Step`. `eval` always clamps `x` to `[0,1]` first.
   at (dB for `GainLinear`), started or not, finished or not; `None` when nothing animates
   it. Recipes record this — not the instantaneous value — when they save a property to
   restore later, so a restore never lands mid-ramp.
+- **`has_live_gain(now, horizon)`** (R90; M1 of the final review): a not-finished `gain.*`
+  animation that has started or starts within `horizon` — the fast gain timer's arm condition
+  (the caller passes one main tick period). `len()`/`retain_targets(keep)` (the runtime drops
+  animations on nodes that are gone — a never-started placeholder would otherwise stay forever).
 - **`add()` supersedes, permanently.** `Animator` holds at most one live animation per
   `PropPath` — `add()`ing a second animation on a target **removes** the earlier one
   outright (same as `cancel()`; retracting its completion from the `finished()` queue too,
@@ -479,6 +491,13 @@ if nothing resolves — true inside `nix build .#lp-player`'s sandboxed check ph
 `tests/effects_all.rs` treats `None` the same way `tests/common::headless_gl` treats no
 EGL device: print `"SKIP: ..."` and return, never fail the build over it.
 
+**A failing effect is cached (final review M3).** `Catalogue::program` caches a load/compile
+failure (`Catalogue::failed(id)`), logs `effects.compile_failed {id, error}` once and returns the
+error at once afterwards; `Composer` then draws the effect as a **cut at the midpoint** (`from`
+below progress 0.5, `to` from it) — never the transparent/black frame it used to present while
+re-reading and re-compiling the body every frame. `tests/compose.rs::
+uncompilable_effect_draws_a_cut_not_black` (a catalogue copy with a broken body).
+
 **Header rewrite + fail-loud rule** (`rewrite_header`, applied to `wrap.vert` and
 `wrap.frag.template` in `Catalogue::load`): replace the exact first line `#version 300
 es` with `#version 330 core`, then delete a `precision highp float;` line if present.
@@ -708,7 +727,14 @@ plays on (R45).
   default framebuffer). Pinned by `tests/sources.rs::source_texture_holds_image_top_at_t0`
   (top-red/bottom-blue clip: low y red, high y blue). Never flip in a source.
 
-**`MpvSource::open(gfx, path, opts)`** — one mpv core + one render context per source.
+**`MpvSource::open(gfx, path, opts)`** — one mpv core + one render context per source. Since
+the final review (I5) it is two halves: **`MpvSource::prepare_core(opts)`** — eventfd,
+`mpv_create`, the fixed options, `mpv_initialize`, the observers, the wakeup callback; no GL,
+no node props; `Send` (`PreparedCore`, dropped unused = callback cleared + core to the reaper)
+— and **`MpvSource::open_with_core(gfx, path, opts, core)`** on the loop thread (render
+context, every property applied, `start`, `loadfile`). `SourceHost` runs the first half on an
+`lp-open` worker thread in the real-clock runtime (§ Sources "`SourceHost`"); `open` = both in a
+row (stepped mode, tests, the harness).
 Fixed options: `vo=libmpv`, `config=no`, `terminal=no`, `keep-open=yes` (an ended video
 holds its last frame) **with `keep-open-pause=no`** (keep-open's default also flips
 `pause` at EOF — `read("paused")` would then disagree with the graph and a seek back
@@ -716,7 +742,11 @@ after the end would stay frozen), `idle=yes` (the core survives a load error / w
 a `path` change), `volume=100`, `volume-gain-min=-96`, `image-display-duration=inf` (set
 always — it only affects single-frame images), `keepaspect=no` (the texture *is* the
 frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, below),
-`osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`.
+`osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`,
+**`dither=ordered`** (I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
+every new render context's first render — measured ~25–30 ms on the loop per switch; ordered
+dithering of the same 8-bit target is visually equivalent), and with opt `shader_cache_dir`
+(`serve` passes `<state>/shader-cache`) `gpu-shader-cache=yes` + `gpu-shader-cache-dir`.
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
 `audio_delay_bias` (seconds **added** to every `audio_delay` before it reaches mpv's
@@ -811,11 +841,16 @@ audio at all. Fires immediately (never actually waits) for: stepped mode (`self.
 nothing to confirm — including the stepped-logical `"paused"` branch itself, which still
 arms/fires through the same `arm_audio_flowing` so a caller holding a ramp on a stepped
 source's un-pause is never stuck), an image, or `no_audio`. Otherwise armed: the next
-`audio-pts` property change (a *new* observed property, `OBS_AUDIO_PTS`) reports it —
+`audio-pts` property change (`OBS_AUDIO_PTS` — **observed only while armed** since the final
+review (M4): `observe` on arm, `unobserve` on confirm/disarm; it changes at the audio-buffer
+rate and woke the loop all day; the first notification after `observe` is the current value
+and is skipped) reports it —
 man mpv: "Current audio playback position... takes into account the audio driver delay"
 — unlike `time-pos`, it doesn't move while held/paused, so the very next change after
 arming is the real thing. `load` (a `path` change) resets `awaiting_flowing` — a new load
-supersedes everything. Callers (the transition recipe, `Runtime`'s player-pause gain)
+supersedes everything — and **arms it again when the load plays** (not paused; final review I6:
+a restored source's fade-in waits for it), as does an audio re-route
+(`MpvSource::set_audio_route`, I7). Callers (the transition recipe, `Runtime`'s player-pause gain)
 bound the wait themselves (`recipes::transition::ONSET_TIMEOUT`) — the source itself
 never times out; it either confirms or waits.
 
@@ -836,8 +871,9 @@ is off again and `aid` re-resolves for real. `None`/unknown (no file loaded yet,
 notification seen for this load) reads `true` (the schema default) — the conservative
 "don't falsely skip a real wait" choice. `arm_audio_flowing` fires immediately (no wait)
 when `has_audio == Some(false)`, same bucket as `no_audio`/image/stepped above;
-`recipes::transition::b_has_audio` and `Runtime::source_has_audio` both gained the same
-`&& has_audio` check.
+the one predicate, `crate::onset::has_audio` (`kind == video && !no_audio && has_audio !=
+false`), carries the same check for the recipe and the runtime (final review M12 merged the
+copies).
 
 **Render targets: front + back.** `front` is what `texture()` returns. Until the current
 load is `Ready`, every frame (including any leftover of a superseded load) renders into a
@@ -949,6 +985,25 @@ overwrite a command not yet forwarded. `events()` drains `(node id, event)`; `te
 is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime polls; `get`/
 `ids` for probes/tests.
 
+**Async opens (final review I5).** With `SourceHost::set_async_open(Some(waker))` (the
+real-clock runtime; its waker is a calloop ping) a new mpv node's core is made on an `lp-open`
+thread (`MpvSource::prepare_core`, base opts only); the node is `opening` (not hosted: no
+texture, no events, `open_failed` false) until a later `sync` finds the worker's result and
+opens the source from the node's **current** props (so a change made meanwhile is never lost);
+a worker error is the same `SourceEvent::Error` + `failed` as a synchronous one; a node gone
+meanwhile drops the result (`PreparedCore::drop` → reaper). `finish_teardown` waits (bounded)
+for outstanding workers; `host::opening_pending()` counts toward `mpv.reaper_stragglers`. R29
+`Ready` semantics are unchanged (still the first frame of the current load). Stepped mode and
+the harnesses open synchronously.
+
+**Audio re-route (final review I7).** `SourceHost::set_audio_route(device, bias)` — the bus went
+down (`None`: mpv's default device) or came back (`Some(bus device)`, bias = −latency): base
+opts change for new sources, every hosted mpv source gets `MpvSource::set_audio_route` (async
+`audio-device`, a changed `audio-delay`, then `aid no` + `aid auto` — a dead server takes mpv's
+AO with it and mpv deselects the track, so an `audio-device` change alone left
+`current-ao` unset; measured), and a core still being prepared with the old route is re-routed
+when it opens.
+
 **`SnapshotSource` (`sources/snapshot.rs`)** — a still copy (`glBlitFramebuffer`, row order
 kept → image-top at `t = 0`) of another source's texture taken at creation; `Ready` at
 once; never changes; no audio. It exists because pausing doesn't freeze a texture: a paused
@@ -1014,8 +1069,8 @@ curve, requested }` on the `Tr` (`tr.onset`) — a transition has at most one at
 for that id arrives (`start_onset`: *now* adds the `Animation`, with `start` = the
 confirmation instant, never backdated to the un-pause); `step()`'s own top-of-call check
 resolves it unconfirmed once `ONSET_TIMEOUT` (150 ms) passes, logging
-`transition.onset_timeout`. `recipes::transition::b_has_audio` (kind == `video` && not
-`no_audio`) skips the whole mechanism for a `color`/`image`/`snapshot` B, or one explicitly
+`transition.onset_timeout`. `recipes::transition::b_has_audio` (= `crate::onset::has_audio`: kind == `video` && not
+`no_audio` && not `has_audio == false`, R92) skips the whole mechanism for a `color`/`image`/`snapshot` B, or one explicitly
 muted — nothing to confirm, ramp it in at once exactly as before this task
 (`schedule_onset` is the one seam every call site goes through). `Phase::Handoff`'s
 `transition.done` check requires `tr.onset.is_none()` too — never fires while a
@@ -1047,8 +1102,8 @@ measured fixed tail (documented at its `pub const`), not a live confirmation —
 dropout**: on-machine evidence (`docs/player/debugging.md`'s offset row) shows a
 different, ~5–7 ms gap at A's ramp tail that occurs *before* `pause_at` even fires —
 root-caused to the `Animator`'s tick-rate coarseness on a 30 ms ramp (invariant #4's own
-caveat), not the pause timing this fix controls. Left as a documented, out-of-scope
-finding (Task 14's "audio edge"), not papered over by loosening the detector.
+caveat), not the pause timing this fix controls — **resolved since** by R90's 1 kHz gain timer
+(Task 16d) and the detector's own R94/R96 alignment fixes (`docs/player/invariants.md` #8).
 
 `fx.progress` is Linear 0→1 over [t0, t0+D]; handoff happens on the first tick ≥ t0+D.
 reveal/frozen snapshot only an A whose picture can still change: a still (by **kind** —
@@ -1074,7 +1129,16 @@ drop + one frame (+ k·length for later ones); reveal/frozen copy A's last frame
 tick and start at the boundary (measured +0.0 ms vs the visible wrap); full-live, if a
 drop has been seen, ends on the first reachable boundary, else uses the uncentred `time_pos`
 estimate (on a looping file it runs ahead of the picture: −17 ms measured). The ½-frame
-centring is for an A that ends (measured −0.8…+12 ms vs `Ended`).
+centring is for an A that ends (measured −0.8…+12 ms vs `Ended`). **Bounded (final review
+M2):** an A that never reaches its end — it errored without `Ended`, stalled, or has no known
+duration — doesn't hold the switch forever: after A's remaining play time at its speed +
+`ALIGN_SLACK` (10 s; `Tr::align_deadline`, re-derived after a speed change or a new lead) the
+effect starts now (`transition.align_fallback {a, deadline_ms}`); an A `Error` counts as ended
+for alignment at once. The wait is on the player clock, so a player pause still freezes it.
+**Restores hold their onset (I6):** `restore_a` un-pausing an A the recipe had held (reveal/
+frozen snap-back, a grave shown again) sets its anticlick to −96 and holds the ramp back
+(`Transitions::restore_onsets`, `crate::onset::Onsets`) until A's audio flows; `start` forces a
+pending one on a node it captures.
 
 **Interrupt / cancel / failure** (R35/R36, invariant #6): `start` first creates B (a bad
 request changes nothing), then resolves every in-flight transition sharing any output:
@@ -1121,9 +1185,10 @@ destroyed (its audio follows its picture there); reveal/frozen hold it via a sna
 Mixing policy for two audible wallpapers is out of scope (docs/TODO.md).
 
 **Events (R37)** — outbox + `log::event("transition", …)`, each `{corr, at_ms, event,
-…}`: `transition.scheduled {outputs, to, path, method, align, effect_id, duration_ms}`,
-`.started {method, effect_id, start_ms}` (`start_ms` may be ≤ one tick before `at_ms`, see
-Align), `.handoff {to, from, committed}`, `.done {to}`, `.cancelled {reason}`, `.failed {path,
+…}` — `at_ms`/`start_ms` on the **pause-excised player clock** (`Runtime::now`), not
+`t_mono_ms`: `transition.scheduled {outputs, to, path, method, align, effect_id, duration_ms}`,
+`.started {method, effect_id, start_ms, a, b}` (`start_ms` may be ≤ one tick before `at_ms`, see
+Align; `a`/`b` = each outgoing A's and B's `AudioSourceSnapshot` for the dropout detector, R70), `.handoff {to, from, committed}`, `.done {to}`, `.cancelled {reason}`, `.failed {path,
 reason}`. Order per corr: scheduled, started, handoff, done — or scheduled[, started],
 cancelled|failed. `status()` lists live transitions with `held` = sources paused on
 purpose (pending B, held A's, frozen B, snapshots) plus its graves. `held_sources()`
@@ -1206,7 +1271,8 @@ exists → a clean `quit`), and on the real clock a `Timer` at the max output re
 (`tick_period`, recomputed on hotplug; skips ahead if a tick overruns), and on Wayland the
 connection (§ Wayland). A failing dispatch (the compositor went away) logs `loop.failed`,
 silences + tears down every source (`stop_all(true)`, then the normal shutdown) and
-`serve` returns `Err` (exit 1).
+`serve` returns `Err` (`ServeError::Runtime`, exit `EXIT_RUNTIME` 3 — restarted when
+supervised).
 
 **Who runs what (R47).** The **timer tick** is the only place time-driven work runs:
 `Animator::tick` → `Graph::set` (a failed set — node gone — cancels that animation,
@@ -1227,8 +1293,12 @@ sample: at 60 Hz that's 1–2 `Animator::tick` calls over the whole ramp, so mpv
 `volume-gain` holds each pushed value for most of the ramp's span then snaps straight to
 the end — measured (Task 16c/d): 5–7 ms `micro_gaps` at 60 Hz, 2 ms at 240 Hz. A second,
 independent calloop `Timer` at `runtime::GAIN_TICK_PERIOD` (1 ms) fixes this —
-**armed only while at least one `gain.*` animation exists** (`Runtime::
-arm_gain_timer_if_needed`, checked from `sync_sources`, so a handler's `animate`/
+**armed only while a gain ramp is actually moving** (`Runtime::gain_work_pending`, final review
+M1: a `gain.*` animation that has started or starts within one main tick period
+(`Animator::has_live_gain(now, horizon)`) and isn't frozen by the player pause, a teardown ramp
+(`teardown_anim`, unpaused clock), or a pause gate mid-ramp — a restored source's placeholder
+fade-in far in the future or a transition paused mid-ramp no longer keeps 1000 wakeups/s going;
+`Runtime::arm_gain_timer_if_needed`, checked from `sync_sources`, so a handler's `animate`/
 `transition` or the recipe's own `Transitions::tick` arms it within one loop iteration)
 and **self-disarms** (`TimeoutAction::Drop`, from inside its own callback,
 `Runtime::gain_fast_tick`) the instant none remain, including the one that armed it
@@ -1250,10 +1320,10 @@ timer only ever touches gain paths).
 - **Pause composes (R88/invariant #7).** `Runtime::now` is frozen while `player.paused`
   — re-evaluating `tick_gains` against an unchanged `now` would just keep re-emitting
   the same already-sent value, so the fire skips evaluating *entirely* while paused: zero
-  pushes, zero `graph.set` calls, verified by `tests/api.rs::
-  gain_fast_timer_paused_makes_no_progress`. The timer itself keeps ticking through the
-  pause (so a resume is picked up at the very next 1 ms fire, not delayed behind the main
-  tick) unless the animation itself finishes or is cancelled meanwhile. `gain_fast_tick`
+  pushes, zero `graph.set` calls, and (M1) the timer **disarms** for the pause unless a gate or
+  teardown ramp is moving — verified by `tests/api.rs::gain_fast_timer_paused_makes_no_progress`
+  (`gain_timer_armed: false` throughout the pause). A resume re-arms it from the next
+  `sync_sources` (≤ one loop iteration). `gain_fast_tick`
   also calls `update_player_paused()` itself as its first line — a race found while
   building this: the timer can fire within the same dispatch batch as the client request
   that just paused, before `after_dispatch`'s own `sync_sources` gets to it, and the
@@ -1338,6 +1408,66 @@ read-only props via `set_observed`, `output.changed`). `Headless`: `VIRTUAL-1…
   `remove_all_outputs_parks_and_readd_resumes`,
   `remove_all_outputs_mid_transition_commits_and_parks_b`.
 
+**The player-pause gate (R88; final review I2)** — `docs/player/invariants.md` #7. Ramps its own
+`gain.pause` slot on wall-clock time (`PauseGate`, `drive_pause_gates_pre_sync` /
+`_post_update`), so it gates every playing source with audio whatever transition it's part of
+(only node-paused, no-audio, retiring and parked sources are skipped); at the pause edge a playing
+source ramps out then pauses, a source that becomes eligible while paused starts `Paused` at −96;
+resume = un-pause, wait for `AudioFlowing` (bounded), ramp in; a re-pause turns a resuming gate
+back from where it is. Nothing to restore when a transition takes a gated source over.
+
+**Teardown on the unpaused clock (final review I1).** `retire`'s and `park`'s ramps run on
+`Runtime::teardown_anim`, an Animator ticked with the **unpaused** base clock
+(`ClockKind::now`, `Runtime::base_now`) by the main tick and the fast timer; `pending_destroy`
+deadlines and park settling use the same clock, and a source ramping out (or into its park) is
+excluded from the player-pause composition until it's done — so a destroy, `stop` or output
+removal completes (decoder freed) while the player is paused. A source the pause already holds
+paused is silent (`onset::audible`) and goes at once. **`stop` clears `player.paused`** (after
+retiring, so held sources go silently first): a stop ends the session, the next wallpaper plays.
+
+**No output left: transitions are accepted (final review I4).** With zero outputs (R60 parked),
+`transition` on an `out:` alias goes to `Runtime::transition_parked`: B is created paused and
+silent and **replaces the parked wallpaper** (the old one is retired — paused and silent, so at
+once), reply `{corr, to, parked: true}`, events `transition.scheduled {parked: true}` →
+`.handoff {committed: true, parked: true}` → `.done`. An `align: end` request waits instead
+(`Runtime::parked_req`; the parked A is paused, its end can't come) and hands off when an output
+shows B (`unpark`), or is `.cancelled {reason: "superseded", parked: true}` by the next one / by
+`stop`. So a rotation keeps its place invisibly and the *last* target is what the next output
+shows. Test: `tests/api.rs::i4_transitions_while_no_output_replace_the_parked_wallpaper`.
+
+**Onsets (final review I6).** `Runtime::onsets` (`crate::onset::Onsets`, player clock) holds the
+unpark ramp-in until the source's audio flows; a restored source's fade-in (`fade_in`,
+`FadeWait`) starts once it is `Ready` **and** flowing (or `ONSET_TIMEOUT` after `Ready`, logged
+`runtime.onset_timeout`; at once without audio); `drive_onsets` resolves both from each tick's
+events. The R88 resume uses the same flow test + bound on its wall clock; a bus re-route holds
+`gain.pause` the same way (I7). `onset.held`/`onset.started {reason, held_ms}` (debug) for every
+path.
+
+**Bounds (C1).** `probe loop` → `bounds`: the size of every per-source collection (graph nodes,
+`gain_history_tracks/samples`, animator entries, teardown ramps, pending destroys, onsets,
+fade-ins, dropout windows/due analyses, pause gates, `last_event`, `local`, wake registrations,
+warn keys, hosted/opening/dying sources, transitions/graves/ended/restore onsets). `GainHistory`
+is run-length encoded (a steady source = two samples), drops a dead source's track
+`DEAD_LINGER` (30 s) after its last reading (its post-roll analysis needs it), and is capped at
+`MAX_TRACKS` 64 / `MAX_TOTAL_SAMPLES` 131 072 (least recently seen dead track first). Test:
+`tests/api.rs::c1_long_run_switches_stay_bounded` (200 switches + destroys: 64 tracks, ~4 200
+samples, everything else ≤ 4), `probe::dropout` unit test (10 000 simulated cycles).
+
+**Switch cost and the Phase 2 render worker (final review I5).** Per switch, measured
+(`tests/api.rs::i5_switch_loop_busy`, a cut/fade to a fresh 1080p clip, 10 switches ×2 runs):
+**before** max loop busy 32–54 ms (median 36–44), synchronous open 3–14 ms; **after** (core on
+the `lp-open` worker, `dither=ordered`, the shader cache) 8–26 ms (median 17–19), open 1–8 ms.
+**Residual:** the render-context creation (+ props + `loadfile`, 1–8 ms) and the new context's
+first `render_into` (6–20 ms: shader compile/link — cached binaries help little on this
+NVIDIA driver, which already has its own disk cache — scaler LUTs, texture/FBO setup) still run
+on the loop, i.e. one to five missed frames at 240 Hz on every output per switch; Task 20's
+pacing criterion should exclude the switch frame. **Phase 2 plan:** a render worker thread with
+its own EGL context in the compositor's share group owns every `MpvSource`'s render context —
+creation, first render, and every later render into a shared texture (with a sync fence per
+frame) — so the loop only samples finished textures; the same thread is where dmabuf imports
+from the scene/web workers land. Until then the loop counts the open share apart
+(`max_open_ms`).
+
 **Retire = ramp, then destroy (item 10, core invariant).** `Runtime::retire(id)` — used by
 the `destroy` verb, `stop` and output removal: an audible source (not paused, ready,
 above −96 dB, a kind with audio) gets `gain.anticlick` ramped to −96 over 30 ms
@@ -1412,8 +1542,8 @@ note on stderr and exits 0 (or stdout closes).
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
 | `get` | `{path}` (must resolve to one node) | `{value}` | graph codes, `ambiguous` | `ctl get '{"path":"cur:DP-1.time_pos"}'` |
-| `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}`; `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
-| `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
+| `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}` (a broadcast alias matching nothing: `targets: []`, like `set` — M13); `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
+| `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` (`parked: true` when no output exists — § Runtime, I4) | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
 | `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
@@ -1454,7 +1584,10 @@ exceeded the meter's RT scratch cap, chunked rather than reallocated), `probe.dr
 R77/R79, `docs/player/debugging.md`), `probe.dropout_decode_failed`,
 `probe.dropout_analysis_stragglers` (R79 fix round — `Runtime::shutdown`'s bounded join
 of in-flight dropout analyses, mirroring `mpv.reaper_stragglers`),
-`compose.failed` — i.e. every event-log kind
+`compose.failed`, and (final review) `onset.held|started` (debug), `runtime.onset_timeout`,
+`transition.align_fallback`, `effects.compile_failed`, `audio.bus.reconnecting|reconnect_failed|
+sources_rerouted`, `supervisor.stopped`, `probe.dropout {skipped: "window_too_long"}` — i.e.
+every event-log kind
 (log warnings included). Every event has `corr` (or null) and `t_mono_ms`.
 
 **Global settings go to `srcs:*` (R50).** The backend (Task 17) sends every global setting
@@ -1469,7 +1602,12 @@ kind's schema and succeeds with `targets: []` (a broadcast to nobody isn't an er
 unknown connector or a concrete id that doesn't exist is `no_such_node`. With no output
 left, `srcs:*` is exactly the parked wallpaper (§ Runtime → Outputs).
 
-**Probes (`src/probe/`).** `list`; `sources` — per hosted source `{id, kind, path, ready,
+**Probes (`src/probe/`).** `dropout` analyses are bounded (final review M8): each ffmpeg
+decode is killed after 20 s (`DECODE_TIMEOUT`), and a window longer than 120 s
+(`MAX_ANALYSIS_WINDOW`, e.g. a pause gate spanning a long pause) is skipped
+(`probe.dropout {skipped: "window_too_long"}`) instead of decoded into memory; if the 1 ms-refined
+lag can't be fitted the whole coarse alignment stands (lag, capture, fit, offset together).
+`list`; `sources` — per hosted source `{id, kind, path, ready,
 paused, loop, speed, time_pos, duration, gain_effective_db (graph), gains (the live
 source's own slots), live_kind, size, mpv_volume_gain, mpv_pause, requests_in_flight,
 stepped, step_status, virtual_t, last_event}` + `dying` (sources mid-teardown),
@@ -1478,9 +1616,11 @@ only); `loop` — `{clock, tick_period_ms, ticks, tick_hz_last_s, last_tick_ms,
 recent_ticks_ms, max_tick_ms_recent, last_phases {sync_ms, transitions_ms, render_ms,
 total_ms}, max_busy_ms (longest synchronous stretch since the last
 `args: {"reset": true}`), max_busy_excl_open_ms + max_open_ms (the same with the
-synchronous source opens taken out / those opens alone — `MpvSource::open` is still
-synchronous on the loop, ms-scale), iterations, wakes, wake_pending, wake_fds, clients,
-subscribed_topics, tap_dropped, reaper_pending, uptime_ms}`; `frames` (Task 13,
+loop's share of source opens taken out / that share alone — render context + props +
+`loadfile`; the core itself is made on the `lp-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
+subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,
+gain_pushes, pause_gates, dropout_windows_open, bounds (§ Runtime "Bounds"),
+recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening`; `frames` (Task 13,
 `probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000), outputs:
 [{name, hz, refresh_mhz, period_ms, idle, frame_pending, since_present_ms, paced {count,
 mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
@@ -1822,15 +1962,30 @@ an unavailable meter is an **`unsupported` error saying why** (never an empty "a
 the owner's session for nothing). `Bus::create` failing (PipeWire unreachable, module
 missing, never linked) → `audio.bus.down {reason}` (warn), sources keep mpv's default
 device (no `audio_device`, no bias), the meter is unavailable. Both are logged exactly
-once; `ctl probe '{"name":"bus"}'` says why. A connection lost later → `audio.bus.down`;
-streams already on the bus fall back to the default sink (WirePlumber), the meter reports
-unavailable. Shutdown: `Runtime::shutdown` destroys every source first, then
+once; `ctl probe '{"name":"bus"}'` says why. **A connection lost later is re-created (final
+review I7):** the `lp-bus` thread runs the bus as *sessions* (`bus::session`) — a core error ends
+one (`audio.bus.down {reason}`; the loopback module is *not* destroyed by us then: it unloads
+itself on a core error, and destroying it too was a measured double free), sources are re-routed
+to mpv's default device (`Bus::route()` = `(up, generation)`, polled by `Runtime::
+track_bus_route` every tick → `SourceHost::set_audio_route`, `audio.bus.sources_rerouted`), and
+the bus retries with backoff (0.5 s, doubling ≤ 10 s; `audio.bus.reconnecting {attempt}`,
+`.reconnect_failed {reason}`) until a new session is up (`audio.bus.up {reconnected: true,
+generation}`; latency re-measured; the meter's capture stream re-created on the same
+`MeterShared`) — then every source goes back onto the bus with its ramp-in held on `gain.pause`
+until its rebuilt audio chain flows (invariant #8). The first session's setup failing is still
+`Bus::create`'s error (no bus for the process — the fallback above). Shutdown: `Runtime::shutdown` destroys every source first, then
 `Audio::close` (`audio.bus.down {reason: "shutdown"}`), so no stream is moved to the default
 sink on the way out; a killed player's sink goes with its PipeWire connection.
 
 **Tests.** `tests/api.rs::bus_down_falls_back_to_default_device` (PipeWire made
 unreachable: empty `PIPEWIRE_RUNTIME_DIR` + bogus `PIPEWIRE_REMOTE`; image source, so
-silent) and `ao_null_runs_without_bus`; unit tests in `meter.rs` (RMS/floor/max-channel/
+silent), `ao_null_runs_without_bus`, **`i7_bus_reconnects_after_pipewire_restart`** — a
+*private, hermetic* PipeWire + WirePlumber (`PrivatePw`: own runtime/config/state dirs, no
+D-Bus, WirePlumber's `policy` profile so no ALSA/Bluetooth/V4L2 monitor ever opens a device,
+one null sink; skipped without the binaries; the owner's PipeWire is never touched): tone on
+the bus → both daemons killed → `down` + sources on `auto` → restarted → `up {reconnected}` +
+sources back on `pipewire/lp-player-bus` with a live AO, the tone on the bus again, the ramp-in
+`onset.started {slot: pause, reason: flowed}`; unit tests in `meter.rs` (RMS/floor/max-channel/
 carry/ring/clock) and `bus.rs` (args, default parsing). **On-machine: `bash
 src/player/tests/onmachine/bus.sh`** (exit 0 = pass; real audio, R56): its own temp
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` for the lp-player socket while PipeWire/Pulse reach the
@@ -1915,7 +2070,9 @@ binary as the supervisor even after a rebuild replaced the file.
   `supervisor.restart`).
 - **Stop:** SIGTERM/SIGINT to the supervisor are forwarded to the child; it waits ≤ 10 s
   (`STOP_WAIT`; then SIGKILL, `supervisor.stop_timeout`) and exits with the child's status
-  — never a restart.
+  — never a restart. During the no-compositor backoff (no child) a SIGTERM/SIGINT ends it at
+  once, exit 0, `supervisor.stopped` (`sleep_unless_stopped` = `sigtimedwait`, final review M9;
+  `tests/supervise.rs::sigterm_during_compositor_backoff_exits_at_once`).
 - **The supervisor's log lines** (`supervisor.child_exited {pid, signal|code, uptime_ms}`
   warn on every crash, `giving_up`, `stop_timeout`, `spawn_failed`) are appended to the
   shared `events.jsonl` with `log::append_detached` (one `O_APPEND` write per line, never
@@ -1959,7 +2116,8 @@ to `<state>/snapshot.json` so a restarted player comes back with the same wallpa
 same place.
 
 - **Format (`version` 1, pretty JSON):** `saved_unix_ms`; `player` (settable Player props:
-  `debug`); `outputs` — per present connector `{content: <source key>|null, props
+  `debug`, `paused` — the player is the one authority for pause, restored with the snapshot;
+  the backend never re-asserts it, I3); `outputs` — per present connector `{content: <source key>|null, props
   (settable output props ≠ default: layer, paused), layer (main layer fit, viewport,
   opacity)}`; `output_props` — remembered props of connectors not present; `sources` — per
   referenced source `{kind, path, position, paused, speed, loop, gains (set slots except

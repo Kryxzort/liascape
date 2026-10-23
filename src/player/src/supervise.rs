@@ -452,6 +452,27 @@ fn wait_child(sup: &Sup, child: &mut Child, set: &libc::sigset_t) -> (ExitStatus
     }
 }
 
+/// Sleep `d` with SIGCHLD/SIGINT/SIGTERM blocked, but wake for a stop signal: returns
+/// `Some(signal)` if SIGINT/SIGTERM arrived (M9), `None` once `d` has passed.
+fn sleep_unless_stopped(set: &libc::sigset_t, d: Duration) -> Option<i32> {
+    let end = Instant::now() + d;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        let ts = libc::timespec {
+            tv_sec: left.as_secs() as libc::time_t,
+            tv_nsec: left.subsec_nanos() as libc::c_long,
+        };
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let sig = unsafe { libc::sigtimedwait(set, &mut info, &ts) };
+        if sig == libc::SIGINT || sig == libc::SIGTERM {
+            return Some(sig);
+        }
+    }
+}
+
 fn status_code(st: ExitStatus) -> u8 {
     match (st.code(), st.signal()) {
         (Some(c), _) => c.clamp(0, 255) as u8,
@@ -535,7 +556,17 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
                         "budget_ms": compositor_budget.as_secs_f64() * 1000.0,
                     }),
                 );
-                std::thread::sleep(compositor_delay);
+                // M9 (final review): a SIGTERM/SIGINT during the backoff ends supervision
+                // at once (there's no child to forward it to) — never a "hung" stop.
+                if let Some(sig) = sleep_unless_stopped(&set, compositor_delay) {
+                    sup.event(
+                        Level::Info,
+                        "supervisor.stopped",
+                        json!({ "signal": sig, "while": "waiting_for_compositor",
+                                "waited_ms": compositor_waited.as_secs_f64() * 1000.0 }),
+                    );
+                    return ExitCode::SUCCESS;
+                }
                 compositor_waited = next_total;
                 compositor_delay *= 2;
                 continue;

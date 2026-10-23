@@ -23,6 +23,7 @@ use serde_json::{Map, Value, json};
 use crate::anim::{AnimUnit, Animation, Animator, Curve, PropPath};
 use crate::graph::{ApiError, Graph, NodeKind, PropValue};
 use crate::log::{self, CorrId, Level};
+use crate::onset::{Onsets, PendingOnset};
 use crate::sources::SourceEvent;
 use crate::units::{GainSlot, SILENT_DB, db_to_lin};
 
@@ -31,14 +32,12 @@ use crate::units::{GainSlot, SILENT_DB, db_to_lin};
 pub const ANTICLICK: Duration = Duration::from_millis(30);
 /// B that hasn't produced its first frame by then fails the transition (never park).
 pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
-/// R85 (Task 16c): the longest an onset ramp (B un-paused, about to ramp its gain in)
-/// waits for [`SourceEvent::AudioFlowing`] before ramping anyway. Measured real restart
-/// latency (owner's machine, PipeWire/mpv) is ~19 ms; 150 ms gives comfortable headroom
-/// for a slow/cold audio-out restart while still being far short of anything a viewer
-/// would read as "the wallpaper froze" — past this, ramping unconfirmed is judged less
-/// bad than holding a transition's handoff open indefinitely. Logged `transition.onset_timeout`
-/// when hit.
-pub const ONSET_TIMEOUT: Duration = Duration::from_millis(150);
+/// R85: the onset bound — one constant for every onset path (`crate::onset`, I6).
+pub use crate::onset::ONSET_TIMEOUT;
+/// M2 (final review): an `align: end` wait never outlasts A's remaining play time (at its
+/// speed) by more than this — an A that errors mid-file, stalls, or has no known end falls
+/// back to starting now (`transition.align_fallback`), so rotation never silently stops.
+pub const ALIGN_SLACK: Duration = Duration::from_secs(10);
 /// Requirement #2 (Task 16c): the extra tail *after* a ramp-to-silence's own 30 ms before
 /// the source is actually paused — gain pushes are async and mpv's own audio buffering
 /// lags the graph value (dropout evidence: a ramp paused exactly at its nominal end
@@ -297,28 +296,15 @@ struct Tr {
     /// R85 (Task 16c): B's onset ramp, held until real audio confirms (or times out).
     /// `None` once started, or never needed (a cut never goes through this path).
     onset: Option<PendingOnset>,
+    /// M2: when an `align: end` wait gives up on A's end and starts anyway (player clock;
+    /// `None` = not computed yet / recompute — after a speed change or a new lead).
+    align_deadline: Option<Duration>,
 }
 
 impl Tr {
     fn lead_a(&self) -> Option<&str> {
         self.lead.and_then(|i| self.sides[i].a.as_deref())
     }
-}
-
-/// R85 (Task 16c): an onset ramp held until [`SourceEvent::AudioFlowing`] confirms real
-/// audio (or [`ONSET_TIMEOUT`] passes) — `id` has already been un-paused; its gain stays
-/// at [`SILENT_DB`] (the graph value `begin_running`/`handoff`/`commit` set before
-/// creating this) until the ramp actually starts.
-#[derive(Debug)]
-struct PendingOnset {
-    id: String,
-    slot: &'static str,
-    from: f64,
-    to: f64,
-    dur: Duration,
-    curve: Curve,
-    /// When the un-pause was requested (recipe clock) — what [`ONSET_TIMEOUT`] bounds.
-    requested: Duration,
 }
 
 /// A source waiting to be destroyed once its ramp to silence is over. `orig` is what the
@@ -348,6 +334,10 @@ pub struct Transitions {
     ended: BTreeMap<String, f64>,
     outbox: Vec<TransitionEvent>,
     prev_now: Duration,
+    /// I6 (final review): `restore_a`'s un-pause-then-ramp-in onsets (a snap-back, a
+    /// cancelled/failed/superseded switch, a grave shown again) — held until the restored
+    /// A's audio flows, like every other onset.
+    restore_onsets: Onsets,
 }
 
 fn path(id: &str, prop: &str) -> PropPath {
@@ -488,22 +478,13 @@ fn ramp_slot(
 /// confirms real audio, or [`ONSET_TIMEOUT`] passes. Bumps `settle_until` so a Handoff's
 /// `transition.done` can't fire before this ramp (started here, possibly well after the
 /// nominal effect end) actually finishes.
-fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration) {
+fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration, reason: &str) {
     let Some(onset) = tr.onset.take() else {
         return;
     };
-    anim_gain(
-        anim,
-        &tr.corr,
-        &onset.id,
-        onset.slot,
-        onset.from,
-        onset.to,
-        now,
-        onset.dur,
-        onset.curve,
-    );
-    tr.settle_until = tr.settle_until.max(now + onset.dur);
+    let dur = onset.dur;
+    onset.start(anim, now, reason);
+    tr.settle_until = tr.settle_until.max(now + dur);
 }
 
 /// R85: does `id` have real audio worth holding an onset ramp for? Only a live `video`
@@ -518,9 +499,7 @@ fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration) {
 /// (R92: before this check, every such B waited the full timeout and logged a warning,
 /// every time) — ramp it in at once instead.
 fn b_has_audio(g: &Graph, id: &str) -> bool {
-    get_str(g, id, "kind") == "video"
-        && !get_bool(g, id, "no_audio")
-        && get_bool(g, id, "has_audio")
+    crate::onset::has_audio(g, id)
 }
 
 /// Un-pause `id` and either hold its onset ramp (R85, real audio) or start it at once (no
@@ -540,6 +519,7 @@ fn schedule_onset(
     now: Duration,
 ) {
     if b_has_audio(g, &id) {
+        crate::onset::held(&id, slot, Some(tr.corr.clone()));
         tr.onset = Some(PendingOnset {
             id,
             slot,
@@ -548,6 +528,7 @@ fn schedule_onset(
             dur,
             curve,
             requested: now,
+            corr: Some(tr.corr.clone()),
         });
     } else {
         anim_gain(anim, &tr.corr, &id, slot, from, to, now, dur, curve);
@@ -741,8 +722,11 @@ impl Transitions {
             .collect();
         for tr in &mut self.active {
             if tr.onset.as_ref().is_some_and(|o| incoming.contains(&o.id)) {
-                start_onset(tr, anim, now);
+                start_onset(tr, anim, now, "forced");
             }
+        }
+        for id in &incoming {
+            self.restore_onsets.force(id, anim, now);
         }
 
         let sides = build_sides(g, &outputs);
@@ -778,6 +762,7 @@ impl Transitions {
             evaluated: false,
             copies_made: false,
             onset: None,
+            align_deadline: None,
         };
         // align: end — A's current iteration is its last (unless shared, R34, or a still).
         if req.align == Align::End
@@ -870,18 +855,28 @@ impl Transitions {
                         self.ended.remove(id);
                     }
                 }
-                SourceEvent::Error { .. } | SourceEvent::Rejected { .. } => {}
+                // M2: an A that errored mid-file holds its last frame and makes no more
+                // sound — for `align: end` it has ended (never waited on forever).
+                SourceEvent::Error { .. } => {
+                    if self.active.iter().any(|t| t.lead_a() == Some(id.as_str())) {
+                        let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
+                        self.ended.insert(id.clone(), tp);
+                    }
+                }
+                SourceEvent::Rejected { .. } => {}
                 // R85: the onset ramp this id was waiting on (if any) starts now, for real.
                 SourceEvent::AudioFlowing => {
                     for tr in &mut self.active {
                         if tr.onset.as_ref().is_some_and(|o| &o.id == id) {
-                            start_onset(tr, anim, now);
+                            start_onset(tr, anim, now, "flowed");
                         }
                     }
                 }
             }
         }
         self.ended.retain(|id, _| is_source(g, id));
+        self.restore_onsets.retain(|id| is_source(g, id));
+        self.restore_onsets.tick(events, anim, now, "transition");
         self.bury(g, anim, now);
 
         let mut i = 0;
@@ -893,6 +888,23 @@ impl Transitions {
             }
         }
         self.prev_now = now;
+    }
+
+    /// Drop `id`'s held restore onset (someone else — retire, park — owns its anticlick
+    /// now).
+    pub fn cancel_restore_onset(&mut self, id: &str) {
+        self.restore_onsets.cancel(id);
+    }
+
+    /// `(live transitions, graves, ended-tracking entries, restore onsets)` — the `loop`
+    /// probe's long-run `bounds` (C1).
+    pub fn bounds(&self) -> (usize, usize, usize, usize) {
+        (
+            self.active.len(),
+            self.graves.len(),
+            self.ended.len(),
+            self.restore_onsets.len(),
+        )
     }
 
     /// Drain the event outbox (R37).
@@ -992,6 +1004,7 @@ impl Transitions {
                 tr.drop_at = None;
                 tr.target_end = None;
                 tr.boundary = None;
+                tr.align_deadline = None;
             }
             if tr.outputs.is_empty() {
                 self.commit_unseen(tr, g, anim, now);
@@ -1165,17 +1178,10 @@ impl Transitions {
         // R85: an onset ramp still waiting past its bound starts anyway — never held
         // open indefinitely for a confirmation that may never arrive.
         if let Some(onset) = &tr.onset
-            && now >= onset.requested + ONSET_TIMEOUT
+            && onset.timed_out(now)
         {
-            let (corr, id) = (tr.corr.clone(), onset.id.clone());
-            log::event(
-                "transition",
-                Level::Warn,
-                "transition.onset_timeout",
-                Some(corr),
-                json!({ "id": id, "waited_ms": ms(now - onset.requested) }),
-            );
-            start_onset(tr, anim, now);
+            crate::onset::log_timeout("transition", onset, now);
+            start_onset(tr, anim, now, "timeout");
         }
         if tr.phase == Phase::Scheduled {
             tr.phase = Phase::WaitingReady;
@@ -1344,6 +1350,28 @@ impl Transitions {
         };
         if !is_source(g, &a) || is_still(g, &a) {
             return Some(now); // `End` on an image (or a vanished A) is `Now`
+        }
+        // M2: never wait for an end that doesn't come (A errored without `Ended`, stalled,
+        // no known duration): A's remaining play time at its speed + ALIGN_SLACK, then
+        // start now. Recomputed after a speed change or a new lead (`align_deadline`).
+        let deadline = *tr.align_deadline.get_or_insert_with(|| {
+            let speed = get_f64(g, &a, "speed").unwrap_or(1.0).max(0.01);
+            let remaining = match (get_f64(g, &a, "duration"), get_f64(g, &a, "time_pos")) {
+                (Some(d), Some(t)) if d > 0.0 => ((d - t).max(0.0) / speed).min(86_400.0),
+                _ => 0.0,
+            };
+            now + Duration::from_secs_f64(remaining) + ALIGN_SLACK
+        });
+        if now >= deadline && !self.ended.contains_key(&a) {
+            log::event(
+                "transition",
+                Level::Warn,
+                "transition.align_fallback",
+                Some(tr.corr.clone()),
+                json!({ "a": a, "at_ms": ms(now), "deadline_ms": ms(deadline),
+                        "hint": "A never reached its end (error, stall or no duration); started now" }),
+            );
+            return Some(now);
         }
         let shared_loop = tr.sides[li].shared && get_bool(g, &a, "loop");
         let ended = self.ended.contains_key(&a);
@@ -1841,7 +1869,7 @@ impl Transitions {
     /// it stays current (cancel/failure); a superseded A is proceeded from as it is (R44).
     #[allow(clippy::too_many_arguments)]
     fn restore_a(
-        &self,
+        &mut self,
         a: &str,
         orig: Orig,
         seek_if_ended: bool,
@@ -1859,16 +1887,40 @@ impl Transitions {
                 gset(g, corr, a, "position", PropValue::F64(0.0));
             }
         }
+        // I6 (invariant #8): an A the recipe held paused (reveal/frozen) and now un-pauses
+        // must not ramp back in before its audio restarts — hold the anticlick ramp-in
+        // (silent until then) like every other onset; the other slots ramp at once, gated
+        // by it.
+        let unpausing = orig.paused == Some(false) && get_bool(g, a, "paused");
         if let Some(p) = orig.paused {
             gset(g, corr, a, "paused", PropValue::Bool(p));
         }
         for (slot, db) in orig.gains {
-            ramp_slot(g, anim, corr, a, slot, db, now, ANTICLICK);
+            if unpausing && slot == "anticlick" && crate::onset::has_audio(g, a) {
+                gset(g, corr, a, "gain.anticlick", PropValue::F64(SILENT_DB));
+                self.restore_onsets.schedule(
+                    g,
+                    anim,
+                    PendingOnset {
+                        id: a.to_string(),
+                        slot: "anticlick",
+                        from: 0.0,
+                        to: db_to_lin(db),
+                        dur: ANTICLICK,
+                        curve: Curve::Linear,
+                        requested: now,
+                        corr: Some(corr.clone()),
+                    },
+                    now,
+                );
+            } else {
+                ramp_slot(g, anim, corr, a, slot, db, now, ANTICLICK);
+            }
         }
     }
 
     fn restore(
-        &self,
+        &mut self,
         side: &mut Side,
         seek_if_ended: bool,
         corr: &CorrId,
@@ -2005,6 +2057,9 @@ fn track_lead(tr: &mut Tr, g: &Graph, now: Duration) {
     }
     if paused || tr.last_speed.is_some_and(|s| (s - speed).abs() > 1e-9) {
         tr.end_est = None;
+    }
+    if tr.last_speed.is_some_and(|s| (s - speed).abs() > 1e-9) {
+        tr.align_deadline = None; // M2: re-derive the fallback from the new speed
     }
     tr.last_tp = Some(tp);
     tr.last_speed = Some(speed);
@@ -2220,6 +2275,57 @@ mod tests {
         h.tick(10, &[]);
         let mid = gain_db(&h.g, &a2, "anticlick");
         assert!(mid > SILENT_DB && mid < 0.0, "A2 mid-ramp at +10 ms: {mid}");
+    }
+
+    /// M2 (final review): an `align: end` A that never reaches its end (stalled — its
+    /// `time_pos` stops moving — or errored without `Ended`) doesn't hold the switch
+    /// forever: after its remaining play time + ALIGN_SLACK it starts anyway
+    /// (`transition.align_fallback`), not before.
+    #[test]
+    fn align_end_falls_back_when_a_never_ends() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 2.0); // 8 s left, and it never moves
+        let t = h.start(req("/b.mkv", "full-live", "end", None));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let mut waited = 0u64;
+        while waited < 17_500 {
+            h.tick(100, &[]);
+            waited += 100;
+        }
+        assert!(
+            !h.has(&t, "transition.started"),
+            "fell back before remaining (8 s) + slack (10 s)"
+        );
+        for _ in 0..10 {
+            h.tick(100, &[]);
+        }
+        assert!(h.has(&t, "transition.started"), "never fell back");
+    }
+
+    /// M2: an A that errors mid-file counts as ended for alignment (it makes no more
+    /// sound and holds its last frame) — the switch starts at once.
+    #[test]
+    fn align_end_a_error_counts_as_ended() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 10.0, 2.0);
+        let t = h.start(req("/b.mkv", "full-live", "end", None));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        assert!(!h.has(&t, "transition.started"));
+        h.tick(
+            16,
+            &[(
+                a.clone(),
+                SourceEvent::Error {
+                    reason: "decode".into(),
+                },
+            )],
+        );
+        h.tick(16, &[]);
+        assert!(h.has(&t, "transition.started"));
     }
 
     /// Item 7: after a natural reveal handoff the held (paused) A is destroyed in the same
