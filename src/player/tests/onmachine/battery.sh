@@ -20,6 +20,12 @@
 #   --cells m1/mo1,m2/mo2 only run these method/mode cells (see --list-cells); default = all 24
 #   --list-cells          print every method/mode cell id and exit
 #   --results-dir DIR     override the timestamped results directory
+#   --resume DIR          resume an interrupted run (stage-2 controller ruling R99): reuses DIR
+#                         (implies --results-dir DIR), skips every method/mode cell that already
+#                         has a full SWITCHES-count of records in switches.jsonl OR a recorded
+#                         entry in cell-failures.jsonl, and re-runs (cleanly, discarding any
+#                         partial records first) any cell that was cut off mid-way. switches.jsonl
+#                         is never truncated when resuming.
 #   --build               rebuild lp-player (cargo) + the backend (dotnet) first (hermetic only;
 #                         default: use whatever is already built, like `--no-build` elsewhere)
 #   -h / --help           this text
@@ -31,7 +37,13 @@
 # 0 micro_gaps per the dropout detector (skipped entirely if this branch has no `probe dropout` --
 # see "Dropout detector availability" below), frame present intervals within +/- 0.5 ms of refresh on
 # every output, no `transition.failed` except ones we deliberately inject (we inject none -- any
-# `failed:` is a real stop).
+# `failed:` is a real failure). **R99 (stage-2 controller ruling, overrides this file's original
+# "stop the whole battery" design):** a failing switch stops only ITS OWN cell's remaining
+# switches (that corr's `ctl logs` + the frames/dropout stats already in switches.jsonl are
+# recorded to cell-failures.jsonl) -- run_battery then moves on to the next method/mode cell, so
+# one run still produces the full 24-cell matrix even when a cell genuinely fails. The script's
+# own exit code still goes non-zero if anything failed (cleanup() checks $FAILED at the very end,
+# after every cell has had its turn and owner state is fully restored).
 #
 # Dropout detector availability: this worktree (lp-player-laneC, HEAD cbf6451) predates lane B's
 # audio work, which adds the `dropout` probe / `probe.dropout` events / `player.debug`'s consumer.
@@ -94,8 +106,9 @@ CELLS_FILTER=""
 RESULTS_DIR_OVERRIDE=""
 BUILD=0
 SOAK_MINUTES=60
+RESUME=0
 
-usage() { sed -n '2,70p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,85p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -105,6 +118,7 @@ while [ $# -gt 0 ]; do
     --cells) shift; CELLS_FILTER=${1:?--cells needs a list} ;;
     --list-cells) for m in "${METHODS[@]}"; do for o in "${MODES[@]}"; do echo "$m/$o"; done; done; exit 0 ;;
     --results-dir) shift; RESULTS_DIR_OVERRIDE=${1:?--results-dir needs a path} ;;
+    --resume) shift; RESUME=1; RESULTS_DIR_OVERRIDE=${1:?--resume needs a results dir} ;;
     --build) BUILD=1 ;;
     --minutes) shift; SOAK_MINUTES=${1:?--minutes needs N} ;;
     -h|--help) usage 0 ;;
@@ -145,8 +159,8 @@ else
 fi
 mkdir -p "$RESULTS_DIR"
 SWITCHES_FILE="$RESULTS_DIR/switches.jsonl"
-: > "$SWITCHES_FILE"
-log "results: $RESULTS_DIR"
+[ "$RESUME" = 1 ] && [ -f "$SWITCHES_FILE" ] || : > "$SWITCHES_FILE"   # --resume: keep prior switches
+log "results: $RESULTS_DIR$([ "$RESUME" = 1 ] && echo " (resuming)")"
 
 # ==================================================================
 # State shared by the cleanup trap. Populated as the run progresses so the trap can always leave
@@ -270,33 +284,48 @@ record_switch() {
       dropout:$dropout, note:$note}' >> "$SWITCHES_FILE"
 }
 
+# R99 (stage-2 controller ruling, overrides this file's original "stop the whole battery"
+# design): record the failing switch's corr logs (+ its frames/dropout stats, already written
+# to switches.jsonl by record_switch below, called before this from every real caller) into
+# CELL_FAILURES_FILE, then return 1 so the CALLING CELL aborts its own remaining switches --
+# but run_battery's method x mode loop continues with the next cell. One run must still give
+# the full 24-cell matrix even if one cell hits a real failure. FAILED stays the "did anything
+# fail" flag for cleanup()'s final exit code (still non-zero if any cell failed), but no longer
+# an immediate `exit`.
+CELL_FAILURES_FILE="$RESULTS_DIR/cell-failures.jsonl"
 stop_on_failure() {
   local reason="$1" corr="${2:-}"
   FAILED=1
-  err "BATTERY STOPPED: $reason${corr:+ (corr=$corr)}"
+  err "CELL FAILURE ($CUR_CELL switch ${CUR_IDX:-?}): $reason${corr:+ (corr=$corr)}"
   if [ -n "$corr" ]; then
     ctl logs "{\"corr\":\"$corr\"}" > "$RESULTS_DIR/failure-$corr.json" 2>/dev/null
     err "dumped $RESULTS_DIR/failure-$corr.json"
   fi
-  exit 1
+  jq -nc --arg cell "$CUR_CELL" --argjson idx "${CUR_IDX:-0}" --arg corr "$corr" --arg reason "$reason" --arg t "$(date -Iseconds)" \
+    '{t:$t, cell:$cell, idx:$idx, corr:$corr, reason:$reason}' >> "$CELL_FAILURES_FILE"
+  return 1
 }
 
 # One switch, generically: wait for a new corr after the caller already issued whatever action
 # triggers it, wait for its terminal event, collect frames+dropout, record, stop on real failure.
 #
-# Sets the global OBS_CORR (never echoes/is never called via `$(...)`: stop_on_failure() below calls
-# `exit`, and `exit` inside a command-substitution subshell would only kill that subshell, silently
-# defeating "stop on the first failure" -- every caller invokes this as a plain statement and reads
-# OBS_CORR afterward).
+# Sets the global OBS_CORR and returns 1 on a real (non-tolerant) failure (never echoed/never
+# called via `$(...)`: a `$(...)` subshell's `return`/variable writes never reach the caller --
+# every caller invokes this as a plain statement and reads OBS_CORR + the return code
+# afterward). CUR_CELL/CUR_IDX (globals) are set here so stop_on_failure() always knows which
+# cell/switch it's reporting against without every call site re-threading them.
 OBS_CORR=""
+CUR_CELL=""; CUR_IDX=""
 observe_switch() {
   local cell="$1" idx="$2" prev_corr="$3" new_timeout="$4" term_timeout="$5" tolerant="${6:-0}"
   local corr outcome frames frames_eval dropout
   OBS_CORR=""
+  CUR_CELL="$cell"; CUR_IDX="$idx"
   corr=$(wait_for_new_corr "$prev_corr" "$new_timeout")
   if [ -z "$corr" ]; then
     [ "$tolerant" = 1 ] && return 1
     stop_on_failure "no new transition corr observed" ""
+    return 1
   fi
   outcome=$(wait_for_terminal "$corr" "$term_timeout")
   frames=$(probe_frames_raw); [ -n "$frames" ] || frames='{"outputs":[]}'
@@ -306,11 +335,15 @@ observe_switch() {
   if [ "$ENFORCE_FRAME_TIMING" = 1 ]; then
     echo "$frames_eval" | jq -e '.ok' >/dev/null || warn "cell $cell switch $idx: frame timing out of +/-0.5ms tolerance (reported, see $SWITCHES_FILE)"
   fi
-  case "$outcome" in
-    failed:*) [ "$tolerant" = 1 ] && warn "cell $cell switch $idx: $outcome (tolerated -- interrupted side)" || stop_on_failure "$outcome" "$corr" ;;
-    timeout) [ "$tolerant" = 1 ] && warn "cell $cell switch $idx: terminal timeout (tolerated -- interrupted side)" || stop_on_failure "transition did not reach a terminal state" "$corr" ;;
-  esac
   OBS_CORR="$corr"
+  case "$outcome" in
+    failed:*)
+      [ "$tolerant" = 1 ] && { warn "cell $cell switch $idx: $outcome (tolerated -- interrupted side)"; return 0; }
+      stop_on_failure "$outcome" "$corr"; return 1 ;;
+    timeout)
+      [ "$tolerant" = 1 ] && { warn "cell $cell switch $idx: terminal timeout (tolerated -- interrupted side)"; return 0; }
+      stop_on_failure "transition did not reach a terminal state" "$corr"; return 1 ;;
+  esac
   return 0
 }
 
@@ -330,8 +363,20 @@ stop_legacy_wallpaper() {
 snapshot_owner_settings() {
   [ "$HERMETIC" = 1 ] && return 0
   local f
-  for f in PlayerEngine TransitionMethod GlobalTransitionEnabled GlobalTransitionEffectIds \
-           GlobalTransitionDurationMs AutoMute LastSession; do
+  # NOTE (battery-script fix): the backend serializes /settings with camelCase keys
+  # (confirmed live: GET /settings | jq keys -> "playerEngine", "transitionMethod", ... --
+  # never the PascalCase C# property names). jq field access is case-sensitive, so a
+  # PascalCase filter here would silently read/write a DIFFERENT, brand-new key than the
+  # real one -- and since .NET's deserializer IS case-insensitive (verified live: POSTing
+  # both "transitionMethod" and a differently-cased "TransitionMethod" in one object has
+  # the LAST one win), restore_owner_settings below would have ended every live run by
+  # POSTing a real field's value as the jq-appended PascalCase key's (always-null, because
+  # the snapshot read was equally broken) value -- silently NULLING playerEngine/
+  # transitionMethod/globalTransitionEnabled/globalTransitionEffectIds/
+  # globalTransitionDurationMs/autoMute instead of restoring them. Fixed by using the
+  # real camelCase names throughout this script's /settings GET->modify->POST paths.
+  for f in playerEngine transitionMethod globalTransitionEnabled globalTransitionEffectIds \
+           globalTransitionDurationMs autoMute lastSession; do
     ORIG_FIELDS["$f"]=$(settings_get | jq -c ".$f")
   done
   get /playlist/state > "$ORIG_PLAYLIST_STATE_FILE" 2>/dev/null && HAVE_ORIG_PLAYLIST_STATE=1
@@ -479,7 +524,7 @@ setup_live_backend() {
   API="http://127.0.0.1:$(cat "$portfile")"
   curl -sf -m 5 "$API/health" >/dev/null || { err "backend at $API not responding"; exit 1; }
   snapshot_owner_settings
-  setting_set ".PlayerEngine = \"lp-player\" | .AutoMute = false | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = [\"$EFFECT_ID\"] | .GlobalTransitionDurationMs = $EFFECT_DURATION_MS"
+  setting_set ".playerEngine = \"lp-player\" | .autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
   sleep 1
   [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "lp-player" ] || { err "backend did not switch to lp-player -- aborting before touching any playback"; exit 1; }
   PLAYER_SP=$(sup_pid)
@@ -632,6 +677,23 @@ cell_selected() {
   return 1
 }
 
+# --resume support: a cell counts as "already attempted" (skip, don't re-run) if either (a)
+# switches.jsonl already has a full SWITCHES-count of records for it (completed, pass or not),
+# or (b) cell-failures.jsonl recorded an R99 failure for it (a deliberate early stop, not an
+# interruption -- re-running it would just re-diagnose the same thing). A cell with a non-zero
+# but PARTIAL record count and no failure entry was cut off mid-run (e.g. a usage-limit
+# interruption, not a real failure) -- NOT "attempted"; run_battery's caller purges its
+# partial records and redoes it from scratch.
+cell_already_attempted() {
+  local c="$1" cnt=0
+  [ -s "$SWITCHES_FILE" ] && cnt=$(jq -c --arg c "$c" 'select(.cell==$c)' "$SWITCHES_FILE" 2>/dev/null | wc -l)
+  [ "$cnt" -ge "$SWITCHES" ] && return 0
+  if [ -s "$CELL_FAILURES_FILE" ] && jq -e --arg c "$c" 'select(.cell==$c)' "$CELL_FAILURES_FILE" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 restore_cli_invoke() {
   if [ "$HERMETIC" = 1 ]; then
     "$DOTNET" "$DLL" --restore > "$HERMETIC_T/restore-$(date +%s%N).log" 2>&1
@@ -654,7 +716,9 @@ run_cell() {
   local cell="$method/$mode"
   log "-- cell $cell ($SWITCHES switches) --"
   local term; term=$(term_timeout)
-  local i corr prev
+  local i corr prev cell_failed=0   # R99: set on a real observe_switch failure; breaks this
+                                     # cell's own remaining switches but run_battery still moves
+                                     # on to the next cell -- never aborts the whole matrix.
 
   case "$mode" in
     manual-next|manual-prev|random|next-mid-transition)
@@ -684,7 +748,7 @@ run_cell() {
             fi
             ;;
         esac
-        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0
+        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0 || { cell_failed=1; break; }
       done
       ;;
 
@@ -698,7 +762,7 @@ run_cell() {
         [ -n "$corr" ] && wait_for_terminal "$corr" "$term" >/dev/null   # priming switch, drained, not evaluated
         prev=$(last_corr)
         restore_cli_invoke
-        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0
+        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0 || { cell_failed=1; break; }
       done
       ;;
 
@@ -717,12 +781,14 @@ run_cell() {
       local auto_timeout; auto_timeout=$(python3 -c "print(int($interval) + 15)")
       prev=$(last_corr)
       for ((i = 1; i <= SWITCHES; i++)); do
-        observe_switch "$cell" "$i" "$prev" "$auto_timeout" "$term" 0
+        observe_switch "$cell" "$i" "$prev" "$auto_timeout" "$term" 0 || { cell_failed=1; break; }
         prev="$OBS_CORR"
       done
       post /stop '{}' >/dev/null; sleep 0.5
       ;;
   esac
+  [ "$cell_failed" = 1 ] && return 1
+  return 0
 }
 
 write_summary() {
@@ -884,13 +950,25 @@ run_battery() {
   log "importing ${#ALT_TARGETS[@]} alternating target(s) into the library once (needed for /next //prev/-random navigation)"
   for p in "${ALT_TARGETS[@]}"; do import_target "$p" >/dev/null || warn "import failed for $p"; done
 
-  local any=0
+  local any=0 failed_cells=0
   for method in "${METHODS[@]}"; do
-    setting_set ".TransitionMethod = \"$method\""
+    setting_set ".transitionMethod = \"$method\""
     for mode in "${MODES[@]}"; do
       cell_selected "$method" "$mode" || continue
       any=1
-      run_cell "$method" "$mode"
+      local c="$method/$mode"
+      if [ "$RESUME" = 1 ] && cell_already_attempted "$c"; then
+        log "resume: $c already attempted (per $SWITCHES_FILE/$CELL_FAILURES_FILE) -- skipping"
+        continue
+      fi
+      if [ "$RESUME" = 1 ] && [ -s "$SWITCHES_FILE" ]; then
+        # a partial switches.jsonl for this cell means an earlier attempt was cut off
+        # mid-cell (interrupted, not a recorded R99 failure) -- purge it so write_summary's
+        # per-cell counts don't double up once we redo the whole cell cleanly.
+        local tmp; tmp=$(mktemp)
+        jq -c --arg c "$c" 'select(.cell != $c)' "$SWITCHES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$SWITCHES_FILE"
+      fi
+      run_cell "$method" "$mode" || { failed_cells=$((failed_cells + 1)); warn "cell $c FAILED (R99) -- continuing with remaining cells"; }
     done
   done
   [ "$any" = 1 ] || { err "--cells matched nothing (try --list-cells)"; exit 2; }
@@ -898,7 +976,11 @@ run_battery() {
   jq -n --argjson avail "$(dropout_probe_available)" \
     '{dropout_probe_available: $avail, note: "false means lane B (the dropout detector) was not merged into this build -- re-run after it is"}' \
     > "$RESULTS_DIR/dropout-availability.json"
-  log "battery complete. 0 failures stopped the run -- see $RESULTS_DIR/summary.json"
+  if [ "$failed_cells" = 0 ]; then
+    log "battery complete. 0 cells failed -- see $RESULTS_DIR/summary.json"
+  else
+    err "battery complete. $failed_cells cell(s) failed (R99: ran the full matrix anyway) -- see $RESULTS_DIR/summary.json and $CELL_FAILURES_FILE"
+  fi
 }
 
 # ==================================================================
