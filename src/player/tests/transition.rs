@@ -59,6 +59,18 @@ fn idx(frames: u32) -> PathBuf {
         ClipSpec::FrameIndex { frames },
     )
 }
+/// R92 review: [`idx`]'s exact visual pattern, with a real audio track — for a B whose
+/// onset-wait (`b_has_audio`) must still hold (a plain [`idx`] clip genuinely has no
+/// audio stream, so R92's fix correctly skips the wait for it now).
+fn idx_with_audio(frames: u32) -> PathBuf {
+    ensure_clip(
+        &format!("tr_frame_index_audio_{frames}"),
+        ClipSpec::FrameIndexWithAudio {
+            frames,
+            tone_hz: 440.0,
+        },
+    )
+}
 fn s(p: &std::path::Path) -> &str {
     p.to_str().unwrap()
 }
@@ -181,8 +193,12 @@ fn frozen_silent_then_b_starts() {
         return;
     };
     let a = h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]);
+    // R92 review: B must genuinely have an audio track for this test's onset-wait
+    // assertions to mean anything — a plain `idx(300)` (no audio at all) now correctly
+    // skips the wait entirely (`b_has_audio`), which is the fix this test's sibling,
+    // `tests/api.rs::r92_transition_onto_video_with_no_audio_skips_onset_wait`, covers.
     let corr = h.start(json!({
-        "outputs": "out:*", "to": {"path": s(&idx(300)), "loop": true},
+        "outputs": "out:*", "to": {"path": s(&idx_with_audio(300)), "loop": true},
         "effect_id": "fade", "duration_ms": 1000, "method": "frozen"
     }));
     let b = h.to_of(&corr);

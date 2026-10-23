@@ -48,6 +48,9 @@ const OBS_IMAGE: u64 = 7;
 const OBS_IDLE: u64 = 8;
 /// Task 16c (R85): "real audio flowing" detector — see `MpvSource::arm_audio_flowing`.
 const OBS_AUDIO_PTS: u64 = 9;
+/// R92 (review of Task 16c/16d): does the *file* actually have an audio track mpv
+/// selected? See `MpvSource::has_audio`'s doc.
+const OBS_AUDIO_SELECTED: u64 = 10;
 /// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
 const TEARDOWN_MAX: Duration = Duration::from_millis(500);
 
@@ -303,6 +306,19 @@ pub struct MpvSource {
     /// When `audio-pts` was *first* seen to change since arming (`Instant`, paired with
     /// [`FLOWING_CONFIRM_MARGIN`]) — `None` until that first change.
     flowing_confirmed_at: Option<Instant>,
+    /// R92 (review of Task 16c/16d): whether the *current load* actually has an audio
+    /// track mpv selected — unlike `no_audio` (our own request to disable it) or
+    /// `kind == "video"` (just "this isn't a still image"), this is what mpv itself
+    /// resolved after the file loaded (`current-tracks/audio/id`: a real id = has one,
+    /// unavailable = none). `None` = not yet known (no file loaded, or no notification
+    /// seen yet for this load) — every caller treats that as "has audio" (the
+    /// conservative default: never falsely skip a ramp/wait a real stream needs).
+    /// Without this, a video file with literally no audio stream (common for subtly
+    /// silent wallpapers) made every onset (R85) and R88 pause/resume wait the full
+    /// `ONSET_TIMEOUT` and log a warning, forever, since the old check
+    /// (`kind == "video" && !no_audio`) can't tell "disabled" apart from "never had
+    /// one". Reset to `None` on every new load (`StartFile`); set from `on_prop`.
+    has_audio: Option<bool>,
 }
 
 /// Task 16c (R85 review fix round): the real time required *after* `audio-pts`'s first
@@ -445,6 +461,7 @@ impl MpvSource {
             (OBS_IMAGE, "current-tracks/video/image", Format::Flag),
             (OBS_IDLE, "idle-active", Format::Flag),
             (OBS_AUDIO_PTS, "audio-pts", Format::F64),
+            (OBS_AUDIO_SELECTED, "aid", Format::Str),
         ] {
             handle.observe(id, name, f).map_err(api_err)?;
         }
@@ -520,6 +537,7 @@ impl MpvSource {
             audio_delay_bias,
             awaiting_flowing: false,
             flowing_confirmed_at: None,
+            has_audio: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -796,13 +814,16 @@ impl MpvSource {
     /// R85: arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
     /// un-pause request is queued. Nothing to wait for (fires at once) when: stepped mode
     /// (mpv stays paused for good there — audio is always silent, § Sources "Stepped
-    /// mode"), no audio track (`no_audio` asked for `aid=no`), or an image (no audio
-    /// concept at all). Otherwise armed — `audio-pts`'s first change starts a
+    /// mode"), no audio track (`no_audio` asked for `aid=no`), an image (no audio
+    /// concept at all), or — R92 — the file itself genuinely has no audio track to begin
+    /// with (`self.has_audio == Some(false)`; `None`/unknown still waits, the
+    /// conservative default). Otherwise armed — `audio-pts`'s first change starts a
     /// [`FLOWING_CONFIRM_MARGIN`] countdown (`on_prop`) before it fires; the caller (a
     /// recipe/the runtime) bounds the whole wait itself (`ONSET_TIMEOUT`).
     fn arm_audio_flowing(&mut self) {
         let no_audio = matches!(self.props.get("no_audio"), Some(PropValue::Bool(true)));
-        if self.stepped || self.kind != "video" || no_audio {
+        let no_track = self.has_audio == Some(false);
+        if self.stepped || self.kind != "video" || no_audio || no_track {
             self.pending.push(SourceEvent::AudioFlowing);
             return;
         }
@@ -964,6 +985,7 @@ impl MpvSource {
                         self.restarted = false;
                         self.time_pos = None;
                         self.duration = None;
+                        self.has_audio = None;
                     }
                 }
                 Event::FileLoaded => {
@@ -1060,6 +1082,32 @@ impl MpvSource {
                 self.kind = if img { "image" } else { "video" };
                 self.props
                     .insert("kind".into(), PropValue::Str(self.kind.into()));
+            }
+            // R92: `aid` (the *resolved* audio track selection — "manpage: the special
+            // value `no` means no track is selected") always has a real textual value
+            // ("auto" pre-resolution, then either a track number or `no`), unlike
+            // `current-tracks/audio/id`'s sub-path (tried first: a genuinely audio-less
+            // file never generates a change-notification for it at all, since
+            // "unavailable" before AND after load is not a value transition — measured
+            // directly, `tests/sources.rs::has_audio_reflects_real_track_presence`
+            // failed against that approach). `aid` reliably transitions away from
+            // "auto" once mpv decides, for every load, including the very first.
+            //
+            // **Must not conflate with our own `no_audio` request** (which also drives
+            // `aid` to `"no"`, § `apply`'s `"no_audio" => self.set(prop, "aid", …)`):
+            // while `no_audio` is on, an observed `"no"` here says nothing about the
+            // *file's* own content, so it's ignored — `has_audio` keeps whatever it last
+            // genuinely knew (or stays `None`/unknown) until `no_audio` is off again and
+            // `aid` re-resolves against the real file.
+            (OBS_AUDIO_SELECTED, PropData::Str(s)) if self.is_current() => {
+                let no_audio = matches!(self.props.get("no_audio"), Some(PropValue::Bool(true)));
+                if !no_audio {
+                    if s == "no" {
+                        self.has_audio = Some(false);
+                    } else if !s.is_empty() && s != "auto" {
+                        self.has_audio = Some(true);
+                    }
+                }
             }
             // R85 (review fix round): the *first* change confirms something resumed
             // (decode/demux), but not reliably that the AO itself has yet — record it and
@@ -1410,6 +1458,11 @@ impl Source for MpvSource {
             "width" => self.target_size().map(|(w, _)| PropValue::I64(w as i64)),
             "height" => self.target_size().map(|(_, h)| PropValue::I64(h as i64)),
             "color" => None,
+            // R92: unknown stays `None` (unmirrored) rather than an explicit `true` — the
+            // graph's own schema default (`true`) already is the conservative "treat as
+            // audio" fallback invariants #4/#8 need; no point mirroring a value we don't
+            // actually know yet.
+            "has_audio" => self.has_audio.map(PropValue::Bool),
             _ => self.props.get(prop).cloned(),
         }
     }

@@ -48,6 +48,18 @@ use crate::units::{equal_power, lin_to_db};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PropPath(pub String);
 
+/// Whether `path` names a gain slot (`<id>.gain.<slot>`) rather than a picture-affecting
+/// property — split at the first `.` (node ids never contain one, § `graph::split_path`),
+/// same convention used throughout the crate (`graph/props.rs`, `sources/mpv.rs`, …).
+/// Shared by [`Animator::has_live_gain`]/[`Animator::tick_gains`] (R90, Task 16d's fast
+/// gain timer) and [`crate::redraw::audio_only`] (a gain change never needs a redraw) —
+/// one definition, not two that could drift apart.
+pub fn is_gain_path(path: &PropPath) -> bool {
+    path.0
+        .split_once('.')
+        .is_some_and(|(_, prop)| prop.starts_with("gain."))
+}
+
 /// An easing curve mapping clamped progress `x` in `[0, 1]` to a shaped value, also in
 /// `[0, 1]` for every curve here. `eval` clamps `x` first, so a caller passing a
 /// slightly-out-of-range progress (e.g. floating-point drift past the end) never drives a
@@ -248,6 +260,50 @@ impl Animator {
         out
     }
 
+    /// Like [`tick`](Self::tick), but only evaluates/emits animations whose target is a
+    /// `gain.*` path (R90, Task 16d: the fast gain timer's own ≥ 1 kHz driver, run
+    /// independent of the output refresh — `.claude/rules/player-core.md` § Runtime "The
+    /// fast gain timer"). Shares the same per-[`Entry`] `done` flag and `finished_queue`
+    /// as `tick`: whichever call reaches an animation's end first (this one, or the
+    /// ordinary `tick` the main loop timer still runs every cycle, R47 unchanged — it
+    /// evaluates every path, gain included) finalizes it; the other sees `done` already
+    /// set and skips it — never a double emission of the final value, never a double
+    /// `finished()` entry.
+    pub fn tick_gains(&mut self, now: Duration) -> Vec<(PropPath, f64)> {
+        let mut out = Vec::new();
+        let mut newly_finished = Vec::new();
+        for (i, e) in self.entries.iter().enumerate() {
+            if e.done || now < e.anim.start || !is_gain_path(&e.anim.target) {
+                continue;
+            }
+            out.push((e.anim.target.clone(), e.anim.emitted_value(now)));
+            if now >= e.anim.end() {
+                newly_finished.push(i);
+            }
+        }
+
+        for i in newly_finished {
+            self.entries[i].done = true;
+            let id = self.entries[i].id;
+            let corr = self.entries[i].anim.corr.clone();
+            self.finished_queue.push((id, corr));
+        }
+
+        out
+    }
+
+    /// Whether any not-yet-finished animation targets a `gain.*` path, started or not
+    /// (R90): the fast gain timer arms (and stays armed) iff this is true — independent
+    /// of `now`, since a not-yet-started gain ramp still needs the timer already running
+    /// so it can start emitting the instant its own `start` arrives, rather than wait for
+    /// the next main tick to notice. Cheap: one scan of the (small, bounded by live
+    /// animations) entry list, no allocation.
+    pub fn has_live_gain(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|e| !e.done && is_gain_path(&e.anim.target))
+    }
+
     /// Drains and returns every `(AnimId, Option<CorrId>)` that has completed (not
     /// cancelled, and not superseded by a later `add()` on the same target) since the
     /// last call.
@@ -396,6 +452,98 @@ mod tests {
         );
         a.cancel_target(&g);
         assert_eq!(a.target_of(&g), None);
+    }
+
+    #[test]
+    fn gain_path_predicate() {
+        assert!(is_gain_path(&PropPath("src7.gain.xfade".to_string())));
+        assert!(is_gain_path(&PropPath("src7.gain.anticlick".to_string())));
+        assert!(!is_gain_path(&PropPath("src7.speed".to_string())));
+        assert!(!is_gain_path(&PropPath("fx2.progress".to_string())));
+        // No '.' at all: not a gain path (also not a valid PropPath, but must not panic).
+        assert!(!is_gain_path(&PropPath("nope".to_string())));
+    }
+
+    #[test]
+    // R90 (Task 16d): `tick_gains` must only ever touch `gain.*` targets — a scalar
+    // animation on the same tick must be invisible to it, and `has_live_gain` must
+    // reflect only the gain one's presence.
+    fn tick_gains_ignores_scalar_paths() {
+        let mut a = Animator::new();
+        assert!(!a.has_live_gain(), "nothing added yet");
+
+        a.add(anim("fx2.progress", 0.0, 1.0, 0, 1000, Curve::Linear));
+        assert!(!a.has_live_gain(), "a scalar animation is not a gain one");
+
+        a.add(Animation {
+            unit: AnimUnit::GainLinear,
+            ..anim("src1.gain.anticlick", 0.0, 1.0, 0, 30, Curve::Linear)
+        });
+        assert!(a.has_live_gain(), "the gain animation is now live");
+
+        let gains = a.tick_gains(Duration::from_millis(15));
+        assert_eq!(gains.len(), 1, "only the gain path, never fx2.progress");
+        assert_eq!(gains[0].0, PropPath("src1.gain.anticlick".to_string()));
+
+        // The scalar one is wholly untouched by tick_gains — a plain tick() must still
+        // see it fresh (not yet advanced, not finished).
+        let scalar = a.tick(Duration::from_millis(15));
+        assert!(
+            scalar
+                .iter()
+                .any(|(p, v)| p.0 == "fx2.progress" && (*v - 0.015).abs() < 1e-9),
+            "tick_gains must not have advanced or consumed the scalar animation: {scalar:?}"
+        );
+    }
+
+    #[test]
+    // R90: a not-yet-started gain animation still counts as "live" — the fast timer
+    // must arm ahead of its own start, not wait for it.
+    fn has_live_gain_before_start() {
+        let mut a = Animator::new();
+        a.add(Animation {
+            unit: AnimUnit::GainLinear,
+            ..anim("src1.gain.xfade", 0.0, 1.0, 5_000, 30, Curve::Linear)
+        });
+        assert!(a.has_live_gain(), "not started yet, but still live");
+        assert!(
+            a.tick_gains(Duration::ZERO).is_empty(),
+            "nothing emitted before start"
+        );
+        assert!(a.has_live_gain(), "still live: it just hasn't started");
+    }
+
+    #[test]
+    // R90: tick_gains finishing an animation must disarm has_live_gain, and must share
+    // the `done`/finished bookkeeping with a subsequent plain `tick()` — no double
+    // emission, no double `finished()` entry, no resurfacing.
+    fn tick_gains_finish_is_shared_with_tick() {
+        let mut a = Animator::new();
+        let path = PropPath("src1.gain.anticlick".to_string());
+        let id = a.add(Animation {
+            unit: AnimUnit::GainLinear,
+            ..anim("src1.gain.anticlick", 0.0, 1.0, 0, 30, Curve::Linear)
+        });
+
+        // Fast-tick path drives it all the way to its end.
+        let at_29 = a.tick_gains(Duration::from_millis(29));
+        assert_eq!(at_29.len(), 1);
+        assert!(a.has_live_gain(), "not finished yet at 29ms");
+
+        let at_30 = a.tick_gains(Duration::from_millis(30));
+        assert_eq!(at_30.len(), 1, "the exact final value, once");
+        assert!(!a.has_live_gain(), "finished: no longer live");
+        assert_eq!(a.finished(), vec![(id, None)]);
+
+        // The ordinary main-tick `tick()` must see it as already done: no re-emission,
+        // no second `finished()` entry, and `value_at` still holds the final value.
+        let later = a.tick(Duration::from_millis(1000));
+        assert!(
+            later.is_empty(),
+            "tick() must not re-emit what tick_gains already finished"
+        );
+        assert!(a.finished().is_empty(), "no duplicate finished() entry");
+        assert_eq!(a.value_at(&path, Duration::from_millis(1000)), Some(0.0));
     }
 
     #[test]

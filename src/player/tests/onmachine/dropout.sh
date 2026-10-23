@@ -15,7 +15,8 @@
 #      transition, `ctl destroy`'d while playing — gets the exact same 30 ms anti-click
 #      ramp, and `Runtime::retire` registers it as a dropout window too (its own minted
 #      `corr`, carried on `source.retire`'s log event). Probed on demand once the meter
-#      has actually captured past the window's end: must show no drops either.
+#      has actually captured past the window's end: must show no drops either. Runs
+#      after 3, once `ctl stop` has silenced the bus (Task 16d) — the only source on it.
 #   3. `method: reveal` (A held and silent via a 30 ms ramp + settle tail then paused, B
 #      rises `sin(x*pi/2)` from the Running instant): same no-drops/no-micro_gaps check,
 #      plus an onset check (below) on B's rise — exercises the full-live/reveal half of
@@ -39,12 +40,17 @@
 #
 # Isolation: its own temp XDG_RUNTIME_DIR (the lp-player socket) + XDG_STATE_HOME;
 # PipeWire/Pulse still reach the owner's real session via PIPEWIRE_RUNTIME_DIR /
-# PULSE_SERVER; --headless with WAYLAND_DISPLAY unset. LP_PLAYER_BIN=<path> skips the build.
+# PULSE_SERVER; --headless with WAYLAND_DISPLAY unset. LP_PLAYER_BIN=<path> skips the
+# build. DROPOUT_OUTPUT_HZ=<n> (default 60, Task 16d): the headless output's refresh —
+# R90's fast gain timer is independent of it, so every case here must report 0 drops/
+# micro_gaps the same at 240 Hz as at the default 60 Hz; the script is meant to be run at
+# both.
 set -uo pipefail
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
 UID_=$(id -u)
+OUTPUT_HZ=${DROPOUT_OUTPUT_HZ:-60}
 export PIPEWIRE_RUNTIME_DIR=/run/user/$UID_
 export PULSE_SERVER=unix:/run/user/$UID_/pulse/native
 
@@ -54,6 +60,60 @@ fail() {
 }
 ok() { echo "ok: $*"; }
 sink_count() { pactl list sinks short | awk '$2=="lp-player-bus"' | wc -l; }
+
+# ---------------------------------------------------------------- mute the test tones
+# Controller instruction: the owner hears these through the speakers otherwise. Mutes
+# ONLY the bus's own forwarding stream (`node.name == lp-player-bus.playback`) — never
+# the mpv streams feeding the bus (they carry `application.name lp-player` too, but are
+# upstream of the bus sink the meter actually reads; muting them would mute the
+# measurements themselves). The meter captures `lp-player-bus`'s own monitor, which sits
+# *before* this playback/forwarding stream in the graph, so muting it leaves every
+# measurement in this script unaffected — verified directly: a run with muting on
+# reported the same tone levels (median ≈ −23 dBFS for a −20 dBFS tone, matching
+# `bus.sh`'s own documented ~−22.98…−23.03 figure) as a run with `LP_TEST_AUDIBLE=1`.
+# LP_TEST_AUDIBLE=1 skips all of this (kept audible, e.g. to sanity-check by ear).
+bus_playback_index() {
+    pactl -f json list sink-inputs 2>/dev/null \
+        | jq -r '.[] | select(.properties["node.name"] == "lp-player-bus.playback") | .index' \
+        | head -1
+}
+MUTE_LOOP_PID=
+MUTE_STATE_FILE=
+start_mute_watcher() {
+    [[ -n ${LP_TEST_AUDIBLE:-} ]] && return
+    MUTE_STATE_FILE=$TMP/mute_state
+    (
+        recorded=0
+        while true; do
+            idx=$(bus_playback_index)
+            if [[ -n $idx ]]; then
+                if [[ $recorded == 0 ]]; then
+                    # A controller-side watcher may already be muting every
+                    # lp-player-bus.playback stream on this machine — record whether
+                    # *we* are the one flipping it so cleanup only unmutes what we
+                    # muted, never fighting an external watcher's own intent.
+                    was_muted=$(pactl -f json list sink-inputs 2>/dev/null \
+                        | jq -r --argjson i "$idx" '.[] | select(.index==$i) | .mute')
+                    [[ $was_muted == false ]] && echo muted_by_us > "$MUTE_STATE_FILE"
+                    recorded=1
+                fi
+                pactl set-sink-input-mute "$idx" 1 2>/dev/null
+            fi
+            sleep 0.2
+        done
+    ) &
+    MUTE_LOOP_PID=$!
+}
+stop_mute_watcher_and_restore() {
+    [[ -n $MUTE_LOOP_PID ]] || return
+    kill "$MUTE_LOOP_PID" 2>/dev/null
+    wait "$MUTE_LOOP_PID" 2>/dev/null
+    MUTE_LOOP_PID=
+    if [[ -f $MUTE_STATE_FILE ]]; then
+        idx=$(bus_playback_index)
+        [[ -n $idx ]] && pactl set-sink-input-mute "$idx" 0 2>/dev/null
+    fi
+}
 
 # ---------------------------------------------------------------- build + preconditions
 BIN=${LP_PLAYER_BIN:-$REPO/src/player/target/debug/lp-player}
@@ -83,9 +143,11 @@ export XDG_RUNTIME_DIR=$TMP/run XDG_STATE_HOME=$TMP/state
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
 SERVE_PID=
+start_mute_watcher
 
 cleanup() {
     local rc=$?
+    stop_mute_watcher_and_restore
     if [[ -n $SERVE_PID ]] && kill -0 "$SERVE_PID" 2>/dev/null; then
         "$BIN" ctl quit >/dev/null 2>&1
         for _ in $(seq 50); do kill -0 "$SERVE_PID" 2>/dev/null || break; sleep 0.1; done
@@ -134,7 +196,7 @@ for spec in "$CLIP_A 440" "$CLIP_B 660"; do
 done
 
 # ---------------------------------------------------------------- serve --debug
-"$BIN" serve --headless --outputs 640x360@60 --debug --log-level debug \
+"$BIN" serve --headless --outputs "640x360@${OUTPUT_HZ}" --debug --log-level debug \
     >"$TMP/serve.out" 2>"$TMP/serve.err" &
 SERVE_PID=$!
 SOCK=$XDG_RUNTIME_DIR/livepaper/lp-player.sock
@@ -224,6 +286,16 @@ check_onset_ramped() {
 dump_micro_gap_diagnostics() {
     local corr=$1 report=$2 label=$3
     local n
+    # Task 16d: any finding (drop or micro_gap) also gets the analysis' complete inputs
+    # written next to the kept logs (`probe dropout {dump}`: the 1 ms meter samples,
+    # both expected envelopes, the recorded gain schedule, the report) — replayable
+    # offline, so "real or the detector's own alignment" is decided from data.
+    if (($(jq '(.drops | length) + (.micro_gaps | length)' <<<"$report") > 0)); then
+        local dump=$TMP/dropout-dump-${label//[^a-z0-9]/_}.json
+        ctl probe "{\"name\":\"dropout\",\"args\":{\"corr\":\"$corr\",\"dump\":\"$dump\"}}" >/dev/null \
+            && echo "analysis inputs for $label ($corr) -> $dump"
+        for _ in $(seq 50); do [[ -s $dump ]] && break; sleep 0.1; done
+    fi
     n=$(jq '.micro_gaps | length' <<<"$report")
     ((n > 0)) || return 0
     local started_t
@@ -235,7 +307,7 @@ dump_micro_gap_diagnostics() {
         started_t=$(ctl logs "{\"corr\":\"$corr\",\"kind_prefix\":\"source.retire\"}" \
             | jq -r '.events[0].t_mono_ms // empty')
     fi
-    echo "=== $label micro_gap diagnostics (corr=$corr, window-start-equivalent t_mono_ms=$started_t) ==="
+    echo "=== $label micro_gap diagnostics (corr=$corr, started t_mono_ms=$started_t; window start = that - 500) ==="
     jq -c '.micro_gaps[]' <<<"$report" | while read -r g; do
         local at len under from to
         at=$(jq -r .at_ms <<<"$g"); len=$(jq -r .len_ms <<<"$g"); under=$(jq -r .under_db <<<"$g")
@@ -307,6 +379,47 @@ HANDOFF2=$(ctl logs "{\"corr\":\"$CORR2\",\"kind_prefix\":\"transition.handoff\"
 check_onset_ramped "$((${HANDOFF2%.*} - 10))" "$((${HANDOFF2%.*} + 300))" "frozen" \
     || fail "frozen onset check (see stderr above)"
 
+# ---------------------------------------------------------------- 3. reveal: A fades, B rises
+# method: reveal — A ramps to silence over 30 ms + the settle tail then pauses
+# (requirement #2's A-offset path), B rises `sin(x*pi/2)` from the Running instant with
+# the same held-onset-ramp treatment as full-live (R85) — covers the other half of the
+# fix case 2 (frozen) doesn't: B's onset here isn't delayed to a handoff at all, so this
+# also proves the fix doesn't regress the already-clean reveal/full-live case.
+TR3=$(ctl transition "{\"outputs\":\"out:*\",\"to\":{\"path\":\"$CLIP_B\",\"loop\":true},\
+\"effect_id\":\"fade\",\"duration_ms\":1000,\"method\":\"reveal\"}") \
+    || fail "reveal transition: $TR3"
+CORR3=$(jq -r .corr <<<"$TR3")
+EV4=$(wait_for_report "$CORR3" 10 10) || fail "reveal: wait_for_report (see stderr above)"
+echo "reveal probe.dropout: $EV4"
+[[ $(jq -r 'has("skipped")' <<<"$EV4") == false ]] || fail "probe.dropout skipped: $(jq -r .skipped <<<"$EV4")"
+REPORT4=$(jq -c .report <<<"$EV4")
+DROPS4=$(jq '.drops | length' <<<"$REPORT4")
+GAPS4=$(jq '.micro_gaps | length' <<<"$REPORT4")
+echo "reveal report: $(jq -c '{lag_ms, fit_db, drops: (.drops|length), micro_gaps: (.micro_gaps|length)}' <<<"$REPORT4")"
+dump_micro_gap_diagnostics "$CORR3" "$REPORT4" "reveal"
+((DROPS4 == 0)) || fail "reveal flagged $DROPS4 drop(s): $(jq -c .drops <<<"$REPORT4")"
+((GAPS4 == 0)) || fail "reveal flagged $GAPS4 micro_gap(s): $(jq -c .micro_gaps <<<"$REPORT4")"
+ok "reveal: 0 drops, 0 micro_gaps"
+# Unlike full-live, reveal's A *does* go silent quickly (its own 30 ms ramp + the
+# requirement #2 settle tail, same as frozen's A-hold) — search from there, not from
+# `started` itself, so the window begins on a genuinely silent bus (A paused, B still
+# waiting), the same premise frozen's handoff check relies on.
+STARTED3=$(ctl logs "{\"corr\":\"$CORR3\",\"kind_prefix\":\"transition.started\"}" \
+    | jq -r '.events[0].t_mono_ms')
+check_onset_ramped "$((${STARTED3%.*} + 45))" "$((${STARTED3%.*} + 400))" "reveal" \
+    || fail "reveal onset check (see stderr above)"
+
+# Isolate the retire and player-pause/resume cases from the current wallpaper (TR3's B,
+# still playing/looping): stop every live source so the bus is silent before SRC_R /
+# SRC_P exist. The dropout detector explicitly doesn't model a second audible source on
+# the bus (debugging.md) — Task 16d found the retire case used to run with frozen's B
+# still audible: the bus never went silent at the retire ramp, so its window had almost
+# no alignment edge (lag 0–20 ms, fit ≈ 0.5 dB, offset ≈ 0 instead of −3) and a real
+# cut in the ramp would have been half-masked by B's tone. This script restores nothing
+# afterward anyway (no playlist state to preserve — `--headless`, never the owner's
+# real session).
+ctl stop >/dev/null || fail "stop before the pause/resume case"
+
 # ---------------------------------------------------------------- 2b. plain retire ramp
 # A bare source (no transition at all) playing CLIP_B, destroyed outright: Runtime::retire
 # ramps it to silence over 30 ms (same anti-click primitive every method uses) and mints
@@ -357,42 +470,6 @@ dump_micro_gap_diagnostics "$CORR_R" "$REPORT3" "retire"
 ((GAPS3 == 0)) || fail "plain retire ramp flagged $GAPS3 micro_gap(s): $(jq -c .micro_gaps <<<"$REPORT3")"
 ok "retire: 0 drops, 0 micro_gaps for the anti-click ramp (pure offset, no onset to check)"
 
-# ---------------------------------------------------------------- 3. reveal: A fades, B rises
-# method: reveal — A ramps to silence over 30 ms + the settle tail then pauses
-# (requirement #2's A-offset path), B rises `sin(x*pi/2)` from the Running instant with
-# the same held-onset-ramp treatment as full-live (R85) — covers the other half of the
-# fix case 2 (frozen) doesn't: B's onset here isn't delayed to a handoff at all, so this
-# also proves the fix doesn't regress the already-clean reveal/full-live case.
-TR3=$(ctl transition "{\"outputs\":\"out:*\",\"to\":{\"path\":\"$CLIP_B\",\"loop\":true},\
-\"effect_id\":\"fade\",\"duration_ms\":1000,\"method\":\"reveal\"}") \
-    || fail "reveal transition: $TR3"
-CORR3=$(jq -r .corr <<<"$TR3")
-EV4=$(wait_for_report "$CORR3" 10 10) || fail "reveal: wait_for_report (see stderr above)"
-echo "reveal probe.dropout: $EV4"
-[[ $(jq -r 'has("skipped")' <<<"$EV4") == false ]] || fail "probe.dropout skipped: $(jq -r .skipped <<<"$EV4")"
-REPORT4=$(jq -c .report <<<"$EV4")
-DROPS4=$(jq '.drops | length' <<<"$REPORT4")
-GAPS4=$(jq '.micro_gaps | length' <<<"$REPORT4")
-echo "reveal report: $(jq -c '{lag_ms, fit_db, drops: (.drops|length), micro_gaps: (.micro_gaps|length)}' <<<"$REPORT4")"
-dump_micro_gap_diagnostics "$CORR3" "$REPORT4" "reveal"
-((DROPS4 == 0)) || fail "reveal flagged $DROPS4 drop(s): $(jq -c .drops <<<"$REPORT4")"
-((GAPS4 == 0)) || fail "reveal flagged $GAPS4 micro_gap(s): $(jq -c .micro_gaps <<<"$REPORT4")"
-ok "reveal: 0 drops, 0 micro_gaps"
-# Unlike full-live, reveal's A *does* go silent quickly (its own 30 ms ramp + the
-# requirement #2 settle tail, same as frozen's A-hold) — search from there, not from
-# `started` itself, so the window begins on a genuinely silent bus (A paused, B still
-# waiting), the same premise frozen's handoff check relies on.
-STARTED3=$(ctl logs "{\"corr\":\"$CORR3\",\"kind_prefix\":\"transition.started\"}" \
-    | jq -r '.events[0].t_mono_ms')
-check_onset_ramped "$((${STARTED3%.*} + 45))" "$((${STARTED3%.*} + 400))" "reveal" \
-    || fail "reveal onset check (see stderr above)"
-
-# Isolate the player-pause/resume case from the current wallpaper (TR3's B, still
-# playing/looping): stop every live source so the bus is silent before SRC_P exists. The
-# dropout detector explicitly doesn't model a second audible source on the bus
-# (debugging.md), and this script restores nothing afterward anyway (no playlist state
-# to preserve — `--headless`, never the owner's real session).
-ctl stop >/dev/null || fail "stop before the pause/resume case"
 
 # ---------------------------------------------------------------- 4. player pause/resume
 # Task 16c (R85/R88): a plain (non-transition) playing source, paused then resumed via

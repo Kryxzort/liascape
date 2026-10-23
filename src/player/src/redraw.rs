@@ -26,7 +26,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::anim::{Animator, PropPath};
+use crate::anim::{Animator, PropPath, is_gain_path};
 use crate::graph::{Graph, NodeKind, PropValue};
 
 /// Per-output "has the picture changed since its last present" bookkeeping.
@@ -102,11 +102,11 @@ impl Redraw {
     }
 }
 
-/// Whether `path` only changes audio (a `gain.<slot>`), never a picture.
+/// Whether `path` only changes audio (a `gain.<slot>`), never a picture. Shares its
+/// definition with [`is_gain_path`] (R90, Task 16d) — one predicate, not two that could
+/// drift apart.
 pub fn audio_only(path: &PropPath) -> bool {
-    path.0
-        .split_once('.')
-        .is_some_and(|(_, prop)| prop.starts_with("gain."))
+    is_gain_path(path)
 }
 
 /// Something visible moves: a started, unfinished animation on a non-gain path.

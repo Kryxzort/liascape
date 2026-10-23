@@ -220,6 +220,15 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("ready", def(PropType::Bool, true, PropValue::Bool(false))),
+            // R92: what mpv actually selected once the file loaded — `true` (the
+            // conservative default) until a real source observes otherwise. Distinct
+            // from `no_audio` (our own request) and `kind` (video vs a still): this is
+            // "does the file even have an audio track". See `sources::MpvSource::
+            // has_audio`'s doc.
+            (
+                "has_audio",
+                def(PropType::Bool, true, PropValue::Bool(true)),
+            ),
             ("duration", def(PropType::F64, true, PropValue::F64(0.0))),
             ("time_pos", def(PropType::F64, true, PropValue::F64(0.0))),
             ("width", def(PropType::I64, true, PropValue::I64(0))),

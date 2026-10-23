@@ -51,6 +51,54 @@ linked_to() {
         END { exit !(("lp-player-bus.playback:output_FL" in n) && ("lp-player-bus.playback:output_FR" in n)) }'
 }
 
+# ---------------------------------------------------------------- mute the test tones
+# Controller instruction (same rationale as dropout.sh): mutes ONLY the bus's own
+# forwarding stream (`node.name == lp-player-bus.playback`) — never the mpv streams
+# feeding the bus — so the meter (which reads the bus sink's own monitor, upstream of
+# this forwarding stream) measures exactly what it would unmuted. LP_TEST_AUDIBLE=1
+# skips this.
+bus_playback_index() {
+    pactl -f json list sink-inputs 2>/dev/null \
+        | jq -r '.[] | select(.properties["node.name"] == "lp-player-bus.playback") | .index' \
+        | head -1
+}
+MUTE_LOOP_PID=
+MUTE_STATE_FILE=
+start_mute_watcher() {
+    [[ -n ${LP_TEST_AUDIBLE:-} ]] && return
+    MUTE_STATE_FILE=$TMP/mute_state
+    (
+        recorded=0
+        while true; do
+            idx=$(bus_playback_index)
+            if [[ -n $idx ]]; then
+                if [[ $recorded == 0 ]]; then
+                    # A controller-side watcher may already be muting every
+                    # lp-player-bus.playback stream — record whether *we* are the one
+                    # flipping it so cleanup only unmutes what we muted.
+                    was_muted=$(pactl -f json list sink-inputs 2>/dev/null \
+                        | jq -r --argjson i "$idx" '.[] | select(.index==$i) | .mute')
+                    [[ $was_muted == false ]] && echo muted_by_us > "$MUTE_STATE_FILE"
+                    recorded=1
+                fi
+                pactl set-sink-input-mute "$idx" 1 2>/dev/null
+            fi
+            sleep 0.2
+        done
+    ) &
+    MUTE_LOOP_PID=$!
+}
+stop_mute_watcher_and_restore() {
+    [[ -n $MUTE_LOOP_PID ]] || return
+    kill "$MUTE_LOOP_PID" 2>/dev/null
+    wait "$MUTE_LOOP_PID" 2>/dev/null
+    MUTE_LOOP_PID=
+    if [[ -f $MUTE_STATE_FILE ]]; then
+        idx=$(bus_playback_index)
+        [[ -n $idx ]] && pactl set-sink-input-mute "$idx" 0 2>/dev/null
+    fi
+}
+
 # ---------------------------------------------------------------- build + preconditions
 BIN=${LP_PLAYER_BIN:-$REPO/src/player/target/debug/lp-player}
 if [[ -z ${LP_PLAYER_BIN:-} ]]; then
@@ -78,6 +126,7 @@ mkdir -p "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
 SERVE_PID=
 OWNED= # node ids serve owned (bus playback/sink, meter, latency probes, mpv streams)
+start_mute_watcher
 
 # Nodes of the running serve (its in-process loopback/meter and its mpv streams).
 serve_nodes() {
@@ -129,6 +178,7 @@ wp_clear_saved_target() {
 
 cleanup() {
     local rc=$?
+    stop_mute_watcher_and_restore
     [[ -n ${MON_PID:-} ]] && kill "$MON_PID" 2>/dev/null
     if [[ -n ${CONTROL_PID:-} ]]; then
         [[ -n ${CONTROL_ID:-} ]] && pw-metadata -d -- "$CONTROL_ID" >/dev/null 2>&1

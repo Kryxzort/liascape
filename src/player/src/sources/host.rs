@@ -23,9 +23,18 @@ use crate::log::{self, Level};
 
 /// Observed values mirrored into the graph after every `update` (`Graph::set_observed`).
 /// `kind` too: an `MpvSource` infers image/video from the file (and corrects it after
-/// load), and recipes decide what is a still by it.
-const MIRRORED: [&str; 7] = [
-    "kind", "ready", "duration", "time_pos", "width", "height", "paused",
+/// load), and recipes decide what is a still by it. `has_audio` (R92): what mpv actually
+/// resolved — distinct from `no_audio` (our own request) — so a video with literally no
+/// audio track is never mistaken for one that merely has audio disabled.
+const MIRRORED: [&str; 8] = [
+    "kind",
+    "ready",
+    "duration",
+    "time_pos",
+    "width",
+    "height",
+    "paused",
+    "has_audio",
 ];
 
 struct Hosted {
@@ -111,6 +120,39 @@ impl SourceHost {
                 id.to_string(),
                 SourceEvent::Rejected {
                     prop: "paused".to_string(),
+                    reason,
+                },
+            ));
+        }
+    }
+
+    /// R90 (Task 16d): a direct, scoped forward of one already-graph-set gain change to
+    /// its hosted source — the fast gain timer's own ≥ 1 kHz channel
+    /// (`Runtime::gain_fast_tick`), bypassing the ordinary per-tick [`sync`](Self::sync)
+    /// entirely (no source opens, no gone-source scan, no `player_paused` composition —
+    /// gain is never composed with it, unlike `paused`). Same direct-apply bypass
+    /// pattern as [`force_paused`](Self::force_paused). A source not yet hosted (mid-
+    /// open, or its node vanished the instant before) is silently skipped: the ordinary
+    /// `sync` catches up once/if it exists, same as any other graph change reaching a
+    /// never-hosted id. A rejection is logged/queued exactly like `sync`'s own (the
+    /// source is fine, R45).
+    pub fn push_gain(&mut self, id: &str, prop: &str, v: &PropValue) {
+        let Some(h) = self.sources.get_mut(id) else {
+            return;
+        };
+        if let Err(e) = h.src.apply(prop, v) {
+            let reason = format!("apply {prop}: {e}");
+            log::event(
+                "host",
+                Level::Warn,
+                "source.rejected",
+                None,
+                json!({ "id": id, "prop": prop, "reason": reason }),
+            );
+            self.events.push((
+                id.to_string(),
+                SourceEvent::Rejected {
+                    prop: prop.to_string(),
                     reason,
                 },
             ));

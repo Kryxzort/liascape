@@ -63,6 +63,18 @@ pub const STEP_TIMEOUT: Duration = Duration::from_secs(2);
 pub const REAPER_WAIT: Duration = Duration::from_secs(2);
 /// Anti-click ramp used by `stop`/`quit` before sources are destroyed (invariant #4).
 const STOP_RAMP: Duration = Duration::from_millis(30);
+/// R90 (Task 16d): the fast gain-only timer's period — independent of the output
+/// refresh (which can be a single 60 Hz monitor), this is what turns a ≤ 30 ms
+/// anti-click ramp (invariant #4) into a genuinely smooth push sequence in the real
+/// audio output instead of the 1–2 `Animator::tick` evaluations a 60 Hz main tick alone
+/// gives it (measured, Task 16c's report: held steps then an abrupt final jump, 5–7 ms
+/// `micro_gaps`). See `.claude/rules/player-core.md` § Runtime "The fast gain timer".
+const GAIN_TICK_PERIOD: Duration = Duration::from_millis(1);
+/// R90: how many recent fast-timer gain pushes the `loop` probe keeps — a test/
+/// diagnostic hook for counting or inspecting real pushes within a ramp without logging
+/// one event per 1 kHz tick (which would allocate a JSON object even below the log
+/// level threshold, exactly the per-tick cost R90 asks to bound).
+const GAIN_PUSH_HISTORY: usize = 256;
 /// Steps that may wait behind the running one (one per client at most, by the FIFO).
 pub const STEP_QUEUE_MAX: usize = 64;
 /// Repeated warnings (same key) are logged at most this often (`warn_limited`).
@@ -250,6 +262,16 @@ pub(crate) struct LoopStats {
     pub max_busy_excl_open_ms: f64,
     pub max_open_ms: f64,
     pub iterations: u64,
+    /// R90 (Task 16d): the fast gain timer's own fire count (armed periods only) and
+    /// how many gain values it actually forwarded to a hosted source — the `loop`
+    /// probe's own evidence that the fast path is doing (bounded) work, or sitting
+    /// idle while disarmed.
+    pub gain_ticks: u64,
+    pub gain_pushes: u64,
+    /// The last few `(t_mono_ms, db)` actually forwarded, capped at
+    /// [`GAIN_PUSH_HISTORY`] — a test/diagnostic hook for counting or inspecting real
+    /// pushes within a ramp.
+    pub recent_gain_pushes: VecDeque<(f64, f64)>,
 }
 
 impl LoopStats {
@@ -278,6 +300,15 @@ impl LoopStats {
         self.max_busy_ms = self.max_busy_ms.max(ms(d));
         self.max_busy_excl_open_ms = self.max_busy_excl_open_ms.max(ms(d.saturating_sub(open)));
         self.max_open_ms = self.max_open_ms.max(ms(open));
+    }
+
+    /// R90: records one fast-timer gain push (bounded history, [`GAIN_PUSH_HISTORY`]).
+    pub(crate) fn record_gain_push(&mut self, t_mono_ms: f64, db: f64) {
+        self.gain_pushes += 1;
+        self.recent_gain_pushes.push_back((t_mono_ms, db));
+        if self.recent_gain_pushes.len() > GAIN_PUSH_HISTORY {
+            self.recent_gain_pushes.pop_front();
+        }
     }
 }
 
@@ -356,6 +387,9 @@ pub struct Runtime {
     /// Recent transitions' audio windows (`transition.started`/`.done`), for the
     /// dropout probe's auto-trigger and its on-demand `probe dropout` verb.
     pub(crate) dropout_windows: PendingWindows,
+    /// Task 16d: dropout analyses waiting for their window's post-roll to be captured
+    /// (`probe::dropout::request_analysis`/`run_due`).
+    pub(crate) dropout_due: Vec<dropout::DueAnalysis>,
     /// Task 16c (R88): per-source anticlick gate for player-level pause/resume — see
     /// [`PauseGate`]. Real wall-clock timed (`Instant`, never `Runtime::now()`, which
     /// freezes the instant `player.paused` does): the Animator/graph clock can't drive a
@@ -369,6 +403,14 @@ pub struct Runtime {
     /// '{"name":"dropout","args":{"corr":…}}'` can check a whole pause/resume cycle once
     /// it's done (`source.player_pause_gate`'s log event carries it).
     pause_gate_corr: BTreeMap<String, CorrId>,
+    /// R90 (Task 16d): whether the fast (≥ 1 kHz) gain-only timer is currently
+    /// registered with the event loop. Armed the moment any `gain.*` animation exists
+    /// (`arm_gain_timer_if_needed`, checked from `sync_sources` — after every
+    /// graph/animator change reaches it) and self-disarms (`TimeoutAction::Drop`, from
+    /// inside its own callback) the instant none remain; never armed under the stepped
+    /// clock (gains there are evaluated at step boundaries exactly like every other
+    /// property — nothing "between steps" for a 1 ms timer to drive).
+    gain_timer_armed: bool,
 }
 
 /// Task 16c (R88) — see `pause_gates`' doc and `.claude/rules/player-core.md` § Runtime
@@ -411,6 +453,18 @@ impl Runtime {
 
     pub(crate) fn player_paused(&self) -> bool {
         self.player_paused
+    }
+
+    /// R90: whether the fast gain timer is currently armed (the `loop` probe).
+    pub(crate) fn gain_timer_armed(&self) -> bool {
+        self.gain_timer_armed
+    }
+
+    /// R93: how many player-pause anticlick gates (`PauseGate`) are currently open (the
+    /// `loop` probe) — a destroyed/retired gated source must leave this at 0 for it,
+    /// never leaked.
+    pub(crate) fn pause_gate_count(&self) -> usize {
+        self.pause_gates.len()
     }
 
     /// Reacts to a `player.paused` change: freezes/unfreezes [`Runtime::now`]. Called at
@@ -465,6 +519,7 @@ impl Runtime {
         self.sync_sources();
         let sync_ms = t_sync.elapsed();
         self.finish_tick(t.elapsed(), sync_ms);
+        dropout::run_due(self);
     }
 
     /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
@@ -562,10 +617,9 @@ impl Runtime {
                 }
                 TransitionEventKind::Done { .. } => {
                     self.dropout_windows.done(&ev.corr.0, mono);
-                    if self.debug_mode()
-                        && let Some(pending) = self.dropout_windows.get(&ev.corr.0)
-                    {
-                        dropout::spawn_analysis(self, ev.corr.clone(), pending);
+                    if self.debug_mode() {
+                        // Task 16d: deferred until the window's post-roll is captured.
+                        dropout::request_analysis(self, ev.corr.clone(), None);
                     }
                 }
                 _ => {}
@@ -624,6 +678,188 @@ impl Runtime {
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);
         self.sync_wake_regs();
+        self.arm_gain_timer_if_needed();
+    }
+
+    /// R90 (Task 16d): arms the fast (≥ 1 kHz) gain-only timer if it isn't already and
+    /// at least one `gain.*` animation exists *or* an R88 pause gate is mid-ramp (fix
+    /// round: the gate's own ramp isn't an Animator animation at all, so it needs its
+    /// own arming condition — `has_active_pause_gate_ramp`). A no-op under the stepped
+    /// clock (`self.stepped()`) — gains there are evaluated at step boundaries exactly
+    /// like every other property (`begin_step`'s own `run_anims` call), never between
+    /// them; there's no "real time" for a 1 ms timer to tick against anyway (and a
+    /// gate never exists under stepped either, § invariant #7 R93). Called from
+    /// `sync_sources` (both the main tick's own call and `after_dispatch`'s), so a gain
+    /// animation a handler just added (`animate`, `transition`) or the recipe just added
+    /// (`Transitions::tick`, one loop iteration later) is armed promptly. Cheap when
+    /// it's a no-op: one bounded scan of the `Animator`'s own (small) entry list plus
+    /// one of `pause_gates` (equally small), no allocation.
+    fn arm_gain_timer_if_needed(&mut self) {
+        if self.gain_timer_armed
+            || self.stepped()
+            || (!self.anim.has_live_gain() && !self.has_active_pause_gate_ramp())
+        {
+            return;
+        }
+        self.gain_timer_armed = true;
+        if let Err(e) = self.handle.insert_source(
+            Timer::from_duration(GAIN_TICK_PERIOD),
+            |deadline, _, rt: &mut Runtime| rt.gain_fast_tick(deadline),
+        ) {
+            self.gain_timer_armed = false;
+            log::event(
+                "runtime",
+                Level::Warn,
+                "loop.gain_timer_failed",
+                None,
+                json!({ "error": e.to_string() }),
+            );
+        }
+    }
+
+    /// R90: one fire of the fast gain timer — evaluates only `gain.*` animations at the
+    /// current (pause-adjusted) [`Runtime::now`], `graph.set`s each, then forwards just
+    /// those changes straight to their hosted sources (`SourceHost::push_gain`, the same
+    /// direct-apply bypass pattern as the R88 pause gate's `force_paused`) instead of
+    /// the ordinary per-tick `sync` — which would also scan for opened/gone sources and
+    /// compose `player_paused`, neither of which a gain push needs — then removes them
+    /// from the pending-changes queue (`Graph::drain_gain_changes`) so the next ordinary
+    /// `sync_sources` never replays what this call already hand-delivered. The main
+    /// timer keeps doing everything else at the output refresh (R47 unchanged — this
+    /// timer only ever touches gain paths).
+    ///
+    /// **Pause (R88/invariant #7).** While `player.paused`, [`Runtime::now`] is frozen
+    /// (excised, never merely stopped-and-later-jumped) — calling `tick_gains` with an
+    /// unchanged `now` would just keep re-emitting the same already-sent value, so
+    /// *that* loop skips evaluating entirely while paused: zero Animator pushes for the
+    /// whole pause. [`push_pause_gate_ramps`](Self::push_pause_gate_ramps) still runs
+    /// unconditionally, though — a `Pausing` gate's ramp exists *because* the player is
+    /// paused, and is deliberately wall-clock timed for exactly that reason.
+    ///
+    /// **Self-disarm.** The instant no `gain.*` animation remains *and* no pause gate
+    /// is mid-ramp — including whichever of the two armed this very call, finishing on
+    /// it — this returns `TimeoutAction::Drop`, removing its own calloop registration;
+    /// `arm_gain_timer_if_needed` re-inserts a fresh one the next time either appears.
+    fn gain_fast_tick(&mut self, deadline: Instant) -> TimeoutAction {
+        self.stats.gain_ticks += 1;
+        // A `set player.paused` reaching the graph and `Runtime::sync_sources` noticing
+        // it (which is what actually freezes `now()` via `update_player_paused`) are two
+        // separate steps in the main tick/`after_dispatch` path, but this timer is its
+        // own calloop source: if it fires within the same dispatch batch as the client
+        // request that just paused, *before* `after_dispatch` gets to run
+        // `sync_sources`, the cached `self.player_paused` field would still read stale
+        // (`false`) and `self.now()` would hand back the real, still-advancing clock
+        // instead of the frozen one — exactly the race `drive_pause_gates_pre_sync`'s
+        // own doc warns about for the R88 gate. Calling this directly (cheap: one graph
+        // read, a no-op if nothing changed) closes it the same way the main `tick()`
+        // does as its own first line.
+        self.update_player_paused();
+        if !self.player_paused {
+            let now = self.now();
+            for (path, v) in self.anim.tick_gains(now) {
+                if let Err(e) = self.graph.set_animated(&path, PropValue::F64(v)) {
+                    // The node went away under the animation (destroyed, output
+                    // unplugged) — same handling as `run_anims`.
+                    self.anim.cancel_target(&path);
+                    log::event(
+                        "runtime",
+                        Level::Debug,
+                        "anim.dropped",
+                        None,
+                        json!({ "path": path.0, "error": e.to_string() }),
+                    );
+                }
+            }
+        }
+        // R90 fix round: the R88 pause gate's own ramp is deliberately *not* an
+        // Animator animation at all (its `Pausing` state exists only while
+        // `player.paused` — which is exactly what freezes `Runtime::now()`, R75 — so it
+        // has to be wall-clock timed) — `tick_gains` above never touches it. Push its
+        // current value here too, unconditionally (never gated on `player_paused`: a
+        // `Pausing` ramp runs *while* paused, and a `Resuming` one starts the instant
+        // it's un-paused, which can be before the next main tick even notices).
+        self.push_pause_gate_ramps();
+
+        let gains = self.graph.drain_gain_changes();
+        if !gains.is_empty() {
+            let t_mono_ms = log::mono_now().unwrap_or_default().as_secs_f64() * 1000.0;
+            for (path, v) in &gains {
+                let Some((id, prop)) = path.0.split_once('.') else {
+                    continue;
+                };
+                self.host.push_gain(id, prop, v);
+                if let PropValue::F64(db) = v {
+                    self.stats.record_gain_push(t_mono_ms, *db);
+                }
+            }
+            // R90 fix round: the dropout detector's `GainHistory` must be sampled at
+            // the same (fast) rate as what's actually pushed, or its "expected"
+            // envelope — held at the *coarse* bin's last recorded value for the
+            // `drops` check (`gain_at`, nearest-previous) — goes stale mid-ramp:
+            // measured on-machine, a 60 Hz `record_gain_history` (main tick only)
+            // against a now-1 kHz-smooth real ramp produced false `drops` of 10–30 ms
+            // / 16–52 dB at the exact point `GainLinear`'s dB curve steepens (most of
+            // a linear-amplitude ramp's dB range lands in its last ~30% of progress —
+            // invariant #2). Recording here too keeps the two in lockstep: only while
+            // a gain animation or gate ramp is actually pushing (bounded bursts, same
+            // lifetime as the fast timer itself), never a sustained 1 kHz cost.
+            self.record_gain_history();
+        }
+        if !self.anim.has_live_gain() && !self.has_active_pause_gate_ramp() {
+            self.gain_timer_armed = false;
+            return TimeoutAction::Drop;
+        }
+        let next = deadline + GAIN_TICK_PERIOD;
+        let now = Instant::now();
+        TimeoutAction::ToInstant(if next <= now {
+            now + GAIN_TICK_PERIOD
+        } else {
+            next
+        })
+    }
+
+    /// R90 fix round: whether any R88 pause gate is currently mid-ramp (`Pausing` or
+    /// `Resuming`) — the fast gain timer's other arming condition alongside
+    /// `Animator::has_live_gain`, since the gate's ramp isn't an Animator animation.
+    fn has_active_pause_gate_ramp(&self) -> bool {
+        self.pause_gates
+            .values()
+            .any(|st| matches!(st, PauseGate::Pausing { .. } | PauseGate::Resuming { .. }))
+    }
+
+    /// R90 fix round: pushes the current wall-clock-computed value for every open
+    /// `Pausing`/`Resuming` gate — the exact same formula
+    /// `drive_pause_gates_pre_sync` itself uses for its own (still 60 Hz) write, so
+    /// the two never disagree at the instant the main tick samples it. Deliberately
+    /// does **not** transition a gate's state (`Pausing` → `Paused`,
+    /// `Resuming` → removed) — that stays `drive_pause_gates_pre_sync`'s job alone, so
+    /// a state transition is never more than one main tick late; only the gain
+    /// *value* in between is now smooth. `graph.set` (not `set_animated`) exactly like
+    /// the existing per-tick write — both are identical for `gain.*` paths
+    /// (`apply_set`'s `bump` is unconditionally skipped for them).
+    fn push_pause_gate_ramps(&mut self) {
+        for (id, st) in &self.pause_gates {
+            let db = match st {
+                PauseGate::Pausing { started, from_lin } => {
+                    let el = started.elapsed();
+                    if el >= ANTICLICK {
+                        SILENT_DB
+                    } else {
+                        let t = el.as_secs_f64() / ANTICLICK.as_secs_f64();
+                        lin_to_db(*from_lin * (1.0 - t))
+                    }
+                }
+                PauseGate::Resuming { started } => {
+                    let el = started.elapsed();
+                    let t = (el.as_secs_f64() / ANTICLICK.as_secs_f64()).min(1.0);
+                    lin_to_db(t)
+                }
+                PauseGate::AwaitingFlow { .. } | PauseGate::Paused => continue,
+            };
+            let _ = self
+                .graph
+                .set(&p(&format!("{id}.gain.anticlick")), PropValue::F64(db));
+        }
     }
 
     fn sync_wake_regs(&mut self) {
@@ -716,10 +952,13 @@ impl Runtime {
             .retain(|id| self.graph.kind_of(id) == Some(NodeKind::Source));
     }
 
-    /// Task 16c (R88): is `id` a video source with a real audio track? Mirrors
+    /// Task 16c (R88)/R92: is `id` a video source with a real audio track? Mirrors
     /// `recipes::transition::b_has_audio` — a `color`/`image`/`snapshot` source has no
-    /// `MpvSource` behind it at all (never reports `AudioFlowing`), and `no_audio` asked
-    /// mpv for `aid=no`.
+    /// `MpvSource` behind it at all (never reports `AudioFlowing`), `no_audio` asked mpv
+    /// for `aid=no`, and `has_audio` (R92, defaults `true` until a real source observes
+    /// otherwise) is what mpv itself resolved — a video file with literally no audio
+    /// stream must never be gated (R88's anticlick gate) or waited on (R85's onset) as
+    /// if it had one.
     fn source_has_audio(&self, id: &str) -> bool {
         matches!(
             self.graph.get(&p(&format!("{id}.kind"))),
@@ -727,6 +966,9 @@ impl Runtime {
         ) && !matches!(
             self.graph.get(&p(&format!("{id}.no_audio"))),
             Ok(PropValue::Bool(true))
+        ) && !matches!(
+            self.graph.get(&p(&format!("{id}.has_audio"))),
+            Ok(PropValue::Bool(false))
         )
     }
 
@@ -746,6 +988,20 @@ impl Runtime {
     /// tick's `evs`, which don't exist yet at that point, so it stays here, called from
     /// `finish_tick` after `update_sources`.
     fn drive_pause_gates_pre_sync(&mut self) {
+        // R93 (review, minor): explicitly inert under the stepped clock — never opens a
+        // gate there at all, rather than happening to be harmless only because every
+        // existing stepped player-pause test pauses mid-transition (gate-ineligible via
+        // `busy` anyway). Two independent reasons this is correct, not just convenient:
+        // mpv itself stays paused for good in stepped mode (§ Sources "Stepped mode"),
+        // so there is no real "live audio" an anticlick ramp protects; and the gate's
+        // own ramp is deliberately wall-clock (`Instant`) timed (R88's doc) — stepped
+        // mode's virtual time has no relationship to wall-clock progression for it to
+        // pace against. Since this check runs on every call and gates are the only way
+        // `self.pause_gates` is ever populated, it staying empty here for the whole
+        // process's life is guaranteed, not just true today.
+        if self.stepped() {
+            return;
+        }
         let want_paused = self.player_paused();
         let edge = want_paused != self.pause_gate_prev;
         self.pause_gate_prev = want_paused;
@@ -757,15 +1013,23 @@ impl Runtime {
         // the ordinary `node.paused || player.paused` for it like any other source, and
         // whatever the recipe does to it from here on is never second-guessed by a stale
         // gate deciding to `force_paused` underneath it later.
+        //
+        // R93 (review): also abandon any gate whose node is simply gone — a defensive
+        // backstop alongside `retire`'s own explicit `abandon_pause_gate` call (the
+        // primary fix: it runs *before* a competing write ever happens). This one only
+        // ever fires if some other path destroyed a gated source's node without going
+        // through `retire` — it exists so a gate can never write `gain.anticlick` to a
+        // node that no longer exists, not to be the only cleanup path.
         let (by_output, graves) = self.tr.held_sources();
         let busy: BTreeSet<String> = by_output.into_values().flatten().chain(graves).collect();
         let abandoned: Vec<String> = self
             .pause_gates
             .keys()
-            .filter(|id| busy.contains(*id))
+            .filter(|id| busy.contains(*id) || self.graph.kind_of(id) != Some(NodeKind::Source))
             .cloned()
             .collect();
-        self.pause_gates.retain(|id, _| !busy.contains(id));
+        self.pause_gates
+            .retain(|id, _| !busy.contains(id) && self.graph.kind_of(id) == Some(NodeKind::Source));
         if !abandoned.is_empty() {
             let mono = log::mono_now().unwrap_or_default();
             for id in abandoned {
@@ -782,8 +1046,26 @@ impl Runtime {
             // extends naturally to "already paused"), not already gated. Scanning every
             // call (not just the edge) also naturally picks up a source that stops being
             // transition-held while the player stays paused.
+            // R93 (review): `retire` already owns these ids' `gain.anticlick` (its own
+            // Animator-based ramp to silence, queued for destruction once it ends) — a
+            // gate must never be (re-)opened for one, or the two fight over the same
+            // slot exactly like a gate `abandon_pause_gate` just removed would (found
+            // this way: `destroy` called with zero delay right after `set
+            // player.paused true` recreated a *second* gate here, one `sync_sources`
+            // call later, for the id `retire` had already started ramping down — its
+            // own wall-clock `Resuming` ramp then drove the source straight back to 0
+            // dB while `retire`'s frozen-time ramp sat stuck, so the node tore down
+            // fully audible; `tests/api.rs::r93_destroy_mid_gate_never_leaks` pins it).
+            let destroying: BTreeSet<&str> = self
+                .pending_destroy
+                .iter()
+                .map(|(_, id, _)| id.as_str())
+                .collect();
             for id in self.graph.ids_of(NodeKind::Source) {
-                if self.pause_gates.contains_key(&id) || busy.contains(&id) {
+                if self.pause_gates.contains_key(&id)
+                    || busy.contains(&id)
+                    || destroying.contains(id.as_str())
+                {
                     continue;
                 }
                 if !self.source_has_audio(&id) {
@@ -815,6 +1097,17 @@ impl Runtime {
                 };
                 self.dropout_windows
                     .started(corr.0.clone(), mono, vec![a], b);
+                // R93 (review): logged on *open*, not only on the normal completion
+                // (`player.pause_gate`, below) — so a test/operator can find this gate's
+                // corr and its dropout window while it's still in flight, including the
+                // "destroyed mid-gate" case this event exists to make observable at all.
+                log::event(
+                    "runtime",
+                    Level::Debug,
+                    "player.pause_gate_opened",
+                    Some(corr.clone()),
+                    json!({ "id": id }),
+                );
                 self.pause_gate_corr.insert(id.clone(), corr);
                 self.pause_gates.insert(
                     id,
@@ -1394,10 +1687,38 @@ impl Runtime {
                 .is_some_and(|db| db <= SILENT_DB + 1e-9)
     }
 
+    /// R93 (review of Task 16c/16d): drop `id`'s player-pause anticlick gate (if any)
+    /// outright — closing its own dropout-probe window — called wherever a gated source
+    /// is about to be retired/destroyed (`retire`, every path: `destroy`, `stop`, output
+    /// removal). Without this, a gate still `Pausing`/`Resuming` keeps writing
+    /// `gain.anticlick` directly (`drive_pause_gates_pre_sync`) on the very same tick
+    /// `retire` adds its *own* Animator-based ramp on the identical path — two writers
+    /// racing for the same property, "safe" only by incidental drain order — and once
+    /// the node is actually destroyed, a gate in ANY state (including `Paused`/
+    /// `AwaitingFlow`, which don't write but also never clean up on their own) is never
+    /// removed from `pause_gates`/`pause_gate_corr` at all: a permanent leak, and a
+    /// dropout-probe window left open forever. Mirrors the existing "a gate never fights
+    /// the recipe's own holds" abandon in `drive_pause_gates_pre_sync` (R34/invariant
+    /// #7) — same shape, a different trigger (here: the source is going away outright,
+    /// not merely captured by a transition).
+    fn abandon_pause_gate(&mut self, id: &str) {
+        if self.pause_gates.remove(id).is_none() {
+            return;
+        }
+        if let Some(corr) = self.pause_gate_corr.remove(id) {
+            let mono = log::mono_now().unwrap_or_default();
+            self.dropout_windows.done(&corr.0, mono);
+        }
+    }
+
     /// Remove a source without a click (core invariant, item 10): an audible one is ramped
     /// to −96 over 30 ms (`gain.anticlick`) and destroyed when the ramp is over; a silent
     /// one goes at once. Returns the ramp length. Used by `destroy`, `stop`, output removal.
     pub(crate) fn retire(&mut self, id: &str) -> Duration {
+        // R93: before anything else — `retire` is about to become the sole writer of
+        // `id.gain.anticlick` (directly, below, or via its own ramp); a still-open R88
+        // gate must never compete with or outlive that, in any of its states.
+        self.abandon_pause_gate(id);
         if self.graph.kind_of(id) != Some(NodeKind::Source) {
             let _ = self.graph.destroy(id);
             return Duration::ZERO;
@@ -2601,9 +2922,11 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         pause_offset: Duration::ZERO,
         gain_history: GainHistory::new(),
         dropout_windows: PendingWindows::new(),
+        dropout_due: Vec::new(),
         pause_gates: BTreeMap::new(),
         pause_gate_prev: false,
         pause_gate_corr: BTreeMap::new(),
+        gain_timer_armed: false,
     };
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));

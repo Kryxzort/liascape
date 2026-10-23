@@ -91,8 +91,67 @@
 //! that exact millisecond via [`gain_lin_interp_at`] — linear interpolation **in
 //! amplitude** between [`GainHistory`]'s recorded ticks, not a held/stepped value. Only
 //! `micro_gaps` uses this ([`analyse_with_fine`]); `drops` and the lag search are
-//! unchanged. If a micro-gap still appears after this fix, it is real (see
-//! `docs/player/debugging.md`'s "frozen-method micro-gap" row for what to report).
+//! unchanged. **Superseded by R94 below** — a micro-gap can still appear after this fix
+//! and not be real; see R94 for the remaining edge case and what actually distinguishes
+//! a real one.
+//!
+//! **R94 (Task 16d review) — the micro-gap pass ignores a ramp's own edge; `drops`
+//! unchanged.** Even with R80's 1 ms-accurate comparison, a `GainLinear` ramp (linear in
+//! *amplitude*; invariant #2/#4) has an **unbounded dB slope in its last fraction of a
+//! millisecond** — measured directly (`tests/onmachine/dropout.sh` @ both 60 Hz and 240
+//! Hz, after Task 16d's 1 kHz fast gain timer made the *real* push rate no longer the
+//! bottleneck): a 30 ms ramp's true dB value crosses from −58 dB to −96 dB within its
+//! last 0.04 ms of real time (`10^(-58/20)` vs `10^(-96/20)` amplitude, both converted
+//! back to a ramp-progress fraction — see this module's test
+//! `micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms`'s own sanity check for the
+//! numbers). No alignment the 10 ms-bin lag search offers, and no real push/capture
+//! jitter (sub-ms, but still ≫ 0.04 ms), can land exactly on that edge — so comparing
+//! `observed` against `fine_expected` *at that one instant* produces a false `micro_gap`
+//! that is the **detector's own alignment limit**, not a real glitch in the audio. Fixed
+//! by [`STEADY_NEIGHBOURHOOD_MS`] (2 ms): a 1 ms sample only counts toward a micro-gap if
+//! the expected level stays audible (> −45 dB) for its *whole* ±2 ms neighbourhood, not
+//! just at that exact instant — a ramp edge never has that (its own neighbourhood crosses
+//! into silence), while a genuine hole in otherwise-steady audio does (both sides stay
+//! audible), so it's untouched. `drops` (10 ms bins) and the lag search are unaffected —
+//! only the `micro_gaps` pass gained this guard. Tests:
+//! `micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms` (a realistic sub-bin
+//! misalignment at a ramp edge is never flagged — RED without the guard, pinned by its
+//! own inline sanity check of the raw pre-guard condition),
+//! `micro_gap_pass_still_flags_a_hole_shortly_before_a_ramp_starts` (a real 4 ms hole
+//! whose own ±2 ms neighbourhood never touches a ramp 5 ms away is still flagged exactly
+//! once), `injected_4ms_gap_is_flagged_as_exactly_one_micro_gap_not_a_drop` (`tests/
+//! dropout.rs`, unaffected — its whole neighbourhood is steady). **If a micro-gap still
+//! appears after this fix, check first whether it sits at a ramp edge** (the expected
+//! level within ±2 ms of it crosses the −45 dB line) before treating it as real; see
+//! `docs/player/debugging.md`'s "ramp-edge micro-gap" row.
+//!
+//! **Task 16d (R96 + the effect-start finding) — alignment is exact to 1 ms; the auto-run
+//! sees the whole window.** Intermittent `frozen` findings at effect start (a 4 ms / 61 dB
+//! micro-gap at A's ramp bottom with `lag_ms` 10; once, @240 Hz, a 30 ms / 73 dB *drop*
+//! with `lag_ms` 40) were proven to be this module's own alignment, not the audio: the
+//! meter and an independent `parec` capture of the bus monitor both showed A's full 30 ms
+//! ramp in all 24 reproduced runs. Three causes, three fixes (none loosens a threshold):
+//! 1. **Window grid** ([`bin_observed`]): the meter was binned on the *absolute* 10 ms
+//!    grid while `expected` starts at the window's own sub-10 ms phase φ — "lag 10" meant
+//!    10 − φ, and the micro-gap pass then applied a full 10 ms. Coarse bins are now also
+//!    the power mean of the 1 ms envelope ([`coarse_from_fine`]), the same reduction the
+//!    meter side gets, instead of the gain held at each bin's start.
+//! 2. **R96, 1 ms lag** ([`refine_lag`]): the coarse best ± [`REFINE_RADIUS_MS`], scored
+//!    by the same error sample by sample against the fine envelope; the meter is then
+//!    re-binned at that lag for `drops`/`fit_db`/`offset_db`, and the micro-gap pass uses
+//!    it. `lag_ms` is reported at 1 ms.
+//! 3. **Complete window** ([`request_analysis`]/[`run_due`]): the debug auto-trigger
+//!    snapshotted the meter at `transition.done`, so the capture ended at B's ramp while
+//!    `expected` ran another 500 ms — a lag pushing B's ramp off the captured data scored
+//!    better. Analyses now start at `done + WINDOW_POST + CAPTURE_MARGIN`.
+//!
+//! **Why this can't mask a real cut:** the lag is pinned by whatever edges and level the
+//! window has *as a whole* (A's steady tone, B's onset), so an instant cut at one edge
+//! can't drag it far enough to explain itself — the cut's expected-audible bins then pair
+//! with true silence and are flagged (`tests/dropout.rs::an_unramped_cut_at_effect_start_
+//! is_flagged`; an injected 4 ms hole still flags exactly once,
+//! `refined_lag_still_flags_an_injected_4ms_gap`). `probe dropout {corr, dump}` writes
+//! every input + the report for offline replay ([`write_dump`]).
 
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::process::CommandExt;
@@ -113,12 +172,18 @@ use crate::units::{SILENT_DB, db_to_lin};
 /// Bin width for the whole algorithm (lag search, drops): 10 ms, matching the Python
 /// reference.
 const BIN_MS: i64 = 10;
+/// R94 (controller ruling): how far either side of a 1 ms sample the micro-gap pass's
+/// steady-state guard checks — see `analyse_inner`'s `is_steady`.
+const STEADY_NEIGHBOURHOOD_MS: i64 = 2;
 /// The probe's window around a transition (R71): `transition.started` − this, `.done` +
 /// this.
 pub const WINDOW_PRE: Duration = Duration::from_millis(500);
 pub const WINDOW_POST: Duration = Duration::from_millis(500);
 /// Lag search range (0..=25 × 10 ms = 0..=250 ms), inclusive, matching the brief.
 const MAX_LAG_BINS: i64 = 25;
+/// R96 (controller ruling): how far either side of the coarse (10 ms-step) best lag the
+/// 1 ms refinement searches ([`refine_lag`]).
+const REFINE_RADIUS_MS: i64 = 10;
 /// Review fix round, R79: at most this many decode+analyse passes run at once (ffmpeg
 /// decode is the expensive part — two full-resolution decodes is already real CPU/IO
 /// load off the loop thread). A request beyond this is refused with `skipped: "busy"`
@@ -163,7 +228,9 @@ pub enum FitStatus {
 /// What [`analyse`] found.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DropoutReport {
-    /// The lag (ms, 10 ms steps) that best aligns `observed` to `expected`.
+    /// The lag (ms) that best aligns `observed` to `expected`: 1 ms resolution when a
+    /// fine envelope was given ([`analyse_with_fine`], production — R96), else 10 ms
+    /// steps ([`analyse`]).
     pub lag_ms: u32,
     /// Mean absolute dB error at that lag, after `offset_db` — how good the fit is. R76
     /// (review fix round): the brief's text says "median" here; this has always been,
@@ -193,11 +260,15 @@ fn pw_mean_db(vals: &[f64]) -> f64 {
     10.0 * (lin_sum / vals.len() as f64).log10()
 }
 
-/// This duration's 10 ms bin index on an absolute, arbitrary-origin grid (integer
-/// milliseconds, never float seconds — avoids a boundary sample flooring into the wrong
-/// bin from floating-point noise).
-fn bin10(d: Duration) -> i64 {
-    (d.as_millis() as i64) / BIN_MS
+/// `t + ms` for a signed millisecond offset; `None` if that would go negative (there's
+/// no instant before the recording started). Used by the micro-gap pass's steady-state
+/// neighbourhood check (R94).
+fn offset_ms(t: Duration, ms: i64) -> Option<Duration> {
+    if ms >= 0 {
+        Some(t + Duration::from_millis(ms as u64))
+    } else {
+        t.checked_sub(Duration::from_millis((-ms) as u64))
+    }
 }
 
 /// Port of `lp_audiowatch.py`'s `refcheck` (the reference-based half): aligns `observed`
@@ -230,31 +301,29 @@ fn analyse_inner(
     expected: &[(Duration, f64)],
     fine_expected: Option<&[(Duration, f64)]>,
 ) -> DropoutReport {
+    let insufficient = || DropoutReport {
+        lag_ms: 0,
+        fit_db: 0.0,
+        offset_db: 0.0,
+        fit: FitStatus::Insufficient,
+        drops: Vec::new(),
+        micro_gaps: Vec::new(),
+    };
     if expected.is_empty() {
-        return DropoutReport {
-            lag_ms: 0,
-            fit_db: 0.0,
-            offset_db: 0.0,
-            fit: FitStatus::Insufficient,
-            drops: Vec::new(),
-            micro_gaps: Vec::new(),
-        };
+        return insufficient();
     }
-    let origin = bin10(expected[0].0);
-    let exp: Vec<f64> = expected.iter().map(|(_, v)| *v).collect();
-    let n = exp.len() as i64;
-
-    // Bin the raw observed samples onto the expected grid (sparse — a gap in the meter
-    // leaves a bin with no entry at all, never a fabricated silence).
-    let mut cap_bins: HashMap<i64, Vec<f64>> = HashMap::new();
-    for (t, db) in observed {
-        cap_bins.entry(bin10(*t) - origin).or_default().push(*db);
-    }
-    let capb = |k: i64| -> Option<f64> {
-        cap_bins
-            .get(&k)
-            .filter(|v| !v.is_empty())
-            .map(|v| pw_mean_db(v))
+    let origin = expected[0].0;
+    let fine_expected = fine_expected.filter(|f| !f.is_empty());
+    let n = expected.len() as i64;
+    // Task 16d: with a fine envelope, each coarse bin is the power mean of its own 1 ms
+    // values (`coarse_from_fine`) — the same reduction the observed side gets (a power
+    // mean of its 1 ms samples per bin). `mix_envelope`'s bin holds the gain at the
+    // bin's *start* across all 10 ms, which on a ramp is up to a whole bin louder/
+    // quieter than what that bin really averages to: a systematic edge bias the lag
+    // search then "corrects" with a wrong lag.
+    let exp: Vec<f64> = match fine_expected {
+        Some(fine) => coarse_from_fine(fine, expected),
+        None => expected.iter().map(|(_, v)| *v).collect(),
     };
 
     // R77 (review fix round): the guard scales with the window instead of a bare
@@ -262,6 +331,12 @@ fn analyse_inner(
     // `expected`'s own bins are audible at all.
     let qualifying = exp.iter().filter(|&&e| e > -60.0).count();
     let min_pairs = (qualifying / 2).clamp(10, 50);
+
+    // Bin the raw observed samples onto the expected grid (sparse — a gap in the meter
+    // leaves a bin with no entry at all, never a fabricated silence). Task 16d: the
+    // grid is `expected`'s own (`origin` + 10 ms·k), never the absolute 10 ms grid —
+    // see `bin_observed`.
+    let cap0 = bin_observed(observed, origin, 0);
 
     // Lag search: minimise the mean absolute dB error (after a median offset) over bins
     // where expected is audible and the capture isn't implausibly loud (> -90 filters
@@ -271,53 +346,55 @@ fn analyse_inner(
         if lag >= n {
             continue;
         }
-        let mut pairs: Vec<(f64, f64)> = Vec::new();
-        for k in 0..(n - lag) {
-            if let Some(c) = capb(k + lag) {
-                let e = exp[k as usize];
-                if e > -60.0 && c > -90.0 {
-                    pairs.push((c, e));
-                }
-            }
-        }
-        if pairs.len() < min_pairs {
+        let Some((err, off)) = bin_fit(&cap0, &exp, lag, min_pairs) else {
             continue;
-        }
-        let mut diffs: Vec<f64> = pairs.iter().map(|(c, e)| c - e).collect();
-        diffs.sort_by(f64::total_cmp);
-        let off = diffs[diffs.len() / 2];
-        let err = pairs.iter().map(|(c, e)| (c - e - off).abs()).sum::<f64>() / pairs.len() as f64;
+        };
         if best.is_none_or(|(be, _, _)| err < be) {
             best = Some((err, lag, off));
         }
     }
-    let Some((fit_db, lag, offset_db)) = best else {
+    let Some((coarse_fit, coarse_lag, coarse_off)) = best else {
         // No lag had enough reliably-paired bins to trust an alignment at all — report
         // that plainly rather than guessing a lag of 0 and flagging findings on top of
         // it (R77).
-        return DropoutReport {
-            lag_ms: 0,
-            fit_db: 0.0,
-            offset_db: 0.0,
-            fit: FitStatus::Insufficient,
-            drops: Vec::new(),
-            micro_gaps: Vec::new(),
-        };
+        return insufficient();
+    };
+
+    // R96 (controller ruling): refine the lag to 1 ms on the fine envelope, ±10 ms
+    // around the coarse best — a 10 ms lag step misaligns a steep ramp edge by up to
+    // 5 ms, far beyond R94's ±2 ms steady-state guard. Then re-bin the observed side at
+    // that exact lag, so `drops`/`fit_db`/`offset_db` are computed on the same
+    // alignment the micro-gap pass uses.
+    let (lag_ms, cap, drop_lag, fit_db, offset_db) = match fine_expected {
+        Some(fine) => {
+            let lag_ms = refine_lag(observed, fine, coarse_lag * BIN_MS, min_pairs);
+            let cap = bin_observed(observed, origin, lag_ms);
+            let (fit, off) = bin_fit(&cap, &exp, 0, min_pairs).unwrap_or((coarse_fit, coarse_off));
+            (lag_ms, cap, 0, fit, off)
+        }
+        None => (
+            coarse_lag * BIN_MS,
+            cap0,
+            coarse_lag,
+            coarse_fit,
+            coarse_off,
+        ),
     };
 
     // Drops: runs of 10 ms bins at least 15 dB under an audible expected level.
+    let capb = |k: i64| cap.get(&k).copied();
     let mut drops = Vec::new();
     let mut k = 0i64;
-    while k < n - lag {
+    while k < n - drop_lag {
         let e = exp[k as usize] + offset_db;
-        let c = capb(k + lag);
+        let c = capb(k + drop_lag);
         if e > -55.0 && c.is_some_and(|c| c < e - 15.0) {
             let start = k;
             let mut worst = 0.0f64;
             let mut j = k;
-            while j < n - lag {
+            while j < n - drop_lag {
                 let ej = exp[j as usize] + offset_db;
-                match capb(j + lag) {
+                match capb(j + drop_lag) {
                     Some(cj) if ej > -55.0 && cj < ej - 15.0 => {
                         worst = worst.max(ej - cj);
                         j += 1;
@@ -338,16 +415,16 @@ fn analyse_inner(
 
     // Micro-gaps: raw (sub-bin) observed samples far under their expected level at that
     // exact instant. R80: when a `fine_expected` (1 ms resolution) is available, use it
-    // (shifted by the same lag, in continuous time) instead of holding the coarse bin's
-    // value across its whole 10 ms span.
+    // (shifted by the same — R96: 1 ms-refined — lag, in continuous time) instead of
+    // holding the coarse bin's value across its whole 10 ms span.
     let fine_origin = fine_expected.and_then(|f| f.first()).map(|(t, _)| *t);
-    let lag_dur = Duration::from_millis((lag * BIN_MS).max(0) as u64);
+    let lag_dur = Duration::from_millis(lag_ms.max(0) as u64);
     let mut micro_gaps = Vec::new();
     let mut run: Vec<(Duration, f64, f64)> = Vec::new();
     let flush = |run: &mut Vec<(Duration, f64, f64)>, out: &mut Vec<Drop>| {
         if run.len() >= 2 {
             let start = run[0].0;
-            let at_ms = (start.as_millis() as i64) - (expected[0].0.as_millis() as i64);
+            let at_ms = (start.as_millis() as i64) - (origin.as_millis() as i64);
             let len_ms = run.len() as u32; // ~1 ms-spaced samples (the bus meter's own rate)
             let under_db = run.iter().map(|(_, d, e)| e - d).fold(0.0, f64::max);
             out.push(Drop {
@@ -358,37 +435,200 @@ fn analyse_inner(
         }
         run.clear();
     };
-    for (t, d) in observed {
-        let e = match (fine_expected, fine_origin) {
+    // R94 (controller ruling): the expected level AT one exact instant, fine or coarse
+    // (the same lookup the pre-R94 code ran inline) — pulled out so the steady-state
+    // guard below can reuse it at the neighbouring instants too.
+    let expected_at = |t: Duration| -> Option<f64> {
+        match (fine_expected, fine_origin) {
             (Some(fine), Some(fine_origin)) => t
                 .checked_sub(lag_dur)
                 .and_then(|t_exp| t_exp.checked_sub(fine_origin))
                 .and_then(|rel| fine.get(rel.as_millis() as usize))
                 .map(|(_, v)| v + offset_db),
             _ => {
-                let k = bin10(*t) - origin - lag;
+                let k = t.checked_sub(origin)?.as_millis() as i64 / BIN_MS - coarse_lag;
                 if k >= 0 && (k as usize) < exp.len() {
                     Some(exp[k as usize] + offset_db)
                 } else {
                     None
                 }
             }
-        };
+        }
+    };
+    // R94 (controller ruling): a 1 ms sample counts toward a micro-gap only if the
+    // EXPECTED level stays "steady" — audible (> −45 dB) for its *whole*
+    // `STEADY_NEIGHBOURHOOD_MS` neighbourhood, not just at that exact instant. A
+    // linear-amplitude anti-click ramp's dB curve has an unbounded slope in its very
+    // last fraction of a millisecond (invariant #2: `GainLinear` is linear in
+    // *amplitude*; dB is logarithmic) — measured directly: a 30 ms ramp's dB value
+    // crosses from −58 dB to −96 dB within its last 0.04 ms, far below anything the
+    // lag search or real push/capture jitter can align to. A false micro-gap right
+    // there is the *detector's* own alignment limit, not a real audio glitch —
+    // excluding ramp edges from counting is not loosening what counts as a real one: a
+    // genuine hole in otherwise-steady audio has a steady neighbourhood on both sides
+    // and is untouched (`injected_4ms_gap_is_flagged_...`,
+    // `micro_gap_pass_still_flags_a_hole_shortly_before_a_ramp_starts`).
+    let is_steady = |t: Duration| -> bool {
+        for dm in -STEADY_NEIGHBOURHOOD_MS..=STEADY_NEIGHBOURHOOD_MS {
+            let Some(tt) = offset_ms(t, dm) else {
+                return false;
+            };
+            match expected_at(tt) {
+                Some(e) if e > -45.0 => {}
+                _ => return false,
+            }
+        }
+        true
+    };
+    for (t, d) in observed {
+        let e = expected_at(*t);
         match e {
-            Some(e) if e > -45.0 && *d < e - 35.0 => run.push((*t, *d, e)),
+            Some(e) if e > -45.0 && *d < e - 35.0 && is_steady(*t) => run.push((*t, *d, e)),
             _ => flush(&mut run, &mut micro_gaps),
         }
     }
     flush(&mut run, &mut micro_gaps);
 
     DropoutReport {
-        lag_ms: (lag * BIN_MS) as u32,
+        lag_ms: lag_ms as u32,
         fit_db,
         offset_db,
         fit: FitStatus::Ok,
         drops,
         micro_gaps,
     }
+}
+
+/// Task 16d: bins `observed` onto `expected`'s own 10 ms grid — bin `k` holds the
+/// samples in `[origin + shift + 10k, origin + shift + 10k + 10)` ms, power-averaged.
+/// **Never the absolute 10 ms grid** (the pre-16d `⌊t/10⌋ − ⌊origin/10⌋`): the
+/// window starts at an arbitrary sub-10 ms phase φ (`transition.started` − 500 ms), so
+/// that grid paired expected bin `k` with observed samples φ ms *earlier* — a lag of
+/// "10 ms" then really meant 10 − φ, which the micro-gap pass applied as a full 10 ms
+/// in continuous time: measured on-machine, φ ≈ 8 ms turned a true ~2 ms lag into a
+/// reported 10 ms one and flagged the bottom of A's clean anti-click ramp as a 4 ms
+/// micro-gap. `shift` (ms, ≥ 0) re-bins at a 1 ms-refined lag (R96).
+fn bin_observed(
+    observed: &[(Duration, f64)],
+    origin: Duration,
+    shift_ms: i64,
+) -> HashMap<i64, f64> {
+    let base = origin + Duration::from_millis(shift_ms.max(0) as u64);
+    let mut bins: HashMap<i64, Vec<f64>> = HashMap::new();
+    for (t, db) in observed {
+        if let Some(rel) = t.checked_sub(base) {
+            bins.entry(rel.as_millis() as i64 / BIN_MS)
+                .or_default()
+                .push(*db);
+        }
+    }
+    bins.into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| (k, pw_mean_db(&v)))
+        .collect()
+}
+
+/// Task 16d: `expected`'s grid re-derived from the 1 ms `fine` envelope — bin `k` is the
+/// power mean of every fine value in `[t_k, t_k + 10 ms)` (`t_k` = `expected[k]`'s own
+/// time), i.e. the same reduction [`bin_observed`] applies to the meter's 1 ms samples.
+/// A bin with no fine values keeps `expected`'s own value.
+fn coarse_from_fine(fine: &[(Duration, f64)], expected: &[(Duration, f64)]) -> Vec<f64> {
+    let origin = expected[0].0;
+    let mut sums = vec![(0.0f64, 0usize); expected.len()];
+    for (t, db) in fine {
+        let Some(rel) = t.checked_sub(origin) else {
+            continue;
+        };
+        let k = rel.as_millis() as usize / BIN_MS as usize;
+        if let Some(slot) = sums.get_mut(k) {
+            slot.0 += 10f64.powf(db / 10.0);
+            slot.1 += 1;
+        }
+    }
+    sums.iter()
+        .zip(expected)
+        .map(|(&(sum, count), (_, e))| {
+            if count == 0 {
+                *e
+            } else {
+                let p = sum / count as f64;
+                if p > 1e-14 { 10.0 * p.log10() } else { -140.0 }
+            }
+        })
+        .collect()
+}
+
+/// The lag search's fit at one bin lag: `(mean |c − e − offset|, offset)` over bins
+/// where expected is audible (> −60 dB) and the capture plausible (> −90 dB), with the
+/// median `c − e` as the offset — `None` below `min_pairs` paired bins (R77).
+fn bin_fit(cap: &HashMap<i64, f64>, exp: &[f64], lag: i64, min_pairs: usize) -> Option<(f64, f64)> {
+    let n = exp.len() as i64;
+    let mut pairs: Vec<(f64, f64)> = Vec::new();
+    for k in 0..(n - lag).max(0) {
+        if let Some(&c) = cap.get(&(k + lag)) {
+            let e = exp[k as usize];
+            if e > -60.0 && c > -90.0 {
+                pairs.push((c, e));
+            }
+        }
+    }
+    if pairs.len() < min_pairs {
+        return None;
+    }
+    let mut diffs: Vec<f64> = pairs.iter().map(|(c, e)| c - e).collect();
+    diffs.sort_by(f64::total_cmp);
+    let off = diffs[diffs.len() / 2];
+    let err = pairs.iter().map(|(c, e)| (c - e - off).abs()).sum::<f64>() / pairs.len() as f64;
+    Some((err, off))
+}
+
+/// R96 (controller ruling): the coarse lag refined to 1 ms — every whole-ms lag within
+/// [`REFINE_RADIUS_MS`] of `coarse_ms` (clamped to the search range), scored by the
+/// same error as the coarse search (mean |c − e − median offset| over audible-expected,
+/// plausible-capture pairs) but sample by sample: each 1 ms meter sample against the
+/// fine envelope at `t − lag`. Ties keep the smaller lag; a candidate with fewer than
+/// `min_pairs` pairs is skipped, and if none qualifies the coarse lag stands.
+fn refine_lag(
+    observed: &[(Duration, f64)],
+    fine: &[(Duration, f64)],
+    coarse_ms: i64,
+    min_pairs: usize,
+) -> i64 {
+    let fine_origin = fine[0].0;
+    let lo = (coarse_ms - REFINE_RADIUS_MS).max(0);
+    let hi = (coarse_ms + REFINE_RADIUS_MS).min(MAX_LAG_BINS * BIN_MS);
+    let mut best: Option<(f64, i64)> = None;
+    let mut diffs: Vec<f64> = Vec::with_capacity(observed.len());
+    let mut sorted: Vec<f64> = Vec::with_capacity(observed.len());
+    for lag in lo..=hi {
+        let lag_dur = Duration::from_millis(lag as u64);
+        diffs.clear();
+        for (t, c) in observed {
+            let e = t
+                .checked_sub(lag_dur)
+                .and_then(|t_exp| t_exp.checked_sub(fine_origin))
+                .and_then(|rel| fine.get(rel.as_millis() as usize))
+                .map(|(_, v)| *v);
+            if let Some(e) = e
+                && e > -60.0
+                && *c > -90.0
+            {
+                diffs.push(c - e);
+            }
+        }
+        if diffs.len() < min_pairs {
+            continue;
+        }
+        sorted.clear();
+        sorted.extend_from_slice(&diffs);
+        sorted.sort_by(f64::total_cmp);
+        let off = sorted[sorted.len() / 2];
+        let err = diffs.iter().map(|d| (d - off).abs()).sum::<f64>() / diffs.len() as f64;
+        if best.is_none_or(|(be, _)| err < be) {
+            best = Some((err, lag));
+        }
+    }
+    best.map_or(coarse_ms, |(_, lag)| lag)
 }
 
 // --------------------------------------------------------------- expected_envelope()
@@ -875,6 +1115,15 @@ impl PendingWindows {
     pub(crate) fn get(&self, corr: &str) -> Option<&PendingTransition> {
         self.map.get(corr)
     }
+
+    /// R93 (review): how many recorded windows are still open (`done_mono.is_none()`) —
+    /// the `loop` probe's own evidence that nothing (a transition, `retire`, the R88
+    /// pause gate) left a window dangling. A gate abandoned mid-flight
+    /// (`Runtime::abandon_pause_gate`) must close its window outright rather than leave
+    /// it open forever, so this returns to whatever it was before that gate opened.
+    pub(crate) fn open_count(&self) -> usize {
+        self.map.values().filter(|p| p.done_mono.is_none()).count()
+    }
 }
 
 /// R79 (review fix round): a small gate, not a queue — at most
@@ -967,13 +1216,70 @@ fn snapshot_window(s: &AudioSourceSnapshot) -> SourceWindow {
     }
 }
 
+/// Task 16d: how long past a window's end (`done + WINDOW_POST`) an analysis waits before
+/// it snapshots the meter, so the window's last samples have been delivered (a meter
+/// block lands one graph cycle after its own time — 1.3 ms at this machine's 64-frame
+/// quantum, ~21 ms at a 1024-frame one).
+pub(crate) const CAPTURE_MARGIN: Duration = Duration::from_millis(100);
+
+/// One analysis waiting for its window to be fully captured ([`request_analysis`]).
+pub(crate) struct DueAnalysis {
+    corr: CorrId,
+    due: Duration,
+    dump: Option<PathBuf>,
+}
+
+/// Task 16d: run `corr`'s analysis once the meter has captured its **whole** window —
+/// at once if it already has (or there's nothing to wait for: stepped clock, no meter),
+/// else queued until `done + WINDOW_POST + CAPTURE_MARGIN` ([`run_due`], from every
+/// tick). The auto-trigger used to snapshot the meter at `transition.done` itself, so
+/// the 500 ms post-roll was never checked and the lag search saw a capture that ended
+/// at B's ramp while `expected` ran on: measured on-machine (@240 Hz), it picked a lag
+/// that pushed B's ramp bins off the end of the capture (40 ms, the last lag still
+/// clearing the R77 pair guard) and flagged A's clean anti-click ramp as a 30 ms drop.
+pub(crate) fn request_analysis(rt: &mut Runtime, corr: CorrId, dump: Option<PathBuf>) {
+    let Some(pending) = rt.dropout_windows.get(&corr.0) else {
+        return;
+    };
+    let Some(done) = pending.done_mono else {
+        return;
+    };
+    let due = done + WINDOW_POST + CAPTURE_MARGIN;
+    let now = log::mono_now().unwrap_or_default();
+    if now >= due || rt.stepped() || rt.audio.meter_unavailable().is_some() {
+        let pending = pending.clone();
+        spawn_analysis(rt, corr, &pending, dump);
+    } else {
+        rt.dropout_due.push(DueAnalysis { corr, due, dump });
+    }
+}
+
+/// Task 16d: starts every queued [`request_analysis`] whose window is now fully captured
+/// (called from `Runtime::tick`; a no-op with nothing queued).
+pub(crate) fn run_due(rt: &mut Runtime) {
+    if rt.dropout_due.is_empty() {
+        return;
+    }
+    let now = log::mono_now().unwrap_or_default();
+    let (ready, waiting): (Vec<DueAnalysis>, Vec<DueAnalysis>) =
+        std::mem::take(&mut rt.dropout_due)
+            .into_iter()
+            .partition(|d| now >= d.due);
+    rt.dropout_due = waiting;
+    for d in ready {
+        if let Some(pending) = rt.dropout_windows.get(&d.corr.0).cloned() {
+            spawn_analysis(rt, d.corr, &pending, d.dump);
+        }
+    }
+}
+
 /// Snapshot the meter + gain schedule for `pending`'s window (main thread, cheap) and
 /// run the decode + [`analyse_with_fine`] on a spawned thread, delivering
 /// `probe.dropout {corr, report}` (or `{corr, skipped}`) via `log::event` once it's
 /// done — R71, never blocks the caller. A no-op if `pending` hasn't reached
 /// `transition.done` yet. R79: refuses (`skipped: "busy"`) rather than queues past
 /// [`MAX_CONCURRENT_ANALYSES`] concurrent analyses.
-pub(crate) fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition) {
+fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition, dump: Option<PathBuf>) {
     let Some(done_mono) = pending.done_mono else {
         return;
     };
@@ -1016,6 +1322,11 @@ pub(crate) fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransi
         let _slot = SlotGuard;
         let (expected, fine) = expected_envelopes(&sources, &schedule, window);
         let report = analyse_with_fine(&observed, &expected, &fine);
+        if let Some(path) = dump {
+            write_dump(
+                &path, &corr, window, &sources, &schedule, &observed, &expected, &fine, &report,
+            );
+        }
         log::event(
             "probe",
             Level::Info,
@@ -1024,6 +1335,53 @@ pub(crate) fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransi
             json!({ "report": report }),
         );
     });
+}
+
+/// Task 16d: `probe dropout {corr, dump}` writes every input the analysis saw (the 1 ms
+/// meter samples, both expected envelopes, the recorded gain schedule, the sources'
+/// rebased positions) plus the report to `dump` (an absolute path) — the raw evidence
+/// for "is this flagged gap real or the detector's own alignment", reproducible offline.
+/// Times are `t_mono_ms`. Best effort: a write failure is logged, never fatal.
+#[allow(clippy::too_many_arguments)]
+fn write_dump(
+    path: &Path,
+    corr: &CorrId,
+    window: (Duration, Duration),
+    sources: &[SourceWindow],
+    schedule: &GainSchedule,
+    observed: &[(Duration, f64)],
+    expected: &[(Duration, f64)],
+    fine: &[(Duration, f64)],
+    report: &DropoutReport,
+) {
+    let ms = |d: &Duration| d.as_secs_f64() * 1000.0;
+    let env =
+        |e: &[(Duration, f64)]| -> Vec<(f64, f64)> { e.iter().map(|(t, v)| (ms(t), *v)).collect() };
+    let sched: HashMap<&String, Vec<(f64, f64)>> =
+        schedule.iter().map(|(id, tr)| (id, env(tr))).collect();
+    let srcs: Vec<Value> = sources
+        .iter()
+        .map(|s| json!({ "id": s.id, "path": s.path, "position": s.position, "speed": s.speed }))
+        .collect();
+    let body = json!({
+        "corr": corr,
+        "window_ms": [ms(&window.0), ms(&window.1)],
+        "sources": srcs,
+        "schedule": sched,
+        "observed": env(observed),
+        "expected": env(expected),
+        "fine": env(fine),
+        "report": report,
+    });
+    if let Err(e) = std::fs::write(path, body.to_string()) {
+        log::event(
+            "probe",
+            Level::Warn,
+            "probe.dropout_dump_failed",
+            Some(corr.clone()),
+            json!({ "path": path.display().to_string(), "error": e.to_string() }),
+        );
+    }
 }
 
 /// `probe {"name":"dropout","args":{"corr":"tr-12"}}` — re-runs the detector for a
@@ -1068,9 +1426,16 @@ pub(super) fn probe(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
             hint: "`ctl probe '{\"name\":\"bus\"}'` shows why".into(),
         });
     }
-    let corr_id = CorrId(corr.to_string());
-    let pending = pending.clone();
-    spawn_analysis(rt, corr_id, &pending);
+    let dump = match args.get("dump") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(d)) if Path::new(d).is_absolute() => Some(PathBuf::from(d)),
+        Some(_) => {
+            return Err(bad(
+                "dropout's `dump` must be an absolute path string".into()
+            ));
+        }
+    };
+    request_analysis(rt, CorrId(corr.to_string()), dump);
     Ok(json!({ "status": "pending", "corr": corr }))
 }
 
@@ -1248,6 +1613,116 @@ mod tests {
              1 ms-accurate: {:?}",
             fixed.micro_gaps
         );
+    }
+
+    /// The true, continuous `GainLinear` curve (invariant #2/#4): flat 0 dB, ramps
+    /// linearly *in amplitude* to silence over `dur_ms` starting at `start_ms`, flat
+    /// silent after. `t_ms` may be fractional (a sub-ms-shifted "observed" copy below).
+    fn ramp_curve(t_ms: f64, start_ms: f64, dur_ms: f64) -> f64 {
+        let p = t_ms - start_ms;
+        if p <= 0.0 {
+            0.0
+        } else if p >= dur_ms {
+            SILENT_DB
+        } else {
+            crate::units::lin_to_db(1.0 - p / dur_ms)
+        }
+    }
+
+    #[test]
+    // R94 (controller ruling): a ramp edge whose observed copy is shifted by exactly
+    // 1 ms — a realistic sub-bin capture/push misalignment, nothing the 10 ms lag
+    // search can correct for — must never be flagged. The curve's own slope is
+    // unbounded in its last fraction of a millisecond (ramp_curve's doc), so a 1 ms
+    // misalignment there is exactly the scenario the steady-state guard exists for.
+    fn micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms() {
+        const START_MS: f64 = 500.0;
+        const DUR_MS: f64 = 30.0;
+        // The curve's own slope: for THIS 30 ms ramp, a bare 1 ms shift lands its
+        // mismatch inside a single 1 ms-wide window (`-29.5 dB` at p=29 to the floor
+        // at p=30) — never 2 *consecutive* samples, so the pre-guard code (which only
+        // ever flags a run of >= 2) wouldn't have flagged it either; that's not this
+        // guard's doing, it's `flush`'s existing `run.len() >= 2` rule. A 2 ms shift
+        // reliably spans two: sanity-checked below against the exact pre-guard
+        // condition (`e > -45 && d < e - 35`), independent of `analyse_with_fine`,
+        // before asserting the guarded result — proving this shift really would have
+        // been flagged without the fix.
+        const SHIFT_MS: f64 = 2.0;
+        let sample_at = |t: f64| ramp_curve(t, START_MS, DUR_MS);
+        let raw_hit = |t: f64| {
+            let e = sample_at(t);
+            let d = sample_at(t + SHIFT_MS);
+            e > -45.0 && d < e - 35.0
+        };
+        assert!(
+            raw_hit(528.0) && raw_hit(529.0),
+            "sanity: a {SHIFT_MS} ms shift must raw-flag >= 2 consecutive samples \
+             (528, 529) or this test doesn't exercise the guard at all"
+        );
+
+        let fine: Vec<(Duration, f64)> = (0..1000u64)
+            .map(|t| (ms(t), ramp_curve(t as f64, START_MS, DUR_MS)))
+            .collect();
+        let coarse: Vec<(Duration, f64)> = (0..100i64)
+            .map(|k| {
+                (
+                    ms((k * 10) as u64),
+                    ramp_curve((k * 10) as f64, START_MS, DUR_MS),
+                )
+            })
+            .collect();
+        for shift in [-SHIFT_MS, SHIFT_MS] {
+            let observed: Vec<(Duration, f64)> = (0..1000u64)
+                .map(|t| (ms(t), ramp_curve(t as f64 + shift, START_MS, DUR_MS)))
+                .collect();
+            let report = analyse_with_fine(&observed, &coarse, &fine);
+            assert!(
+                report.micro_gaps.is_empty(),
+                "shift {shift} ms: a ramp edge misaligned by a couple of ms must not \
+                 be flagged: {:?}",
+                report.micro_gaps
+            );
+        }
+    }
+
+    #[test]
+    // R94 (controller ruling): a genuine 4 ms hole in otherwise-steady audio, placed
+    // 5 ms *before* an unrelated ramp starts, must still be flagged — the hole's own
+    // ±2 ms neighbourhood never touches the ramp (2 ms < the 5 ms gap between them), so
+    // the steady-state guard must not suppress it. Proves the guard is scoped to ramp
+    // edges, not "any audio near a ramp."
+    fn micro_gap_pass_still_flags_a_hole_shortly_before_a_ramp_starts() {
+        const HOLE_START_MS: i64 = 400;
+        const HOLE_LEN_MS: i64 = 4;
+        const RAMP_START_MS: f64 = (HOLE_START_MS + HOLE_LEN_MS + 5) as f64; // 409 ms
+        const DUR_MS: f64 = 30.0;
+        let fine: Vec<(Duration, f64)> = (0..1000u64)
+            .map(|t| (ms(t), ramp_curve(t as f64, RAMP_START_MS, DUR_MS)))
+            .collect();
+        let coarse: Vec<(Duration, f64)> = (0..100i64)
+            .map(|k| {
+                (
+                    ms((k * 10) as u64),
+                    ramp_curve((k * 10) as f64, RAMP_START_MS, DUR_MS),
+                )
+            })
+            .collect();
+        let mut observed: Vec<(Duration, f64)> = (0..1000u64)
+            .map(|t| (ms(t), ramp_curve(t as f64, RAMP_START_MS, DUR_MS)))
+            .collect();
+        for sample in &mut observed[HOLE_START_MS as usize..(HOLE_START_MS + HOLE_LEN_MS) as usize]
+        {
+            sample.1 = SILENT_DB;
+        }
+        let report = analyse_with_fine(&observed, &coarse, &fine);
+        assert_eq!(
+            report.micro_gaps.len(),
+            1,
+            "the hole must still be flagged: {:?}",
+            report.micro_gaps
+        );
+        assert_eq!(report.micro_gaps[0].at_ms, HOLE_START_MS);
+        assert_eq!(report.micro_gaps[0].len_ms, HOLE_LEN_MS as u32);
     }
 
     // ------------------------------------------------------------ R79: bounded analyses

@@ -205,6 +205,22 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         "tap_dropped": rt.tap.dropped(),
         "reaper_pending": reaper::pending(),
         "uptime_ms": rt.started.elapsed().as_secs_f64() * 1000.0,
+        // R90 (Task 16d): the fast (>= 1 kHz) gain-only timer — armed iff a `gain.*`
+        // animation exists (never under the stepped clock). `recent_gain_pushes`:
+        // [t_mono_ms, db] pairs, oldest first, bounded.
+        "gain_timer_armed": rt.gain_timer_armed(),
+        "gain_ticks": s.gain_ticks,
+        "gain_pushes": s.gain_pushes,
+        // R93: open player-pause anticlick gates (`PauseGate`) — must drop to 0 once a
+        // gated source is destroyed/retired, never leaked. `dropout_windows_open`: how
+        // many recorded audio windows (transitions, retires, pause gates) are still
+        // open — a gate abandoned mid-flight must close its window, not leave it open.
+        "pause_gates": rt.pause_gate_count(),
+        "dropout_windows_open": rt.dropout_windows.open_count(),
+        "recent_gain_pushes": s.recent_gain_pushes
+            .iter()
+            .map(|(t, db)| json!([t, db]))
+            .collect::<Vec<_>>(),
     });
     if args.get("reset").and_then(Value::as_bool) == Some(true) {
         rt.stats.max_busy_ms = 0.0;

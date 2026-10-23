@@ -74,6 +74,11 @@ pub enum ClipSpec {
     /// `(128,128,128)` — for frame-exact seek checks. No audio. `n` survives the YUV round
     /// trip to within ±1 (neutral grey has no chroma, so only luma quantisation applies).
     FrameIndex { frames: u32 },
+    /// [`ClipSpec::FrameIndex`]'s exact visual pattern, plus a stereo 48 kHz sine at
+    /// `tone_hz`, −20 dBFS peak (R92 review: a `b_has_audio`/onset-wait test needs a
+    /// frame-marker-readable B that also has a real audio track — `FrameIndex` itself
+    /// deliberately never does).
+    FrameIndexWithAudio { frames: u32, tone_hz: f64 },
     /// A single 1920×1080 PNG of one colour (lossless RGB, no YUV involved).
     Image { rgb: [u8; 3] },
     /// Top half `top`, bottom half `bottom`, for `secs` — the R25 orientation pin
@@ -194,6 +199,38 @@ pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
                 &frames.to_string(),
             ]);
             push(&video_codec);
+        }
+        ClipSpec::FrameIndexWithAudio { frames, tone_hz } => {
+            let secs = frames as f64 / 30.0;
+            let amp = 10f64.powf(-20.0 / 20.0);
+            let ch = format!("{amp}*sin(2*PI*{tone_hz}*t)");
+            push(&[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=0x808080:s=1920x1080:r=30:d={secs}"),
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=black:s=64x64:r=30:d={secs}"),
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("aevalsrc={ch}|{ch}:s=48000:d={secs}"),
+                "-filter_complex",
+                &format!(
+                    "[1]format=rgb24,geq=r=N:g=N:b=N[box];[0]format=rgb24[bg];\
+                     [bg][box]overlay=0:0:format=rgb,format=rgb24,{TO_YUV}[v]"
+                ),
+                "-map",
+                "[v]",
+                "-map",
+                "2:a",
+                "-frames:v",
+                &frames.to_string(),
+            ]);
+            push(&video_codec);
+            push(&["-c:a", "pcm_s16le"]);
         }
         ClipSpec::Image { rgb } => {
             push(&[
