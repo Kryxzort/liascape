@@ -17,8 +17,20 @@
 #                         stage-1 verification; stage 2 drops it to run on the owner's live session.
 #   --smoke               2 switches per cell instead of >= 50 (plumbing check, not a real battery)
 #   --switches N          override the per-cell switch count (default 50)
-#   --cells m1/mo1,m2/mo2 only run these method/mode cells (see --list-cells); default = all 24
-#   --list-cells          print every method/mode cell id and exit
+#   --cells m1/mo1,m2/mo2 only run these method/mode cells (see --list-cells); default = every
+#                         cell this build knows (the 24-cell matrix + the realism cell + the
+#                         3-method extremes block, R100/R101 -- see --list-cells)
+#   --list-cells          print every method/mode cell id (matrix + realism + extremes) and exit
+#   --effect-ms N          R100 (controller ruling): fix the MAIN MATRIX's effect duration to N ms
+#                         instead of deriving it from real media -- skips setup_live_media's
+#                         derivation and is what actually reaches the backend (fixes a real
+#                         ordering bug found running this live: setup_live_backend used to push
+#                         globalTransitionDurationMs from the stale pre-media-scan default BEFORE
+#                         setup_live_media recomputed it from real clips, so the backend ran at
+#                         the wrong duration the whole time -- now ALWAYS re-pushed after media
+#                         setup, whether from this flag or the auto-derivation). The realism cell
+#                         (full-live/realism) and the extremes block's own cells (R101) set their
+#                         own duration per cell regardless of this flag.
 #   --results-dir DIR     override the timestamped results directory
 #   --resume DIR          resume an interrupted run (stage-2 controller ruling R99): reuses DIR
 #                         (implies --results-dir DIR), skips every method/mode cell that already
@@ -44,6 +56,34 @@
 # one run still produces the full 24-cell matrix even when a cell genuinely fails. The script's
 # own exit code still goes non-zero if anything failed (cleanup() checks $FAILED at the very end,
 # after every cell has had its turn and owner state is fully restored).
+#
+# Realism cell + extremes block (R100/R101 controller rulings), run AFTER the main matrix,
+# BEFORE permonitor/soak, same R99/resume machinery (own cells in switches.jsonl/
+# cell-failures.jsonl, named below -- `--list-cells` prints every one):
+#   full-live/realism       10 switches, timed-interval, at the OWNER's own pre-touched
+#                           globalTransitionDurationMs/globalTransitionEffectIds (snapshotted
+#                           before this script changes anything) -- sanity-checks the
+#                           controlled-duration matrix (--effect-ms) against what the owner
+#                           actually experiences day to day.
+#   <method>/fast-cut       0 ms, 20x manual /next   -- R42's 30 ms gain-ramp floor even at D=0,
+#   <method>/fast-50ms      50 ms, 20x manual /next     onset/offset ramps shorter than the
+#   <method>/fast-250ms     250 ms, 20x manual /next     effect; checked via the dropout report.
+#   <method>/long-timed     30 s effect, 3x via timed-interval (35 s tick, so each really lands)
+#   <method>/long-advance   30 s effect, 3x via advance-on-end
+#   <method>/long-interrupt 30 s effect, /next at ~40% of a running effect x3 -- the
+#                           interrupt/commit path (same mechanism as next-mid-transition, at
+#                           this method's own 30 s)
+#   <method>/long-shortA-end a clip SHORTER than the 30 s effect, raw `ctl transition` with
+#                           align:"end" -- the short-A-hold fallback (player-core.md "Align":
+#                           "if it's already past at the first evaluation... it starts at once
+#                           and A holds its last frame")
+#   <method>/long-pause-resume  player.paused true for 3 s mid-effect then false -- frozen
+#                           picture/audio/time together (R75/invariant #7), checked via a
+#                           time_pos-unchanged assertion across the pause plus the usual
+#                           frames+dropout checks on the switch itself
+# (<method> = full-live, reveal, frozen for every extremes row). Each extra cell sets its own
+# globalTransitionDurationMs before running and leaves EFFECT_DURATION_MS as the main matrix's
+# own value afterward -- owner settings are still restored once, at script exit, as usual.
 #
 # Dropout detector availability: this worktree (lp-player-laneC, HEAD cbf6451) predates lane B's
 # audio work, which adds the `dropout` probe / `probe.dropout` events / `player.debug`'s consumer.
@@ -91,8 +131,14 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
 
 METHODS=(full-live reveal frozen)
 MODES=(manual-next manual-prev timed-interval advance-on-end wait-for-end random restore-replay next-mid-transition)
+# R101 (controller ruling, owner request "testing very long and very fast transitions"):
+# per-method extremes, run after the main matrix, before permonitor/soak (see run_extra_cell).
+EXTRA_MODES=(fast-cut fast-50ms fast-250ms long-timed long-advance long-interrupt long-shortA-end long-pause-resume)
 EFFECT_ID="fade"
 EFFECT_DURATION_MS=1000
+EFFECT_MS_OVERRIDE=""   # --effect-ms: fixes the MAIN MATRIX's effect duration instead of
+                        # deriving it from real media (R100) -- skips the live-media derivation
+                        # in setup_live_media and is pushed to the backend right after setup.
 
 SUBCMD="run"
 case "${1:-}" in
@@ -108,7 +154,7 @@ BUILD=0
 SOAK_MINUTES=60
 RESUME=0
 
-usage() { sed -n '2,85p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,125p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -116,9 +162,14 @@ while [ $# -gt 0 ]; do
     --smoke) SMOKE=1 ;;
     --switches) shift; SWITCHES=${1:?--switches needs N} ;;
     --cells) shift; CELLS_FILTER=${1:?--cells needs a list} ;;
-    --list-cells) for m in "${METHODS[@]}"; do for o in "${MODES[@]}"; do echo "$m/$o"; done; done; exit 0 ;;
+    --list-cells)
+      for m in "${METHODS[@]}"; do for o in "${MODES[@]}"; do echo "$m/$o"; done; done
+      echo "full-live/realism"
+      for m in "${METHODS[@]}"; do for o in "${EXTRA_MODES[@]}"; do echo "$m/$o"; done; done
+      exit 0 ;;
     --results-dir) shift; RESULTS_DIR_OVERRIDE=${1:?--results-dir needs a path} ;;
     --resume) shift; RESUME=1; RESULTS_DIR_OVERRIDE=${1:?--resume needs a results dir} ;;
+    --effect-ms) shift; EFFECT_MS_OVERRIDE=${1:?--effect-ms needs N}; EFFECT_DURATION_MS=$EFFECT_MS_OVERRIDE ;;
     --build) BUILD=1 ;;
     --minutes) shift; SOAK_MINUTES=${1:?--minutes needs N} ;;
     -h|--help) usage 0 ;;
@@ -237,12 +288,54 @@ probe_frames_raw() { ctl probe '{"name":"frames"}' 2>/dev/null; }
 
 # {outputs:[{name,expected_ms,mean_ms,within_tol,missed}], ok:bool} -- ok is reported always, enforced
 # only when ENFORCE_FRAME_TIMING=1 (live mode; --hermetic reports but never fails on this, per the brief).
+#
+# battery-script fix #1 (found analysing task20-final-run): `ok` used to ALSO require `missed ==
+# 0`. `missed` counts presents > 1.5 refresh periods apart within the probe's rolling 2 s window --
+# which a switch itself routinely produces on purpose: player-core.md's Runtime "Switch cost" /
+# final-review I5 measures the render-context-create + first-render cost of opening a new source
+# at ~1-26 ms on the loop, i.e. "one to five missed frames at 240 Hz on every output per switch",
+# and says explicitly "Task 20's pacing criterion should exclude the switch frame". Requiring
+# missed==0 right after every single switch this probe samples made frame_violations == switches
+# in EVERY cell of that run (100% "violation" rate) -- not evidence of a pacing defect, just this
+# check asking for something the design doc says a switch is allowed to cost. The brief's actual
+# pass bar is "frame present intervals within +/- 0.5 ms of refresh" -- the MEAN -- so `ok` no
+# longer requires missed==0; `missed` is still captured/reported per switch for visibility (a
+# genuinely stuck/duplicate-frame output would still show up as a persistently nonzero missed
+# count across many switches in the report, just not as a per-switch hard failure here).
+#
+# battery-script fix #2 (found analysing the SAME run's raw frames field, after fix #1):
+# `.paced.mean_ms` is `null` -- not a small number -- for a switch sampled before the output has
+# presented >= 2 frames BACK TO BACK within the probe's own 2 s window (`paced` = "intervals
+# between presents made back to back", player-core.md § Wayland "frames probe"). This probe is
+# called from `evaluate_known_corr()` right as a switch reaches its terminal event -- for most
+# modes (manual-next, timed-interval, every `fast-*`/`long-*` extremes cell...) that is BEFORE 2
+# presents have happened yet, so `.paced.mean_ms // 0` silently became a literal `0`, which then
+# failed `within_tol` by the full expected refresh period every time -- the actual dominant cause
+# of frame_violations == switches in essentially the WHOLE matrix (confirmed: every non-
+# wait-for-end sample checked post-hoc has `mean_ms: 0`, not some small-but-wrong value). This is
+# "no data yet", not "paced at 0 ms" -- `.paced.count` (or a missing/null `.paced` object entirely)
+# distinguishes the two; `within_tol` is now vacuously true (not a violation) when there weren't
+# enough paced samples to judge, flagged separately as `insufficient` for visibility instead.
+#
+# What's left after both fixes, NOT a bug (documented in the report, not re-fixed here): once a
+# switch DOES have enough real paced samples (wait-for-end's own clips, which keep playing for
+# 10-30s), `mean_ms` reflects the SOURCE's own frame rate (these SFW clips are ~24-25 fps, i.e.
+# ~40 ms apart), not the display's 144/240 Hz refresh -- player-core.md's own "Frame pacing"
+# section documents exactly this as CORRECT, by-design content-paced behaviour (its own measured
+# "60 fps test clip" row: "60.0 presents/s (content-paced, idle between frames)", not a defect).
+# The brief's "+/- 0.5 ms of refresh" bar is only meaningful for genuinely display-rate content
+# (an opacity/gain animation, or a high-fps clip) -- exactly what `outputs.sh` checks with its own
+# dedicated synthetic 240 fps clip + opacity animation (matching player-core.md's measured
+# 6.94/4.17 ms numbers). battery.sh's per-switch frame probe can't meaningfully re-validate the
+# refresh-matching bar against arbitrary real video content; `outputs.sh` is the authority for it.
 evaluate_frames() {
   echo "$1" | jq -c '
-    { outputs: [ .outputs[] | ( (1000000 / .refresh_mhz) as $exp |
-        { name, expected_ms: $exp, mean_ms: (.paced.mean_ms // 0), missed: (.paced.missed // 0),
-          within_tol: ((((.paced.mean_ms // 0) - $exp) | if . < 0 then -. else . end) <= 0.5) } ) ] }
-    | .ok = ((.outputs | all(.within_tol)) and (.outputs | all(.missed == 0)))'
+    { outputs: [ .outputs[] | ( (1000000 / .refresh_mhz) as $exp | (.paced.count // 0) as $n |
+        { name, expected_ms: $exp, mean_ms: (.paced.mean_ms // 0), paced_count: $n,
+          missed: (.paced.missed // 0), insufficient: ($n < 2),
+          within_tol: (if $n < 2 then true
+                       else ((((.paced.mean_ms // 0) - $exp) | if . < 0 then -. else . end) <= 0.5) end) } ) ] }
+    | .ok = (.outputs | all(.within_tol))'
 }
 
 # A sentinel FILE, not a plain variable: probe_dropout() is always invoked via `$(...)` (to capture
@@ -278,10 +371,13 @@ probe_dropout() {
 
 record_switch() {
   # cell idx corr outcome frames_json dropout_json note
+  # effect_ms (R100 "mark their duration in the results"): the EFFECT_DURATION_MS actually
+  # active on the backend for THIS switch -- lets the report show per-cell duration without
+  # cross-referencing logs. Older records written before this field existed simply lack it.
   jq -nc --arg cell "$1" --argjson idx "$2" --arg corr "$3" --arg outcome "$4" \
-    --argjson frames "$5" --argjson dropout "$6" --arg note "${7:-}" --arg t "$(date -Iseconds)" \
+    --argjson frames "$5" --argjson dropout "$6" --arg note "${7:-}" --argjson effect_ms "$EFFECT_DURATION_MS" --arg t "$(date -Iseconds)" \
     '{t:$t, cell:$cell, idx:$idx, corr:$corr, outcome:$outcome, frames:$frames, frames_ok:$frames.ok,
-      dropout:$dropout, note:$note}' >> "$SWITCHES_FILE"
+      dropout:$dropout, note:$note, effect_ms:$effect_ms}' >> "$SWITCHES_FILE"
 }
 
 # R99 (stage-2 controller ruling, overrides this file's original "stop the whole battery"
@@ -316,17 +412,17 @@ stop_on_failure() {
 # cell/switch it's reporting against without every call site re-threading them.
 OBS_CORR=""
 CUR_CELL=""; CUR_IDX=""
-observe_switch() {
-  local cell="$1" idx="$2" prev_corr="$3" new_timeout="$4" term_timeout="$5" tolerant="${6:-0}"
-  local corr outcome frames frames_eval dropout
-  OBS_CORR=""
+
+# Everything AFTER a corr is already known: wait for its terminal event, collect frames+dropout,
+# record, stop-this-cell on real failure. Split out of observe_switch (below) so a caller that
+# already has its own corr (long-pause-resume: the corr it's evaluating is the SAME one it
+# started before the pause, not a new one -- calling observe_switch there made it wait for a
+# *different* corr that was never going to appear, which is exactly what produced "no new
+# transition corr observed" the first time this was tried) can skip the new-corr wait entirely.
+evaluate_known_corr() {
+  local cell="$1" idx="$2" corr="$3" term_timeout="$4" tolerant="${5:-0}"
+  local outcome frames frames_eval dropout
   CUR_CELL="$cell"; CUR_IDX="$idx"
-  corr=$(wait_for_new_corr "$prev_corr" "$new_timeout")
-  if [ -z "$corr" ]; then
-    [ "$tolerant" = 1 ] && return 1
-    stop_on_failure "no new transition corr observed" ""
-    return 1
-  fi
   outcome=$(wait_for_terminal "$corr" "$term_timeout")
   frames=$(probe_frames_raw); [ -n "$frames" ] || frames='{"outputs":[]}'
   frames_eval=$(evaluate_frames "$frames")
@@ -345,6 +441,20 @@ observe_switch() {
       stop_on_failure "transition did not reach a terminal state" "$corr"; return 1 ;;
   esac
   return 0
+}
+
+observe_switch() {
+  local cell="$1" idx="$2" prev_corr="$3" new_timeout="$4" term_timeout="$5" tolerant="${6:-0}"
+  local corr
+  OBS_CORR=""
+  CUR_CELL="$cell"; CUR_IDX="$idx"
+  corr=$(wait_for_new_corr "$prev_corr" "$new_timeout")
+  if [ -z "$corr" ]; then
+    [ "$tolerant" = 1 ] && return 1
+    stop_on_failure "no new transition corr observed" ""
+    return 1
+  fi
+  evaluate_known_corr "$cell" "$idx" "$corr" "$term_timeout" "$tolerant"
 }
 
 # ==================================================================
@@ -581,6 +691,17 @@ EOF
 # natural end, which an image never reaches, so they are video-only by construction here).
 # ==================================================================
 VIDEOS=(); IMAGES=(); SHORT_VIDEOS=()
+# battery-script fix (found analysing task20-final-run, all 3 wait-for-end cells: tr-136/324/515,
+# every one "scheduled" with align:end then "cancelled" by LpPlayerMedia.SwitchAndWait's own
+# AlignBackstopSlackSec=15s backstop ~15.5-16s later -- see player-adapter.md's `DoVideoEndWait`
+# row and LpPlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
+# which bounds a plain cut/effect switch fine but has NOTHING to do with how long an align:"end"
+# wait-for-the-video's-real-end switch can legitimately take -- that's bounded by the CLIP's own
+# remaining play time (+ the player's own 10 s align_fallback, behind which sits the adapter's own
+# 15 s backstop). MAX_SHORT_VIDEO_MS is the longest of the real SHORT_VIDEOS clips used by
+# advance-on-end/wait-for-end, so a term_timeout for those two modes can safely bound "the clip plays
+# all the way to its own end" without mistaking that for "the switch never completed".
+MAX_SHORT_VIDEO_MS=0
 
 ffprobe_duration_ms() {
   ffprobe -v error -show_entries format=duration -of csv=p=0 "$1" 2>/dev/null \
@@ -601,6 +722,7 @@ setup_hermetic_media() {
   VIDEOS=("$T/va.mp4" "$T/vb.mp4" "$T/vshort.mp4")
   IMAGES=("$T/imga.png" "$T/imgb.png")
   SHORT_VIDEOS=("$T/vend1.mp4" "$T/vend2.mp4")
+  MAX_SHORT_VIDEO_MS=3500   # vend2.mp4 above, 3.5 s
 }
 
 WORKSHOP_DIR="$HOME/.local/share/Steam/steamapps/workshop/content/431960"
@@ -620,16 +742,20 @@ setup_live_media() {
   [ "${#VIDEOS[@]}" -ge 2 ] && [ "${#IMAGES[@]}" -ge 2 ] || { err "not enough video/image candidates found under $WORKSHOP_DIR"; exit 1; }
   # Pick the EFFECT duration so at least the shortest real clip we found is shorter than it (brief:
   # "some clips shorter than the effect"), and take the 3 shortest videos as the advance/wait-for-end set.
+  # R100: skipped when --effect-ms fixed it explicitly -- the matrix then runs at that exact
+  # duration instead of whatever real media happens to produce (SHORT_VIDEOS is still computed
+  # either way; advance-on-end/wait-for-end need real short clips regardless of the effect length).
   local min_ms=999999999 m
   for v in "${VIDEOS[@]}"; do
     m=$(ffprobe_duration_ms "$v"); durs+=("$m:$v")
     [ "$m" -gt 0 ] && [ "$m" -lt "$min_ms" ] && min_ms=$m
   done
-  if [ "$min_ms" -lt 999999999 ]; then
+  if [ -z "$EFFECT_MS_OVERRIDE" ] && [ "$min_ms" -lt 999999999 ]; then
     EFFECT_DURATION_MS=$(python3 -c "print(max(800, int($min_ms * 1.5)))")
   fi
   mapfile -t SHORT_VIDEOS < <(printf '%s\n' "${durs[@]}" | sort -n -t: -k1,1 | head -3 | cut -d: -f2-)
-  log "media: ${#VIDEOS[@]} video(s), ${#IMAGES[@]} image(s), effect duration ${EFFECT_DURATION_MS} ms (shortest clip ${min_ms} ms)"
+  MAX_SHORT_VIDEO_MS=$(printf '%s\n' "${durs[@]}" | sort -n -t: -k1,1 | head -3 | cut -d: -f1 | sort -n | tail -1)
+  log "media: ${#VIDEOS[@]} video(s), ${#IMAGES[@]} image(s), effect duration ${EFFECT_DURATION_MS} ms (shortest clip ${min_ms} ms, longest of the 3 short videos ${MAX_SHORT_VIDEO_MS} ms)${EFFECT_MS_OVERRIDE:+ [--effect-ms override]}"
 }
 
 # alternating video/image pool, used by every mode except advance-on-end/wait-for-end
@@ -698,9 +824,26 @@ restore_cli_invoke() {
   if [ "$HERMETIC" = 1 ]; then
     "$DOTNET" "$DLL" --restore > "$HERMETIC_T/restore-$(date +%s%N).log" 2>&1
   else
-    local lp; lp=$(command -v livepaper || true)
-    [ -n "$lp" ] || { err "restore-replay (live): 'livepaper' not found on PATH"; return 1; }
-    "$lp" --restore >/dev/null 2>&1
+    # battery-script fix (task20-final-run: restore-replay failed its FIRST switch in all 3
+    # methods, "no new transition corr observed", every time). Root cause confirmed live, in two
+    # steps: first, `strace`'d the owner's INSTALLED `livepaper` (what `command -v livepaper`
+    # resolves to, what this used to invoke) running `LP_PLAYER_BIN=<repo lp-player> livepaper
+    # --restore` -- the env var DID reach the final managed process (verified: present in that
+    # exact execve's own environ via `strace -v`), yet it still ran the legacy path (`Apply()` ->
+    # `SwitchToFile` -> `setsid mpvpaper ...`). That ruled out a missing-env-var/PATH problem, so
+    # second: `strings -el` (UTF-16, .NET string literals) on the installed package's
+    # `livepaper.dll` for "LP_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
+    # on this worktree's own dev build (`$DLL`, what `livepaper-watch`/dotnet watch actually runs)
+    # finds both -- the NixOS-packaged `livepaper` is a STALE BUILD that predates lp-player/
+    # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LP_PLAYER_BIN`
+    # could ever have fixed. Confirmed the actual fix: priming the SAME session then invoking
+    # `$DOTNET $DLL --restore` (the current dev build, what --serve itself runs) produces a real
+    # new transition.scheduled corr immediately. This is a packaging/deployment gap (the owner's
+    # installed system package needs rebuilding from this branch) -- not a bug in the restore
+    # mechanism, this script's corr-detection, or anything fixable by this script choosing a
+    # different binary on PATH. Using the dev build here is what actually exercises what this
+    # cell is supposed to test; flagged for the owner in docs/player/reports/phase1.md + TODO.md.
+    "$DOTNET" "$DLL" --restore >/dev/null 2>&1
   fi
 }
 
@@ -779,14 +922,205 @@ run_cell() {
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       local auto_timeout; auto_timeout=$(python3 -c "print(int($interval) + 15)")
+      # battery-script fix (task20-final-run: full-live/reveal/frozen wait-for-end ALL failed their
+      # very first switch, "transition did not reach a terminal state", tr-136/324/515 -- confirmed
+      # via events.jsonl: each was scheduled align:"end" then genuinely CANCELLED ~15.5-16s later by
+      # LpPlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop (player-adapter.md's
+      # `DoVideoEndWait` row), not by this script's own /stop -- i.e. the switch was still correctly
+      # in flight, this script just stopped watching too early). wait-for-end's countdown freezes
+      # while _waitingForVideoEnd (PlayerHelper.cs ~line 992), so its real per-switch bound is the
+      # CLIP's own remaining play time, not EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the
+      # player's 10s align_fallback / adapter's 15s backstop + margin) instead of term() for this
+      # mode only. advance-on-end's own interval always wins first (PlayerHelper.cs ~line 1032: the
+      # interval elapsing while _waitingForVideoEnd && !_waitForVideoEnd force-advances at the
+      # interval, well under `term`), so it keeps the plain term().
+      local term_this="$term"
+      [ "$mode" = wait-for-end ] && term_this=$(python3 -c "print(int($MAX_SHORT_VIDEO_MS/1000) + 30)")
       prev=$(last_corr)
       for ((i = 1; i <= SWITCHES; i++)); do
-        observe_switch "$cell" "$i" "$prev" "$auto_timeout" "$term" 0 || { cell_failed=1; break; }
+        observe_switch "$cell" "$i" "$prev" "$auto_timeout" "$term_this" 0 || { cell_failed=1; break; }
         prev="$OBS_CORR"
       done
       post /stop '{}' >/dev/null; sleep 0.5
       ;;
   esac
+  [ "$cell_failed" = 1 ] && return 1
+  return 0
+}
+
+# ==================================================================
+# R100 realism cell: ONE cell at the OWNER's own pre-touched globalTransitionDurationMs /
+# globalTransitionEffectIds (snapshotted into ORIG_FIELDS before this script changed anything)
+# -- full-live, timed-interval, 10 switches. Takes (method, mode) like every other cell
+# function for dispatch_cell's sake, but both are fixed ("full-live"/"realism") by the ruling.
+# ==================================================================
+run_realism_cell() {
+  local cell="full-live/realism"
+  local owner_ms owner_ids saved_effect_ms=$EFFECT_DURATION_MS term paths settings
+  owner_ms=${ORIG_FIELDS[globalTransitionDurationMs]:-3000}
+  owner_ids=${ORIG_FIELDS[globalTransitionEffectIds]:-'["fade"]'}
+  log "-- cell $cell (10 switches, owner's own duration ${owner_ms} ms / effects $owner_ids) --"
+  if [ "$HERMETIC" = 1 ]; then
+    log "cell $cell: hermetic has no owner settings to be realistic about -- using EFFECT_DURATION_MS/EFFECT_ID as-is"
+  else
+    setting_set ".transitionMethod = \"full-live\" | .globalTransitionDurationMs = $owner_ms | .globalTransitionEffectIds = $owner_ids"
+  fi
+  EFFECT_DURATION_MS=$owner_ms
+  term=$(term_timeout)
+  build_alt_targets
+  paths=("${ALT_TARGETS[@]}")
+  settings=$(jq -nc '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:5, AdvanceOnVideoEnd:false, WaitForVideoEnd:false}')
+  post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
+  sleep 1.5
+  local prev cell_failed=0 i
+  prev=$(last_corr)
+  for ((i = 1; i <= 10; i++)); do
+    observe_switch "$cell" "$i" "$prev" 20 "$term" 0 || { cell_failed=1; break; }
+    prev="$OBS_CORR"
+  done
+  post /stop '{}' >/dev/null; sleep 0.5
+  EFFECT_DURATION_MS=$saved_effect_ms
+  [ "$HERMETIC" = 0 ] && setting_set ".globalTransitionDurationMs = $EFFECT_DURATION_MS | .transitionMethod = \"full-live\""
+  [ "$cell_failed" = 1 ] && return 1
+  return 0
+}
+
+# ==================================================================
+# R101 extremes block: per method, very-fast (0/50/250 ms, manual /next) and very-long
+# (30 s: timed/advance-on-end, a 40%-mark interrupt, a short-A align:end hold, a mid-effect
+# pause/resume). Every switch goes through observe_switch exactly like the main matrix, so the
+# frames+dropout checks R101 asks for are automatic (record_switch already captures both).
+# ==================================================================
+run_extra_cell() {
+  local method="$1" mode="$2"
+  local cell="$method/$mode"
+  log "-- extra cell $cell --"
+  local saved_effect_ms=$EFFECT_DURATION_MS cell_failed=0 term i prev corr
+  case "$mode" in
+    fast-cut)   EFFECT_DURATION_MS=0 ;;
+    fast-50ms)  EFFECT_DURATION_MS=50 ;;
+    fast-250ms) EFFECT_DURATION_MS=250 ;;
+    long-*)     EFFECT_DURATION_MS=30000 ;;
+  esac
+  [ "$HERMETIC" = 0 ] && setting_set ".transitionMethod = \"$method\" | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
+  term=$(term_timeout)
+
+  case "$mode" in
+    fast-cut|fast-50ms|fast-250ms)
+      build_alt_targets
+      post /apply "$(jq -nc --arg p "${ALT_TARGETS[0]}" '{path:$p}')" >/dev/null
+      sleep 1.0
+      for ((i = 1; i <= 20; i++)); do
+        prev=$(last_corr)
+        post /next '{}' >/dev/null
+        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0 || { cell_failed=1; break; }
+      done
+      ;;
+
+    long-timed|long-advance)
+      local paths=() settings advance=false
+      if [ "$mode" = long-advance ]; then paths=("${SHORT_VIDEOS[@]}"); advance=true
+      else build_alt_targets; paths=("${ALT_TARGETS[@]}"); advance=false; fi
+      if [ "${#paths[@]}" -lt 2 ]; then
+        err "cell $cell: fewer than 2 media paths available"; EFFECT_DURATION_MS=$saved_effect_ms; return 1
+      fi
+      # interval (35 s) > the 30 s effect so every tick's transition actually completes before
+      # the next one fires, instead of racing R35/R36's commit path (that's long-interrupt's job).
+      settings=$(jq -nc --argjson adv "$advance" '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:35, AdvanceOnVideoEnd:$adv, WaitForVideoEnd:false}')
+      post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
+      sleep 1.5
+      prev=$(last_corr)
+      for ((i = 1; i <= 3; i++)); do
+        observe_switch "$cell" "$i" "$prev" 50 "$term" 0 || { cell_failed=1; break; }
+        prev="$OBS_CORR"
+      done
+      post /stop '{}' >/dev/null; sleep 0.5
+      ;;
+
+    long-interrupt)
+      build_alt_targets
+      post /apply "$(jq -nc --arg p "${ALT_TARGETS[0]}" '{path:$p}')" >/dev/null
+      sleep 1.5
+      for ((i = 1; i <= 3; i++)); do
+        prev=$(last_corr)
+        post /next '{}' >/dev/null
+        corr=$(wait_for_new_corr "$prev" "$NEW_CORR_TIMEOUT")
+        if [ -n "$corr" ]; then
+          sleep "$(python3 -c "print(0.4*$EFFECT_DURATION_MS/1000)")"   # ~40% of the 30 s effect
+          local outcome1
+          post /next '{}' >/dev/null   # interrupt it; observe_switch below tracks the SECOND corr
+          outcome1=$(wait_for_terminal "$corr" "$term")
+          case "$outcome1" in
+            failed:*) warn "cell $cell switch $i: interrupted corr $corr ended $outcome1 (expected handoff/cancelled)" ;;
+            cancelled:*|handoff) : ;;
+            *) warn "cell $cell switch $i: interrupted corr $corr: $outcome1" ;;
+          esac
+          prev="$corr"
+        fi
+        observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0 || { cell_failed=1; break; }
+      done
+      ;;
+
+    long-shortA-end)
+      # A clip SHORTER than the 30 s effect, align:"end" -- the short-A-hold fallback
+      # (player-core.md "Align": "if it's already past at the first evaluation... it starts
+      # at once and A holds its last frame"). /next doesn't expose align, so this goes through
+      # raw `ctl transition`, same pattern permonitor already uses.
+      build_alt_targets
+      local shortA=${SHORT_VIDEOS[0]:-${ALT_TARGETS[0]}}
+      post /apply "$(jq -nc --arg p "$shortA" '{path:$p}')" >/dev/null
+      sleep 1.0
+      prev=$(last_corr)
+      local resp
+      resp=$(ctl transition "$(jq -nc --arg p "${ALT_TARGETS[1]}" --arg eff "$EFFECT_ID" --argjson d "$EFFECT_DURATION_MS" --arg m "$method" \
+        '{outputs:"out:*", to:{path:$p}, effect_id:$eff, duration_ms:$d, method:$m, align:"end"}')")
+      corr=$(echo "$resp" | jq -r '.corr // empty')
+      if [ -z "$corr" ]; then
+        err "cell $cell: align:end ctl transition failed to start: $resp"
+        cell_failed=1
+      else
+        observe_switch "$cell" 1 "$prev" 5 "$term" 0 || cell_failed=1
+      fi
+      ;;
+
+    long-pause-resume)
+      # player.paused for 3 s mid-effect then resumed -- R75/invariant #7: picture, audio AND
+      # time freeze together, resuming exactly where they left off. time_pos is asserted
+      # unchanged across the pause; the switch itself still gets the normal frames+dropout
+      # checks via observe_switch (R101's "verified with the dropout report + frames probe").
+      build_alt_targets
+      post /apply "$(jq -nc --arg p "${ALT_TARGETS[0]}" '{path:$p}')" >/dev/null
+      sleep 1.0
+      prev=$(last_corr)
+      post /next '{}' >/dev/null
+      corr=$(wait_for_new_corr "$prev" "$NEW_CORR_TIMEOUT")
+      if [ -z "$corr" ]; then
+        stop_on_failure "no new transition corr observed (long-pause-resume)" ""
+        cell_failed=1
+      else
+        sleep "$(python3 -c "print(0.4*$EFFECT_DURATION_MS/1000)")"
+        ctl set '{"path":"player.paused","value":true}' >/dev/null 2>&1
+        sleep 0.3   # let the pause actually land (R47: a set reaches sources at the next
+                    # dispatch/tick, not synchronously) BEFORE sampling "before" -- sampling
+                    # right at the set call races real playback that hasn't frozen yet, which
+                    # read as a false "time_pos moved during pause" the first time this ran.
+        # (.sources // .): the probe's exact top-level shape (a bare array vs {sources:[...]})
+        # isn't pinned down by the docs read for this task -- robust to either.
+        local before_tp after_tp
+        before_tp=$(ctl probe '{"name":"sources"}' 2>/dev/null | jq -r '(.sources // .) | [.[] | select(.time_pos != null)][0].time_pos // "null"' 2>/dev/null)
+        sleep 3
+        after_tp=$(ctl probe '{"name":"sources"}' 2>/dev/null | jq -r '(.sources // .) | [.[] | select(.time_pos != null)][0].time_pos // "null"' 2>/dev/null)
+        [ "$before_tp" = "$after_tp" ] && log "OK: cell $cell time_pos frozen across the 3 s pause ($before_tp)" \
+          || warn "cell $cell: time_pos moved during pause: $before_tp -> $after_tp (expected frozen, R75/invariant #7)"
+        ctl set '{"path":"player.paused","value":false}' >/dev/null 2>&1
+        # Evaluate the SAME corr this switch already started -- not observe_switch, which
+        # waits for a *different, new* corr (nothing new is issued here) and would time out
+        # every time (exactly what happened the first time this cell was tried).
+        evaluate_known_corr "$cell" 1 "$corr" "$term" 0 || cell_failed=1
+      fi
+      ;;
+  esac
+  EFFECT_DURATION_MS=$saved_effect_ms
   [ "$cell_failed" = 1 ] && return 1
   return 0
 }
@@ -822,16 +1156,45 @@ run_permonitor() {
   local tA=${ALT_TARGETS[0]} tB=${ALT_TARGETS[1 % ${#ALT_TARGETS[@]}]} tC=${ALT_TARGETS[2 % ${#ALT_TARGETS[@]}]}
   log "permonitor: $OUTA <- $tA, $OUTB <- $tB, then a transition on $OUTA alone -> $tC"
 
+  # battery-script fix (found running this live -- first real exercise per Stage 1's own notes):
+  # `setup_live_backend` only flips the `PlayerEngine` SETTING; player-adapter.md's
+  # `EnsureRunning()` is explicit that "only a switch calls it -- queries/sets never spawn" --
+  # so without an actual HTTP switch first, no `lp-player serve` process (and no socket) exists
+  # yet when the raw `ctl` calls below run, and every one of them failed with `io`/"can't
+  # connect to .../lp-player.sock: No such file or directory". `run_battery`'s own cells never
+  # hit this because every one of them starts with a real `/apply`/`/playlist/play` HTTP call
+  # before touching `ctl`. Prime it here the same way (drained, not evaluated) for live mode
+  # only (hermetic's `setup_hermetic_backend` already starts `lp-player serve` itself directly).
+  if [ "$HERMETIC" = 0 ]; then
+    local prime_prev prime_corr
+    prime_prev=$(last_corr)
+    post /apply "$(jq -nc --arg p "$tA" '{path:$p}')" >/dev/null
+    for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
+    ctl hello >/dev/null 2>&1 || warn "permonitor: lp-player socket still not up after priming apply -- the ctl calls below will likely fail"
+    # The priming apply is itself a full-live `out:*` transition (default duration/effect) --
+    # found running this live: without waiting for IT to hand off first, the raw `ctl create`/
+    # `ctl set lay:<out>:main.content` calls below raced it, landing mid-effect (both layers'
+    # `content` still the apply's own in-flight `fx*` node, not the two distinct sources this
+    # step is trying to place) instead of a clean starting point.
+    prime_corr=$(wait_for_new_corr "$prime_prev" "$NEW_CORR_TIMEOUT")
+    [ -n "$prime_corr" ] && wait_for_terminal "$prime_corr" "$(term_timeout)" >/dev/null
+  fi
+
   local srcA srcB
   srcA=$(ctl create "$(jq -nc --arg p "$tA" '{kind:"source",props:{path:$p,loop:true}}')" | jq -r .id)
   srcB=$(ctl create "$(jq -nc --arg p "$tB" '{kind:"source",props:{path:$p,loop:true}}')" | jq -r .id)
   ctl set "$(jq -nc --arg v "$srcA" '{path:("lay:'"$OUTA"':main.content"),value:$v}')" >/dev/null
   ctl set "$(jq -nc --arg v "$srcB" '{path:("lay:'"$OUTB"':main.content"),value:$v}')" >/dev/null
   sleep 1.0
+  # battery-script fix (found running this live): `ctl get {path:"cur:X"}` with no property is
+  # `no_such_prop` ("prop path ... has no '.' separating node id from property name") -- `cur:`
+  # is a NODE alias, only valid as the node-id half of a `<node>.<prop>` path (e.g.
+  # `cur:DP-1.time_pos`), never queryable bare. What this check actually wants -- "which source
+  # id does this output's main layer show right now" -- is `lay:<out>:main.content` directly.
   local curA curB
-  curA=$(ctl get "{\"path\":\"cur:$OUTA\"}" | jq -r .value); curB=$(ctl get "{\"path\":\"cur:$OUTB\"}" | jq -r .value)
+  curA=$(ctl get "{\"path\":\"lay:$OUTA:main.content\"}" | jq -r .value); curB=$(ctl get "{\"path\":\"lay:$OUTB:main.content\"}" | jq -r .value)
   [ "$curA" = "$srcA" ] && [ "$curB" = "$srcB" ] && log "OK: independent sources on $OUTA ($srcA) and $OUTB ($srcB)" \
-    || warn "cur:$OUTA=$curA (want $srcA), cur:$OUTB=$curB (want $srcB)"
+    || warn "lay:$OUTA:main.content=$curA (want $srcA), lay:$OUTB:main.content=$curB (want $srcB)"
 
   local framesB_before meterB_before resp corr outcome framesB_after meterB_after
   framesB_before=$(probe_frames_raw | jq -c --arg o "$OUTB" '.outputs[] | select(.name==$o)')
@@ -858,9 +1221,9 @@ run_permonitor() {
   ctl set '{"path":"lay:'"$OUTA"':main.viewport","value":[0,0,0.5,1]}' >/dev/null
   ctl set '{"path":"lay:'"$OUTB"':main.viewport","value":[0.5,0,0.5,1]}' >/dev/null
   sleep 0.5
-  curA=$(ctl get "{\"path\":\"cur:$OUTA\"}" | jq -r .value); curB=$(ctl get "{\"path\":\"cur:$OUTB\"}" | jq -r .value)
+  curA=$(ctl get "{\"path\":\"lay:$OUTA:main.content\"}" | jq -r .value); curB=$(ctl get "{\"path\":\"lay:$OUTB:main.content\"}" | jq -r .value)
   [ "$curA" = "$srcSpan" ] && [ "$curB" = "$srcSpan" ] && log "OK: one source ($srcSpan) spans $OUTA+$OUTB" \
-    || warn "span check: cur:$OUTA=$curA cur:$OUTB=$curB (want both $srcSpan)"
+    || warn "span check: lay:$OUTA:main.content=$curA lay:$OUTB:main.content=$curB (want both $srcSpan)"
   ctl set '{"path":"lay:'"$OUTA"':main.viewport","value":[0,0,1,1]}' >/dev/null
   ctl set '{"path":"lay:'"$OUTB"':main.viewport","value":[0,0,1,1]}' >/dev/null
 
@@ -880,8 +1243,15 @@ run_permonitor() {
 run_soak() {
   if [ "$HERMETIC" = 1 ]; then setup_hermetic_backend; setup_hermetic_media
   else setup_live_backend; setup_live_media; fi
-  local pid; pid=$(comp_pid)
-  [ -n "$pid" ] || { err "soak: no compositor pid from ctl hello"; exit 1; }
+  # battery-script fix (found running permonitor live, same root cause applies here): `ctl
+  # hello`/`comp_pid` needs the lp-player SOCKET, which only exists once something actually
+  # switches (player-adapter.md: "EnsureRunning()... only a switch calls it -- queries/sets
+  # never spawn"). setup_live_backend only flips the PlayerEngine SETTING, so checking comp_pid
+  # THIS early (before the playlist below ever issues its first real switch) failed every time
+  # live. Moved past the `/playlist/play` call, which is this subcommand's own first real switch
+  # (hermetic's setup_hermetic_backend starts `lp-player serve` directly, so it never had this
+  # problem either way).
+  local pid
 
   if [ "$HERMETIC" = 1 ]; then
     build_alt_targets
@@ -899,6 +1269,9 @@ run_soak() {
     fi
   fi
   sleep 2
+  for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
+  pid=$(comp_pid)
+  [ -n "$pid" ] || { err "soak: no compositor pid from ctl hello after starting the playlist"; exit 1; }
 
   local samples="$RESULTS_DIR/soak-samples.jsonl"; : > "$samples"
   local n=$((SOAK_MINUTES)) i rss vram t0 t
@@ -942,9 +1315,37 @@ PYEOF
   log "soak summary: $RESULTS_DIR/soak-summary.json"
 }
 
+# R99 resume/dispatch shared by every cell source (the main matrix, the realism cell, the
+# extremes block): skip an already-attempted cell under --resume, purge a partial (interrupted,
+# not failed) one before redoing it, run it, and turn a real failure into a counted "continue
+# with the rest" instead of aborting (same pattern for all three, so R101's extra cells don't
+# need their own copy of this logic).
+dispatch_cell() {
+  local fn="$1" method="$2" mode="$3"
+  local c="$method/$mode"
+  if [ "$RESUME" = 1 ] && cell_already_attempted "$c"; then
+    log "resume: $c already attempted (per $SWITCHES_FILE/$CELL_FAILURES_FILE) -- skipping"
+    return 0
+  fi
+  if [ "$RESUME" = 1 ] && [ -s "$SWITCHES_FILE" ]; then
+    local tmp; tmp=$(mktemp)
+    jq -c --arg c "$c" 'select(.cell != $c)' "$SWITCHES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$SWITCHES_FILE"
+  fi
+  "$fn" "$method" "$mode" || { warn "cell $c FAILED (R99) -- continuing with remaining cells"; return 1; }
+  return 0
+}
+
 run_battery() {
   print_eta
   if [ "$HERMETIC" = 1 ]; then setup_hermetic_backend; setup_hermetic_media; else setup_live_backend; setup_live_media; fi
+  if [ "$HERMETIC" = 0 ]; then
+    # R100 fix: setup_live_backend already pushed globalTransitionDurationMs from whatever
+    # EFFECT_DURATION_MS was BEFORE setup_live_media ran (the stale 1000 ms default, unless
+    # --effect-ms set it earlier) -- setup_live_media may since have changed it (media-derived,
+    # when no override was given). Push the FINAL value now so the backend's actual duration
+    # always matches what this script's own term_timeout()/sleeps assume for the main matrix.
+    setting_set ".globalTransitionDurationMs = $EFFECT_DURATION_MS"
+  fi
   NEW_CORR_TIMEOUT=15
   build_alt_targets
   log "importing ${#ALT_TARGETS[@]} alternating target(s) into the library once (needed for /next //prev/-random navigation)"
@@ -956,21 +1357,23 @@ run_battery() {
     for mode in "${MODES[@]}"; do
       cell_selected "$method" "$mode" || continue
       any=1
-      local c="$method/$mode"
-      if [ "$RESUME" = 1 ] && cell_already_attempted "$c"; then
-        log "resume: $c already attempted (per $SWITCHES_FILE/$CELL_FAILURES_FILE) -- skipping"
-        continue
-      fi
-      if [ "$RESUME" = 1 ] && [ -s "$SWITCHES_FILE" ]; then
-        # a partial switches.jsonl for this cell means an earlier attempt was cut off
-        # mid-cell (interrupted, not a recorded R99 failure) -- purge it so write_summary's
-        # per-cell counts don't double up once we redo the whole cell cleanly.
-        local tmp; tmp=$(mktemp)
-        jq -c --arg c "$c" 'select(.cell != $c)' "$SWITCHES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$SWITCHES_FILE"
-      fi
-      run_cell "$method" "$mode" || { failed_cells=$((failed_cells + 1)); warn "cell $c FAILED (R99) -- continuing with remaining cells"; }
+      dispatch_cell run_cell "$method" "$mode" || failed_cells=$((failed_cells + 1))
     done
   done
+
+  # R100 realism cell + R101 extremes block -- after the main matrix, before permonitor/soak.
+  if cell_selected full-live realism; then
+    any=1
+    dispatch_cell run_realism_cell full-live realism || failed_cells=$((failed_cells + 1))
+  fi
+  for method in "${METHODS[@]}"; do
+    for mode in "${EXTRA_MODES[@]}"; do
+      cell_selected "$method" "$mode" || continue
+      any=1
+      dispatch_cell run_extra_cell "$method" "$mode" || failed_cells=$((failed_cells + 1))
+    done
+  done
+
   [ "$any" = 1 ] || { err "--cells matched nothing (try --list-cells)"; exit 2; }
   write_summary
   jq -n --argjson avail "$(dropout_probe_available)" \
