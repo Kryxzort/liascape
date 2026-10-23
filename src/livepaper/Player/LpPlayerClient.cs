@@ -446,7 +446,10 @@ public sealed class LpPlayerClient
     private void Fail(string why) { LastError = why; _lastSpawnFail = Environment.TickCount64; Log(why); }
 
     // ---- events --------------------------------------------------------------------------------
-    public static readonly string[] Topics = ["transition.", "source.", "supervisor."]; // supervisor.* arrives with Task 16
+    // M11 (final review): only the kinds the adapter consumes — a switch's terminal outcomes
+    // (LpPlayerMedia.OnEvent). `source.` would stream every debug-level `source.position`
+    // (~10 Hz per source) to be discarded; restarts are detected by `hello.pid`, not events.
+    public static readonly string[] Topics = ["transition.handoff", "transition.cancelled", "transition.failed"];
     public event Action<string, JsonElement>? Event;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;

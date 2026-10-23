@@ -667,6 +667,70 @@ fn gives_up_without_compositor_after_backoff() {
     drop(serial);
 }
 
+/// M9 (final review): a SIGTERM while the supervisor sits in its no-compositor backoff
+/// ends it at once (exit 0, `supervisor.stopped`) — never a multi-second "hung" stop.
+#[test]
+fn sigterm_during_compositor_backoff_exits_at_once() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let mut c = Command::new(BIN);
+    guard(&mut c);
+    c.args(["serve", "--ao", "null"])
+        .env("XDG_RUNTIME_DIR", root.join("run"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("WAYLAND_DISPLAY", "no-such-wayland-9")
+        .env(TEST_COMPOSITOR_WAIT_ENV, "60000")
+        .env_remove("WAYLAND_SOCKET")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = c.spawn().expect("spawn lp-player");
+    let log = state_dir(&root).join("events.jsonl");
+    let t = Instant::now();
+    loop {
+        let waiting = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["kind"] == "supervisor.waiting_for_compositor")
+            .count();
+        // The second wait is 1 s long: SIGTERM lands inside it.
+        if waiting >= 2 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "never entered the backoff"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+    let t = Instant::now();
+    let st = loop {
+        if let Some(st) = child.try_wait().unwrap() {
+            break st;
+        }
+        assert!(
+            t.elapsed() < Duration::from_millis(500),
+            "SIGTERM during the backoff must end the supervisor at once"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    println!("supervisor gone {:?} after SIGTERM", t.elapsed());
+    assert_eq!(st.code(), Some(0), "{st:?}");
+    let stopped = std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .any(|e| e["kind"] == "supervisor.stopped");
+    assert!(stopped, "supervisor.stopped logged");
+    drop(serial);
+}
+
 /// A corrupt or unknown-version snapshot → `snapshot.invalid {reason}`, an empty player
 /// (and the file moved aside) — never a crash.
 #[test]

@@ -63,8 +63,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `docs/player/architecture.md` § 6.
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
-      `.claude/rules/player-core.md` / `player-adapter.md` (Task 19). `docs/player/debugging.md` lands with
-      Task 15/16c (lane B), not yet merged into this branch.
+      `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
+- [x] **Final-review fixes**: GainHistory bounded (C1), pause lifetime (I1/I3), the pause gate on its own slot
+      (I2), switches with no output (I4), async mpv core open (I5), one onset helper (I6), bus reconnect (I7).
+- [ ] **Phase 2: render worker** — move every `MpvSource` render context (creation + first render, the
+      residual ~6–25 ms per switch on the loop after I5) to a worker thread with a shared EGL context;
+      `.claude/rules/player-core.md` § Runtime "Switch cost and the Phase 2 render worker".
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

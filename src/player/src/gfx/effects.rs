@@ -131,6 +131,10 @@ pub struct Catalogue {
     /// — substituted per effect in [`Catalogue::program`].
     frag_template: String,
     programs: HashMap<String, EffectProgram>,
+    /// M3 (final review): effects that failed to load/compile on this driver — the error,
+    /// cached so a failing effect is read and compiled once (logged once,
+    /// `effects.compile_failed`), not on every frame of every output.
+    failed: HashMap<String, String>,
 }
 
 impl Catalogue {
@@ -220,6 +224,7 @@ impl Catalogue {
             vert_src,
             frag_template,
             programs: HashMap::new(),
+            failed: HashMap::new(),
         })
     }
 
@@ -232,6 +237,7 @@ impl Catalogue {
             vert_src: String::new(),
             frag_template: String::new(),
             programs: HashMap::new(),
+            failed: HashMap::new(),
         }
     }
 
@@ -244,8 +250,41 @@ impl Catalogue {
     /// Compile/link errors are prefixed with the effect id (so a batch run like
     /// `tests/effects_all.rs`'s `all_compile` can list failures by id without having to
     /// re-thread it through `Gfx::program`'s own stage-only error).
+    ///
+    /// A failure is cached (M3): later calls return the same error at once, and it is
+    /// logged once (`effects.compile_failed`) — the compositor then draws a cut.
     pub fn program(&mut self, gfx: &Gfx, id: &str) -> Result<&EffectProgram, String> {
-        if !self.programs.contains_key(id) {
+        if let Some(e) = self.failed.get(id) {
+            return Err(e.clone());
+        }
+        if !self.programs.contains_key(id)
+            && let Err(e) = self.build(gfx, id)
+        {
+            {
+                if self.effects.iter().any(|x| x.id == id) {
+                    crate::log::event(
+                        "effects",
+                        crate::log::Level::Warn,
+                        "effects.compile_failed",
+                        None,
+                        serde_json::json!({ "id": id, "error": e,
+                            "hint": "this effect draws as a cut on this driver" }),
+                    );
+                    self.failed.insert(id.to_string(), e.clone());
+                }
+                return Err(e);
+            }
+        }
+        Ok(self.programs.get(id).expect("just inserted above"))
+    }
+
+    /// Whether `id` is cached as failing to compile (tests/probes).
+    pub fn failed(&self, id: &str) -> bool {
+        self.failed.contains_key(id)
+    }
+
+    fn build(&mut self, gfx: &Gfx, id: &str) -> Result<(), String> {
+        {
             let spec = self
                 .effects
                 .iter()
@@ -266,7 +305,7 @@ impl Catalogue {
             let effect = EffectProgram::new(gfx, gl_program, spec);
             self.programs.insert(id.to_string(), effect);
         }
-        Ok(self.programs.get(id).expect("just inserted above"))
+        Ok(())
     }
 }
 

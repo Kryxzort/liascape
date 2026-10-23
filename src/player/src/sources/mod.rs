@@ -23,7 +23,7 @@ pub mod snapshot;
 
 pub use color::ColorSource;
 pub use host::SourceHost;
-pub use mpv::{MpvSource, StepStatus};
+pub use mpv::{MpvSource, PreparedCore, StepStatus};
 pub use snapshot::SnapshotSource;
 
 use crate::gfx::{Gfx, Tex};

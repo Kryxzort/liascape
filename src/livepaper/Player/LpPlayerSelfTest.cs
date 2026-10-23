@@ -64,7 +64,7 @@ public static class LpPlayerSelfTest
         Num(["set_property", "mute", true], "gain.mute", -96);
         Num(["set_property", "mute", false], "gain.mute", 0);
         Num(["set_property", "speed", 1.5], "speed", 1.5);
-        Eq(["set_property", "pause", true], "paused", true);
+        Eq(["set_property", "pause", true], "player.paused", true);
         Eq(["set", "loop-file", "inf"], "loop", true);
         Eq(["set", "loop-file", "no"], "loop", false);
         Num(["set", "vf", "fps=30"], "fps_cap", 30);
@@ -264,6 +264,15 @@ public static class LpPlayerSelfTest
                 if (LpPlayerMedia.ReapplyCount < 1) fails.Add("R81: no settings reapply after the stall recovered (OnRecovered)");
                 else Phase($"R81: stall recovery triggered a reapply ({LpPlayerMedia.ReapplyCount}x so far)");
 
+                // I3 (final review): the pause is toggled by ANOTHER process (a keybind's one-shot
+                // `livepaper --action=toggle-pause` — here a second, independent client): this
+                // backend has no memory of it, and must never re-assert one. After the supervised
+                // restart below (whose snapshot restores `player.paused`) and its R81 reapply, the
+                // pause must still be on — not flipped.
+                var other = new LpPlayerClient(sock) { AutoSpawn = false };
+                other.Call("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = true }, 2000);
+                Thread.Sleep(600); // the snapshot is written 250 ms after a change
+
                 // Supervised restart (Task 17 fix): SIGKILL the COMPOSITOR directly, never the supervisor
                 // — the supervisor must see this as a crash and restart its child with a NEW hello.pid
                 // (same supervisor_pid) within ~1.5 s (measured on-machine: 150-260 ms).
@@ -294,6 +303,13 @@ public static class LpPlayerSelfTest
                     LpPlayerMedia.Drain().Wait(2000);
                     if (LpPlayerMedia.ReapplyCount <= reapplyBeforeRestart) fails.Add("R81: no settings reapply after the supervised restart (OnRestarted)");
                     else Phase($"R81: supervised restart triggered a reapply ({LpPlayerMedia.ReapplyCount}x so far)");
+                    var pausedAfter = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }).GetProperty("value").ValueKind;
+                    if (pausedAfter != JsonValueKind.True) fails.Add($"I3: player.paused after the restart + reapply = {pausedAfter}, want true (a pause from another process must survive, never be flipped)");
+                    else Phase("I3: a pause set by another process survived the restart + reapply");
+                    // and the toggle reads the player's truth: one toggle un-pauses
+                    if (!LpPlayerMedia.TogglePause()) fails.Add("I3: TogglePause failed after the restart");
+                    var pausedToggled = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }).GetProperty("value").ValueKind;
+                    if (pausedToggled != JsonValueKind.False) fails.Add($"I3: one TogglePause after the restart left player.paused = {pausedToggled}, want false");
                 }
 
                 // StopAndQuit afterwards must leave NO lp-player process — neither the (new) compositor

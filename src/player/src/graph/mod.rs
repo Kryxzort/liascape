@@ -502,6 +502,11 @@ impl Graph {
     }
 
     /// Every node id of `kind`, sorted.
+    /// How many nodes exist (the `loop` probe's `bounds`).
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn ids_of(&self, kind: NodeKind) -> Vec<String> {
         self.nodes
             .values()

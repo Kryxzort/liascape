@@ -32,7 +32,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_void};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -94,6 +94,10 @@ const IMPULSE: f32 = 1.0e-3;
 const IMPULSE_SEEN: f32 = 1.0e-6;
 /// The bus thread wakes at least this often (commands, retarget timeouts, quit).
 const TICK: Duration = Duration::from_millis(10);
+/// I7 (final review): after the PipeWire connection is lost the bus is re-created —
+/// first after this, then doubling up to [`RECONNECT_MAX`] while attempts keep failing.
+const RECONNECT_INITIAL: Duration = Duration::from_millis(500);
+const RECONNECT_MAX: Duration = Duration::from_secs(10);
 
 /// `Bus::state()` (events `audio.bus.up` / `.retargeting` / `.down`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -132,6 +136,11 @@ pub struct BusInfo {
 struct Shared {
     info: Mutex<BusInfo>,
     quit: AtomicBool,
+    /// I7: bumped every time the bus comes up (1 = created, 2+ = reconnected) — the
+    /// runtime re-targets every source's `audio-device` when it moves.
+    generation: AtomicU64,
+    /// I7: the bus is up (cheap to poll every tick, unlike `info`).
+    up: AtomicBool,
 }
 
 impl Shared {
@@ -182,6 +191,8 @@ impl Bus {
                 reason: Some("starting".into()),
             }),
             quit: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            up: AtomicBool::new(false),
         });
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
@@ -225,6 +236,15 @@ impl Bus {
 
     pub fn state(&self) -> BusState {
         self.info().state
+    }
+
+    /// I7: `(up, generation)` — cheap; the runtime re-targets sources when it changes
+    /// (down → mpv's default device; up again → the bus).
+    pub fn route(&self) -> (bool, u64) {
+        (
+            self.shared.up.load(Ordering::SeqCst),
+            self.shared.generation.load(Ordering::SeqCst),
+        )
     }
 
     pub fn info(&self) -> BusInfo {
@@ -858,6 +878,102 @@ fn run(
     ready: &mpsc::Sender<Result<(), String>>,
 ) -> Result<(), String> {
     pw::init();
+    let mut meter_req: Option<Arc<MeterShared>> = None;
+    // The first session's setup failing is `Bus::create`'s error (the caller falls back
+    // to direct streams); a connection lost *later* is re-created (I7).
+    let mut lost = match session(shared, &rx, Some(ready), &mut meter_req)? {
+        End::Quit => return Ok(()),
+        End::Lost(reason) => reason,
+    };
+    let mut delay = RECONNECT_INITIAL;
+    let mut attempt = 0u32;
+    loop {
+        down(shared, &lost);
+        if let Some(m) = &meter_req {
+            m.set_error("audio bus down");
+        }
+        loop {
+            if wait_or_quit(shared, &rx, &mut meter_req, delay) {
+                return Ok(());
+            }
+            attempt += 1;
+            log::event(
+                "audio",
+                Level::Info,
+                "audio.bus.reconnecting",
+                None,
+                json!({ "attempt": attempt, "after_ms": delay.as_millis() as u64 }),
+            );
+            match session(shared, &rx, None, &mut meter_req) {
+                Ok(End::Quit) => return Ok(()),
+                Ok(End::Lost(reason)) => {
+                    lost = reason;
+                    delay = RECONNECT_INITIAL;
+                    attempt = 0;
+                    break;
+                }
+                Err(e) => {
+                    if shared.quit.load(Ordering::SeqCst) {
+                        return Ok(());
+                    }
+                    shared.update(|i| i.reason = Some(e.clone()));
+                    log::event(
+                        "audio",
+                        Level::Warn,
+                        "audio.bus.reconnect_failed",
+                        None,
+                        json!({ "attempt": attempt, "reason": e }),
+                    );
+                    delay = (delay * 2).min(RECONNECT_MAX);
+                }
+            }
+        }
+    }
+}
+
+/// How a bus session ended.
+enum End {
+    /// The `Bus` dropped (player shutdown): the loopback is unloaded.
+    Quit,
+    /// The PipeWire connection failed (e.g. the server restarted): re-create it.
+    Lost(String),
+}
+
+/// I7: sleep `d` (in `TICK`s), still taking meter commands; `true` = quit.
+fn wait_or_quit(
+    shared: &Shared,
+    rx: &mpsc::Receiver<Cmd>,
+    meter_req: &mut Option<Arc<MeterShared>>,
+    d: Duration,
+) -> bool {
+    let end = Instant::now() + d;
+    while Instant::now() < end {
+        if shared.quit.load(Ordering::SeqCst) {
+            return true;
+        }
+        while let Ok(cmd) = rx.try_recv() {
+            match cmd {
+                Cmd::StartMeter(m) => {
+                    m.set_error("audio bus down");
+                    *meter_req = Some(m);
+                }
+                Cmd::StopMeter => *meter_req = None,
+            }
+        }
+        std::thread::sleep(TICK);
+    }
+    shared.quit.load(Ordering::SeqCst)
+}
+
+/// One bus session: connect, load the loopback, wait for it to link, measure the
+/// latency, then watch (retarget, meter commands) until the `Bus` drops or the connection
+/// fails. `ready` = the first session (its setup result goes to `Bus::create`).
+fn session(
+    shared: &Arc<Shared>,
+    rx: &mpsc::Receiver<Cmd>,
+    ready: Option<&mpsc::Sender<Result<(), String>>>,
+    meter_req: &mut Option<Arc<MeterShared>>,
+) -> Result<End, String> {
     let ml = MainLoopRc::new(None).map_err(|e| format!("PipeWire main loop: {e}"))?;
     let context = ContextRc::new(
         &ml,
@@ -1010,38 +1126,77 @@ fn run(
             i.sink_node = s.sink();
         });
     }
-    let _ = ready.send(Ok(()));
+    shared.up.store(true, Ordering::SeqCst);
+    let generation = shared.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    match ready {
+        Some(r) => {
+            let _ = r.send(Ok(()));
+        }
+        None => {
+            // I7: re-created after a lost connection.
+            let info = shared
+                .info
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            log::event(
+                "audio",
+                Level::Info,
+                "audio.bus.up",
+                None,
+                json!({
+                    "device": info.device,
+                    "latency_ms": info.latency_ms,
+                    "target": info.target,
+                    "reconnected": true,
+                    "generation": generation,
+                }),
+            );
+        }
+    }
+    // The meter (if one was asked for) comes back on the new connection.
+    if let Some(m) = meter_req.clone() {
+        m.clear_error();
+        w.start_meter(&core, m);
+    }
 
     // ------------------------------------------------------------ the watch loop
     while !shared.quit.load(Ordering::SeqCst) {
         ml.loop_().iterate(pw::loop_::Timeout::Finite(TICK));
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
-                Cmd::StartMeter(m) => w.start_meter(&core, m),
-                Cmd::StopMeter => w.meter = None,
+                Cmd::StartMeter(m) => {
+                    *meter_req = Some(m.clone());
+                    w.start_meter(&core, m);
+                }
+                Cmd::StopMeter => {
+                    *meter_req = None;
+                    w.meter = None;
+                }
             }
         }
         if let Some(e) = seen.borrow().core_error.clone() {
-            down(shared, &format!("PipeWire connection error: {e}"));
-            if let Some((m, _, _)) = &w.meter {
-                m.set_error("audio bus down");
-            }
-            break;
+            // I7: everything on this connection is dead — re-create the bus. The loopback
+            // module unloads itself on a core error (module-loopback's own core listener
+            // schedules its destroy), so destroying it here too is a double free
+            // (measured: "double free or corruption" on a PipeWire kill) — leave it to
+            // the context's teardown below.
+            shared.up.store(false, Ordering::SeqCst);
+            w.meter = None;
+            std::mem::forget(module);
+            return Ok(End::Lost(format!("PipeWire connection error: {e}")));
         }
         w.step(&seen);
-    }
-    // Idle until the Bus drops (a dead connection keeps the state Down).
-    while !shared.quit.load(Ordering::SeqCst) {
-        std::thread::sleep(TICK);
     }
     w.meter = None;
     drop(module);
     seen.borrow_mut().abort = None; // quit is set: this flush must still run
     let _ = roundtrip(&ml, &core, &seen);
-    Ok(())
+    Ok(End::Quit)
 }
 
 fn down(shared: &Shared, reason: &str) {
+    shared.up.store(false, Ordering::SeqCst);
     shared.update(|i| {
         i.state = BusState::Down;
         i.reason = Some(reason.to_string());

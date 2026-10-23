@@ -216,6 +216,33 @@ leave this nonzero after a destroy settles). `player.pause_gate_opened` (debug-l
 logged when a gate opens, carrying its `corr`) makes a still-open gate's window
 discoverable without waiting for it to complete normally.
 
+**Final review (I1, I2) — the gate on its own slot; teardown on the unpaused clock; pause
+ends with the session.**
+- **`gain.pause`** (`units::GainSlot::Pause`): the gate ramps its own slot, never
+  `gain.anticlick` (which the recipe, `retire` and `park` ramp on the other clock). So it gates
+  every *playing* source with audio — a source waiting on a pending `align: end` switch (the
+  advance-on-end mode: before, that A was "busy" and paused with an unramped cut), both sides of a
+  running full-live crossfade, a ramping grave — and a transition taking a gated source over has
+  nothing to restore (before, an abandoned gate left `anticlick` at −96: a superseded/failed/
+  cancelled switch restored A silent). Only sources already silent are skipped (node-paused —
+  what reveal/frozen hold —, no audio, retiring, parked). At the pause edge a playing, ready
+  source gets the `Pausing` ramp; one that becomes eligible later (opened, un-paused by the
+  recipe, unparked — all composed paused already) starts `Paused` at −96, so its resume is the
+  same flow-gated ramp-in. A re-pause turns a `Resuming` gate straight back from where it is (and
+  a `Pausing` one resumes from its current level — before, it restarted from −96). Tests:
+  `tests/api.rs::i2_pause_while_align_end_pending_is_ramped_both_ways`,
+  `i2_switch_while_gated_never_leaves_a_playing_source_silent`.
+- **Teardown completes while paused.** `retire` (destroy / stop / output removal) and `park` ramp
+  on the **unpaused** base clock (`Runtime::teardown_anim`, `pending_destroy` and park settling
+  on `ClockKind::now`, pushed by the fast timer too), and a source ramping out is excluded from
+  the pause composition until it's gone. A source the pause already holds paused is silent and
+  goes at once. Before, these waited on the frozen `Runtime::now` — a destroyed source kept its
+  decoder until resume, then un-paused audibly for 30 ms with no picture.
+- **`stop` clears `player.paused`** (legacy semantics: a stop ends the session), and the backend
+  clears it for a new session (Apply / ApplyPlaylist / a cold Launch); next/prev and rotation keep
+  it. Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
+  (now: torn down while still paused), `scripts/test-lp-player-adapter.sh` (I1 cases).
+
 ## 8. No audio onset or offset without a ramp the listener can hear — ramps run on audio that is actually flowing
 
 **Why:** invariant #4's ≤ 30 ms anti-click ramp assumes the stream is already producing
@@ -306,4 +333,21 @@ that analysed before the window's post-roll was captured — all fixed in
 `probe/dropout.rs` without loosening any threshold (an instant cut injected at effect start
 is still a 30 ms drop: `tests/dropout.rs::an_unramped_cut_at_effect_start_is_flagged`).
 `dropout.sh` passes every case at 60 Hz and 240 Hz.
+
+**Final review (I6) — one onset helper for every path.** `src/player/src/onset.rs`:
+`PendingOnset` (held ramp: `start` at the confirmation instant, never backdated; bounded by
+`ONSET_TIMEOUT`), `Onsets` (a holder: `schedule` / `tick(events)` / `force` / `cancel`),
+`has_audio` + `audible` (the one "can it be heard" predicate — `is_silent` used to ignore
+`no_audio`/`has_audio`), `onset.held` / `onset.started {reason: flowed|timeout|forced|no_audio,
+held_ms}` (debug) as the evidence. Every un-pause-then-ramp path uses it: the recipe's B onsets
+(as before), `restore_a` (snap-back, a cancelled/failed/superseded switch, a grave shown again —
+an A the recipe had held paused gets its anticlick ramp held, `Transitions::restore_onsets`),
+unpark (`Runtime::onsets`), a restored source's fade-in (starts once it is `Ready` **and** its
+audio flows — `MpvSource` now arms `AudioFlowing` on every load that plays, not only on an
+un-pause), the R88 resume (same flow test + bound, on the gate's wall clock) and a re-route after
+a PipeWire restart (`gain.pause` held until the rebuilt audio chain flows). `audio-pts` is observed
+only while a confirmation is armed (its first notification after `observe` is the current value,
+not a change). Test: `tests/api.rs::i6_every_onset_waits_for_flowing_audio` (unpark, snap-back,
+R88 resume, frozen B, restore fade-in: each `onset.started` is `reason: flowed` and preceded by
+that source's own `source.audio_flowing`).
 

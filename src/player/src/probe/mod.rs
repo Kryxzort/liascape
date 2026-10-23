@@ -155,6 +155,12 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 "mpv_audio_delay".into(),
                 json!(m.mpv_get_f64("audio-delay")),
             );
+            // I7: whether mpv has a live audio output at all (it drops it when the AO
+            // can't open — e.g. PipeWire was down — and gets it back on a re-route).
+            o.insert(
+                "mpv_current_ao".into(),
+                json!(m.mpv_get_string("current-ao")),
+            );
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             o.insert("stepped".into(), json!(m.is_stepped()));
             o.insert(
@@ -177,6 +183,7 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         "sources": out,
         "nodes_not_hosted": snapshots,
         "dying": rt.host.dying(),
+        "opening": rt.host.opening(),
         "reaper_pending": reaper::pending(),
     }))
 }
@@ -217,6 +224,9 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         // open — a gate abandoned mid-flight must close its window, not leave it open.
         "pause_gates": rt.pause_gate_count(),
         "dropout_windows_open": rt.dropout_windows.open_count(),
+        // C1 (final review): every per-source collection's size — a long run of switches
+        // must leave each of these bounded (the "long-run bounds" evidence).
+        "bounds": rt.bounds(),
         "recent_gain_pushes": s.recent_gain_pushes
             .iter()
             .map(|(t, db)| json!([t, db]))

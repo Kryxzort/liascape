@@ -716,6 +716,7 @@ public static class PlayerHelper
             }
             TeardownTimer();
             ClearTimedStateFile();
+            if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // I1: a new session plays
             SwitchToFile(videoPath, mpvOptions);
             // Track the single item so QueryCurrentPath works for scenes (no mpv socket to query) and a
             // live override can identify what's playing. _timedPaths stays null → no timed-playlist logic.
@@ -1966,12 +1967,15 @@ public static class PlayerHelper
             if (ct.IsCancellationRequested) return;
             if (outcome != "handoff")
             {
-                // failed / player unreachable / cancelled by someone else: back off (never a storm), then
-                // switch now — the legacy "mpv gone → switch immediately" fallback.
-                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: {outcome} → switching now");
-                try { await Task.Delay(1000, ct).ConfigureAwait(false); }
+                // failed / player unreachable / cancelled by someone else / timed out: back off — 1 s,
+                // doubling to ≤ 30 s while it keeps failing (I4: never a storm, whatever the player's
+                // reason) — then switch now, the legacy "mpv gone → switch immediately" fallback.
+                var backoff = LpPlayerMedia.NextFailureBackoff();
+                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: {outcome} → switching in {backoff.TotalSeconds:0} s");
+                try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
             }
+            else LpPlayerMedia.ResetFailureBackoff();
             lock (_lock)
             {
                 if (!_waitingForVideoEnd || ct.IsCancellationRequested) return;
@@ -2961,6 +2965,7 @@ public static class PlayerHelper
         if (PlayerEngine.IsLpPlayer)
         {
             _lastSwitchTarget = file;
+            LpPlayerMedia.QueueNewSession(); // I1: a cold launch is a new session — it plays
             LpPlayerMedia.QueueSwitch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
             readyTcs?.TrySetResult(true);
             return null;

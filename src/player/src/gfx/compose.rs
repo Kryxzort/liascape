@@ -626,10 +626,35 @@ impl Composer {
                 gfx.gl.viewport(0, 0, ow as i32, oh as i32);
                 gfx.gl.disable(glow::BLEND);
             }
-            let program = cat
-                .program(gfx, effect_id)
-                .map_err(|e| format!("compose_output: effect `{effect_id}`: {e}"))?;
-            program.draw(gfx, &inter.from.0, &inter.to.0, progress, ratio, &params);
+            match cat.program(gfx, effect_id) {
+                Ok(program) => {
+                    program.draw(gfx, &inter.from.0, &inter.to.0, progress, ratio, &params)
+                }
+                Err(_) => {
+                    // M3 (final review): an effect this driver can't compile is a cut at
+                    // the midpoint — never a black output (the failure is cached and
+                    // logged once by the catalogue). The intermediates hold raw
+                    // (image-top-at-t0) orientation, so this copy is the one flip.
+                    let side = if progress < 0.5 {
+                        &inter.from.0
+                    } else {
+                        &inter.to.0
+                    };
+                    clear_transparent(gfx, result_fbo, ow, oh);
+                    draw_rect(
+                        gfx,
+                        &self.blit,
+                        side,
+                        UvRect {
+                            uv: [0.0, 0.0, 1.0, 1.0],
+                            dst: [0.0, 0.0, ow as f64, oh as f64],
+                        },
+                        1.0,
+                        result_fbo,
+                        true,
+                    );
+                }
+            }
         }
 
         // `Tex`'s fields are all `Copy` (`glow::Texture`, `u32`, `u32`) — copying them out

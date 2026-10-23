@@ -366,6 +366,15 @@ impl Handle {
         )
     }
 
+    /// `mpv_unobserve_property` — render-thread-safe (`client.h`), like `observe`.
+    pub fn unobserve(&self, id: u64) -> Result<(), MpvError> {
+        let r = unsafe { ffi::mpv_unobserve_property(self.raw(), id) };
+        if r < 0 {
+            return Err(MpvError::new(r, "unobserve"));
+        }
+        Ok(())
+    }
+
     /// `mpv_request_log_messages` (`"no"`, `"fatal"`, `"error"`, `"warn"`, …).
     pub fn request_log_messages(&self, min_level: &str) -> Result<(), MpvError> {
         let l = cstr(min_level)?;

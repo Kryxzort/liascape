@@ -365,20 +365,29 @@ fn analyse_inner(
     // 5 ms, far beyond R94's ±2 ms steady-state guard. Then re-bin the observed side at
     // that exact lag, so `drops`/`fit_db`/`offset_db` are computed on the same
     // alignment the micro-gap pass uses.
+    // Final review (minor): one alignment for everything — if the refined lag's re-binned
+    // capture can't be fitted (too few pairs), the *whole* coarse alignment stands (lag,
+    // capture, fit and offset together), never a refined capture scored with the coarse
+    // fit.
+    let coarse = || {
+        (
+            coarse_lag * BIN_MS,
+            cap0.clone(),
+            coarse_lag,
+            coarse_fit,
+            coarse_off,
+        )
+    };
     let (lag_ms, cap, drop_lag, fit_db, offset_db) = match fine_expected {
         Some(fine) => {
             let lag_ms = refine_lag(observed, fine, coarse_lag * BIN_MS, min_pairs);
             let cap = bin_observed(observed, origin, lag_ms);
-            let (fit, off) = bin_fit(&cap, &exp, 0, min_pairs).unwrap_or((coarse_fit, coarse_off));
-            (lag_ms, cap, 0, fit, off)
+            match bin_fit(&cap, &exp, 0, min_pairs) {
+                Some((fit, off)) => (lag_ms, cap, 0, fit, off),
+                None => coarse(),
+            }
         }
-        None => (
-            coarse_lag * BIN_MS,
-            cap0,
-            coarse_lag,
-            coarse_fit,
-            coarse_off,
-        ),
+        None => coarse(),
     };
 
     // Drops: runs of 10 ms bins at least 15 dB under an audible expected level.
@@ -747,6 +756,15 @@ fn kill_all_children() {
 /// ([`register_child`]/[`unregister_child`]) and `PR_SET_PDEATHSIG(SIGKILL)`'d so it
 /// can't outlive this process even on an abrupt exit.
 fn run_ffmpeg(start_s: f64, decode_s: f64, path: &Path) -> std::io::Result<std::process::Output> {
+    run_ffmpeg_bounded(start_s, decode_s, path, DECODE_TIMEOUT)
+}
+
+fn run_ffmpeg_bounded(
+    start_s: f64,
+    decode_s: f64,
+    path: &Path,
+    timeout: Duration,
+) -> std::io::Result<std::process::Output> {
     let mut cmd = Command::new(FFMPEG);
     cmd.arg("-v")
         .arg("error")
@@ -773,13 +791,60 @@ fn run_ffmpeg(start_s: f64, decode_s: f64, path: &Path) -> std::io::Result<std::
             Ok(())
         });
     }
-    let child = cmd.spawn()?;
+    let mut child = cmd.spawn()?;
     let pid = child.id();
     register_child(pid);
-    let out = child.wait_with_output();
+    // M8 (final review): bounded — a decode that hangs (a stale network path) is killed
+    // after DECODE_TIMEOUT instead of holding an analysis slot forever. stdout/stderr are
+    // drained on their own threads so a full pipe can't stall the child meanwhile.
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let out_t = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        if let Some(o) = stdout.as_mut() {
+            let _ = std::io::Read::read_to_end(o, &mut b);
+        }
+        b
+    });
+    let err_t = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        if let Some(e) = stderr.as_mut() {
+            let _ = std::io::Read::read_to_end(e, &mut b);
+        }
+        b
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Ok(st),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("ffmpeg decode timed out after {timeout:?}"),
+                ));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(e) => break Err(e),
+        }
+    };
     unregister_child(pid);
-    out
+    let stdout = out_t.join().unwrap_or_default();
+    let stderr = err_t.join().unwrap_or_default();
+    status.map(|status| std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
+
+/// M8: the longest one ffmpeg decode may run before it's killed.
+const DECODE_TIMEOUT: Duration = Duration::from_secs(20);
+/// M8: the longest window one analysis decodes (a pause gate's window spans the whole
+/// pause; one 1 ms fine-envelope entry per ms, decoded audio for every source) — longer
+/// ones are skipped (`skipped: "window_too_long"`), never decoded into memory.
+pub(crate) const MAX_ANALYSIS_WINDOW: Duration = Duration::from_secs(120);
 
 /// Decode `path` from `start_s` for `dur_s` seconds of **file time** into one **linear
 /// power** value (`mean(x²)`) per 10 ms bin, mono 48 kHz — padding silence before
@@ -1007,12 +1072,43 @@ pub fn expected_envelopes(
 
 /// How long a source's gain history is kept — comfortably past the brief's "≥ 30 s".
 const HISTORY_SPAN: Duration = Duration::from_secs(40);
+/// C1 (final review): how long a *dead* source's track (its node destroyed — retired,
+/// released, stopped) outlives its last reading. A transition's analysis runs only once
+/// its window's post-roll is captured (`done + WINDOW_POST + CAPTURE_MARGIN`, after the
+/// outgoing A is usually already gone) and `probe dropout` can be asked again a little
+/// later, so a track can't be dropped the instant its source dies — but it must go
+/// eventually: ids are never reused, so without this every switch leaked its A's track.
+pub(crate) const DEAD_LINGER: Duration = Duration::from_secs(30);
+/// C1: global caps — however fast sources come and go (rapid "next" floods), the history
+/// never holds more than this many tracks or samples (24 B each: ≤ ~3 MiB). Over a cap the
+/// least recently seen *dead* track goes first, then the oldest samples of the longest
+/// track.
+pub(crate) const MAX_TRACKS: usize = 64;
+pub(crate) const MAX_TOTAL_SAMPLES: usize = 131_072;
+/// C1: one track never holds more than this many samples (a gain that changes on every
+/// 1 kHz push for longer than this keeps only its newest ~32 s).
+const MAX_TRACK_SAMPLES: usize = 32_768;
 
-/// Per-source `effective_gain_db` history, one entry per `Runtime` tick, on the log's
-/// `t_mono_ms` clock (R70).
+/// One source's recorded gain, run-length encoded (C1): a run of identical readings is
+/// kept as its first and its latest sample (the latest one's time moves forward), so a
+/// steady source costs two entries instead of one per tick, and both lookups
+/// ([`gain_at`]'s nearest-previous, [`gain_lin_interp_at`]'s interpolation) see exactly
+/// what per-tick recording gave them — the sample before a change is still the previous
+/// tick's.
+#[derive(Default)]
+struct Track {
+    samples: VecDeque<(Duration, f64)>,
+    /// The last time this source was among the recorded readings (alive).
+    last_seen: Duration,
+}
+
+/// Per-source `effective_gain_db` history, recorded every `Runtime` tick (and every fast
+/// gain push), on the log's `t_mono_ms` clock (R70). Bounded (C1): per track by
+/// [`HISTORY_SPAN`] + [`MAX_TRACK_SAMPLES`], dead tracks by [`DEAD_LINGER`], in total by
+/// [`MAX_TRACKS`] + [`MAX_TOTAL_SAMPLES`].
 #[derive(Default)]
 pub(crate) struct GainHistory {
-    tracks: HashMap<String, VecDeque<(Duration, f64)>>,
+    tracks: HashMap<String, Track>,
 }
 
 impl GainHistory {
@@ -1020,30 +1116,93 @@ impl GainHistory {
         GainHistory::default()
     }
 
-    /// Record one tick's readings, pruning entries older than [`HISTORY_SPAN`] (per
-    /// source, so a source that stops changing isn't forgotten just because others tick).
+    /// Record one tick's readings — every live source's, so a track missing from them
+    /// belongs to a source that is gone (dropped [`DEAD_LINGER`] after its last reading).
     pub(crate) fn record(&mut self, t: Duration, readings: impl Iterator<Item = (String, f64)>) {
         for (id, db) in readings {
             let track = self.tracks.entry(id).or_default();
-            track.push_back((t, db));
-            while track
-                .front()
-                .is_some_and(|(ts, _)| t.saturating_sub(*ts) > HISTORY_SPAN)
-            {
-                track.pop_front();
+            track.last_seen = t;
+            let s = &mut track.samples;
+            let n = s.len();
+            if n >= 2 && s[n - 1].1 == db && s[n - 2].1 == db {
+                s[n - 1].0 = t; // the run goes on: move its end forward
+            } else {
+                s.push_back((t, db));
+            }
+            // The front sample is only needed while it defines the value at the span's
+            // edge: drop it once the next one is itself older than the span.
+            while s.len() >= 2 && t.saturating_sub(s[1].0) > HISTORY_SPAN {
+                s.pop_front();
+            }
+            while s.len() > MAX_TRACK_SAMPLES {
+                s.pop_front();
+            }
+        }
+        self.tracks
+            .retain(|_, tr| t.saturating_sub(tr.last_seen) <= DEAD_LINGER);
+        self.enforce_caps(t);
+    }
+
+    fn enforce_caps(&mut self, t: Duration) {
+        loop {
+            let total: usize = self.tracks.values().map(|tr| tr.samples.len()).sum();
+            if self.tracks.len() <= MAX_TRACKS && total <= MAX_TOTAL_SAMPLES {
+                return;
+            }
+            // The least recently seen dead track first.
+            let dead = self
+                .tracks
+                .iter()
+                .filter(|(_, tr)| tr.last_seen < t)
+                .min_by_key(|(_, tr)| tr.last_seen)
+                .map(|(id, _)| id.clone());
+            if let Some(id) = dead {
+                self.tracks.remove(&id);
+                continue;
+            }
+            if self.tracks.len() > MAX_TRACKS {
+                // Every track is live (more live sources than the cap — never in practice):
+                // the one seen longest ago, deterministically.
+                let id = self
+                    .tracks
+                    .iter()
+                    .min_by(|a, b| a.1.last_seen.cmp(&b.1.last_seen).then(a.0.cmp(b.0)))
+                    .map(|(id, _)| id.clone());
+                if let Some(id) = id {
+                    self.tracks.remove(&id);
+                }
+                continue;
+            }
+            // Live tracks only, still over the sample cap: trim the longest one's oldest.
+            if let Some(tr) = self.tracks.values_mut().max_by_key(|tr| tr.samples.len()) {
+                let excess = (total - MAX_TOTAL_SAMPLES).min(tr.samples.len().saturating_sub(2));
+                if excess == 0 {
+                    return;
+                }
+                tr.samples.drain(..excess);
+            } else {
+                return;
             }
         }
     }
 
-    /// A clone of the recorded tracks for exactly these ids (cheap — bounded by
-    /// [`HISTORY_SPAN`] × tick rate), handed to the worker thread.
+    /// `(tracks, samples)` currently held — the `loop` probe's bound evidence (C1).
+    pub(crate) fn stats(&self) -> (usize, usize) {
+        (
+            self.tracks.len(),
+            self.tracks.values().map(|tr| tr.samples.len()).sum(),
+        )
+    }
+
+    /// A clone of the recorded tracks for exactly these ids (cheap — bounded by the caps
+    /// above), handed to the worker thread.
     pub(crate) fn snapshot(&self, ids: &[String]) -> GainSchedule {
         ids.iter()
             .map(|id| {
                 let track = self
                     .tracks
                     .get(id)
-                    .map(|t| t.iter().copied().collect())
+                    .map(|t| t.samples.iter().copied().collect())
                     .unwrap_or_default();
                 (id.clone(), track)
             })
@@ -1110,6 +1269,11 @@ impl PendingWindows {
         if let Some(p) = self.map.get_mut(corr) {
             p.done_mono = Some(done_mono);
         }
+    }
+
+    /// Recorded windows (bounded by `MAX_PENDING`) — the `loop` probe's `bounds`.
+    pub(crate) fn len(&self) -> usize {
+        self.map.len()
     }
 
     pub(crate) fn get(&self, corr: &str) -> Option<&PendingTransition> {
@@ -1287,6 +1451,18 @@ fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition, dump:
         pending.started_mono.saturating_sub(WINDOW_PRE),
         done_mono + WINDOW_POST,
     );
+    if window.1.saturating_sub(window.0) > MAX_ANALYSIS_WINDOW {
+        log::event(
+            "probe",
+            Level::Info,
+            "probe.dropout",
+            Some(corr),
+            json!({ "skipped": "window_too_long",
+                    "window_ms": window.1.saturating_sub(window.0).as_secs_f64() * 1000.0,
+                    "max_ms": MAX_ANALYSIS_WINDOW.as_secs_f64() * 1000.0 }),
+        );
+        return;
+    }
     if let Some(why) = rt.audio.meter_unavailable() {
         log::event(
             "probe",
@@ -1524,15 +1700,109 @@ mod tests {
     #[test]
     fn gain_history_prunes_past_its_span() {
         let mut h = GainHistory::new();
-        h.record(ms(0), std::iter::once(("s".to_string(), -6.0)));
-        h.record(
-            ms(HISTORY_SPAN.as_millis() as u64 + 1000),
-            std::iter::once(("s".to_string(), -3.0)),
-        );
-        let snap = h.snapshot(&["s".to_string()]);
+        let s = || "s".to_string();
+        h.record(ms(0), std::iter::once((s(), -6.0)));
+        h.record(ms(10), std::iter::once((s(), -5.0)));
+        let late = HISTORY_SPAN.as_millis() as u64 + 1000;
+        h.record(ms(late), std::iter::once((s(), -3.0)));
+        let snap = h.snapshot(&[s()]);
         let track = &snap["s"];
-        assert_eq!(track.len(), 1, "the stale entry must have been pruned");
-        assert_eq!(track[0].1, -3.0);
+        // Only what defines the value from the span's edge on is kept.
+        assert_eq!(track.len(), 2, "{track:?}");
+        assert_eq!(track[0].1, -5.0);
+        assert_eq!(gain_at(Some(track), ms(late)), -3.0);
+    }
+
+    #[test]
+    fn gain_history_run_length_keeps_lookups_exact() {
+        let mut h = GainHistory::new();
+        let s = || "s".to_string();
+        for i in 0..1000u64 {
+            h.record(ms(i), std::iter::once((s(), 0.0)));
+        }
+        for (k, i) in (1000..1030u64).enumerate() {
+            h.record(ms(i), std::iter::once((s(), -(k as f64))));
+        }
+        for i in 1030..2000u64 {
+            h.record(ms(i), std::iter::once((s(), SILENT_DB)));
+        }
+        let snap = h.snapshot(&[s()]);
+        let track = &snap["s"];
+        assert!(
+            track.len() <= 34,
+            "a steady run must not cost one entry per tick: {}",
+            track.len()
+        );
+        // The sample right before the ramp is still the previous tick's 0 dB.
+        assert_eq!(gain_at(Some(track), ms(999)), 0.0);
+        assert_eq!(gain_at(Some(track), ms(500)), 0.0);
+        assert_eq!(gain_at(Some(track), ms(1010)), -10.0);
+        assert_eq!(gain_at(Some(track), ms(1500)), SILENT_DB);
+        let mid = gain_lin_interp_at(Some(track), ms(500));
+        assert!((mid - 1.0).abs() < 1e-12, "{mid}");
+    }
+
+    #[test]
+    fn gain_history_forgets_dead_sources_and_stays_bounded() {
+        // C1: 10 000 simulated create → record → destroy cycles (ids never reused, like
+        // `src<n>`): the map must stay bounded by the caps, and a dead track must go
+        // once DEAD_LINGER has passed.
+        let mut h = GainHistory::new();
+        let mut t = 0u64;
+        for n in 0..10_000u64 {
+            let id = format!("src{n}");
+            for _ in 0..40 {
+                t += 1;
+                h.record(
+                    ms(t),
+                    [("live".to_string(), 0.0), (id.clone(), -((t % 7) as f64))].into_iter(),
+                );
+            }
+            let (tracks, samples) = h.stats();
+            assert!(tracks <= MAX_TRACKS, "tracks {tracks} after {n} cycles");
+            assert!(
+                samples <= MAX_TOTAL_SAMPLES,
+                "samples {samples} after {n} cycles"
+            );
+        }
+        // Long after the last cycle only the live source is left.
+        let later = t + DEAD_LINGER.as_millis() as u64 + 10;
+        h.record(ms(later), std::iter::once(("live".to_string(), 0.0)));
+        assert_eq!(
+            h.stats().0,
+            1,
+            "dead tracks must be dropped after DEAD_LINGER"
+        );
+        assert!(h.stats().1 <= 2);
+    }
+
+    #[test]
+    fn a_hung_decode_is_killed_at_its_timeout() {
+        // M8: ffmpeg reading a FIFO nobody writes blocks forever — bounded, it's killed.
+        if std::process::Command::new(FFMPEG)
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            println!("SKIP: no ffmpeg");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("lp-dropout-fifo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("never.wav");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let t = Instant::now();
+        let r = run_ffmpeg_bounded(0.0, 1.0, &fifo, Duration::from_millis(300));
+        let took = t.elapsed();
+        let _ = std::fs::remove_file(&fifo);
+        assert!(took < Duration::from_secs(3), "not bounded: {took:?}");
+        let e = r.expect_err("a hung decode must fail");
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(
+            FFMPEG_CHILDREN.lock().unwrap().is_empty(),
+            "child left registered"
+        );
     }
 
     #[test]

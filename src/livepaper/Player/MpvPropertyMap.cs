@@ -31,7 +31,9 @@ public static class MpvPropertyMap
             case "volume": return Num(v) is double vol ? ("gain.user", VolumeDb(vol)) : Unknown(mpvArgs, "volume not a number");
             case "speed": return Num(v) is double sp ? ("speed", sp) : Unknown(mpvArgs, "speed not a number");
             case "mute": return Bool(v) is bool m ? ("gain.mute", m ? SilentDb : 0.0) : Unknown(mpvArgs, "mute not a bool");
-            case "pause": return Bool(v) is bool p ? ("paused", p) : Unknown(mpvArgs, "pause not a bool");
+            // M7 (final review): mpv's `pause` is the PLAYER-level pause (R75) — never a
+            // node's own `paused`, which the transition recipe owns for held sides.
+            case "pause": return Bool(v) is bool p ? ("player.paused", p) : Unknown(mpvArgs, "pause not a bool");
             case "loop-file":
             case "loop":
                 {

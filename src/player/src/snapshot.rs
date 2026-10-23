@@ -64,7 +64,7 @@ pub const DEBOUNCE: Duration = Duration::from_millis(250);
 pub const REFRESH: Duration = Duration::from_secs(2);
 
 /// Gain slots that are recipe/anti-click scaffolding, restored at 0 dB.
-const TRANSIENT_GAINS: [&str; 2] = ["xfade", "anticlick"];
+const TRANSIENT_GAINS: [&str; 3] = ["xfade", "anticlick", "pause"];
 /// Source props stored as `SourceSnap` fields (not in its `props`).
 const SOURCE_FIELDS: [&str; 6] = ["kind", "path", "paused", "speed", "loop", "position"];
 

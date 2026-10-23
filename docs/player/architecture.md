@@ -42,7 +42,11 @@ overlay leaving mpvpaper parked — see the design spec §1 for the measured inc
 6. A new transition on an output commits or supersedes whatever is already in flight there —
    never parked, never stacked.
 7. Player-level pause freezes picture, audio *and* time together, and resumes exactly where it
-   left off.
+   left off (its own anti-click gate on a dedicated `gain.pause` slot; teardown still completes
+   while paused; `stop` ends the pause with the session).
+8. No audio onset or offset without a ramp the listener can hear — every ramp-in waits for the
+   source's audio to really flow (`src/player/src/onset.rs`, the one helper every un-pause path
+   uses), every ramp-out settles before the pause/destroy lands.
 
 ---
 
@@ -60,8 +64,10 @@ overlay leaving mpvpaper parked — see the design spec §1 for the measured inc
 │        Graph (src/graph/) · Animator + Clocks (src/anim.rs, src/clock.rs) ·                │
 │        gl-transitions Effects (src/gfx/effects.rs) · Composer (src/gfx/compose.rs) ·        │
 │        Transition recipe (src/recipes/transition.rs) · Command API (src/api/) · Probes      │
-│        (src/probe/) · Audio bus (src/audio/) · Snapshot writer (src/snapshot.rs)            │
-│        in-process sources: video/image via libmpv (src/sources/mpv.rs, src/mpv/),           │
+│        (src/probe/, incl. the dropout detector probe/dropout.rs) · Audio bus (src/audio/,  │
+│        re-created after a PipeWire restart) · Snapshot writer (src/snapshot.rs)             │
+│        in-process sources: video/image via libmpv (src/sources/mpv.rs, src/mpv/; the core  │
+│          is created on an `lp-open` worker thread, the GL half on the loop),                │
 │        colour (src/sources/color.rs), still-frame copies (src/sources/snapshot.rs)          │
 └──────────────▲──────────────────────────────────────────────────▲─────────────────────────┘
                │ JSON Lines, one unix socket                       │ EGL + Wayland (src/wl.rs),
@@ -142,12 +148,17 @@ transition.done {to}                                                            
    a bad/erroring B before handoff always snaps back to A, never a black/silent screen)
 ```
 
-**Every tick** (the one calloop loop, `src/player/src/runtime.rs`, "Who runs what"): `Animator::tick` →
-`Graph::set` → due destroys → `sync_sources` (`SourceHost::sync`, forwards drained graph changes
-to the live mpv/colour sources) → `update_sources` (`SourceHost::update`, pulls back `Ready`/
-`Ended`/`Position`/`Error` events, mirrors observed values) → `Transitions::tick(those events)`
-(advances the state machine, drains its own events) → `refresh_srcs` → `Composer::compose_output`
-per output → present (`src/player/src/wl.rs` frame callback, or the headless backend's no-op).
+**Every tick** (the one calloop loop, `src/player/src/runtime.rs`, "Who runs what"): bus route
+check (re-route sources after a PipeWire restart) → `Animator::tick` (+ the teardown ramps on the
+unpaused clock) → `Graph::set` → due destroys → `sync_sources` (the R88 player-pause gate's state
+machine, then `SourceHost::sync`: forwards drained graph changes to the live mpv/colour sources,
+finishes async opens) → `update_sources` (`SourceHost::update`, pulls back `Ready`/`Ended`/
+`Position`/`Error`/`AudioFlowing` events, mirrors observed values) → held onsets resolved
+(`crate::onset`) → `Transitions::tick(those events)` (advances the state machine, drains its own
+events) → `refresh_srcs` → `Composer::compose_output` per output → present
+(`src/player/src/wl.rs` frame callback, or the headless backend's no-op). Gain ramps also run on
+a second, 1 kHz timer (R90 — armed only while a gain ramp is actually moving) so a 30 ms ramp is
+~30 pushes, not one per output refresh.
 
 **Every event**, the moment it's produced, goes through `log::event` (→ `events.jsonl` +
 the in-memory `recent()` ring, `src/player/src/log.rs`) and the Command API's tap (`src/player/src/api/server.rs`),
@@ -180,7 +191,8 @@ reply is sent. The backend's `LpPlayerClient` background event connection
 | Crash restart, startup-failure classification | `src/player/src/supervise.rs` | § Supervisor | `src/player/tests/supervise.rs` |
 | State persistence / `--restore` | `src/player/src/snapshot.rs` | § Snapshot | `src/player/tests/supervise.rs` (restore cases) |
 | The C# side of a setting / dispatch point | `src/livepaper/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-lp-player-adapter.sh`, `--lp-player-selftest` |
-| Reference-based dropout detection (landing via Task 15/16c, lane B) | `src/player/src/probe/dropout.rs`, `scripts/lp_audiowatch.py` | `docs/player/debugging.md` (same lane) | `src/player/tests/dropout.rs` |
+| Reference-based dropout detection | `src/player/src/probe/dropout.rs`, `scripts/lp_audiowatch.py` | `docs/player/debugging.md` | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
+| Onset waits (ramp-ins on flowing audio), the "can it be heard" predicate | `src/player/src/onset.rs` | `docs/player/invariants.md` #8 | its own unit tests, `src/player/tests/api.rs::i6_*` |
 
 A change to a **setting** always needs two ends: the graph property (above) *and* the adapter
 dispatch point that targets it (`.claude/rules/player-adapter.md` § Targeting, § Dispatch points) — "settings
@@ -215,15 +227,17 @@ the screen:
    - `frames` — present-interval pacing per output (mean/p95/missed), whether an output is idle.
    - `bus` / `meter.window {"last_ms":1000}` — the audio bus's health and a window of its real
      dBFS (what the wallpapers actually output, nothing else).
-   - `dropout` — lands with Task 15/16c (lane B, not yet in this history): a reference-based
-     report (lag, fit, flagged drops/micro-gaps) auto-emitted after every `transition.done` once
-     `player.debug` is on; see `docs/player/debugging.md` (same lane) for the symptom → probe →
-     cause playbook once it lands.
+   - `dropout {"corr":"tr-12"}` — a reference-based report (lag, fit, flagged drops/micro-gaps)
+     for a transition/retire/pause window, emitted as `probe.dropout`; auto-run after every
+     `transition.done` while `player.debug` is on. `docs/player/debugging.md` is the symptom →
+     probe → cause playbook.
+   - `loop` — tick/busy timing (`max_busy_ms`, `max_open_ms`), the gain timer, and `bounds`:
+     the size of every per-source collection (a long run of switches must leave them bounded).
 5. **`lp-player ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'`** — look at the actual
    pixels of an output, a layer, or a source.
-6. **`lp-player ctl set '{"path":"player.debug","value":true}'`** (or `--debug` at startup, once
-   that flag lands with the same lane) raises logging detail and turns on the always-on-in-debug
-   probes above.
+6. **`lp-player ctl set '{"path":"player.debug","value":true}'`** (or `serve --debug`) turns on
+   the dropout auto-trigger above; `--log-level debug` adds the debug events (`onset.held`/
+   `onset.started`, `source.position`, `player.pause_gate_opened`, …) to the log.
 7. Every command and query is available as JSON from a shell (`lp-player ctl <verb> '<args>'`,
    `--timeout-ms` to override the 10 s default) — nothing here needs the GUI, mpv's own IPC, or a
    monitor plugged in.
