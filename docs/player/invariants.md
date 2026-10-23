@@ -62,8 +62,23 @@ effect's duration (R42). Tests: `reveal_holds_a_silent`, `frozen_silent_then_b_s
 (B at 0 dB exactly 30 ms after the end), `cut_without_effect`, `cancel_running_snaps_back`,
 `zero_duration_gains_still_ramp_30ms` (duration 0: no gain moves faster than a 30 ms ramp),
 `cancel_held_methods_restore_a`, unit `cut_end_ramps_each_playing_a`.
-Caveat: the ramp is stepped once per loop iteration (≈ 4 steps at 144 Hz, 1–2 in the 60 Hz
-test harness) — a per-sample ramp would need the audio edge (Task 14).
+**Resolved (R90, Task 16d):** the ramp used to be stepped once per *output refresh* loop
+iteration (≈ 4 steps at 144 Hz, 1–2 at 60 Hz) — mpv held each pushed `volume-gain` value
+for most of a 30 ms ramp's span, then snapped straight to the end (measured: 5–7 ms
+`micro_gaps`, ~60 dB under, at 60 Hz). A second, independent calloop timer at ≥ 1 kHz
+(`runtime::GAIN_TICK_PERIOD`), armed only while a `gain.*` animation exists and
+self-disarmed the instant none remain, now evaluates and pushes gain values at that rate
+regardless of the output refresh — `Runtime::gain_fast_tick`,
+`Animator::tick_gains`/`has_live_gain`, `SourceHost::push_gain`,
+`.claude/rules/player-core.md` § Runtime "The fast gain timer". A 30 ms ramp now produces
+29–30 distinct pushes even at 60 Hz (`tests/api.rs::gain_fast_timer_dense_pushes_at_60hz`,
+floor 15 — 5× the main timer's 2–3 — so a busy desktop can't flake it);
+`dropout.sh` at both 60 Hz and 240 Hz (`DROPOUT_OUTPUT_HZ`) reports 0 drops/micro_gaps
+across every case (with Task 16d's detector alignment fixes, #8). Still stepped mode only: between steps, exactly like every other
+property (no "real time" for the fast timer to drive there); still frozen, not advanced,
+while `player.paused` (R75/invariant #7) — the fast timer keeps firing but does no work
+while paused, rather than re-emitting a stale value (`gain_fast_timer_paused_makes_no_
+progress`).
 
 ## 5. Audio follows the picture
 
@@ -162,8 +177,44 @@ at once and ramps back in once `SourceEvent::AudioFlowing` confirms (#8 again), 
 `ONSET_TIMEOUT`. A source with no audio, or already paused, is untouched (instant, as
 before this task). Test: `tests/api.rs::player_pause_ramps_a_plain_source` (`--clock
 real` — the gate's own wall-clock timing has nothing to pace against under `--clock
-stepped`'s virtual time; harmless there since every existing stepped-mode player-pause
-test pauses mid-transition, i.e. never gate-eligible in the first place).
+stepped`'s virtual time; now explicitly inert there regardless — see the stepped-mode
+note below — not merely harmless by accident of every existing test pausing
+mid-transition).
+
+**R93 (review of Task 16c/16d) — the gate must never outlive or race its source's own
+teardown, and must never run under the stepped clock.** Three fixes, found writing
+`tests/api.rs::r93_destroy_mid_gate_never_leaks`:
+- **Abandon on retire/destroy.** `Runtime::retire` (the single path behind `destroy`,
+  `stop`, and output removal) calls `Runtime::abandon_pause_gate(id)` as its very first
+  line, in every state (`Pausing`/`Paused`/`AwaitingFlow`/`Resuming`) — closing the
+  gate's own dropout-probe window and removing it from `pause_gates`/`pause_gate_corr`
+  *before* `retire` adds its own Animator-based ramp on the same `gain.anticlick` path.
+  Without this a still-open gate kept writing that path directly underneath `retire`'s
+  ramp (two writers, "safe" only by incidental drain order), and a gate in a
+  non-writing state (`Paused`/`AwaitingFlow`) was never cleaned up at all — a permanent
+  leak plus a dropout window left open forever.
+- **Never re-opened for a `pending_destroy` id.** The abandon above isn't enough by
+  itself: `drive_pause_gates_pre_sync`'s "new eligible sources" scan could re-create a
+  *second* gate for the same id one `sync_sources` call later (found exactly this way —
+  `destroy` issued with zero delay right after `set player.paused true`), whose wall-clock
+  `Resuming` ramp then drove the source straight back to 0 dB while `retire`'s own,
+  frozen-time ramp sat stuck — the node tore down fully audible. Fixed by excluding every
+  id in `pending_destroy` from that scan, the same way a transition-held id already is.
+  A defensive per-tick backstop also abandons any gate whose node is simply gone
+  (`graph.kind_of(id) != Source`), independent of which path destroyed it.
+- **Stepped clock: explicitly inert.** `drive_pause_gates_pre_sync` bails on
+  `self.stepped()` as its first line — a gate is never opened there (mpv stays paused
+  for good in stepped mode anyway; the gate's wall-clock ramp has nothing to pace
+  against), rather than happening to be harmless only because every existing stepped
+  test pauses mid-transition. Test: `tests/api.rs::
+  stepped_player_pause_never_opens_a_gate`.
+
+Probe (`loop`): `pause_gates` (open gate count, must return to 0),
+`dropout_windows_open` (recorded audio windows — transitions, retires, gates — still
+without a `transition.done`/`.done()`; a leaked gate window is the only thing that could
+leave this nonzero after a destroy settles). `player.pause_gate_opened` (debug-level,
+logged when a gate opens, carrying its `corr`) makes a still-open gate's window
+discoverable without waiting for it to complete normally.
 
 ## 8. No audio onset or offset without a ramp the listener can hear — ramps run on audio that is actually flowing
 
@@ -198,6 +249,23 @@ whole invariant exists to prevent: an unramped click (onset) or a truncated tail
   it force-started immediately, never left to resolve invisibly underneath whatever that
   new transition does to the same gain slot. `Runtime`'s player-pause gate (invariant #7's
   R88) reuses the same primitive for a resume.
+  **R92 (review):** "no audio track" above originally only meant `no_audio` (our own
+  request) — a `kind == "video"` file that simply has no audio *stream at all* still
+  counted as "has audio" and waited the full `ONSET_TIMEOUT` every single time, logging
+  `transition.onset_timeout` on every onset. Fixed by a third, genuinely observed signal,
+  `has_audio` (`MpvSource`, mirrored into the graph like `kind`/`ready`): mpv's `aid`
+  property — not `current-tracks/audio/id`, tried first and found to never re-notify for
+  a file that has no track at all before *or* after load (measured directly,
+  `tests/sources.rs::has_audio_reflects_real_track_presence` failed against it) — always
+  has a real value (`"auto"` pre-resolution, then a track number or the literal `"no"`),
+  so it reliably transitions even for the very first load. Ignored while `no_audio` is
+  on (that's *our* request, not the file's own content) so the two signals never
+  conflate. Defaults `true` (unknown ⇒ has audio, the conservative "don't falsely skip a
+  real wait" choice) until a real source observes otherwise. `b_has_audio`/
+  `Runtime::source_has_audio` both gained the extra `&& has_audio` check. Tests:
+  `recipes::transition::b_has_audio_false_skips_onset_wait_entirely` (unit, synthetic),
+  `tests/api.rs::r92_transition_onto_video_with_no_audio_skips_onset_wait` +
+  `r92_pause_gate_skips_video_with_no_audio` (real GPU + libmpv, real clock).
 - **Offset (requirement #2).** A ramp-to-silence immediately followed by a pause/destroy
   waits for the ramp's nominal duration *plus* `AUDIO_SETTLE_TAIL` (15 ms — comfortably ≥
   2× the measured ~6 ms truncation, small against the 30 ms ramp itself) before the pause
@@ -224,12 +292,18 @@ real to capture). On-machine (`tests/onmachine/dropout.sh`, real audio): full-li
 frozen, reveal, a plain retire, and the `Runtime` player-pause gate (below) each assert
 `drops == 0` and `micro_gaps == 0`, plus an onset check (first 10 ms after audio appears
 must not exceed the ramp's own settled level by > 6 dB) for every case with a real onset.
-**Not fully green yet** — see `docs/player/debugging.md`'s two frozen rows: the onset fix
-(R85) eliminated the original ~15–35 ms unramped-click window (verified: 3 clean
-on-machine runs with the old symptom gone), but a small ~5–7 ms residual `micro_gaps`
-entry persists on *both* the offset (A's hold) and the onset (B's rise), reproducibly,
-root-caused to the `Animator`'s pre-existing tick-rate coarseness (a 30 ms ramp gets only
-1–2 evaluations at 60 Hz — the real fix is a per-sample audio-thread ramp, Task 14's
-"audio edge", out of scope here) rather than anything R85/requirement #2 control. Reported
-with raw evidence rather than loosening the detector's thresholds to force a pass.
+**Green since Task 16d.** History (`docs/player/debugging.md`'s frozen rows): the onset fix
+(R85) eliminated the original ~15–35 ms unramped-click window; the ~5–7 ms residual
+`micro_gaps` Task 16c left on A's offset and B's onset was the `Animator`'s tick-rate
+coarseness, closed by R90's 1 kHz gain timer (#4). The intermittent effect-start findings
+that remained (a 4 ms / 61 dB micro-gap at A's ramp bottom with `lag_ms` 10, or a 30 ms /
+73 dB "A's whole ramp silent" drop with `lag_ms` 40) were proven **not real**: the bus
+meter *and* an independent `parec` capture of the bus monitor showed A's full 30 ms ramp
+in all 24 reproduced runs, with A's mpv pause requested only after ramp + settle tail.
+They were the detector's own alignment — the meter binned on the absolute 10 ms grid
+instead of `expected`'s, a 10 ms-step lag (R96: now refined to 1 ms) and an auto-trigger
+that analysed before the window's post-roll was captured — all fixed in
+`probe/dropout.rs` without loosening any threshold (an instant cut injected at effect start
+is still a 30 ms drop: `tests/dropout.rs::an_unramped_cut_at_effect_start_is_flagged`).
+`dropout.sh` passes every case at 60 Hz and 240 Hz.
 

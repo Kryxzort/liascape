@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use common::{ClipSpec, ensure_clip};
 use lp_player::probe::dropout::{
-    DropoutReport, FitStatus, GainSchedule, SourceWindow, analyse, expected_envelope,
+    DropoutReport, FitStatus, GainSchedule, SourceWindow, analyse, analyse_with_fine,
+    expected_envelope,
 };
 use lp_player::units::{SILENT_DB, db_to_lin};
 
@@ -182,6 +183,182 @@ fn sparse_window_is_insufficient_and_flags_nothing() {
         "micro_gaps = {:?}",
         report.micro_gaps
     );
+}
+
+// ------------------------------------------- Task 16d: R96 1 ms lag + window-grid fix
+
+/// A synthetic copy of the on-machine frozen window (`tests/onmachine/dropout.sh`,
+/// case 2): A steady at −20 dB until 500 ms, a 30 ms linear-*amplitude* anti-click ramp
+/// to silence (`GainLinear`, invariant #2), held silence, then B's 30 ms ramp-in at
+/// 1567 ms and B steady — the expected level at window-relative `t` ms.
+fn frozen_curve(t: f64) -> f64 {
+    let a = if t < 500.0 {
+        1.0
+    } else if t < 530.0 {
+        1.0 - (t - 500.0) / 30.0
+    } else {
+        0.0
+    };
+    let b = if t < 1567.0 {
+        0.0
+    } else if t < 1597.0 {
+        (t - 1567.0) / 30.0
+    } else {
+        1.0
+    };
+    let p = 0.01 * (a * a + b * b); // −20 dB
+    if p > 1e-14 { 10.0 * p.log10() } else { -140.0 }
+}
+
+const FROZEN_WINDOW_MS: u64 = 2100;
+
+/// `(observed, coarse, fine)` for [`frozen_curve`] with the window starting at
+/// `origin_ms` (any sub-10 ms phase, like the real `transition.started − 500 ms`), the
+/// meter delayed by `lag_ms` and 3 dB under expected (the real bus offset), sampled every
+/// 1 ms at a sub-ms phase and floored at the meter's −96 dB, optionally only up to
+/// window-relative `observed_until_ms` (the auto-trigger snapshotting the meter at
+/// `transition.done`, before the window's post-roll was captured). `coarse` holds the
+/// level at each bin's start, as `mix_envelope`'s nearest-previous gain does.
+#[allow(clippy::type_complexity)]
+fn frozen_fixture(
+    origin_ms: f64,
+    lag_ms: f64,
+    observed_until_ms: Option<f64>,
+) -> (
+    Vec<(Duration, f64)>,
+    Vec<(Duration, f64)>,
+    Vec<(Duration, f64)>,
+) {
+    let at = |rel: f64| Duration::from_secs_f64((origin_ms + rel) / 1000.0);
+    let fine: Vec<(Duration, f64)> = (0..FROZEN_WINDOW_MS)
+        .map(|k| (at(k as f64), frozen_curve(k as f64)))
+        .collect();
+    let coarse: Vec<(Duration, f64)> = (0..FROZEN_WINDOW_MS / 10)
+        .map(|k| (at((k * 10) as f64), frozen_curve((k * 10) as f64)))
+        .collect();
+    let until = observed_until_ms.unwrap_or(FROZEN_WINDOW_MS as f64);
+    let observed: Vec<(Duration, f64)> = (0..FROZEN_WINDOW_MS)
+        .map(|k| k as f64 + 0.42)
+        .filter(|rel| *rel <= until)
+        .map(|rel| (at(rel), (frozen_curve(rel - lag_ms) - 3.0).max(SILENT_DB)))
+        .collect();
+    (observed, coarse, fine)
+}
+
+#[test]
+fn refined_lag_recovers_a_23ms_lag_with_no_micro_gap() {
+    // R96: a true 23 ms lag — between two 10 ms steps — on a window full of steep ramp
+    // edges. The coarse search can only say 20 (or 30); the micro-gap pass applying
+    // that in continuous time misaligns A's ramp bottom by 3+ ms, past R94's ±2 ms
+    // guard. Refined to 1 ms it lands on 23 ± 1 and nothing is flagged.
+    let (observed, coarse, fine) = frozen_fixture(0.0, 23.0, None);
+    let report = analyse_with_fine(&observed, &coarse, &fine);
+    assert!(
+        (22..=24).contains(&report.lag_ms),
+        "lag_ms {} not 23 ± 1: {report:?}",
+        report.lag_ms
+    );
+    assert!(report.drops.is_empty(), "drops = {:?}", report.drops);
+    assert!(
+        report.micro_gaps.is_empty(),
+        "micro_gaps = {:?}",
+        report.micro_gaps
+    );
+    assert!(
+        (report.offset_db + 3.0).abs() < 0.5,
+        "offset {}",
+        report.offset_db
+    );
+}
+
+#[test]
+fn refined_lag_still_flags_an_injected_4ms_gap() {
+    // R96 must not absorb a real hole: the same 23 ms-lag window with 4 ms of true
+    // silence in B's steady tone is still exactly one 4 ms micro-gap, at the hole.
+    let (mut observed, coarse, fine) = frozen_fixture(0.0, 23.0, None);
+    for s in observed
+        .iter_mut()
+        .filter(|(t, _)| (1800..1804).contains(&(t.as_millis() as u64)))
+    {
+        s.1 = SILENT_DB;
+    }
+    let report = analyse_with_fine(&observed, &coarse, &fine);
+    assert!((22..=24).contains(&report.lag_ms), "{report:?}");
+    assert!(report.drops.is_empty(), "drops = {:?}", report.drops);
+    assert_eq!(
+        report.micro_gaps.len(),
+        1,
+        "micro_gaps = {:?}",
+        report.micro_gaps
+    );
+    assert_eq!(report.micro_gaps[0].at_ms, 1800);
+    assert_eq!(report.micro_gaps[0].len_ms, 4);
+}
+
+#[test]
+fn window_phase_does_not_skew_the_lag() {
+    // Task 16d, the on-machine failure itself (`dropout.sh` frozen @60 and @240 Hz:
+    // `lag_ms` 10, a 4 ms / 61 dB micro-gap at A's ramp bottom, `at_ms` 532): the window
+    // starts 7.9 ms past a 10 ms boundary and the true lag is 2 ms. Binning the meter on
+    // the absolute 10 ms grid paired each expected bin with samples 7.9 ms early, so the
+    // search said 10 ms (really +2.1) and the micro-gap pass then shifted the fine
+    // envelope a full 10 ms — 8 ms off at the ramp's steepest point.
+    for origin in [3967.9, 3118.17, 3057.86, 4000.0] {
+        let (observed, coarse, fine) = frozen_fixture(origin, 2.0, None);
+        let report = analyse_with_fine(&observed, &coarse, &fine);
+        assert!(
+            (1..=3).contains(&report.lag_ms),
+            "origin {origin}: lag_ms {} (true 2): {report:?}",
+            report.lag_ms
+        );
+        assert!(report.drops.is_empty(), "origin {origin}: {report:?}");
+        assert!(report.micro_gaps.is_empty(), "origin {origin}: {report:?}");
+    }
+}
+
+#[test]
+fn truncated_capture_does_not_pull_the_lag() {
+    // Task 16d, the @240 Hz on-machine failure (`lag_ms` 40, a 30 ms / 73 dB *drop* at
+    // `at_ms` 500 — A's whole anti-click ramp "observed silent"): the auto-trigger used
+    // to snapshot the meter at `transition.done`, so the capture ended at B's ramp end
+    // while `expected` ran 500 ms further. The real audio was ramped (meter + an
+    // independent `parec` capture agree). Whatever window the analysis gets, the lag
+    // must stay the true one and A's ramp must not be flagged.
+    for origin in [3967.9, 4000.0] {
+        let (observed, coarse, fine) = frozen_fixture(origin, 2.0, Some(1600.0));
+        let report = analyse_with_fine(&observed, &coarse, &fine);
+        assert!(
+            (1..=3).contains(&report.lag_ms),
+            "origin {origin}: {report:?}"
+        );
+        assert!(report.drops.is_empty(), "origin {origin}: {report:?}");
+        assert!(report.micro_gaps.is_empty(), "origin {origin}: {report:?}");
+    }
+}
+
+#[test]
+fn an_unramped_cut_at_effect_start_is_flagged() {
+    // The REAL defect the effect-start finding had to rule out: A's audio stopping at
+    // effect start with no ramp. The fixed detector (window grid + R96) must flag it —
+    // its precision gain can't mask a real cut: the lag is pinned by B's onset edge and
+    // A's steady tone, and A's expected-audible ramp bins then pair with true silence.
+    for origin in [3967.9, 4000.0] {
+        let (mut observed, coarse, fine) = frozen_fixture(origin, 2.0, None);
+        for s in observed.iter_mut() {
+            let rel = s.0.as_secs_f64() * 1000.0 - origin;
+            if (502.0..1569.0).contains(&rel) {
+                s.1 = SILENT_DB;
+            }
+        }
+        let report = analyse_with_fine(&observed, &coarse, &fine);
+        assert!(
+            report
+                .drops
+                .iter()
+                .any(|d| (490..=510).contains(&d.at_ms) && d.len_ms >= 20),
+            "origin {origin}: an instant cut at effect start must be a drop: {report:?}"
+        );
+    }
 }
 
 // ----------------------------------------------------------- expected_envelope() (ffmpeg)

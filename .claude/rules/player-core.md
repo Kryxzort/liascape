@@ -819,6 +819,26 @@ supersedes everything. Callers (the transition recipe, `Runtime`'s player-pause 
 bound the wait themselves (`recipes::transition::ONSET_TIMEOUT`) — the source itself
 never times out; it either confirms or waits.
 
+**`has_audio` (R92, review of Task 16c/16d) — does the *file* genuinely have an audio
+track, mirrored into the graph like `kind`/`ready`.** Distinct from `no_audio` (our own
+request, `aid=no`) and from `kind == "video"` (just "not a still): a video with no audio
+*stream at all* used to be indistinguishable from one with audio merely disabled, so
+every onset/R88 resume on it waited the full `ONSET_TIMEOUT` and logged a warning, every
+time. Observed via `aid` (`OBS_AUDIO_SELECTED`, `Format::Str`) — not `current-tracks/
+audio/id`, tried first and found to never re-notify for a genuinely audio-less file
+(unavailable before *and* after load isn't a value transition mpv bothers to re-signal;
+measured directly, `tests/sources.rs::has_audio_reflects_real_track_presence`). `aid`
+always holds a real value (`"auto"` pre-resolution, then a track number or the literal
+`"no"`), so it reliably transitions even on the very first load. The observation is
+*ignored* while `no_audio` is on (an observed `"no"` then says nothing about the file,
+only about our own request) — `has_audio` keeps whatever it last knew until `no_audio`
+is off again and `aid` re-resolves for real. `None`/unknown (no file loaded yet, or no
+notification seen for this load) reads `true` (the schema default) — the conservative
+"don't falsely skip a real wait" choice. `arm_audio_flowing` fires immediately (no wait)
+when `has_audio == Some(false)`, same bucket as `no_audio`/image/stepped above;
+`recipes::transition::b_has_audio` and `Runtime::source_has_audio` both gained the same
+`&& has_audio` check.
+
 **Render targets: front + back.** `front` is what `texture()` returns. Until the current
 load is `Ready`, every frame (including any leftover of a superseded load) renders into a
 staging `back` target; at `Ready` the back is promoted to the front in the same `update`
@@ -1201,6 +1221,58 @@ self-sustains: every gain push's reply wakes the fd). Handlers run inside the cl
 callback and change only the graph/animator/recipe; their changes reach the sources in the
 same iteration's post-dispatch sync.
 
+**The fast gain timer (R90, Task 16d).** A ≤ 30 ms anti-click ramp (invariant #4)
+evaluated only on the main timer is stepped once per *output refresh*, not once per
+sample: at 60 Hz that's 1–2 `Animator::tick` calls over the whole ramp, so mpv's
+`volume-gain` holds each pushed value for most of the ramp's span then snaps straight to
+the end — measured (Task 16c/d): 5–7 ms `micro_gaps` at 60 Hz, 2 ms at 240 Hz. A second,
+independent calloop `Timer` at `runtime::GAIN_TICK_PERIOD` (1 ms) fixes this —
+**armed only while at least one `gain.*` animation exists** (`Runtime::
+arm_gain_timer_if_needed`, checked from `sync_sources`, so a handler's `animate`/
+`transition` or the recipe's own `Transitions::tick` arms it within one loop iteration)
+and **self-disarms** (`TimeoutAction::Drop`, from inside its own callback,
+`Runtime::gain_fast_tick`) the instant none remain, including the one that armed it
+finishing on that very call. Each fire: `Animator::tick_gains(now)` evaluates *only*
+`gain.*`-targeted animations (`anim::is_gain_path` — shared with `redraw::audio_only`,
+§ Wayland "Frame pacing") at the current (pause-adjusted) `Runtime::now`,
+`Graph::set_animated` each, then forwards straight to the hosted source
+(`SourceHost::push_gain` — the same direct-apply bypass as the R88 gate's
+`force_paused`, skipping the ordinary per-tick `sync`'s source-open/gone scan and
+`player_paused` composition, neither of which a gain push needs) and removes those
+entries from the pending-changes queue (`Graph::drain_gain_changes`, a gain-scoped
+partition of `self.changes`, leaving every other pending change untouched) so the next
+ordinary `sync_sources` never replays what this call already hand-delivered (it would
+otherwise re-walk `self.changes` and reapply every historical value once per normal tick
+while a ramp is in flight — exactly the per-tick cost this timer exists to bound). The
+main timer is unchanged (R47 still runs everything else at the output refresh; this
+timer only ever touches gain paths).
+
+- **Pause composes (R88/invariant #7).** `Runtime::now` is frozen while `player.paused`
+  — re-evaluating `tick_gains` against an unchanged `now` would just keep re-emitting
+  the same already-sent value, so the fire skips evaluating *entirely* while paused: zero
+  pushes, zero `graph.set` calls, verified by `tests/api.rs::
+  gain_fast_timer_paused_makes_no_progress`. The timer itself keeps ticking through the
+  pause (so a resume is picked up at the very next 1 ms fire, not delayed behind the main
+  tick) unless the animation itself finishes or is cancelled meanwhile. `gain_fast_tick`
+  also calls `update_player_paused()` itself as its first line — a race found while
+  building this: the timer can fire within the same dispatch batch as the client request
+  that just paused, before `after_dispatch`'s own `sync_sources` gets to it, and the
+  cached `player_paused` field would read stale otherwise.
+- **Stepped clock: never armed.** `arm_gain_timer_if_needed` bails on `self.stepped()` —
+  gains there are evaluated at step boundaries exactly like every other property
+  (`begin_step`'s own `run_anims`); there is no "real time" between steps for a 1 ms
+  timer to drive anything against.
+- **Bounded cost.** The fast tick's own work is one bounded scan of the (small) Animator
+  entry list (`has_live_gain`/`tick_gains`) — no allocation on the hot path beyond the
+  small per-emitted-value `Vec`s every tick already produces (same shape as the existing
+  `tick`). It only runs at all while a gain ramp is actually in flight (typically tens of
+  ms), never as a steady-state background cost.
+- **Probe (`loop`).** `gain_timer_armed`, `gain_ticks` (fire count), `gain_pushes` (total
+  forwarded), `recent_gain_pushes` (bounded `[t_mono_ms, db]` history,
+  `GAIN_PUSH_HISTORY` = 256) — the acceptance evidence for "dense pushes" without logging
+  one event per 1 kHz tick (which would allocate a JSON object even below the log level
+  threshold).
+
 **Stepped clock (R48).** No timer. `step {ms}`: advance the `SteppedClock`, run the
 animator + due destroys + `sync_sources` + `update_sources`, then give every mpv source a
 **virtual media time**: created at its first step at its graph `position` (no advance that
@@ -1415,9 +1487,16 @@ mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, cal
 missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
 Wayland → Frame pacing; Task 16 adds `totals.present_failed`, `last_present_error`,
 `retry_in_ms`); `bus` and `meter.window` (§ Audio bus); `dropout` (Task 15,
-`probe/dropout.rs`) — `{corr, args}` → `{status: "pending", corr}`, the reference-based
+`probe/dropout.rs`) — `{corr, dump?}` → `{status: "pending", corr}`, the reference-based
 dropout detector's result following as a `probe.dropout {corr, report}` event (never
-deferred like `step`'s reply; `docs/player/debugging.md`); `snapshot` (Task 16,
+deferred like `step`'s reply; `docs/player/debugging.md`). Task 16d: the analysis runs
+only once the meter has captured the whole window (`done + WINDOW_POST +
+CAPTURE_MARGIN`, queued in `Runtime::dropout_due` and started from `tick` — the debug
+auto-trigger used to snapshot at `transition.done` and never saw the post-roll); the
+meter is binned on `expected`'s own grid (never the absolute 10 ms one — the window's
+sub-10 ms phase skewed every lag), coarse bins are power means of the 1 ms envelope, and
+the lag is refined to 1 ms (R96, ±10 ms) before drops/micro-gaps; `dump` (absolute path)
+writes every analysis input + the report as JSON for offline replay; `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +

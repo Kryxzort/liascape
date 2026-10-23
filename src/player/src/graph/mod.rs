@@ -740,6 +740,26 @@ impl Graph {
     pub fn drain_changes(&mut self) -> Vec<(PropPath, PropValue)> {
         std::mem::take(&mut self.changes)
     }
+
+    /// R90 (Task 16d): drains only the `gain.*` entries from the pending-changes queue,
+    /// leaving every other pending change in place for the next ordinary
+    /// [`Graph::drain_changes`]. The fast gain timer's own forwarding channel
+    /// (`Runtime::gain_fast_tick`) calls this right after hand-delivering each push
+    /// straight to its source — without it, the next ordinary `sync_sources` would walk
+    /// `self.changes` and replay every historical gain value the ramp already pushed
+    /// since the last ordinary tick, once per normal tick while it's in flight (redundant
+    /// mpv IPC — exactly the cost R90 asks to bound). Any *other* already-pending gain
+    /// change (e.g. a plain `set srcs:*.gain.user` a handler queued moments ago, not yet
+    /// drained) is swept up too and forwarded by the same caller — never silently
+    /// dropped, just delivered sooner than the next main tick would have.
+    pub fn drain_gain_changes(&mut self) -> Vec<(PropPath, PropValue)> {
+        let all = std::mem::take(&mut self.changes);
+        let (gains, rest): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|(p, _)| crate::anim::is_gain_path(p));
+        self.changes = rest;
+        gains
+    }
 }
 
 /// Splits `"<node id>.<prop name>"` at the first `.` — node ids never contain `.` (they may
@@ -1082,6 +1102,45 @@ mod tests {
             ]
         );
         assert!(g.drain_changes().is_empty(), "drain must empty the queue");
+    }
+
+    #[test]
+    // R90 (Task 16d): `drain_gain_changes` must extract only the `gain.*` entries,
+    // leaving every other pending change exactly in place (order preserved) for the
+    // next ordinary `drain_changes`.
+    fn drain_gain_changes_is_scoped() {
+        let mut g = Graph::new();
+        src(&mut g, "src1");
+
+        g.set(&p("src1.speed"), PropValue::F64(2.0)).unwrap();
+        g.set(&p("src1.gain.anticlick"), PropValue::F64(-96.0))
+            .unwrap();
+        g.set(&p("src1.loop"), PropValue::Bool(true)).unwrap();
+        g.set(&p("src1.gain.xfade"), PropValue::F64(-3.0)).unwrap();
+
+        let gains = g.drain_gain_changes();
+        assert_eq!(
+            gains,
+            vec![
+                (p("src1.gain.anticlick"), PropValue::F64(-96.0)),
+                (p("src1.gain.xfade"), PropValue::F64(-3.0)),
+            ]
+        );
+        assert!(
+            g.drain_gain_changes().is_empty(),
+            "draining again must find nothing left"
+        );
+
+        // The non-gain entries are untouched, still in call order, for the ordinary
+        // channel.
+        let rest = g.drain_changes();
+        assert_eq!(
+            rest,
+            vec![
+                (p("src1.speed"), PropValue::F64(2.0)),
+                (p("src1.loop"), PropValue::Bool(true)),
+            ]
+        );
     }
 
     #[test]

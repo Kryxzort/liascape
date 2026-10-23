@@ -1329,6 +1329,347 @@ fn player_pause_ramps_a_plain_source() {
     );
 }
 
+/// R93 (review of Task 16c/16d): destroying a plain source while its R88 player-pause
+/// anticlick gate is still open — in any of its four states (`Pausing`, `Paused`,
+/// `AwaitingFlow`, `Resuming`) — must never leak the gate or its dropout-probe window,
+/// and `retire`'s own 30 ms ramp must be the *only* writer left touching
+/// `gain.anticlick` from that point on (reaching silence cleanly, not fought over by a
+/// gate that kept writing underneath it). `--clock real`: the gate is wall-clock timed.
+#[test]
+fn r93_destroy_mid_gate_never_leaks() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_in(new_root(), &["--clock", "real"], serial);
+    let mut c = srv.client();
+
+    let mpv_paused = |c: &mut Client, id: &str| -> bool {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        probe_source(&p, id)["mpv_pause"].as_str() == Some("yes")
+    };
+    let anticlick = |c: &mut Client, id: &str| -> f64 {
+        get(c, &format!("{id}.gain.anticlick"))["result"]["value"]
+            .as_f64()
+            .unwrap()
+    };
+    let loop_probe = |c: &mut Client| c.ok("probe", json!({"name": "loop"}));
+
+    for state in ["Pausing", "Paused", "AwaitingFlow", "Resuming"] {
+        let base = loop_probe(&mut c);
+        let open_before = base["dropout_windows_open"].as_u64().unwrap();
+
+        let id = create_src(
+            &mut c,
+            json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+        );
+        show_all(&mut c, &id);
+        let t = Instant::now();
+        loop {
+            let v = get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+                .as_f64()
+                .unwrap_or(0.0);
+            if v >= 0.3 {
+                break;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(5),
+                "never started playing"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        c.ok("set", json!({"path": "player.paused", "value": true}));
+        match state {
+            "Pausing" => {
+                // No wait at all: destroy while the gate is still mid-ramp-down (< the
+                // 45 ms ANTICLICK + AUDIO_SETTLE_TAIL window).
+            }
+            "Paused" | "AwaitingFlow" | "Resuming" => {
+                let t = Instant::now();
+                while !mpv_paused(&mut c, &id) {
+                    assert!(t.elapsed() < Duration::from_secs(2), "never paused");
+                }
+                if state == "Paused" {
+                    // Destroy right here, fully paused, gate idle but still open.
+                } else {
+                    c.ok("set", json!({"path": "player.paused", "value": false}));
+                    if state == "Resuming" {
+                        // Wait for AudioFlowing to confirm (anticlick starts rising from
+                        // SILENT_DB) before destroying — lands mid-ramp-in.
+                        let t = Instant::now();
+                        while anticlick(&mut c, &id) <= -95.0 {
+                            assert!(
+                                t.elapsed() < Duration::from_secs(1),
+                                "never started resuming"
+                            );
+                        }
+                    }
+                    // AwaitingFlow: destroy immediately after the resume request, well
+                    // before AudioFlowing can confirm.
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        c.ok("destroy", json!({ "id": id }));
+        // `player.paused` freezes *every* animation (R75, invariant #7) — including
+        // `retire`'s own teardown ramp, if the player is still paused when `destroy`
+        // was issued ("Pausing"/"Paused" above left it `true`; "AwaitingFlow"/
+        // "Resuming" already turned it back off before destroying). That's the correct,
+        // consistent behaviour (everything freezes together), not something this test
+        // should fight — un-pause so the ramp (and so the destroy) can actually
+        // complete, the same way a real session would eventually resume.
+        c.ok("set", json!({"path": "player.paused", "value": false}));
+
+        // The node must actually go (retire's own ramp, or an instant destroy).
+        let t = Instant::now();
+        loop {
+            if get(&mut c, &format!("{id}.gain.anticlick"))["ok"] != json!(true) {
+                break;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(2),
+                "{state}: source never destroyed"
+            );
+        }
+
+        let after = loop_probe(&mut c);
+        assert_eq!(
+            after["pause_gates"],
+            json!(0),
+            "{state}: a gate leaked: {after}"
+        );
+        let open_after = after["dropout_windows_open"].as_u64().unwrap();
+        assert!(
+            open_after <= open_before,
+            "{state}: a dropout window was left open (before {open_before}, after \
+             {open_after}): {after}"
+        );
+
+        // retire's own ramp was the only writer left: the teardown's reported level is
+        // clean silence, same evidence `destroy_ramps_audible_source_out` uses.
+        let t = Instant::now();
+        let teardown = loop {
+            let l = c.ok("logs", json!({"kind_prefix": "source.teardown"}));
+            if let Some(e) = l["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|e| e["id"] == id)
+            {
+                break e.clone();
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(2),
+                "{state}: no source.teardown"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            teardown["gain_db"].as_f64().unwrap() <= -95.9,
+            "{state}: torn down while still audible (a second writer fought the ramp): \
+             {teardown}"
+        );
+    }
+}
+
+/// R93 (review of Task 16c/16d, minor fix): under the stepped clock, `player.paused`
+/// must never open an R88 gate for a plain source at all — mpv itself stays paused for
+/// good there (§ Sources "Stepped mode"), and the gate's wall-clock (`Instant`) ramp has
+/// nothing meaningful to pace against. Pausing/resuming stays the ordinary, instant R75
+/// composition (`node.paused || player.paused`, § invariant #7) — no ramp, `gain.
+/// anticlick` untouched, `probe loop`'s `pause_gates` stays 0 throughout. Default
+/// `Serve::start()` (`--clock stepped`).
+#[test]
+fn stepped_player_pause_never_opens_a_gate() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let anticlick_before = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    c.step(16);
+    let lp = c.ok("probe", json!({"name": "loop"}));
+    assert_eq!(
+        lp["pause_gates"],
+        json!(0),
+        "a gate opened under stepped: {lp}"
+    );
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    let src = probe["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == json!(id))
+        .unwrap();
+    assert_eq!(
+        src["effective_paused"],
+        json!(true),
+        "instant R75 composition, same step: {src}"
+    );
+    assert_eq!(
+        get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"].as_f64(),
+        Some(anticlick_before),
+        "no gate means no gain ramp at all"
+    );
+
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    c.step(16);
+    let lp = c.ok("probe", json!({"name": "loop"}));
+    assert_eq!(lp["pause_gates"], json!(0), "{lp}");
+}
+
+/// R92 (review of Task 16c/16d): a frozen transition onto a B that is a real `video`
+/// with literally no audio stream (`ClipSpec::FrameIndex`, generated with no `-c:a`/
+/// audio input at all — not `no_audio`, which is our own request) must complete
+/// quickly, never waiting the full `ONSET_TIMEOUT` (150 ms) or logging
+/// `transition.onset_timeout` — `has_audio` resolves `false` once mpv loads the file,
+/// so `b_has_audio` already treats it like a colour/image B (R85's existing fast path).
+/// `--clock real`: the whole point is real wall-clock timing of the onset wait.
+#[test]
+fn r92_transition_onto_video_with_no_audio_skips_onset_wait() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    let t0 = Instant::now();
+    loop {
+        let v = get(&mut c, &format!("{a}.time_pos"))["result"]["value"]
+            .as_f64()
+            .unwrap_or(0.0);
+        if v >= 0.3 {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "A never started playing"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*",
+               "to": {"path": s(&ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 })),
+                      "loop": true},
+               "effect_id": "fade", "duration_ms": 300, "method": "frozen"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+
+    let t = Instant::now();
+    let mut handoff_at = None;
+    let mut done_at = None;
+    loop {
+        let logs = c.ok("logs", json!({"corr": corr}));
+        for e in logs["events"].as_array().unwrap() {
+            match e["kind"].as_str().unwrap_or("") {
+                "transition.handoff" if handoff_at.is_none() => handoff_at = Some(t.elapsed()),
+                "transition.done" if done_at.is_none() => done_at = Some(t.elapsed()),
+                "transition.onset_timeout" => {
+                    panic!("must never time out for a B known to have no audio: {logs}")
+                }
+                _ => {}
+            }
+        }
+        if done_at.is_some() {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(3),
+            "transition never completed: {logs}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let handoff_at = handoff_at.expect("handoff must have fired before done");
+    let gap = done_at.unwrap().saturating_sub(handoff_at);
+    println!("R92: handoff->done gap {gap:?} (the old bug would have been >= 150 ms)");
+    assert!(
+        gap < Duration::from_millis(100),
+        "done took {gap:?} after handoff — looks like it still waited for an onset \
+         confirmation that could never arrive"
+    );
+}
+
+/// R92/R88: a plain (non-transition) playing source with no audio track must pause and
+/// resume *instantly* on `player.paused` — `source_has_audio` must be false for it, so
+/// `Runtime`'s anticlick gate never opens at all (no ramp, no `player.pause_gate` log
+/// event), exactly like a colour/image source.
+#[test]
+fn r92_pause_gate_skips_video_with_no_audio() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 })),
+               "loop": true}),
+    );
+    show_all(&mut c, &id);
+    let t0 = Instant::now();
+    loop {
+        let v = get(&mut c, &format!("{id}.time_pos"))["result"]["value"]
+            .as_f64()
+            .unwrap_or(0.0);
+        if v >= 0.3 {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "never started playing"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Let `has_audio` resolve to false (the file loaded well before this point already).
+    std::thread::sleep(Duration::from_millis(50));
+
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let mpv_paused = |c: &mut Client| -> bool {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        probe_source(&p, &id)["mpv_pause"].as_str() == Some("yes")
+    };
+    let t = Instant::now();
+    loop {
+        if mpv_paused(&mut c) {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "never paused — if a gate opened for a no-audio source, this is why"
+        );
+    }
+    let logs = c.ok("logs", json!({"kind_prefix": "player.pause_gate"}));
+    assert!(
+        logs["events"].as_array().unwrap().is_empty(),
+        "no gate should ever open for a source with no audio track: {logs}"
+    );
+
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let t = Instant::now();
+    loop {
+        if !mpv_paused(&mut c) {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_millis(100), "never resumed");
+    }
+}
+
 /// Task 16b/16c review fix: `probe sources`' `effective_paused` must read `player.paused`
 /// straight off the graph, never the runtime's own cached field — which is only refreshed
 /// at the top of the next tick/step. A `set player.paused true` immediately followed by
@@ -2684,4 +3025,170 @@ fn ao_null_runs_without_bus() {
     );
     let logs = c.ok("logs", json!({"kind_prefix": "audio.bus.down"}));
     assert_eq!(logs["events"].as_array().unwrap().len(), 1, "{logs}");
+}
+
+// ---------------------------------------------------------------- Task 16d (R90): the
+// fast (>= 1 kHz) gain-only timer, independent of the output refresh.
+
+/// `gain_fast_timer_dense_pushes_at_60hz`'s floor: 5× the 2–3 evaluations a 30 ms ramp
+/// gets from a 60 Hz main timer alone.
+const MIN_FAST_PUSHES: u64 = 15;
+
+/// R90: a 30 ms anti-click gain ramp must land as a genuinely dense push sequence, not
+/// the 1-2 `Animator::tick` evaluations a 60 Hz main tick alone would give it (Task
+/// 16c's measured residual: held steps then an abrupt final jump). `--clock real`, the
+/// default headless outputs (`640x360@60,320x180@60`) — 60 Hz, same as the brief's own
+/// acceptance line. A colour source needs no mpv/audio device at all, so this is a pure,
+/// fast check of the push *mechanism* (graph.set + forward), independent
+/// of real audio hardware (the on-machine `dropout.sh` covers the real-audio case).
+#[test]
+fn gain_fast_timer_dense_pushes_at_60hz() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = color(&mut c, [255, 0, 0]);
+
+    // Idle before any gain animation exists: never armed.
+    let idle = c.ok("probe", json!({"name": "loop"}));
+    assert_eq!(idle["gain_timer_armed"], json!(false), "{idle}");
+
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.anticlick"), "from": 0.0, "to": 1.0,
+               "duration_ms": 30, "unit": "gain_linear"}),
+    );
+
+    // Give the ramp (30 ms) + a generous margin time to fully run and self-disarm.
+    std::thread::sleep(Duration::from_millis(150));
+
+    let lp = c.ok("probe", json!({"name": "loop"}));
+    let pushes = lp["gain_pushes"].as_u64().expect("gain_pushes");
+    println!("R90: {pushes} gain pushes over a 30 ms ramp at 60 Hz output: {lp}");
+    // Unloaded: 29–30 (one per ms). The bound is what proves R90 — the main timer alone
+    // gives a 30 ms ramp at most 2–3 evaluations at 60 Hz — while tolerating the single
+    // loop thread being busy for a few ms at a time on a loaded machine (a late fire
+    // pushes the value for *now*, it just skips the missed ms): measured once in seven
+    // full `tests/api.rs` runs with the owner's desktop busy, < 25 (Task 16d).
+    assert!(
+        pushes >= MIN_FAST_PUSHES,
+        "expected >= {MIN_FAST_PUSHES} distinct pushes, got {pushes}: {lp}"
+    );
+    assert!(
+        lp["gain_ticks"].as_u64().unwrap() >= pushes,
+        "fast-tick count must be >= pushes: {lp}"
+    );
+
+    let recent = lp["recent_gain_pushes"]
+        .as_array()
+        .expect("recent_gain_pushes");
+    let dbs: Vec<f64> = recent.iter().map(|p| p[1].as_f64().unwrap()).collect();
+    let distinct: std::collections::BTreeSet<i64> =
+        dbs.iter().map(|db| (db * 1e6) as i64).collect();
+    assert!(
+        distinct.len() >= MIN_FAST_PUSHES as usize,
+        "expected >= {MIN_FAST_PUSHES} distinct values, got {}: {dbs:?}",
+        distinct.len()
+    );
+    // A linear-amplitude ramp to 0 dB (unity) is monotonically increasing in dB too.
+    for w in dbs.windows(2) {
+        assert!(w[1] >= w[0] - 1e-9, "not monotonic: {dbs:?}");
+    }
+    assert!(
+        (*dbs.last().unwrap() - 0.0).abs() < 1e-6,
+        "must settle at 0 dB: {dbs:?}"
+    );
+
+    // Self-disarm: nothing left to drive.
+    assert_eq!(
+        lp["gain_timer_armed"],
+        json!(false),
+        "must disarm once the ramp finished: {lp}"
+    );
+    assert_eq!(
+        get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"],
+        json!(0.0)
+    );
+}
+
+/// R90: while `player.paused`, the fast gain timer must make no progress at all on an
+/// in-flight ramp — `Runtime::now` is frozen (R75/invariant #7), so re-evaluating with
+/// an unchanged `now` must push nothing new. Resuming must let it continue and finish.
+#[test]
+fn gain_fast_timer_paused_makes_no_progress() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = color(&mut c, [0, 255, 0]);
+
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.anticlick"), "from": 0.0, "to": 1.0,
+               "duration_ms": 300, "unit": "gain_linear"}),
+    );
+    // Let it get genuinely under way before pausing.
+    std::thread::sleep(Duration::from_millis(60));
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    // Settle past the pause edge itself (the fast timer may legitimately fire once
+    // more, still unpaused, if it was already queued in the same dispatch batch as the
+    // `set` — the same race `drive_pause_gates_pre_sync`'s own doc describes for R88's
+    // gate) before taking the "now it's frozen" baseline below.
+    std::thread::sleep(Duration::from_millis(30));
+
+    let before = c.ok("probe", json!({"name": "loop"}));
+    let pushes_baseline = before["gain_pushes"].as_u64().unwrap();
+    let value_baseline = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        before["gain_timer_armed"] == json!(true),
+        "the animation hasn't finished: the timer must still be armed: {before}"
+    );
+
+    // Sample repeatedly across a 160 ms window: every sample must match the settled
+    // baseline exactly (frozen `now()` is bit-for-bit deterministic, R75) — not just the
+    // first and last point, which would miss a slow trickle a single before/after pair
+    // could average away.
+    for _ in 0..8 {
+        std::thread::sleep(Duration::from_millis(20));
+        let v = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+            .as_f64()
+            .unwrap();
+        let p = c.ok("probe", json!({"name": "loop"}))["gain_pushes"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(p, pushes_baseline, "no new pushes while paused");
+        assert!(
+            (v - value_baseline).abs() < 1e-9,
+            "gain.anticlick must not move while paused: {value_baseline} vs {v}"
+        );
+    }
+
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let t = Instant::now();
+    loop {
+        let v = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
+            .as_f64()
+            .unwrap();
+        if (v - 0.0).abs() < 1e-6 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(2),
+            "ramp never finished resuming"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    let done = c.ok("probe", json!({"name": "loop"}));
+    assert!(
+        done["gain_pushes"].as_u64().unwrap() > pushes_baseline,
+        "resume must push new values: {done}"
+    );
+    assert_eq!(
+        done["gain_timer_armed"],
+        json!(false),
+        "disarmed once finished: {done}"
+    );
 }

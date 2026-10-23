@@ -507,14 +507,20 @@ fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration) {
 }
 
 /// R85: does `id` have real audio worth holding an onset ramp for? Only a live `video`
-/// source (not `no_audio`) ever reports [`SourceEvent::AudioFlowing`] — `MpvSource::apply`
-/// fires it immediately for everything else (stepped mode, no audio track), and a
+/// source (not `no_audio`, R92: and not confirmed to have no actual audio track —
+/// `has_audio`, defaulting `true` until a real source observes otherwise) ever reports
+/// [`SourceEvent::AudioFlowing`] — `MpvSource::apply` fires it immediately for everything
+/// else (stepped mode, no audio track, no audio stream in the file at all), and a
 /// `color`/`image`/`snapshot` source (no `MpvSource` behind it at all) never fires it in
 /// the first place. Checking here too (never scheduling a [`PendingOnset`] for one) avoids
 /// relying on a 150 ms [`ONSET_TIMEOUT`] for the completely ordinary case of a plain cut-
-/// like fade onto a colour/image B — ramp it in at once, exactly as before this task.
+/// like fade onto a colour/image B, **or onto a video that simply has no audio stream**
+/// (R92: before this check, every such B waited the full timeout and logged a warning,
+/// every time) — ramp it in at once instead.
 fn b_has_audio(g: &Graph, id: &str) -> bool {
-    get_str(g, id, "kind") == "video" && !get_bool(g, id, "no_audio")
+    get_str(g, id, "kind") == "video"
+        && !get_bool(g, id, "no_audio")
+        && get_bool(g, id, "has_audio")
 }
 
 /// Un-pause `id` and either hold its onset ramp (R85, real audio) or start it at once (no
@@ -2377,6 +2383,49 @@ mod tests {
             h.anim.target_of(&path(&b, "gain.anticlick")),
             Some(0.0),
             "timed out — ramps unconfirmed rather than holding forever"
+        );
+    }
+
+    /// R92 (review of Task 16c/16d): a video `kind` that mpv itself resolved to have
+    /// **no audio track at all** (`has_audio` observed `false` — distinct from
+    /// `no_audio`, our own request) must skip the onset wait entirely, exactly like a
+    /// colour/image B — `b_has_audio` must be false for it, so `schedule_onset` never
+    /// creates a `PendingOnset` in the first place. Before this fix, `b_has_audio` only
+    /// checked `kind == "video" && !no_audio`, which is true here too — the ramp would
+    /// have stayed `None` (held) until `ONSET_TIMEOUT` (150 ms) elapsed and a
+    /// `transition.onset_timeout` warning fired, every single time, for a file that was
+    /// never going to send `AudioFlowing` at all. The fix's evidence is the *absence* of
+    /// that wait: unlike `onset_timeout_ramps_anyway` above (which needs a 200 ms tick to
+    /// reach the same final state), this reaches it on the very same tick as handoff.
+    #[test]
+    fn b_has_audio_false_skips_onset_wait_entirely() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.observe(&b, "has_audio", PropValue::Bool(false));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        h.tick(600, &[]); // handoff — no further ticks needed before the assertions below
+        assert!(h.has(&t, "transition.handoff"));
+        assert!(!h.bool(&b, "paused"), "B un-paused at handoff");
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            Some(0.0),
+            "no audio track: the ramp is scheduled immediately, same tick as handoff — \
+             never held behind a PendingOnset waiting for AudioFlowing"
+        );
+        h.tick(ANTICLICK.as_millis() as u64 + 1, &[]);
+        assert!(
+            h.has(&t, "transition.done"),
+            "done must not wait on an onset that was never scheduled"
         );
     }
 

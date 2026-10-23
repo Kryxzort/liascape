@@ -456,6 +456,39 @@ fn no_audio_live() {
     );
 }
 
+/// R92 (review of Task 16c/16d): `has_audio` must reflect what mpv actually resolved —
+/// `true` for a clip with a real audio stream, `false` for one with none at all
+/// (`ClipSpec::FrameIndex`, which `ensure_clip`'s own doc says carries no audio). This is
+/// distinct from `no_audio` ([`no_audio_live`] above, our own request to disable it): a
+/// file that simply never had an audio track must resolve to `false` here on its own,
+/// with nothing else asked of it.
+#[test]
+fn has_audio_reflects_real_track_presence() {
+    let Some(gfx) = headless_gl() else { return };
+
+    let with_audio = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_ready(&gfx, path_str(&with_audio), json!({}));
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
+        s.read("has_audio") == Some(PropValue::Bool(true))
+    });
+    assert!(
+        ok,
+        "has_audio never became true for a clip with audio: {evs:?}"
+    );
+
+    let no_audio_clip = ensure_clip("frame_index_90_r92", ClipSpec::FrameIndex { frames: 90 });
+    let mut src2 = open_ready(&gfx, path_str(&no_audio_clip), json!({}));
+    let wake2 = Some(src2.wake_fd());
+    let (evs2, ok2) = pump(&gfx, &mut src2, wake2, Duration::from_secs(3), |_, s| {
+        s.read("has_audio") == Some(PropValue::Bool(false))
+    });
+    assert!(
+        ok2,
+        "has_audio never became false for a clip with no audio stream: {evs2:?}"
+    );
+}
+
 /// The brief's property map, checked against what mpv itself reports.
 #[test]
 fn property_map_reaches_mpv() {
