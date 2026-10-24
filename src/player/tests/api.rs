@@ -3814,6 +3814,97 @@ fn i5_switch_loop_busy() {
     }
 }
 
+/// Task 20b: per-switch allocator retention — the Task 20 soak's RSS slope (6.4 MiB/min
+/// with malloc's in-use bytes flat). Fade between two playing 1080p clips: after `WARM`
+/// switches, `MEASURE` more must leave RSS nearly flat, and an on-demand `malloc_trim(0)`
+/// (`probe memory {trim: true}`) must find little to give back — glibc keeping freed
+/// frame buffers resident in its arenas is exactly the bug (`mem::apply_policy`). Both
+/// checks are ratios of the process's own RSS, not absolute sizes. Old behaviour on
+/// demand: `LP_PLAYER_MALLOC=glibc cargo test --test api t20b` (RED).
+#[test]
+fn t20b_switch_loop_rss_stays_flat() {
+    const WARM: usize = 4;
+    const MEASURE: usize = 16;
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    let switch = |c: &mut Client, i: usize| {
+        let path = if i.is_multiple_of(2) { &blue } else { &red };
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": path, "loop": true},
+                   "effect_id": "fade", "duration_ms": 300}),
+        );
+        let b = r["to"].as_str().unwrap().to_string();
+        wait_playing(c, &b, 0.2);
+        wait_for(Duration::from_secs(5), "transition done", || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        });
+    };
+    // Every old core destroyed (and the reaper's trim after it run) before a reading.
+    let settled = |c: &mut Client| {
+        wait_for(Duration::from_secs(5), "reaper idle", || {
+            let m = c.ok("probe", json!({"name": "memory"}));
+            (m["reaper_pending"] == json!(0) && m["dying_sources"] == json!(0)).then_some(())
+        });
+        // `reaper_pending` only drops to 0 after the batch's trim (reaper.rs), so no sleep.
+    };
+    for i in 0..WARM {
+        switch(&mut c, i);
+    }
+    settled(&mut c);
+    let m0 = c.ok("probe", json!({"name": "memory"}));
+    for i in WARM..WARM + MEASURE {
+        switch(&mut c, i);
+    }
+    settled(&mut c);
+    let m1 = c.ok("probe", json!({"name": "memory", "args": {"trim": true}}));
+    let kib = |v: &Value| v.as_u64().unwrap_or_else(|| panic!("rss: {v}")) as f64;
+    let (r0, r1) = (kib(&m0["proc"]["rss_kib"]), kib(&m1["proc"]["rss_kib"]));
+    let trimmed = kib(&m1["trim"]["proc_after"]["rss_kib"]);
+    let growth = (r1 - r0) / r0;
+    let retained = (r1 - trimmed) / r1;
+    println!(
+        "T20b rss after {WARM} switches {:.0} MiB, after {} {:.0} MiB (growth {:.1} %), \
+         trim gives back {:.0} MiB ({:.1} %); malloc {} -> {}; policy {}",
+        r0 / 1024.0,
+        WARM + MEASURE,
+        r1 / 1024.0,
+        growth * 100.0,
+        (r1 - trimmed) / 1024.0,
+        retained * 100.0,
+        m0["malloc"],
+        m1["malloc"],
+        m1["policy"],
+    );
+    // Near-vacuous under the policy (the reaper already trimmed); it is the RED detector for
+    // `LP_PLAYER_MALLOC=glibc`. The growth check below is the meaningful one.
+    assert!(
+        retained < 0.05,
+        "malloc keeps {:.0} MiB of freed memory resident ({:.1} % of RSS) after {} switches — \
+         allocator retention (mem::apply_policy): {m1}",
+        (r1 - trimmed) / 1024.0,
+        retained * 100.0,
+        WARM + MEASURE
+    );
+    assert!(
+        growth < 0.10,
+        "RSS grew {:.1} % over {MEASURE} warm switches ({:.0} -> {:.0} MiB): {m1}",
+        growth * 100.0,
+        r0 / 1024.0,
+        r1 / 1024.0
+    );
+}
+
 /// I7 (final review): a **private, hermetic** PipeWire + WirePlumber (their own runtime/
 /// config/state dirs, no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/V4L2
 /// monitors, so no real device is ever touched; one null sink as the only output). The

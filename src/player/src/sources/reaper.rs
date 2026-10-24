@@ -2,7 +2,8 @@
 //! context on the GL thread (it must: GL current, before the core) and hands the core
 //! here; one background thread runs `mpv_terminate_destroy` (measured 30–240 ms for a
 //! playing 1080p clip — never on the loop). `quit` calls [`shutdown`] with a bounded wait
-//! and logs any straggler.
+//! and logs any straggler. After each batch of destroyed cores it runs
+//! `mem::trim_after_reap` (Task 20b: `malloc_trim(0)`, the allocator policy's second half).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -43,17 +44,39 @@ fn spawn() -> Option<Reaper> {
     let thread = std::thread::Builder::new()
         .name("lp-mpv-reaper".into())
         .spawn(move || {
-            for d in rx {
-                let t = Instant::now();
-                drop(d);
-                PENDING.fetch_sub(1, Ordering::SeqCst);
-                log::event(
-                    "mpv",
-                    Level::Debug,
-                    "mpv.reaped",
-                    None,
-                    json!({ "ms": t.elapsed().as_secs_f64() * 1000.0 }),
-                );
+            while let Ok(first) = rx.recv() {
+                let mut next = Some(first);
+                let mut batch = 0usize;
+                while let Some(d) = next.take() {
+                    let t = Instant::now();
+                    drop(d);
+                    batch += 1;
+                    log::event(
+                        "mpv",
+                        Level::Debug,
+                        "mpv.reaped",
+                        None,
+                        json!({ "ms": t.elapsed().as_secs_f64() * 1000.0 }),
+                    );
+                    next = rx.try_recv().ok();
+                }
+                // Task 20b: give the pages those cores freed back (`mem::apply_policy`).
+                if let Some((released, ms)) = crate::mem::trim_after_reap() {
+                    log::event(
+                        "mpv",
+                        Level::Debug,
+                        "mpv.trimmed",
+                        None,
+                        json!({
+                            "ms": ms,
+                            "released": released,
+                            "rss_kib": crate::mem::proc_status().rss_kib,
+                        }),
+                    );
+                }
+                // Only now: `pending() == 0` means destroyed AND trimmed (the t20b test waits
+                // on it, deterministically).
+                PENDING.fetch_sub(batch, Ordering::SeqCst);
             }
             let _ = done_tx.send(());
         })
@@ -81,7 +104,7 @@ pub(crate) fn reap(h: Handle) {
     }
 }
 
-/// Cores handed to the reaper and not destroyed yet (probes).
+/// Cores handed to the reaper and not destroyed (+ their batch's `malloc_trim` run) yet (probes).
 pub fn pending() -> usize {
     PENDING.load(Ordering::SeqCst)
 }

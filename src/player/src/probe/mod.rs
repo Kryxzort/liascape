@@ -17,10 +17,13 @@
 //!   worker thread and replies `pending`, delivering `probe.dropout` as an event.
 //! - `snapshot` (`snapshot.rs`, Task 16) — the state snapshot: what would be saved now,
 //!   when it's next written, writer counters.
+//! - `memory` (`memory.rs`, Task 20b) — RSS + glibc malloc in-use vs retained, arena
+//!   count; `args: {"trim": true}` runs `malloc_trim(0)` and reports the RSS it gave back.
 
 mod audio;
 pub mod dropout;
 pub mod frames;
+mod memory;
 mod snapshot;
 
 use serde_json::{Map, Value, json};
@@ -65,6 +68,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         "meter.window",
         audio::meter_window,
         "bus meter samples {last_ms | from_ms,to_ms}: [[t_ms, dbfs_1ms]…] + median/min/max/gap",
+    ),
+    (
+        "memory",
+        memory::memory,
+        "RSS + glibc malloc in-use vs retained bytes, arena count; {trim: true} runs \
+         malloc_trim(0) and reports what it gave back",
     ),
     (
         "dropout",
@@ -160,6 +169,11 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             o.insert(
                 "mpv_current_ao".into(),
                 json!(m.mpv_get_string("current-ao")),
+            );
+            // Task 20b: which decoder mpv really picked (`hwdec: auto` resolves per file).
+            o.insert(
+                "mpv_hwdec_current".into(),
+                json!(m.mpv_get_string("hwdec-current")),
             );
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             o.insert("stepped".into(), json!(m.is_stepped()));

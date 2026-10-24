@@ -42,7 +42,12 @@
 #                         default: use whatever is already built, like `--no-build` elsewhere)
 #   -h / --help           this text
 #
-# Options (soak): --minutes N (default 60).  Options (permonitor): --hermetic (headless 2-output
+# Options (soak): --minutes N (default 60); --hermetic soak only (Task 20b -- it used to switch
+# ~never: the playlist followed GlobalIntervalSeconds 1800 with 320x180 clips): --soak-interval S
+# (default 10: a timed switch every S s with transitions, ~6x the owner's real rate) and
+# --soak-hwdec X (default auto, the owner's HwDec) over three 1080p30 clips with audio. Every
+# sample also records the `memory` probe (malloc in-use / retained / arenas) and the switch count.
+# Options (permonitor): --hermetic (headless 2-output
 # stand-in for DP-1/DP-2); live permonitor always targets the owner's real DP-1/DP-2.
 #
 # Pass criteria (brief step 2, enforced live, REPORTED-not-enforced under --hermetic): 0 drops and
@@ -152,6 +157,8 @@ CELLS_FILTER=""
 RESULTS_DIR_OVERRIDE=""
 BUILD=0
 SOAK_MINUTES=60
+SOAK_INTERVAL=10
+SOAK_HWDEC=auto
 RESUME=0
 
 usage() { sed -n '2,125p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
@@ -172,6 +179,8 @@ while [ $# -gt 0 ]; do
     --effect-ms) shift; EFFECT_MS_OVERRIDE=${1:?--effect-ms needs N}; EFFECT_DURATION_MS=$EFFECT_MS_OVERRIDE ;;
     --build) BUILD=1 ;;
     --minutes) shift; SOAK_MINUTES=${1:?--minutes needs N} ;;
+    --soak-interval) shift; SOAK_INTERVAL=${1:?--soak-interval needs S} ;;
+    --soak-hwdec) shift; SOAK_HWDEC=${1:?--soak-hwdec needs a value} ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 2 ;;
   esac
@@ -241,8 +250,8 @@ settings_get() { get /settings; }   # NEVER echo this directly anywhere -- it ca
 # scripts/test-lp-player-adapter.sh's setting(); global-constraints.md: POST /settings replaces the
 # whole object, so every write must round-trip through the live object, never a hand-built partial one.
 setting_set() {
-  local body
-  body=$(settings_get | jq -c "$1") || { err "settings_set: GET /settings failed"; return 1; }
+  local body prog="$1"; shift   # extra args go to jq (--arg …): never interpolate values into the program
+  body=$(settings_get | jq -c "$@" "$prog") || { err "settings_set: GET /settings failed"; return 1; }
   post /settings "$body" >/dev/null
 }
 
@@ -1254,8 +1263,22 @@ run_soak() {
   local pid
 
   if [ "$HERMETIC" = 1 ]; then
-    build_alt_targets
-    post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${ALT_TARGETS[@]}")" --argjson s '{"Order":0}' '{paths:$p, settings:$s}')" >/dev/null
+    # Task 20b: a soak that never switches can't find per-switch growth. Three 1080p30 clips with
+    # audio (what a real wallpaper decodes -- 320x180 frames hide allocator retention), a timed
+    # switch every SOAK_INTERVAL s with transitions, and the owner's HwDec.
+    local T=$HERMETIC_T c soak=()
+    for c in "testsrc2 440" "smptebars 550" "mandelbrot 660"; do
+      local src hz; read -r src hz <<<"$c"
+      ffmpeg -nostdin -loglevel error -y -f lavfi -i "$src=size=1920x1080:rate=30" -f lavfi -i "sine=frequency=$hz:sample_rate=48000" \
+        -t 6 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest "$T/soak-$src.mp4"
+      soak+=("$T/soak-$src.mp4")
+    done
+    setting_set '.hwDec = $hw' --arg hw "$SOAK_HWDEC" || exit 1   # camelCase on the wire (see the R-note near snapshot_owner_settings)
+    log "soak (hermetic): ${#soak[@]} 1080p clips, a switch every ${SOAK_INTERVAL}s, HwDec=$SOAK_HWDEC"
+    post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${soak[@]}")" --argjson iv "$SOAK_INTERVAL" \
+      '{paths:$p, settings:{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, AdvanceOnVideoEnd:false,
+        WaitForVideoEnd:false, TransitionEnabled:true, TransitionEffectIds:["fade","crosswarp","dissolve","wind"],
+        TransitionDurationMs:1000}}')" >/dev/null
   else
     local names; names=$(get /playlist/names | jq -r '.[]?' 2>/dev/null)
     if echo "$names" | grep -qx dp; then
@@ -1284,11 +1307,24 @@ run_soak() {
     [ -n "$vram" ] || vram=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
     [ -n "$vram" ] || vram=0
     t=$(date +%s)
+    # Task 20b: malloc's own split (in use vs retained) + how many switches so far, so a slope can
+    # be read as "per switch" and as "leak vs allocator retention" without re-running anything.
+    local mem sw
+    # switches = the probe's monotonic transitions_done_total (the log ring is bounded); .policy
+    # carries the trim counters. A failed probe leaves all three null (the summary skips them).
+    local pol
+    mem=$(ctl probe '{"name":"memory"}' 2>/dev/null)
+    sw=$(jq -c '.transitions_done_total // null' <<<"$mem" 2>/dev/null); [ -n "$sw" ] || sw=null
+    pol=$(jq -c '.policy // null' <<<"$mem" 2>/dev/null); [ -n "$pol" ] || pol=null
+    mem=$(jq -c '.malloc // null' <<<"$mem" 2>/dev/null); [ -n "$mem" ] || mem=null
     jq -nc --argjson t "$t" --argjson rss_kib "$rss" --argjson vram_mib "$vram" --argjson pid "$pid" \
-      '{t:$t, pid:$pid, rss_kib:$rss_kib, vram_mib:$vram_mib}' >> "$samples"
+      --argjson malloc "$mem" --argjson policy "$pol" --argjson switches "$sw" \
+      '{t:$t, pid:$pid, rss_kib:$rss_kib, vram_mib:$vram_mib, switches:$switches, malloc:$malloc, policy:$policy}' >> "$samples"
     sleep 60
   done
 
+  # NOTE: over a ~15 min run the 1 MiB/min bar is inside the +-40 MiB per-sample noise (an in-flight
+  # transition holds two cores); trust it only on long (>= 1 h) soaks.
   # Linear-regression slope over samples taken >= 5 min in (the brief excludes warmup); < 1 MiB/min
   # on both RSS and VRAM is a pass. python3 for the same reason the rest of the repo's test scripts
   # reach for it over awk/bc (global-constraints.md / test-lp-player-adapter.sh's dB()/near()).
@@ -1306,7 +1342,29 @@ def slope_per_min(key, to_mib):
     return num/den if den else 0.0
 rss_slope = slope_per_min("rss_kib", lambda v: v/1024.0)
 vram_slope = slope_per_min("vram_mib", lambda v: float(v))
-print(json.dumps({"samples": len(rows), "after_5min": len(skip),
+# Samples whose memory probe failed carry malloc:null -- skipped (counting them as 0 would spike a slope).
+skip_all = skip
+skip = [r for r in skip_all if r.get("malloc")]
+for r in skip:
+    m = r["malloc"]
+    r["retained"] = m.get("free_bytes", 0)
+    r["arena"] = m.get("arena_bytes", 0)
+    r["live"] = m.get("in_use_bytes", 0) + m.get("mmap_bytes", 0)
+retained_slope = slope_per_min("retained", lambda v: v/1048576.0)
+arena_slope = slope_per_min("arena", lambda v: v/1048576.0)
+live_slope = slope_per_min("live", lambda v: v/1048576.0)
+trim_max = max([(r.get("policy") or {}).get("trim_ms_max", 0) for r in rows] or [0])
+swr = [r for r in rows if r.get("switches") is not None]
+sw = [r["switches"] for r in swr]
+mins = (swr[-1]["t"] - swr[0]["t"]) / 60.0 if len(swr) > 1 else 0
+print(json.dumps({"samples": len(rows), "after_5min": len(skip_all),
+       "switches": sw[-1] if sw else 0,
+       "switches_per_min": ((sw[-1] - sw[0]) / mins) if mins else None,
+       "malloc_live_slope_mib_per_min": live_slope,
+       "malloc_retained_slope_mib_per_min": retained_slope,
+       "arena_bytes_slope_mib_per_min": arena_slope,
+       "free_bytes_slope_mib_per_min": retained_slope,
+       "trim_ms_max": trim_max,
        "rss_slope_mib_per_min": rss_slope, "vram_slope_mib_per_min": vram_slope,
        "rss_pass": (rss_slope is not None and rss_slope < 1.0),
        "vram_pass": (vram_slope is not None and vram_slope < 1.0)}, indent=2))
