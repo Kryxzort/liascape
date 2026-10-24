@@ -283,6 +283,68 @@ sleep 5
 post /stop '{}' >/dev/null; sleep 0.6
 ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
 
+echo "== Task 20c: /next /prev /random skip scenes under lp-player (never a 500, never land on one)"
+# Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (library.md /
+# player.md): a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
+# what IsSceneFolder checks, and exactly what makes PlayerHelper.IsScenePath (no media extension) true
+# for that folder's path. No linux-wallpaperengine / scene.pkg needed to be *recognized* as a scene —
+# only to actually render one, which these never attempt (they must be SKIPPED, not launched).
+LIB=$XDG_DATA_HOME/livepaper/library
+postcode() { curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d "${2:-{}}" "$U$1"; }
+postbody() { curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "${2:-{}}" "$U$1"; }
+
+mkdir -p "$LIB/imported/sv1" "$LIB/imported/sv2" "$LIB/imported/sv3" "$LIB/imported/ss1" "$LIB/imported/ss2"
+cp "$A" "$LIB/imported/sv1/sv1.mp4"; cp "$A" "$LIB/imported/sv2/sv2.mp4"; cp "$A" "$LIB/imported/sv3/sv3.mp4"
+echo '{"type":"scene"}' > "$LIB/imported/ss1/project.json"
+echo '{"type":"scene"}' > "$LIB/imported/ss2/project.json"
+SV1=$LIB/imported/sv1/sv1.mp4; SV2=$LIB/imported/sv2/sv2.mp4; SV3=$LIB/imported/sv3/sv3.mp4
+SS1=$LIB/imported/ss1; SS2=$LIB/imported/ss2
+curl -sf -m 5 "$U/library" | jq -e --arg p "$SS1" '[.[] | select(.videoPath==$p)][0].isScene == true' >/dev/null \
+  && ok "fake scene item recognized by /library (isScene=true, no media file)" || bad "fake scene not recognized as a scene"
+
+post /apply "{\"path\":\"$SV1\"}" >/dev/null; sleep 1.2
+[ "$(cur path)" = "$SV1" ] && ok "/apply sv1 (library/single-wallpaper mode) → cur sv1" || bad "/apply sv1 → cur $(cur path)"
+
+step_many() {   # $1 = /next|/prev|/random, $2 = iteration count
+  local route=$1 n=$2 allok=1 sceneHit=0 i p code
+  for i in $(seq 1 "$n"); do
+    code=$(postcode "$route")
+    [ "$code" = 200 ] || allok=0
+    sleep 0.5
+    p=$(cur path)
+    { [ "$p" = "$SS1" ] || [ "$p" = "$SS2" ]; } && sceneHit=1
+  done
+  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response"
+  [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — TryStepLibrary/ApplyRandom didn't skip it"
+}
+step_many /next 20
+step_many /prev 20
+step_many /random 20
+
+echo "== Task 20c: an all-scene library → 409, no hang, no crash, current wallpaper untouched"
+mv "$LIB/imported/sv1" "$T/removed-sv1"; mv "$LIB/imported/sv2" "$T/removed-sv2"; mv "$LIB/imported/sv3" "$T/removed-sv3"
+mv "$(dirname "$LD")" "$T/removed-ld"; mv "$(dirname "$LB")" "$T/removed-lb"
+before=$(cur path)
+code=$(postcode /next); body=$(postbody /next)
+[ "$code" = 409 ] && ok "/next on an all-scene library → 409 (not a 500, not a hang)" || bad "/next on all-scene library → $code"
+echo "$body" | jq -e '.error | contains("No playable wallpaper")' >/dev/null \
+  && ok "409 body carries a clear message: $(echo "$body" | jq -r .error)" || bad "409 body: $body"
+after=$(cur path)
+[ "$after" = "$before" ] && ok "the failed /next left the current wallpaper untouched ($before)" || bad "cur path changed: $before -> $after"
+code=$(postcode /random)
+[ "$code" = 409 ] && ok "/random on an all-scene library → 409 too" || bad "/random on all-scene library → $code"
+code=$(postcode /prev)
+[ "$code" = 409 ] && ok "/prev on an all-scene library → 409 too" || bad "/prev on all-scene library → $code"
+
+mv "$T/removed-sv1" "$LIB/imported/sv1"; mv "$T/removed-sv2" "$LIB/imported/sv2"; mv "$T/removed-sv3" "$LIB/imported/sv3"
+mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
+# The legacy-engine "scenes still reachable when AllowScenes=true" decision-point check lives in the
+# self-test instead (LpPlayerSelfTest.SceneSkipAssertions) — this IT script stays on lp-player
+# throughout by design (see header: "it aborts before any playback call unless active: lp-player"),
+# and switching the live engine to legacy here while something is playing would try to launch a real
+# mpvpaper/LWE, which this hermetic sandbox explicitly never does.
+post /stop '{}' >/dev/null; sleep 0.6
+
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"

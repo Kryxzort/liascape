@@ -30,46 +30,58 @@ sealed class Program
         var action = args.FirstOrDefault(a => a.StartsWith("--action="))?.Substring("--action=".Length);
         if (action != null)
         {
-            switch (action)
+            // next-wallpaper/previous-wallpaper/random (and play/toggle-play's Restore()) can throw
+            // when the library/session has no item playable under the current engine (e.g. an
+            // all-scene library under lp-player, PlayerHelper.IsSkippedPath) — report cleanly instead
+            // of an unhandled-exception crash (same contract as the /next /prev /random HTTP routes).
+            try
             {
-                case "toggle-mute":
-                    if (PlayerHelper.IsUserMuted)
-                        PlayerHelper.SetUserMute(false);
-                    else if (PlayerHelper.IsMuted)
-                        PlayerHelper.SetMute(false);
-                    else
-                        PlayerHelper.SetUserMute(true);
-                    break;
-                case "toggle-pause":
-                    PlayerHelper.TogglePause();
-                    break;
-                case "stop":
-                    PlayerHelper.Stop();
-                    break;
-                case "play":
-                    PlayerHelper.Restore();
-                    break;
-                case "toggle-play":
-                    if (PlayerHelper.IsPlaying || PlayerHelper.IsTimedPlaylistActive())
+                switch (action)
+                {
+                    case "toggle-mute":
+                        if (PlayerHelper.IsUserMuted)
+                            PlayerHelper.SetUserMute(false);
+                        else if (PlayerHelper.IsMuted)
+                            PlayerHelper.SetMute(false);
+                        else
+                            PlayerHelper.SetUserMute(true);
+                        break;
+                    case "toggle-pause":
+                        PlayerHelper.TogglePause();
+                        break;
+                    case "stop":
                         PlayerHelper.Stop();
-                    else
+                        break;
+                    case "play":
                         PlayerHelper.Restore();
-                    break;
-                case "next-wallpaper":
-                    PlayerHelper.NextWallpaper();
-                    break;
-                case "previous-wallpaper":
-                    PlayerHelper.PreviousWallpaper();
-                    break;
-                case "random":
-                    PlayerHelper.ApplyRandom();
-                    break;
-                case "volume-up":
-                    PlayerHelper.AdjustVolume(5);
-                    break;
-                case "volume-down":
-                    PlayerHelper.AdjustVolume(-5);
-                    break;
+                        break;
+                    case "toggle-play":
+                        if (PlayerHelper.IsPlaying || PlayerHelper.IsTimedPlaylistActive())
+                            PlayerHelper.Stop();
+                        else
+                            PlayerHelper.Restore();
+                        break;
+                    case "next-wallpaper":
+                        PlayerHelper.NextWallpaper();
+                        break;
+                    case "previous-wallpaper":
+                        PlayerHelper.PreviousWallpaper();
+                        break;
+                    case "random":
+                        PlayerHelper.ApplyRandom();
+                        break;
+                    case "volume-up":
+                        PlayerHelper.AdjustVolume(5);
+                        break;
+                    case "volume-down":
+                        PlayerHelper.AdjustVolume(-5);
+                        break;
+                }
+            }
+            catch (InvalidOperationException e)
+            {
+                Console.Error.WriteLine($"livepaper --action={action}: {e.Message}");
+                Environment.ExitCode = 1;
             }
             DrainLpPlayerBeforeExit();
             return;
@@ -77,7 +89,12 @@ sealed class Program
 
         if (args.Contains("--random"))
         {
-            PlayerHelper.ApplyRandom();
+            try { PlayerHelper.ApplyRandom(); }
+            catch (InvalidOperationException e)
+            {
+                Console.Error.WriteLine($"livepaper --random: {e.Message}");
+                Environment.ExitCode = 1;
+            }
             DrainLpPlayerBeforeExit();
             return;
         }
@@ -97,7 +114,12 @@ sealed class Program
         if (args.Contains("--restore"))
         {
             RunHeadlessAutoSync();
-            PlayerHelper.Restore();
+            try { PlayerHelper.Restore(); }
+            catch (InvalidOperationException e)
+            {
+                Console.Error.WriteLine($"livepaper --restore: {e.Message}");
+                Environment.ExitCode = 1;
+            }
             DrainLpPlayerBeforeExit();
             return;
         }

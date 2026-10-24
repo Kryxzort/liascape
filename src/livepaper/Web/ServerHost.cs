@@ -533,9 +533,26 @@ public static class ServerHost
             return Results.Ok();
         });
         app.MapPost("/stop", () => { PlayerHelper.Stop(); return Results.Ok(); });
-        app.MapPost("/next", () => { PlayerHelper.NextWallpaper(); return Results.Ok(); });
-        app.MapPost("/prev", () => { PlayerHelper.PreviousWallpaper(); return Results.Ok(); });
-        app.MapPost("/random", () => { PlayerHelper.ApplyRandom(); return Results.Ok(); });
+        // next/prev/random step the library/playlist to pick an item — under lp-player Phase 1,
+        // scenes are skipped exactly like AllowScenes=false (PlayerHelper.IsSkippedPath), but when
+        // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()
+        // an unplayable path. Catch that domain exception here so it's a clear 409, never an
+        // unhandled 500 (player-adapter.md / player.md: never invent a new skip mechanism).
+        app.MapPost("/next", () =>
+        {
+            try { PlayerHelper.NextWallpaper(); return Results.Ok(); }
+            catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
+        });
+        app.MapPost("/prev", () =>
+        {
+            try { PlayerHelper.PreviousWallpaper(); return Results.Ok(); }
+            catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
+        });
+        app.MapPost("/random", () =>
+        {
+            try { PlayerHelper.ApplyRandom(); return Results.Ok(); }
+            catch (InvalidOperationException e) { return Results.Conflict(new { error = e.Message }); }
+        });
         app.MapPost("/pause", () => { PlayerHelper.TogglePause(); return Results.Ok(); });
         app.MapPost("/volume", (ValueReq r) =>
         {

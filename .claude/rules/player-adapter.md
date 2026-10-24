@@ -142,6 +142,7 @@ code below it is unchanged)
 | `/preview` (ServerHost) | `LpPlayerMedia.Preview` → the playing item's source(s), literal values |
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
+| `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
 | restart daemon / timer (`UpdateRestartTimer`, `SpawnRestartDaemon`, `RunRestartDaemon`, `RestartCurrentAndLaunch`) | no-op — the leak-restart is an mpvpaper workaround |
 
 `AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under lp-player

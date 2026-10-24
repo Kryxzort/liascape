@@ -2309,8 +2309,16 @@ public static class PlayerHelper
         var current = _history != null && playingIdx >= 0 && playingIdx < _history.Count
             ? _history[playingIdx]
             : null;
+        // Same IsSkippedPath contract as AdvanceToNext/TryStepLibrary/ApplyRandom — _timedPaths is
+        // normally already scene-filtered under lp-player (ApplyPlaylist), but a stale cross-engine
+        // session (SwitchEngineLive replaying a legacy LastSession) can still carry one through; skip
+        // it here too rather than randomizing onto a path that just stops playback.
+        bool scenesOk = PlayerEngine.ScenesPlayable(SettingsService.Load());
+        var pool = _timedPaths.Where(p => !IsSkippedPath(p, scenesOk)).ToList();
+        // nothing playable to pick — leave the current wallpaper (and its armed video-end wait) alone
+        if (pool.Count == 0) return;
         CancelVideoEndWait();
-        var pick = PickRandomExcluding(_timedPaths, current);
+        var pick = PickRandomExcluding(pool, current);
         if (_history != null)
         {
             _history.Add(pick);
@@ -2375,6 +2383,14 @@ public static class PlayerHelper
     // steps through the library alphabetically. Wraps at the ends. Returns
     // false for mpv-native playlist sessions so the caller can fall through
     // to mpv's own `playlist-next`/`playlist-prev`.
+    //
+    // Skips items unplayable under the current engine (IsSkippedPath — scenes when
+    // !ScenesPlayable, the SAME "skipped exactly like AllowScenes=false" contract the
+    // timed-playlist tick's own AdvanceToNext already applies) by stepping further in the
+    // same direction, bounded to one full pass of the library so an all-unplayable library
+    // can't spin forever. Throws InvalidOperationException (never calls Apply on an
+    // unplayable path) when NOT ONE library item is playable — callers turn that into a
+    // 4xx/clear message instead of letting Apply()'s own scene check 500 the request.
     private static bool TryStepLibrary(bool forward)
     {
         var settings = SettingsService.Load();
@@ -2396,7 +2412,15 @@ public static class PlayerHelper
                 ? (currentIdx + 1) % library.Count
                 : (currentIdx - 1 + library.Count) % library.Count;
 
-        var pickPath = library[newIdx].VideoPath;
+        bool scenesOk = PlayerEngine.ScenesPlayable(settings);
+        int pickIdx = newIdx;
+        for (int attempts = 0; attempts < library.Count && IsSkippedPath(library[pickIdx].VideoPath, scenesOk); attempts++)
+            pickIdx = forward ? (pickIdx + 1) % library.Count : (pickIdx - 1 + library.Count) % library.Count;
+
+        if (IsSkippedPath(library[pickIdx].VideoPath, scenesOk))
+            throw new InvalidOperationException(NoPlayableMessage());
+
+        var pickPath = library[pickIdx].VideoPath;
         Apply(pickPath, settings.BuildMpvOptions());
         settings.LastSession = new LastSession { Paths = [pickPath] };
         SettingsService.Save(settings);
@@ -2544,6 +2568,12 @@ public static class PlayerHelper
     // playlist is active, hands off to the timer owner via a pending action
     // so the daemon picks from its in-memory paths and resets the countdown.
     // Otherwise picks from the full library as a one-shot.
+    //
+    // Excludes items unplayable under the current engine (IsSkippedPath — same contract as
+    // TryStepLibrary/AdvanceToNext) from the pool so a random pick never lands Apply() on a
+    // scene under lp-player. An empty library is still a silent no-op (nothing to play, not an
+    // error); a non-empty library with NO playable item throws so the caller can surface it
+    // instead of letting Apply() 500.
     public static void ApplyRandom()
     {
         if (IsTimedPlaylistActive())
@@ -2553,8 +2583,13 @@ public static class PlayerHelper
         }
 
         var settings = SettingsService.Load();
-        var pool = LibraryService.LoadAll().Select(i => i.VideoPath).ToList();
-        if (pool.Count == 0) return;
+        var library = LibraryService.LoadAll();
+        if (library.Count == 0) return;
+
+        bool scenesOk = PlayerEngine.ScenesPlayable(settings);
+        var pool = library.Select(i => i.VideoPath).Where(p => !IsSkippedPath(p, scenesOk)).ToList();
+        if (pool.Count == 0)
+            throw new InvalidOperationException(NoPlayableMessage());
 
         var current = settings.LastSession?.Paths.FirstOrDefault();
         var pick = PickRandomExcluding(pool, current);
@@ -3210,6 +3245,15 @@ public static class PlayerHelper
         var s = SettingsService.Load();
         return !PlayerEngine.ScenesPlayable(s);
     }
+
+    private static string NoPlayableMessage() => PlayerEngine.IsLpPlayer
+        ? "No playable wallpaper in the library — every item is a scene, and scenes need the Legacy player engine for now (Settings → Advanced → Player engine)"
+        : "No playable wallpaper in the library — every item is a scene, and scenes need \"Allow scene support\" + linux-wallpaperengine";
+
+    // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which`)
+    // instead of once per scene item.
+    private static bool IsSkippedPath(string path, bool scenesPlayable) =>
+        IsScenePath(path) && !scenesPlayable;
 
     // Spawns one linux-wallpaperengine process per monitor, writes new PIDs to
     // LwePidPath, and returns the new PID strings. Does NOT kill any existing
