@@ -748,7 +748,8 @@ frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, be
 `osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`,
 **`dither=ordered`** (I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
 every new render context's first render — measured ~25–30 ms on the loop per switch; ordered
-dithering of the same 8-bit target is visually equivalent), and with opt `shader_cache_dir`
+dithering of the same 8-bit target is visually equivalent), **`gpu-hwdec-interop=no`** (Task 20d:
+no hwdec GL interop init on the loop — "Hardware decoding" below), and with opt `shader_cache_dir`
 (`serve` passes `<state>/shader-cache`) `gpu-shader-cache=yes` + `gpu-shader-cache-dir`.
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
@@ -789,7 +790,8 @@ reached mpv) is for probes/tests; `mpv_get_string`/`mpv_get_f64` are synchronous
 **Property map** (graph name → mpv): `loop` → `loop-file` `inf`/`no`; `paused` → `pause`
 (observed `pause` changes are mirrored back into `read`); `speed`; `position` → `seek <t>
 absolute exact` (or `start` before the current file has loaded; a `path` change resets
-`start` to `none`); `hwdec` (`""` → `no`); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
+`start` to `none`); `hwdec` → `sources::mpv::mpv_hwdec(v)` (copy modes only — "Hardware
+decoding" below); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
 **`auto`** for `true` (mpv's normal policy — what the legacy engine runs with
 DisableCache=false; `yes` would RAM-cache every local wallpaper) and `no` for `false`;
 `demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
@@ -805,6 +807,59 @@ reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`); `audio_
 (exact dB; `volume` is cubic — § Units; mpv stores it single-precision, so it reads back
 within ~1e-6 dB). `volume-gain-min=-96` is what lets mpv accept the −96 dB floor. `open`
 pushes the initial sum too, so mpv never runs at its own default.
+
+**Hardware decoding (Task 20d, R107) — copy modes, never GL interop.** Every core runs
+`gpu-hwdec-interop=no` and `apply("hwdec", v)` sends `mpv_hwdec(v)`: `""`/`no` → `no`;
+`auto`/`auto-copy` → `nvdec-copy,vaapi-copy,auto-copy` (`auto-safe`/`yes`/`auto-copy-safe` → the
+same with `auto-copy-safe`, `auto-unsafe`/`auto-copy-unsafe` → with `auto-copy-unsafe`); an interop
+name (every mpv 0.41 decoder with a `-copy` twin: `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`,
+`amf`, `v4l2m2m`) → its `-copy` twin; anything else (a `-copy` mode, or a name this mpv doesn't
+know — e.g. `drm` isn't in 0.41's list: mpv rejects it and the prop reverts, R45) unchanged; lists
+element by element (a unit test asserts no accepted value comes out as an interop decoder). On
+AMD/Intel this turns `auto`'s zero-copy `vaapi` into `vaapi-copy` too (same trade-off below). `read("hwdec")` keeps the user's value;
+the `sources` probe has `mpv_hwdec` (the request) and `mpv_hwdec_current` (the pick). **Why:**
+(1) mpv's render context runs hwdec interop init on the render thread — our loop — and with
+mpv's default `gpu-hwdec-interop=auto` it creates the **CUDA interop (a CUDA context) inside
+`mpv_render_context_create`** whenever libmpv can load `libcuda.so.1`: 65–90 ms per switch,
+*whatever `hwdec` says* (also `no`). libmpv's RUNPATH lacks `/run/opengl-driver/lib` (nixpkgs
+adds it to `bin/mpv` only), so the dev/install binary fails that load (`ffmpeg: Cannot load
+libcuda.so.1` once per source — harmless now) while the flake wrapper's
+`LD_LIBRARY_PATH=/run/opengl-driver/lib` (R86) made it succeed; it also succeeds in any process
+where libavutil already loaded libcuda for `nvdec-copy` (glibc matches the soname) — so before
+this, `nvdec-copy` cost 66–138 ms per switch from its second switch on, and the UI's `nvdec`/`vaapi`
+silently decoded in software in the dev binary. (2) mpv 0.41's own `auto` order is `vulkan, nvdec,
+vaapi, vulkan-copy, nvdec-copy, …`, so without interop it picks `vulkan-copy`: each new core's
+`vkCreateDevice` (mpv's core thread, `select_and_set_hwdec → av_hwdevice_ctx_create`) holds an
+NVIDIA driver lock (a process-wide PI mutex) that every GL entry point on our loop waits on —
+230–320 ms per switch — **only when no X server is reachable** (`DISPLAY` unset/dead: headless
+tests, an Xwayland-less session; with the session's Xwayland reachable 7–22 ms, which is why the
+live run and `cargo test` — both inherit `DISPLAY=:1` — never showed it; a nested headless sway
+without `DISPLAY` does). Not layers/ICDs (`NODEVICE_SELECT`, `VK_LOADER_LAYERS_DISABLE`, an
+NVIDIA-only ICD list changed nothing): driver-internal. An explicit `vulkan`/`vulkan-copy` keeps
+that limit (driver; documented, not worked around). **Measured** (hermetic headless 2 × 1080p60,
+1080p30 h264 clips, fade 500 ms, 6 switches per mode in one process, no `DISPLAY`; max loop busy
+per switch, ms):
+
+| `hwdec` | dev env before → after | libcuda on the path (flake wrapper) before → after |
+|---|---|---|
+| `no` | 10–34 → 10–47 | 74–157 (CUDA interop) → 14–49 |
+| `auto` | 264–300 (`vulkan-copy`) → 12–42 (`nvdec-copy`) | 79–95 (`nvdec` interop) → 11–40 (`nvdec-copy`) |
+| `nvdec` | 10–89, **software** → 8–42 (`nvdec-copy`) | 85–98 (`nvdec`) → 13–50 (`nvdec-copy`) |
+| `vaapi` | 9–39, **software** → 10–43 (`vaapi-copy`) | 72–94, software → 18–40 (`vaapi-copy`) |
+| `nvdec-copy` | 21, then 81–115 → 10–33 | 72–83 → 10–33 |
+| `vulkan` / `vulkan-copy` | 72–82 (software) / 261–284 → 273–313 / 267–297 (no X; with X 7–22) | — |
+
+**The trade-off (Phase 1):** copy modes download each frame and mpv uploads it on the loop like
+software decoding. Steady state, one source on both outputs, % of one core: 1080p30 `no` 27.7,
+`nvdec-copy` 9.8, `vaapi-copy` 26.0 (nvidia-vaapi-driver), `vulkan-copy` 14.4, `nvdec` interop
+7.4; 4K60 `no` 111, `nvdec-copy` 55.6, `vulkan-copy` 80.1, `nvdec` interop 11.3 (loop max busy at
+4K60: `no` 8.1, `nvdec-copy` 12.8, interop 2.8 ms). First frame of a cold source (1080p): `no` 319,
+`nvdec-copy` 438, `vaapi-copy` 642, `vulkan-copy` 698 ms — hence `nvdec-copy` ahead of mpv's
+`vulkan-copy` in `auto`. Zero-copy interop comes back with the Phase 2 render worker (§ Runtime
+"Switch cost"), whose thread owns render-context creation. Guards:
+`tests/api.rs::t20d_hwdec_switch_never_stalls_the_loop` (dev env + libcuda env, `DISPLAY`/
+`WAYLAND_DISPLAY` removed; warm median < 50 ms — fixed medians 16–36 ms, the traps ≥ 65 — and
+never an interop mode; RED before: 286, 91, 85, 88 ms), `tests/sources.rs::property_map_reaches_mpv`, unit `hwdec_maps_to_copy_modes_only`.
 
 **Load fencing (live `path` changes).** Every `loadfile` is async; its reply carries the
 new playlist entry id (`playlist_entry_id` from the result map), START_FILE/END_FILE carry
@@ -1469,7 +1524,9 @@ its own EGL context in the compositor's share group owns every `MpvSource`'s ren
 creation, first render, and every later render into a shared texture (with a sync fence per
 frame) — so the loop only samples finished textures; the same thread is where dmabuf imports
 from the scene/web workers land. Until then the loop counts the open share apart
-(`max_open_ms`).
+(`max_open_ms`). These numbers hold for every `hwdec` since Task 20d (copy modes, no GL interop
+init in the render context — § Sources "Hardware decoding"; before, `hwdec=auto` cost 230–320 ms
+and a loadable libcuda 65–90 ms per switch).
 
 **Retire = ramp, then destroy (item 10, core invariant).** `Runtime::retire(id)` — used by
 the `destroy` verb, `stop` and output removal: an audible source (not paused, ready,
@@ -1648,7 +1705,8 @@ env_unknown_value}, transitions_done_total (monotonic switch counter), live_sour
 dying_sources, opening, reaper_pending (0 only after the batch's trim)}`,
 `args: {"trim": true}` adds `trim {released, ms, proc_after, malloc_after}` — that trim runs on
 the LOOP thread (debug probe; with hundreds of MiB retained it can drop a frame) (§ Memory);
-`sources` also has `mpv_hwdec_current` (what `hwdec: auto` resolved to); `snapshot` (Task 16,
+`sources` also has `mpv_hwdec_current` (what `hwdec: auto` resolved to) and `mpv_hwdec` (what we
+asked for — copy modes, Task 20d); `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
