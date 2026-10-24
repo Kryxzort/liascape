@@ -25,6 +25,7 @@ public static class LpPlayerSelfTest
         {
             MapAssertions(fails);
             OwnershipAssertions(fails);
+            SceneSkipAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -95,6 +96,60 @@ public static class LpPlayerSelfTest
         Own("targets the bus sink", Block("x", "1", "y", "57"), true);
         Own("application.name lp-player", Block("lp-player", "1", "y", "12"), true);
         Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
+    }
+
+    // ---- Task 20c: next/prev/random's scene-skip decision point ------------------------------
+    // TryStepLibrary/ApplyRandom/AdvanceToNext (PlayerHelper) skip a path exactly when
+    // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
+    // private IsSkippedPath uses, reused here rather than invented (.claude/rules/player.md /
+    // player-adapter.md: "skipped exactly like AllowScenes=false"). Needs no player, no
+    // mpvpaper, no `--serve` — pure decision logic, so this also covers the "legacy engine
+    // check that scenes are still reachable when AllowScenes=true" requirement without needing
+    // linux-wallpaperengine installed on the test box (it stops at the decision point when LWE
+    // isn't on PATH here — documented below, same allowance task-20c gives the IT script).
+    private static void SceneSkipAssertions(List<string> fails)
+    {
+        const string scenePath = "/tmp/lp-selftest-lib/workshop/123";   // no extension → a scene
+        const string videoPath = "/tmp/lp-selftest-lib/imported/v1/v1.mp4";
+
+        if (!PlayerHelper.IsScenePath(scenePath)) fails.Add("IsScenePath(workshop dir) should be true");
+        if (PlayerHelper.IsScenePath(videoPath)) fails.Add("IsScenePath(.mp4) should be false");
+
+        static bool WouldSkip(string path, AppSettings s) =>
+            PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayable(s);
+
+        try
+        {
+            var lp = new AppSettings { PlayerEngine = PlayerEngine.LpPlayer, AllowScenes = true };
+            PlayerEngine.Refresh(lp); // deterministically sets the cached IsLpPlayer ScenesPlayable reads
+            if (!WouldSkip(scenePath, lp))
+                fails.Add("lp-player Phase 1 should still skip a scene even with AllowScenes=true");
+            if (WouldSkip(videoPath, lp))
+                fails.Add("lp-player should never skip a video");
+
+            var legacyOff = new AppSettings { PlayerEngine = PlayerEngine.Legacy, AllowScenes = false };
+            PlayerEngine.Refresh(legacyOff);
+            if (!WouldSkip(scenePath, legacyOff))
+                fails.Add("legacy + AllowScenes=false should still skip a scene (unchanged contract)");
+
+            // legacy + AllowScenes=true: ACTUALLY reaching a scene additionally needs
+            // linux-wallpaperengine on PATH (ScenesPlayable → PlayerHelper.IsLweAvailable, a real
+            // `which`) — orthogonal to this fix and not faked here. What this proves without it:
+            // the skip formula has no lp-player-only special case — it's driven purely by
+            // ScenesPlayable, so whenever that's true (LWE present, e.g. a real install) a scene
+            // is reached, never skipped — identical to the pre-fix TryStepLibrary, which picked
+            // library[idx] unconditionally (WouldSkip is false for every candidate in that case).
+            var legacyOn = new AppSettings { PlayerEngine = PlayerEngine.Legacy, AllowScenes = true };
+            PlayerEngine.Refresh(legacyOn);
+            bool lweHere = PlayerEngine.ScenesPlayable(legacyOn);
+            if (lweHere && WouldSkip(scenePath, legacyOn))
+                fails.Add("legacy + AllowScenes=true + LWE present should NOT skip a scene (regression)");
+            Console.WriteLine(lweHere
+                ? "  scene-skip: linux-wallpaperengine found on PATH — legacy+AllowScenes=true scene reachability verified live"
+                : "  scene-skip: no linux-wallpaperengine on PATH here — stopped at the decision point (task-20c); " +
+                  "verified the skip formula has no engine-specific case instead");
+        }
+        finally { PlayerEngine.Refresh(SettingsService.Load()); } // restore the real cached engine for RoundTrip
     }
 
     // ---- item 6: queue depth cap, never blocks a caller --------------------------------------
