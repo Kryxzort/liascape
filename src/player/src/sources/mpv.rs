@@ -144,6 +144,62 @@ fn yes_no(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
 }
 
+/// Task 20d (R107): the hardware decoders `auto` tries, in order, ahead of mpv's own copy
+/// list. mpv 0.41's own order is `vulkan, nvdec, vaapi, vulkan-copy, nvdec-copy, …` — with no
+/// GL interop (below) `auto` would pick `vulkan-copy`, which on NVIDIA costs more CPU than
+/// `nvdec-copy` (1080p30: 14.4 vs 9.8 %, 4K60: 80 vs 56 % of a core), shows its first frame
+/// later (~700 vs ~450 ms) and, without a reachable X server, holds a driver lock our GL
+/// calls wait on for 230–320 ms per switch. On AMD/Intel `nvdec-copy` fails at once (no
+/// libcuda) and `vaapi-copy` is the normal pick; anything else falls through to mpv's list.
+const AUTO_COPY: [&str; 2] = ["nvdec-copy", "vaapi-copy"];
+
+/// Task 20d (R107): the mpv `hwdec` value for a graph `hwdec` — **never a GL interop mode**.
+/// mpv's render context runs every hwdec interop's init inside the render thread — our loop
+/// — and with `gpu-hwdec-interop=auto` it loads the CUDA interop (a CUDA context) in
+/// `mpv_render_context_create` itself: 65–90 ms per switch whenever libcuda is loadable,
+/// even with `hwdec=no`. So every core runs `gpu-hwdec-interop=no` (`prepare_core`) and the
+/// hardware decoder is used in its copy mode: `""`/`no` → `no`; `auto`, `auto-safe`, `yes`,
+/// `auto-copy`, `auto-copy-safe`, `auto-unsafe`, `auto-copy-unsafe` → [`AUTO_COPY`] + mpv's
+/// `auto-copy[-safe|-unsafe]`; an interop name (every mpv 0.41 decoder with a `-copy` twin:
+/// `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`, `amf`, `v4l2m2m`) → its `-copy` twin; anything
+/// else (a `-copy` mode, a name mpv doesn't know — mpv rejects it and the prop reverts, R45)
+/// passes through unchanged. A comma
+/// list maps element by element (duplicates dropped, order kept). The graph keeps the
+/// user's value (`read("hwdec")`); the `sources` probe shows both (`mpv_hwdec`,
+/// `mpv_hwdec_current`).
+pub fn mpv_hwdec(value: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        if !out.iter().any(|o| o == s) {
+            out.push(s.to_string());
+        }
+    };
+    for e in value.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        match e {
+            "auto" | "auto-copy" | "auto-safe" | "yes" | "auto-copy-safe" | "auto-unsafe"
+            | "auto-copy-unsafe" => {
+                for a in AUTO_COPY {
+                    push(a);
+                }
+                push(match e {
+                    "auto" | "auto-copy" => "auto-copy",
+                    "auto-unsafe" | "auto-copy-unsafe" => "auto-copy-unsafe",
+                    _ => "auto-copy-safe",
+                });
+            }
+            "nvdec" | "cuda" | "vaapi" | "vdpau" | "vulkan" | "amf" | "v4l2m2m" => {
+                push(&format!("{e}-copy"))
+            }
+            other => push(other),
+        }
+    }
+    if out.is_empty() {
+        "no".to_string()
+    } else {
+        out.join(",")
+    }
+}
+
 /// What an in-flight async request was, so its reply can be reported/reverted.
 struct Request {
     /// e.g. `af=no_such_filter (af)` — what an `Error` event names.
@@ -419,7 +475,7 @@ impl MpvSource {
         let wake = unsafe { OwnedFd::from_raw_fd(raw_fd) };
         let wake_ctx = raw_fd as usize as *mut c_void;
         let handle = Handle::create().map_err(api_err)?;
-        let fixed: [(&str, &str); 17] = [
+        let fixed: [(&str, &str); 18] = [
             ("vo", "libmpv"),
             ("config", "no"),
             ("terminal", "no"),
@@ -446,6 +502,12 @@ impl MpvSource {
             // per switch (with it: first `update` 33–65 ms; `ordered`: 6–19 ms). Ordered
             // dithering of the same 8-bit target is visually equivalent for wallpapers.
             ("dither", "ordered"),
+            // Task 20d (R107): no hwdec GL interop. mpv's default (`auto`) loads the CUDA
+            // interop — a CUDA context — inside `mpv_render_context_create`, on the loop:
+            // 65–90 ms per switch whenever libcuda is loadable (the flake wrapper's
+            // LD_LIBRARY_PATH, or once libavutil loaded it for nvdec-copy), even with
+            // `hwdec=no`. Hardware decoding runs in its copy mode instead (`mpv_hwdec`).
+            ("gpu-hwdec-interop", "no"),
             ("ao", &ao),
         ];
         for (k, v) in fixed {
@@ -1527,10 +1589,8 @@ impl Source for MpvSource {
                     self.set(prop, "start", &t)
                 }
             }
-            "hwdec" => {
-                let h = if s.is_empty() { "no" } else { s.as_str() };
-                self.set(prop, "hwdec", h)
-            }
+            // Task 20d: copy modes only (`mpv_hwdec`; the core runs without GL interop).
+            "hwdec" => self.set(prop, "hwdec", &mpv_hwdec(&s)),
             "fps_cap" => {
                 let n = num(v);
                 let vf = if n > 0.0 {
@@ -1697,6 +1757,69 @@ impl Drop for MpvSource {
         }
         if let Some(h) = self.handle.take() {
             super::reaper::reap(h);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mpv_hwdec;
+
+    /// Task 20d: never a GL interop mode; `auto` prefers nvdec/vaapi copies over mpv's own
+    /// `vulkan-copy`-first list; the user's explicit choices keep their API.
+    #[test]
+    fn hwdec_maps_to_copy_modes_only() {
+        for (graph, mpv) in [
+            ("", "no"),
+            ("no", "no"),
+            (" , ", "no"),
+            ("auto", "nvdec-copy,vaapi-copy,auto-copy"),
+            ("auto-copy", "nvdec-copy,vaapi-copy,auto-copy"),
+            ("auto-safe", "nvdec-copy,vaapi-copy,auto-copy-safe"),
+            ("yes", "nvdec-copy,vaapi-copy,auto-copy-safe"),
+            ("auto-copy-safe", "nvdec-copy,vaapi-copy,auto-copy-safe"),
+            ("nvdec", "nvdec-copy"),
+            ("vaapi", "vaapi-copy"),
+            ("vulkan", "vulkan-copy"),
+            ("cuda", "cuda-copy"),
+            ("vdpau", "vdpau-copy"),
+            ("v4l2m2m", "v4l2m2m-copy"),
+            ("nvdec-copy", "nvdec-copy"),
+            ("vulkan-copy", "vulkan-copy"),
+            ("auto-unsafe", "nvdec-copy,vaapi-copy,auto-copy-unsafe"),
+            ("auto-copy-unsafe", "nvdec-copy,vaapi-copy,auto-copy-unsafe"),
+            ("amf", "amf-copy"),
+            ("drm", "drm"),
+            ("not_a_decoder", "not_a_decoder"),
+            ("vaapi, nvdec-copy", "vaapi-copy,nvdec-copy"),
+            ("vaapi,auto", "vaapi-copy,nvdec-copy,auto-copy"),
+            ("nvdec,nvdec-copy", "nvdec-copy"),
+        ] {
+            assert_eq!(mpv_hwdec(graph), mpv, "hwdec {graph:?}");
+        }
+        // No value mpv 0.41 accepts may come out as an interop (non-copy) decoder.
+        const INTEROP: [&str; 10] = [
+            "auto",
+            "auto-safe",
+            "auto-unsafe",
+            "yes",
+            "nvdec",
+            "cuda",
+            "vaapi",
+            "vdpau",
+            "vulkan",
+            "amf",
+        ];
+        for v in INTEROP
+            .iter()
+            .chain(&["v4l2m2m", "auto-copy", "nvdec,vaapi,vulkan"])
+        {
+            let m = mpv_hwdec(v);
+            assert!(
+                m.split(',')
+                    .all(|e| !INTEROP.contains(&e) && e != "v4l2m2m"),
+                "hwdec {v:?} → {m:?} keeps an interop decoder"
+            );
         }
     }
 }

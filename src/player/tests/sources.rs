@@ -512,6 +512,15 @@ fn property_map_reaches_mpv() {
     assert_eq!(src.mpv_get_f64("speed"), Some(1.5));
     ap(&mut src, "hwdec", PropValue::Str("no".into()));
     assert_eq!(s(&src, "hwdec"), "no");
+    // Task 20d: copy modes only (no GL interop init on the loop); the graph keeps the
+    // user's value.
+    assert_eq!(s(&src, "gpu-hwdec-interop"), "no");
+    ap(&mut src, "hwdec", PropValue::Str("auto".into()));
+    assert_eq!(s(&src, "hwdec"), "nvdec-copy,vaapi-copy,auto-copy");
+    assert_eq!(src.read("hwdec"), Some(PropValue::Str("auto".into())));
+    ap(&mut src, "hwdec", PropValue::Str("nvdec".into()));
+    assert_eq!(s(&src, "hwdec"), "nvdec-copy");
+    ap(&mut src, "hwdec", PropValue::Str("no".into()));
     ap(&mut src, "fps_cap", PropValue::F64(24.0));
     assert!(s(&src, "vf").contains("fps"), "vf = {:?}", s(&src, "vf"));
     ap(&mut src, "fps_cap", PropValue::F64(0.0));

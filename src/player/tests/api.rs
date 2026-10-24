@@ -126,9 +126,23 @@ impl Serve {
         env: &[(&str, &Path)],
         serial: Option<MutexGuard<'static, ()>>,
     ) -> Serve {
+        Serve::spawn_env_without(root, extra, env, &[], serial)
+    }
+
+    /// [`Serve::spawn_env`] that also removes `unset` from the child's environment.
+    fn spawn_env_without(
+        root: PathBuf,
+        extra: &[&str],
+        env: &[(&str, &Path)],
+        unset: &[&str],
+        serial: Option<MutexGuard<'static, ()>>,
+    ) -> Serve {
         let mut cmd = serve_cmd(&root, extra);
         for (k, v) in env {
             cmd.env(k, v);
+        }
+        for k in unset {
+            cmd.env_remove(k);
         }
         let child = cmd.spawn().expect("spawn lp-player serve");
         let sock = root.join("run/livepaper/lp-player.sock");
@@ -3812,6 +3826,126 @@ fn i5_switch_loop_busy() {
             "a warm switch still blocks the loop: {busy:?}"
         );
     }
+}
+
+/// Task 20d (R107): the I5 switch bound must hold whatever `hwdec` says. Two NVIDIA traps,
+/// both on the loop thread: (1) mpv's render context loads the CUDA GL interop eagerly
+/// whenever `libcuda.so.1` is loadable from libmpv (the flake wrapper's `LD_LIBRARY_PATH`,
+/// or once libavutil has loaded it for `nvdec-copy`) — CUDA context creation inside
+/// `mpv_render_context_create`, 65–90 ms per switch, *even with `hwdec=no`*; (2) without it
+/// mpv's `auto` resolves to `vulkan-copy`, whose per-core `vkCreateDevice` (mpv's core
+/// thread) holds an NVIDIA driver lock our GL calls wait on — 230–320 ms per switch, but
+/// only when no X server is reachable (with the session's Xwayland in `DISPLAY` it doesn't
+/// contend; measured). Scenario A = the dev binary's environment, B = the packaged one
+/// (libcuda on the library path); both without `DISPLAY`/`WAYLAND_DISPLAY` (hermetic, and
+/// the X-less case is the one that stalls). Per switch: the loop's longest synchronous
+/// stretch, and what mpv really decodes with (never a GL interop mode: `no` or a `-copy`
+/// mode, `sources::mpv::mpv_hwdec`).
+#[test]
+fn t20d_hwdec_switch_never_stalls_the_loop() {
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let driver = Path::new("/run/opengl-driver/lib");
+    let mut cuda_env: Vec<(&str, &Path)> = Vec::new();
+    if driver.is_dir() {
+        cuda_env.push(("LD_LIBRARY_PATH", driver));
+    }
+    type Env<'a> = &'a [(&'a str, &'a Path)];
+    let scenarios: [(&str, Env, &[&str]); 2] = [
+        ("dev env", &[], &["auto"]),
+        ("libcuda on the path", &cuda_env, &["auto", "no", "nvdec"]),
+    ];
+    let mut failures = Vec::new();
+    for (label, env, modes) in scenarios {
+        let Some(mut srv) = Serve::start() else {
+            return;
+        };
+        let serial = srv._serial.take();
+        drop(srv);
+        let srv = Serve::spawn_env_without(
+            new_root(),
+            &["--clock", "real"],
+            env,
+            &["DISPLAY", "WAYLAND_DISPLAY"],
+            serial,
+        );
+        let mut c = srv.client();
+        let a = create_src(&mut c, json!({"path": red, "loop": true, "hwdec": "no"}));
+        show_all(&mut c, &a);
+        wait_playing(&mut c, &a, 0.3);
+        let mut i = 0usize;
+        for hwdec in modes {
+            let mut busy = Vec::new();
+            let mut picked = Vec::new();
+            for _ in 0..6 {
+                std::thread::sleep(Duration::from_millis(300));
+                c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+                let path = if i.is_multiple_of(2) { &blue } else { &red };
+                i += 1;
+                let r = c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": path, "loop": true, "hwdec": hwdec},
+                           "effect_id": "fade", "duration_ms": 300}),
+                );
+                let b = r["to"].as_str().unwrap().to_string();
+                wait_playing(&mut c, &b, 0.2);
+                wait_for(Duration::from_secs(5), "done", || {
+                    let st = c.ok("state", json!({}));
+                    st["transitions"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty()
+                        .then_some(())
+                });
+                let lp = c.ok("probe", json!({"name": "loop"}));
+                busy.push(lp["max_busy_ms"].as_f64().unwrap());
+                let p = c.ok("probe", json!({"name": "sources"}));
+                let src = p["sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["id"] == json!(b));
+                let cur = src
+                    .map(|s| s["mpv_hwdec_current"].as_str().unwrap_or("?").to_string())
+                    .unwrap_or_default();
+                // What we asked mpv for: a hardware hwdec must ask for a copy mode (a decoder
+                // that silently fell back to software reports `no` above — this catches a
+                // mapping that stopped asking for hardware at all).
+                let asked = src
+                    .map(|s| s["mpv_hwdec"].as_str().unwrap_or("?").to_string())
+                    .unwrap_or_default();
+                if *hwdec != "no" && !asked.split(',').any(|e| e.ends_with("-copy")) {
+                    failures.push(format!(
+                        "{label}, hwdec={hwdec}: mpv was asked for {asked:?}, not a copy mode"
+                    ));
+                }
+                picked.push(cur);
+            }
+            let mut warm = busy[1..].to_vec();
+            warm.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            let median = warm[warm.len() / 2];
+            println!(
+                "T20d {label}, hwdec={hwdec}: max_busy_ms {busy:.1?} (warm median {median:.1}), \
+                 mpv decodes with {picked:?}"
+            );
+            // Fixed, every mode costs what `hwdec=no` does (I5: 8–26 ms per switch; medians
+            // 16–36 ms here with the full suite and other GPU work running); the traps this
+            // guards cost >= 65 ms. 50 keeps both margins.
+            if median >= 50.0 {
+                failures.push(format!(
+                    "{label}, hwdec={hwdec}: a warm switch blocks the loop {median:.1} ms \
+                     (median; bound 50): {busy:.1?}, decoder {picked:?}"
+                ));
+            }
+            if let Some(bad) = picked.iter().find(|h| *h != "no" && !h.ends_with("-copy")) {
+                failures.push(format!(
+                    "{label}, hwdec={hwdec}: mpv decodes with GL interop mode {bad:?} — its \
+                     init runs in the render context on the loop"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Task 20b: per-switch allocator retention — the Task 20 soak's RSS slope (6.4 MiB/min

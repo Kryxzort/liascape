@@ -175,6 +175,8 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 "mpv_hwdec_current".into(),
                 json!(m.mpv_get_string("hwdec-current")),
             );
+            // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes only).
+            o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             o.insert("stepped".into(), json!(m.is_stepped()));
             o.insert(
