@@ -433,6 +433,15 @@ pub fn init(dir: &Path, level: Level) -> io::Result<()> {
     })
 }
 
+/// Monotonic count of `transition.done` events emitted since start (the soak's switch
+/// counter: the ring `logs` reads is bounded, a counter is not).
+static TRANSITIONS_DONE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// See [`TRANSITIONS_DONE`].
+pub fn transitions_done_total() -> u64 {
+    TRANSITIONS_DONE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Emits one event to the global log. A no-op (not a panic) if `init` hasn't run yet
 /// — callers that log speculatively before startup finishes don't need to guard this.
 /// If a [`Tap`] is installed and [`Tap::wants`] the event, it also gets the record —
@@ -441,6 +450,9 @@ pub fn event(comp: &'static str, level: Level, kind: &str, corr: Option<CorrId>,
     let Some(logger) = GLOBAL.get() else {
         return;
     };
+    if kind == "transition.done" {
+        TRANSITIONS_DONE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     let tap = TAP
         .read()
         .ok()

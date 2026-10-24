@@ -99,7 +99,20 @@ feature-specific plumbing anywhere else in the crate:
 | **Clock** | a time base; pausable per-output or globally | `src/player/src/clock.rs`, `Runtime`'s player-pause fields |
 | **Program / Recipe** | the only place policy lives, built only from the blocks above; today: the transition A→B recipe | `src/player/src/recipes/transition.rs` |
 | **Command API** | create/destroy/set/get/animate/subscribe/probe/capture | `src/player/src/api/{proto,server,handlers}.rs`, `src/player/src/ctl.rs` |
-| **Probe** | measure: live sources, loop health, frame pacing, the audio bus/meter, the snapshot writer | `src/player/src/probe/{mod,frames,audio,snapshot}.rs` |
+| **Probe** | measure: live sources, loop health, frame pacing, the audio bus/meter, the snapshot writer | `src/player/src/probe/{mod,frames,audio,snapshot,memory}.rs` |
+
+### Memory
+
+Every switch creates one mpv core (decoder/demux/audio threads, 1080p frame pools) and
+destroys another, so the process's allocator sees a constant churn of multi-MiB buffers.
+glibc's defaults keep that memory: its dynamic mmap threshold rises past a frame buffer
+after the first core is freed, and the per-thread arenas then retain each peak (Task 20's
+soak: +6.4 MiB/min; 200 hermetic switches: RSS 159 → 922 MiB with live memory flat).
+`serve` therefore fixes the threshold at 128 KiB before any mpv core exists, and the mpv
+reaper `malloc_trim(0)`s after each batch of destroyed cores (off the loop) — 364 → 380 MiB
+over 300 switches (`src/player/src/mem.rs`, `.claude/rules/player-core.md` § Memory). The
+`memory` probe splits RSS into live vs retained; `LP_PLAYER_MALLOC=glibc` turns the policy
+off for an A/B.
 
 **Signal** (spec §4.2: "other audio playing" → auto-mute, "window fullscreen" → auto-pause) is
 specified but **not implemented yet** — it is Phase 3 (§6). Today the equivalent decisions
@@ -192,6 +205,7 @@ reply is sent. The backend's `LpPlayerClient` background event connection
 | State persistence / `--restore` | `src/player/src/snapshot.rs` | § Snapshot | `src/player/tests/supervise.rs` (restore cases) |
 | The C# side of a setting / dispatch point | `src/livepaper/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-lp-player-adapter.sh`, `--lp-player-selftest` |
 | Reference-based dropout detection | `src/player/src/probe/dropout.rs`, `scripts/lp_audiowatch.py` | `docs/player/debugging.md` | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
+| Process memory, the glibc allocator policy, the `memory` probe | `src/player/src/mem.rs`, `src/player/src/probe/memory.rs`, `src/player/src/sources/reaper.rs` | `.claude/rules/player-core.md` § Memory | `src/player/tests/api.rs::t20b_switch_loop_rss_stays_flat`, `battery.sh soak --hermetic` |
 | Onset waits (ramp-ins on flowing audio), the "can it be heard" predicate | `src/player/src/onset.rs` | `docs/player/invariants.md` #8 | its own unit tests, `src/player/tests/api.rs::i6_*` |
 
 A change to a **setting** always needs two ends: the graph property (above) *and* the adapter
@@ -233,6 +247,8 @@ the screen:
      probe → cause playbook.
    - `loop` — tick/busy timing (`max_busy_ms`, `max_open_ms`), the gain timer, and `bounds`:
      the size of every per-source collection (a long run of switches must leave them bounded).
+   - `memory` — RSS + glibc malloc's live vs retained bytes and arena count (`{"trim":true}`
+     shows what a `malloc_trim(0)` gives back): "RSS grows" → leak or allocator retention.
 5. **`lp-player ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'`** — look at the actual
    pixels of an output, a layer, or a source.
 6. **`lp-player ctl set '{"path":"player.debug","value":true}'`** (or `serve --debug`) turns on

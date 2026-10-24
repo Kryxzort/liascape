@@ -42,7 +42,8 @@ happen regardless of timing.
   `handlers.rs` (the verbs). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
   and state paths. § Command API.
 - `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
-  `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more).
+  `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more;
+  `memory.rs`: `memory`, Task 20b).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `Audio` (what
   `serve` runs, `mod.rs`). § Audio bus.
@@ -50,6 +51,8 @@ happen regardless of timing.
   for and restarts the compositor child (Task 16). § Supervisor.
 - `src/snapshot.rs` — the persisted state snapshot (`<state>/snapshot.json`, `--restore`)
   + its writer thread (Task 16). § Snapshot.
+- `src/mem.rs` — process memory (`/proc/self/status`, glibc `mallinfo2`/`malloc_info`)
+  and the allocator policy `serve` applies first thing (Task 20b). § Memory.
 - `src/onset.rs` — invariant #8's one onset helper (`PendingOnset`/`Onsets`: ramp-ins held
   until the source's audio flows, bounded by `ONSET_TIMEOUT`) and the one "can it be heard"
   predicate (`has_audio`, `audible`). § Runtime "Onsets" (final review I6/M12).
@@ -921,7 +924,7 @@ create + destroy at once, before the VO is up) guards it. Then `Drop` frees the 
 context — fast now: with the VO live, `mpv_render_context_free` waits on the playloop
 (**measured 21–32 ms** for a playing 1080p clip) — and hands the core to the **reaper**
 (`sources/reaper.rs`): one background thread runs `mpv_terminate_destroy` (30–240 ms
-measured), started on first use; the wakeup callback is cleared first (mpv invokes it
+measured), started on first use, then `malloc_trim(0)` once its queue is empty (§ Memory); the wakeup callback is cleared first (mpv invokes it
 under the same lock, so nothing writes the eventfd after that). `reaper::shutdown(timeout)`
 (`quit`: after `SourceHost::finish_teardown(500 ms)`, ≤ 2 s) closes the queue, waits and
 returns the stragglers (logged `mpv.reaper_stragglers`); later drops destroy
@@ -1571,7 +1574,7 @@ present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|la
 gl_error|duplicate_output|pointer_error`, `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
-`step.timeout`, `mpv.reaped`, `mpv.reaper_stragglers`, `effects.missing`,
+`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`, `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
 `snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|
@@ -1636,7 +1639,16 @@ auto-trigger used to snapshot at `transition.done` and never saw the post-roll);
 meter is binned on `expected`'s own grid (never the absolute 10 ms one — the window's
 sub-10 ms phase skewed every lag), coarse bins are power means of the 1 ms envelope, and
 the lag is refined to 1 ms (R96, ±10 ms) before drops/micro-gaps; `dump` (absolute path)
-writes every analysis input + the report as JSON for offline replay; `snapshot` (Task 16,
+writes every analysis input + the report as JSON for offline replay; `memory` (Task 20b,
+`probe/memory.rs`) — `{proc {rss_kib, hwm_kib, rss_anon_kib, rss_file_kib, threads},
+malloc {arena_bytes, mmap_bytes, mmap_chunks, in_use_bytes, free_bytes,
+top_releasable_bytes, arenas}, policy {applied, mmap_threshold, trim_after_reap, trims,
+trim_ms_total, trim_ms_max, allocator (glibc|other), mmap_threshold_source (policy|env|null),
+env_unknown_value}, transitions_done_total (monotonic switch counter), live_sources,
+dying_sources, opening, reaper_pending (0 only after the batch's trim)}`,
+`args: {"trim": true}` adds `trim {released, ms, proc_after, malloc_after}` — that trim runs on
+the LOOP thread (debug probe; with hundreds of MiB retained it can drop a frame) (§ Memory);
+`sources` also has `mpv_hwdec_current` (what `hwdec: auto` resolved to); `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
@@ -2169,3 +2181,42 @@ same place.
   nothing); parking cancels it (unpark ramps from −96).
 - **`snapshot` probe:** `{path, writes, failures, last_write_ms, since_last_write_ms,
   due_in_ms, frozen, current}` — `current` is what would be written now.
+
+## Memory
+
+`src/mem.rs` + `src/probe/memory.rs` + the reaper (Task 20b). **The allocator policy**
+(`mem::apply_policy`, the first line of `runtime::serve`, before any mpv core exists; the outcome is
+logged as `mem.policy` right after `log::init`, Warn on an unknown `LP_PLAYER_MALLOC` value):
+
+- **Fixed mmap threshold, `mem::MMAP_THRESHOLD` = 128 KiB** (`mallopt(M_MMAP_THRESHOLD)`,
+  which also turns glibc's dynamic adjustment off). glibc starts at 128 KiB but raises the
+  threshold to the size of any mmapped chunk that is freed (≤ 32 MiB): after the first mpv
+  core is destroyed, a 1080p frame-pool buffer (~3 MiB) or demuxer block no longer gets its
+  own mapping but comes from one of ~57 per-thread arenas (8 × cores max), and an arena
+  keeps what it frees. Fixed, an allocation ≥ 128 KiB that no free chunk of its arena fits
+  gets its own mapping (fresh `mmap`, unmapped by `free`) instead of growing the arena. The caller's own choice wins (`MALLOC_MMAP_THRESHOLD_`, or
+  `glibc.malloc.mmap_threshold` in `GLIBC_TUNABLES`).
+- **`malloc_trim(0)` after each reaper batch** (`mem::trim_after_reap`, on the
+  `lp-mpv-reaper` thread once its queue is empty — never the loop): the smaller chunks a
+  destroyed core frees still fragment the arenas (+0.35 MiB retained per switch with the
+  threshold alone); the trim returns those pages. Measured ≤ 2.4 ms (1.4 ms mean) per
+  switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug).
+- **No arena cap.** `M_ARENA_MAX` 4 on top changed little (373 vs 380 MiB after 300
+  switches) and adds lock contention across the ~30 decoder/demux/audio threads.
+- **`LP_PLAYER_MALLOC=glibc`** skips the whole policy (A/B; the regression test's RED run);
+  `memory` probe `policy.applied` says which is in effect.
+
+**Measured** (hermetic headless, 2 × 1080p outputs, `--ao null`, a fade to an alternating
+1080p30 clip every 1 s): 200 switches with glibc's defaults grew RSS 159 → 922 MiB while
+malloc's in-use bytes stayed flat at ~300 MiB and its free (retained) bytes went 1 → 614
+MiB — allocator retention, not a leak; `hwdec=auto` (mpv picks `vulkan-copy` here)
+1.2–1.6 GiB. With the policy: 364 → 380 MiB over 300 switches (`hwdec=auto` 451 → 457 MiB
+over 200). CPU: idle playback unchanged (13.75 vs 14.03 s per 60 s); a 1 s switch loop costs
+~4 % more process CPU (161.7 → 168.1 s per 313 s, ~21 ms CPU per switch: fresh pages for each
+new core's pools + the trim). Diagnose
+with the `memory` probe: *live* (`in_use_bytes + mmap_bytes`) flat + `free_bytes` growing
+= retention; live growing = a real leak (then `loop` → `bounds`, `reaper_pending`,
+`dying_sources`, `opening`). Guard: `tests/api.rs::t20b_switch_loop_rss_stays_flat` (20
+fades between two 1080p clips: RSS growth over the last 16 < 10 % and an on-demand trim
+gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaningful check; with `LP_PLAYER_MALLOC=glibc` 32 % / 13.6 % → fails).
+`docs/player/debugging.md` row "RSS grows per switch".

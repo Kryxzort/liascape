@@ -18,6 +18,7 @@ pub mod gfx;
 pub mod graph;
 pub mod headless;
 pub mod log;
+pub mod mem;
 pub mod mpv;
 pub mod onset;
 pub mod paths;

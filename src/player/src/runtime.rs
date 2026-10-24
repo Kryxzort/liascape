@@ -3192,6 +3192,7 @@ fn signal_fd() -> Result<OwnedFd, String> {
 /// `lp-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
 /// connection is lost — then every source is silenced and torn down, and it returns `Err`).
 pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
+    crate::mem::apply_policy(); // Task 20b: allocator policy, first thing (before the mpv cores exist)
     supervise::make_sent_faults_fatal(); // `kill -SEGV` crashes, never shrugged off
     let sigfd = signal_fd()?;
     log::init(&opts.state_dir, opts.log_level).map_err(|e| {
@@ -3200,6 +3201,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             opts.state_dir.display()
         )
     })?;
+    crate::mem::log_policy();
     // R73: a restarted child says why, first thing (the supervisor has no socket).
     let restart_event = opts
         .supervised
