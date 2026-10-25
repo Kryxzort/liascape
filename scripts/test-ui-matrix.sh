@@ -12,18 +12,26 @@
 # and the temp dir removed on every exit path.
 #
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
-#                                  [--probe <app/shell script>]  (default probe-matrix.js; probe-morph.js =
-#                                  the settings-modal morph probe, same hermetic stack)
+#                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
+#                                  probe-morph.js = the settings-modal morph probe, same hermetic stack)
 #   --ui-dir: drive an already-built UI bundle instead of building this tree's (e.g. an older commit's,
 #   to show a UI-side fix RED)
+#   --jobs N (default 4, env LP_MATRIX_JOBS): N complete hermetic stacks in parallel, each running every
+#   N-th cell (`--shard i/N`, internal); builds once, merges <out>/cells.jsonl (each shard keeps its own
+#   dir <out>/shard-i/ + log <out>/shard-i.log), prints the combined MATRIX line. --jobs 1 = one stack,
+#   the cells in order (the original single run). A probe other than probe-matrix.js always runs alone.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
 # electron-42). Exit 0 = every cell passed. Results: $LP_MATRIX_OUT (default: a dir printed at the end).
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-BUILD=1; ONLY=""; UIDIR=""
+BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-4}; SHARD=""; PROBE=""
 while [ $# -gt 0 ]; do
-  case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
+  case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
+    --jobs) JOBS=$2; shift ;; --shard) SHARD=$2; shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
 done
+case "$JOBS" in ''|*[!0-9]*|0) echo "--jobs wants a positive number"; exit 2 ;; esac
+[ -n "$PROBE" ] && [ "$PROBE" != probe-matrix.js ] && JOBS=1
+SELF=$ROOT/scripts/$(basename "${BASH_SOURCE[0]}")
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 ELECTRON=${ELECTRON:-$(ls -d /nix/store/*-electron-42*/bin/electron 2>/dev/null | head -1)}
@@ -44,6 +52,67 @@ if [ $BUILD = 1 ]; then
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
+
+# ---------------------------------------------------------------- --jobs N: N shards in parallel
+if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
+  P=$(mktemp -d /tmp/lpmx-XXXXXX)
+  OUTROOT=${LP_MATRIX_OUT:-$P/out}
+  mkdir -p "$OUTROOT"
+  if [ -z "$UIDIR" ]; then
+    echo "== UI bundle"
+    (cd "$ROOT/app/ui" && node node_modules/vite/bin/vite.js build --outDir "$P/ui" --emptyOutDir --logLevel error) || { echo "vite build failed"; exit 2; }
+    UIDIR=$P/ui
+  fi
+  PIDS=()
+  pcleanup() {
+    trap - EXIT INT TERM HUP
+    # each shard runs in its own session (setsid): its whole tree — Electron, Xvfb, backend, player — goes
+    for pid in "${PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null; done
+    for pid in "${PIDS[@]}"; do for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done; kill -KILL -- "-$pid" 2>/dev/null; done
+    if [ -z "${LP_MATRIX_OUT:-}" ] && [ -d "$OUTROOT" ]; then
+      [ -e /tmp/lpmx-last ] && trash /tmp/lpmx-last 2>/dev/null
+      cp -r "$OUTROOT" /tmp/lpmx-last && echo "results kept in /tmp/lpmx-last"
+    fi
+    case "$P" in /tmp/lpmx-*) if command -v trash >/dev/null; then trash "$P" 2>/dev/null; else rm -rf -- "$P"; fi ;; esac
+  }
+  trap pcleanup EXIT
+  trap 'exit 130' INT TERM HUP
+  T0=$(date +%s)
+  echo "== matrix: $JOBS shards"
+  for i in $(seq 0 $((JOBS - 1))); do
+    LP_MATRIX_OUT=$OUTROOT/shard-$i setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} \
+      </dev/null >"$OUTROOT/shard-$i.log" 2>&1 &
+    PIDS+=($!)
+    sleep 2 # stagger the start-up spikes (ffmpeg clips, the backend's JIT, Electron)
+  done
+  # live: every shard's lines as they land, prefixed with its number
+  SEEN=(); for i in $(seq 0 $((JOBS - 1))); do SEEN[$i]=0; done
+  flush() {
+    for i in $(seq 0 $((JOBS - 1))); do
+      local n; n=$(wc -l <"$OUTROOT/shard-$i.log" 2>/dev/null || echo 0)
+      [ "$n" -gt "${SEEN[$i]}" ] && sed -n "$((SEEN[$i] + 1)),${n}p" "$OUTROOT/shard-$i.log" | sed "s|^|[$i] |"
+      SEEN[$i]=$n
+    done
+  }
+  while :; do
+    alive=0; for pid in "${PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+    flush; [ $alive = 0 ] && break; sleep 3
+  done
+  rcs=""; for i in $(seq 0 $((JOBS - 1))); do wait "${PIDS[$i]}"; rcs="$rcs $?"; done
+  cat "$OUTROOT"/shard-*/cells.jsonl >"$OUTROOT/cells.jsonl" 2>/dev/null
+  echo "== failures (all shards)"
+  jq -r 'select(.result != "PASS" and .result != "SKIP") | "\(.result) \(.state) × \(.control)" + ((.violations // []) | map("\n        - " + .) | join(""))' "$OUTROOT/cells.jsonl"
+  crashed=0
+  for i in $(seq 0 $((JOBS - 1))); do
+    grep -q '^MATRIX ' "$OUTROOT/shard-$i.log" || { crashed=$((crashed + 1)); echo "shard $i/$JOBS ended without a summary:"; tail -n 8 "$OUTROOT/shard-$i.log" | sed 's/^/     /'; }
+  done
+  n() { jq -s --arg r "$1" 'map(select(.result == $r)) | length' "$OUTROOT/cells.jsonl"; }
+  echo "== done in $(( ($(date +%s) - T0) / 60 ))m$(( ($(date +%s) - T0) % 60 ))s ($JOBS shards, exit codes:$rcs)"
+  pass=$(n PASS); fail=$(n FAIL); err=$(n ERROR); skip=$(n SKIP); setup=$(n SETUP); known=$(n KNOWN)
+  echo "MATRIX pass=$pass fail=$fail error=$((err + crashed)) skip=$skip setup=$setup known=$known"
+  [ $((fail + err + setup + crashed)) = 0 ] && [ -z "$(echo $rcs | tr -d ' 0')" ]
+  exit $?
+fi
 
 T=$(mktemp -d /tmp/lpmx-XXXXXX)   # short: a unix socket path must be < 108 bytes
 OUT=${LP_MATRIX_OUT:-$T/out}
@@ -110,7 +179,7 @@ for _ in $(seq 1 50); do [ -s "$T/xdisplay" ] && break; sleep 0.1; done
 [ -s "$T/xdisplay" ] || { echo "ABORT: Xvfb didn't start"; tail -3 "$T/xvfb.log"; exit 1; }
 echo "== matrix"
 (cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LP_URL="$U" LP_PLAYER_SOCKET="$XDG_RUNTIME_DIR/livepaper/lp-player.sock" \
-  LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" \
+  LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" LP_SHARD="$SHARD" \
   LP_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" LP_BACKEND_LOG="$T/backend.log" \
   LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" \
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
