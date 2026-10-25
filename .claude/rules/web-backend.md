@@ -68,6 +68,20 @@ run over 500 ms.
 /steam/{qr/start,qr/cancel,signout} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
+**`POST /settings` merges (PATCH semantics)** — `SettingsService.Patch` → `Merge`: the body's keys overwrite
+the saved settings, every key it leaves out keeps its saved value. It bound the body as the whole
+`AppSettings`, so a partial one reset every other field to its C# default (an agent's `{"Volume": 50}`:
+~15 fields incl. `LweMonitors` and `PlayerEngine` → a live engine switch). Each key binds exactly as the
+whole body did (the API's web JSON defaults: camelCase or PascalCase keys, the setters' clamps); a value
+replaces its field as a unit — an array (`LweMonitors`, `GlobalTransitionEffectIds`) is the whole new
+list, an object the whole new object; an explicit `null` sets null (on a value-type field it's a bad
+value); unknown keys are ignored; a bad value (wrong type, a non-object body) is a **400 `{error}`** that
+saves nothing. `LastSession` + the Steam tokens keep their saved values whatever the body says (the UI's
+copy is stale). One poster at a time (a lock around load → merge → save): parallel partial bodies all
+land (without it 64 of 80 were lost). The UI still posts its whole copy, so it behaves exactly as before;
+`prev` → `cur` for the live-apply diff = the saved settings → the merged ones, so a partial body applies
+live like any other. Hermetic test: `scripts/test-settings-merge.sh` (lp-player headless, ~10 s).
+
 **Live-apply:** `/library/volume|speed` save the override (dropped when == global) then `PlayerHelper.ApplyOverrideLive` retargets the *playing* wallpaper instantly (mpv IPC / `pactl` for scenes). `/preview` is the throttled drag-preview twin — sets mpv/LWE volume|speed NOW with **no persist** (the modal throttles it during a slider drag, then persists once on release). **`/preview {volume|speed, global:true}`** is the Settings page's global sliders' twin (`PlayerHelper.PreviewGlobal`): every live wallpaper WITHOUT its own override for that field takes the dragged value (override ?? global, R61 — an overridden one never moves); lp-player: one `set` per following source from the cached source map; legacy: the current item when it has no override. **A no-op `/settings` costs ~5–10 ms** (300-item library, `scripts/test-settings-latency.sh`): it used to be 0.15–0.5 s because `_ = LibraryService.BackfillLoudnessAsync()` ran the whole library scan synchronously on the request thread (an `async` method runs until its first real await — with every item measured, that was all of it) and parsed `index.json` twice per item; now `KickLoudnessBackfill(force: just switched on)` runs it on the thread pool, at most once per 30 s otherwise, reading each index once. The handler logs its phases when it takes > 100 ms (`/settings: N ms (load+save …, backfill …)`; always with `LP_PROFILE_SETTINGS=1`). `/settings` applies the *effective* (`override ?? global`) value so a global change never clobbers an active override; it also live-applies `VideoScale` (mpv `panscan`). A `PlayerEngine` change in `/settings` switches the engine live (`PlayerHelper.SwitchEngineLive` — see `player-adapter.md`); under lp-player `/preview` targets the playing item's own source. `/open` reveals an item in the file manager (resolves the symlink / scene dir). `/library/duration` = ffprobe.
 
 ## WS event types
@@ -80,6 +94,9 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
 ## Rules
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.
 - `SettingsService.Load()` per request (no cached singleton) — daemons may have changed the file.
+- Never bind a whole `AppSettings` from a request body — a partial body resets what it leaves out.
+  Settings go through `SettingsService.Patch` (merge over what's saved). (`/playlist/state` still binds its
+  whole `CustomPlaylist` — `docs/TODO.md`.)
 - **`SettingsService.Save` is atomic** (a per-writer temp file renamed over `settings.json`) and `Load`
   retries a file it can't parse. It used to truncate + write in place: a load mid-write got the C#
   defaults (NoAudio on, volume 100, the legacy engine), applied them live, and the next save wrote them
