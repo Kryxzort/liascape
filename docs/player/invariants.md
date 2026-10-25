@@ -296,6 +296,17 @@ whole invariant exists to prevent: an unramped click (onset) or a truncated tail
   `recipes::transition::b_has_audio_false_skips_onset_wait_entirely` (unit, synthetic),
   `tests/api.rs::r92_transition_onto_video_with_no_audio_skips_onset_wait` +
   `r92_pause_gate_skips_video_with_no_audio` (real GPU + libmpv, real clock).
+  **Nothing (more) to hear (2026-10-25, TODO "onset_timeout on audio-less videos").** A
+  selected audio track that stops producing — a 30 ms track on a 4 s video, a stream that
+  stalls right after starting — or an audio-less file whose `aid` hadn't resolved yet still
+  waited out the 150 ms and warned: the source only confirmed on a *later* `audio-pts`
+  change. `MpvSource::confirm_flowing_by_time` (every tick) now also confirms (a) once
+  `FLOWING_CONFIRM_MARGIN` of real time passed since the first change, and (b) when
+  `audio-pts` is *unavailable* (mpv plays no audio) while the picture moved
+  `NO_AUDIO_MEDIA_ADVANCE` (0.1 s of media) since arming — with audio playing, the audio
+  is mpv's clock, so the picture can't run ahead of it. A core that never plays still
+  never confirms. Test: `tests/api.rs::audio_less_b_never_times_out_its_onset_any_method_or_align`
+  (RED before: all 6 method × align cells with the short track timed out).
 - **Offset (requirement #2).** A ramp-to-silence immediately followed by a pause/destroy
   waits for the ramp's nominal duration *plus* `AUDIO_SETTLE_TAIL` (15 ms — comfortably ≥
   2× the measured ~6 ms truncation, small against the 30 ms ramp itself) before the pause

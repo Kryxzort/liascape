@@ -124,10 +124,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
       slower than `REAPER_WAIT` during `quit` is reported as `mpv.reaper_stragglers`; skip the trim once
       shutdown has started (Task 20b review, cosmetic).
-- [ ] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
+- [x] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
       unknown → treated as audible) waits the full 150 ms `ONSET_TIMEOUT` before its (silent) ramp; 85 such
       timeouts in the Task 20 re-run. Harmless (nothing to hear) but noisy; resolve `has_audio` from the
       file's track list before scheduling the onset, or don't warn for a source that never reports audio.
+      — done: a B with no audio stream at all didn't reproduce it (R92's `has_audio` resolves in time in
+      every method × align, and a switch storm); a selected track that ENDS (30 ms of audio on a 4 s
+      video) timed out in all 6 cells. The source now confirms `AudioFlowing` when `audio-pts` is
+      unavailable while the picture plays on (no audio playing: track ended or `aid` unresolved), and its
+      40 ms margin on real time, not on a later `audio-pts` change (`MpvSource::confirm_flowing_by_time`).
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
