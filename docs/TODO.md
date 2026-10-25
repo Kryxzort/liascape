@@ -113,14 +113,21 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
       (arena address space +4.6 MiB/min, ~5.7 MiB per switch). Costs no RAM; the reaper's `malloc_trim` walks it
       (1.7 ms max now). Run `battery.sh soak --minutes 480`; if it doesn't plateau, consider fewer per-core
-      threads (mpv's Lua scripts) or reusing cores across switches.
+      threads or reusing cores across switches (the Lua scripts are gone since — 6 fewer threads and their
+      Lua VMs per core; re-measure the free-heap growth first).
 - [ ] **Explicit sync back on NVIDIA once egl-wayland2 > 1.0.2 ships** — Task 20e: 1.0.2 leaks one queued
       `wl_buffer.release` (~224 B) per present with explicit sync (upstream fix 6235dd8, 2026-09-09, unreleased),
       so `serve` defaults `__NV_DISABLE_EXPLICIT_SYNC=1` (cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, loop tick
       p99 ~0.3 → 1.6 ms, 0 missed) and drains libwayland's default queue every iteration. With a fixed driver
       the drain alone is leak-free: drop the env default (keep the drain). `player-core.md` § Wayland NVIDIA notes.
-- [ ] **mpv's built-in Lua scripts per core** (console, stats, auto_profiles, commands, select) start threads
+- [x] **mpv's built-in Lua scripts per core** (console, stats, auto_profiles, commands, select) start threads
       for every new source — `load-scripts`/`load-*=no`-style options would trim per-switch CPU (Task 20d note).
+      — done: `sources::mpv::SCRIPT_TRIMS` (`load-scripts`/`osc`/`load-stats-overlay`/`load-console`/
+      `load-auto-profiles`/`load-select`/`load-commands`/`load-positioning`/`load-context-menu`/
+      `input-builtin-bindings` = `no`, best-effort — an unknown name is skipped and logged once). A playing
+      1080p core 28 → 22 threads (6 Lua script threads gone); a core's create + initialize + destroy
+      37–47 → 3.7–5.7 ms CPU; ~1.3 MiB less RSS per live core; the loop's open share 3.6–7.5 → 0.8–3.9 ms.
+      `tests/sources.rs::builtin_scripts_are_not_loaded` (RED: `load-scripts` `yes`, 6 script threads).
 - [ ] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
       slower than `REAPER_WAIT` during `quit` is reported as `mpv.reaper_stragglers`; skip the trim once
       shutdown has started (Task 20b review, cosmetic).
