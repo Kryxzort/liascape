@@ -290,9 +290,47 @@ public static class PlayerHelper
         catch { }
     }
 
+    // only our own claim: a stopping backend deleting the NEXT one's let SpawnTimerDaemon's guard spawn a
+    // daemon next to it
     public static void ClearGuiTimerPid()
     {
-        try { File.Delete(GuiTimerPidPath); } catch { }
+        try { if (File.ReadAllText(GuiTimerPidPath).Trim() == Environment.ProcessId.ToString()) File.Delete(GuiTimerPidPath); } catch { }
+    }
+
+    // Another live `--serve` backend's pid in gui_timer.pid (it took the timed playlist over), else null.
+    // Checked by its cmdline, not liveness alone: a stale file's pid may belong to anything by now.
+    private static int? OtherTimerOwner()
+    {
+        try
+        {
+            if (!int.TryParse(File.ReadAllText(GuiTimerPidPath).Trim(), out int pid) || pid == Environment.ProcessId) return null;
+            var argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0');
+            return argv.Contains("--serve") && argv.Any(a => a.Contains("livepaper")) ? pid : null;
+        }
+        catch { return null; }
+    }
+
+    // This process stops owning the timed playlist — its backend is shutting down and hands it to a
+    // `--timer-daemon`, or another backend took it over — WITHOUT touching the session the new owner
+    // resumes from (saved first; TeardownTimer would clear it and consume a pending action): no more
+    // ticks, and its armed end-of-video wait is cancelled (the new owner arms its own; left armed, it
+    // would be superseded and switch now). The stopping backend used to tick on until the process exited
+    // — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket held it open — next to the daemon
+    // and then the next backend: their aligned switches superseded each other, a dev restart switched
+    // the wallpaper every 1–16 s.
+    private static volatile bool _timerReleased;
+    private static DateTime _ownerCheckedAt;
+    public static void ReleaseTimer()
+    {
+        lock (_lock)
+        {
+            SaveTimedState();
+            _timerReleased = true;
+            _playlistTimer?.Dispose();
+            _playlistTimer = null;
+            _waitCts?.Cancel();
+            StopRestartTimer();
+        }
     }
 
     private static bool IsGuiTimerAlive()
@@ -928,6 +966,7 @@ public static class PlayerHelper
         _daemonCts?.Dispose();
         _daemonCts = new CancellationTokenSource();
         _lastTickTime = DateTime.UtcNow;
+        _timerReleased = false;
         ConsumePendingAction(); // discard any stale pending action from a prior session
 
         _playlistTimer = new Timer(_ => Tick(), null, TickInterval, Timeout.InfiniteTimeSpan);
@@ -937,6 +976,18 @@ public static class PlayerHelper
     {
         lock (_lock)
         {
+            if (_timerReleased) return;
+            // a backend started while this one still runs (a dev restart, a second `--serve`) took over
+            if (!_daemonMode && DateTime.UtcNow - _ownerCheckedAt > TimeSpan.FromSeconds(1))
+            {
+                _ownerCheckedAt = DateTime.UtcNow;
+                if (OtherTimerOwner() is int other)
+                {
+                    Console.Error.WriteLine($"timed playlist: backend {other} owns it now — this one ({Environment.ProcessId}) stops ticking");
+                    ReleaseTimer();
+                    return;
+                }
+            }
             var now = DateTime.UtcNow;
             var elapsedMs = (long)(now - _lastTickTime).TotalMilliseconds;
             _lastTickTime = now;
@@ -1987,9 +2038,32 @@ public static class PlayerHelper
             var lpCfg = TransitionService.CurrentConfig();
             var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: true, ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested) return;
+            // superseded by another backend's switch (it took the playlist over): leave it to that one
+            if (outcome != "handoff" && !_daemonMode && OtherTimerOwner() is int owner)
+            {
+                Console.Error.WriteLine($"timed playlist: backend {owner} owns it now — this one ({Environment.ProcessId}) stops ticking");
+                ReleaseTimer();
+                return;
+            }
+            if (outcome == "cancelled:superseded")
+            {
+                // another requester replaced it — never this process (its own switches cancel the wait
+                // first): a second backend before it yields, a daemon. Wait for A's end again, never
+                // "switch now": two owners each switching now on the other's supersede was the storm.
+                var backoff = LpPlayerMedia.NextFailureBackoff();
+                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: superseded by another request → re-arming in {backoff.TotalSeconds:0} s");
+                try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                lock (_lock)
+                {
+                    if (!_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
+                    ArmVideoEndWait(next, prevIsVideo);
+                }
+                return;
+            }
             if (outcome != "handoff")
             {
-                // failed / player unreachable / cancelled by someone else / timed out: back off — 1 s,
+                // failed / player unreachable / timed out: back off — 1 s,
                 // doubling to ≤ 30 s while it keeps failing (I4: never a storm, whatever the player's
                 // reason) — then switch now, the legacy "mpv gone → switch immediately" fallback.
                 var backoff = LpPlayerMedia.NextFailureBackoff();
@@ -2000,7 +2074,7 @@ public static class PlayerHelper
             else LpPlayerMedia.ResetFailureBackoff();
             lock (_lock)
             {
-                if (!_waitingForVideoEnd || ct.IsCancellationRequested) return;
+                if (!_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
                 _waitingForVideoEnd = false;
                 _waitCts = null;
                 if (outcome == "handoff")

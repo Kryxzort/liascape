@@ -89,7 +89,8 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
 ## Binary resolution (`PlayerEngine.ResolveBinary`)
 env `LP_PLAYER_BIN` → next to the running livepaper executable (`Environment.ProcessPath` dir, then
 `AppContext.BaseDirectory`) → the repo dev tree `src/player/target/{release,debug}/lp-player` (walk up
-from the assembly) → `PATH`. **Missing → `IsLpPlayer` is false** (legacy keeps working), one log line,
+from the assembly; **release first** — debug is `opt-level 0` and the player mixes audio itself, so a
+player change reaches the dev session only once `cargo build --release` ran) → `PATH`. **Missing → `IsLpPlayer` is false** (legacy keeps working), one log line,
 and `/player-engine` reports `available:false` + the reason → the UI row is disabled with it (switching
 back to Legacy always stays possible).
 
@@ -111,6 +112,23 @@ back to Legacy always stays possible).
   from EnsureRunning means that backoff hasn't succeeded within our 3 s wait, not that it gave up) — all
   surfaced via `LastError` → `/player-engine` `reason` + one log line; EnsureRunning never crashes on any
   of them, only reports `false`.
+- **In-place upgrade** (`LpPlayerClient.StaleReason` / `UpgradeInPlace`, `LpPlayerMedia.StartUpgradeWatch`).
+  The player outlives the backend and the app on purpose, so a rebuilt or reinstalled binary never reached
+  a running one: fixes "persisted" for hours (a 13:26 build still running at 19:00). **Stale** = the
+  running compositor isn't the build this backend starts — compared as FILES, never path strings (one
+  checkout is `/home/…` and `/mnt/…/@home/…`): size + mtime through open handles, `/proc/<pid>/exe`
+  opening the running binary even after a rebuild replaced it (`… (deleted)`); Nix by store root
+  (`/nix/store/<hash>-name` — every store file has mtime 1, and `LP_PLAYER_BIN` is the `wrapProgram`
+  wrapper while the process runs `.lp-player-wrapped`); a binary written < 2 s ago isn't started yet.
+  **Upgrade** = `QuitOrKill` (the player writes its final snapshot) → the supervisor's own `serve`
+  arguments (from its cmdline, minus `--supervised/--restore/--restarted`) + `--restore` → the same
+  wallpaper at the same place, paused stays paused, ~0.2 s; then events resubscribe and the `Restarted`
+  handler re-applies settings (R81). Never twice onto the same build (a check that can't see through
+  some wrapper must not restart the player every 10 s). **When**: before every switch (`Switch`, after
+  `EnsureRunning`), and from a 10 s check in `--serve` only while **no transition is pending** — an
+  armed align:end switch would be dropped by the restart and the rotation would switch early (failure
+  path), so an advance-on-end playlist upgrades at its next switch. `AutoSpawn=false` (self-test) never
+  upgrades. `/player-engine` → `running {pid, supervisor, exe, started, stale}`.
 - Socket: `$LP_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (mirrors `paths.rs`).
 - `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from lp-player =
   `StopAndQuit` (stop → quit → TERM → KILL, synchronous, outside `_lock`).
@@ -246,9 +264,10 @@ subscription ack before requesting, and returns "handoff" | "cancelled:…" | "f
 ## Debugging
 - Adapter log: `~/.cache/livepaper/lp-player-adapter.log` (+ stderr → the serve unit's journal),
   rate-limited (an identical line ≤ once / 10 s): every refused request with its **hint**, start
-  failures, untranslated mpv commands, engine switches. Player stdout/stderr:
-  `~/.cache/livepaper/lp-player-serve.log`. `GET /player-engine` = `{engine, active, available,
-  binary, reason}`.
+  failures, untranslated mpv commands, engine switches, in-place upgrades (`out of date (…)` → `upgraded
+  in place: pid A → B`). Player stdout/stderr: `~/.cache/livepaper/lp-player-serve.log`.
+  `GET /player-engine` = `{engine, active, available, binary, reason, running}` — `running.stale` names
+  why the running player is out of date (null = current).
 - `lp-player ctl state` — what each output shows (`lay:<c>:main.content`, `cur:`), every source's
   `path/ready/paused/gain/gain_effective_db`, live `transitions` (phase, held).
 - `lp-player ctl logs '{"corr":"tr-12"}'` — one switch's whole story (scheduled → started → handoff →
@@ -278,7 +297,15 @@ rotation resuming (I4); a pending B getting its OWN override while the global
 changes; **speed storm**: an aligned switch armed at 4× survives a drop to 0.5× and an aligned switch
 survives an 8 s pause (no cancel, no forced switch, no backstop log line), each then handing off at A's
 end; `/preview {paths:[A]}` during a running 8 s fade moves A only and `{paths:[B]}` B only (RED before:
-A's values landed on B) (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
+A's values landed on B); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
+copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
+a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
+owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend
+started while the first runs → the first yields ("stops ticking"); a rebuilt binary → an idle paused
+player is upgraded within ~12 s (new compositor + supervisor, the new build, same wallpaper, still
+paused, `snapshot.restored`, `/player-engine` current), and an advance-on-end playlist is **not**
+upgraded while its switch is armed (stale > 15 s) but at its next switch, the following switch armed
+on the new player (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
 while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
 pending B — `cur:*.paused`/a source's own raw `paused` never changes, by design); a SIGSTOPped player

@@ -90,6 +90,8 @@ public static class ServerHost
         PlayerHelper.WriteGuiTimerPid();
         // load the engine NOW (cached): /settings compares against what actually runs when it changes
         _ = livepaper.Player.PlayerEngine.IsLpPlayer;
+        // a player left running by an older build (it outlives the backend) restarts onto the current one
+        livepaper.Player.LpPlayerMedia.StartUpgradeWatch();
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
         // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
         // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
@@ -104,7 +106,10 @@ public static class ServerHost
             if (s.AutoMute && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
             // Release timer ownership, then hand the timed playlist back to a detached `--timer-daemon`
             // so it keeps cycling after the app closes (the Electron shell only kills the backend — it
-            // doesn't run `--restore`). Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
+            // doesn't run `--restore`). Stop our own ticking first: this process may live on for a while
+            // (Kestrel waits for open WebSockets), and two owners supersede each other's switches.
+            // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
+            PlayerHelper.ReleaseTimer();
             PlayerHelper.ClearGuiTimerPid();
             if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
         });

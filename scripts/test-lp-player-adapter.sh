@@ -48,9 +48,11 @@ fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 
 T=$(mktemp -d /tmp/lpit-XXXXXX)   # short: a unix socket path must be < 108 bytes
-mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
+mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$T/bin"
+# the backend's player binary: a link to this build, replaced by a copy to stand in for a rebuild (upgrade test)
+ln -s "$B" "$T/bin/lp-player"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
-export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions
+export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$T/bin/lp-player LP_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 # The adapter's aligned-switch backstop slack (LpPlayerMedia.AlignBackstopSlackSec, 15 s in production),
 # shortened so the speed-drop / long-pause scenarios below reach it in seconds.
@@ -63,7 +65,10 @@ cleanup() {
   # it was never stopped) before anything else, so a `quit`/TERM below can actually be handled.
   [ -n "$CP" ] && kill -CONT "$CP" 2>/dev/null
   [ -n "$SP" ] && kill -CONT "$SP" 2>/dev/null
-  [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
+  [ -n "${WSP:-}" ] && kill "$WSP" 2>/dev/null
+  for bp in "$BP" ${BP_OLD:-}; do [ -n "$bp" ] && { kill "$bp" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$bp" 2>/dev/null || break; sleep 0.1; done; kill -9 "$bp" 2>/dev/null; }; done
+  # a `--timer-daemon` a stopping backend handed the playlist to (the restart test below)
+  [ -s "$XDG_CONFIG_HOME/livepaper/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/livepaper/timer.pid")" 2>/dev/null
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
@@ -88,6 +93,7 @@ A=$T/a.mp4; Bc=$T/b.mp4; C=$T/c.mp4; D=$T/d.mp4
 clip "$A" testsrc2 440 2; clip "$Bc" smptebars 550 2; clip "$C" rgbtestsrc 660 2; clip "$D" testsrc 220 10
 E1=$T/e1.mp4; E2=$T/e2.mp4; P1=$T/p1.mp4; P2=$T/p2.mp4
 clip "$E1" testsrc2 330 12; clip "$E2" smptebars 770 12; clip "$P1" rgbtestsrc 880 4; clip "$P2" testsrc 990 4
+L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while an end-of-video switch is armed
 
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 {"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
@@ -417,6 +423,92 @@ near "$(sv "$TAp" gain.user)" "$(dB 20)" && near "$(sv "$TAp" speed)" 1.5 && ok 
 near "$(sv "$TBp" gain.user)" 0 && near "$(sv "$TBp" speed)" 1 && ok "…and left B alone ($TBp: $(sv "$TBp" gain.user) dB, $(sv "$TBp" speed)x)" || bad "A's drag leaked into B: $(sv "$TBp" gain.user) dB $(sv "$TBp" speed)x"
 post /preview "{\"volume\":40,\"paths\":[\"$E2\"]}" >/dev/null; sleep 0.4
 near "$(sv "$TBp" gain.user)" "$(dB 40)" && near "$(sv "$TAp" gain.user)" "$(dB 20)" && ok "B's drag moved B only" || bad "B's drag: A $(sv "$TAp" gain.user) B $(sv "$TBp" gain.user)"
+post /stop '{}' >/dev/null; sleep 0.6
+
+armed_only() { for _ in $(seq 1 80); do ctl state | jq -e '[.transitions[] | select(.phase != "done")] | length == 1 and .[0].phase == "waiting_start"' >/dev/null && return; sleep 0.1; done; echo "  note: no lone armed switch within 8 s: $(ctl state | jq -c '[.transitions[] | .phase]')"; }
+echo "== a backend restart hands the playlist over without two timers (dotnet watch / app relaunch)"
+# A stopping backend hands its timed playlist to a detached --timer-daemon, but kept ticking itself until
+# the process exited — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket holds it open — and a
+# new backend then resumed the playlist too: two or three owners each armed an aligned switch and
+# superseded the others' (a switch every 1–16 s, "cancelled:superseded → switching in N s" storm).
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+armed_only
+python3 - "${U##*:}" > "$T/ws.log" 2>&1 <<'PY' & WSP=$!
+import socket, sys, time, base64, os
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
+s.send(("GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % base64.b64encode(os.urandom(16)).decode()).encode())
+print(s.recv(256).split(b"\r\n")[0].decode(), flush=True)
+time.sleep(120)
+PY
+sleep 0.5
+grep -q " 101 " "$T/ws.log" && ok "a WebSocket client holds the backend open (like the UI)" || bad "WebSocket upgrade: $(cat "$T/ws.log")"
+storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
+# the play's own switch has handed off and only the next aligned one is armed (a baseline to count from)
+nows() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.align=="now")] | length'; }
+st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; OLD1=$BP; sleep 1.5
+"$DOTNET" "$DLL" --serve > "$T/backend2.log" 2>&1 & BP=$!
+for _ in $(seq 1 150); do [ "$(cat "$XDG_CONFIG_HOME/livepaper/serve.port" 2>/dev/null)" != "$port0" ] && break; sleep 0.1; done
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
+kill -0 "$OLD1" 2>/dev/null && ok "the old backend is still shutting down (WebSocket open) while the new one runs" || echo "  note the old backend already exited — the overlap this tests didn't happen"
+sleep 16   # E1 (12 s) ends inside this window → exactly one aligned advance
+[ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -3 | tr '\n' ' ')"
+[ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
+dh=$(( $(handoffs) - h0 )); [ "$dh" = 1 ] && [ "$(cur path)" = "$E2" ] && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, cur $(basename "$(cur path)")"
+[ "$(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null) (new backend $BP)"
+tp=$(cat "$XDG_CONFIG_HOME/livepaper/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no --timer-daemon left running" || bad "a --timer-daemon (pid $tp) runs next to the new backend"
+kill "$WSP" 2>/dev/null; WSP=""
+for _ in $(seq 1 50); do kill -0 "$OLD1" 2>/dev/null || break; sleep 0.1; done
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== a second backend started while the first runs takes the playlist over (the first stops ticking)"
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+armed_only
+st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); first=$BP
+"$DOTNET" "$DLL" --serve > "$T/backend3.log" 2>&1 & BP=$!; BP_OLD="$BP_OLD $first"
+for _ in $(seq 1 150); do [ "$(cat "$XDG_CONFIG_HOME/livepaper/serve.port" 2>/dev/null)" != "$port0" ] && break; sleep 0.1; done
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
+sleep 16
+[ "$(storms)" = "$st0" ] && [ "$(nows)" = "$nw0" ] && ok "two live backends: no storm, no immediate switch" || bad "two live backends: $(( $(storms) - st0 )) failed aligned switches, $(( $(nows) - nw0 )) align:now"
+dh=$(( $(handoffs) - h0 )); [ "$dh" = 1 ] && [ "$(cur path)" = "$E2" ] && ok "one advance at E1's end" || bad "$dh handoffs, cur $(basename "$(cur path)")"
+grep -q "stops ticking" "$T/backend2.log" && ok "the first backend yielded: $(grep -m1 "stops ticking" "$T/backend2.log")" || bad "the first backend never yielded the timer"
+kill "$first" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$first" 2>/dev/null || break; sleep 0.1; done
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== a rebuilt player binary: the backend restarts the player onto it, keeping what it shows"
+# The player outlives the backend on purpose, so a rebuild/reinstall never reached a running one: fixes
+# "persisted" for hours. Here: a new file at the backend's binary path (cp + mv = a new inode, like cargo/nix).
+rebuild() { cp "$B" "$T/bin/lp-player.new" && mv -f "$T/bin/lp-player.new" "$T/bin/lp-player"; }
+post /apply "{\"path\":\"$D\"}" >/dev/null; sleep 1.5
+post /pause '{}' >/dev/null; sleep 0.3
+CP0=$(comp_pid); SP0=$(sup_pid)
+curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: running player current" || bad "stale before the rebuild: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
+rebuild
+for _ in $(seq 1 200); do c=$(comp_pid); [ -n "$c" ] && [ "$c" != "$CP0" ] && break; sleep 0.1; done   # ≤ the 10 s check + 2 s settle
+CP=$(comp_pid); SP=$(sup_pid)
+[ -n "$CP" ] && [ "$CP" != "$CP0" ] && [ -n "$SP" ] && [ "$SP" != "$SP0" ] && ok "idle player upgraded: compositor $CP0 → $CP, supervisor $SP0 → $SP" || bad "no upgrade: compositor $CP0 → $CP, supervisor $SP0 → $SP"
+[ "$(readlink "/proc/$CP/exe")" = "$T/bin/lp-player" ] && ok "it runs the new build" || bad "it runs $(readlink "/proc/$CP/exe")"
+[ "$(cur path)" = "$D" ] && [ "$(playerPaused)" = true ] && ok "same wallpaper, still paused" || bad "after the upgrade: cur $(basename "$(cur path)") paused=$(playerPaused)"
+[ "$(ctl logs '{"kind_prefix":"snapshot.restored"}' | jq '.events|length')" -ge 1 ] && ok "restored from its snapshot" || bad "no snapshot.restored on the new player"
+curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: current again" || bad "still stale: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
+post /pause '{}' >/dev/null
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== …never across an armed end-of-video switch: an advance-on-end playlist upgrades at its next switch"
+post /playlist/play "{\"paths\":[\"$L1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+for _ in $(seq 1 60); do [ -n "$(aligned_corr "$E2")" ] && break; sleep 0.1; done
+CP0=$(comp_pid); st0=$(storms); nw0=$(nows)
+rebuild
+for _ in $(seq 1 250); do python3 -c "import sys; sys.exit(0 if float('$(cur time_pos)') >= 18.6 else 1)" 2>/dev/null && break; sleep 0.1; done
+[ "$(comp_pid)" = "$CP0" ] && [ "$(cur path)" = "$L1" ] && [ "$(nows)" = "$nw0" ] && ok "armed for L1's end: not upgraded (L1 at $(cur time_pos) s, stale > 15 s)" || bad "upgraded or switched while armed: compositor $CP0 → $(comp_pid), cur $(basename "$(cur path)")"
+for _ in $(seq 1 80); do c=$(comp_pid); [ -n "$c" ] && [ "$c" != "$CP0" ] && break; sleep 0.1; done
+CP=$(comp_pid); SP=$(sup_pid)
+[ -n "$CP" ] && [ "$CP" != "$CP0" ] && [ "$(cur path)" = "$E2" ] && ok "upgraded at the switch: E2 on screen, compositor $CP0 → $CP" || bad "after L1's end: compositor $CP0 → $CP, cur $(basename "$(cur path)")"
+for _ in $(seq 1 40); do [ -n "$(aligned_corr "$L1")" ] && break; sleep 0.1; done
+[ -n "$(aligned_corr "$L1")" ] && [ "$(storms)" = "$st0" ] && [ "$(nows)" = 0 ] && ok "the next end-of-video switch is armed on the new player, no storm" || bad "after the upgrade: armed=$(aligned_corr "$L1") storms=$(( $(storms) - st0 )) now-switches=$(nows)"
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"

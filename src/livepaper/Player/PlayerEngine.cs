@@ -53,12 +53,13 @@ public static class PlayerEngine
     public static bool ScenesPlayable(AppSettings s) => s.AllowScenes && PlayerHelper.IsLweAvailable() && !IsLpPlayer;
 
     // env LP_PLAYER_BIN → next to the running livepaper executable → the repo dev tree
-    // src/player/target/{release,debug}/lp-player → PATH. Cached until the next Refresh.
-    public static string? ResolveBinary()
+    // src/player/target/{release,debug}/lp-player → PATH (release first: debug is opt-level 0 and the
+    // player mixes audio itself). Cached until the next Refresh, or `fresh` (the upgrade check).
+    public static string? ResolveBinary(bool fresh = false)
     {
         lock (_lock)
         {
-            if (_binResolved) return _bin;
+            if (_binResolved && !fresh) return _bin;
             _bin = Resolve();
             _binResolved = true;
             return _bin;
@@ -108,6 +109,7 @@ public static class PlayerEngine
             active = IsLpPlayer ? LpPlayer : Legacy,
             available = bin != null,
             binary = bin,
+            running = LpPlayerClient.Shared.RunningInfo(),
             reason = bin == null ? UnavailableReason
                 : Wants(s) && !IsLpPlayer ? "lp-player was not found when it was selected — select it again to switch now"
                 : LpPlayerClient.Shared.LastError,
