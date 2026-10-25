@@ -345,18 +345,25 @@ public static class LpPlayerMedia
         if (ct.IsCancellationRequested) return "caller-cancelled";
         // M2 (final review): an aligned wait is bounded too — A's remaining play time + slack (the
         // player's own fallback, `transition.align_fallback`, fires 10 s after A's end; ours is a
-        // backstop behind it). While no output exists (R60 parked) the player holds an aligned
-        // switch until one shows it (I4) — then the backstop keeps waiting instead of giving up.
+        // backstop behind it), re-derived each time it runs out (`AlignedWaitCheck`: A's speed may
+        // have changed, the player may be paused). While no output exists (R60 parked) the player
+        // holds an aligned switch until one shows it (I4) — then the backstop keeps waiting too.
         var remaining = alignEnd ? await Task.Run(TimeRemaining).ConfigureAwait(false) : null;
+        double? lastPos = alignEnd ? await Task.Run(() => Query("time_pos")).ConfigureAwait(false) : null; // A when armed
         var corr = await Queue(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets
         if (corr == null) return "failed:request refused";
-        int bound = alignEnd ? (int)Math.Min(int.MaxValue - 1, ((remaining ?? 0) + AlignBackstopSlackSec) * 1000) : 60_000;
+        int bound = alignEnd ? BackstopMs(remaining) : 60_000;
         string outcome;
         while (true)
         {
             outcome = await WaitCorr(corr, ct, bound).ConfigureAwait(false);
-            if (outcome == "timeout" && alignEnd && !await Task.Run(() => HasOutputs(client)).ConfigureAwait(false)) continue;
-            break;
+            if (outcome != "timeout" || !alignEnd) break;
+            // The bound is A's remaining time when the switch was armed — but A's end moves with
+            // its CURRENT speed and stands still while the player is paused (the player re-derives
+            // its own align deadline for both). Give up only when A stopped moving (a stall).
+            var (keepWaiting, next, pos) = await Task.Run(() => AlignedWaitCheck(client, lastPos)).ConfigureAwait(false);
+            if (!keepWaiting) break;
+            bound = next; lastPos = pos;
         }
         if (outcome == "timeout")
         {
@@ -375,7 +382,34 @@ public static class LpPlayerMedia
 
     // Seconds past A's remaining play time an aligned switch is waited for (M2) — behind the
     // player's own 10 s `align_fallback`, so the player normally resolves it first.
-    public const double AlignBackstopSlackSec = 15;
+    // LP_TEST_ALIGN_BACKSTOP_SLACK_SEC shortens it for scripts/test-lp-player-adapter.sh only.
+    public static readonly double AlignBackstopSlackSec =
+        double.TryParse(Environment.GetEnvironmentVariable("LP_TEST_ALIGN_BACKSTOP_SLACK_SEC"),
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var slack) && slack > 0
+            ? slack : 15;
+
+    private static int BackstopMs(double? remainingSec) =>
+        (int)Math.Min(int.MaxValue - 1, ((remainingSec ?? 0) + AlignBackstopSlackSec) * 1000);
+
+    // An aligned switch's backstop expired: may it keep waiting, and how long until the next check?
+    // No output (I4: the player holds the switch until one shows it) or the player paused (its clock
+    // and the switch stand still) → yes. Otherwise only while A (what `cur:*` shows) still plays on,
+    // for its remaining time at its current speed + slack; A not moving since the last check (a
+    // stall), or no answer → give up (cancel, the caller switches now).
+    private static (bool wait, int boundMs, double? pos) AlignedWaitCheck(LpPlayerClient client, double? lastPos)
+    {
+        if (!HasOutputs(client)) return (true, BackstopMs(0), lastPos);
+        try
+        {
+            if (client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs)
+                    .GetProperty("value").ValueKind == JsonValueKind.True)
+                return (true, BackstopMs(0), lastPos);
+        }
+        catch (LpPlayerException) { return (false, 0, lastPos); }
+        if (Query("time_pos") is not double pos || TimeRemaining() is not double rem) return (false, 0, lastPos);
+        if (lastPos is double lp && Math.Abs(pos - lp) < 1e-3) return (false, 0, pos);
+        return (true, BackstopMs(rem), pos);
+    }
 
     // Whether the player has any output (false = R60 parked: monitors off / unplugged).
     private static bool HasOutputs(LpPlayerClient client)
