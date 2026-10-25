@@ -1702,7 +1702,11 @@ public static class PlayerHelper
     // Reorders the active playlist in real time without restarting mpvpaper or resetting the timer countdown.
     // Sequential: positions the current wallpaper at index 0, then appends the rest in original order
     //             starting from current+1 (wrapping). Shuffled: same but randomises the tail.
-    public static void ReorderPlaylist(IReadOnlyList<string> originalPaths, bool isTimedPlaylist, bool shuffle)
+    // `previousPaths` (the list before the edit, when the caller knows it): the playing item was removed →
+    // the rotation goes on from its place — the first item after it in the old list that's still there,
+    // like trash does — instead of from the top of the new list (it replayed everything before it).
+    public static void ReorderPlaylist(IReadOnlyList<string> originalPaths, bool isTimedPlaylist, bool shuffle,
+        IReadOnlyList<string>? previousPaths = null)
     {
         lock (_lock)
         {
@@ -1739,6 +1743,17 @@ public static class PlayerHelper
                 else
                 {
                     rest.AddRange(originalPaths);
+                    // only for an edit of the same list (items removed / moved) — a different playlist loaded over
+                    // it starts at its own top
+                    int was = currentPath != null && previousPaths != null && originalPaths.All(previousPaths.Contains)
+                        ? previousPaths.ToList().IndexOf(currentPath) : -1;
+                    if (was >= 0)
+                    {
+                        var after = Enumerable.Range(1, previousPaths!.Count).Select(k => previousPaths[(was + k) % previousPaths.Count])
+                            .FirstOrDefault(p => p != currentPath && rest.Contains(p));
+                        int at = after != null ? rest.IndexOf(after) : -1;
+                        if (at > 0) rest = rest.Skip(at).Concat(rest.Take(at)).ToList(); // the next advance (→ index 0) plays it
+                    }
                 }
 
                 if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
@@ -1842,7 +1857,7 @@ public static class PlayerHelper
             // Mixed advance-on-end playlists use the timed machinery — IPC playlist ops are useless here.
             if (_timedPaths != null)
             {
-                ReorderPlaylist(newPaths, true, shuffle);
+                ReorderPlaylist(newPaths, true, shuffle, oldPaths);
                 return;
             }
 

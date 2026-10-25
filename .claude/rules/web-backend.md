@@ -52,6 +52,11 @@ run over 500 ms.
   `/playlist/state` after trash and undo (a stale strip saves itself back over the backend's).
 - **`PlayFrom`** plays `[clicked, rest…]` but persists the strip in **its own order** (`persistPaths`) —
   persisting the play order reordered the strip on the next launch.
+- **Removing the playing item from the strip** (X / context menu → `/playlist/state` without it): it keeps
+  playing, and the rotation goes on from **its place** — the first item after it in the previous list
+  that's still there (`ReorderPlaylist(…, previousPaths)`; like Trash). It went on from the top of the new
+  list (removing item 5 of 10 replayed 1–4). Only for an edit of the same list (nothing added): a
+  different playlist loaded over it starts at its own top.
 - **`Web/SteamOps.cs`** — QR login (→ WS `steam-qr` PNG via QRCoder, `steam-signed-in`), status
   (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time).
 
