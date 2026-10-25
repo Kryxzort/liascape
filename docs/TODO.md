@@ -92,11 +92,16 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `lp-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
       Needs an actual rebuild from this branch, not a code change — **owner action:**
       `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
-- [ ] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
+- [x] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
       mechanism, `.claude/rules/player-core.md` § Sources "Async opens") — a burst of near-simultaneous
       switches/creates has no ceiling on how many `lp-open` threads it can spin up at once. Not exercised by
       anything in Task 20's battery (every cell opens sources well below any plausible concurrency ceiling);
       worth a bound + a test before Phase 2 leans on this path harder.
+      — done: `host::OpenPool`, a FIFO queue on ≤ `MAX_OPEN_WORKERS` (2) on-demand `lp-open` threads; a job
+      queued for a node destroyed meanwhile is skipped (no core made). Burst of 16 paused 1080p creates: all
+      made + opened 61–80 ms (uncapped 23–70, cap 4 58–71), all ready ~0.5 s either way, the loop's longest
+      open share 2–8 ms (uncapped 13–29). `tests/api.rs::i5_open_burst_is_capped_and_none_lost` (RED: 16 at
+      once; GREEN: peak 2, the 3 destroyed while queued skipped, quit with a queued burst 40 ms, no straggler).
 - [ ] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
       currently just prints `"SKIP: no EGL device"` and returns on a GPU-less machine; there's no way to make
       a CI run that's *supposed* to have a GPU fail loudly instead of silently skipping everything. Not

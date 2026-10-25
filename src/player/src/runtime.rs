@@ -562,6 +562,7 @@ impl Runtime {
             "warned": self.warned.len(),
             "hosted": self.host.ids().len(),
             "opening": self.host.opening(),
+            "open_queued": crate::sources::host::open_queued(),
             "dying": self.host.dying(),
             "transitions": active,
             "graves": graves,
