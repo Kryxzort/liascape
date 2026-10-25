@@ -931,6 +931,72 @@ fn stepped_align_end_reveal() {
     c.step_until_event(100, 30, "transition.done", &corr);
 }
 
+/// TODO "a speed-up inside the last D of an `align:end` wait / a global speed change
+/// mid-effect", real libmpv on the virtual clock: a 1.5 s full-live fade aligned to the end
+/// of a 3 s A, A sped up 4× (`srcs:*.speed`, the backend's global path) 300 ms into the
+/// effect — the effect is compressed and hands off at A's new end. RED before: at the
+/// requested 1.5 s, ~0.9 s after A ended (A frozen on its last frame meanwhile).
+#[test]
+fn align_end_speed_up_mid_effect_hands_off_at_a_end() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_3s", RED_3S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(100);
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 1500, "method": "full-live", "align": "end"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let evs = c.step_until_event(16, 300, "transition.started", &corr);
+    let started = evs
+        .iter()
+        .find(|e| e["event"] == "transition.started")
+        .unwrap()["at_ms"]
+        .as_f64()
+        .unwrap();
+    for _ in 0..19 {
+        c.step(16);
+    }
+    let now = c.ok("state", json!({}))["clock"]["now_ms"]
+        .as_f64()
+        .unwrap();
+    let tp = get(&mut c, &format!("{a}.time_pos"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    let t = c.ok("set", json!({"path": "srcs:*.speed", "value": 4.0}));
+    assert!(
+        t["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == &json!(a)),
+        "{t}"
+    );
+    let a_end = now + (3.0 - tp) / 4.0 * 1000.0;
+    let evs = c.step_until_event(16, 300, "transition.handoff", &corr);
+    let handoff = evs
+        .iter()
+        .find(|e| e["event"] == "transition.handoff")
+        .unwrap()["at_ms"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (handoff - a_end).abs() <= 40.0,
+        "handoff {:+.0} ms vs A's end (effect started at {started:.0}, A sped up at {now:.0}, \
+         time_pos {tp:.3}; RED: the full 1.5 s)",
+        handoff - a_end
+    );
+    c.step_until_event(16, 100, "transition.done", &corr);
+}
+
 /// Finds `id` in a `probe sources` reply.
 fn probe_source<'a>(probe: &'a Value, id: &str) -> &'a Value {
     probe["sources"]
@@ -1632,6 +1698,113 @@ fn r92_transition_onto_video_with_no_audio_skips_onset_wait() {
         gap < Duration::from_millis(100),
         "done took {gap:?} after handoff — looks like it still waited for an onset \
          confirmation that could never arrive"
+    );
+}
+
+/// TODO "`transition.onset_timeout` on audio-less videos" (85 in the Task 20 re-run): EVERY
+/// method × align onto a B that has nothing (more) to play — no audio stream at all, or a
+/// selected audio track that ends 30 ms in (RED before: the confirmation needed a SECOND
+/// `audio-pts` change ≥ 40 ms after the first, which never came, so every one of these
+/// waited out `ONSET_TIMEOUT` and warned) — must hand off without the timeout. A has audio
+/// (a 3 s clip, so `align: end` arrives quickly); `--clock real`. Then a `/next` storm.
+#[test]
+fn audio_less_b_never_times_out_its_onset_any_method_or_align() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let b_clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let short = ensure_clip(
+        "api_short_audio_4s",
+        ClipSpec::ShortAudio {
+            rgb: [0, 0, 255],
+            secs: 4.0,
+            audio_secs: 0.03,
+        },
+    );
+    let mut timeouts = Vec::new();
+    for (bname, bpath) in [("no-audio", &b_clip), ("short-audio", &short)] {
+        for method in ["full-live", "reveal", "frozen"] {
+            for align in ["now", "end"] {
+                let a = create_src(
+                    &mut c,
+                    json!({"path": s(&ensure_clip("api_red_3s", RED_3S)), "loop": true}),
+                );
+                show_all(&mut c, &a);
+                let t0 = Instant::now();
+                while get(&mut c, &format!("{a}.time_pos"))["result"]["value"]
+                    .as_f64()
+                    .unwrap_or(0.0)
+                    < 0.3
+                {
+                    assert!(t0.elapsed() < Duration::from_secs(5), "A never started");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let r = c.ok(
+                    "transition",
+                    json!({"outputs": "out:*", "to": {"path": s(bpath), "loop": true},
+                       "effect_id": "fade", "duration_ms": 300, "method": method, "align": align}),
+                );
+                let corr = r["corr"].as_str().unwrap().to_string();
+                let t = Instant::now();
+                loop {
+                    let logs = c.ok("logs", json!({"corr": corr}));
+                    let evs = logs["events"].as_array().unwrap();
+                    if evs.iter().any(|e| e["kind"] == "transition.onset_timeout") {
+                        timeouts.push(format!("{bname} {method}/{align}"));
+                    }
+                    if evs.iter().any(|e| e["kind"] == "transition.done") {
+                        break;
+                    }
+                    assert!(
+                        t.elapsed() < Duration::from_secs(8),
+                        "{bname} {method}/{align}: no transition.done: {logs}"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                c.ok("stop", json!({}));
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+    // a /next storm (the battery's fast cells): audio-less ↔ audio-less, every request
+    // superseding or committing the previous one, 60–120 ms apart
+    let b2 = ensure_clip("frame_index_90", ClipSpec::FrameIndex { frames: 90 });
+    let first = create_src(&mut c, json!({"path": s(&b_clip), "loop": true}));
+    show_all(&mut c, &first);
+    std::thread::sleep(Duration::from_millis(500));
+    let mut corrs = Vec::new();
+    for i in 0..16 {
+        let to = if i % 2 == 0 { &b2 } else { &b_clip };
+        let method = ["full-live", "reveal", "frozen"][i % 3];
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": s(to), "loop": true},
+                   "effect_id": "fade", "duration_ms": 200, "method": method, "align": "now"}),
+        );
+        corrs.push(r["corr"].as_str().unwrap().to_string());
+        std::thread::sleep(Duration::from_millis(60 + 15 * (i as u64 % 4)));
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    for corr in &corrs {
+        let logs = c.ok("logs", json!({"corr": corr}));
+        if logs["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "transition.onset_timeout")
+        {
+            timeouts.push(format!("storm {corr}"));
+        }
+    }
+    let rt = c.ok("logs", json!({"kind_prefix": "runtime.onset_timeout"}));
+    for e in rt["events"].as_array().unwrap() {
+        timeouts.push(format!("runtime {}", e));
+    }
+    timeouts.dedup();
+    assert!(
+        timeouts.is_empty(),
+        "transition.onset_timeout onto a B with no audio track: {timeouts:?}"
     );
 }
 

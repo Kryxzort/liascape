@@ -424,6 +424,12 @@ pub struct MpvSource {
     /// `observe`, which is not a change.
     pts_observed: bool,
     flowing_last_pts: Option<f64>,
+    /// While armed: the media position when the wait began (the first `time-pos` seen
+    /// since arming), and whether `audio-pts` was last reported *unavailable* — mpv has no
+    /// audio playing then (none selected, or the track already ended). Both together decide
+    /// [`NO_AUDIO_MEDIA_ADVANCE`]'s "the picture plays on without any audio" confirmation.
+    flowing_arm_pos: Option<f64>,
+    audio_pts_unavailable: bool,
     /// R92 (review of Task 16c/16d): whether the *current load* actually has an audio
     /// track mpv selected — unlike `no_audio` (our own request to disable it) or
     /// `kind == "video"` (just "this isn't a still image"), this is what mpv itself
@@ -450,6 +456,12 @@ pub struct MpvSource {
 /// genuinely slower than this still gets its ramp started by the outer timeout rather
 /// than this constant silently absorbing an even larger lag.
 const FLOWING_CONFIRM_MARGIN: Duration = Duration::from_millis(40);
+
+/// Media seconds the picture must have played since an `AudioFlowing` wait was armed, with
+/// `audio-pts` unavailable throughout, before "no audio is playing at all" is believed
+/// (`MpvSource::confirm_flowing_by_time`): several frames at any frame rate, well inside
+/// `ONSET_TIMEOUT` (150 ms) at 1×. A position that wraps (a loop) counts as moved.
+const NO_AUDIO_MEDIA_ADVANCE: f64 = 0.1;
 
 impl MpvSource {
     /// Create an mpv core rendering through `gfx`'s GL context and start loading `path`
@@ -717,6 +729,8 @@ impl MpvSource {
             flowing_confirmed_at: None,
             pts_observed: false,
             flowing_last_pts: None,
+            flowing_arm_pos: None,
+            audio_pts_unavailable: false,
             has_audio: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
@@ -1031,6 +1045,8 @@ impl MpvSource {
         self.awaiting_flowing = false;
         self.flowing_confirmed_at = None;
         self.flowing_last_pts = None;
+        self.flowing_arm_pos = None;
+        self.audio_pts_unavailable = false;
         if self.pts_observed {
             self.pts_observed = false;
             if let Some(h) = &self.handle {
@@ -1058,11 +1074,13 @@ impl MpvSource {
         self.awaiting_flowing = true;
         self.flowing_confirmed_at = None;
         self.flowing_last_pts = None;
+        self.flowing_arm_pos = self.time_pos;
         if !self.pts_observed
             && let Some(h) = &self.handle
             && h.observe(OBS_AUDIO_PTS, "audio-pts", Format::F64).is_ok()
         {
             self.pts_observed = true;
+            self.audio_pts_unavailable = false; // the fresh observe's first notification says
         }
     }
 
@@ -1269,6 +1287,39 @@ impl MpvSource {
                 _ => {}
             }
         }
+        self.confirm_flowing_by_time();
+    }
+
+    /// Confirmations that no further `audio-pts` change brings, checked after every pump
+    /// (every `update`/`poll_events`, i.e. every tick):
+    /// - **the margin is real time**, not "until the next change": once
+    ///   [`FLOWING_CONFIRM_MARGIN`] has passed since the first change, confirm — an audio
+    ///   stream that stalls right after starting sent no second change;
+    /// - **the picture plays on without any audio**: `audio-pts` is unavailable (mpv plays
+    ///   no audio — the selected track already ended, e.g. a 30 ms track on a 4 s video)
+    ///   while the media position moved [`NO_AUDIO_MEDIA_ADVANCE`] since arming (with
+    ///   audio playing, mpv's clock is the audio, so the picture doesn't run ahead of it).
+    ///   Nothing will ever be heard, so the ramp may start: there is nothing to cut off.
+    ///
+    /// Before, only a LATER `audio-pts` change could confirm, so every onset on such a
+    /// source waited out `ONSET_TIMEOUT` and logged `transition.onset_timeout` (TODO, the
+    /// Task 20 re-run's 85). A core that never plays (no change, position stuck) still
+    /// never confirms — the caller's timeout stays the backstop.
+    fn confirm_flowing_by_time(&mut self) {
+        if !self.awaiting_flowing {
+            return;
+        }
+        let by_margin = self
+            .flowing_confirmed_at
+            .is_some_and(|t| t.elapsed() >= FLOWING_CONFIRM_MARGIN);
+        let no_audio_playing = self.flowing_confirmed_at.is_none()
+            && self.audio_pts_unavailable
+            && matches!((self.flowing_arm_pos, self.time_pos),
+                        (Some(a), Some(t)) if (t - a).abs() >= NO_AUDIO_MEDIA_ADVANCE);
+        if by_margin || no_audio_playing {
+            self.disarm_audio_flowing();
+            self.pending.push(SourceEvent::AudioFlowing);
+        }
     }
 
     fn on_prop(&mut self, id: u64, value: PropData) {
@@ -1278,6 +1329,9 @@ impl MpvSource {
         match (id, value) {
             (OBS_TIME_POS, PropData::F64(t)) if live => {
                 self.time_pos = Some(t);
+                if self.awaiting_flowing && self.flowing_arm_pos.is_none() {
+                    self.flowing_arm_pos = Some(t);
+                }
                 // Stepped: `time-pos` only moves on a step's seek — report every change
                 // (a wall-clock throttle would make the event stream timing-dependent).
                 let due = self.stepped
@@ -1351,7 +1405,13 @@ impl MpvSource {
             // after it). `audio-pts` updates "more often than once per frame", so later
             // changes keep re-checking the margin; if none ever come, the caller's own
             // `ONSET_TIMEOUT` is the real backstop.
+            // mpv reports `audio-pts` unavailable while no audio plays (none selected yet,
+            // or the audio track already ended while the video goes on)
+            (OBS_AUDIO_PTS, PropData::None) if self.awaiting_flowing => {
+                self.audio_pts_unavailable = true;
+            }
             (OBS_AUDIO_PTS, PropData::F64(v)) if live && self.awaiting_flowing => {
+                self.audio_pts_unavailable = false;
                 // M4: the first notification after `observe` is its current value, not a
                 // change — remember it; only a different value counts.
                 let Some(last) = self.flowing_last_pts.replace(v) else {

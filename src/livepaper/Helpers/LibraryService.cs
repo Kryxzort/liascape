@@ -156,11 +156,28 @@ public static class LibraryService
     }
 
     private static int _backfilling = 0;
+    private static long _lastBackfillKick;
+
+    // Start the background backfill OFF the caller's thread (an `async` method runs synchronously up to
+    // its first real await — with every item measured that was the whole scan, on `/settings`' request
+    // thread). `force` = normalization was just switched on; otherwise at most once per 30 s (every
+    // debounced slider save posts /settings) — still picks up items added while the app is open.
+    public static void KickLoudnessBackfill(bool force)
+    {
+        long now = Environment.TickCount64, last = System.Threading.Interlocked.Read(ref _lastBackfillKick);
+        if (!force && last != 0 && now - last < 30_000) return;
+        System.Threading.Interlocked.Exchange(ref _lastBackfillKick, now);
+        _ = System.Threading.Tasks.Task.Run(async () => { try { await BackfillLoudnessAsync().ConfigureAwait(false); } catch { } });
+    }
 
     // Measure every un-measured library video in the background — one ffmpeg at a time (gentle), so
     // clips are ready before they play instead of being measured lazily on first play. Runs while the
     // app is open when NormalizeAudio is on. Idempotent (skips measured) + single-flight; stops early if
     // normalization is turned off mid-scan.
+    // The scan reads each source's index ONCE (it used to parse the whole index.json twice per item,
+    // plus settings.json per item — O(items × index size), ~0.3–0.5 s for a 300-item library, and
+    // `/settings` ran it on its request thread on every save). EnsureLoudnessAsync re-reads an item's
+    // entry before measuring, so a snapshot of the index is enough to decide what to skip.
     public static async System.Threading.Tasks.Task BackfillLoudnessAsync()
     {
         if (System.Threading.Interlocked.Exchange(ref _backfilling, 1) == 1) return;
@@ -168,12 +185,20 @@ public static class LibraryService
         {
             using var sem = new System.Threading.SemaphoreSlim(3); // 3 ffmpegs at once — fast, still gentle
             var tasks = new List<System.Threading.Tasks.Task>();
+            var indexes = new Dictionary<string, Dictionary<string, LibMeta>>();
+            LibMeta? Meta(string path)
+            {
+                if (LibraryStore.Locate(path) is not { } loc) return null;
+                if (!indexes.TryGetValue(loc.Source, out var idx)) indexes[loc.Source] = idx = LibraryStore.LoadIndex(loc.Source);
+                return idx.GetValueOrDefault(loc.Key);
+            }
             foreach (var item in LoadAll())
             {
-                if (!SettingsService.Load().NormalizeAudio) break;
                 if (item.IsScene || !IsVideoFile(item.VideoPath)) continue;
-                var meta = LibraryStore.GetMeta(item.VideoPath);
-                if (ReadLoudness(item.VideoPath) != null || meta?.LoudnessSkip == true) continue; // measured or no-audio
+                var meta = Meta(item.VideoPath);
+                if (meta is { LoudnessI: not null, LoudnessTP: not null, LoudnessLRA: not null, LoudnessThresh: not null }
+                    || meta?.LoudnessSkip == true) continue; // measured or no-audio
+                if (!SettingsService.Load().NormalizeAudio) break; // turned off mid-scan (checked before real work only)
                 var path = item.VideoPath;
                 await sem.WaitAsync().ConfigureAwait(false);
                 tasks.Add(System.Threading.Tasks.Task.Run(async () =>

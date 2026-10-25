@@ -1430,6 +1430,12 @@ impl Runtime {
             exclude.remove(&id);
         }
         for id in to_drop {
+            // The exact final value: this tick's `ramp_db` read the clock just before the
+            // `elapsed() >= ANTICLICK` check did, so it can be a hair under 0 dB (−0.0003
+            // measured under load) and nothing would ever write the slot again.
+            let _ = self
+                .graph
+                .set(&p(&format!("{id}.gain.pause")), PropValue::F64(0.0));
             self.pause_gates.remove(&id);
             if let Some(corr) = self.pause_gate_corr.remove(&id) {
                 let mono = log::mono_now().unwrap_or_default();

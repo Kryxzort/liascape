@@ -2931,6 +2931,18 @@ public static class PlayerHelper
         if (IsLweRunning) ApplyLweVolume(volume);
     }
 
+    // The Settings page's global Volume/Speed drag preview (`/preview {global:true}`, no persist — the
+    // UI's debounced /settings persists): every live wallpaper WITHOUT its own override for that field
+    // takes the dragged value (effective = override ?? global, R61); an overridden one never moves.
+    public static void PreviewGlobal(int? volume, double? speed)
+    {
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.PreviewGlobal(volume, speed); return; }
+        var cur = QueryCurrentPath();
+        if (cur == null) return;
+        if (volume is int v && ReadVolumeOverride(cur) == null) SetVolume(v);
+        if (speed is double sp && !IsLweRunning && ReadSpeedOverride(cur) == null) SetSpeed(sp); // scenes are 1×
+    }
+
     public static void SetSpeed(double speed)
     {
         SendCommand("set_property", "speed", speed);
@@ -2948,7 +2960,8 @@ public static class PlayerHelper
         // lp-player: the source(s) showing THAT item (may be an in-flight transition's pending B)
         if (PlayerEngine.IsLpPlayer)
         {
-            LpPlayerMedia.Queue(() =>
+            // coalescible: it re-reads the override when it runs, so the newest request covers older ones
+            LpPlayerMedia.QueueSet("override:" + LpPlayerMedia.FullPath(path), () =>
             {
                 if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
             });
@@ -3772,7 +3785,7 @@ public static class PlayerHelper
         // lp-player: loudnorm is per item → that item's source(s)
         if (PlayerEngine.IsLpPlayer)
         {
-            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.Queue(() => LpPlayerMedia.SetForPath(path, "af", af)); }
+            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.QueueSet("af:" + LpPlayerMedia.FullPath(path), () => LpPlayerMedia.SetForPath(path, "af", af)); }
             return;
         }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;

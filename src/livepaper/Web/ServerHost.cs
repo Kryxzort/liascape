@@ -326,6 +326,11 @@ public static class ServerHost
         });
         app.MapPost("/settings", (AppSettings s) =>
         {
+            // phase timing: logged when the whole handler is slow (or always with LP_PROFILE_SETTINGS=1)
+            var psw = System.Diagnostics.Stopwatch.StartNew();
+            var phases = new List<string>();
+            long lastMs = 0;
+            void Mark(string what) { long now = psw.ElapsedMilliseconds; phases.Add($"{what} {now - lastMs}"); lastMs = now; }
             var prev = SettingsService.Load();
             // The UI caches the whole AppSettings at load and re-POSTs it on every change. Fields
             // mutated backend-side WHILE the UI is open (LastSession via apply/random/next; steam
@@ -337,22 +342,30 @@ public static class ServerHost
             s.SteamAccountName = prev.SteamAccountName;
             s.SteamLoginSecure = prev.SteamLoginSecure;
             SettingsService.Save(s);
+            Mark("load+save");
             // PlayerEngine changed → stop the old engine, replay the session on the new one (else just
             // refresh the cached engine + binary resolution). First, so everything below hits the new one.
             PlayerHelper.SwitchEngineLive(prev, s);
+            Mark("engine");
             // live-apply the cheap ones, but respect the PLAYING wallpaper's per-item override so a global
             // change never clobbers an active override (effective = override ?? new global).
             var curPlaying = PlayerHelper.QueryCurrentPath();
+            Mark("current");
             PlayerHelper.SetVolume((curPlaying != null ? LibraryService.ReadVolumeOverride(curPlaying) : null) ?? s.Volume);
             PlayerHelper.SetSpeed((curPlaying != null ? LibraryService.ReadSpeedOverride(curPlaying) : null) ?? s.Speed);
             PlayerHelper.SetVideoScale(s.VideoScale); // fill/fit applies live to the playing video (no relaunch)
+            Mark("volume/speed/scale");
             // loudness normalization: apply live to the playing wallpaper (toggle/retune now), and when
             // it's on, (re)start the background measurement backfill so all clips get measured while open.
             PlayerHelper.ApplyNormalizationLive(curPlaying);
-            if (s.NormalizeAudio) _ = LibraryService.BackfillLoudnessAsync();
+            Mark("normalize");
+            // off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
+            if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
+            Mark("backfill");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFps, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying);
+            Mark("playback");
             // restart-daemon interval/mode changed → re-arm the in-process leak-restart timer now
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
@@ -388,6 +401,9 @@ public static class ServerHost
                 else
                     AudioMonitor.Stop();
             }
+            Mark("rest");
+            if (psw.ElapsedMilliseconds > 100 || Environment.GetEnvironmentVariable("LP_PROFILE_SETTINGS") == "1")
+                Console.WriteLine($"/settings: {psw.ElapsedMilliseconds} ms ({string.Join(", ", phases)})");
             return Results.Ok();
         });
         app.MapGet("/themes", () => Results.Json(ThemeService.All));
@@ -414,6 +430,9 @@ public static class ServerHost
         // gates on "the edited item is the playing one", then persists once on release via /library/{volume,speed}.
         app.MapPost("/preview", (PreviewReq r) =>
         {
+            // the Settings page's global Volume/Speed drag: every live wallpaper that follows the global
+            // (no override of its own for that field — override ?? global, R61); never an overridden one
+            if (r.Global == true) { PlayerHelper.PreviewGlobal(r.Volume, r.Speed); return Results.Ok(); }
             // lp-player: a per-item value → the EDITED item's source(s), not srcs:* (R61) — mid-transition
             // `cur:*` is the incoming side, so "what's playing" would move the other wallpaper.
             if (livepaper.Player.PlayerEngine.IsLpPlayer) { livepaper.Player.LpPlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
@@ -738,7 +757,7 @@ public static class ServerHost
     public record PathReq(string Path);
     public record OverrideReq(string Path, int? IntValue, double? DoubleValue);
     // Paths = the item(s) being edited (the per-wallpaper modal); none = whatever is playing.
-    public record PreviewReq(int? Volume, double? Speed, List<string>? Paths = null);
+    public record PreviewReq(int? Volume, double? Speed, List<string>? Paths = null, bool? Global = null);
     public record WhitelistReq(string Path, bool Value);
     public record ValueReq(int? Delta, int? Value);
     public record MuteReq(bool User, bool Value);

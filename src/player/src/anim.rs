@@ -223,6 +223,46 @@ impl Animator {
         id
     }
 
+    /// Make the live animation on `path` finish at `end` instead of later, keeping its
+    /// shape: the rest of its progress (from where it is at `now`) runs over `[now, end]` —
+    /// a time-scale change of the remaining curve, so the value is continuous at `now`. A
+    /// not-yet-started one keeps its start (moved back to `end` if that is earlier) and
+    /// ends at `end`. Only an animation `corr` added that ends after `end`; never a
+    /// finished one. Returns whether it changed (the transition recipe's `align: end`
+    /// compression).
+    pub fn compress_to(
+        &mut self,
+        path: &PropPath,
+        corr: &CorrId,
+        now: Duration,
+        end: Duration,
+    ) -> bool {
+        let Some(e) = self
+            .entries
+            .iter_mut()
+            .find(|e| &e.anim.target == path && !e.done)
+        else {
+            return false;
+        };
+        let a = &mut e.anim;
+        if a.corr.as_ref() != Some(corr) || a.end() <= end {
+            return false;
+        }
+        if now < a.start {
+            a.start = a.start.min(end);
+            a.duration = end - a.start;
+            return true;
+        }
+        let x0 = a.progress(now);
+        if x0 >= 1.0 {
+            return false;
+        }
+        let dur = end.saturating_sub(now).as_secs_f64() / (1.0 - x0);
+        a.duration = Duration::from_secs_f64(dur);
+        a.start = now.saturating_sub(Duration::from_secs_f64(x0 * dur));
+        true
+    }
+
     /// Cancels one animation by id. A cancelled animation never appears in `finished()`.
     pub fn cancel(&mut self, id: AnimId) {
         self.entries.retain(|e| e.id != id);
@@ -413,6 +453,54 @@ mod tests {
             unit: AnimUnit::Scalar,
             corr: None,
         }
+    }
+
+    /// `compress_to` rescales the rest of the curve in time: continuous at `now`, the final
+    /// value exactly at the new end, same curve; only for its own corr, never later, never a
+    /// finished one; a not-yet-started one just ends earlier.
+    #[test]
+    fn compress_to_keeps_value_and_shape() {
+        let corr = CorrId("tr-1".into());
+        let p = PropPath("fx1.progress".into());
+        let ms = Duration::from_millis;
+        let mut an = Animator::new();
+        let mut a = anim("fx1.progress", 0.0, 1.0, 0, 2000, Curve::EqualPowerIn);
+        a.corr = Some(corr.clone());
+        an.add(a);
+        let at_500 = an.value_at(&p, ms(500)).unwrap();
+        assert!(
+            !an.compress_to(&p, &CorrId("tr-2".into()), ms(500), ms(800)),
+            "not ours"
+        );
+        assert!(!an.compress_to(&p, &corr, ms(500), ms(2500)), "never later");
+        assert!(an.compress_to(&p, &corr, ms(500), ms(800)));
+        assert!(
+            (an.value_at(&p, ms(500)).unwrap() - at_500).abs() < 1e-9,
+            "continuous"
+        );
+        // the remaining 75% of progress now spans 300 ms: x(650) = 0.25 + 0.75·0.5
+        let want = Curve::EqualPowerIn.eval(0.625);
+        assert!(
+            (an.value_at(&p, ms(650)).unwrap() - want).abs() < 1e-6,
+            "same curve"
+        );
+        let out = an.tick(ms(800));
+        assert_eq!(out, vec![(p.clone(), 1.0)], "final value at the new end");
+        assert!(!an.compress_to(&p, &corr, ms(800), ms(810)), "finished");
+
+        let q = PropPath("src1.gain.xfade".into());
+        let mut b = anim("src1.gain.xfade", 0.0, 1.0, 1000, 500, Curve::Linear);
+        b.corr = Some(corr.clone());
+        an.add(b);
+        assert!(an.compress_to(&q, &corr, ms(200), ms(1200)));
+        assert!(
+            an.value_at(&q, ms(999)).is_none(),
+            "still starts at its start"
+        );
+        assert!(
+            (an.value_at(&q, ms(1100)).unwrap() - 0.5).abs() < 1e-9,
+            "ends at 1200"
+        );
     }
 
     #[test]
