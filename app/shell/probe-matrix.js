@@ -240,7 +240,7 @@ const STATES = {
     c.fresh = false; await post("/next"); c.ok = await waitFor(async () => (await live()).some((t) => t.phase === "running" && (t.from || []).length > 0), 8000, 50); c.mid = true; } },
   pending: { exp: { paused: false }, roles: () => [K[3], K[0]], playlist: PENDING_PL, async enter(c) { c.playlist = true; c.fresh = true;
     await post("/playlist/play", PENDING_PL());
-    c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 4000, 50));
+    c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
     c.pending = true; } },
   paused: { exp: { paused: true }, roles: () => [K[0], K[2]], async enter(c) { await STATES.single.enter(c); if (c.ok !== false) await post("/pause"); } },
   pausedEffect: { exp: { paused: true }, roles: () => [K[0], K[1]], async enter(c) { await STATES.effect.enter(c); if (c.ok !== false) await post("/pause"); } },
@@ -248,13 +248,17 @@ const STATES = {
     await STATES.single.enter(c); if (c.ok === false) return;
     await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" }); c.noOutput = true; } },
   muted: { exp: { paused: false, muted: true }, roles: () => [K[0], K[2]], async enter(c) { await STATES.single.enter(c); if (c.ok !== false) await post("/mute", { user: true, value: true }); } },
+  // like `playlist` (timed, 600 s), but FOLLOWING the global rotation (no override) — opt-in
+  playlistGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => ({ paths: [K[0], K[1], K[2]], settings: PS({ overrideGlobalSettings: false }) }),
+    async enter(c) { c.playlist = true; c.fresh = true;
+      await post("/playlist/play", STATES.playlistGlobal.playlist()); c.ok = await waitSettled(12000, K[0]); } },
   // like `pending`, but the playlist FOLLOWS the global rotation + transitions (no override) — opt-in: only
   // the controls that list it run here. Its globals go in before the UI loads (the UI saves its whole copy).
   pendingGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[3], K[0]], playlist: () => ({ ...PENDING_PL(), settings: PS({ overrideGlobalSettings: false }) }),
     async pre() { const s = await getSettings(); Object.assign(s, { globalAdvanceOnVideoEnd: true, globalTransitionDurationMs: 600 }); await post("/settings", s); },
     async enter(c) { c.playlist = true; c.fresh = true;
       await post("/playlist/play", STATES.pendingGlobal.playlist());
-      c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 4000, 50));
+      c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
       c.pending = true; } },
 };
 
@@ -474,6 +478,7 @@ const armedTo = (st) => (st.transitions || []).filter((t) => t.phase === "waitin
 // item after what plays (`want`; null = none may stay armed)
 function armedCheck(c, want = succ(c.after.ps?.videoPaths, c.after.cur?.path)) {
   if (!c.pending || c.noOutput) return [];
+  if ((c.after.ps?.videoPaths || []).length < 2) want = null; // a one-item playlist has nothing to advance to
   const a = armedTo(c.after.st);
   if (want === null) return a.length ? [`an aligned switch is still armed (to ${a.map(TITLE)})`] : [];
   if (a.length !== 1) return [`${a.length} aligned switches armed (${a.map(TITLE)}), expected one to ${TITLE(want)}`];
@@ -800,6 +805,142 @@ C["gAdvanceOff"] = { states: ["pending", "pendingGlobal"], rearms: true, async r
     // following the globals: nothing stays armed; with its own override: the playlist still advances at A's end
     return [...v, ...armedCheck(c, c.state === "pendingGlobal" ? null : undefined)]; } };
 
+// --- the global interval (Settings → Rotation) → 8 s: a timed playlist that follows the globals switches within it;
+// one with its own interval (playlist: 600 s) doesn't
+C["gInterval8s"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
+    await ui(`m.tab("Settings"); await m.sleep(600); const iv = m.row("Interval").querySelectorAll(".hms input");
+      m.setValue(iv[2], 8, "s"); await m.sleep(300); m.setValue(iv[1], 0, "m");`);
+    c.tChange = Date.now();
+    c.sw = await waitFor(async () => events.some((e) => e._t >= c.tChange && e.event === "transition.scheduled"), 11000, 100);
+    await sleep(300); await waitSettled(8000);
+  }, check(c) {
+    const v = c.after.s.globalIntervalSeconds === 8 ? [] : [`globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected 8`];
+    if (c.state === "playlistGlobal" && !c.sw) v.push("following the globals, no switch within 11 s of an 8 s global interval");
+    if (c.state === "playlist" && c.sw) v.push("a global interval change switched a playlist that has its own (600 s)");
+    return v;
+  } };
+
+// --- multi-select (Ctrl+click cards): a card action on a selected card applies to the whole selection
+const ctrlClick = (p) => `m.card(${JSON.stringify(TITLE(p))})?.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true })); await m.sleep(150);`;
+// what plays after trashing the set `ps`: what was on screen (or incoming) trashed → a playlist plays on from the
+// next strip item after it that survives, a single item stops; else nothing switches
+function afterTrashMany(c, ps) {
+  const del = new Set(ps), v = [];
+  for (const p of ps) v.push(...notTargeted(c, p, { gone: true }));
+  const was = c.before.cur?.path, now = c.after.cur?.path, strip = c.before.ps?.videoPaths || [];
+  if (del.has(now)) v.push(`trashed ${TITLE(now)} still on screen`);
+  if (c.noOutput) return v;
+  let want = was;
+  if (del.has(was)) { const i = strip.indexOf(was); want = c.playlist && i >= 0 ? [...strip.slice(i + 1), ...strip.slice(0, i)].find((p) => !del.has(p)) ?? null : null; }
+  if ((now ?? null) !== (want ?? null)) v.push(`after trashing ${ps.map(TITLE)}: /current ${TITLE(now)}, expected ${TITLE(want)}`);
+  return v;
+}
+const SEL_STATES = ["single", ...PL_STATES];
+C["selTrash:shown+other"] = { states: SEL_STATES, switch: true, async run(c) {
+    c.targets = [c.shown, c.other].filter(Boolean); if (c.before.cur?.path && c.targets.includes(c.before.cur.path)) c.exp.paused = false;
+    await ui(`${c.targets.map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.targets[0]))})?.querySelector(".del"), "trash");`); await sleep(900);
+  }, check: (c) => [...afterTrashMany(c, c.targets), ...armedCheck(c)] };
+C["selTrashUndo:shown+other"] = { states: SEL_STATES, switch: true, async run(c) {
+    c.targets = [c.shown, c.other].filter(Boolean); if (c.before.cur?.path && c.targets.includes(c.before.cur.path)) c.exp.paused = false;
+    c.idx = c.targets.map((p) => (c.before.ps?.videoPaths || []).indexOf(p));
+    await ui(`${c.targets.map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.targets[0]))})?.querySelector(".del"), "trash"); await m.sleep(900);
+      m.click(m.byText(".topbar button", "Undo"), "Undo");`); await sleep(900);
+  }, check(c) {
+    const v = [];
+    c.targets.forEach((p, k) => {
+      if (!(c.after.lib || []).some((i) => i.videoPath === p)) v.push(`${TITLE(p)} not back in the library`);
+      const at = (c.after.ps?.videoPaths || []).indexOf(p); if (c.idx[k] >= 0 && at !== c.idx[k]) v.push(`${TITLE(p)} back at playlist index ${at}, was ${c.idx[k]}`);
+    });
+    return [...v, ...armedCheck(c)];
+  } };
+// toggle on a selected card: adds the whole selection when that card isn't in the playlist, removes it when it is
+C["selToggle:add"] = { states: PL_STATES, rearms: true, async run(c) {
+    const strip = c.before.ps?.videoPaths || []; c.add = K.find((p) => !strip.includes(p)); c.also = c.shown;
+    await ui(`${[c.add, c.also].map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.add))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900);
+  }, check(c) {
+    const want = [...(c.before.ps?.videoPaths || []), c.add].map(TITLE), got = (c.after.ps?.videoPaths || []).map(TITLE);
+    return [...(JSON.stringify(got) === JSON.stringify(want) ? [] : [`playlist ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`]), ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
+  } };
+C["selToggle:remove"] = { states: PL_STATES, rearms: true, async run(c) {
+    const strip = c.before.ps?.videoPaths || []; c.out = K.find((p) => !strip.includes(p)); c.target = c.other;
+    await ui(`${[c.out, c.target].map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900);
+  }, check(c) {
+    const want = (c.before.ps?.videoPaths || []).filter((p) => p !== c.target).map(TITLE), got = (c.after.ps?.videoPaths || []).map(TITLE);
+    return [...(JSON.stringify(got) === JSON.stringify(want) ? [] : [`playlist ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`]), ...afterRemove(c)];
+  } };
+// the settings modal opened from a selected card edits every selected item: both live sides (A and B / the pending B)
+C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
+    c.targets = [c.shown, c.other];
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600); m.setValue(m.modalRange(0), 33, "volume");`);
+    await sleep(170); c.during = await snapshot(); await sleep(600); await ui(`m.closeModal();`); await sleep(500);
+  }, check(c) {
+    const v = [];
+    for (const p of c.targets) {
+      const ov = (c.after.lib || []).find((i) => i.videoPath === p)?.volumeOverride; if (ov !== 33) v.push(`${TITLE(p)} volumeOverride ${ov}, expected 33`);
+      for (const [id, n] of srcFor(c.during, p)) if (!near(n.gain?.user ?? 0, VolumeDb(33))) v.push(`the drag didn't reach ${id}(${TITLE(p)}): ${n.gain?.user}`);
+    }
+    return v;
+  } };
+// the card's own toggle (one item): take what plays out of the playlist / put another one in
+C["cardToggle:shown"] = { states: PL_STATES, rearms: true, async run(c) { c.target = c.shown;
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900); }, check: afterRemove };
+C["cardToggle:add"] = { states: PL_STATES, rearms: true, async run(c) { const strip = c.before.ps?.videoPaths || []; c.add = K.find((p) => !strip.includes(p));
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(c.add))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900); },
+  check(c) { const got = (c.after.ps?.videoPaths || []).map(TITLE), want = [...(c.before.ps?.videoPaths || []), c.add].map(TITLE);
+    return [...(JSON.stringify(got) === JSON.stringify(want) ? [] : [`playlist ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`]), ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)]; } };
+// a saved playlist overwritten (Save → click its name → Save): loading it gives the current strip
+C["plSaveOverwrite"] = { states: ["playlist"], noSwitch: true,
+  async pre() { await post("/playlist/save", { name: "mx-over", playlist: { videoPaths: [K[1]], settings: PS(), name: "mx-over" } }); },
+  async run(c) {
+    await ui(`m.click(document.querySelector('button[title="Save playlist"]'), "save"); await m.sleep(500);
+      m.click(m.byText(".pl-modal .pl-name", "mx-over"), "mx-over"); await m.sleep(150); m.click(m.byText(".pl-modal button", "Save"), "Save");`);
+    await sleep(900); c.saved = (await post("/playlist/load", { name: "mx-over" })).json;
+  }, check(c) { const a = (c.saved?.videoPaths || []).map(TITLE), b = (c.before.ps?.videoPaths || []).map(TITLE);
+    return JSON.stringify(a) === JSON.stringify(b) ? [] : [`mx-over holds ${JSON.stringify(a)} after overwriting, the strip was ${JSON.stringify(b)}`]; } };
+
+// --- the same switch control twice quickly: the second one wins, no storm
+C["seq:cardApply×2"] = { states: ["single", "playlist", "effect"], switch: true, async run(c) {
+    const [a, b] = [K[2], K[3]].map((p) => (p === c.before.cur?.path ? K[1] : p)); c.target = b;
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(a))})?.querySelector(".thumb-wrap"), "card"); await m.sleep(120); m.click(m.card(${JSON.stringify(TITLE(b))})?.querySelector(".thumb-wrap"), "card");`);
+  }, check: (c) => expectShown(c, c.target, { effect: true }) };
+C["seq:stripClick×2"] = { states: PL_STATES, switch: true, async run(c) {
+    const strip = c.before.ps?.videoPaths || []; const others = strip.filter((p) => p !== c.before.cur?.path);
+    if (others.length < 2) return c.skip = "needs two other strip items"; c.target = others[1];
+    await ui(`m.click(m.strip(${JSON.stringify(TITLE(others[0]))}), "strip"); await m.sleep(120); m.click(m.strip(${JSON.stringify(TITLE(others[1]))}), "strip");`);
+  }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
+// two trashes, two undos: both back where they were (the undo stack runs newest first)
+C["seq:trash×2+undo×2"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    c.targets = [c.other, c.shown]; c.exp.paused = false;
+    c.idx = c.targets.map((p) => (c.before.ps?.videoPaths || []).indexOf(p));
+    for (const p of c.targets) { await ui(`m.click(m.card(${JSON.stringify(TITLE(p))})?.querySelector(".del"), "trash");`); await sleep(900); }
+    for (let i = 0; i < 2; i++) { await ui(`m.click(m.byText(".topbar button", "Undo"), "Undo");`); await sleep(900); }
+  }, check(c) {
+    const v = [];
+    c.targets.forEach((p, k) => {
+      if (!(c.after.lib || []).some((i) => i.videoPath === p)) v.push(`${TITLE(p)} not back in the library`);
+      const at = (c.after.ps?.videoPaths || []).indexOf(p); if (c.idx[k] >= 0 && at !== c.idx[k]) v.push(`${TITLE(p)} back at playlist index ${at}, was ${c.idx[k]}`);
+    });
+    return [...v, ...armedCheck(c)];
+  } };
+// paused, then the playlist's interval → 8 s: the rotation holds while paused (the picture is frozen; a switch now
+// would unfreeze it or cut on a paused clock) — and switches once resumed
+C["seq:pause+plInterval"] = { states: ["playlist"], rearms: true, async run(c) {
+    await cliStep(c, "toggle-pause"); await sleep(300);
+    await ui(`${plOpen} m.setValue(${hms(2)}, 8, "s"); await m.sleep(300); m.setValue(${hms(1)}, 0, "m"); ${plClose}`);
+    const t = Date.now(); await sleep(11000);
+    c.whilePaused = events.filter((e) => e._t >= t - 1500 && e.event === "transition.scheduled").map((e) => TITLE(e.path));
+    c.pausedAfter = !!(await ctl.call("state")).graph.player?.paused;
+    await cliStep(c, "toggle-pause"); const t2 = Date.now();
+    c.sw = await waitFor(async () => events.some((e) => e._t >= t2 && e.event === "transition.scheduled"), 11000, 100);
+    await sleep(300); await waitSettled(8000);
+  }, check(c) {
+    const v = [];
+    if (c.whilePaused.length) v.push(`the rotation switched while paused (to ${c.whilePaused})`);
+    if (!c.pausedAfter) v.push("not paused any more 11 s after pausing");
+    if (!c.sw) v.push("no switch within 11 s of resuming (the 8 s interval had passed)");
+    return v;
+  } };
+
 function expectShown(c, want, { effect }) {
   const v = [];
   if (!c.noOutput && c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
@@ -846,7 +987,12 @@ async function runCell(stateName, ctlName) {
   const logAt = logSizes();
   await loadUi();
   await S.enter(c);
-  if (c.ok === false) return { state: stateName, control: ctlName, result: "SETUP", violations: [`state ${stateName} not reached`] };
+  if (c.ok === false) { // what the state's entry saw (a SETUP is usually load: the run's timing, not a product bug)
+    const st = await ctl.call("state").catch(() => null);
+    return { state: stateName, control: ctlName, result: "SETUP", violations: [`state ${stateName} not reached`],
+      seen: st && { transitions: (st.transitions || []).map((t) => `${t.corr} ${t.phase} → ${TITLE(st.graph[t.to]?.path)}`), screen: Object.values(screen(st)).map(TITLE),
+        current: TITLE((await http("GET", "/current")).json?.path) }, logs: logsSince(logAt) };
+  }
   c.before = await snapshot();
   const t0 = Date.now(); const h0 = httpLog.length;
   try { await K_.run(c); } catch (e) { return { ...c, result: "ERROR", violations: [`control failed: ${e.message}`] }; }
