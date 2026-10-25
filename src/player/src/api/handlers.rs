@@ -15,7 +15,7 @@ use crate::headless::OutputInfo;
 use crate::log::{self, Level, LogFilter};
 use crate::recipes::TransitionReq;
 use crate::runtime::Runtime;
-use crate::units::db_to_lin;
+use crate::units::{GainSlot, db_to_lin};
 
 type Handler = fn(&mut Runtime, u64, &Value) -> Result<Value, ApiError>;
 
@@ -471,9 +471,14 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         starts.push(start);
     }
     let corr = log::new_corr("an");
-    let now = rt.now();
+    // a user setting ramps on the unpaused clock (`Runtime::setting_anim`): it lands while paused
+    let setting = prop
+        .strip_prefix("gain.")
+        .and_then(|s| s.parse::<GainSlot>().ok())
+        .is_some_and(|s| s.is_setting());
+    let now = if setting { rt.base_now() } else { rt.now() };
     for (id, start) in targets.iter().zip(starts) {
-        rt.anim.add(Animation {
+        let a = Animation {
             target: PropPath(format!("{id}.{prop}")),
             from: start,
             to,
@@ -482,7 +487,14 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
             curve,
             unit,
             corr: Some(corr.clone()),
-        });
+        };
+        if setting {
+            rt.anim.cancel_target(&a.target);
+            rt.setting_anim.add(a);
+        } else {
+            rt.setting_anim.cancel_target(&a.target);
+            rt.anim.add(a);
+        }
     }
     log::event(
         "runtime",

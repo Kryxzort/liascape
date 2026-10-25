@@ -123,6 +123,21 @@ impl GainSlot {
             GainSlot::Pause => "pause",
         }
     }
+
+    /// A user-setting slot (volume, override, normalization, mute, auto-mute) — what the
+    /// backend changes, as opposed to the recipe's and the runtime's own transient slots
+    /// (`xfade`, `anticlick`, `pause`). Its `animate` ramps run on the unpaused clock, so a
+    /// setting changed while the player is paused lands (`Runtime::setting_anim`).
+    pub fn is_setting(&self) -> bool {
+        matches!(
+            self,
+            GainSlot::User
+                | GainSlot::Override
+                | GainSlot::Normalize
+                | GainSlot::Mute
+                | GainSlot::AutoMute
+        )
+    }
 }
 
 impl fmt::Display for GainSlot {

@@ -383,6 +383,13 @@ pub struct Runtime {
     /// excluded from the player-pause composition until its ramp is done (it keeps
     /// playing into silence, then goes).
     teardown_anim: Animator,
+    /// `animate` on a user-setting gain slot (`GainSlot::is_setting` — the backend's mute
+    /// ramp, a volume fade) — on the **unpaused** base clock like `teardown_anim`: a setting
+    /// changed while the player is paused must land (on the main Animator's frozen clock a
+    /// keybind mute reached no source until the resume, then raced the pause gate's
+    /// ramp-in). Inaudible meanwhile: the pause gate holds every playing source silent. One
+    /// writer per path: adding here cancels the main Animator's ramp on it and vice versa.
+    pub(crate) setting_anim: Animator,
     /// I6: the runtime's own held onsets (unpark) — `crate::onset`.
     onsets: Onsets,
     /// I4: an `align: end` request made while no output exists, waiting for one.
@@ -527,7 +534,7 @@ impl Runtime {
 
     /// The **unpaused** base clock (I1): what teardown ramps (`teardown_anim`), their
     /// destroy deadlines and park settling run on, so they complete while paused.
-    fn base_now(&self) -> Duration {
+    pub(crate) fn base_now(&self) -> Duration {
         self.clock.now()
     }
 
@@ -541,6 +548,7 @@ impl Runtime {
             "gain_history_samples": gh_samples,
             "anim_entries": self.anim.len(),
             "teardown_anim_entries": self.teardown_anim.len(),
+            "setting_anim_entries": self.setting_anim.len(),
             "pending_destroy": self.pending_destroy.len(),
             "onsets": self.onsets.len(),
             "fade_in": self.fade_in.len(),
@@ -780,14 +788,27 @@ impl Runtime {
             }
         }
         self.teardown_anim.finished();
+        // user-setting ramps on the unpaused clock too (`setting_anim`)
+        for (path, v) in self.setting_anim.tick(self.base_now()) {
+            if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
+                self.setting_anim.cancel_target(&path);
+            }
+        }
         // M1: an animation on a node that is gone never emits again (a placeholder that
         // never started would otherwise sit — and keep the gain timer armed — forever).
         let g = &self.graph;
         let alive = |p: &PropPath| g.kind_of(redraw::node_of(p)).is_some();
         self.anim.retain_targets(alive);
         self.teardown_anim.retain_targets(alive);
+        self.setting_anim.retain_targets(alive);
         self.redraw.mark_nodes(&self.graph, &moved);
-        for (_, corr) in self.anim.finished() {
+        let done: Vec<_> = self
+            .anim
+            .finished()
+            .into_iter()
+            .chain(self.setting_anim.finished())
+            .collect();
+        for (_, corr) in done {
             if let Some(c) = corr
                 && c.0.starts_with("an-")
             {
@@ -929,6 +950,7 @@ impl Runtime {
         let horizon = self.tick_period;
         (!self.player_paused && self.anim.has_live_gain(self.now(), horizon))
             || self.teardown_anim.has_live_gain(self.base_now(), horizon)
+            || self.setting_anim.has_live_gain(self.base_now(), horizon)
             || self.has_active_pause_gate_ramp()
     }
 
@@ -973,6 +995,11 @@ impl Runtime {
         for (path, v) in self.teardown_anim.tick_gains(self.base_now()) {
             if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
                 self.teardown_anim.cancel_target(&path);
+            }
+        }
+        for (path, v) in self.setting_anim.tick_gains(self.base_now()) {
+            if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
+                self.setting_anim.cancel_target(&path);
             }
         }
         if !self.player_paused {
@@ -1900,6 +1927,7 @@ impl Runtime {
             let path = p(&format!("{id}.gain.{}", slot.as_str()));
             self.anim.cancel_target(&path);
             self.teardown_anim.cancel_target(&path);
+            self.setting_anim.cancel_target(&path);
         }
         self.onsets.cancel(id);
         self.tr.cancel_restore_onset(id);
@@ -2294,6 +2322,7 @@ impl Runtime {
         }
         self.tr = Transitions::new();
         self.anim = Animator::new();
+        self.setting_anim = Animator::new();
         self.onsets = Onsets::new();
         for l in self.graph.ids_of(NodeKind::Layer) {
             let _ = self
@@ -2502,6 +2531,7 @@ impl Runtime {
         snapshot::capture(&snapshot::Capture {
             graph: &self.graph,
             anim: &self.anim,
+            setting_anim: &self.setting_anim,
             transitions: &status,
             parked: self.parked.as_ref().map(|pk| snapshot::ParkedSnap {
                 id: pk.id.clone(),
@@ -3355,6 +3385,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         local: BTreeMap::new(),
         pending_destroy: Vec::new(),
         teardown_anim: Animator::new(),
+        setting_anim: Animator::new(),
         onsets: Onsets::new(),
         parked_req: None,
         bus_route: (true, 1),
