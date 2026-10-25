@@ -167,6 +167,39 @@ const AUTO_COPY: [&str; 2] = ["nvdec-copy", "vaapi-copy"];
 /// list maps element by element (duplicates dropped, order kept). The graph keeps the
 /// user's value (`read("hwdec")`); the `sources` probe shows both (`mpv_hwdec`,
 /// `mpv_hwdec_current`).
+/// The `af` chain mpv runs for graph `af` (the user's chain, e.g. the backend's loudnorm): that
+/// chain plus a permanent `scaletempo2` (label `@lp-tempo`). With pitch correction on (mpv's
+/// default) mpv adds its own tempo filter only while `speed` ≠ 1 and drops it at exactly 1× —
+/// and every add/drop rebuilds the audio chain (its `userspeed` + format `convert` stages): 3–5 ms
+/// of digital silence each, ~200 ms later at the sink (speed storm: 22 holes in 40 s of 0.9↔1.0
+/// toggles, none for 0.9↔1.1). mpv hands the speed to the last filter of the chain that takes it,
+/// so with ours there the chain is built once and never changes; at 1× scaletempo2 is bit-exact
+/// (measured: output identical to the source, zero lag). A chain that already has a tempo filter
+/// (`scaletempo*`, `rubberband`) is left as it is — that filter takes the speed instead.
+/// `read("af")` keeps the graph value.
+pub fn mpv_af(value: &str) -> String {
+    let af = value.trim();
+    let has_tempo = af.split(',').any(|f| {
+        let f = f.trim();
+        let f = match f.split_once(':') {
+            Some((label, rest)) if label.starts_with('@') => rest,
+            _ => f,
+        };
+        let name = f.split_once('=').map_or(f, |(n, _)| n);
+        matches!(name, "scaletempo" | "scaletempo2" | "rubberband")
+    });
+    if has_tempo {
+        af.to_string()
+    } else if af.is_empty() {
+        TEMPO_AF.to_string()
+    } else {
+        format!("{af},{TEMPO_AF}")
+    }
+}
+
+/// The tempo filter [`mpv_af`] keeps in every chain.
+const TEMPO_AF: &str = "@lp-tempo:scaletempo2";
+
 pub fn mpv_hwdec(value: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut push = |s: &str| {
@@ -1623,7 +1656,7 @@ impl Source for MpvSource {
                 };
                 self.set(prop, name, &val)
             }
-            "af" => self.set(prop, "af", &s),
+            "af" => self.set(prop, "af", &mpv_af(&s)),
             // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
             "no_audio" => self.set(prop, "aid", if b { "no" } else { "auto" }),
             // The graph value is the user's offset; the bus compensation is added to it.
@@ -1763,7 +1796,27 @@ impl Drop for MpvSource {
 
 #[cfg(test)]
 mod tests {
-    use super::mpv_hwdec;
+    use super::{mpv_af, mpv_hwdec};
+
+    /// Speed storm: mpv's own tempo filter is inserted only while speed ≠ 1 and removed at
+    /// exactly 1× — each rebuild of the audio chain cut 3–5 ms of digital silence into the
+    /// output (22 holes in 40 s of 0.9↔1.0, none for 0.9↔1.1). A tempo filter in the chain
+    /// we hand mpv takes the speed for good; a chain that already has one keeps the user's.
+    #[test]
+    fn af_always_carries_a_tempo_filter() {
+        for (graph, mpv) in [
+            ("", "@lp-tempo:scaletempo2"),
+            ("  ", "@lp-tempo:scaletempo2"),
+            ("lavfi=[anull]", "lavfi=[anull],@lp-tempo:scaletempo2"),
+            ("lavfi=[loudnorm=I=-16]", "lavfi=[loudnorm=I=-16],@lp-tempo:scaletempo2"),
+            ("scaletempo2", "scaletempo2"),
+            ("scaletempo=stride=30", "scaletempo=stride=30"),
+            ("rubberband", "rubberband"),
+            ("lavfi=[anull],rubberband=pitch=quality", "lavfi=[anull],rubberband=pitch=quality"),
+        ] {
+            assert_eq!(mpv_af(graph), mpv, "af {graph:?}");
+        }
+    }
 
     /// Task 20d: never a GL interop mode; `auto` prefers nvdec/vaapi copies over mpv's own
     /// `vulkan-copy`-first list; the user's explicit choices keep their API.
