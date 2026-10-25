@@ -248,11 +248,20 @@ const STATES = {
     await STATES.single.enter(c); if (c.ok === false) return;
     await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" }); c.noOutput = true; } },
   muted: { exp: { paused: false, muted: true }, roles: () => [K[0], K[2]], async enter(c) { await STATES.single.enter(c); if (c.ok !== false) await post("/mute", { user: true, value: true }); } },
+  // like `pending`, but the playlist FOLLOWS the global rotation + transitions (no override) — opt-in: only
+  // the controls that list it run here. Its globals go in before the UI loads (the UI saves its whole copy).
+  pendingGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[3], K[0]], playlist: () => ({ ...PENDING_PL(), settings: PS({ overrideGlobalSettings: false }) }),
+    async pre() { const s = await getSettings(); Object.assign(s, { globalAdvanceOnVideoEnd: true, globalTransitionDurationMs: 600 }); await post("/settings", s); },
+    async enter(c) { c.playlist = true; c.fresh = true;
+      await post("/playlist/play", STATES.pendingGlobal.playlist());
+      c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 4000, 50));
+      c.pending = true; } },
 };
 
 // ---------------------------------------------------------------- controls
 // Each: { run(c), switch?: waits for the switch to settle, check?(c) → violations[], pre?(c) before the UI loads,
-//         exp?: oracle expectations, noSwitch?: no switch may be requested, states?: only these states (else all) }
+//         exp?: oracle expectations, noSwitch?: no switch may be requested, rearms?: may cancel + re-arm an aligned
+//         switch, states?: only these states (else every state but the opt-in ones) }
 const srcFor = (snap, p) => sourcesOf(snap.st).filter(([, n]) => n.path === p);
 const itemTargets = ["shown", "other", "off"];
 const pick = (c, t) => (t === "shown" ? c.shown : t === "other" ? c.other : K[3] === c.shown ? K[2] : K[3]);
@@ -763,6 +772,34 @@ C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
   }, check: (c) => [...(c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /settings during saves were not the settings: ${JSON.stringify(c.race.first)}, saved ${JSON.stringify(c.want)}`] : []),
     ...(c.after.s.playerEngine !== c.want.playerEngine || c.after.s.volume !== c.want.volume ? [`after the saves: engine ${c.after.s.playerEngine} volume ${c.after.s.volume}`] : [])] };
 
+// --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
+// that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
+// (pending) keeps its own (a global change never clobbers an override)
+const armedReq = (c) => { const [a] = (c.after.st.transitions || []).filter((t) => t.phase === "waiting_start");
+  return a && [...events].reverse().find((e) => e.event === "transition.scheduled" && e.corr === a.corr); };
+const gTrDrive = (k) => `m.tab("Settings"); await m.sleep(600); m.click(m.row("Transitions")?.querySelector(".sctl button"), "global transitions");
+  await m.sleep(600); for (let i = 0; i < 30 && !document.querySelector(".tr-modal .tr-chip"); i++) await m.sleep(100);
+  ${TR[k].drive} await m.sleep(300); m.click(document.querySelector(".tr-modal .tr-done"), "Done");`;
+const G_SAVED = { Off: (s) => s.globalTransitionEnabled === false, Duration: (s) => s.globalTransitionDurationMs === 1200,
+  Effect: (s) => JSON.stringify(s.globalTransitionEffectIds) === JSON.stringify(["crosswarp"]) };
+for (const k of Object.keys(TR)) C[`gTr${k}`] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(gTrDrive(k)); await sleep(1200); },
+  check(c) {
+    const v = [...armedCheck(c)];
+    if (!G_SAVED[k](c.after.s)) v.push(`the global transition setting didn't take the change`);
+    const req = armedReq(c);
+    if (c.state === "pendingGlobal" && !(req && TR[k].want(req))) v.push(`the armed switch still runs ${fmtSw(req)}, the globals now say ${TR[k].what}`);
+    if (c.state === "pending" && !(req && req.effect_id === "fade" && req.duration_ms === 600)) v.push(`a global change reached the playlist's own transition: the armed switch runs ${fmtSw(req)} (its playlist: fade 600 ms)`);
+    return v;
+  } };
+C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); await m.select("Transition method", "Frozen");`); await sleep(1200); },
+  check(c) { const v = [...armedCheck(c)]; const req = armedReq(c);
+    if (c.after.s.transitionMethod !== "frozen") v.push(`transitionMethod ${c.after.s.transitionMethod}`);
+    if (!(req && req.method === "frozen")) v.push(`the armed switch still runs method ${req?.method}, the setting says frozen`); return v; } };
+C["gAdvanceOff"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); m.setCheck(m.input("Switch when video ends"), false, "advance");`); await sleep(1200); },
+  check(c) { const v = c.after.s.globalAdvanceOnVideoEnd === false ? [] : ["globalAdvanceOnVideoEnd not saved off"];
+    // following the globals: nothing stays armed; with its own override: the playlist still advances at A's end
+    return [...v, ...armedCheck(c, c.state === "pendingGlobal" ? null : undefined)]; } };
+
 function expectShown(c, want, { effect }) {
   const v = [];
   if (!c.noOutput && c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
@@ -804,6 +841,7 @@ async function runCell(stateName, ctlName) {
   const c = { state: stateName, control: ctlName, exp: { ...S.exp } };
   [c.shown, c.other] = S.roles();
   await reset(S.playlist?.());
+  if (S.pre) await S.pre(c);
   if (K_.pre) await K_.pre(c); // before the UI loads: it reads overrides/settings at start, like a real session
   const logAt = logSizes();
   await loadUi();
@@ -827,7 +865,7 @@ async function runCell(stateName, ctlName) {
     if (e.event === "transition.failed") v.push(`transition.failed ${e.corr}: ${e.reason}`);
     if (e.event === "source.error") v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
     if (e.event === "source.rejected") v.push(`source.rejected ${e.prop}: ${e.reason}`);
-    if (e.event === "transition.cancelled" && !K_.switch && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
+    if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
     if (e.event === "transition.scheduled" && K_.noSwitch) v.push(`a switch was requested (${TITLE(e.path)})`);
   }
   const asset = /\/(media|img|anim|assets|transitions)\b|favicon|icons\.svg/;
@@ -868,7 +906,7 @@ app.whenReady().then(async () => {
   for (const st of Object.keys(STATES)) for (const k of Object.keys(C)) {
     const name = `${st} × ${k}`;
     if (ONLY && !ONLY.test(name)) continue;
-    if (C[k].states && !C[k].states.includes(st)) continue;
+    if (C[k].states ? !C[k].states.includes(st) : STATES[st].optIn) continue;
     if (SHARD && ++idx % SHARD[1] !== SHARD[0]) continue;
     let r; const t0 = Date.now();
     try { r = await runCell(st, k); } catch (e) { r = { state: st, control: k, result: "ERROR", violations: [String(e && e.stack || e)] }; }
