@@ -12,7 +12,8 @@
 //! `transitions/` directory resolves (true inside `nix build .#lp-player`'s sandboxed
 //! check phase). Every test here needs a `Catalogue` even when it never actually draws an
 //! effect, because `Composer::compose_output`'s signature always takes one (R20) — so a
-//! missing `transitions/` skips every test in this file, not just the effect ones.
+//! missing `transitions/` skips every test in this file, not just the effect ones. Under
+//! `LP_REQUIRE_GPU=1` either missing precondition fails instead (`common::skip_gpu`).
 
 mod common;
 
@@ -27,12 +28,7 @@ use serde_json::{Map, json};
 
 fn setup() -> Option<(Gfx, Catalogue)> {
     let gfx = headless_gl()?;
-    let Some(dir) = Catalogue::resolve_dir() else {
-        println!(
-            "SKIP: no transitions/ directory resolved (LP_TRANSITIONS_DIR unset, no ~/.local/share/livepaper-web/transitions, no repo transitions/ found above the exe or CARGO_MANIFEST_DIR)"
-        );
-        return None;
-    };
+    let dir = common::catalogue_dir()?;
     let catalogue = Catalogue::load(&dir).unwrap_or_else(|e| {
         panic!("Catalogue::load({}) failed: {e}", dir.display());
     });
@@ -721,9 +717,7 @@ fn uncompilable_effect_draws_a_cut_not_black() {
     let Some((gfx, _cat)) = setup() else {
         return;
     };
-    let Some(src) = Catalogue::resolve_dir() else {
-        return;
-    };
+    let src = Catalogue::resolve_dir().expect("setup() already proved this resolves");
     // A catalogue copy whose `fade` body is broken GLSL (the shared assets stay untouched).
     let dir = std::env::temp_dir().join(format!("lp-broken-cat-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("glsl")).unwrap();

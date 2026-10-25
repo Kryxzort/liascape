@@ -6,7 +6,8 @@
 //! no EGL device at all (`common::headless_gl`, mirrors `gfx_basic.rs`), or no
 //! `transitions/` directory can be resolved (`Catalogue::resolve_dir`) — the case inside
 //! `nix build .#lp-player`'s sandboxed check phase, where `src/player` is built without
-//! its sibling `transitions/` directory present. Never fails the build over either.
+//! its sibling `transitions/` directory present. Never fails the build over either —
+//! unless `LP_REQUIRE_GPU=1` says this run must have both (`common::skip_gpu`).
 
 mod common;
 
@@ -19,12 +20,7 @@ use lp_player::gfx::{Catalogue, Gfx, Tex};
 /// the two preconditions was missing.
 fn setup() -> Option<(Gfx, Catalogue)> {
     let gfx = headless_gl()?;
-    let Some(dir) = Catalogue::resolve_dir() else {
-        println!(
-            "SKIP: no transitions/ directory resolved (LP_TRANSITIONS_DIR unset, no ~/.local/share/livepaper-web/transitions, no repo transitions/ found above the exe or CARGO_MANIFEST_DIR)"
-        );
-        return None;
-    };
+    let dir = common::catalogue_dir()?;
     let catalogue = Catalogue::load(&dir).unwrap_or_else(|e| {
         panic!("Catalogue::load({}) failed: {e}", dir.display());
     });

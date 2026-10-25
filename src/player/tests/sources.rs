@@ -12,7 +12,8 @@
 //! colours come back within ±3 per channel after RGB→YUV→RGB plus mpv's output dither;
 //! `FrameIndex`'s neutral-grey `(n,n,n)` marker within ±1 (luma quantisation only).
 //!
-//! Skips (prints `SKIP: …`, returns) only when there's no EGL device at all.
+//! Skips (prints `SKIP: …`, returns) only when there's no EGL device at all — fails instead
+//! under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
 
 mod common;
 

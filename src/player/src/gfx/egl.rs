@@ -832,9 +832,20 @@ mod tests {
     /// the surviving clone — not merely that `Rc::strong_count` arithmetic looks right.
     #[test]
     fn shared_egl_state_outlives_gfx_when_another_clone_exists() {
-        let Ok(gfx) = Gfx::new_offscreen() else {
-            println!("SKIP: no EGL device");
-            return;
+        let gfx = match Gfx::new_offscreen() {
+            Ok(gfx) => gfx,
+            // `LP_REQUIRE_GPU` (same rule as `tests/common::skip_gpu`): a run that must
+            // have a GPU fails instead of skipping.
+            Err(e)
+                if std::env::var_os("LP_REQUIRE_GPU")
+                    .is_some_and(|v| !v.is_empty() && v != "0") =>
+            {
+                panic!("LP_REQUIRE_GPU is set but a GPU test would skip: no EGL device ({e})")
+            }
+            Err(_) => {
+                println!("SKIP: no EGL device");
+                return;
+            }
         };
 
         SHARED_DROP_COUNT.with(|c| c.set(0));

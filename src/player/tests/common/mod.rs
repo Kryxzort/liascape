@@ -7,23 +7,61 @@ pub mod harness;
 use glow::HasContext;
 use lp_player::gfx::{Gfx, Tex};
 
+/// `LP_REQUIRE_GPU` (TODO "`LP_REQUIRE_GPU` test mode"): set (any value but empty or `0`)
+/// for a run that is *supposed* to have a GPU — a missing GPU-test precondition (no EGL
+/// device, no `transitions/` catalogue) then fails the test loudly instead of printing
+/// `SKIP` and passing. Unset (the default, e.g. the sandboxed `nix build` check phase), they
+/// skip as before. Not covered on purpose: preconditions that aren't the GPU's — the opt-in
+/// Wayland test (`LP_PLAYER_TEST_WAYLAND`), a private PipeWire's binaries, python3 / the repo
+/// for `credits`; ffmpeg is never a skip (`ensure_clip` panics without it).
+pub const REQUIRE_GPU_ENV: &str = "LP_REQUIRE_GPU";
+
+/// Whether [`REQUIRE_GPU_ENV`] is on.
+pub fn require_gpu() -> bool {
+    std::env::var_os(REQUIRE_GPU_ENV).is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Skip the calling test because a GPU-test precondition is missing: prints `SKIP:
+/// <reason>` — or, under [`REQUIRE_GPU_ENV`], panics with it. Callers return right after.
+pub fn skip_gpu(reason: &str) {
+    if require_gpu() {
+        panic!("{REQUIRE_GPU_ENV} is set but a GPU test would skip: {reason}");
+    }
+    println!("SKIP: {reason}");
+}
+
 /// Create a real, surfaceless [`Gfx`] for a test, or skip cleanly.
 ///
 /// Returns `None` **only** when [`Gfx::new_offscreen`] fails (no EGL device at all — e.g.
 /// a sandboxed `nix build` check phase with no `/dev/dri`), printing `"SKIP: no EGL
-/// device"` plus the reason so a skipped run still says why. On this machine
-/// (NVIDIA 595.84) it always succeeds, so tests that call this genuinely exercise the GPU
-/// here — they are not quietly skipped on the owner's box.
+/// device"` plus the reason so a skipped run still says why ([`skip_gpu`]: under
+/// `LP_REQUIRE_GPU=1` it panics instead). On this machine (NVIDIA 595.84) it always
+/// succeeds, so tests that call this genuinely exercise the GPU here — they are not
+/// quietly skipped on the owner's box.
 ///
 /// Callers: `let Some(gfx) = headless_gl() else { return };`
 pub fn headless_gl() -> Option<Gfx> {
     match Gfx::new_offscreen() {
         Ok(gfx) => Some(gfx),
         Err(e) => {
-            println!("SKIP: no EGL device ({e})");
+            skip_gpu(&format!("no EGL device ({e})"));
             None
         }
     }
+}
+
+/// The effect catalogue's directory, or skip ([`skip_gpu`]) — the `transitions/` assets
+/// aren't there (the `nix build` sandbox builds `src/player` alone).
+pub fn catalogue_dir() -> Option<std::path::PathBuf> {
+    let dir = lp_player::gfx::Catalogue::resolve_dir();
+    if dir.is_none() {
+        skip_gpu(
+            "no transitions/ directory resolved (LP_TRANSITIONS_DIR unset, no \
+             ~/.local/share/livepaper-web/transitions, no repo transitions/ found above the exe \
+             or CARGO_MANIFEST_DIR)",
+        );
+    }
+    dir
 }
 
 /// Read back one pixel of `tex` at `(x, y)` through a temporary FBO.
