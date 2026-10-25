@@ -27,7 +27,9 @@ public static class AppOps
         p.OverrideGlobalSettings ? p.WaitForVideoEnd : s.GlobalWaitForVideoEnd;
 
     // `paths` are already in the desired order (the UI sends the current strip order).
-    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps)
+    // `persist` = what to save as the current playlist state when it differs from what plays
+    // (play-from plays a pre-arranged order but keeps the playlist's own Order setting).
+    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, PlaylistSettings? persist = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
         // Persist what's actually playing as the current playlist state. TransitionService.CurrentConfig()
@@ -36,7 +38,7 @@ public static class AppOps
         try
         {
             var existing = PlaylistService.LoadCurrentState();
-            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = paths, Settings = ps, Name = existing?.Name ?? "" });
+            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = paths, Settings = persist ?? ps, Name = existing?.Name ?? "" });
         }
         catch { }
         var s = SettingsService.Load();
@@ -75,12 +77,11 @@ public static class AppOps
         var rest = paths.Where((_, i) => i != startIndex).ToList();
         if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
         var ordered = new List<string> { paths[startIndex] }.Concat(rest).ToList();
-        return PlayPlaylist(ordered, new PlaylistSettings
-        {
-            Order = PlaylistOrder.Sequential, // pre-arranged; don't reshuffle
-            OverrideGlobalSettings = ps.OverrideGlobalSettings, IntervalSeconds = ps.IntervalSeconds,
-            AdvanceOnVideoEnd = ps.AdvanceOnVideoEnd, WaitForVideoEnd = ps.WaitForVideoEnd,
-        });
+        // Clone, never rebuild: a hand-copied subset dropped every transition field (play-from
+        // switched transitions off). Plays the pre-arranged order; saves the playlist's own Order.
+        var play = ps.Clone();
+        play.Order = PlaylistOrder.Sequential; // pre-arranged; don't reshuffle
+        return PlayPlaylist(ordered, play, persist: ps);
     }
 
     private static void Save(AppSettings s, LastSession sess) { s.LastSession = sess; SettingsService.Save(s); }
@@ -231,13 +232,14 @@ public static class AppOps
             var survivors = sess.Paths.Where(p => !del.Contains(p)).ToList();
             if (survivors.Count > 0)
             {
-                PlayPlaylist(survivors, new PlaylistSettings
-                {
-                    Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential,
-                    OverrideGlobalSettings = sess.OverrideGlobalSettings,
-                    IntervalSeconds = sess.TimedIntervalSeconds,
-                    AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd, WaitForVideoEnd = sess.WaitForVideoEnd,
-                });
+                // Start from the current playlist's settings (transitions etc.) and take the
+                // rotation from the session — a fresh PlaylistSettings dropped the transitions.
+                var ps = PlaylistService.LoadCurrentState()?.Settings?.Clone() ?? new PlaylistSettings();
+                ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
+                ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
+                ps.IntervalSeconds = sess.TimedIntervalSeconds;
+                ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd; ps.WaitForVideoEnd = sess.WaitForVideoEnd;
+                PlayPlaylist(survivors, ps);
                 return;
             }
         }

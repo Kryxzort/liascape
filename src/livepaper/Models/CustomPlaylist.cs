@@ -20,6 +20,15 @@ public class PlaylistSettings
     public int TransitionDurationMs { get; set; } = 600;
     public int TransitionDurationMaxMs { get; set; } = 0;
     public bool TransitionShuffle { get; set; } = true;
+
+    // Every field — new ones included — so a caller that only changes Order (play-from) or the
+    // rotation fields can never silently drop the transition settings (it did, twice).
+    public PlaylistSettings Clone()
+    {
+        var c = (PlaylistSettings)MemberwiseClone();
+        c.TransitionEffectIds = [.. TransitionEffectIds];
+        return c;
+    }
 }
 
 public class CustomPlaylist

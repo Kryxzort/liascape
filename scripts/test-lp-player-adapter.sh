@@ -345,6 +345,19 @@ mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
 # mpvpaper/LWE, which this hermetic sandbox explicitly never does.
 post /stop '{}' >/dev/null; sleep 0.6
 
+echo "== play-from keeps the playlist's transition settings (it used to rebuild them from rotation fields only)"
+pf=$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$b], startIndex:1, settings:{order:1, overrideGlobalSettings:true,
+  intervalSeconds:20, advanceOnVideoEnd:true, waitForVideoEnd:true, transitionEnabled:true,
+  transitionEffectIds:["fade","wipeLeft"], transitionDurationMs:1234, transitionDurationMaxMs:0, transitionShuffle:false}}')
+post /playlist/play-from "$pf" >/dev/null; sleep 1
+st=$(curl -sf -m 5 "$U/playlist/state")
+echo "$st" | jq -e '.settings.transitionEnabled == true and .settings.transitionDurationMs == 1234 and (.settings.transitionEffectIds == ["fade","wipeLeft"]) and .settings.transitionShuffle == false' >/dev/null \
+  && ok "play-from kept transitionEnabled/effects/duration/shuffle in the current playlist state" \
+  || bad "play-from dropped transition settings: $(echo "$st" | jq -c '.settings | {transitionEnabled, transitionEffectIds, transitionDurationMs, transitionShuffle}')"
+echo "$st" | jq -e '.settings.order == 1' >/dev/null && ok "play-from kept the playlist's own order (shuffle) in the saved state" \
+  || bad "play-from overwrote the saved order: $(echo "$st" | jq -c '.settings.order')"
+post /stop '{}' >/dev/null; sleep 0.6
+
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"
