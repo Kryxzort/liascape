@@ -56,8 +56,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       supervisor + state snapshot/restore, the C# backend adapter behind `PlayerEngine`, and packaging
       (flake + `install.sh`). Default engine stays `legacy`; `lp-player` is opt-in/experimental.
       `docs/player/architecture.md`, `.claude/rules/player-core.md` / `player-adapter.md`.
-- [ ] **Phase 1 on-machine battery + report** (Task 20): ≥ 50 switches × {method} × {mode} on the owner's
-      machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` (not written yet).
+- [x] **Phase 1 on-machine battery + report** (Task 20): ≥ 50 switches × {method} × {mode} on the owner's
+      machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` — done: dropout
+      0/0 everywhere, frame pacing/outputs/permonitor PASS, 4 product findings fixed (Tasks 20b–20e), final
+      soak PASS (0.31 MiB/min).
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process incl. auto-mute ≤ 100 ms; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
@@ -69,6 +71,55 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Phase 2: render worker** — move every `MpvSource` render context (creation + first render, the
       residual ~6–25 ms per switch on the loop after I5) to a worker thread with a shared EGL context;
       `.claude/rules/player-core.md` § Runtime "Switch cost and the Phase 2 render worker".
+- [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=lp-player`** (Task 20 battery,
+      `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
+      `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
+- [ ] **The owner's installed `livepaper` (NixOS package) predates lp-player entirely** (Task 20 battery,
+      `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `livepaper.dll` —
+      zero occurrences of `PlayerEngine`/`LP_PLAYER_BIN` anywhere, while the current dev build has both. So
+      every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
+      `lp-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
+      Needs an actual rebuild from this branch, not a code change — **owner action:**
+      `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
+- [ ] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
+      mechanism, `.claude/rules/player-core.md` § Sources "Async opens") — a burst of near-simultaneous
+      switches/creates has no ceiling on how many `lp-open` threads it can spin up at once. Not exercised by
+      anything in Task 20's battery (every cell opens sources well below any plausible concurrency ceiling);
+      worth a bound + a test before Phase 2 leans on this path harder.
+- [ ] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
+      currently just prints `"SKIP: no EGL device"` and returns on a GPU-less machine; there's no way to make
+      a CI run that's *supposed* to have a GPU fail loudly instead of silently skipping everything. Not
+      exercised in Task 20 (every run there had a real GPU) — worth adding before relying on CI coverage of
+      this crate's GPU paths.
+- [ ] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
+      `gpu-hwdec-interop=no` and maps `hwdec` to copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`),
+      because interop init (a CUDA context per render context, 65–90 ms) and `vulkan-copy`'s device creation
+      (230–320 ms without an X server) ran on the loop at every switch. Cost: 4K60 nvdec interop ~11 % of a
+      core → nvdec-copy ~56 % (flake build); the copy upload also runs on the loop (8–13 ms at 4K60). Once
+      render contexts live on the render worker, re-enable interop there. `player-core.md` § Sources
+      "Hardware decoding".
+- [ ] **8 h soak: does glibc's free heap plateau?** The final 1 h live soak (Task 20, `phase1.md` § 4)
+      passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
+      (arena address space +4.6 MiB/min, ~5.7 MiB per switch). Costs no RAM; the reaper's `malloc_trim` walks it
+      (1.7 ms max now). Run `battery.sh soak --minutes 480`; if it doesn't plateau, consider fewer per-core
+      threads (mpv's Lua scripts) or reusing cores across switches.
+- [ ] **Explicit sync back on NVIDIA once egl-wayland2 > 1.0.2 ships** — Task 20e: 1.0.2 leaks one queued
+      `wl_buffer.release` (~224 B) per present with explicit sync (upstream fix 6235dd8, 2026-09-09, unreleased),
+      so `serve` defaults `__NV_DISABLE_EXPLICIT_SYNC=1` (cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, loop tick
+      p99 ~0.3 → 1.6 ms, 0 missed) and drains libwayland's default queue every iteration. With a fixed driver
+      the drain alone is leak-free: drop the env default (keep the drain). `player-core.md` § Wayland NVIDIA notes.
+- [ ] **mpv's built-in Lua scripts per core** (console, stats, auto_profiles, commands, select) start threads
+      for every new source — `load-scripts`/`load-*=no`-style options would trim per-switch CPU (Task 20d note).
+- [ ] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
+      slower than `REAPER_WAIT` during `quit` is reported as `mpv.reaper_stragglers`; skip the trim once
+      shutdown has started (Task 20b review, cosmetic).
+- [ ] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
+      unknown → treated as audible) waits the full 150 ms `ONSET_TIMEOUT` before its (silent) ramp; 85 such
+      timeouts in the Task 20 re-run. Harmless (nothing to hear) but noisy; resolve `has_audio` from the
+      file's track list before scheduling the onset, or don't warn for a source that never reports audio.
+- [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
+      `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
+      wrap under load). Watch; harden their timing margins if they recur.
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
