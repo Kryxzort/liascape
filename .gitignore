@@ -19,3 +19,5 @@ src/native/lp-transition/*-protocol.h
 # lp-audio: built binary
 src/native/lp-audio/lp-audio
 scripts/gl-transitions/
+# Claude Code agent worktrees (isolated copies, never part of the tree)
+.claude/worktrees/
