@@ -101,7 +101,9 @@ echo "library: $CLIPS"
 # card crops it to 16:9, the settings modal shows it at its own aspect — the morph probe needs both)
 K1DIR=$(dirname "$(echo "$CLIPS" | jq -r '.[0]')")
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=480x480" -frames:v 1 "$K1DIR/k1.jpg"
-ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=240x240:rate=12" -t 2 -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
+# duration= bounds the SOURCE: palettegen waits for its input to end while paletteuse queues every frame,
+# so an unbounded source grew to 18 GB until earlyoom killed it (an output -t never ends the input)
+timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=240x240:rate=12:duration=2" -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
 
 "$XVFB" -displayfd 3 -nolisten tcp -screen 0 1400x900x24 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
 for _ in $(seq 1 50); do [ -s "$T/xdisplay" ] && break; sleep 0.1; done
