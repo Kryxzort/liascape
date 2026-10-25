@@ -105,13 +105,15 @@ function flight(samples, from, to, aspect, what) {
   if (bad.length) v.push(`${what}: the picture is stretched in ${bad.length}/${live.length} frames (box ${fmt(bad[0].box)}, aspect ${(bad[0].box.w / bad[0].box.h).toFixed(3)} vs the image's ${aspect.toFixed(3)})`);
   const c = (s) => [s.vis.x + s.vis.w / 2, s.vis.y + s.vis.h / 2, s.vis.w];
   const [x0, y0, w0] = c(first), [x1, y1, w1] = c(last);
-  const travel = Math.hypot(x1 - x0, y1 - y0) + Math.abs(w1 - w0);
+  // the scale of the flight: first → last, or the furthest it got (a round trip ends where it began)
+  let travel = Math.hypot(x1 - x0, y1 - y0) + Math.abs(w1 - w0);
   let maxStep = 0, moving = 0;
   for (let i = 1; i < live.length; i++) {
     const [a, b, w] = c(live[i - 1]), [p, q, z] = c(live[i]);
     const step = Math.hypot(p - a, q - b) + Math.abs(z - w);
     if (step > 0.5) moving++;
     maxStep = Math.max(maxStep, step);
+    travel = Math.max(travel, Math.hypot(p - x0, q - y0) + Math.abs(z - w0));
   }
   if (travel > 40 && moving < 5) v.push(`${what}: only ${moving} moving frames over ${travel.toFixed(0)} px — a jump, not a morph`);
   if (travel > 40 && maxStep > 0.45 * travel) v.push(`${what}: one frame jumped ${maxStep.toFixed(0)} px of ${travel.toFixed(0)}`);
@@ -182,6 +184,18 @@ app.whenReady().then(async () => {
       });
       await sleep(400);
     }
+    // closed while still flying open (a quick Escape): it turns around where it is — no jump to the end
+    // pose and back — and lands on the source
+    await cell("lib k1 close mid-open", async () => {
+      const r = await page(`const src = m.source("lib", "k1"); const S = m.rect(src); m.ctx(src); await m.sleep(250);
+        const btn = m.byText(".lib-ctx button", "Settings (volume / speed)");
+        const samples = await m.sample(900, () => { btn.click(); setTimeout(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 120); });
+        return { S, samples, srcVisible: getComputedStyle(src).visibility !== "hidden" };`);
+      const v = flight(r.samples.filter((s) => s.open), r.S, r.S, 1, "open+close");
+      if (r.samples[r.samples.length - 1].open) v.push("still open 900 ms after an Escape at 120 ms");
+      if (!r.srcVisible) v.push("the source is still hidden");
+      return v;
+    });
     const files = [...await shots("lib", "k1"), ...await shots("pl", "k1")];
     console.log(`screenshots: ${files.length} in ${OUT}`);
   } catch (e) {

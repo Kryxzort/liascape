@@ -65,6 +65,7 @@ export function LibrarySettingsModal({
   const bodyRef = useRef<HTMLDivElement>(null);
   const closingRef = useRef(false);
   const flightRef = useRef(0); // the newest flight; an older one's finish must not tidy up after a newer one
+  const openAnimsRef = useRef<Animation[]>([]); // the open flight, while it runs (a close turns it around)
   // the picture's own aspect: the card's still knows it at the click; else 16:9 until the image loads
   const [loaded, setLoaded] = useState<{ path: string; aspect: number } | null>(null);
   const aspect = source?.aspect ?? (loaded && loaded.path === item?.videoPath ? loaded.aspect : 16 / 9);
@@ -110,6 +111,7 @@ export function LibrarySettingsModal({
       return;
     }
     const anims = fly(src, S, "open");
+    openAnimsRef.current = anims;
     return () => anims.forEach((a) => a.cancel());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item]);
@@ -118,6 +120,14 @@ export function LibrarySettingsModal({
   const requestClose = () => {
     if (closingRef.current) return;
     closingRef.current = true;
+    // still flying open (a quick Escape / double click): turn the flight around where it is
+    const opening = openAnimsRef.current;
+    if (opening.length && opening.every((a) => a.playState === "running")) {
+      flightRef.current++; // the open's tidy-up must not run when the reversed flight lands
+      opening.forEach((a) => a.reverse());
+      opening[0].finished.then(onClose, onClose);
+      return;
+    }
     const src = sourceEl(morphId);
     const S = src ? boxOf(src) : null;
     const panel = panelRef.current;
