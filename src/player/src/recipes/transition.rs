@@ -1507,14 +1507,19 @@ impl Transitions {
         );
         let Some(eid) = tr.effect_id.clone() else {
             // Cut: 30 ms ramp down A, swap, 30 ms ramp up B — decided per A: one that has
-            // ended (End) or is paused is silent already and just gets the slot set.
+            // ended (End), is paused or is already silent (the player pause's gate holds a
+            // playing source at −96 — a cut made while paused swaps at once instead of
+            // waiting for the resume on the frozen clock) just gets the slot set.
             let mut ramped = false;
             for side in &mut tr.sides {
                 if let (false, Some(a)) = (side.shared, side.a.clone())
                     && is_source(g, &a)
                 {
                     note_gain(&mut side.orig, g, anim, &a, "anticlick");
-                    if self.ended.contains_key(&a) || get_bool(g, &a, "paused") {
+                    let silent = g
+                        .effective_gain_db(&a)
+                        .is_some_and(|db| db <= SILENT_DB + 1e-9);
+                    if self.ended.contains_key(&a) || get_bool(g, &a, "paused") || silent {
                         gset(g, &corr, &a, "gain.anticlick", PropValue::F64(SILENT_DB));
                     } else {
                         ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);

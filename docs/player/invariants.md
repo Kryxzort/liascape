@@ -239,8 +239,11 @@ ends with the session.**
   goes at once. Before, these waited on the frozen `Runtime::now` — a destroyed source kept its
   decoder until resume, then un-paused audibly for 30 ms with no picture.
 - **`stop` clears `player.paused`** (legacy semantics: a stop ends the session), and the backend
-  clears it for a new session (Apply / ApplyPlaylist / a cold Launch); next/prev and rotation keep
-  it. Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
+  clears it for a new session (Apply / ApplyPlaylist / a cold Launch); a rotation keeps it. A user
+  next/prev/random made while paused resumes first (the owner's default) or — with the
+  `KeepPauseOnSwitch` setting — keeps it: the switch is then a cut, and a cut whose A is already
+  silent (the pause gate holds a playing A at −96) swaps at once instead of waiting for the resume
+  (`tests/api.rs::cut_while_paused_swaps_at_once`). Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
   (now: torn down while still paused), `scripts/test-lp-player-adapter.sh` (I1 cases).
 
 ## 8. No audio onset or offset without a ramp the listener can hear — ramps run on audio that is actually flowing
