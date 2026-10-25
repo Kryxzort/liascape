@@ -20,10 +20,12 @@ instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy
   `io`/`timeout` with a hint); `TryCall` logs instead. One persistent request connection (serialized,
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
   connection on a background thread — **only the kinds it consumes** (final review M11):
-  `transition.handoff`, `transition.cancelled`, `transition.failed` (a switch's terminal
-  outcome); `source.` used to stream every debug `source.position` (~10 Hz per source) only to be
-  discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
-  250 ms → 5 s.
+  `transition.` (a switch's terminal outcome — handoff/cancelled/failed — and, for the source
+  map's invalidation, every other transition kind), `player.stopped`, `source.retire` — a handful
+  per switch; `source.` as a whole used to stream every debug `source.position` (~10 Hz per source)
+  only to be discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
+  250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now).
+  `RequestCount` = requests sent so far (round-trip evidence).
   **Two pids from `hello`** (player-core.md § Supervisor / § Command API `hello`): `PlayerPid` = the
   COMPOSITOR (`hello.pid`, what every `cur:`/`srcs:`/mpv-ownership query is really about) and
   `SupervisorPid` = `hello.supervisor_pid` (null = unsupervised, `--no-supervise`). `Generation` bumps
@@ -74,12 +76,29 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   own `transition`/`cancel` request keeps the default (opening a new source is itself ms-scale under
   `player-core.md` § Runtime, but a switch is a heavier, rarer operation than a plain set — no reason to
   shave its margin).
-- **Queue depth is capped** (`LpPlayerMedia.MaxQueueDepth` = 256, `QueueDepth`): once at the cap, a NEW
-  property-set command is logged and dropped (a **switch or stop is never dropped** — `QueueSwitch` /
-  `QueueStop` go through `QueueEssential`, which bypasses the cap but still counts toward the depth) **without being enqueued at all** — never the oldest one evicted (that
-  would need the chain to support mid-list removal; a continuation chain doesn't, so admission is
-  refused instead) — so a caller is never blocked and the chain never grows past this regardless of how
-  long a stall lasts.
+- **The queue coalesces; its depth is capped** (`LpPlayerMedia.MaxQueueDepth` = 256, `QueueDepth`,
+  `Coalesced`). The worker is a pending list (`LinkedList`) + one worker loop on the thread pool, so a
+  pending command can be removed. Three kinds:
+  - **essential** (`QueueEssential` — switch, stop, `QueueNewSession`, `cycle pause` → `TogglePause`,
+    the in-place upgrade, `SwitchAndWait`'s own switch): never dropped (bypasses the cap, still counts
+    toward the depth) and a **barrier** — nothing coalesces across it, so a set is never reordered
+    across a switch/stop.
+  - **coalescible** (`QueueSet(key, …)`, key = target + property): `Mpv()`'s property sets
+    (`set:<prop>` — `Set` always targets the same alias for a prop), `ApplySettingsLive` (one
+    `set:<prop>` per CHANGED field, the same keys), `/preview` (`preview:<prop>:<sorted full paths>`,
+    or `<playing>` without paths), `ApplyOverrideLive` (`override:<path>`, re-reads the override when it
+    runs), `ApplyNormalizationLive` (`af:<path>`), `ReapplyAll` (`reapply`). A new one **removes** a
+    still-pending command with its key enqueued since the last barrier and goes to the tail: every
+    other command keeps its order and only a write that a later write of the same targets overwrites
+    anyway is lost — the final state is what the whole sequence would leave, and a burst (a slider
+    behind a stalled player) holds ONE pending command per key. A coalesced command is admitted even
+    at the cap (it doesn't grow the queue); the replaced one's task completes with its replacement
+    (`Drain` stays correct).
+  - anything else (`Queue(…)`): a barrier, refused at the cap.
+
+  At the cap a command that can't coalesce and isn't essential is logged and dropped (R81 catches up
+  after a stall). Before (speed storm): admission was refused for every set past 256, the NEWEST
+  included — the storm's own final restore sets were dropped.
 - `SwitchEngineLive` reads `IsPlaying` before taking `_lock`, tears the session state down under it,
   and talks to lp-player only AFTER releasing it: `StopAndQuit()` (drain the queue ≤ 3 s, `stop`, `quit`,
   then escalate against the **supervisor** — SIGCONT+SIGTERM, then SIGKILL, each waiting ≤ 1.5 s for the
@@ -162,7 +181,7 @@ code below it is unchanged)
 | `ApplyPlaybackSettingsLive` | `ApplySettingsLive`: NoAudio/VideoFps/DisableCache/Demuxer*/HwDec → `srcs:*`; Loop only for a single non-timed video (the legacy guard) |
 | `ApplyOverrideLive` | the item's own source(s) by path (may be a pending B) |
 | `ApplyNormalizationLive` | `af` on the item's source(s) |
-| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), one `state` read for a selection — on screen, either side of an effect, a pending B), literal values; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths` |
+| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), from the cached source map — on screen, either side of an effect, a pending B), literal values, ONE `set` per source per value; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: every source in the map whose item has NO override for that field (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
@@ -186,7 +205,23 @@ in-process inside the compositor, never the supervisor, so this is the right pid
   in the targets then gets its own `override ?? global` (`FixupPerItem` — one `state` read, skipped when
   the only target is what's on screen).
 - **Per-item overrides** (`ApplyOverrideLive`, `/library/volume|speed`, `/preview`, normalization `af`)
-  → the source(s) whose `path` is that item (`state` graph; may be the pending B).
+  → the source(s) whose `path` is that item (may be the pending B), from the **cached path → source-id
+  map** (`SourceMap`, below) — one `set` per source, no `state` read.
+- **The path → source-id map** (`LpPlayerMedia.SourceMap`/`SourcesFor`/`SetEach`, speed storm: every
+  `/preview` cost a full `state` + the `set`s — 2 round trips per value with paths, 3 without — and
+  saturated the one worker at ~50/s). One `state` read builds `full path → [ids]` for every live media
+  source (no snapshot/colour); it's reused until the graph's SOURCES change. Ids are never reused within
+  a player process and a source's path never changes, so only these change it, and each **invalidates**
+  it (`InvalidateSources`): our own `Switch` (finally), `Stop`, `StopAndQuit`, a `cancel`, the in-place
+  upgrade — synchronously, on the queue's worker where every reader runs; the player's own changes and
+  other clients' through the subscribed events (`LpPlayerClient.Topics` = `transition.` — scheduled
+  creates a B, handoff drops A, cancelled/failed drop B, output_adopted/done — + `player.stopped` +
+  `source.retire`, a handful per switch; `source.position` is still never subscribed); a new compositor
+  (`Generation`, `OnRestarted`). It is **only trusted while the event connection is live**
+  (`EventsLive`; every (re)subscription invalidates — a reconnect gap loses events), a map read while an
+  invalidation happened is never stored (epoch), and a `set` that hits `no_such_node` (an id retired
+  meanwhile) invalidates and re-reads once. `FixupPerItem` uses it too (id → path). Self-test evidence:
+  `SourceMapReads`, `SourceEpoch`, `LpPlayerClient.RequestCount`.
 - **Layer settings** (`fit` ← VideoScale) → `lay:*:main` (also re-asserted on every switch, so a
   hotplugged output matches).
 - **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → `animate srcs:*.gain.mute` over
@@ -298,7 +333,9 @@ rotation resuming (I4); a pending B getting its OWN override while the global
 changes; **speed storm**: an aligned switch armed at 4× survives a drop to 0.5× and an aligned switch
 survives an 8 s pause (no cancel, no forced switch, no backstop log line), each then handing off at A's
 end; `/preview {paths:[A]}` during a running 8 s fade moves A only and `{paths:[B]}` B only (RED before:
-A's values landed on B); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
+A's values landed on B); `/preview {global:true}` during a running 8 s fade from a library item that
+follows the global to one with its own override 30 / 0.8× moves A only, persists nothing, answers < 100 ms
+and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
 a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
 owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend
@@ -326,7 +363,10 @@ assertions on synthetic `pactl` blocks, **item 6's queue-depth-cap assertions** 
 all — a single artificially slow `Queue(...)` item clogs the one-worker FIFO deterministically, so a
 burst of `MaxQueueDepth + 60` enqueued right behind it piles up instead of racing the drain: enqueueing
 all of them must stay fast (≤ 500 ms, never blocking the caller) and `QueueDepth` must never exceed the
-cap; draining afterward must bring it back to 0), then a round-trip against a **private, supervised**
+cap; draining afterward must bring it back to 0) **+ the coalescing assertions** (behind a clog: a
+newer `QueueSet` of a key replaces the pending one and the rest keep their order — `b1 a2 E1 a4`;
+nothing merges across an essential command; at the cap a pending key's newest set still lands, an
+essential command is admitted and runs last, a new key is refused), then a round-trip against a **private, supervised**
 `lp-player serve --headless --outputs 640x360@60 --clock stepped --ao null` (temp
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `/tmp` — a unix socket path must be < 108 bytes — own
 `--socket`, `LD_LIBRARY_PATH` removed, `quit` + kill at the end; the shared client is swapped to it
@@ -335,14 +375,22 @@ SUPERVISOR** (serve forks its compositor child before anything else runs) — `h
 `client.PlayerPid`) is the compositor, a different pid; `hello.supervisor_pid` (→
 `client.SupervisorPid`) is the spawned pid. Covers: `hello` asserts both pids against the spawned
 process + each other; colour → clip with `align:now` + `fade` gets `transition.handoff` **as a
-subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; a cut with `align:end` hands off
-at A's end; a cancelled aligned switch → `cancel {corr}` → `transition.cancelled`, A stays; a
+subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; **a slider burst past the cap**
+(`MaxQueueDepth + 61` volume sets behind a 600 ms clog) lands its NEWEST value and queues ≤ 3 commands
+(RED before: depth 256, the last ~60 dropped, gain.user stuck at the 255th value); **20 `/preview`s
+on A cost 1 request each** (`client.RequestCount`; RED before: 2 — `state` + `set`) and the last lands;
+a cut with `align:end` hands off at A's end, then a preview on B reaches B's NEW source (the map was
+invalidated by the switch), and a pending B requested by ANOTHER client (raw `transition`) gets a
+preview once its `transition.scheduled` event bumped `SourceEpoch`; a cancelled aligned switch → `cancel {corr}` → `transition.cancelled`, A stays; a
 SIGSTOPped **compositor** (never the supervisor — it would feel nothing): the first query returns in
 ≤ 450 ms (QuickMs), the next in ≤ 50 ms (stall breaker), a property set returns at once (queued), and
 it recovers after SIGCONT — **R81**: that recovery (`Recovered`) must have bumped
 `LpPlayerMedia.ReapplyCount` (waited for via `Drain()` before checking, since `Queue(...)` from an
 event handler is fire-and-forget by design); a SIGKILLed **compositor** yields a NEW `hello.pid`
-within 1.5 s with the SAME `supervisor_pid` (the supervised restart, Task 16 § Supervisor) — **R81**
+within 1.5 s with the SAME `supervisor_pid` (the supervised restart, Task 16 § Supervisor; polled with
+a FRESH client per attempt — a hello reaching the new compositor before it serves times out, and the
+shared client's breaker then failed every later attempt for 3 s: under load that alone failed the
+check; the shared client must then see the new pid within 4 s) — **R81**
 again: `OnRestarted` must also have bumped `ReapplyCount`; **I3**: a pause set just before by a
 second, independent client (another process's toggle) is still on after the restart + reapply,
 and one `TogglePause` then resumes; then `LpPlayerMedia.StopAndQuit()` must

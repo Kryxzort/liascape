@@ -215,6 +215,10 @@ public static class AudioMonitor
         psi.ArgumentList.Add("--channels=1");
         psi.ArgumentList.Add($"--rate={SampleRateHz}");
         psi.ArgumentList.Add("--raw");
+        // a small fragment: parec's default buffering held the first data back ~2 s (measured 2023 ms →
+        // 65 ms first byte, 76 ms first 20 ms chunk — scripts/measure-automute-latency.py), so auto-mute
+        // reacted ~2 s late to every new stream. Only this monitor's own record stream is affected.
+        psi.ArgumentList.Add("--latency-msec=10");
 
         Process? proc;
         try { proc = Process.Start(psi); }

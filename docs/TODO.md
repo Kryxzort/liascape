@@ -17,8 +17,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       "Calls made by the designer" list at the end. Next step after approval: write the implementation plan.
       — approved 2026-10-20 (`TransitionMethod` kept, per the spec's own status line); implementation plan:
       `docs/superpowers/plans/2026-10-20-lp-player-phase0-1.md`.
-- [ ] **Auto-mute, legacy quick win**: add `--latency-msec=10` to the `parec` spawn in `AudioMonitor.MonitorStreamAsync`.
+- [x] **Auto-mute, legacy quick win**: add `--latency-msec=10` to the `parec` spawn in `AudioMonitor.MonitorStreamAsync`.
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in lp-player.
+      — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
+      (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
 - [ ] **LICENSE** for the repo. There is none today. lp-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 
 ## Legacy player (current app) — small fixes
@@ -122,10 +124,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
       slower than `REAPER_WAIT` during `quit` is reported as `mpv.reaper_stragglers`; skip the trim once
       shutdown has started (Task 20b review, cosmetic).
-- [ ] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
+- [x] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
       unknown → treated as audible) waits the full 150 ms `ONSET_TIMEOUT` before its (silent) ramp; 85 such
       timeouts in the Task 20 re-run. Harmless (nothing to hear) but noisy; resolve `has_audio` from the
       file's track list before scheduling the onset, or don't warn for a source that never reports audio.
+      — done: a B with no audio stream at all didn't reproduce it (R92's `has_audio` resolves in time in
+      every method × align, and a switch storm); a selected track that ENDS (30 ms of audio on a 4 s
+      video) timed out in all 6 cells. The source now confirms `AudioFlowing` when `audio-pts` is
+      unavailable while the picture plays on (no audio playing: track ended or `aid` unresolved), and its
+      40 ms margin on real time, not on a later `audio-pts` change (`MpvSource::confirm_flowing_by_time`).
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
@@ -182,21 +189,37 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         restore sets. Not reproduced in a 4 min re-run once the trip got its own log line (`no reply to …
         (waited …; gen2 GCs …, thread-pool queue …)`) and the `loop` probe got `max_request_ms/cmd` (handler
         time used to be outside `max_busy_ms`). Next trip: read that line first.
-  - [ ] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
+  - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
-  - [ ] **`/preview` costs three round trips** (`get cur:*.path`, a full `state` for `SourcesFor`, the `set`)
+        — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one
+        of its key since the last essential command (switch/stop/toggle = barriers, never dropped), so a burst
+        holds one command per key and the newest always lands (self-test: 317 sets → depth 2, RED: 256 + the
+        last ~60 dropped). Also fixed: `SwitchAndWait`'s own switch went through the droppable queue.
+  - [x] **`/preview` costs three round trips** (`get cur:*.path`, a full `state` for `SourcesFor`, the `set`)
         — fine at the UI's ~11/s, saturates the one worker at ~50/s. Cache the path → source ids per switch.
-  - [ ] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
+        — done: `SourceMap`, invalidated by our switches/stops/cancels and by the subscribed `transition.`/
+        `player.stopped`/`source.retire` events (a foreign switch too), trusted only while events flow;
+        1.0 request per preview value (self-test over 20; RED: 2.0).
+  - [x] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
         frame, up to 0.5 s seen under random 0.25–4× drags): a fixed-length effect can't make up a start
         instant that moved into the past. Compress the effect's remaining progress to A's new end instead?
         Same for a global speed change mid-effect (it reaches A through `srcs:*`).
+        — done: full-live `align:end` keeps ending with A (`Transitions::follow_a_end`): a speed-up before or
+        during the effect compresses its remaining progress and both xfade ramps to A's new end
+        (`Animator::compress_to`, continuous, same curves; ≥ 100 ms left; never stretched on a slow-down;
+        an A already shorter than D keeps its designed hold). Drag storm −4.6…+10.8 ms vs A (RED ≤ +391);
+        real libmpv `srcs:*.speed` 4× mid-effect: RED +892 ms → on A's end.
   - [ ] **Shared looping A on `align:end`** caches its boundary (`target_end`, from the drop + k·length at the
         old speed) — a speed change doesn't move it. Unused by the backend today (same wallpaper on every
         output = never shared); re-anchor at the next wrap when per-monitor wallpapers land.
   - [ ] **Missed frames scale with content fps**: steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
         240 Hz output; random 0.25–4× (up to 240 fps content) 1–1.4/s vs 0.16/s at 1×. Phase 2 render worker.
-  - [ ] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
+  - [x] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
         previews) and a no-op `POST /settings` costs ~150 ms in the backend — profile it.
+        — done: the cost was the loudness backfill's library scan running synchronously on the request thread
+        (and parsing index.json twice per item): 330–550 ms → median 8 ms with 300 items
+        (`scripts/test-settings-latency.sh`); the global Volume/Speed sliders preview through a throttled
+        `/preview {global:true}` (only wallpapers without their own override move; matrix `globalDrag*`).
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

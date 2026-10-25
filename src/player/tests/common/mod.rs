@@ -79,6 +79,14 @@ pub enum ClipSpec {
     /// frame-marker-readable B that also has a real audio track — `FrameIndex` itself
     /// deliberately never does).
     FrameIndexWithAudio { frames: u32, tone_hz: f64 },
+    /// A solid colour for `secs` whose audio track (stereo 48 kHz sine, −20 dBFS) lasts only
+    /// `audio_secs` — a selected audio track that stops producing audio almost at once (the
+    /// onset wait's "a source that never reports audio for long" case).
+    ShortAudio {
+        rgb: [u8; 3],
+        secs: f64,
+        audio_secs: f64,
+    },
     /// A single 1920×1080 PNG of one colour (lossless RGB, no YUV involved).
     Image { rgb: [u8; 3] },
     /// Top half `top`, bottom half `bottom`, for `secs` — the R25 orientation pin
@@ -228,6 +236,28 @@ pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
                 "2:a",
                 "-frames:v",
                 &frames.to_string(),
+            ]);
+            push(&video_codec);
+            push(&["-c:a", "pcm_s16le"]);
+        }
+        ClipSpec::ShortAudio {
+            rgb,
+            secs,
+            audio_secs,
+        } => {
+            let amp = 10f64.powf(-20.0 / 20.0);
+            let ch = format!("{amp}*sin(2*PI*440*t)");
+            push(&[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c={}:s=1920x1080:r=30:d={secs}", hex(rgb)),
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("aevalsrc={ch}|{ch}:s=48000:d={audio_secs}"),
+                "-vf",
+                &format!("format=rgb24,{TO_YUV}"),
             ]);
             push(&video_codec);
             push(&["-c:a", "pcm_s16le"]);
