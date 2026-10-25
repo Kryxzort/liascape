@@ -48,7 +48,7 @@ XVFB=${XVFB:-$(ls /nix/store/*-xorg-server-*/bin/Xvfb 2>/dev/null | head -1)}
 [ -x "$XVFB" ] || XVFB=$(command -v Xvfb || true)
 [ -x "$XVFB" ] || { echo "no Xvfb — set XVFB=/path/to/Xvfb"; exit 2; }
 B=$ROOT/src/player/target/debug/lp-player
-DLL=$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll
+DLL=${LP_MATRIX_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll} # LP_MATRIX_DLL: another backend build (an older commit's — a fix RED)
 
 if [ $BUILD = 1 ]; then
   echo "== build"
