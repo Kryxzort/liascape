@@ -139,7 +139,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   panel (the panel is see-through meanwhile, `[data-morph]`); the body is clipped to the growing ghost
   (a `polygon()` clip — `inset()`s summing past the box get scaled down and stop tracking) and fades in
   late / out early. Close re-measures the source (the strip may have scrolled) and lands on it, then
-  `closeItemSettings` (source shown in the same render); off-screen/missing source → fade. Escape closes.
+  `closeItemSettings` (source shown in the same render); off-screen/missing source → fade. Escape closes; a
+  close while the open flight still runs reverses it from where it is (cancelling it jumped to the end pose).
   The media box layers the card's own `still()` (cached → frame 1 IS the card), the sharp native image,
   and the playing preview: the card's gif URL (same image → same animation) or the video, started where
   the card's hover video was (`settingsSource`, read at the click — the card's layer unmounts on open).
