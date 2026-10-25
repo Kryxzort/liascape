@@ -941,6 +941,30 @@ C["seq:pause+plInterval"] = { states: ["playlist"], rearms: true, async run(c) {
     return v;
   } };
 
+// --- keyboard selection: Ctrl+click + Shift+click a range, then the Delete key; Ctrl+A, Delete, then Undo
+const key = (k, mods = {}) => `window.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} })); await m.sleep(150);`;
+C["selRange+Delete"] = { states: SEL_STATES, switch: true, async run(c) {
+    const order = await ui(`return [...document.querySelectorAll(".card.lib")].map((e) => e.querySelector(".lib-title")?.title);`);
+    const i = order.indexOf(TITLE(c.shown)); const j = i + 1 < order.length ? i + 1 : i - 1;
+    c.targets = [c.shown, K[order[j].slice(1) - 1]]; c.exp.paused = false;
+    const shift = `m.card(${JSON.stringify(order[j])})?.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true })); await m.sleep(150);`;
+    await ui(`${ctrlClick(c.shown)} ${shift} ${key("Delete")}`); await sleep(900);
+  }, check: (c) => [...afterTrashMany(c, c.targets), ...armedCheck(c)] };
+C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    c.exp.paused = false; c.strip = c.before.ps?.videoPaths || [];
+    await ui(`${key("a", { ctrlKey: true })} ${key("Delete")}`); await sleep(1200);
+    c.midState = { lib: ((await http("GET", "/library")).json || []).length, cur: (await http("GET", "/current")).json?.path ?? null };
+    await ui(`m.click(m.byText(".topbar button", "Undo"), "Undo");`); await sleep(1200);
+  }, check(c) {
+    const v = [];
+    if (c.midState.lib !== 0 || c.midState.cur) v.push(`after Ctrl+A, Delete: ${c.midState.lib} library items, /current ${TITLE(c.midState.cur)}`);
+    if ((c.after.lib || []).length !== K.length) v.push(`${(c.after.lib || []).length} library items after the undo, expected ${K.length}`);
+    const got = (c.after.ps?.videoPaths || []).map(TITLE), want = c.strip.map(TITLE);
+    if (JSON.stringify(got) !== JSON.stringify(want)) v.push(`playlist ${JSON.stringify(got)} after the undo, was ${JSON.stringify(want)}`);
+    if (c.after.cur?.path) v.push(`${TITLE(c.after.cur.path)} plays after deleting everything + undo (the delete stopped playback)`);
+    return v;
+  } };
+
 function expectShown(c, want, { effect }) {
   const v = [];
   if (!c.noOutput && c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
