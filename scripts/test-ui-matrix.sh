@@ -16,12 +16,17 @@
 #                                  probe-morph.js = the settings-modal morph probe, same hermetic stack)
 #   --ui-dir: drive an already-built UI bundle instead of building this tree's (e.g. an older commit's,
 #   to show a UI-side fix RED)
-#   --jobs N (default 4, env LP_MATRIX_JOBS): N complete hermetic stacks in parallel, each running every
+#   --jobs N (default 6, env LP_MATRIX_JOBS): N complete hermetic stacks in parallel, each running every
 #   N-th cell (`--shard i/N`, internal); builds once, merges <out>/cells.jsonl (each shard keeps its own
 #   dir <out>/shard-i/ + log <out>/shard-i.log), prints the combined MATRIX line. --jobs 1 = one stack,
 #   the cells in order (the original single run). A probe other than probe-matrix.js always runs alone.
-#   Each stack is a debug lp-player + a backend + a software-rendered Electron (~0.5 GB): 4 of them took a
-#   24-core desktop to load 22 (laggy to use meanwhile) — use --jobs 2 + LP_MATRIX_NICE=1 next to someone working.
+#   Each stack is a debug lp-player + a backend + a software-rendered Electron (~0.8 GB). Measured on the
+#   24-core / 31 GB dev box (~530 cells, 56 min of cell time): 4 → 14.5 min, 6 → 10 min (clean), 8 → 8.3 min
+#   but 13 cells timed out entering their state (all passed alone). 4+ stacks make the desktop laggy:
+#   use --jobs 2 + LP_MATRIX_NICE=1 next to someone working.
+#   Memory guard: N is capped so each stack has ~1 GiB above LP_MATRIX_MIN_FREE_MB (default 3072) of
+#   MemAvailable, and the run is stopped (exit 3) if MemAvailable falls under that floor — a test run must
+#   never be what makes earlyoom kill the desktop's apps.
 # LP_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
@@ -29,7 +34,7 @@
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
-BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-4}; SHARD=""; PROBE=""
+BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-6}; SHARD=""; PROBE=""
 while [ $# -gt 0 ]; do
   case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
     --jobs) JOBS=$2; shift ;; --shard) SHARD=$2; shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
@@ -83,6 +88,10 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   trap pcleanup EXIT
   trap 'exit 130' INT TERM HUP
   T0=$(date +%s)
+  MINFREE=${LP_MATRIX_MIN_FREE_MB:-3072}
+  memavail() { awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo; }
+  fit=$(( ($(memavail) - MINFREE) / 1024 )); [ "$fit" -lt 1 ] && fit=1
+  [ "$JOBS" -gt "$fit" ] && { echo "== only $(memavail) MiB available: $fit shard(s), not $JOBS"; JOBS=$fit; }
   echo "== matrix: $JOBS shards"
   for i in $(seq 0 $((JOBS - 1))); do
     LP_MATRIX_OUT=$OUTROOT/shard-$i setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} \
@@ -101,6 +110,7 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   }
   while :; do
     alive=0; for pid in "${PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+    if [ "$(memavail)" -lt "$MINFREE" ]; then echo "ABORT: only $(memavail) MiB available (floor $MINFREE) — stopping every shard"; exit 3; fi
     flush; [ $alive = 0 ] && break; sleep 3
   done
   rcs=""; for i in $(seq 0 $((JOBS - 1))); do wait "${PIDS[$i]}"; rcs="$rcs $?"; done
