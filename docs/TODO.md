@@ -17,8 +17,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       "Calls made by the designer" list at the end. Next step after approval: write the implementation plan.
       — approved 2026-10-20 (`TransitionMethod` kept, per the spec's own status line); implementation plan:
       `docs/superpowers/plans/2026-10-20-lp-player-phase0-1.md`.
-- [ ] **Auto-mute, legacy quick win**: add `--latency-msec=10` to the `parec` spawn in `AudioMonitor.MonitorStreamAsync`.
+- [x] **Auto-mute, legacy quick win**: add `--latency-msec=10` to the `parec` spawn in `AudioMonitor.MonitorStreamAsync`.
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in lp-player.
+      — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
+      (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
 - [ ] **LICENSE** for the repo. There is none today. lp-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 
 ## Legacy player (current app) — small fixes
