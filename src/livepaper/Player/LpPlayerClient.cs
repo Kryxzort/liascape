@@ -166,6 +166,8 @@ public sealed class LpPlayerClient
             var req = new Dictionary<string, object?> { ["id"] = id, ["cmd"] = cmd };
             if (args != null) req["args"] = args;
             var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(req) + "\n");
+            long sentAt = Environment.TickCount64;
+            int gen2At = GC.CollectionCount(2);
             try
             {
                 _sock!.SendTimeout = Math.Max(1, timeoutMs);
@@ -242,6 +244,11 @@ public sealed class LpPlayerClient
                 if (ex is TimeoutException || ex.InnerException is SocketException { SocketErrorCode: SocketError.TimedOut } || ex is IOException { InnerException: SocketException { SocketErrorCode: SocketError.TimedOut } })
                 {
                     Interlocked.Exchange(ref _stalledUntil, Environment.TickCount64 + StallMs);
+                    // The breaker opening is the one place a stall's cause is still known — every
+                    // request after it only says "not responding" (and most callers swallow those).
+                    Log($"no reply to `{cmd}` within {timeoutMs} ms (waited {Environment.TickCount64 - sentAt} ms; "
+                        + $"gen2 GCs meanwhile {GC.CollectionCount(2) - gen2At}, thread-pool queue {ThreadPool.PendingWorkItemCount}, "
+                        + $"threads {ThreadPool.ThreadCount}) — failing requests fast for {StallMs / 1000} s");
                     throw new LpPlayerException("timeout", $"no reply to `{cmd}` within {timeoutMs} ms",
                         "pass a longer timeout; is the loop stalled? `lp-player ctl probe '{\"name\":\"loop\"}'`");
                 }
