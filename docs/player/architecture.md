@@ -112,7 +112,13 @@ soak: +6.4 MiB/min; 200 hermetic switches: RSS 159 → 922 MiB with live memory 
 reaper `malloc_trim(0)`s after each batch of destroyed cores (off the loop) — 364 → 380 MiB
 over 300 switches (`src/player/src/mem.rs`, `.claude/rules/player-core.md` § Memory). The
 `memory` probe splits RSS into live vs retained; `LP_PLAYER_MALLOC=glibc` turns the policy
-off for an A/B.
+off for an A/B. On Wayland a second, per-*present* leak sat underneath (Task 20e: live
+in-use +2 MiB/min). NVIDIA egl-wayland2 ≤ 1.0.2 with explicit sync leaves one
+`wl_buffer.release` (~224 B) queued per present on a queue nobody dispatches. `serve` sets
+`__NV_DISABLE_EXPLICIT_SYNC=1` unless the caller chose a value, and the Wayland backend
+dispatches libwayland's default queue every iteration, because upstream's driver fix moves
+the buffers there (`src/player/src/wl.rs`, `.claude/rules/player-core.md` § Wayland → NVIDIA
+notes).
 
 **Signal** (spec §4.2: "other audio playing" → auto-mute, "window fullscreen" → auto-pause) is
 specified but **not implemented yet** — it is Phase 3 (§6). Today the equivalent decisions
@@ -206,6 +212,7 @@ reply is sent. The backend's `LpPlayerClient` background event connection
 | The C# side of a setting / dispatch point | `src/livepaper/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-lp-player-adapter.sh`, `--lp-player-selftest` |
 | Reference-based dropout detection | `src/player/src/probe/dropout.rs`, `scripts/lp_audiowatch.py` | `docs/player/debugging.md` | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
 | Process memory, the glibc allocator policy, the `memory` probe | `src/player/src/mem.rs`, `src/player/src/probe/memory.rs`, `src/player/src/sources/reaper.rs` | `.claude/rules/player-core.md` § Memory | `src/player/tests/api.rs::t20b_switch_loop_rss_stays_flat`, `battery.sh soak --hermetic` |
+| Wayland EGL driver environment (NVIDIA explicit sync), libwayland default-queue drain | `src/player/src/wl.rs` (`apply_driver_env`, `Wayland::dispatch_default_queue`) | `.claude/rules/player-core.md` § Wayland → NVIDIA notes | `src/player/tests/api.rs::t20e_wayland_present_heap_stays_flat` (opt-in `LP_PLAYER_TEST_WAYLAND`) |
 | Onset waits (ramp-ins on flowing audio), the "can it be heard" predicate | `src/player/src/onset.rs` | `docs/player/invariants.md` #8 | its own unit tests, `src/player/tests/api.rs::i6_*` |
 
 A change to a **setting** always needs two ends: the graph property (above) *and* the adapter

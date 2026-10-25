@@ -4039,6 +4039,99 @@ fn t20b_switch_loop_rss_stays_flat() {
     );
 }
 
+/// Task 20e: the live soak's in-use heap grew ~2 MiB/min (headless runs flat). Cause: every
+/// present on Wayland leaves one `wl_buffer.release` event (a ~224 B `wl_closure`) queued
+/// on an event queue nobody dispatches — NVIDIA egl-wayland2 ≤ 1.0.2 keeps its buffers on
+/// a per-swapchain queue it never dispatches under explicit sync, and upstream's fix moves
+/// them to libwayland's *default* queue, which wayland-rs never dispatches either. A long
+/// colour fade on every output (each output redraws every refresh, no decoder in the heap)
+/// must leave the heap flat per present (`wl::apply_driver_env` + the default-queue drain in
+/// `Wayland::process`). Opt-in — it draws on a real compositor's outputs for ~25 s:
+/// `LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> cargo test --test api t20e` (absolute: the
+/// test runs with its own `XDG_RUNTIME_DIR`). Old behaviour on demand:
+/// add `__NV_DISABLE_EXPLICIT_SYNC=0` (RED on egl-wayland2 ≤ 1.0.2).
+#[test]
+fn t20e_wayland_present_heap_stays_flat() {
+    let Some(display) = std::env::var_os("LP_PLAYER_TEST_WAYLAND") else {
+        println!(
+            "SKIP: set LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run (draws on that \
+             compositor's outputs for ~25 s)"
+        );
+        return;
+    };
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if Catalogue::resolve_dir().is_none() {
+        println!("SKIP: no transitions/ directory resolved");
+        return;
+    }
+    let root = new_root();
+    let mut cmd = Command::new(BIN);
+    die_with_parent(&mut cmd);
+    cmd.args(["serve", "--no-supervise", "--clock", "real", "--ao", "null"])
+        .env("XDG_RUNTIME_DIR", root.join("run"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("WAYLAND_DISPLAY", &display)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(
+            std::fs::File::create(root.join("stderr-wayland.log")).unwrap(),
+        ));
+    let mut srv = Serve {
+        child: Some(cmd.spawn().expect("spawn lp-player serve (wayland)")),
+        sock: root.join("run/livepaper/lp-player.sock"),
+        root,
+        _serial: Some(serial),
+    };
+    srv.wait_up();
+    let mut c = srv.client();
+    let fade = |c: &mut Client, rgb: [u8; 3], ms: u32| {
+        c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"kind": "color", "color": rgb},
+                   "effect_id": "fade", "duration_ms": ms}),
+        );
+    };
+    fade(&mut c, [255, 0, 0], 100);
+    std::thread::sleep(Duration::from_millis(500));
+    fade(&mut c, [0, 0, 255], 60_000); // redraws every output at its refresh rate
+    // A one-off ~0.4 MiB (the first frames' allocations) is freed within ~8 s; then the
+    // heap is flat to the byte when nothing leaks (measured).
+    std::thread::sleep(Duration::from_secs(10));
+    let read = |c: &mut Client| {
+        let m = c.ok("probe", json!({"name": "memory"}));
+        let f = c.ok("probe", json!({"name": "frames"}));
+        let presents: u64 = f["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["totals"]["presents"].as_u64().unwrap())
+            .sum();
+        (m["malloc"]["in_use_bytes"].as_f64().unwrap(), presents, f)
+    };
+    let (m0, p0, _) = read(&mut c);
+    std::thread::sleep(Duration::from_secs(10));
+    let (m1, p1, f) = read(&mut c);
+    let presents = p1 - p0;
+    let per_present = (m1 - m0) / presents.max(1) as f64;
+    println!(
+        "T20e heap {:+.0} KiB over {presents} presents ({per_present:.1} B/present); \
+         explicit sync: {}, default queue dispatched: {}",
+        (m1 - m0) / 1024.0,
+        f["explicit_sync"],
+        f["default_queue_dispatched"]
+    );
+    assert!(
+        presents >= 300,
+        "only {presents} presents in 10 s — is the compositor giving frame callbacks? {f}"
+    );
+    assert!(
+        per_present < 32.0,
+        "the heap grew {per_present:.1} B per present ({:+.0} KiB over {presents}) — an \
+         undispatched Wayland event queue (wl::apply_driver_env, Wayland::process): {f}",
+        (m1 - m0) / 1024.0
+    );
+}
+
 /// I7 (final review): a **private, hermetic** PipeWire + WirePlumber (their own runtime/
 /// config/state dirs, no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/V4L2
 /// monitors, so no real device is ever touched; one null sink as the only output). The

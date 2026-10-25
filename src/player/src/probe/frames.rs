@@ -274,10 +274,17 @@ pub fn frames(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
             st.reset(now);
         }
     }
+    // Task 20e: NVIDIA explicit sync for this process and the default-queue drain.
+    let default_queue = rt
+        .backend
+        .as_wayland_mut()
+        .map(|w| w.default_queue_dispatched());
     Ok(json!({
         "backend": rt.backend.kind(),
         "policy": if paced_backend { "content" } else { "every_tick" },
         "window_ms": WINDOW.as_secs_f64() * 1000.0,
+        "explicit_sync": crate::wl::driver_env_json(),
+        "default_queue_dispatched": default_queue,
         "outputs": outs,
     }))
 }

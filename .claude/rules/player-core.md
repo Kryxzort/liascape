@@ -1628,7 +1628,8 @@ cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|po
 `source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
 (host), `transition.output_adopted`, `output.added|removed|changed|layer_failed|
 present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|layer|
-gl_error|duplicate_output|pointer_error`, `input.pointer` (debug), `loop.failed`,
+gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the last two Task
+20e), `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
 `step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`, `effects.missing`,
@@ -1681,7 +1682,9 @@ loop's share of source opens taken out / that share alone — render context + p
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,
 gain_pushes, pause_gates, dropout_windows_open, bounds (§ Runtime "Bounds"),
 recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening`; `frames` (Task 13,
-`probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000), outputs:
+`probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000),
+explicit_sync ({env, value, source: policy|env}, null headless — Task 20e),
+default_queue_dispatched (events from libwayland's default queue; null headless), outputs:
 [{name, hz, refresh_mhz, period_ms, idle, frame_pending, since_present_ms, paced {count,
 mean_ms, p50_ms, p95_ms, max_ms, missed}, all {… + fps}, totals {presents, callbacks,
 missed, idle_gaps}}]}`, `args: {"reset": true}` clears the windows after reading (§
@@ -1752,7 +1755,8 @@ then does two roundtrips (output info → surfaces created; first configures). T
 (R17 `Rc<Shared>`; mpv renders through it as before). The event queue goes into the loop as
 a `calloop_wayland_source::WaylandSource` (it flushes + `prepare_read`s before each sleep,
 so events EGL's own queue reads off the socket are never stranded); its callback dispatches
-into `Wayland::state` via `as_wayland_mut`. **sctk handlers only record** (outputs,
+into `Wayland::state` via `as_wayland_mut`, and `process` dispatches libwayland's default
+queue — EGL's proxies — every iteration (Task 20e, NVIDIA notes below). **sctk handlers only record** (outputs,
 configures, frame callbacks, pointer); GPU work and graph changes run after the dispatch:
 `apply_output_changes` (`backend.process(gfx)` → hotplug), `pointer_events`, `render_paced`.
 
@@ -1868,7 +1872,7 @@ button, suppressed}` is logged at debug (motion ≤ 10/s per output; `suppressed
 rest). On enter the cursor is set to the default shape (`wp_cursor_shape_v1`), else the
 compositor keeps whatever cursor it had. Axis events are ignored.
 
-**NVIDIA / EGL notes (595.84, egl-wayland, Hyprland 0.56.2 — measured).**
+**NVIDIA / EGL notes (595.84, egl-wayland2 1.0.2, Hyprland 0.56.2 — measured).**
 - **`glDrawBuffer(GL_BACK)` before writing FBO 0.** `Gfx::new_wayland` makes the context
   current surfaceless first; per `EGL_KHR_surfaceless_context` the default framebuffer's
   draw/read buffers then start as `GL_NONE` and stay so when a window surface is bound —
@@ -1880,10 +1884,43 @@ compositor keeps whatever cursor it had. Axis events are ignored.
 - **Swap interval 0** on every window (`WindowTarget::set_swap_interval`): with the
   default 1, `eglSwapBuffers` on the 144 Hz output would block the single loop thread and
   drag the 240 Hz output down; pacing is ours (frame callbacks).
-- **Explicit sync is egl-wayland's business**: it binds `wp_linux_drm_syncobj_manager_v1`
-  (and `wp_fifo_manager_v1`, `wp_commit_timing_manager_v1`) and sets an acquire point per
-  swap (seen with `WAYLAND_DEBUG=1`); nothing to do here. **Damage:** every present redraws
-  the whole surface and `eglSwapBuffers` posts full damage — no buffer-age/partial damage.
+- **Explicit sync is off by default (Task 20e) — it leaked a queued event per present.**
+  With it on, egl-wayland2 binds `wp_linux_drm_syncobj_manager_v1` (+ `wp_fifo_manager_v1`,
+  `wp_commit_timing_manager_v1`) and sets acquire/release points per swap (seen with
+  `WAYLAND_DEBUG=client`). **egl-wayland2 ≤ 1.0.2** (NVIDIA 595's) then keeps each
+  swapchain's `wl_buffer`s on a per-swapchain event queue (`EGLSurface(<id>/<ptr>)`) that it
+  only dispatches *without* explicit sync — and Hyprland sends `wl_buffer.release` for every
+  present anyway, so one ~224 B `wl_closure` per present stayed queued for good, allocated by
+  our own `wl_display_read_events` (heaptrack: all the growth under `wl_closure_init` ←
+  `wl_connection_demarshal` ← `wl_display_read_events` ← `WaylandSource::before_handle_events`).
+  Measured 224.1 B/present (colour fade, 384 presents/s), the 1 h live soak's ~2 MiB/min of
+  in-use heap (1080p60 + 24 fps content on two outputs; minutes without a switch grew as
+  fast — per present, not per switch). Upstream's fix (egl-wayland2 6235dd8, after 1.0.2)
+  moves those buffers to libwayland's **default queue** — which wayland-rs never dispatches
+  (all its proxies live on its own queue), so with that build the leak was the same
+  (224.4 B/present, built from upstream main) until we dispatch it too. Two parts, both in
+  `wl.rs`: **(1)** `apply_driver_env` (first thing in `serve`, Wayland only, before any
+  thread — it `setenv`s): `__NV_DISABLE_EXPLICIT_SYNC=1` unless the caller set it (a set
+  value wins; `0` keeps explicit sync); egl-wayland2 then waits for the GPU at each swap
+  (`glFinish` — the compositor is on an NVIDIA GPU, so no implicit sync) and dispatches its
+  swapchain queue itself. Cost, two outputs 240/144 Hz mid-crosswarp (two runs): loop tick
+  p99 0.13–0.32 → ~1.6 ms, max 0.7–2.2 → 2.3–3.5 ms (< the 4.17 ms budget), 0 missed frames,
+  same CPU; 240 Hz interval p95 4.7–4.8 → 5.0–5.4 ms. **(2)** `Wayland::dispatch_default_queue`
+  (`wl_display_dispatch_pending`, step 0 of `process`, every loop iteration): what a normal
+  libwayland app does in its main loop and EGL relies on; events on proxies without a
+  listener are just freed. With explicit sync off nothing lands there per frame
+  (`default_queue_dispatched` stays 0). Cells (B/present): 1.0.2 + explicit (before) 224.1;
+  1.0.2 + off (default now) −0.0; upstream main + explicit, no drain 224.4, with drain 0.1;
+  1.0.2 + explicit kept by the user 224.1 — a driver bug we can't reach (the queue pointer is
+  egl-wayland2's), hence the default. When the driver ships an egl-wayland2 with 6235dd8,
+  `__NV_DISABLE_EXPLICIT_SYNC=0` brings explicit sync back leak-free. `wl.driver_env {env,
+  value, source: policy|env}` (info) at startup; `frames` probe `explicit_sync` (same
+  object) + `default_queue_dispatched`. Guard: `tests/api.rs::
+  t20e_wayland_present_heap_stays_flat` (opt-in `LP_PLAYER_TEST_WAYLAND=<socket>` — it draws
+  on that compositor for ~25 s; SKIP otherwise): a 60 s colour fade on every output, heap
+  growth per present over 10 s < 32 B (GREEN 2.3 ×2; RED with `__NV_DISABLE_EXPLICIT_SYNC=0`
+  226.6 B/present). **Damage:** every present redraws the whole surface and `eglSwapBuffers`
+  posts full damage — no buffer-age/partial damage.
 - The EGL config has alpha 8, so the buffer is ARGB: alpha is forced to 1 at present (and
   the opaque region set) so the compositor never blends what's below the wallpaper.
 
@@ -2274,7 +2311,9 @@ over 200). CPU: idle playback unchanged (13.75 vs 14.03 s per 60 s); a 1 s switc
 new core's pools + the trim). Diagnose
 with the `memory` probe: *live* (`in_use_bytes + mmap_bytes`) flat + `free_bytes` growing
 = retention; live growing = a real leak (then `loop` → `bounds`, `reaper_pending`,
-`dying_sources`, `opening`). Guard: `tests/api.rs::t20b_switch_loop_rss_stays_flat` (20
+`dying_sources`, `opening`; growing on Wayland only, per *present* rather than per switch —
+minutes without a switch grow as fast — = an event queue nobody dispatches, § Wayland →
+NVIDIA notes, Task 20e). Guard: `tests/api.rs::t20b_switch_loop_rss_stays_flat` (20
 fades between two 1080p clips: RSS growth over the last 16 < 10 % and an on-demand trim
 gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaningful check; with `LP_PLAYER_MALLOC=glibc` 32 % / 13.6 % → fails).
 `docs/player/debugging.md` row "RSS grows per switch".
