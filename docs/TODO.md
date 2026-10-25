@@ -46,7 +46,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`.
 - [ ] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
       (bit an agent on 2026-10-22: ~15 fields incl. LweMonitors). Make it merge (PATCH semantics) or reject partial bodies.
-- [ ] Remove the dead `LweSilent` setting (no consumers).
+- [x] Remove the dead `LweSilent` setting (no consumers).
+      — done 2026-10-26: gone from `AppSettings` and `session.md` (nothing in src/, app/, scripts/ read it). A
+      settings.json that still has it loads (unknown keys are ignored) and the next save drops it.
 - [ ] Harden `AUDIO_SETTLE` in `lp-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
 - [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in lp-player.

@@ -44,7 +44,6 @@ public class AppSettings
     public bool WeCopyFiles { get; set; } = false;
     public bool ResumeFromLast { get; set; } = true;
     public bool AllowScenes { get; set; } = false;
-    public bool LweSilent { get; set; } = false;
     public int LweVolume { get; set; } = 100;
     public List<LweMonitorSettings> LweMonitors { get; set; } = [];
     public int SceneTransitionDelayMs { get; set; } = 1000;
