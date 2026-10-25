@@ -52,6 +52,9 @@ mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# The adapter's aligned-switch backstop slack (LpPlayerMedia.AlignBackstopSlackSec, 15 s in production),
+# shortened so the speed-drop / long-pause scenarios below reach it in seconds.
+export LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
 SP=""; CP=""; BP=""
 cleanup() {
@@ -83,6 +86,8 @@ clip() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "$2=size=320x180:rate=30
            -t "$4" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$1"; }
 A=$T/a.mp4; Bc=$T/b.mp4; C=$T/c.mp4; D=$T/d.mp4
 clip "$A" testsrc2 440 2; clip "$Bc" smptebars 550 2; clip "$C" rgbtestsrc 660 2; clip "$D" testsrc 220 10
+E1=$T/e1.mp4; E2=$T/e2.mp4; P1=$T/p1.mp4; P2=$T/p2.mp4
+clip "$E1" testsrc2 330 12; clip "$E2" smptebars 770 12; clip "$P1" rgbtestsrc 880 4; clip "$P2" testsrc 990 4
 
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 {"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
@@ -356,6 +361,47 @@ echo "$st" | jq -e '.settings.transitionEnabled == true and .settings.transition
   || bad "play-from dropped transition settings: $(echo "$st" | jq -c '.settings | {transitionEnabled, transitionEffectIds, transitionDurationMs, transitionShuffle}')"
 echo "$st" | jq -e '.settings.order == 1' >/dev/null && ok "play-from kept the playlist's own order (shuffle) in the saved state" \
   || bad "play-from overwrote the saved order: $(echo "$st" | jq -c '.settings.order')"
+post /stop '{}' >/dev/null; sleep 0.6
+
+# An aligned (wait-for-video-end) switch is bounded by the adapter at A's remaining time + slack, read
+# when it was armed. A's real remaining time moves with its CURRENT speed and stands still while the
+# player is paused (the player re-derives its own align deadline for both) — a fixed bound gave up
+# early: cancel + switch now, cutting A long before its end (and switching while paused).
+aligned_corr() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" '[.events[] | select(.align=="end" and .path==$p)][-1].corr // empty'; }
+corr_has() { ctl logs "{\"corr\":\"$1\",\"kind_prefix\":\"transition.$2\"}" | jq '.events|length'; }
+nsched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
+backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
+
+echo "== aligned wait survives a speed drop (the backstop follows A's current speed)"
+setting '.Speed = 4'
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+ac=""; for _ in $(seq 1 60); do ac=$(aligned_corr "$E2"); [ -n "$ac" ] && break; sleep 0.1; done
+bs0=$(backstops); ns0=$(nsched)
+setting '.Speed = 0.5'   # E1 now needs ~20 s more; the armed bound was ~3 s + slack
+sleep 9
+[ -n "$ac" ] && [ "$(corr_has "$ac" cancelled)" = 0 ] && [ "$(corr_has "$ac" handoff)" = 0 ] && [ "$(nsched)" = "$ns0" ] \
+  && ok "aligned switch $ac still waiting 9 s after a 4x → 0.5x drop (no cancel, no new switch)" \
+  || bad "speed drop: corr=$ac cancelled=$(corr_has "$ac" cancelled) handoff=$(corr_has "$ac" handoff) new switches=$(( $(nsched) - ns0 ))"
+[ "$(cur path)" = "$E1" ] && ok "E1 still on screen (not cut before its end)" || bad "speed drop: cur $(basename "$(cur path)") — E1 was cut early"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -1)"
+setting '.Speed = 4'
+for _ in $(seq 1 80); do [ "$(corr_has "$ac" handoff)" = 1 ] && break; sleep 0.1; done
+[ "$(corr_has "$ac" handoff)" = 1 ] && [ "$(cur path)" = "$E2" ] && ok "back at 4x: the same aligned switch handed off at E1's end" || bad "after 4x: handoff=$(corr_has "$ac" handoff) cur $(basename "$(cur path)")"
+post /stop '{}' >/dev/null; sleep 0.6; setting '.Speed = 1'
+
+echo "== aligned wait survives a long pause (no switch while paused, resumes at A's end)"
+post /playlist/play "{\"paths\":[\"$P1\",\"$P2\"],\"settings\":{\"Order\":0}}" >/dev/null
+ac=""; for _ in $(seq 1 60); do ac=$(aligned_corr "$P2"); [ -n "$ac" ] && break; sleep 0.1; done
+post /pause '{}' >/dev/null
+bs0=$(backstops); ns0=$(nsched)
+sleep 8   # > P1's remaining (< 4 s) + slack
+[ "$(playerPaused)" = true ] && [ -n "$ac" ] && [ "$(corr_has "$ac" cancelled)" = 0 ] && [ "$(nsched)" = "$ns0" ] && [ "$(cur path)" = "$P1" ] \
+  && ok "8 s paused: aligned switch $ac still waiting, P1 on screen, no new switch" \
+  || bad "long pause: paused=$(playerPaused) corr=$ac cancelled=$(corr_has "$ac" cancelled) new switches=$(( $(nsched) - ns0 )) cur $(basename "$(cur path)")"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -1)"
+post /pause '{}' >/dev/null
+for _ in $(seq 1 80); do [ "$(corr_has "$ac" handoff)" = 1 ] && break; sleep 0.1; done
+[ "$(corr_has "$ac" handoff)" = 1 ] && [ "$(cur path)" = "$P2" ] && ok "resumed: the same aligned switch handed off at P1's end" || bad "after resume: handoff=$(corr_has "$ac" handoff) cur $(basename "$(cur path)")"
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
