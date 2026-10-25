@@ -796,11 +796,24 @@ decoding" below); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
 DisableCache=false; `yes` would RAM-cache every local wallpaper) and `no` for `false`;
 `demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
 `<n>MiB` (a fractional MiB goes as exact bytes — mpv rejects `1.5MiB`; `0` = unset →
-mpv's default 150/50 MiB, the legacy engine's convention); `af`; `no_audio` → `aid`
+mpv's default 150/50 MiB, the legacy engine's convention); `af` → `sources::mpv::mpv_af(v)`
+(below); `no_audio` → `aid`
 `no`/`auto` (`auto` re-inits the AO even after a no-audio start — `current-ao` and
 `audio-out-params` come up, `start_muted_then_unmute_live`; the `aid` *property* then
 reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`); `audio_delay` →
 `audio-delay`.
+
+**A tempo filter is always in the chain (speed storm).** `mpv_af` hands mpv the graph's `af`
+plus `@lp-tempo:scaletempo2` (left out when the chain already has `scaletempo*`/`rubberband`).
+With pitch correction on (mpv's default) mpv adds its own tempo filter only while `speed` ≠ 1 and
+drops it at exactly 1×, and each add/drop rebuilds the audio chain (its `userspeed` stage and a
+s16↔float `convert`, mpv's af log): **3–5 ms of digital silence each, ~200 ms later at the sink** —
+measured on the bus meter, 22 holes in 40 s of 0.9↔1.0 toggles, none for 0.9↔1.1 (the UI's speed
+slider steps 0.1, so every drag across 1× and every release at 1× lands there). mpv gives the speed
+to the last filter of the chain that takes it, so with ours present the chain is built once and
+never rebuilt; at 1× scaletempo2 is bit-exact (output identical to the source, zero lag).
+`read("af")` keeps the graph value. Unit `af_always_carries_a_tempo_filter`, `tests/sources.rs::
+defaults_applied_at_open_match_mpv`.
 
 **Gains → `volume-gain`, `volume` stays 100.** Every `gain.<slot>` apply recomputes
 `units::Gains::effective_db()` and sets mpv `volume-gain` = `units::mpv_volume_gain(db)`
@@ -1175,7 +1188,12 @@ cancel/failure — and seeked to 0 if it ended because of it). full-live *ends* 
 start = end − D, where end is the minimum over ticks of `now + (duration − time_pos)/speed`
 minus half a frame (`time_pos` is the shown frame's pts, so each sample over-estimates by
 0…1 frame; the frame step is the smallest `time_pos` increment) — measured within ±17 ms of
-A's real `Ended`; if that instant passed between two ticks the effect starts backdated (≤ one
+A's real `Ended`; a speed change **rescales** that minimum (`t + (end − t)·s0/s1`, still an
+over-estimate) instead of restarting it from a `time_pos` that may be 100 ms stale (`Position` is
+rate-limited — under a continuous drag no fresh sample arrived between two changes and the effect
+started late; `align_end_tracks_a_speed_dragged_continuously`). A speed-*up* that moves the start
+instant into the past can't be made up by a fixed-length effect: it starts at once and A holds its
+last frame for the difference, as for an A shorter than D; if that instant passed between two ticks the effect starts backdated (≤ one
 tick) so it still ends on time; if it's already past at the first evaluation (A shorter
 than D, or B late) it starts at once and A holds its last frame. reveal/frozen/cut *start*
 at A's `Ended` (tracked from events: set on `Ended`, cleared on `Ready` or a `Position`
@@ -1676,7 +1694,9 @@ stepped, step_status, virtual_t, last_event}` + `dying` (sources mid-teardown),
 only); `loop` — `{clock, tick_period_ms, ticks, tick_hz_last_s, last_tick_ms,
 recent_ticks_ms, max_tick_ms_recent, last_phases {sync_ms, transitions_ms, render_ms,
 total_ms}, max_busy_ms (longest synchronous stretch since the last
-`args: {"reset": true}`), max_busy_excl_open_ms + max_open_ms (the same with the
+`args: {"reset": true}` — a tick, a step, the post-dispatch sync, or one client's requests; before
+the speed storm request handlers were left out), max_request_ms + max_request_cmd (the slowest single
+request handler and its verb, same reset), max_busy_excl_open_ms + max_open_ms (the same with the
 loop's share of source opens taken out / that share alone — render context + props +
 `loadfile`; the core itself is made on the `lp-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,

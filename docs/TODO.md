@@ -120,6 +120,29 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
+- [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same
+      round: the adapter's aligned-switch backstop, the 1× tempo-filter rebuild holes, the align:end estimate):
+  - [ ] **Stall breaker trips without a slow player** — 6 trips in ~25 min of storm (the request after a trip
+        and the R81 reapply then reset a drag), while every verb answered in < 3 ms and 6860 direct pings never
+        took > 50 ms; one trip put the queue at its 256 cap (new sets dropped) and failed the storm's own
+        restore sets. Not reproduced in a 4 min re-run once the trip got its own log line (`no reply to …
+        (waited …; gen2 GCs …, thread-pool queue …)`) and the `loop` probe got `max_request_ms/cmd` (handler
+        time used to be outside `max_busy_ms`). Next trip: read that line first.
+  - [ ] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
+        latest value is the one that matters — coalesce per target instead of refusing admission.
+  - [ ] **`/preview` costs three round trips** (`get cur:*.path`, a full `state` for `SourcesFor`, the `set`)
+        — fine at the UI's ~11/s, saturates the one worker at ~50/s. Cache the path → source ids per switch.
+  - [ ] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
+        frame, up to 0.5 s seen under random 0.25–4× drags): a fixed-length effect can't make up a start
+        instant that moved into the past. Compress the effect's remaining progress to A's new end instead?
+        Same for a global speed change mid-effect (it reaches A through `srcs:*`).
+  - [ ] **Shared looping A on `align:end`** caches its boundary (`target_end`, from the drop + k·length at the
+        old speed) — a speed change doesn't move it. Unused by the backend today (same wallpaper on every
+        output = never shared); re-anchor at the next wrap when per-monitor wallpapers land.
+  - [ ] **Missed frames scale with content fps**: steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
+        240 Hz output; random 0.25–4× (up to 240 fps content) 1–1.4/s vs 0.16/s at 1×. Phase 2 render worker.
+  - [ ] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
+        previews) and a no-op `POST /settings` costs ~150 ms in the backend — profile it.
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

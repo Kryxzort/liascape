@@ -60,7 +60,11 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   query never sits behind a queued switch that waits out its 2 s on a stalled player.
 - **Stall breaker**: a request that times out opens a 3 s window in which every request fails fast
   (`timeout`, "lp-player is not responding") — a SIGSTOPped player costs one 300 ms timeout, not one per
-  caller. The first request after the window tries for real. `EnsureRunning` never spawns a second
+  caller. The trip itself is logged with its cause (`no reply to `<cmd>` within N ms (waited …; gen2 GCs
+  meanwhile …, thread-pool queue …, threads …)`) — the requests after it only say "not responding" and
+  most callers swallow those. The speed storm tripped it 6× in ~25 min with the player answering < 3 ms
+  per request and never > 50 ms in 6860 direct pings; cause not reproduced since the log line went in
+  (docs/TODO.md). The first request after the window tries for real. `EnsureRunning` never spawns a second
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged) — and
   **R81** catches up: the breaker closing fires `LpPlayerClient.Recovered` → `LpPlayerMedia.OnRecovered`
   → `ReapplyAll()` (below), so a dropped set isn't lost for good.
@@ -131,7 +135,7 @@ code below it is unchanged)
 |---|---|
 | `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}`; scene path → `KillCurrentProcess` (AllowScenes=false parity) |
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
-| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled), except while the player has **no output** (`state.outputs` empty — monitors off): the player then holds the aligned switch until an output shows it (player-core.md § Runtime, I4), and the wait keeps going. `ct` cancel → `cancel {corr}`. The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
+| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → `Set`; `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
 | `KillCurrentProcess` (→ `KillAll`, `Stop`) | a queued `stop` (callers hold `_lock`) |
@@ -258,7 +262,10 @@ separate process) surviving a compositor kill -9 + the backend's reapply (I3), p
 `/apply` and pause → `/apply` both playing (I1), all outputs removed during an advance-on-end
 rotation → no switch storm (≤ 2 requests in 8 s), the last target parked and shown on replug,
 rotation resuming (I4); a pending B getting its OWN override while the global
-changes; pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
+changes; **speed storm**: an aligned switch armed at 4× survives a drop to 0.5× and an aligned switch
+survives an 8 s pause (no cancel, no forced switch, no backstop log line), each then handing off at A's
+end (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
+while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
 pending B — `cur:*.paused`/a source's own raw `paused` never changes, by design); a SIGSTOPped player
 (`/settings` Volume, `/pause`, `/volume` each answer < 500 ms; recovery after SIGCONT) — **SIGSTOP/
