@@ -93,6 +93,9 @@ public sealed class LpPlayerClient
     private StreamReader? _rd;
     private long _nextId;
     private bool _helloPending;
+    // requests sent on the request connection so far (every round trip, internal `hello`s included) —
+    // the self-test's requests-per-command evidence
+    public long RequestCount => Interlocked.Read(ref _nextId);
 
     private bool EnsureConnected()
     {
@@ -163,7 +166,7 @@ public sealed class LpPlayerClient
                 try { Call("hello", null, timeoutMs); } catch (LpPlayerException) { }
                 if (!EnsureConnected()) throw new LpPlayerException("io", "lp-player closed the connection", "check `lp-player ctl logs '{\"min_level\":\"warn\"}'`");
             }
-            long id = ++_nextId;
+            long id = Interlocked.Increment(ref _nextId);
             var req = new Dictionary<string, object?> { ["id"] = id, ["cmd"] = cmd };
             if (args != null) req["args"] = args;
             var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(req) + "\n");
@@ -572,13 +575,20 @@ public sealed class LpPlayerClient
     private void Fail(string why) { LastError = why; _lastSpawnFail = Environment.TickCount64; Log(why); }
 
     // ---- events --------------------------------------------------------------------------------
-    // M11 (final review): only the kinds the adapter consumes — a switch's terminal outcomes
-    // (LpPlayerMedia.OnEvent). `source.` would stream every debug-level `source.position`
-    // (~10 Hz per source) to be discarded; restarts are detected by `hello.pid`, not events.
-    public static readonly string[] Topics = ["transition.handoff", "transition.cancelled", "transition.failed"];
+    // M11 (final review): only the kinds the adapter consumes (LpPlayerMedia.OnEvent) — a switch's
+    // terminal outcomes, and every event that changes which sources show which file (the path →
+    // source-id cache: a transition scheduled/started/handed off/done/cancelled/failed/adopting an
+    // output, a stop, an output's sources retired) — a handful per switch. `source.` as a whole
+    // would stream every debug-level `source.position` (~10 Hz per source) to be discarded;
+    // restarts are detected by `hello.pid`, not events.
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire"];
     public event Action<string, JsonElement>? Event;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;
+    // the event connection's `subscribe` was acknowledged (again) — events in a reconnect gap are lost
+    public event Action? Subscribed;
+    // events flow now (subscribed and connected); a cache kept valid by events is only trusted then
+    public bool EventsLive => _subscribed.IsSet;
     private Thread? _evThread;
     private volatile bool _evStop;
     private volatile Socket? _evSock;
@@ -635,6 +645,7 @@ public sealed class LpPlayerClient
                         else if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == "sub")
                         {
                             backoff = 250;
+                            try { Subscribed?.Invoke(); } catch (Exception e) { Log($"subscribed handler threw: {e.Message}"); }
                             _subscribed.Set();
                             // pid / Generation after a restart — off this thread (it may wait behind a long request)
                             _ = System.Threading.Tasks.Task.Run(() => { try { Call("hello", null, 1000); } catch (LpPlayerException) { } });

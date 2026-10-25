@@ -2915,7 +2915,8 @@ public static class PlayerHelper
         // lp-player: the source(s) showing THAT item (may be an in-flight transition's pending B)
         if (PlayerEngine.IsLpPlayer)
         {
-            LpPlayerMedia.Queue(() =>
+            // coalescible: it re-reads the override when it runs, so the newest request covers older ones
+            LpPlayerMedia.QueueSet("override:" + LpPlayerMedia.FullPath(path), () =>
             {
                 if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
             });
@@ -3739,7 +3740,7 @@ public static class PlayerHelper
         // lp-player: loudnorm is per item → that item's source(s)
         if (PlayerEngine.IsLpPlayer)
         {
-            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.Queue(() => LpPlayerMedia.SetForPath(path, "af", af)); }
+            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.QueueSet("af:" + LpPlayerMedia.FullPath(path), () => LpPlayerMedia.SetForPath(path, "af", af)); }
             return;
         }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;

@@ -159,10 +159,17 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         restore sets. Not reproduced in a 4 min re-run once the trip got its own log line (`no reply to …
         (waited …; gen2 GCs …, thread-pool queue …)`) and the `loop` probe got `max_request_ms/cmd` (handler
         time used to be outside `max_busy_ms`). Next trip: read that line first.
-  - [ ] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
+  - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
-  - [ ] **`/preview` costs three round trips** (`get cur:*.path`, a full `state` for `SourcesFor`, the `set`)
+        — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one
+        of its key since the last essential command (switch/stop/toggle = barriers, never dropped), so a burst
+        holds one command per key and the newest always lands (self-test: 317 sets → depth 2, RED: 256 + the
+        last ~60 dropped). Also fixed: `SwitchAndWait`'s own switch went through the droppable queue.
+  - [x] **`/preview` costs three round trips** (`get cur:*.path`, a full `state` for `SourcesFor`, the `set`)
         — fine at the UI's ~11/s, saturates the one worker at ~50/s. Cache the path → source ids per switch.
+        — done: `SourceMap`, invalidated by our switches/stops/cancels and by the subscribed `transition.`/
+        `player.stopped`/`source.retire` events (a foreign switch too), trusted only while events flow;
+        1.0 request per preview value (self-test over 20; RED: 2.0).
   - [ ] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
         frame, up to 0.5 s seen under random 0.25–4× drags): a fixed-length effect can't make up a start
         instant that moved into the past. Compress the effect's remaining progress to A's new end instead?

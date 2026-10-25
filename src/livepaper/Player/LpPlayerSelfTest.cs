@@ -167,6 +167,42 @@ public static class LpPlayerSelfTest
         if (LpPlayerMedia.QueueDepth > LpPlayerMedia.MaxQueueDepth) fails.Add($"queue depth {LpPlayerMedia.QueueDepth} exceeds the cap {LpPlayerMedia.MaxQueueDepth}");
         try { LpPlayerMedia.Drain().Wait(8000); } catch { }
         if (LpPlayerMedia.QueueDepth != 0) fails.Add($"queue depth {LpPlayerMedia.QueueDepth} after draining, want 0");
+
+        // Coalescing (speed storm): the newest command of a key replaces a still-pending one, the rest
+        // keep their order, and nothing coalesces across an essential command (a switch/stop barrier).
+        var ran = new List<string>();
+        void Rec(string s) { lock (ran) ran.Add(s); }
+        _ = LpPlayerMedia.Queue(() => { Thread.Sleep(300); return 0; }); // clog: everything below piles up
+        var a1 = LpPlayerMedia.QueueSet("t:a", () => Rec("a1"));
+        LpPlayerMedia.QueueSet("t:b", () => Rec("b1"));
+        LpPlayerMedia.QueueSet("t:a", () => Rec("a2"));   // replaces a1; b1 keeps its place before it
+        LpPlayerMedia.QueueEssential(() => Rec("E1"));    // barrier
+        LpPlayerMedia.QueueSet("t:a", () => Rec("a3"));   // after the barrier: never merged into a2
+        LpPlayerMedia.QueueSet("t:a", () => Rec("a4"));   // replaces a3
+        try { LpPlayerMedia.Drain().Wait(5000); } catch { }
+        var want = "b1 a2 E1 a4";
+        lock (ran) if (string.Join(" ", ran) != want) fails.Add($"coalescing order: ran `{string.Join(" ", ran)}`, want `{want}`");
+        if (!a1.IsCompleted) fails.Add("a replaced command's task didn't complete with its replacement");
+
+        // At the cap: a set whose key is pending still lands (the newest value, not dropped), an
+        // essential command is admitted anyway, and a NEW key that can't coalesce is refused.
+        ran.Clear();
+        _ = LpPlayerMedia.Queue(() => { Thread.Sleep(600); return 0; });
+        LpPlayerMedia.QueueSet("t:c", () => Rec("c1"));
+        for (int i = 0; i < LpPlayerMedia.MaxQueueDepth + 20; i++) { int k = i; LpPlayerMedia.QueueSet($"t:d{k}", () => Rec("d")); }
+        int atCap = LpPlayerMedia.QueueDepth;
+        LpPlayerMedia.QueueSet("t:c", () => Rec("c2"));
+        LpPlayerMedia.QueueSet("t:new", () => Rec("new"));
+        LpPlayerMedia.QueueEssential(() => Rec("E2"));
+        try { LpPlayerMedia.Drain().Wait(8000); } catch { }
+        lock (ran)
+        {
+            if (atCap != LpPlayerMedia.MaxQueueDepth) fails.Add($"distinct keys past the cap: depth {atCap}, want {LpPlayerMedia.MaxQueueDepth}");
+            if (ran.Contains("c1") || !ran.Contains("c2")) fails.Add($"at the cap the newest set of a pending key must replace it (c1 ran {ran.Contains("c1")}, c2 ran {ran.Contains("c2")})");
+            if (ran.Contains("new")) fails.Add("at the cap a new key that can't coalesce was admitted");
+            if (ran.LastOrDefault() != "E2") fails.Add($"an essential command at the cap didn't run last (last: {ran.LastOrDefault() ?? "none"})");
+        }
+        if (LpPlayerMedia.QueueDepth != 0) fails.Add($"queue depth {LpPlayerMedia.QueueDepth} after the coalescing checks, want 0");
     }
 
     // ---- protocol round-trip -----------------------------------------------------------------
@@ -262,6 +298,34 @@ public static class LpPlayerSelfTest
                 if (Math.Abs(gu - (-18.0618)) > 1e-3) fails.Add($"volume 50 via Mpv → cur gain.user {gu}, want -18.06");
                 if (LpPlayerMedia.Query("time_pos") is not double) fails.Add("Query(time_pos) = null on a playing clip");
 
+                // Speed storm leftover: a slider burst past the queue cap behind a slow command — the
+                // NEWEST value must be the one that lands (coalesced per target + property), never
+                // dropped at the cap (RED before: sets past 256 were refused, the last one included).
+                _ = LpPlayerMedia.Queue(() => { Thread.Sleep(600); return 0; });
+                for (int i = 0; i < LpPlayerMedia.MaxQueueDepth + 60; i++) LpPlayerMedia.Mpv(["set_property", "volume", 20 + i % 40]);
+                LpPlayerMedia.Mpv(["set_property", "volume", 77]);
+                int depthAtBurst = LpPlayerMedia.QueueDepth;
+                LpPlayerMedia.Drain().Wait(20000);
+                var gu77 = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.gain.user" }).GetProperty("value").GetDouble();
+                if (Math.Abs(gu77 - MpvPropertyMap.VolumeDb(77)) > 1e-3)
+                    fails.Add($"queue cap: the newest volume set didn't land — gain.user {gu77:0.###}, want {MpvPropertyMap.VolumeDb(77):0.###} (depth at the burst {depthAtBurst})");
+                if (depthAtBurst > 3) fails.Add($"queue cap: a burst of {LpPlayerMedia.MaxQueueDepth + 61} sets of ONE property queued {depthAtBurst} commands (want them coalesced: the slow one + 1)");
+                Phase($"coalesced slider burst: depth {depthAtBurst}, landed gain.user {gu77:0.##}");
+
+                // /preview round trips (speed storm): a drag value costs ONE `set` per source — not a
+                // `state` read for the path → source ids (+ `get cur:*.path` without paths) every time.
+                // The map is cached until the graph changes (RED before: 2 requests per value).
+                LpPlayerMedia.Preview(30, null, [a]); LpPlayerMedia.Drain().Wait(2000); // may (re)read the map once
+                long req0 = client.RequestCount; int reads0 = LpPlayerMedia.SourceMapReads;
+                const int nPrev = 20;
+                for (int i = 0; i < nPrev; i++) { LpPlayerMedia.Preview(31 + i, null, [a]); LpPlayerMedia.Drain().Wait(2000); }
+                double perPreview = (client.RequestCount - req0) / (double)nPrev;
+                var guPrev = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.gain.user" }).GetProperty("value").GetDouble();
+                if (perPreview > 1.05) fails.Add($"/preview costs {perPreview:0.##} requests per value (want 1: one `set` on the cached source; map reads {LpPlayerMedia.SourceMapReads - reads0})");
+                if (Math.Abs(guPrev - MpvPropertyMap.VolumeDb(50)) > 1e-3) fails.Add($"/preview's last value didn't land: gain.user {guPrev:0.###}, want {MpvPropertyMap.VolumeDb(50):0.###}");
+                Phase($"/preview: {perPreview:0.##} requests per value over {nPrev} (map reads {LpPlayerMedia.SourceMapReads - reads0})");
+                LpPlayerMedia.Mpv(["set_property", "volume", 50]); LpPlayerMedia.Drain().Wait(2000); // back to the global (srcs:*)
+
                 // transitions OFF + video end (the gapless branch): cut at A's end
                 using (var to = new CancellationTokenSource(30000))
                 {
@@ -270,6 +334,32 @@ public static class LpPlayerSelfTest
                 }
                 Phase("clip→clip cut handoff (align end)");
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add($"CurrentPath after cut = {LpPlayerMedia.CurrentPath() ?? "null"}, want b.mp4");
+
+                // the source map is invalidated by a switch: b's NEW source (absent from the map read
+                // while a played) gets the preview
+                LpPlayerMedia.Preview(44, null, [b]); LpPlayerMedia.Drain().Wait(2000);
+                var guB = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.gain.user" }).GetProperty("value").GetDouble();
+                if (Math.Abs(guB - MpvPropertyMap.VolumeDb(44)) > 1e-3) fails.Add($"/preview after a switch missed the new source: gain.user {guB:0.###}, want {MpvPropertyMap.VolumeDb(44):0.###}");
+                // …and by ANOTHER client's switch (a pending B nobody here requested), through its event
+                var foreign = new LpPlayerClient(sock) { AutoSpawn = false };
+                int epoch0 = LpPlayerMedia.SourceEpoch;
+                var fr = foreign.Call("transition", new Dictionary<string, object?>
+                {
+                    ["outputs"] = "out:*",
+                    ["to"] = new Dictionary<string, object?> { ["path"] = a, ["loop"] = true },
+                    ["align"] = "end",
+                });
+                string fCorr = fr.GetProperty("corr").GetString()!, fB = fr.GetProperty("to").GetString()!;
+                var esw = Stopwatch.StartNew();
+                while (LpPlayerMedia.SourceEpoch == epoch0 && esw.ElapsedMilliseconds < 3000) Thread.Sleep(10);
+                LpPlayerMedia.Preview(55, null, [a]); LpPlayerMedia.Drain().Wait(2000);
+                var guF = client.Call("get", new Dictionary<string, object?> { ["path"] = $"{fB}.gain.user" }).GetProperty("value").GetDouble();
+                if (LpPlayerMedia.SourceEpoch == epoch0) fails.Add("another client's switch never invalidated the source map (no event within 3 s)");
+                if (Math.Abs(guF - MpvPropertyMap.VolumeDb(55)) > 1e-3) fails.Add($"/preview missed another client's pending B {fB}: gain.user {guF:0.###}, want {MpvPropertyMap.VolumeDb(55):0.###}");
+                else Phase($"/preview reached a new source after our switch and another client's pending B ({fB})");
+                try { foreign.Call("cancel", new Dictionary<string, object?> { ["corr"] = fCorr }); } catch (LpPlayerException) { }
+                Thread.Sleep(100);
+                LpPlayerMedia.Mpv(["set_property", "volume", 50]); LpPlayerMedia.Drain().Wait(2000);
 
                 // caller cancel → `cancel {corr}` → false, and the player reports it cancelled
                 stepping.Reset(); // clock frozen → A never ends → the aligned switch stays pending
@@ -337,11 +427,14 @@ public static class LpPlayerSelfTest
                 kill(deadCompositor, 9);
                 int newCompositor = -1;
                 var rsw = Stopwatch.StartNew();
+                // Polled with a FRESH client per attempt: a hello that reaches the new compositor before
+                // it serves times out, and the shared client's stall breaker would then fail every
+                // further attempt for 3 s (under load that alone used to fail this check).
                 while (rsw.ElapsedMilliseconds < 1500)
                 {
                     try
                     {
-                        var h = client.Call("hello", null, 300);
+                        var h = new LpPlayerClient(sock) { AutoSpawn = false }.Call("hello", null, 300);
                         int hp = h.GetProperty("pid").GetInt32();
                         if (hp != deadCompositor) { newCompositor = hp; break; }
                     }
@@ -349,7 +442,15 @@ public static class LpPlayerSelfTest
                     Thread.Sleep(30);
                 }
                 Phase($"supervised restart: compositor {deadCompositor} -> {newCompositor} in {rsw.ElapsedMilliseconds} ms");
+                // …then the shared client must notice it too (its breaker may still be open for ≤ 3 s)
+                var nsw = Stopwatch.StartNew();
+                while (newCompositor >= 0 && client.PlayerPid != newCompositor && nsw.ElapsedMilliseconds < 4000)
+                {
+                    try { client.Call("hello", null, 300); } catch (LpPlayerException) { }
+                    if (client.PlayerPid != newCompositor) Thread.Sleep(50);
+                }
                 if (newCompositor < 0) fails.Add($"killing the compositor (pid {deadCompositor}) did not yield a new hello.pid within 1.5 s");
+                else if (client.PlayerPid != newCompositor) fails.Add($"the shared client never saw the restarted compositor {newCompositor} (still {client.PlayerPid})");
                 else if (client.SupervisorPid != priorSupervisor) fails.Add($"after the supervised restart, supervisor_pid {client.SupervisorPid} != {priorSupervisor} (expected the SAME supervisor)");
 
                 // R81: OnRestarted must have queued a reapply of the backend's current effective settings.
