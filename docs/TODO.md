@@ -43,7 +43,16 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       and flags dropouts and 1 ms micro-gaps. Make the ffmpeg path come from PATH.
       — done in Task 15 (`scripts/lp_audiowatch.py`, lane B); not yet merged into this branch's history.
 - [ ] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
-      `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`.
+      `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`. Also (2026-10-26):
+      - **`dotnet watch --no-hot-reload`** — a hot-reload delta never runs a NEW static field's initializer: the
+        merge that added `SettingsService`'s static `Fields`/`WebJson` maps was "applied" in place, leaving
+        `POST /settings` on a null map until a full restart (and a 2026-09 delta with a new static crashed the
+        process). Every .cs change becoming a restart is the owner's stated preference anyway.
+      - **The player must not die with the unit**: `systemctl --user restart livepaper-watch` kills the whole
+        cgroup — the backend-spawned lp-player with it (`setsid` doesn't leave the cgroup) → no wallpaper for
+        ~17 s until the new backend built and replayed. `dotnet watch`'s own restarts don't (same cgroup lives
+        on). Either spawn the player out of the unit's cgroup when `INVOCATION_ID` is set
+        (`systemd-run --user --scope`), or don't restart the unit by hand.
 - [x] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
       (bit an agent on 2026-10-22: ~15 fields incl. LweMonitors). Make it merge (PATCH semantics) or reject partial bodies.
       — done 2026-10-26: it merges (`SettingsService.Patch` → `Merge`, `web-backend.md`): keys in the body overwrite
