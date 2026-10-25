@@ -6,6 +6,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -44,15 +45,33 @@ if (angle) {
 }
 
 let backend;
-function startBackend() {
+// The UI's origin is http://127.0.0.1:<backend port>. A new random port every launch is a new origin, so
+// everything the renderer keeps per origin (localStorage: library sort, source tab, …) started empty on
+// every launch. Reuse the last port while it's free (LP_PORT, honoured by the backend); if it gets taken
+// before the backend binds it, the backend exits without writing serve.port → retry on a random one.
+function portFree(port) {
+  return new Promise((res) => {
+    const s = net.createServer();
+    s.once("error", () => res(false));
+    s.listen(port, "127.0.0.1", () => s.close(() => res(true)));
+  });
+}
+async function startBackend() {
+  let prev = null;
+  try { prev = parseInt(fs.readFileSync(portFile, "utf8").trim(), 10) || null; } catch { /* first run */ }
   try { fs.unlinkSync(portFile); } catch { /* fresh */ }
-  if (process.env.LP_BACKEND) {
-    backend = spawn(process.env.LP_BACKEND, ["--serve"], { env: process.env, stdio: "inherit" });
-  } else {
-    backend = spawn("dotnet", ["run", "--project", "src/livepaper", "--", "--serve"], {
-      cwd: repoRoot, env: { ...process.env, LP_UI_DIR: uiDir }, stdio: "inherit",
+  const env = { ...process.env };
+  if (!env.LP_PORT && prev && (await portFree(prev))) env.LP_PORT = String(prev);
+  const spawnIt = () => {
+    backend = process.env.LP_BACKEND
+      ? spawn(process.env.LP_BACKEND, ["--serve"], { env, stdio: "inherit" })
+      : spawn("dotnet", ["run", "--project", "src/livepaper", "--", "--serve"], { cwd: repoRoot, env: { ...env, LP_UI_DIR: uiDir }, stdio: "inherit" });
+    backend.once("exit", () => {
+      if (fs.existsSync(portFile) || !env.LP_PORT || process.env.LP_PORT) return;
+      delete env.LP_PORT; spawnIt();
     });
-  }
+  };
+  spawnIt();
 }
 
 function waitForPort(cb, tries = 120) {

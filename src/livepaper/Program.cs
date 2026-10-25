@@ -30,57 +30,17 @@ sealed class Program
         var action = args.FirstOrDefault(a => a.StartsWith("--action="))?.Substring("--action=".Length);
         if (action != null)
         {
-            // next-wallpaper/previous-wallpaper/random (and play/toggle-play's Restore()) can throw
-            // when the library/session has no item playable under the current engine (e.g. an
-            // all-scene library under lp-player, PlayerHelper.IsSkippedPath) — report cleanly instead
-            // of an unhandled-exception crash (same contract as the /next /prev /random HTTP routes).
-            try
+            // A running app backend owns the session: hand the action to it, so it acts on its own state
+            // (history, timer, mute) and the UI hears about the switch. Run here only when none answers.
+            if (livepaper.Web.ActionForward.TryForward(action, out var code, out var message))
             {
-                switch (action)
-                {
-                    case "toggle-mute":
-                        if (PlayerHelper.IsUserMuted)
-                            PlayerHelper.SetUserMute(false);
-                        else if (PlayerHelper.IsMuted)
-                            PlayerHelper.SetMute(false);
-                        else
-                            PlayerHelper.SetUserMute(true);
-                        break;
-                    case "toggle-pause":
-                        PlayerHelper.TogglePause();
-                        break;
-                    case "stop":
-                        PlayerHelper.Stop();
-                        break;
-                    case "play":
-                        PlayerHelper.Restore();
-                        break;
-                    case "toggle-play":
-                        if (PlayerHelper.IsPlaying || PlayerHelper.IsTimedPlaylistActive())
-                            PlayerHelper.Stop();
-                        else
-                            PlayerHelper.Restore();
-                        break;
-                    case "next-wallpaper":
-                        PlayerHelper.NextWallpaper();
-                        break;
-                    case "previous-wallpaper":
-                        PlayerHelper.PreviousWallpaper();
-                        break;
-                    case "random":
-                        PlayerHelper.ApplyRandom();
-                        break;
-                    case "volume-up":
-                        PlayerHelper.AdjustVolume(5);
-                        break;
-                    case "volume-down":
-                        PlayerHelper.AdjustVolume(-5);
-                        break;
-                }
+                if (message != null) Console.Error.WriteLine($"livepaper --action={action}: {message}");
+                Environment.ExitCode = code;
+                return;
             }
-            catch (InvalidOperationException e)
+            if (livepaper.Web.AppOps.RunAction(action) is string err)
             {
-                Console.Error.WriteLine($"livepaper --action={action}: {e.Message}");
+                Console.Error.WriteLine($"livepaper --action={action}: {err}");
                 Environment.ExitCode = 1;
             }
             DrainLpPlayerBeforeExit();

@@ -796,6 +796,7 @@ public static class PlayerHelper
                 : (ReadSpeedOverride(ordered[0]) ?? SettingsService.Load().Speed);
             _history = [ordered[0]];
             _historyIndex = 0;
+            if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // I1: a new playlist session plays (Play / play-from while paused stayed paused)
             SwitchToFile(ordered[0], mpvOptions);
 
             if (_advanceOnVideoEnd && !IsScenePath(ordered[0]) && ordered.Count > 1)
@@ -2289,14 +2290,15 @@ public static class PlayerHelper
 
     private static void StepBackAndLaunch()
     {
-        // When _waitingForVideoEnd is true, _historyIndex is pre-fetched one step ahead.
-        // A single decrement undoes the pre-fetch; a second reaches the actual previous.
-        bool preIsFetched = _waitingForVideoEnd;
+        // When _waitingForVideoEnd is true, _historyIndex is pre-fetched one step ahead: the playing
+        // item is at PlayingHistoryIndex, the previous one right before it. Nothing played before it →
+        // leave it AND its armed video-end wait alone (with a pre-fetch this used to undo the pre-fetch
+        // only and relaunch the playing item: restarted, its armed switch cancelled).
+        if (_history == null) return;
+        int prev = PlayingHistoryIndex - 1;
+        if (prev < 0 || prev >= _history.Count) return;
         CancelVideoEndWait();
-        if (_history == null || _historyIndex <= 0) return;
-        _historyIndex--;                          // undo pre-fetch (or go to prev in normal mode)
-        if (preIsFetched && _historyIndex > 0)
-            _historyIndex--;                      // go one further to the actual previous item
+        _historyIndex = prev;
         LaunchAndReset(_history[_historyIndex]);
     }
 

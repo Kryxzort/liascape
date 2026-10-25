@@ -147,6 +147,9 @@ code below it is unchanged)
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
+| `ApplyTimedPlaylist` (Play / play-from / a timed restore) | `QueueNewSession` before its first switch (I1 — it was missing: Play and play-from while paused stayed paused; Apply/Launch already had it) |
+| `StepBackAndLaunch` (timed `prev`) | the item before `PlayingHistoryIndex`; none (a fresh session's first item) → nothing at all. With an advance-on-end pre-fetch it used to undo only the pre-fetch and relaunch the playing item — restarted, its armed switch cancelled |
+| `AppOps.Trash` | `LpPlayerMedia.ShownOrIncomingPaths()` (one `state` read after a bounded `Drain`): every layer's content (an effect's `to`, never its leaving `from`) + each requested switch's B unless it's an aligned one in `waiting_start` — so trashing an item whose switch was requested but not yet running still stops/advances (web-backend.md § Trash) |
 | restart daemon / timer (`UpdateRestartTimer`, `SpawnRestartDaemon`, `RunRestartDaemon`, `RestartCurrentAndLaunch`) | no-op — the leak-restart is an mpvpaper workaround |
 
 `AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under lp-player
@@ -168,7 +171,8 @@ in-process inside the compositor, never the supervisor, so this is the right pid
 - **Layer settings** (`fit` ← VideoScale) → `lay:*:main` (also re-asserted on every switch, so a
   hotplugged output matches).
 - **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → `animate srcs:*.gain.mute` over
-  30 ms, never a step.
+  30 ms, never a step (a setting slot: it ramps on the player's unpaused clock, so it lands while
+  paused too — player-core.md § Runtime).
 - **Pause — the contract (final review I1/I3).** The PLAYER owns pause: `player.paused`, persisted
   in its snapshot and restored with it across a crash restart. The backend keeps **no copy**:
   `TogglePause` reads `get player.paused` and sets the opposite (so a keybind's one-shot

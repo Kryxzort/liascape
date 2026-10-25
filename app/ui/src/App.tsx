@@ -39,6 +39,7 @@ export default function App() {
   const onEvent = useCallback((e: LpEvent) => {
     if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value);
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
+    else if (e.type === "settings-changed") s.mergeSettings(e.payload);
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);

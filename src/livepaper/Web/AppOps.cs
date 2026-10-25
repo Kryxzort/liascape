@@ -8,13 +8,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using livepaper.Helpers;
 using livepaper.Models;
+using livepaper.Player;
 
 namespace livepaper.Web;
 
 // Backend orchestration for the play / download / trash flows, callable from the API endpoints.
 public static class AppOps
 {
-    private sealed record UndoBatch(string BatchDir, List<LibraryItem> Items);
+    // FromPlaylist: the trashed items' (path, index) in the playlist, so an undo puts them back
+    private sealed record UndoBatch(string BatchDir, List<LibraryItem> Items, List<(string Path, int Index)> FromPlaylist);
     private static readonly List<UndoBatch> _undo = new();
     private static readonly object _undoLock = new();
 
@@ -27,9 +29,10 @@ public static class AppOps
         p.OverrideGlobalSettings ? p.WaitForVideoEnd : s.GlobalWaitForVideoEnd;
 
     // `paths` are already in the desired order (the UI sends the current strip order).
-    // `persist` = what to save as the current playlist state when it differs from what plays
-    // (play-from plays a pre-arranged order but keeps the playlist's own Order setting).
-    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, PlaylistSettings? persist = null)
+    // `persist` / `persistPaths` = what to save as the current playlist state when it differs from what
+    // plays (play-from plays a pre-arranged order but keeps the playlist's own Order setting and the
+    // strip's own order — saving the play order reordered the strip on the next launch).
+    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, PlaylistSettings? persist = null, List<string>? persistPaths = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
         // Persist what's actually playing as the current playlist state. TransitionService.CurrentConfig()
@@ -38,7 +41,7 @@ public static class AppOps
         try
         {
             var existing = PlaylistService.LoadCurrentState();
-            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = paths, Settings = persist ?? ps, Name = existing?.Name ?? "" });
+            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = persistPaths ?? paths, Settings = persist ?? ps, Name = existing?.Name ?? "" });
         }
         catch { }
         var s = SettingsService.Load();
@@ -81,7 +84,7 @@ public static class AppOps
         // switched transitions off). Plays the pre-arranged order; saves the playlist's own Order.
         var play = ps.Clone();
         play.Order = PlaylistOrder.Sequential; // pre-arranged; don't reshuffle
-        return PlayPlaylist(ordered, play, persist: ps);
+        return PlayPlaylist(ordered, play, persist: ps, persistPaths: paths);
     }
 
     private static void Save(AppSettings s, LastSession sess) { s.LastSession = sess; SettingsService.Save(s); }
@@ -193,6 +196,100 @@ public static class AppOps
         return item;
     }
 
+    // The keybind actions (`--action=<name>`, forwarded to a running backend's `/action` — ActionForward).
+    // null = done; else the reason it couldn't run. next-wallpaper/previous-wallpaper/random (and
+    // play/toggle-play's Restore()) throw when the library/session has no item playable under the
+    // current engine (e.g. an all-scene library under lp-player, PlayerHelper.IsSkippedPath) — reported
+    // cleanly, same contract as the /next /prev /random HTTP routes.
+    public static readonly string[] Actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
+        "next-wallpaper", "previous-wallpaper", "random", "volume-up", "volume-down"];
+    public static string? RunAction(string action)
+    {
+        if (!Actions.Contains(action)) return $"unknown action (one of: {string.Join(", ", Actions)})";
+        try
+        {
+            switch (action)
+            {
+                case "toggle-mute":
+                    if (PlayerHelper.IsUserMuted)
+                        PlayerHelper.SetUserMute(false);
+                    else if (PlayerHelper.IsMuted)
+                        PlayerHelper.SetMute(false);
+                    else
+                        PlayerHelper.SetUserMute(true);
+                    break;
+                case "toggle-pause":
+                    PlayerHelper.TogglePause();
+                    break;
+                case "stop":
+                    PlayerHelper.Stop();
+                    EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
+                    break;
+                case "play":
+                    PlayerHelper.Restore();
+                    break;
+                case "toggle-play":
+                    if (PlayerHelper.IsPlaying || PlayerHelper.IsTimedPlaylistActive())
+                    {
+                        PlayerHelper.Stop();
+                        EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
+                    }
+                    else
+                        PlayerHelper.Restore();
+                    break;
+                case "next-wallpaper":
+                    PlayerHelper.NextWallpaper();
+                    break;
+                case "previous-wallpaper":
+                    PlayerHelper.PreviousWallpaper();
+                    break;
+                case "random":
+                    PlayerHelper.ApplyRandom();
+                    break;
+                case "volume-up":
+                case "volume-down":
+                    PlayerHelper.AdjustVolume(action == "volume-up" ? 5 : -5);
+                    // the UI holds its own copy of the settings and saves it whole — it must take this one
+                    EventBus.Broadcast("settings-changed", new { volume = SettingsService.Load().Volume });
+                    break;
+            }
+        }
+        catch (InvalidOperationException e) { return e.Message; }
+        return null;
+    }
+
+    // The current playlist (the strip) changed — `/playlist/state`, and a trash / undo that took items
+    // out of it or put them back. Saved, then applied live to a running rotation.
+    public static void SavePlaylistState(CustomPlaylist p)
+    {
+        var prevP = PlaylistService.LoadCurrentState();
+        PlaylistService.SaveCurrentState(p);
+        // Live-apply a rotation change (interval / advance-on-end / wait, or the override toggle) to
+        // the RUNNING timed playlist — no replay. Diff the EFFECTIVE rotation vs the previously-saved
+        // state so a plain reorder/add (which also POSTs state) never resets the countdown. When the
+        // playlist follows globals, /settings owns the live-apply (this stays a no-op then).
+        if (PlayerHelper.IsTimedPlaylistActive())
+        {
+            // Order (Sequential↔Shuffle) or the strip contents (drag-reorder / add / remove) changed →
+            // reflect it on the RUNNING playlist live (keeps the current item playing + the countdown).
+            // Diffed so a rotation/transition-only save doesn't needlessly re-shuffle. Reorder FIRST so
+            // it rebuilds _timedPaths before the rotation re-chains the video-end wait.
+            bool orderChanged = (prevP?.Settings.Order ?? PlaylistOrder.Sequential) != p.Settings.Order;
+            bool listChanged = prevP == null || !prevP.VideoPaths.SequenceEqual(p.VideoPaths);
+            if ((orderChanged || listChanged) && p.VideoPaths.Count > 0)
+                PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle);
+
+            var g = SettingsService.Load();
+            (int iv, bool wait, bool adv) Eff(CustomPlaylist? c) =>
+                (c?.Settings.OverrideGlobalSettings ?? false)
+                    ? (c!.Settings.IntervalSeconds, c.Settings.WaitForVideoEnd, c.Settings.AdvanceOnVideoEnd)
+                    : (g.GlobalIntervalSeconds, g.GlobalWaitForVideoEnd, g.GlobalAdvanceOnVideoEnd);
+            var now = Eff(p);
+            if (now != Eff(prevP)) PlayerHelper.ApplyRotationLive(now.iv, now.wait, now.adv);
+        }
+        
+    }
+
     // Delete from source — enqueue the (durable) unsubscribe + soft-delete the entries.
     public static string DeleteFromSource(List<LibraryItem> items)
     {
@@ -201,48 +298,76 @@ public static class AppOps
         return Trash(items);
     }
 
-    // Soft-delete to trash; if the playing item was among them, stop or advance playback.
+    // Soft-delete to trash. The items leave the playlist too (an undo puts them back where they were) —
+    // live, so a running rotation never plays a trashed file — and when one was on screen (or about to
+    // be: the incoming side of a switch), playback advances to the next survivor or stops.
     public static string Trash(List<LibraryItem> items)
     {
         if (items.Count == 0) return "";
         string batchDir = Path.Combine(LibraryService.TrashPath, Guid.NewGuid().ToString("N")[..8]);
         var done = new List<LibraryItem>();
-        var playing = PlayerHelper.QueryCurrentPath();
-        bool playingDeleted = playing != null && items.Any(i => i.VideoPath == playing);
+        var shown = ShownOrIncoming();
+        var pl = PlaylistService.LoadCurrentState();
 
         foreach (var item in items)
         {
             try { LibraryService.Trash(item, batchDir); done.Add(item); } catch { }
         }
-        if (done.Count > 0) lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done));
+        if (done.Count == 0) return batchDir;
+        var del = new HashSet<string>(done.Select(i => i.VideoPath));
+        var removed = pl?.VideoPaths.Select((p, i) => (p, i)).Where(x => del.Contains(x.p)).ToList() ?? [];
+        lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done, removed));
 
-        if (playingDeleted) StopOrAdvanceAfterDelete(items);
+        var playing = shown.FirstOrDefault(del.Contains);
+        if (playing != null) StopOrAdvanceAfterDelete(playing, del, pl);
+        else if (pl != null && removed.Count > 0)
+            SavePlaylistState(new CustomPlaylist { VideoPaths = pl.VideoPaths.Where(p => !del.Contains(p)).ToList(), Settings = pl.Settings, Name = pl.Name });
         return batchDir;
     }
 
-    // Playlist re-plays its survivors (advancing past the deleted item); a single item / no survivor stops.
-    private static void StopOrAdvanceAfterDelete(List<LibraryItem> deleted)
+    // what's on screen or about to be (lp-player: either output, the incoming side of a switch; legacy:
+    // the current file)
+    private static List<string> ShownOrIncoming()
+    {
+        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.ShownOrIncomingPaths();
+        return PlayerHelper.QueryCurrentPath() is string p ? [p] : [];
+    }
+
+    // `playing` (trashed) was on screen. A playlist session plays on from the next surviving item after
+    // it (wrapping), like the old app; a single item / no survivor stops.
+    private static void StopOrAdvanceAfterDelete(string playing, HashSet<string> del, CustomPlaylist? pl)
     {
         var s = SettingsService.Load();
         var sess = s.LastSession;
-        var del = new HashSet<string>(deleted.Select(i => i.VideoPath));
         bool isPlaylist = sess != null && (sess.IsPlaylist || sess.IsTimedPlaylist);
+        var strip = pl?.VideoPaths ?? [];
+        var survivors = strip.Where(p => !del.Contains(p)).ToList();
         if (isPlaylist && sess != null)
         {
-            var survivors = sess.Paths.Where(p => !del.Contains(p)).ToList();
-            if (survivors.Count > 0)
+            // Start from the current playlist's settings (transitions etc.) and take the
+            // rotation from the session — a fresh PlaylistSettings dropped the transitions.
+            var ps = pl?.Settings?.Clone() ?? new PlaylistSettings();
+            ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
+            ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
+            ps.IntervalSeconds = sess.TimedIntervalSeconds;
+            ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd; ps.WaitForVideoEnd = sess.WaitForVideoEnd;
+            int at = strip.IndexOf(playing);
+            if (at >= 0 && survivors.Count > 0)
             {
-                // Start from the current playlist's settings (transitions etc.) and take the
-                // rotation from the session — a fresh PlaylistSettings dropped the transitions.
-                var ps = PlaylistService.LoadCurrentState()?.Settings?.Clone() ?? new PlaylistSettings();
-                ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
-                ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
-                ps.IntervalSeconds = sess.TimedIntervalSeconds;
-                ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd; ps.WaitForVideoEnd = sess.WaitForVideoEnd;
-                PlayPlaylist(survivors, ps);
+                string next = Enumerable.Range(1, strip.Count).Select(k => strip[(at + k) % strip.Count]).First(p => !del.Contains(p));
+                PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the strip's survivors as the playlist
+                return;
+            }
+            // the session plays something the strip doesn't hold — play on from its own survivors
+            var rest = sess.Paths.Where(p => !del.Contains(p)).ToList();
+            if (rest.Count > 0)
+            {
+                PlayPlaylist(rest, ps, persistPaths: pl != null ? survivors : null);
                 return;
             }
         }
+        if (pl != null && survivors.Count != strip.Count)
+            SavePlaylistState(new CustomPlaylist { VideoPaths = survivors, Settings = pl.Settings, Name = pl.Name });
         PlayerHelper.Stop();
         EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
     }
@@ -257,6 +382,18 @@ public static class AppOps
             batch = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
         }
         LibraryService.RestoreBatch(batch.BatchDir);
+        // back into the playlist where they were (live — a running rotation picks them up again)
+        if (batch.FromPlaylist.Count > 0 && PlaylistService.LoadCurrentState() is { } pl)
+        {
+            var paths = new List<string>(pl.VideoPaths);
+            foreach (var (p, i) in batch.FromPlaylist.OrderBy(x => x.Index))
+                if (!paths.Contains(p)) paths.Insert(Math.Min(i, paths.Count), p);
+            if (!paths.SequenceEqual(pl.VideoPaths))
+                SavePlaylistState(new CustomPlaylist { VideoPaths = paths, Settings = pl.Settings, Name = pl.Name });
+        }
+        // undoing a "Delete from Source" un-queues the unsubscribe (a no-op for a plain delete), like the old app
+        foreach (var i in batch.Items)
+            if (i.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid);
         return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
     }
 
