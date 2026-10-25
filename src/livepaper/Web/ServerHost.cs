@@ -449,35 +449,7 @@ public static class ServerHost
 
         // ---- playlist ---------------------------------------------------------------------
         app.MapGet("/playlist/state", () => Results.Json(PlaylistService.LoadCurrentState()));
-        app.MapPost("/playlist/state", (CustomPlaylist p) =>
-        {
-            var prevP = PlaylistService.LoadCurrentState();
-            PlaylistService.SaveCurrentState(p);
-            // Live-apply a rotation change (interval / advance-on-end / wait, or the override toggle) to
-            // the RUNNING timed playlist — no replay. Diff the EFFECTIVE rotation vs the previously-saved
-            // state so a plain reorder/add (which also POSTs state) never resets the countdown. When the
-            // playlist follows globals, /settings owns the live-apply (this stays a no-op then).
-            if (PlayerHelper.IsTimedPlaylistActive())
-            {
-                // Order (Sequential↔Shuffle) or the strip contents (drag-reorder / add / remove) changed →
-                // reflect it on the RUNNING playlist live (keeps the current item playing + the countdown).
-                // Diffed so a rotation/transition-only save doesn't needlessly re-shuffle. Reorder FIRST so
-                // it rebuilds _timedPaths before the rotation re-chains the video-end wait.
-                bool orderChanged = (prevP?.Settings.Order ?? PlaylistOrder.Sequential) != p.Settings.Order;
-                bool listChanged = prevP == null || !prevP.VideoPaths.SequenceEqual(p.VideoPaths);
-                if ((orderChanged || listChanged) && p.VideoPaths.Count > 0)
-                    PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle);
-
-                var g = SettingsService.Load();
-                (int iv, bool wait, bool adv) Eff(CustomPlaylist? c) =>
-                    (c?.Settings.OverrideGlobalSettings ?? false)
-                        ? (c!.Settings.IntervalSeconds, c.Settings.WaitForVideoEnd, c.Settings.AdvanceOnVideoEnd)
-                        : (g.GlobalIntervalSeconds, g.GlobalWaitForVideoEnd, g.GlobalAdvanceOnVideoEnd);
-                var now = Eff(p);
-                if (now != Eff(prevP)) PlayerHelper.ApplyRotationLive(now.iv, now.wait, now.adv);
-            }
-            return Results.Ok();
-        });
+        app.MapPost("/playlist/state", (CustomPlaylist p) => { AppOps.SavePlaylistState(p); return Results.Ok(); });
         app.MapGet("/playlist/names", () => Results.Json(PlaylistService.ListNames()));
         app.MapPost("/playlist/save", (SavePlaylistReq r) => { PlaylistService.Save(r.Name, r.Playlist); return Results.Ok(); });
         app.MapPost("/playlist/load", (NameReq r) => Results.Json(PlaylistService.Load(r.Name)));
@@ -535,6 +507,11 @@ public static class ServerHost
             return Results.Ok();
         });
         app.MapPost("/stop", () => { PlayerHelper.Stop(); return Results.Ok(); });
+        // `--action=<name>` (keybinds) forwarded by the one-shot CLI process (ActionForward): run here, on
+        // this backend's own session state, so the UI hears about it. 409 {error} = couldn't run.
+        app.MapPost("/action", (NameReq r) => AppOps.RunAction(r.Name) is string err
+            ? Results.Json(new { error = err }, statusCode: AppOps.Actions.Contains(r.Name) ? 409 : 400)
+            : Results.Json(new { ok = true }));
         // next/prev/random step the library/playlist to pick an item — under lp-player Phase 1,
         // scenes are skipped exactly like AllowScenes=false (PlayerHelper.IsSkippedPath), but when
         // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()

@@ -132,6 +132,16 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   (LWE is 1×, so it'd be a no-op). The card→modal `layoutId` morph anchors the SAME `still()` src the card
   uses (morphs from the thumbnail, not flying in from the side).
 
+## Backend-owned state the store mirrors (UI × player-state matrix findings)
+- **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend
+  changed itself: WS `settings-changed {fields}` → `mergeSettings` (a keybind volume-up was reverted by the
+  next UI save). `setSetting`'s debounced save posts `get().settings` at fire time, not its own snapshot.
+- **Playlist strip**: trash/undo change the backend's playlist → `trashItems` drops the items first (a
+  pending strip save can't put them back), both re-read it via `syncPlaylist()`.
+- **Origin**: production = `http://127.0.0.1:<backend port>`; `main.js` reuses the last port while free
+  (`LP_PORT`) so localStorage prefs survive a relaunch; WS connects to `location.origin` when `API` is "".
+- Guard: `scripts/test-ui-matrix.sh` (every control × every player state through the real UI, hermetic).
+
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
 - `// COOL:` — motion/glow/UX intent.

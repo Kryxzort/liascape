@@ -689,6 +689,36 @@ public static class LpPlayerMedia
         catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return null; }
     }
 
+    // Paths on screen now or about to be: every layer's content (an effect's incoming side, never its
+    // outgoing one — that is leaving anyway) plus the B of every requested switch that isn't an aligned
+    // one still waiting for A's end (the rotation retargets those). `cur:*` alone misses a switch that
+    // was requested but isn't running yet (trashing an item right after applying it kept it playing).
+    // A still-queued switch is waited for (bounded) so it counts too.
+    public static List<string> ShownOrIncomingPaths()
+    {
+        var client = C;
+        var paths = new List<string>();
+        if (!client.SocketExists) return paths;
+        try { Drain().Wait(1000); } catch { }
+        JsonElement st;
+        try { st = client.Call("state", null, LpPlayerClient.QuickMs); }
+        catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return paths; }
+        if (!st.TryGetProperty("graph", out var g) || g.ValueKind != JsonValueKind.Object) return paths;
+        string? PathOf(string id) =>
+            id.Length > 0 && g.TryGetProperty(id, out var n) && Str(n, "kind") is not ("effect" or "layer") && Str(n, "path") is { Length: > 0 } p ? p : null;
+        void Add(string? p) { if (p != null && !paths.Contains(p)) paths.Add(p); }
+        foreach (var n in g.EnumerateObject())
+        {
+            if (Str(n.Value, "kind") != "layer") continue;
+            var content = Str(n.Value, "content");
+            Add(g.TryGetProperty(content, out var c) && Str(c, "kind") == "effect" ? PathOf(Str(c, "to")) : PathOf(content));
+        }
+        if (st.TryGetProperty("transitions", out var trs) && trs.ValueKind == JsonValueKind.Array)
+            foreach (var t in trs.EnumerateArray())
+                if (Str(t, "phase") is not ("waiting_start" or "done")) Add(PathOf(Str(t, "to")));
+        return paths;
+    }
+
     // live media sources (not snapshots) whose path is `path`
     private static List<string> SourcesFor(LpPlayerClient client, string path) => SourcesFor(client, [path]);
 

@@ -71,11 +71,11 @@ interface State {
   setLibQuery(q: string): void; setLibSort(i: number): void;
   // playlist
   inPlaylist(path: string): boolean; toggleInPlaylist(path: string): void; removeFromPlaylist(path: string): void;
-  reorderPlaylist(from: number, to: number): void; playPlaylist(): Promise<void>; playFrom(index: number): Promise<void>;
+  syncPlaylist(): Promise<void>; reorderPlaylist(from: number, to: number): void; playPlaylist(): Promise<void>; playFrom(index: number): Promise<void>;
   setPlaylistSettings(p: Partial<PlaylistSettings>): void;
   savePlaylistAs(name: string): Promise<void>; loadNamedPlaylist(name: string): Promise<void>;
   // settings
-  setSetting(key: string, value: unknown): void;
+  setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
   clearLibrary(): Promise<void>; clearCache(): Promise<void>;
   importFile(path: string, title: string): Promise<void>;
   // steam / workshop
@@ -227,23 +227,28 @@ export const useStore = create<State>((set, get) => ({
     const t = get().libraryItems.find((i) => i.videoPath === path)?.title ?? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
     get().setStatus(`Applied: ${t}`);
   },
+  // API: the backend takes trashed items out of the playlist (live, undo puts them back) — drop them
+  // here first so a pending strip save can't put them back, then take the backend's playlist.
   async trashItems(items) {
     if (items.length === 0) return;
+    const gone = new Set(items.map((i) => i.videoPath));
+    set({ playlist: get().playlist.filter((p) => !gone.has(p)) });
     await api.trash(items);
-    await get().loadLibrary();
+    await Promise.all([get().loadLibrary(), get().syncPlaylist()]);
     const n = items.length;
     get().setStatus(n > 1 ? `Deleted ${n} wallpapers` : `Deleted: ${items[0].title}`);
   },
   async undo() {
     const r = await api.undo();
     if (!r.ok) return;
-    await get().loadLibrary();
+    await Promise.all([get().loadLibrary(), get().syncPlaylist()]);
     get().setStatus(r.count > 1 ? `Restored ${r.count} wallpapers` : `Restored: ${r.title ?? ""}`);
   },
   setLibQuery(q) { set({ libQuery: q }); },
   setLibSort(i) { set({ libSort: i }); LS.set("libSort", i); },
 
   // ---- playlist ----
+  async syncPlaylist() { const p = await api.playlistState().catch(() => null); if (p) set({ playlist: p.videoPaths }); },
   inPlaylist(path) { return get().playlist.includes(path); },
   toggleInPlaylist(path) {
     const p = get().playlist;
@@ -286,11 +291,18 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // ---- settings ----
+  // API: `settings-changed` — the backend changed settings itself (a keybind's volume-up/down). Every UI
+  // save posts the whole object, so the store must hold the new values or the next save reverts them.
+  mergeSettings(p) {
+    set({ settings: { ...(get().settings ?? {}), ...p } });
+    if (get().playingPath) get().refreshPlayingStatus();
+  },
   setSetting(key, value) {
     const s = { ...(get().settings ?? {}), [key]: value };
     set({ settings: s });
     clearTimeout(settingsTimer);
-    settingsTimer = setTimeout(() => api.saveSettings(s).catch(() => {}), 250);
+    // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
+    settingsTimer = setTimeout(() => api.saveSettings(get().settings ?? s).catch(() => {}), 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalAdvanceOnVideoEnd", "globalIntervalSeconds"].includes(key))
       get().refreshPlayingStatus();
