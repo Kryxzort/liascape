@@ -36,8 +36,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `store.applyThemeVars` from `/themes` (32 themes, ThemeService color keys).
 - Glow = **static `box-shadow`/`drop-shadow` toggled by state** (hover/playing/selected), never
   animated blur radius (paint storms). Pulsing glow animates opacity/box-shadow on a composited layer.
-- framer-motion: card→preview `layoutId` morph (wrap grid in `<LayoutGroup>`), `AnimatePresence`
-  enter/exit on modals/toasts, spring drag (dnd-kit) on the playlist strip.
+- Card → modal morphs (Browse preview, library/strip settings): `components/useMorph.ts` (WAAPI, see
+  "Settings-modal morph" below) — not framer's `layoutId` any more. framer-motion: `AnimatePresence`
+  enter/exit on other modals/toasts, spring drag (dnd-kit) on the playlist strip.
 - Re-bench Browse/Library at ≥120 visible after glow/motion changes (the `demos/` harness still works).
 
 ## Icons + component patterns (parity-polish pass)
@@ -54,8 +55,11 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   checked = accent fill with checkmark cut out via `fillRule=evenodd`). currentColor → hover brightens.
 - **Library card = compact title-overlay fork** (`.lib-title`, no below-thumb `.title`); trash + toggle
   sit above the 44px bar.
-- **Preview full-res:** `PreviewModal` lazily `api.detail(source, w)` → layers thumb (morph anchor) →
-  `detail.previewUrl` (full-res, fades in) → animated gif on top. Needs the `source` prop.
+- **Preview full-res:** `PreviewModal` lazily `api.detail(source, w)` → layers the card's own static (base)
+  → `detail.previewUrl` (full-res, mounted once the morph `landed`, fades in) → the gif on top from the
+  first frame, with the card's own `anim()` URL (it used `thumb()` — another image, so it restarted, and
+  it mounted only after the morph). Morphs out of / back into its Browse card (`data-morph-id="br-…"`,
+  `.lifted` while previewing). Needs the `source` prop.
 - **Native pickers:** `app/shell/preload.js` exposes `window.lp.pickFolder()/pickFile()` →
   `ipcMain "lp:pick"` → `dialog.showOpenDialog`. Settings "Browse" buttons use it; `window.lp` is
   undefined in a plain browser → falls back to the text input.
@@ -130,7 +134,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes**
   (LWE is 1×, so it'd be a no-op).
-- **Settings-modal morph (`components/morph.ts`, not framer).** The surface that opened the modal (card
+- **Settings-modal morph (`components/morph.ts` + the `useMorph` hook, not framer — also the Browse
+  preview's).** The surface that opened the modal (card
   `.thumb-wrap` / strip `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `settingsMorphId`) and is
   `.lifted` (hidden) while the modal is out. WAAPI flights, both ways: the media box (`[data-morph-media]`,
   transform-origin 0 0) moves with ONE uniform scale onto the cover-box of the source while a clip-path
@@ -141,13 +146,20 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   late / out early. Close re-measures the source (the strip may have scrolled) and lands on it, then
   `closeItemSettings` (source shown in the same render); off-screen/missing source → fade. Escape closes; a
   close while the open flight still runs reverses it from where it is (cancelling it jumped to the end pose).
+  The flight waits (panel hidden, ≤ 300 ms) until the picture's aspect is known — from the source's
+  loaded still/gif/video at the click, else the modal's own copy loading — since a box re-laid out
+  mid-flight jumps; a row that fills in late (the duration) is reserved, since the panel is centred
+  and growing mid-flight moves the landing spot. The close lands one frame AFTER finishing (unmounting
+  in the finishing frame never painted the landing pose); a close mid-open `commitStyles()`s the pose
+  it's in and decelerates into the source from there (reversing replayed the ease-out backwards).
   The media box layers the card's own `still()` (cached → frame 1 IS the card), the sharp native image,
   and the playing preview: the card's gif URL (same image → same animation) or the video, started where
   the card's hover video was (`settingsSource`, read at the click — the card's layer unmounts on open).
   framer's `layoutId` used to scale one `<img>` between aspects (stretched mid-flight), flew a low-res
   still, and the strip's close vanished (the id was dropped at once, and the row clips). Guard:
-  `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a card and
-  a strip item: starts/ends on the source's crop, uniform aspect, smooth, lands; the preview animates).
+  `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a library
+  card, a strip item and a Browse card — a local WE item, offline: starts/ends on the source's crop,
+  uniform aspect, smooth, lands; the preview animates; a close mid-open lands on the card).
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
 - **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend

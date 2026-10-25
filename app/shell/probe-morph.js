@@ -35,10 +35,11 @@ const PAGE = `window.__mo = {
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
   card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === t); },
   strip(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
-  source(surface, t) { return surface === "lib" ? this.card(t)?.querySelector(".thumb-wrap") : this.strip(t); },
+  source(surface, t) { return surface === "pl" ? this.strip(t) : this.card(t)?.querySelector(".thumb-wrap"); }, // lib + br: a .card.lib
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; },
   ctx(el) { const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
-  media() { return document.querySelector(".lib-settings [data-morph-media]") || document.querySelector(".lib-settings .lib-stage img"); },
+  modal() { return document.querySelector(".modal-backdrop .modal"); },
+  media() { return document.querySelector(".modal-backdrop [data-morph-media]") || document.querySelector(".modal-backdrop .modal img"); },
   // the media's visible box: its transformed border box minus its clip-path inset (scaled by the
   // transform's scale — transform-origin 0 0 or not, the inset scales with the box)
   vis(el) {
@@ -54,8 +55,9 @@ const PAGE = `window.__mo = {
     return new Promise((res) => {
       const out = []; const t0 = performance.now();
       const f = () => {
-        const el = this.media();
-        out.push({ t: performance.now() - t0, open: !!document.querySelector(".lib-settings"), ...(el ? this.vis(el) : {}) });
+        const el = this.media(), md = this.modal();
+        const shown = md && getComputedStyle(md).visibility !== "hidden"; // hidden = still waiting to fly
+        out.push({ t: performance.now() - t0, open: !!md, ...(el && shown ? this.vis(el) : {}) });
         if (performance.now() - t0 < ms) requestAnimationFrame(f); else res(out);
       };
       if (trigger) trigger();
@@ -65,14 +67,18 @@ const PAGE = `window.__mo = {
   async open(surface, t, ms) {
     const src = this.source(surface, t); if (!src) throw new Error("no source " + surface + " " + t);
     const S = this.rect(src);
-    this.ctx(src); await this.sleep(250);
-    const btn = this.byText(surface === "lib" ? ".lib-ctx button" : ".pl-ctx button", "Settings (volume / speed)");
-    if (!btn) throw new Error("no Settings menu item");
-    const samples = await this.sample(ms, () => btn.click());
+    // Browse: right-click opens the preview itself; library / strip: their menu's Settings item
+    let btn = null;
+    if (surface !== "br") {
+      this.ctx(src); await this.sleep(250);
+      btn = this.byText(surface === "lib" ? ".lib-ctx button" : ".pl-ctx button", "Settings (volume / speed)");
+      if (!btn) throw new Error("no Settings menu item");
+    }
+    const samples = await this.sample(ms, () => (btn ? btn.click() : this.ctx(src)));
     return { S, samples };
   },
   async close(surface, t, ms) {
-    const btn = this.byText(".lib-settings .modal-actions button", "Close"); if (!btn) throw new Error("no Close button");
+    const btn = this.byText(".modal-backdrop .modal-actions button", "Close"); if (!btn) throw new Error("no Close button");
     const S = this.rect(this.source(surface, t));
     const samples = await this.sample(ms, () => btn.click());
     return { S, samples, srcVisible: getComputedStyle(this.source(surface, t)).visibility !== "hidden" && +getComputedStyle(this.source(surface, t)).opacity > 0.5 };
@@ -80,8 +86,8 @@ const PAGE = `window.__mo = {
   // what the modal animates with (a canvas drawImage of an animated <img> always gives the same frame,
   // so a gif is checked from two screen captures on the probe side)
   async animating() {
-    const img = [...document.querySelectorAll(".lib-settings img")].find((i) => /\\/anim\\?/.test(i.src) && i.complete && i.naturalWidth);
-    const vid = [...document.querySelectorAll(".lib-settings video")][0];
+    const img = [...document.querySelectorAll(".modal-backdrop .modal img")].find((i) => /\\/anim\\?/.test(i.src) && i.complete && i.naturalWidth);
+    const vid = [...document.querySelectorAll(".modal-backdrop .modal video")][0];
     if (img) { const b = img.getBoundingClientRect(); return { kind: "gif", rect: { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) } }; }
     if (vid) { const a = vid.currentTime; await this.sleep(600); return { kind: "video", ok: !vid.paused && vid.currentTime > a, t: [a, vid.currentTime] }; }
     return { kind: "none", ok: false };
@@ -124,11 +130,11 @@ async function shots(surface, t) {
   // a separate open/close with screenshots for review (capturePage stalls frames: no checks here)
   const files = [];
   const grab = async (tag) => { const img = await win.webContents.capturePage(); const f = path.join(OUT, `morph-${surface}-${tag}.png`); fs.writeFileSync(f, img.toPNG()); files.push(f); };
-  await page(`const src = m.source(${JSON.stringify(surface)}, ${JSON.stringify(t)}); m.ctx(src); await m.sleep(250);
-    m.byText(${JSON.stringify(surface === "lib" ? ".lib-ctx button" : ".pl-ctx button")}, "Settings (volume / speed)").click();`);
+  await page(`const src = m.source(${JSON.stringify(surface)}, ${JSON.stringify(t)}); m.ctx(src);
+    if (${JSON.stringify(surface)} !== "br") { await m.sleep(250); m.byText(${JSON.stringify(surface === "lib" ? ".lib-ctx button" : ".pl-ctx button")}, "Settings (volume / speed)").click(); }`);
   for (let i = 0; i < 6; i++) { await grab(`open${i}`); await sleep(40); }
   await sleep(500); await grab("open-done");
-  await page(`m.byText(".lib-settings .modal-actions button", "Close").click();`);
+  await page(`m.byText(".modal-backdrop .modal-actions button", "Close").click();`);
   for (let i = 0; i < 6; i++) { await grab(`close${i}`); await sleep(40); }
   await sleep(600); await grab("close-done");
   return files;
@@ -196,7 +202,51 @@ app.whenReady().then(async () => {
       if (!r.srcVisible) v.push("the source is still hidden");
       return v;
     });
-    const files = [...await shots("lib", "k1"), ...await shots("pl", "k1")];
+    // Browse: the preview / more-info modal, from a local Wallpaper Engine item (square preview + gif)
+    const we = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-workshop", "9001");
+    fs.mkdirSync(we, { recursive: true });
+    const ff = (args) => require("child_process").execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", ...args], { timeout: 60000 });
+    ff(["-f", "lavfi", "-i", "smptebars=size=480x480", "-frames:v", "1", path.join(we, "preview.jpg")]);
+    ff(["-f", "lavfi", "-i", "testsrc2=size=240x240:rate=12:duration=2", "-vf", "split[a][b];[a]palettegen[p];[b][p]paletteuse", path.join(we, "preview.gif")]);
+    ff(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(we, "we1.mp4")]);
+    fs.writeFileSync(path.join(we, "project.json"), JSON.stringify({ title: "we1", type: "video", file: "we1.mp4", preview: "preview.jpg" }));
+    const s0 = (await http("GET", "/settings")).json;
+    await post("/settings", { ...s0, wallpaperEnginePath: path.dirname(we), autoImportWallpaperEngine: false });
+    const srcs = (await http("GET", "/sources")).json;
+    const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
+    await page(`m.byText(".tab", "Browse").click(); await m.sleep(500); m.byText(".pill", ${JSON.stringify(weName)}).click();`);
+    for (let i = 0; i < 80; i++) { if (await page(`return !!m.card("we1");`)) break; await sleep(150); }
+    // you right-click a card you can see: wait for its picture (the still, or the gif over a lazy still)
+    let shown = false;
+    for (let i = 0; i < 50 && !shown; i++) { shown = await page(`return [...m.card("we1").querySelectorAll(".thumb-wrap img.thumb")].some((i) => i.naturalWidth > 0);`); if (!shown) await sleep(100); }
+    if (!shown) await cell("br we1 card shows a picture", async () => ["the Browse card loaded no picture within 5 s"]);
+    await sleep(300);
+    let BM = null;
+    await cell("br we1 open", async () => {
+      const { S, samples } = await page(`return await m.open("br", "we1", 900);`);
+      const live = samples.filter((x) => x.vis && x.vis.w > 1);
+      BM = live.length ? live[live.length - 1].vis : null;
+      return flight(samples, S, null, 1, "open");
+    });
+    await cell("br we1 animates in the modal", async () => {
+      await sleep(300);
+      const a = await page(`return await m.animating();`);
+      if (a.kind === "gif") {
+        const one = (await win.webContents.capturePage(a.rect)).toBitmap(); await sleep(500);
+        a.ok = one.length > 0 && !one.equals((await win.webContents.capturePage(a.rect)).toBitmap());
+      }
+      return a.ok ? [] : [`the preview is not animating (${a.kind})`];
+    });
+    await cell("br we1 close", async () => {
+      const { S, samples, srcVisible } = await page(`return await m.close("br", "we1", 1100);`);
+      const v = flight(samples, BM, S, 1, "close");
+      if (samples.find((x) => !x.open) == null) v.push("close: still open 1.1 s after Close");
+      if (!srcVisible) v.push("close: the card is still hidden after the close");
+      return v;
+    });
+    const brShots = await shots("br", "we1");
+    await page(`m.byText(".tab", "Library").click();`); await sleep(800);
+    const files = [...await shots("lib", "k1"), ...await shots("pl", "k1"), ...brShots];
     console.log(`screenshots: ${files.length} in ${OUT}`);
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });

@@ -1,12 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { atRest, boxFrame, boxOf, CLOSE, fromSourceClip, fullClip, OPEN, onScreen, onSource, sourceEl, type Box, type MorphSource } from "./morph";
+import { type MorphSource } from "./morph";
+import { useMorph } from "./useMorph";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
-const MEDIA_RADIUS = 14;
 
 // Duration formatting (e.g. "2 minutes and 3 seconds").
 function fmtDur(s: number): string {
@@ -58,95 +58,13 @@ export function LibrarySettingsModal({
     return () => { alive = false; clearTimeout(t); };
   }, [item]);
 
-  // ---- the morph ------------------------------------------------------------------------------
-  const panelRef = useRef<HTMLDivElement>(null);
-  const mediaRef = useRef<HTMLDivElement>(null);
-  const ghostRef = useRef<HTMLDivElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const closingRef = useRef(false);
-  const flightRef = useRef(0); // the newest flight; an older one's finish must not tidy up after a newer one
-  const openAnimsRef = useRef<Animation[]>([]); // the open flight, while it runs (a close turns it around)
+  // ---- the morph (components/useMorph.ts) -----------------------------------------------------------
   // the picture's own aspect: the card's still knows it at the click; else 16:9 until the image loads
   const [loaded, setLoaded] = useState<{ path: string; aspect: number } | null>(null);
-  const aspect = source?.aspect ?? (loaded && loaded.path === item?.videoPath ? loaded.aspect : 16 / 9);
+  const loadedAspect = loaded && loaded.path === item?.videoPath ? loaded.aspect : null;
+  const aspect = source?.aspect ?? loadedAspect ?? 16 / 9;
   const [fullFor, setFullFor] = useState<string | null>(null); // the sharp layer shows once IT loaded
-
-  // media box: card crop → its place (uniform scale + re-crop); ghost: card → panel; body fades in late.
-  const fly = (src: HTMLElement, S: Box, dir: "open" | "close"): Animation[] => {
-    const panel = panelRef.current!, mediaEl = mediaRef.current!, ghost = ghostRef.current!, body = bodyRef.current!;
-    for (const el of [panel, mediaEl, ghost, body]) el.getAnimations().forEach((a) => a.cancel());
-    delete panel.dataset.morph;
-    const P = boxOf(panel), M = boxOf(mediaEl), B = boxOf(body);
-    const pcs = getComputedStyle(panel);
-    const rs = parseFloat(getComputedStyle(src).borderTopLeftRadius) || 8;
-    const rp = parseFloat(pcs.borderTopLeftRadius) || 16;
-    Object.assign(ghost.style, { display: "block", background: pcs.backgroundColor, border: pcs.border, boxShadow: pcs.boxShadow });
-    panel.dataset.morph = "1";
-    const flight = ++flightRef.current;
-    const opt = { ...(dir === "open" ? OPEN : CLOSE), fill: "both" as FillMode };
-    const way = (k: Keyframe[]) => (dir === "open" ? k : [...k].reverse());
-    const anims = [
-      mediaEl.animate(way([onSource(M, S, rs, aspect), atRest(MEDIA_RADIUS)]), opt),
-      ghost.animate(way([boxFrame(S, rs), boxFrame(P, rp)]), opt),
-      // the body stays inside the growing ghost (its own clip, same easing) and fades in late / out early
-      body.animate(way([fromSourceClip(B, S), fullClip(B)]), opt),
-      body.animate(dir === "open" ? [{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: 0.35 }, { opacity: 0 }], opt),
-    ];
-    if (dir === "open")
-      anims[0].finished.then(() => {
-        if (flight !== flightRef.current) return;
-        delete panel.dataset.morph; ghost.style.display = "none";
-        anims.forEach((a) => a.cancel());
-      }, () => {});
-    return anims;
-  };
-
-  useLayoutEffect(() => {
-    if (!item) return;
-    closingRef.current = false;
-    const src = sourceEl(morphId);
-    const S = src ? boxOf(src) : null;
-    if (!src || !S || !onScreen(S) || !panelRef.current) {
-      panelRef.current?.animate([{ opacity: 0, transform: "scale(0.97)" }, { opacity: 1, transform: "scale(1)" }], { duration: 200, easing: "ease-out" });
-      return;
-    }
-    const anims = fly(src, S, "open");
-    openAnimsRef.current = anims;
-    return () => anims.forEach((a) => a.cancel());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item]);
-
-  // back into the source — wherever it is NOW (the strip may have scrolled); gone/offscreen → fade out
-  const requestClose = () => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    // still flying open (a quick Escape / double click): turn the flight around where it is
-    const opening = openAnimsRef.current;
-    if (opening.length && opening.every((a) => a.playState === "running")) {
-      flightRef.current++; // the open's tidy-up must not run when the reversed flight lands
-      opening.forEach((a) => a.reverse());
-      opening[0].finished.then(onClose, onClose);
-      return;
-    }
-    const src = sourceEl(morphId);
-    const S = src ? boxOf(src) : null;
-    const panel = panelRef.current;
-    if (!panel || !src || !S || !onScreen(S)) {
-      if (!panel) { onClose(); return; }
-      panel.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.97)" }], { duration: 160, easing: "ease-in", fill: "both" })
-        .finished.then(onClose, onClose);
-      return;
-    }
-    fly(src, S, "close")[0].finished.then(onClose, onClose);
-  };
-  const closeRef = useRef(requestClose);
-  useEffect(() => { closeRef.current = requestClose; });
-  useEffect(() => {
-    if (!item) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [item]);
+  const { panelRef, mediaRef, ghostRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose });
 
   if (!item) return null;
   const p = item.videoPath;
@@ -218,11 +136,12 @@ export function LibrarySettingsModal({
     <div className="modal-backdrop" onClick={requestClose}>
       {/* panel-coloured layer that grows card → panel (and back) while the panel itself is see-through */}
       <div className="morph-ghost" ref={ghostRef} />
-      <div className="modal lib-settings" ref={panelRef} onClick={(e) => e.stopPropagation()}>
+      <div className="modal lib-settings morph-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
         <div className="lib-stage">
           <div className="morph-media" data-morph-media ref={mediaRef}
             style={{ aspectRatio: String(aspect), width: `min(100%, calc(62vh * ${aspect}))` }}>
-            {baseSrc && <img src={baseSrc} alt="" />}
+            {baseSrc && <img src={baseSrc} alt=""
+              onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && !loadedAspect) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); }} />}
             {fullSrc && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); setFullFor(fullSrc); }} />}
             {gifSrc && <img className="mm-anim" src={gifSrc} alt="" />}
@@ -234,7 +153,9 @@ export function LibrarySettingsModal({
         <div className="modal-body" ref={bodyRef}>
           <h2>{item.title}{multi && <span className="shint"> · applies to {targets.length} selected</span>}</h2>
           <div className="meta">
-            {dur && <span className="mrow"><Clock size={14} /> {dur}</span>}
+            {/* its row is reserved before the duration loads: a panel growing mid-morph moves (it's centred)
+                and the flight would land off by half the row */}
+            {!item.isScene && <span className="mrow" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={14} /> {dur || "0 seconds"}</span>}
             {item.resolution && <span className="mrow"><Monitor size={14} /> {item.resolution}</span>}
             {item.ageRating && <span className="mrow"><Shield size={14} /> {item.ageRating}</span>}
           </div>
