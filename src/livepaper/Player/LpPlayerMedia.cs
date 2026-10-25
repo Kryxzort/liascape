@@ -34,6 +34,7 @@ public static class LpPlayerMedia
                     c.Event += OnEvent;
                     c.Restarted += OnRestarted;
                     c.Recovered += OnRecovered;
+                    c.Subscribed += () => InvalidateSources(); // events in the reconnect gap are lost
                     _hooked = c;
                 }
             }
@@ -49,50 +50,136 @@ public static class LpPlayerMedia
     // queued command's OWN player.Call also uses QuickMs (item 6) — a queued set is a single property
     // write, not worth 2000 ms; keeping it quick means a backlog (a stalled player) drains fast instead
     // of each item eating the full default timeout one after another.
+    //
+    // Three kinds of command (speed storm: a slider's newest value was dropped at the cap):
+    // - ESSENTIAL (`QueueEssential`) — a switch, stop, new session, pause toggle, upgrade: user intent,
+    //   never dropped, and a BARRIER: nothing is ever coalesced or reordered across one.
+    // - COALESCIBLE (`QueueSet`, keyed by target + property, e.g. `set:gain.user`, `preview:speed:<paths>`)
+    //   — a pure overwrite whose newest value is the one that matters (a slider, a global setting, a
+    //   per-item override re-read at run time). A new one REMOVES a still-pending one with the same key
+    //   enqueued since the last barrier and takes its place at the tail: the run keeps every other
+    //   command in its order and only loses a write that a later write of the same targets overwrites
+    //   anyway — so the final state is exactly what the full sequence would leave, and a burst holds ONE
+    //   pending command per key, however long the player stalls. A coalesced command is admitted even at
+    //   the cap (it doesn't grow the queue).
+    // - anything else (`Queue`) — unknown semantics, so a barrier for coalescing, and refused at the cap.
+    // The cap (item 6) still bounds memory: at MaxQueueDepth a command that can't coalesce and isn't
+    // essential is logged and dropped. R81 re-applies settings when a stalled player answers again.
     private static readonly object _qLock = new();
-    private static Task _tail = Task.CompletedTask;
 
-    // item 6: a hard cap on how many commands may be in flight (queued + currently running) at once. A
-    // stalled/overloaded player must never turn into unbounded memory growth here — once at the cap, a
-    // NEW property set is logged and dropped outright (switch/stop are exempt — QueueEssential) (never enqueued, so the caller is never blocked and the
-    // chain never grows past this). Simpler and safer than hunting the chain for "the oldest SET to the
-    // same target" to evict instead; documented here and in player-adapter.md.
-    public const int MaxQueueDepth = 256;
-    private static int _queueDepth;
-    public static int QueueDepth => Volatile.Read(ref _queueDepth);
-
-    public static Task<T> Queue<T>(Func<T> f) => Enqueue(f, essential: false);
-
-    // A switch or a stop is user intent, not a coalescible property write: it is never dropped at the
-    // cap (it still counts toward the depth, so a flood of sets can't grow without bound behind it).
-    public static Task QueueEssential(Action a) => Enqueue<bool>(() => { a(); return true; }, essential: true);
-
-    private static Task<T> Enqueue<T>(Func<T> f, bool essential)
+    private sealed class QItem
     {
-        lock (_qLock)
-        {
-            if (!essential && Volatile.Read(ref _queueDepth) >= MaxQueueDepth)
-            {
-                LpPlayerClient.Log($"lp-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
-                return Task.FromResult(default(T)!);
-            }
-            Interlocked.Increment(ref _queueDepth);
-            // never faults: a throwing command is logged and yields default, so the chain (and any await) goes on
-            var t = _tail.ContinueWith(_ =>
-            {
-                try { return f(); }
-                catch (Exception e) { LpPlayerClient.Log($"queued lp-player command threw: {e.GetBaseException().Message}"); return default!; }
-                finally { Interlocked.Decrement(ref _queueDepth); }
-            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-            _tail = t;
-            return t;
-        }
+        public required Action Run;          // never throws (wrapped at enqueue)
+        public string? Key;                  // non-null = coalescible
+        public bool Essential;
+        public readonly TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<TaskCompletionSource>? Replaced; // completions of the pending items this one superseded
+        public bool Barrier => Key == null;
+    }
+
+    private static readonly LinkedList<QItem> _pending = new();
+    private static QItem? _running;   // the command the worker is executing now (null = idle)
+    private static bool _worker;      // a worker loop is scheduled or running
+
+    // item 6: a hard cap on how many commands may be in flight (queued + currently running) at once.
+    public const int MaxQueueDepth = 256;
+    public static int QueueDepth { get { lock (_qLock) return _pending.Count + (_running != null ? 1 : 0); } }
+    private static int _coalesced;
+    // how many pending commands a newer one with the same key replaced — self-test evidence
+    public static int Coalesced => Volatile.Read(ref _coalesced);
+
+    public static Task<T> Queue<T>(Func<T> f)
+    {
+        var res = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: false)
+            ? res.Task : Task.FromResult(default(T)!);
     }
 
     public static Task Queue(Action a) => Queue<bool>(() => { a(); return true; });
 
-    // completes when everything queued so far has run
-    public static Task Drain() { lock (_qLock) return _tail; }
+    // A switch or a stop is user intent, not a coalescible property write: it is never dropped at the
+    // cap (it still counts toward the depth) and nothing coalesces across it.
+    public static Task QueueEssential(Action a) => QueueEssential<bool>(() => { a(); return true; });
+
+    public static Task<T> QueueEssential<T>(Func<T> f)
+    {
+        var res = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: true);
+        return res.Task;
+    }
+
+    // A coalescible overwrite, keyed by its target + property. Completes when it — or the newer
+    // command with its key that replaced it — has run.
+    public static Task QueueSet(string key, Action a)
+    {
+        var it = MakeItem(Wrap(a, () => { }), key, essential: false);
+        return Admit(it) ? it.Done.Task : Task.CompletedTask;
+    }
+
+    private static Action Wrap(Action run, Action onThrow) => () =>
+    {
+        try { run(); }
+        catch (Exception e) { LpPlayerClient.Log($"queued lp-player command threw: {e.GetBaseException().Message}"); onThrow(); }
+    };
+
+    private static QItem MakeItem(Action run, string? key, bool essential) => new() { Run = run, Key = key, Essential = essential };
+
+    private static bool Enqueue(Action run, string? key, bool essential) => Admit(MakeItem(run, key, essential));
+
+    private static bool Admit(QItem it)
+    {
+        lock (_qLock)
+        {
+            bool replaced = false;
+            if (it.Key != null)
+                for (var n = _pending.Last; n != null; n = n.Previous)
+                {
+                    if (n.Value.Barrier) break;              // never coalesce across a barrier
+                    if (n.Value.Key != it.Key) continue;
+                    _pending.Remove(n);
+                    (it.Replaced ??= []).Add(n.Value.Done);
+                    if (n.Value.Replaced != null) it.Replaced.AddRange(n.Value.Replaced);
+                    replaced = true;
+                    Interlocked.Increment(ref _coalesced);
+                    break;                                   // at most one pending per key per run
+                }
+            if (!replaced && !it.Essential && _pending.Count + (_running != null ? 1 : 0) >= MaxQueueDepth)
+            {
+                LpPlayerClient.Log($"lp-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
+                return false;
+            }
+            _pending.AddLast(it);
+            if (!_worker) { _worker = true; ThreadPool.UnsafeQueueUserWorkItem(_ => Worker(), null); }
+            return true;
+        }
+    }
+
+    // ONE ordered worker: runs the pending commands in order, then exits (the next Admit starts it again).
+    private static void Worker()
+    {
+        while (true)
+        {
+            QItem it;
+            lock (_qLock)
+            {
+                if (_pending.First is not { } first) { _running = null; _worker = false; return; }
+                _pending.RemoveFirst();
+                it = first.Value;
+                _running = it;
+            }
+            try { it.Run(); } catch { } // Run is wrapped; belt and braces — the worker must never die
+            lock (_qLock) _running = null;
+            it.Done.TrySetResult();
+            if (it.Replaced != null) foreach (var r in it.Replaced) r.TrySetResult();
+        }
+    }
+
+    // completes when everything queued so far has run (a pending command that gets replaced later
+    // completes with its replacement — never earlier than its own place in the order)
+    public static Task Drain()
+    {
+        lock (_qLock) return (_pending.Last?.Value ?? _running)?.Done.Task ?? Task.CompletedTask;
+    }
 
     public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd) =>
         QueueEssential(() => Switch(path, s, tcfg, alignEnd));
@@ -108,6 +195,8 @@ public static class LpPlayerMedia
 
     private static void OnEvent(string kind, JsonElement e)
     {
+        // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
+        InvalidateSources();
         var outcome = OutcomeOf(kind, e);
         if (outcome == null || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
         var corr = c.GetString()!;
@@ -131,6 +220,7 @@ public static class LpPlayerMedia
     private static void OnRestarted()
     {
         LpPlayerClient.Log("lp-player restarted (new pid) — pending switch waits end as failed");
+        InvalidateSources();
         _recent.Clear();
         _lastCorr = null;
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
@@ -155,7 +245,8 @@ public static class LpPlayerMedia
     // playing item's own override/global split the same way a live /settings change gets it), the
     // layer fit, and the player-level pause flag — through the SAME ordered queue as every other
     // mutation (so this can never race or reorder against a concurrent switch/set).
-    public static void ReapplyAll() => Queue(ReapplyAllNow);
+    // Coalescible: it reads every value when it runs, so one pending reapply covers any number.
+    public static void ReapplyAll() => QueueSet("reapply", ReapplyAllNow);
 
     private static void ReapplyAllNow()
     {
@@ -300,10 +391,11 @@ public static class LpPlayerMedia
         var client = C;
         if (client.PlayerPid == null && !client.Reachable()) return; // a player started before this backend: learn its pid
         if (client.StaleReason() == null) return;
-        Queue(() =>
+        QueueEssential(() =>
         {
             if (client.StaleReason() is not string why || Switching(client)) return;
             client.UpgradeInPlace(why);
+            InvalidateSources();
         });
     }
 
@@ -322,6 +414,12 @@ public static class LpPlayerMedia
     // `transition {outputs:"out:*", to:{path, props}, effect from Pick(tcfg) or null (cut), method, align}`.
     // Returns the corr (or null when the player can't be reached / refused — logged with its hint).
     public static string? Switch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
+    {
+        try { return SwitchCore(path, s, tcfg, alignEnd); }
+        finally { InvalidateSources(); } // a new B (and maybe an upgraded player): re-read the map next time
+    }
+
+    private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
     {
         var client = C;
         if (!client.EnsureRunning()) return null;
@@ -385,7 +483,7 @@ public static class LpPlayerMedia
         // holds an aligned switch until one shows it (I4) — then the backstop keeps waiting too.
         var remaining = alignEnd ? await Task.Run(TimeRemaining).ConfigureAwait(false) : null;
         double? lastPos = alignEnd ? await Task.Run(() => Query("time_pos")).ConfigureAwait(false) : null; // A when armed
-        var corr = await Queue(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets
+        var corr = await QueueEssential(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets; never dropped
         if (corr == null) return "failed:request refused";
         int bound = alignEnd ? BackstopMs(remaining) : 60_000;
         string outcome;
@@ -405,12 +503,14 @@ public static class LpPlayerMedia
             LpPlayerClient.Log($"aligned switch {corr} not handed off within {bound} ms — cancelling it (the caller switches now)");
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
             catch (LpPlayerException) { } // already handed off / superseded meanwhile
+            InvalidateSources();
         }
         if (outcome == "caller-cancelled")
         {
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
             catch (LpPlayerException e) when (e.Code is "no_such_node" or "unsupported") { } // superseded / already handed off
             catch (LpPlayerException e) { LpPlayerClient.Log($"cancel {corr} failed — {e}"); }
+            InvalidateSources();
         }
         return outcome;
     }
@@ -489,6 +589,7 @@ public static class LpPlayerMedia
     {
         var client = C;
         if (client.SocketExists) client.TryCall("stop", null, LpPlayerClient.QuickMs); // item 6
+        InvalidateSources();
     }
 
     // Switching AWAY from lp-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
@@ -500,6 +601,7 @@ public static class LpPlayerMedia
         try { Drain().Wait(3000); } catch { }
         if (client.SocketExists) { try { client.Call("stop", null, LpPlayerClient.QuickMs); } catch (LpPlayerException) { } }
         client.QuitOrKill();
+        InvalidateSources();
         _lastCorr = null;
     }
 
@@ -540,14 +642,13 @@ public static class LpPlayerMedia
     {
         var cur = CurrentPath();
         if (targets.Count == 1 && cur != null) return; // the only source is the one on screen → already right
-        var graph = Graph(client);
-        if (graph is not { } g) return;
+        if (SourceMap(client) is not { } map) return;
+        var pathOf = new Dictionary<string, string>();
+        foreach (var (p, ids) in map) foreach (var id in ids) pathOf[id] = p;
         var s = SettingsService.Load();
         foreach (var id in targets)
         {
-            if (!g.TryGetProperty(id, out var node)) continue;
-            var path = Str(node, "path");
-            if (path.Length == 0 || SamePath(path, cur)) continue;
+            if (!pathOf.TryGetValue(id, out var path) || SamePath(path, cur)) continue; // no path: colour/snapshot
             object v = prop == "gain.user"
                 ? MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume)
                 : Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
@@ -559,10 +660,7 @@ public static class LpPlayerMedia
     public static List<string> SetForPath(string path, string prop, object value)
     {
         var client = C;
-        var ids = SourcesFor(client, path);
-        foreach (var id in ids)
-            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = value }, LpPlayerClient.QuickMs);
-        return ids;
+        return client.SocketExists ? SetEach(client, [path], prop, value) : [];
     }
 
     // ApplyOverrideLive: re-apply `path`'s effective volume/speed to its source(s). Returns the speed
@@ -581,8 +679,21 @@ public static class LpPlayerMedia
     // edits, wherever they are: on screen, the outgoing A or incoming B of an effect, a pending B. No
     // paths → the playing item (`cur:*`, which mid-transition is the incoming side: a drag on A used to
     // land on B there and stay, since the persist that follows targets A by path).
-    public static void Preview(int? volume, double? speed, IReadOnlyCollection<string>? paths = null) =>
-        Queue(() => PreviewNow(volume, speed, paths));
+    // Coalescible per edited selection + property: a drag's newest value replaces a still-pending one.
+    public static void Preview(int? volume, double? speed, IReadOnlyCollection<string>? paths = null)
+    {
+        string who = paths is { Count: > 0 }
+            ? string.Join("\n", paths.Select(FullPath).Order(StringComparer.Ordinal))
+            : "<playing>"; // resolved when it runs (a switch in between is a barrier)
+        if (volume is int v) QueueSet("preview:gain.user:" + who, () => PreviewNow(v, null, paths));
+        if (speed is double sp) QueueSet("preview:speed:" + who, () => PreviewNow(null, sp, paths));
+    }
+
+    // The coalescing key of a per-item command on `path` (same file → same key, like SamePath).
+    public static string FullPath(string path)
+    {
+        try { return Path.GetFullPath(path); } catch { return path; }
+    }
 
     private static void PreviewNow(int? volume, double? speed, IReadOnlyCollection<string>? paths)
     {
@@ -590,29 +701,26 @@ public static class LpPlayerMedia
             paths = CurrentPath() is string cur ? [cur] : [];
         if (paths.Count == 0) return;
         var client = C;
-        var ids = SourcesFor(client, paths);
-        foreach (var id in ids)
-        {
-            if (volume is int v) client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.gain.user", ["value"] = MpvPropertyMap.VolumeDb(v) }, LpPlayerClient.QuickMs);
-            if (speed is double sp) client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.speed", ["value"] = Math.Clamp(sp, 0.1, 4.0) }, LpPlayerClient.QuickMs);
-        }
+        if (!client.SocketExists) return;
+        if (volume is int v) SetEach(client, paths, "gain.user", MpvPropertyMap.VolumeDb(v));
+        if (speed is double sp) SetEach(client, paths, "speed", Math.Clamp(sp, 0.1, 4.0));
     }
 
     // ApplyPlaybackSettingsLive's lp-player twin: every changed decode/buffer/audio setting, live.
     // Loop keeps the legacy guard (single, non-timed video only): during rotation the recipe owns A's
     // loop (align:end turns it off until the switch) and new sources take settings.Loop at creation.
-    public static void ApplySettingsLive(AppSettings prev, AppSettings cur, bool loopAllowed) =>
-        Queue(() => ApplySettingsNow(prev, cur, loopAllowed));
-
-    private static void ApplySettingsNow(AppSettings prev, AppSettings cur, bool loopAllowed)
+    // One coalescible set per CHANGED property (the same `set:<prop>` keys as Mpv()'s, so the newest
+    // value of a property wins whichever path queued it); nothing changed → nothing queued.
+    public static void ApplySettingsLive(AppSettings prev, AppSettings cur, bool loopAllowed)
     {
-        if (prev.NoAudio != cur.NoAudio) Set("no_audio", cur.NoAudio);
-        if (loopAllowed && prev.Loop != cur.Loop) Set("loop", cur.Loop);
-        if (prev.VideoFps != cur.VideoFps) Set("fps_cap", (double)Math.Max(0, cur.VideoFps));
-        if (prev.DisableCache != cur.DisableCache) Set("cache", !cur.DisableCache);
-        if (prev.DemuxerMaxBytes != cur.DemuxerMaxBytes) Set("demuxer_max_mib", (double)Math.Max(0, cur.DemuxerMaxBytes));
-        if (prev.DemuxerMaxBackBytes != cur.DemuxerMaxBackBytes) Set("demuxer_back_mib", (double)Math.Max(0, cur.DemuxerMaxBackBytes));
-        if (prev.HwDec != cur.HwDec) Set("hwdec", HwDec(cur));
+        static void S(string prop, object v) => QueueSet("set:" + prop, () => Set(prop, v));
+        if (prev.NoAudio != cur.NoAudio) S("no_audio", cur.NoAudio);
+        if (loopAllowed && prev.Loop != cur.Loop) S("loop", cur.Loop);
+        if (prev.VideoFps != cur.VideoFps) S("fps_cap", (double)Math.Max(0, cur.VideoFps));
+        if (prev.DisableCache != cur.DisableCache) S("cache", !cur.DisableCache);
+        if (prev.DemuxerMaxBytes != cur.DemuxerMaxBytes) S("demuxer_max_mib", (double)Math.Max(0, cur.DemuxerMaxBytes));
+        if (prev.DemuxerMaxBackBytes != cur.DemuxerMaxBackBytes) S("demuxer_back_mib", (double)Math.Max(0, cur.DemuxerMaxBackBytes));
+        if (prev.HwDec != cur.HwDec) S("hwdec", HwDec(cur));
     }
 
     // The mpv IPC args PlayerHelper.SendCommand/TrySendCommand still build. Property sets go through
@@ -626,14 +734,16 @@ public static class LpPlayerMedia
         var name = args.Length > 1 ? args[1] as string ?? args[1]?.ToString() ?? "" : "";
         switch (cmd)
         {
-            case "cycle" when name == "pause": Queue(() => TogglePause()); return true;
+            case "cycle" when name == "pause": QueueEssential(() => TogglePause()); return true; // a toggle reads the state: never coalesced
             case "loadfile" or "playlist-clear" or "playlist-next" or "playlist-prev" or "playlist-shuffle" or "playlist-unshuffle":
                 return true;
             case "set" or "set_property" when name is "loop-file" or "loop-playlist":
                 return true;
         }
         if (MpvPropertyMap.Translate(args) is not { } t) return false;
-        Queue(() => Set(t.prop, t.value)); // ordered, never on the caller's thread (it may hold PlayerHelper's _lock)
+        // ordered, never on the caller's thread (it may hold PlayerHelper's _lock); the newest value of a
+        // property wins over a still-pending one (Set targets the same alias for a given prop)
+        QueueSet("set:" + t.prop, () => Set(t.prop, t.value));
         return true;
     }
 
@@ -767,17 +877,87 @@ public static class LpPlayerMedia
     // live media sources (not snapshots) whose path is `path`
     private static List<string> SourcesFor(LpPlayerClient client, string path) => SourcesFor(client, [path]);
 
-    // …whose path is any of `paths` (one `state` read for a whole selection)
+    // …whose path is any of `paths` (from the cached map below — one `state` read per graph change)
     private static List<string> SourcesFor(LpPlayerClient client, IReadOnlyCollection<string> paths)
     {
         var ids = new List<string>();
-        if (Graph(client) is not { } g || g.ValueKind != JsonValueKind.Object) return ids;
+        if (SourceMap(client) is not { } map) return ids;
+        foreach (var p in paths)
+            if (map.TryGetValue(FullPath(p), out var l)) foreach (var id in l) if (!ids.Contains(id)) ids.Add(id);
+        return ids;
+    }
+
+    // ---- path → source ids, cached (speed storm: a /preview cost `state` + the `set`s every time) ----
+    // A source's id and path never change while it lives, and the player never reuses an id (`src<N>`,
+    // monotonic per process), so the map changes only when sources come or go: a switch (ours or
+    // another client's — `transition.scheduled` creates the B), a handoff (A goes), a cancel/failure
+    // (B goes), a stop, an output's sources retired, a new player process (Generation). Every one of
+    // those invalidates it: our own Switch/Stop/cancel/upgrade synchronously (they run on the queue's
+    // worker, like every reader), the player's own changes through the subscribed events
+    // (LpPlayerClient.Topics), a restart through Generation + OnRestarted. The map is only trusted
+    // while the event connection is live (a reconnect gap loses events → `Subscribed` invalidates), a
+    // map read while an invalidation happened is never stored (epoch), and a set that finds its cached
+    // id gone (`no_such_node`) invalidates and re-reads once. So a drag costs one `set` per source.
+    private static readonly object _srcLock = new();
+    private static Dictionary<string, List<string>>? _srcMap;
+    private static int _srcMapGen = -1;
+    private static int _srcEpoch;
+    private static int _srcMapReads;
+    // `state` reads made to (re)build the map — self-test evidence of the cache
+    public static int SourceMapReads => Volatile.Read(ref _srcMapReads);
+    // bumped by every invalidation — self-test evidence that an event reached the map
+    public static int SourceEpoch { get { lock (_srcLock) return _srcEpoch; } }
+
+    public static void InvalidateSources()
+    {
+        lock (_srcLock) { _srcEpoch++; _srcMap = null; }
+    }
+
+    private static Dictionary<string, List<string>>? SourceMap(LpPlayerClient client)
+    {
+        client.StartEvents(); // idempotent; the map is cached only once events flow
+        int epoch;
+        lock (_srcLock)
+        {
+            if (_srcMap != null && _srcMapGen == client.Generation && client.EventsLive) return _srcMap;
+            epoch = _srcEpoch;
+        }
+        int gen = client.Generation;
+        Interlocked.Increment(ref _srcMapReads);
+        if (Graph(client) is not { ValueKind: JsonValueKind.Object } g) return null;
+        var map = new Dictionary<string, List<string>>();
         foreach (var n in g.EnumerateObject())
         {
             var v = n.Value;
             if (!v.TryGetProperty("gain_effective_db", out _) || Str(v, "kind") is "snapshot" or "color") continue; // sources only
             var sp = Str(v, "path");
-            if (paths.Any(p => SamePath(sp, p))) ids.Add(n.Name);
+            if (sp.Length == 0) continue;
+            var key = FullPath(sp);
+            if (!map.TryGetValue(key, out var l)) map[key] = l = [];
+            l.Add(n.Name);
+        }
+        lock (_srcLock)
+            if (epoch == _srcEpoch && gen == client.Generation && client.EventsLive) { _srcMap = map; _srcMapGen = gen; }
+        return map;
+    }
+
+    // `set <id>.<prop>` on each of `ids` (cached); a vanished id → re-read the map once and set the
+    // fresh ids for `paths`. Returns the ids it set.
+    private static List<string> SetEach(LpPlayerClient client, IReadOnlyCollection<string> paths, string prop, object value)
+    {
+        var ids = SourcesFor(client, paths);
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            bool stale = false;
+            foreach (var id in ids)
+            {
+                try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = value }, LpPlayerClient.QuickMs); }
+                catch (LpPlayerException e) when (e.Code == "no_such_node") { stale = true; }
+                catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop} failed — {e}"); }
+            }
+            if (!stale) break;
+            InvalidateSources();
+            ids = SourcesFor(client, paths);
         }
         return ids;
     }
