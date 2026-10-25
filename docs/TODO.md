@@ -44,9 +44,22 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       — done in Task 15 (`scripts/lp_audiowatch.py`, lane B); not yet merged into this branch's history.
 - [ ] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`.
-- [ ] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
+- [x] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
       (bit an agent on 2026-10-22: ~15 fields incl. LweMonitors). Make it merge (PATCH semantics) or reject partial bodies.
-- [ ] Remove the dead `LweSilent` setting (no consumers).
+      — done 2026-10-26: it merges (`SettingsService.Patch` → `Merge`, `web-backend.md`): keys in the body overwrite
+      the saved values, the rest are kept; an array or object replaces its field whole, an explicit null sets null,
+      unknown keys are ignored, a bad value is a 400 that saves nothing; one poster at a time. RED before: a partial
+      `{"Theme":"Nord"}` reset 26 other fields incl. `PlayerEngine` (→ the engine switched to legacy).
+      `scripts/test-settings-merge.sh` (hermetic): partial / full / null / unknown key / 400 / parallel bodies, and a
+      partial body applying live (Volume, Speed, NoAudio, VideoScale, override ?? global, rotation interval, engine).
+- [ ] `POST /playlist/state` binds its whole `CustomPlaylist` (`videoPaths` + `settings` + `name`), same hazard as
+      `/settings` had: a body without `videoPaths` saves an empty strip (a running rotation keeps its own list — the
+      live reorder skips an empty one), a partial `settings` resets the rest to their defaults (override off →
+      the rotation follows the globals live, transitions off). The UI always posts the whole strip; decide merge vs
+      reject (`/playlist/play`'s `settings` is per-play by design — defaults intended there).
+- [x] Remove the dead `LweSilent` setting (no consumers).
+      — done 2026-10-26: gone from `AppSettings` and `session.md` (nothing in src/, app/, scripts/ read it). A
+      settings.json that still has it loads (unknown keys are ignored) and the next save drops it.
 - [ ] Harden `AUDIO_SETTLE` in `lp-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
 - [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in lp-player.

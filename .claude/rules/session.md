@@ -17,7 +17,7 @@ paths:
 - Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600, clamped in setter; 0 = off); `RestartOnSwitchOnly` (false) — defer the mpvpaper leak-restart to the next playlist changeover (advanced)
 - Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false), `ReplaceDirectWithWorkshop` (false) — swap a direct-DL `workshop/` copy for a `local/` WE-dir symlink when it appears
 - Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
-- LWE: `LweSilent` (false), `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
+- LWE: `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `lpdbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
 - `LastSession`: tracks last applied mode for `--restore`
@@ -32,7 +32,7 @@ paths:
 - `Paths` — path(s) used; `Shuffle` — shuffle was on
 - `TimedIntervalSeconds`, `WaitForVideoEnd`, `AdvanceOnVideoEnd`, `OverrideGlobalSettings` — restores exact interval/mode rather than current globals
 
-**`LastSession` upkeep:** the `/settings` POST **preserves** `LastSession` from disk (the UI re-POSTs a cached settings blob that omits it — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
+**`LastSession` upkeep:** the `/settings` POST merges its body over the saved settings (PATCH — keys it leaves out keep their values, `web-backend.md`) and **preserves** `LastSession` (+ the Steam sign-in: tokens, `SteamId`) from disk whatever the body says (the UI re-POSTs a stale cached copy — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
 
 ## Timed Playlist
 
