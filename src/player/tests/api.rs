@@ -3240,6 +3240,65 @@ fn gain_fast_timer_paused_makes_no_progress() {
     );
 }
 
+/// UI × player-state matrix: a user setting ramped while the player is paused lands —
+/// the backend mutes with `animate srcs:*.gain.mute` over 30 ms, and on the pause-excised
+/// clock that ramp stood still until the resume (a keybind mute while paused reached no
+/// source; at the resume it raced the pause gate's ramp-in). Setting slots (user/override/
+/// normalize/mute/automute) ramp on the unpaused clock; the recipe's own slots stay frozen.
+#[test]
+fn setting_gain_ramp_lands_while_paused() {
+    let Some(srv) = Serve::start_with(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = color(&mut c, [0, 255, 0]);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    std::thread::sleep(Duration::from_millis(30));
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.mute"), "to": -96.0, "duration_ms": 30}),
+    );
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.user"), "to": -6.0, "duration_ms": 30}),
+    );
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.anticlick"), "to": -40.0, "duration_ms": 30}),
+    );
+    let read = |c: &mut Client, slot: &str| {
+        get(c, &format!("{id}.gain.{slot}"))["result"]["value"]
+            .as_f64()
+            .unwrap()
+    };
+    wait_for(
+        Duration::from_secs(1),
+        "gain.mute/user to land while paused",
+        || {
+            ((read(&mut c, "mute") + 96.0).abs() < 1e-6
+                && (read(&mut c, "user") + 6.0).abs() < 1e-6)
+                .then_some(())
+        },
+    );
+    // the recipe's slot keeps the player clock: still where it was while paused
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(
+        read(&mut c, "anticlick").abs() < 1e-6,
+        "anticlick moved while paused"
+    );
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    wait_for(Duration::from_secs(1), "anticlick after the resume", || {
+        ((read(&mut c, "anticlick") + 40.0).abs() < 1e-6).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    let done = c.ok("probe", json!({"name": "loop"}));
+    assert_eq!(
+        done["gain_timer_armed"],
+        json!(false),
+        "disarmed once finished: {done}"
+    );
+}
+
 // ---------------------------------------------------------------- final review fixes
 
 /// Poll `f` every 5 ms until it returns `Some`, failing after `limit`.

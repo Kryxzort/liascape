@@ -171,6 +171,9 @@ impl SourceSnap {
 pub struct Capture<'a> {
     pub graph: &'a Graph,
     pub anim: &'a Animator,
+    /// The runtime's user-setting gain ramps (unpaused clock) — a gain saved mid-ramp is
+    /// saved at its target, whichever animator moves it.
+    pub setting_anim: &'a Animator,
     pub transitions: &'a [TransitionStatus],
     /// The parked wallpaper (its live id) — `resume_paused` is what it's saved with.
     pub parked: Option<ParkedSnap>,
@@ -249,7 +252,13 @@ fn content_of(g: &Graph, out_id: &str, trs: &[TransitionStatus]) -> Option<(Stri
         .then_some((content, false))
 }
 
-fn source_snap(g: &Graph, anim: &Animator, id: &str, target_b: bool) -> SourceSnap {
+fn source_snap(
+    g: &Graph,
+    anim: &Animator,
+    setting_anim: &Animator,
+    id: &str,
+    target_b: bool,
+) -> SourceSnap {
     let kind = get_str(g, id, "kind");
     let ready = get_bool(g, id, "ready");
     let paused = get_bool(g, id, "paused");
@@ -271,8 +280,10 @@ fn source_snap(g: &Graph, anim: &Animator, id: &str, target_b: bool) -> SourceSn
         if TRANSIENT_GAINS.contains(&slot) {
             continue;
         }
+        let gp = PropPath(format!("{id}.{name}"));
         let db = anim
-            .live_target_of(&PropPath(format!("{id}.{name}")))
+            .live_target_of(&gp)
+            .or_else(|| setting_anim.live_target_of(&gp))
             .or(match v {
                 PropValue::F64(f) => Some(f),
                 _ => None,
@@ -351,7 +362,7 @@ pub fn capture(c: &Capture) -> Snapshot {
         wanted.entry(pk.id.clone()).or_insert(false);
     }
     for (id, b) in wanted {
-        let mut s = source_snap(g, c.anim, &id, b);
+        let mut s = source_snap(g, c.anim, c.setting_anim, &id, b);
         if let Some(pk) = parked.as_ref().filter(|pk| pk.id == id) {
             s.paused = pk.resume_paused;
             s.playing = false;
@@ -598,6 +609,7 @@ mod tests {
         capture(&Capture {
             graph: g,
             anim,
+            setting_anim: &Animator::new(),
             transitions: trs,
             parked: None,
             remembered: &BTreeMap::new(),
@@ -745,6 +757,7 @@ mod tests {
         let s = capture(&Capture {
             graph: &g,
             anim: &Animator::new(),
+            setting_anim: &Animator::new(),
             transitions: &[],
             parked: Some(ParkedSnap {
                 id: "pk".into(),

@@ -1500,6 +1500,15 @@ excluded from the player-pause composition until it's done — so a destroy, `st
 removal completes (decoder freed) while the player is paused. A source the pause already holds
 paused is silent (`onset::audible`) and goes at once. **`stop` clears `player.paused`** (after
 retiring, so held sources go silently first): a stop ends the session, the next wallpaper plays.
+**User-setting ramps land while paused (UI matrix):** `animate` on a setting gain slot
+(`GainSlot::is_setting` — `user`/`override`/`normalize`/`mute`/`automute`) goes to
+`Runtime::setting_anim`, an Animator on the same unpaused base clock (ticked by the main tick and
+the fast timer, part of `gain_work_pending`, saved by the snapshot at its live target, cleared by
+`stop`); one writer per path — adding to either animator cancels the other's ramp on that path. The
+backend mutes with a 30 ms `animate srcs:*.gain.mute`: on the frozen clock a mute while paused
+reached no source until the resume, then raced the gate's ramp-in. The recipe's slots
+(`xfade`/`anticlick`) and every non-gain animation keep the player clock.
+`tests/api.rs::setting_gain_ramp_lands_while_paused`.
 
 **No output left: transitions are accepted (final review I4).** With zero outputs (R60 parked),
 `transition` on an `out:` alias goes to `Runtime::transition_parked`: B is created paused and
