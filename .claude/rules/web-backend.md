@@ -37,7 +37,10 @@ run over 500 ms.
 - **`Web/AppOps.cs`** — backend orchestration: `PlayPlaylist`/`PlayFrom`
   (effective-settings: override-global vs global), `DownloadAsync` (web + workshop-acquire), `Trash`
   / `Undo` / `DeleteFromSource` (below), `SavePlaylistState` (`/playlist/state`'s body: save + live
-  reorder/rotation of a running timed playlist — trash/undo go through it too), `RunAction` (keybinds).
+  reorder/rotation of a running timed playlist — trash/undo go through it too — and a change of its
+  transitions re-arms an aligned switch already armed for A's end, `PlayerHelper.RearmAlignedSwitch`:
+  under lp-player that switch was requested with the old effect/duration; `/settings` does the same for
+  the global transitions and `TransitionMethod`), `RunAction` (keybinds).
 - **Trash** (`AppOps.Trash`, old-app parity): the items leave the **playlist** too (live — a running
   rotation never plays a trashed file; an armed aligned switch to one is re-armed), the batch remembers
   each one's playlist index and **Undo puts it back there** (+ un-queues a delete-from-source

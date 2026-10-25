@@ -368,6 +368,12 @@ public static class ServerHost
             {
                 PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalWaitForVideoEnd, s.GlobalAdvanceOnVideoEnd);
             }
+            // the effective transition (the globals, when the playlist follows them) or the method changed → an
+            // aligned switch already armed for A's end takes it (lp-player requested it with the old one)
+            var plS = PlaylistService.LoadCurrentState()?.Settings;
+            if (prev.TransitionMethod != s.TransitionMethod
+                || !TransitionService.SameConfig(TransitionService.Effective(prev, plS), TransitionService.Effective(s, plS)))
+                PlayerHelper.RearmAlignedSwitch();
             // React live only when an AutoMute field changed — Start (restarts) when enabled,
             // Stop (also unmutes) when disabled. Applies to the currently-playing wallpaper immediately.
             bool amChanged = prev.AutoMute != s.AutoMute

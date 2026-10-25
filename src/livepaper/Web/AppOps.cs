@@ -286,6 +286,9 @@ public static class AppOps
                     : (g.GlobalIntervalSeconds, g.GlobalWaitForVideoEnd, g.GlobalAdvanceOnVideoEnd);
             var now = Eff(p);
             if (now != Eff(prevP)) PlayerHelper.ApplyRotationLive(now.iv, now.wait, now.adv);
+            // the playlist's transitions changed (on/off, effects, duration): an armed aligned switch takes them
+            if (!TransitionService.SameConfig(TransitionService.Effective(g, prevP?.Settings), TransitionService.Effective(g, p.Settings)))
+                PlayerHelper.RearmAlignedSwitch();
         }
         
     }
