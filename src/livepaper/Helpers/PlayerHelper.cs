@@ -2898,6 +2898,18 @@ public static class PlayerHelper
         if (IsLweRunning) ApplyLweVolume(volume);
     }
 
+    // The Settings page's global Volume/Speed drag preview (`/preview {global:true}`, no persist — the
+    // UI's debounced /settings persists): every live wallpaper WITHOUT its own override for that field
+    // takes the dragged value (effective = override ?? global, R61); an overridden one never moves.
+    public static void PreviewGlobal(int? volume, double? speed)
+    {
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.PreviewGlobal(volume, speed); return; }
+        var cur = QueryCurrentPath();
+        if (cur == null) return;
+        if (volume is int v && ReadVolumeOverride(cur) == null) SetVolume(v);
+        if (speed is double sp && !IsLweRunning && ReadSpeedOverride(cur) == null) SetSpeed(sp); // scenes are 1×
+    }
+
     public static void SetSpeed(double speed)
     {
         SendCommand("set_property", "speed", speed);

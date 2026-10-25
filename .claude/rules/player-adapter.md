@@ -180,7 +180,7 @@ code below it is unchanged)
 | `ApplyPlaybackSettingsLive` | `ApplySettingsLive`: NoAudio/VideoFps/DisableCache/Demuxer*/HwDec → `srcs:*`; Loop only for a single non-timed video (the legacy guard) |
 | `ApplyOverrideLive` | the item's own source(s) by path (may be a pending B) |
 | `ApplyNormalizationLive` | `af` on the item's source(s) |
-| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), from the cached source map — on screen, either side of an effect, a pending B), literal values, ONE `set` per source per value; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths` |
+| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), from the cached source map — on screen, either side of an effect, a pending B), literal values, ONE `set` per source per value; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: every source in the map whose item has NO override for that field (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
@@ -332,7 +332,9 @@ rotation resuming (I4); a pending B getting its OWN override while the global
 changes; **speed storm**: an aligned switch armed at 4× survives a drop to 0.5× and an aligned switch
 survives an 8 s pause (no cancel, no forced switch, no backstop log line), each then handing off at A's
 end; `/preview {paths:[A]}` during a running 8 s fade moves A only and `{paths:[B]}` B only (RED before:
-A's values landed on B); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
+A's values landed on B); `/preview {global:true}` during a running 8 s fade from a library item that
+follows the global to one with its own override 30 / 0.8× moves A only, persists nothing, answers < 100 ms
+and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
 a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
 owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend

@@ -179,8 +179,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         output = never shared); re-anchor at the next wrap when per-monitor wallpapers land.
   - [ ] **Missed frames scale with content fps**: steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
         240 Hz output; random 0.25–4× (up to 240 fps content) 1–1.4/s vs 0.16/s at 1×. Phase 2 render worker.
-  - [ ] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
+  - [x] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
         previews) and a no-op `POST /settings` costs ~150 ms in the backend — profile it.
+        — done: the cost was the loudness backfill's library scan running synchronously on the request thread
+        (and parsing index.json twice per item): 330–550 ms → median 8 ms with 300 items
+        (`scripts/test-settings-latency.sh`); the global Volume/Speed sliders preview through a throttled
+        `/preview {global:true}` (only wallpapers without their own override move; matrix `globalDrag*`).
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

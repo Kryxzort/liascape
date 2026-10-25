@@ -425,6 +425,28 @@ post /preview "{\"volume\":40,\"paths\":[\"$E2\"]}" >/dev/null; sleep 0.4
 near "$(sv "$TBp" gain.user)" "$(dB 40)" && near "$(sv "$TAp" gain.user)" "$(dB 20)" && ok "B's drag moved B only" || bad "B's drag: A $(sv "$TAp" gain.user) B $(sv "$TBp" gain.user)"
 post /stop '{}' >/dev/null; sleep 0.6
 
+echo "== global slider drag (/preview global): every source that follows the global moves, an overridden one never does"
+# The Settings page's Volume/Speed sliders drag-preview through /preview {global:true} (no persist; the
+# debounced /settings persists). Effective = override ?? global (R61): mid-effect, A follows the global and
+# B has its own override → only A moves (RED before: the request ignored `global` and moved `cur:*` = B).
+setting '.Volume = 100 | .Speed = 1'
+LG1=$(post /library/import "{\"path\":\"$E1\",\"title\":\"gee one\"}" | jq -r .videoPath)
+LG2=$(post /library/import "{\"path\":\"$E2\",\"title\":\"gee two\"}" | jq -r .videoPath)
+post /library/volume "{\"path\":\"$LG2\",\"intValue\":30}" >/dev/null; post /library/speed "{\"path\":\"$LG2\",\"doubleValue\":0.8}" >/dev/null
+post /apply "{\"path\":\"$LG1\"}" >/dev/null; sleep 1.2
+TG2=$(ctl transition "{\"outputs\":\"out:*\",\"to\":{\"path\":\"$LG2\",\"loop\":true,\"gain.user\":$(dB 30),\"speed\":0.8},\"effect_id\":\"fade\",\"duration_ms\":8000,\"align\":\"now\"}" | jq -r .to)
+TG1=$(srcIdForPath "$LG1"); sleep 0.8
+[ "$(ctl state | jq -r '.transitions[0].phase // empty')" = running ] && ok "fade $TG1 → $TG2 (own override 30 / 0.8×) running" || bad "transition not running: $(ctl state | jq -c .transitions)"
+post /preview '{"volume":55,"speed":1.6,"global":true}' >/dev/null; sleep 0.4
+near "$(sv "$TG1" gain.user)" "$(dB 55)" && near "$(sv "$TG1" speed)" 1.6 && ok "the global drag moved A ($TG1: $(sv "$TG1" gain.user) dB, $(sv "$TG1" speed)x)" || bad "global drag: A at $(sv "$TG1" gain.user) dB $(sv "$TG1" speed)x"
+near "$(sv "$TG2" gain.user)" "$(dB 30)" && near "$(sv "$TG2" speed)" 0.8 && ok "…and never the overridden B ($TG2: $(sv "$TG2" gain.user) dB, $(sv "$TG2" speed)x)" || bad "global drag moved the overridden B: $(sv "$TG2" gain.user) dB $(sv "$TG2" speed)x"
+[ "$(curl -sf -m 5 "$U/settings" | jq .volume)" = 100 ] && ok "a preview doesn't persist (volume still 100)" || bad "preview persisted volume $(curl -sf -m 5 "$U/settings" | jq .volume)"
+m_prev=$(post_ms /preview '{"volume":60,"global":true}'); sleep 0.3
+[ "$m_prev" -lt 100 ] && ok "/preview global answers in ${m_prev} ms" || bad "/preview global took ${m_prev} ms"
+near "$(sv "$TG1" gain.user)" "$(dB 60)" && ok "a volume-only global drag keeps A's speed (1.6×: $(sv "$TG1" speed))" || bad "volume-only drag: A $(sv "$TG1" gain.user) dB"
+near "$(sv "$TG1" speed)" 1.6 || bad "volume-only global drag moved A's speed: $(sv "$TG1" speed)"
+post /stop '{}' >/dev/null; sleep 0.6
+
 armed_only() { for _ in $(seq 1 80); do ctl state | jq -e '[.transitions[] | select(.phase != "done")] | length == 1 and .[0].phase == "waiting_start"' >/dev/null && return; sleep 0.1; done; echo "  note: no lone armed switch within 8 s: $(ctl state | jq -c '[.transitions[] | .phase]')"; }
 echo "== a backend restart hands the playlist over without two timers (dotnet watch / app relaunch)"
 # A stopping backend hands its timed playlist to a detached --timer-daemon, but kept ticking itself until

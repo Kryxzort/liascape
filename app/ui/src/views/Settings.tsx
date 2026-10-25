@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles,
@@ -55,8 +55,33 @@ const Section = ({ title, icon, children }: { title: string; icon?: React.ReactN
 );
 const Help = ({ children }: { children: React.ReactNode }) => <p className="help">{children}</p>;
 
+// COOL: the global Volume/Speed sliders drag-preview LIVE like the per-wallpaper modal's: a throttled
+// (~90 ms, trailing) `/preview {global:true}` moves every playing wallpaper that follows the global (the
+// backend leaves one with its own override alone — override ?? global); the store's debounced
+// /settings save (250 ms after the last tick) persists. API: /preview global.
+function useGlobalPreview() {
+  const r = useRef<{ vol: number | null; spd: number | null; last: number; tm: number | null }>({ vol: null, spd: null, last: 0, tm: null });
+  useEffect(() => () => { if (r.current.tm != null) clearTimeout(r.current.tm); }, []);
+  return useCallback((patch: { volume?: number; speed?: number }) => {
+    const s = r.current;
+    if (patch.volume != null) s.vol = patch.volume;
+    if (patch.speed != null) s.spd = patch.speed;
+    const flush = () => {
+      const body: { volume?: number; speed?: number; global: true } = { global: true };
+      if (s.vol != null) { body.volume = s.vol; s.vol = null; }
+      if (s.spd != null) { body.speed = s.spd; s.spd = null; }
+      s.last = Date.now(); s.tm = null;
+      if (body.volume != null || body.speed != null) api.preview(body).catch(() => {});
+    };
+    const dt = Date.now() - s.last;
+    if (dt >= 90) flush();
+    else if (s.tm == null) s.tm = window.setTimeout(flush, 90 - dt);
+  }, []);
+}
+
 export const Settings = memo(function Settings() {
   const { g, set } = useS();
+  const previewGlobal = useGlobalPreview();
   const clearLibrary = useStore((s) => s.clearLibrary);
   const clearCache = useStore((s) => s.clearCache);
   const steam = useStore((s) => s.steam);
@@ -160,14 +185,14 @@ export const Settings = memo(function Settings() {
         <Row label="Mute audio" rk="noAudio"><input type="checkbox" checked={mute} onChange={(e) => set("noAudio", e.target.checked)} /></Row>
         {adv && <Row label="Disable cache" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>}
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}`} disabled={mute} rk="volume">
-          <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => set("volume", +e.target.value)} /></Row>
+          <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
         <Row label="Normalize audio" hint="match perceived loudness across videos (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
         {!mute && g("normalizeAudio", false) && <Row label="Target loudness" hint="LUFS (dB-referenced loudness); −14 = streaming standard, lower = quieter. Pick a preset or type your own. Every video is matched to this level." rk="normalizeTargetLufs">
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-100} max={0} step={1}
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
-        <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => set("speed", +e.target.value)} /></Row>
+        <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
         {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="keepPauseOnSwitch">
           <input type="checkbox" checked={g("keepPauseOnSwitch", false)} onChange={(e) => set("keepPauseOnSwitch", e.target.checked)} /></Row>}
         <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><input className="num" type="number" min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(e) => set("restartIntervalSeconds", +e.target.value)} /></Row>
