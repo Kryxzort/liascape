@@ -154,7 +154,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       saved playlist overwritten, two controls in a row (slider drag → next, pause → play-from, mute →
       next, a global setting → next, next+next, next+prev, preview drag → close → reopen, remove / drag /
       load / transition change → next, two card applies / strip clicks in quick succession, two trashes + two
-      undos, pause → interval change: the rotation holds until the resume), a settings save/load race. Fixed: settings.json was written in
+      undos, pause → interval change: the rotation holds until the resume, a slider drag closed with Escape
+      at once), a settings save/load race. Fixed: settings.json was written in
       place — a read mid-write got the C# defaults, applied live and saved back over everything (/settings'
       own `prev` → an engine flip, the Steam tokens gone); an armed align:end switch kept the transition it
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
@@ -163,7 +164,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the rest of
       the global Settings page (auto-mute, normalization, appearance, global wait-for-end), Shift+click range
       selection + Delete/Ctrl+A keys, which order a shuffle actually plays, deleting a saved playlist (no UI
-      for it), the item settings modal's Escape close, three or more controls in a row.
+      for it), three or more controls in a row.
 - [x] **Stale player after a rebuild/reinstall** — the player outlives the backend, so fixes "persisted" (a
       13:26 build ran at 19:00): the backend now restarts a stale player onto its binary with `--restore`
       (before a switch, or from a 10 s check while nothing is armed — player-adapter.md § Lifecycle).
