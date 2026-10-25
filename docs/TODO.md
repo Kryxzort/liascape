@@ -139,9 +139,28 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       / play-from while paused stayed paused; `previous` at the first item with an armed advance relaunched
       the current one; mute while paused never reached a source (setting ramps on the frozen clock); the
       installed app got no WS events and lost its localStorage prefs every launch (random port = new origin).
-      **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the global
-      Settings page beyond the nine playback settings, drag-reorder of the strip, saved playlists, the
-      playlist-settings modal beyond advance-on-end, two controls in a row (only one control per state).
+      **Round 2** (2026-10-25 night): `--jobs N` runs N hermetic stacks in parallel (default 6; full run
+      40 min serial → 14.5 min at 4 → 10 min at 6 → 8.3 min at 8 but 13 cells timed out entering their state
+      (all passed alone); ~0.8 GB each, capped by MemAvailable, the run stops under a 3 GB floor;
+      `LP_MATRIX_NICE=1` + `--jobs 2` next to someone working — 4 stacks lag the desktop); the window is SHOWN on the private Xvfb — hidden it rendered no frames (rAF never
+      ran: framer-motion/WAAPI exits never finished, dnd-kit's rAF-aligned pointermoves coalesced so a drop
+      saw a stale target, gifs/the live bg sat paused unfocused). ~90 new cells, each only in the states its
+      halves share: strip drag-reorder through real input events (`sendInputEvent`), remove (X / context
+      menu) of the shown / incoming / other item, Save / Load modals, the playlist-settings modal (interval,
+      0 s on the way, wait-for-end, shuffle, transition off / duration / effect), the global Rotation section
+      + transition method vs an armed switch (opt-in state `pendingGlobal`: a playlist following the globals,
+      vs `pending`'s own override), two controls in a row (slider drag → next, pause → play-from, mute →
+      next, a global setting → next, next+next, next+prev, preview drag → close → reopen, remove / drag /
+      load / transition change → next), a settings save/load race. Fixed: settings.json was written in
+      place — a read mid-write got the C# defaults, applied live and saved back over everything (/settings'
+      own `prev` → an engine flip, the Steam tokens gone); an armed align:end switch kept the transition it
+      was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
+      the playing item from the strip restarted the rotation from the top (now: from its place).
+      `LP_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
+      **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the rest of
+      the global Settings page (auto-mute, normalization, appearance, the global interval / wait-for-end),
+      multi-select actions, which order a shuffle actually plays, overwriting / deleting a saved playlist,
+      three or more controls in a row.
 - [x] **Stale player after a rebuild/reinstall** — the player outlives the backend, so fixes "persisted" (a
       13:26 build ran at 19:00): the backend now restarts a stale player onto its binary with `--restore`
       (before a switch, or from a 10 s check while nothing is armed — player-adapter.md § Lifecycle).
