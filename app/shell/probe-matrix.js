@@ -965,6 +965,22 @@ C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async
     return v;
   } };
 
+// --- the item settings modal closed with Escape the instant a drag ends (its persist is still pending): the last
+// value is saved and stays live — closing must flush, never drop or revert it
+for (const t of ["shown", "other"]) C[`itemVolDragEsc:${t}`] = { states: ["single", "effect", "pending"], async run(c) {
+    c.target = pick(c, t); if (!c.target) return c.skip = "no target";
+    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(600);
+      await m.drag(m.modalRange(0), 80, 30, 10, 30, "volume"); ${key("Escape")}`);
+    await sleep(1200);
+    c.open = await ui(`return !!document.querySelector(".lib-settings");`);
+  }, check(c) {
+    const v = [];
+    const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
+    if (ov !== 30) v.push(`${TITLE(c.target)} volumeOverride ${ov} after a drag to 30 closed with Escape`);
+    if (c.open) v.push("the settings modal is still open 1.2 s after Escape");
+    return v;
+  } };
+
 function expectShown(c, want, { effect }) {
   const v = [];
   if (!c.noOutput && c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
