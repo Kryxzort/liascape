@@ -136,6 +136,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
+      Not a margin: `i2_switch_while_gated_never_leaves_a_playing_source_silent` (~1 in 8 under CPU load) was
+      a real bug — a resuming pause gate was dropped on a second clock read after its last `ramp_db`, so
+      `gain.pause` stayed a hair under 0 dB for good (−0.0003 measured; −0.04…−0.56 dB with a 2 ms stall
+      injected, 4/4 RED). The drop now writes the exact 0 dB.
 - [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
       playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
       align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:
@@ -178,9 +182,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] **Two timer owners across a backend restart** (dotnet watch, app relaunch): switch storm every 1–16 s;
       the stopping backend now releases the timer first, a backend yields to a newer one, a superseded
       aligned switch re-arms instead of switching now (player.md § One timer owner).
-- [ ] **`bin/Debug/livepaper.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
+- [x] **`bin/Debug/livepaper.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
       next to the owner's `dotnet watch` (same `obj/`) — the next watch restart (`dotnet run --no-build`)
       can't start without it. A plain `dotnet build` brought it back; cause not pinned down.
+      — root cause: `/home/kryxzort/Projects` is a symlink to `/mnt/CachyOS/@home/kryxzort/Projects`, and
+      MSBuild's IncrementalClean compares `obj/…/FileListAbsolute.txt` by path STRING — a build through one
+      spelling deletes the other spelling's entries, i.e. its own fresh outputs. Every script now roots at
+      `pwd -P` and the test scripts run their backend from a verified snapshot of `bin/Debug` (d767c59).
 - [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same
       round: the adapter's aligned-switch backstop, the 1× tempo-filter rebuild holes, the align:end estimate):
   - [ ] **Stall breaker trips without a slow player** — 6 trips in ~25 min of storm (the request after a trip
