@@ -74,7 +74,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=lp-player`** (Task 20 battery,
       `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
       `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
-- [ ] **The owner's installed `livepaper` (NixOS package) predates lp-player entirely** (Task 20 battery,
+- [x] **The owner's installed `livepaper` (NixOS package) predates lp-player entirely** — done 2026-10-25: `/etc/nixos/livepaper.nix` re-pinned to the local `lp-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
       `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `livepaper.dll` —
       zero occurrences of `PlayerEngine`/`LP_PLAYER_BIN` anywhere, while the current dev build has both. So
       every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
