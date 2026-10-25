@@ -3843,6 +3843,12 @@ fn i5_switch_loop_busy() {
 /// mode, `sources::mpv::mpv_hwdec`).
 #[test]
 fn t20d_hwdec_switch_never_stalls_the_loop() {
+    // SKIP (no EGL / no catalogue — e.g. the nix build sandbox, which has no ffmpeg either)
+    // before generating any clip.
+    let Some(probe) = Serve::start() else {
+        return;
+    };
+    drop(probe);
     let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
     let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
     let driver = Path::new("/run/opengl-driver/lib");
