@@ -4,6 +4,13 @@ Running list of things found while working that aren't done yet. Newest context 
 Tick items off in the commit that does them. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Waiting on owner
+- [ ] **Pause × a user switch** (UI × player-state matrix, `KNOWN` cells). Paused, then next/previous/random:
+      a single wallpaper **unpauses** and switches (`TryStepLibrary` → `Apply` = a new session, I1); a playlist
+      **keeps** the pause but its tick holds the action until the resume and switches then (the player clock is
+      frozen, so a transition couldn't run anyway). The documented contract (I1) says next/prev keep the pause.
+      Options: (a) every user switch resumes playback (the legacy single-item feel; the playlist consumes the
+      action at once and unpauses); (b) every user switch keeps the pause and shows B paused (a cut while
+      paused, or the effect on the unpaused clock with both sides frozen); (c) leave it.
 - [x] **Approve the lp-player design** (`docs/superpowers/specs/2026-10-20-utopia-player-design.md`). Check the
       "Calls made by the designer" list at the end. Next step after approval: write the implementation plan.
       — approved 2026-10-20 (`TransitionMethod` kept, per the spec's own status line); implementation plan:
@@ -120,6 +127,19 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
+- [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
+      playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
+      align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:
+      trash left items in the playlist (a rotation played the missing file; an armed switch still fired to
+      it), trashing an item whose switch was requested but not yet running kept it playing, undo didn't put
+      it back; keybind next/prev/random on a single wallpaper switched behind the UI (now forwarded to the
+      running backend); keybind volume reverted by the next UI save; play-from saved the strip reordered; Play
+      / play-from while paused stayed paused; `previous` at the first item with an armed advance relaunched
+      the current one; mute while paused never reached a source (setting ramps on the frozen clock); the
+      installed app got no WS events and lost its localStorage prefs every launch (random port = new origin).
+      **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the global
+      Settings page beyond the nine playback settings, drag-reorder of the strip, saved playlists, the
+      playlist-settings modal beyond advance-on-end, two controls in a row (only one control per state).
 - [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same
       round: the adapter's aligned-switch backstop, the 1× tempo-filter rebuild holes, the align:end estimate):
   - [ ] **Stall breaker trips without a slow player** — 6 trips in ~25 min of storm (the request after a trip
