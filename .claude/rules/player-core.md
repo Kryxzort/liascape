@@ -1102,7 +1102,25 @@ a worker error is the same `SourceEvent::Error` + `failed` as a synchronous one;
 meanwhile drops the result (`PreparedCore::drop` → reaper). `finish_teardown` waits (bounded)
 for outstanding workers; `host::opening_pending()` counts toward `mpv.reaper_stragglers`. R29
 `Ready` semantics are unchanged (still the first frame of the current load). Stepped mode and
-the harnesses open synchronously.
+the harnesses open synchronously. **Bounded (TODO "No explicit cap on concurrent `lp-open`
+worker threads"):** the cores are made by `host::OpenPool` — a FIFO queue served by at most
+`MAX_OPEN_WORKERS` (2) `lp-open` threads, spawned on demand and gone once the queue is empty
+(an idle player has none); before, every create spawned its own thread (a burst of 16 = 16 at
+once). A queued job holds its slot **weakly**: a node destroyed before a worker gets to it is
+skipped (no core made — `open_pool.skipped`), so a switch storm's superseded B's cost nothing; a
+running one holds it strongly (a node gone meanwhile drops the result → reaper, as before); a
+prop changed while queued lands because the source still opens from the node's current props.
+`finish_teardown`'s wait is then the ≤ 2 cores in progress. A job that panics doesn't kill its
+worker; a pool that can't start a thread with none running hands the open back (synchronous).
+**Measured** (release, hermetic headless, a burst of 16 paused 1080p creates, 3 rounds per cap):
+all made + opened 102–166 ms at cap 1, **61–80 at 2**, 58–71 at 4, 23–70 uncapped; all ready ~0.5 s
+whatever the cap (first frames dominate); the loop's longest open share 3–5, **2–8**, 11–24, 13–29
+ms (more finished cores land in one `sync` the higher the cap). Guards: `tests/api.rs::
+i5_open_burst_is_capped_and_none_lost` (16 creates in one write: peak ≤ 2, every kept one opens
+and readies, the 3 destroyed while queued are skipped or opened-and-retired — measured: all 3
+skipped —, the one un-paused while queued plays, quit with a second burst queued exits in ~40 ms
+with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_order_and_loses_none`,
+`open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
 **Audio re-route (final review I7).** `SourceHost::set_audio_route(device, bias)` — the bus went
 down (`None`: mpv's default device) or came back (`Some(bus device)`, bias = −latency): base
@@ -1590,7 +1608,8 @@ path.
 **Bounds (C1).** `probe loop` → `bounds`: the size of every per-source collection (graph nodes,
 `gain_history_tracks/samples`, animator entries, teardown ramps, pending destroys, onsets,
 fade-ins, dropout windows/due analyses, pause gates, `last_event`, `local`, wake registrations,
-warn keys, hosted/opening/dying sources, transitions/graves/ended/restore onsets). `GainHistory`
+warn keys, hosted/opening/dying sources, `open_queued` (opens waiting for an `lp-open` worker),
+transitions/graves/ended/restore onsets). `GainHistory`
 is run-length encoded (a steady source = two samples), drops a dead source's track
 `DEAD_LINGER` (30 s) after its last reading (its post-roll analysis needs it), and is capped at
 `MAX_TRACKS` 64 / `MAX_TOTAL_SAMPLES` 131 072 (least recently seen dead track first). Test:
@@ -1770,7 +1789,9 @@ loop's share of source opens taken out / that share alone — render context + p
 `loadfile`; the core itself is made on the `lp-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,
 gain_pushes, pause_gates, dropout_windows_open, bounds (§ Runtime "Bounds"),
-recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening`; `frames` (Task 13,
+recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening` + `open_pool`
+`{cap, workers, running, queued, peak, skipped, pending}` (the `lp-open` pool, § Sources "Async
+opens"); `frames` (Task 13,
 `probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000),
 explicit_sync ({env, value, source: policy|env}, null headless — Task 20e),
 default_queue_dispatched (events from libwayland's default queue; null headless), outputs:

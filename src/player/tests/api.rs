@@ -276,6 +276,36 @@ impl Client {
         r["result"].clone()
     }
 
+    /// Every request in ONE write (the server handles them in one dispatch, ≤ 32 per wake)
+    /// → their results, in order; each must succeed.
+    fn ok_batch(&mut self, reqs: &[(&str, Value)]) -> Vec<Value> {
+        let first = self.id + 1;
+        let mut out = String::new();
+        for (cmd, args) in reqs {
+            self.id += 1;
+            out.push_str(&json!({"id": self.id, "cmd": cmd, "args": args}).to_string());
+            out.push('\n');
+        }
+        self.w.write_all(out.as_bytes()).unwrap();
+        let mut results = Vec::new();
+        for id in first..=self.id {
+            loop {
+                let m = self
+                    .read_msg()
+                    .unwrap_or_else(|| panic!("no response to id {id}"));
+                if m.get("event").is_some() {
+                    self.events.push_back(m);
+                    continue;
+                }
+                assert_eq!(m["id"], json!(id), "responses out of order: {m}");
+                assert_eq!(m["ok"], json!(true), "request {id} failed: {m}");
+                results.push(m["result"].clone());
+                break;
+            }
+        }
+        results
+    }
+
     fn err(&mut self, cmd: &str, args: Value) -> Value {
         let r = self.call(cmd, args.clone());
         assert_eq!(r["ok"], json!(false), "{cmd} {args} should fail: {r}");
@@ -3575,6 +3605,7 @@ fn c1_long_run_switches_stay_bounded() {
         "ended",
         "restore_onsets",
         "dying",
+        "open_queued",
     ] {
         assert!(n(k) <= 4, "bounds.{k} grew: {b}");
     }
@@ -4146,6 +4177,132 @@ fn i5_switch_loop_busy() {
             "a warm switch still blocks the loop: {busy:?}"
         );
     }
+}
+
+/// `lp_player::sources::host::MAX_OPEN_WORKERS` (black-box: spelled out).
+const OPEN_WORKERS_CAP: u64 = 2;
+
+/// TODO "No explicit cap on concurrent `lp-open` worker threads" (final review I5): a burst
+/// of creates starts at most [`OPEN_WORKERS_CAP`] core-making workers at once, the rest
+/// wait in order and none is lost; a node destroyed while queued never opens (its job is
+/// skipped — no core made), a prop changed while queued still reaches the source it opens
+/// (opened from the node's CURRENT props); quit with a burst still queued stays bounded and
+/// clean (no `mpv.reaper_stragglers`). RED before the cap: 16 `lp-open` threads at once.
+#[test]
+fn i5_open_burst_is_capped_and_none_lost() {
+    let Some(mut srv) = real_serve(&[]) else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source.open"]}));
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    const N: usize = 16;
+    let burst = |c: &mut Client| -> Vec<String> {
+        let reqs: Vec<(&str, Value)> = (0..N)
+            .map(|_| {
+                (
+                    "create",
+                    json!({"kind": "source", "props": {"path": red, "loop": true, "paused": true}}),
+                )
+            })
+            .collect();
+        c.ok_batch(&reqs)
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let ids = burst(&mut c);
+    // The back of the burst is still waiting for a worker (2–8 ms per core at the cap).
+    let gone: Vec<String> = ids[N - 3..].to_vec();
+    let changed = ids[N - 4].clone();
+    let mut reqs: Vec<(&str, Value)> = gone
+        .iter()
+        .map(|id| ("destroy", json!({ "id": id })))
+        .collect();
+    reqs.push((
+        "set",
+        json!({"path": format!("{changed}.paused"), "value": false}),
+    ));
+    c.ok_batch(&reqs);
+    let kept: Vec<String> = ids[..N - 3].to_vec();
+    let t = Instant::now();
+    wait_for(Duration::from_secs(20), "every kept source ready", || {
+        let st = c.ok("state", json!({}));
+        kept.iter()
+            .all(|id| st["graph"][id]["ready"] == json!(true))
+            .then_some(())
+    });
+    println!("I5 burst of {N}: all kept ready after {:?}", t.elapsed());
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let pool = p["open_pool"].clone();
+    println!("I5 burst open_pool {pool}");
+    let peak = pool["peak"].as_u64().unwrap();
+    assert!(
+        (1..=OPEN_WORKERS_CAP).contains(&peak),
+        "lp-open workers at once: {peak} (cap {OPEN_WORKERS_CAP}): {pool}"
+    );
+    assert_eq!(
+        pool["workers"],
+        json!(0),
+        "workers left after the burst: {pool}"
+    );
+    assert_eq!(
+        pool["queued"],
+        json!(0),
+        "jobs left after the burst: {pool}"
+    );
+    let opened: std::collections::BTreeSet<String> = c
+        .drain_events()
+        .iter()
+        .filter(|e| e["event"] == "source.open")
+        .filter_map(|e| e["id"].as_str().map(str::to_string))
+        .collect();
+    for id in &kept {
+        assert!(opened.contains(id), "{id} never opened: {opened:?}");
+    }
+    let hosted = p["sources"].as_array().unwrap();
+    for id in &gone {
+        assert!(
+            hosted.iter().all(|s| s["id"] != json!(id)),
+            "{id} was destroyed but is hosted"
+        );
+    }
+    // Each destroyed one was skipped in the queue or (it got its worker first) opened and
+    // retired — never both, never neither.
+    let skipped = pool["skipped"].as_u64().unwrap() as usize;
+    let gone_opened = gone.iter().filter(|id| opened.contains(*id)).count();
+    assert_eq!(skipped + gone_opened, gone.len(), "{pool} {opened:?}");
+    assert_eq!(mpv_pause_of(&mut c, &changed).as_deref(), Some("no"));
+    assert_eq!(mpv_pause_of(&mut c, &kept[0]).as_deref(), Some("yes"));
+
+    // Quit with a second burst still queued (nothing else left to tear down).
+    for id in &kept {
+        c.ok("destroy", json!({ "id": id }));
+    }
+    wait_for(Duration::from_secs(10), "the first burst torn down", || {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        (p["sources"].as_array().unwrap().is_empty()
+            && p["dying"] == json!(0)
+            && p["reaper_pending"] == json!(0))
+        .then_some(())
+    });
+    burst(&mut c);
+    let t = Instant::now();
+    c.ok("quit", json!({}));
+    let st = srv
+        .wait_exit(Duration::from_secs(6))
+        .expect("quit with opens queued must exit");
+    println!("I5 quit with a burst queued: exit after {:?}", t.elapsed());
+    assert!(st.success(), "{st}");
+    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    assert!(
+        !log.contains("mpv.reaper_stragglers"),
+        "straggler at quit: {}",
+        log.lines()
+            .filter(|l| l.contains("stragglers"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
 
 /// Task 20d (R107): the I5 switch bound must hold whatever `hwdec` says. Two NVIDIA traps,
