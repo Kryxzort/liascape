@@ -37,24 +37,24 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const onEnter = (e: React.MouseEvent<HTMLDivElement>) => { setHover(true); place(e.currentTarget); };
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => { const el = e.currentTarget; if (rafRef.current) return; rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; place(el); }); };
   const onLeave = () => { setHover(false); setGlow(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } };
-  // morph source for THIS strip item's settings modal (namespaced pl- so it doesn't collide with the
-  // library card's lib- id for the same wallpaper).
-  const settingsOpen = useStore((s) => s.settingsItem?.videoPath === path && s.settingsMorphId === `pl-${path}`);
-  const active = !!item && !settingsOpen && (hover || (autoPlayGifs && hasGifAsset(item)));
+  // COOL: this strip item's settings modal morphed out of it (pl- ≠ the library card's lib- for the same
+  // wallpaper) → lifted out (hidden) until the modal morphs back in; the modal plays the preview meanwhile
+  const lifted = useStore((s) => s.settingsMorphId === `pl-${path}`);
+  const active = !!item && !lifted && (hover || (autoPlayGifs && hasGifAsset(item)));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={setNodeRef} style={style} className={`pl-item${playing ? " playing" : ""}`}
+    <div ref={setNodeRef} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
-      {item && <MotionThumb item={item} active={active} morphId={settingsOpen ? `pl-${path}` : undefined} />}
+      {item && <MotionThumb item={item} active={active} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {glow && !playing && !isDragging && createPortal(
+      {glow && !playing && !isDragging && !lifted && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's

@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -14,7 +13,7 @@ export function hasGifAsset(item: LibraryItem): boolean {
 // Browsers autoplay gif/webp <img> and decode off-thread → no special gif decode machinery is
 // needed. PERF: the parent card has content-visibility:auto, so offscreen cards never mount the
 // animated layer at all. `active` = should-animate (hover, or AutoPlayGifs for gif assets).
-export function MotionThumb({ item, active, morphId }: { item: LibraryItem; active: boolean; morphId?: string }) {
+export function MotionThumb({ item, active }: { item: LibraryItem; active: boolean }) {
   const anim = item.animatedThumbnailPath;
   const animIsVideo = !!anim && VIDEO_RE.test(anim);
   const videoFallback = !anim && !item.isScene && VIDEO_RE.test(item.videoPath);
@@ -26,10 +25,7 @@ export function MotionThumb({ item, active, morphId }: { item: LibraryItem; acti
   const staticSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   return (
     <>
-      {/* morphId → shared-element source for the card→settings-modal morph (library) */}
-      {morphId
-        ? <motion.img layoutId={morphId} className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" style={{ borderRadius: 14 }} />
-        : <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />}
+      <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
       {active && anim && !animIsVideo && (
         // gif → /anim (leading-black trimmed); backgroundImage = the /still frame so the loop-gap
         // shows a real frame, not black (parity with the Browse Card).

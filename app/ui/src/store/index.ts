@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { captureSource, type MorphSource } from "../components/morph";
 import {
   api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter,
 } from "../api/client";
@@ -47,7 +48,8 @@ interface State {
   status: string; error: string | null;
   // per-wallpaper settings modal (lifted so library cards AND the playlist strip can open it)
   settingsItem: LibraryItem | null; settingsSiblings: LibraryItem[];
-  settingsMorphId: string | null; // layoutId the modal morphs FROM (the surface that opened it: lib-… or pl-…)
+  settingsMorphId: string | null; // the surface the modal morphs FROM/back to (`data-morph-id`: lib-… or pl-…) — hidden while open
+  settingsSource: MorphSource | null; // that surface's picture state at the click (components/morph.ts)
   // PERF/FREEZE: false when the window is hidden OR unfocused (you fullscreened another app over it).
   // On X11 an occluded window often never fires visibilitychange, so Chromium keeps decoding all the
   // autoplay gifs for hours → ThreadPool decode backlog saturates → main thread stalls (futex_wait) →
@@ -121,7 +123,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null,
   themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
-  settingsItem: null, settingsSiblings: [], settingsMorphId: null, appActive: true,
+  settingsItem: null, settingsSiblings: [], settingsMorphId: null, settingsSource: null, appActive: true,
 
   async init() {
     const [sources, themes, settings, cur, lib, pstate, names, depth, steam] = await Promise.all([
@@ -335,8 +337,10 @@ export const useStore = create<State>((set, get) => ({
 
   openExternal(body) { api.open(body).catch(() => {}); },
 
-  openItemSettings(item, siblings, morphId) { set({ settingsItem: item, settingsSiblings: siblings ?? [item], settingsMorphId: morphId ?? null }); },
-  closeItemSettings() { set({ settingsItem: null, settingsSiblings: [], settingsMorphId: null }); get().loadLibrary(); },
+  openItemSettings(item, siblings, morphId) {
+    set({ settingsItem: item, settingsSiblings: siblings ?? [item], settingsMorphId: morphId ?? null, settingsSource: captureSource(morphId ?? null) });
+  },
+  closeItemSettings() { set({ settingsItem: null, settingsSiblings: [], settingsMorphId: null, settingsSource: null }); get().loadLibrary(); },
 
   // ---- shared ----
   applyTheme(name) {

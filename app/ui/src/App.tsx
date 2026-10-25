@@ -171,8 +171,8 @@ export default function App() {
 
         <PreviewModal w={preview} source={s.activeSource} onClose={() => setPreview(null)}
           onDownload={(w) => s.download(s.activeSource, w, true)} />
-        {/* lifted + in the LayoutGroup so the library card→settings-modal morph shares scope */}
-        <LibrarySettingsModal item={s.settingsItem} siblings={s.settingsSiblings} morphId={s.settingsMorphId}
+        {/* lifted: library cards AND strip items open it; it morphs out of / back into them (components/morph.ts) */}
+        <LibrarySettingsModal item={s.settingsItem} siblings={s.settingsSiblings} morphId={s.settingsMorphId} source={s.settingsSource}
           globalVolume={gVol} globalSpeed={gSpd} onClose={s.closeItemSettings} />
       </LayoutGroup>
       <Suspense fallback={null}>

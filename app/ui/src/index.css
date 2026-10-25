@@ -223,12 +223,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* PERF: while a modal is open, the grid sits behind an opaque backdrop — freeze its (invisible) gif
    overlays so they stop decoding/compositing and don't jank the morph. Pure CSS = no re-render. */
 body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { display: none; }
-/* while a card's modal opens/closes, drop its clip + raise it so the reverse (close) morph isn't
-   clipped to the card frame as the image shrinks back in. */
-.card.morphing { overflow: visible; contain: layout style; content-visibility: visible; z-index: 40; }
-/* through the morph, lift the flying thumbnail ABOVE the title bar so the title sits behind it
-   (the title is position:absolute, so the thumb needs to be positioned to win the stacking) */
-.card.lib.morphing .thumb { position: relative; z-index: 2; }
+/* COOL: the surface a settings modal morphed out of (card / strip item) — lifted out until it morphs back */
+.thumb-wrap.lifted, .pl-item.lifted { visibility: hidden; }
 .card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
   display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
@@ -351,7 +347,18 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 .yt-close:hover { background: var(--danger); box-shadow: var(--glow-sm); }
 /* library Settings modal: image-led + narrower so the thumbnail (often square) fills the width
    instead of floating centered with empty side gaps. Image shows at its OWN aspect, uncropped. */
-.modal.lib-settings { width: min(460px, 92vw); }
+.modal.lib-settings { width: min(460px, 92vw); position: relative; z-index: 1; }
+/* COOL: settings-modal morph (components/morph.ts). The media box flies (transform from its top-left +
+   a clip-path re-crop, both set by WAAPI) and a panel-coloured ghost grows card → panel; meanwhile the
+   panel itself is see-through ([data-morph]) and its body fades in late. */
+/* z-index: above the body, which stacks like a positioned element while its opacity animates */
+.morph-media { position: relative; z-index: 2; margin: 0 auto; border-radius: 14px; overflow: hidden; transform-origin: 0 0;
+  background: var(--bg-crust); will-change: transform; }
+.morph-media > img, .morph-media > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.morph-media > .mm-full { opacity: 0; transition: opacity .25s ease; }
+.morph-media > .mm-full.on { opacity: 1; }
+.morph-ghost { position: fixed; z-index: 0; display: none; pointer-events: none; box-sizing: border-box; }
+.modal.lib-settings[data-morph] { background: transparent; border-color: transparent; box-shadow: none; }
 .modal-img.natural { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; }
 .modal-body { padding: 18px 20px 20px; max-height: 62vh; overflow-y: auto; }
 .modal-body h2 { margin: 0 0 8px; font-size: 20px; }
