@@ -17,7 +17,7 @@ paths:
 - Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600, clamped in setter; 0 = off); `RestartOnSwitchOnly` (false) — defer the mpvpaper leak-restart to the next playlist changeover (advanced)
 - Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false), `ReplaceDirectWithWorkshop` (false) — swap a direct-DL `workshop/` copy for a `local/` WE-dir symlink when it appears
 - Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
-- LWE: `LweSilent` (false), `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
+- LWE: `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `lpdbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
 - `LastSession`: tracks last applied mode for `--restore`
