@@ -2344,9 +2344,7 @@ mod tests {
                     h.observe(&a, "time_pos", PropValue::F64(pos.min(40.0)));
                 }
                 started = h.events.iter().find_map(|e| match &e.kind {
-                    TransitionEventKind::Started { start_ms, .. } if e.corr == t => {
-                        Some(*start_ms)
-                    }
+                    TransitionEventKind::Started { start_ms, .. } if e.corr == t => Some(*start_ms),
                     _ => None,
                 });
                 if started.is_some() {
@@ -2354,7 +2352,9 @@ mod tests {
                 }
                 if since_speed >= 90 {
                     since_speed = 0;
-                    lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    lcg = lcg
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     speed = 0.25 + 3.75 * ((lcg >> 33) as f64 / (1u64 << 31) as f64);
                     h.g.set(&path(&a, "speed"), PropValue::F64(speed)).unwrap();
                     changed_at = secs(h.now) * 1000.0;
