@@ -177,10 +177,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         — done: `SourceMap`, invalidated by our switches/stops/cancels and by the subscribed `transition.`/
         `player.stopped`/`source.retire` events (a foreign switch too), trusted only while events flow;
         1.0 request per preview value (self-test over 20; RED: 2.0).
-  - [ ] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
+  - [x] **A speed-up inside the last D of an `align:end` wait** ends the effect after A (A holds its last
         frame, up to 0.5 s seen under random 0.25–4× drags): a fixed-length effect can't make up a start
         instant that moved into the past. Compress the effect's remaining progress to A's new end instead?
         Same for a global speed change mid-effect (it reaches A through `srcs:*`).
+        — done: full-live `align:end` keeps ending with A (`Transitions::follow_a_end`): a speed-up before or
+        during the effect compresses its remaining progress and both xfade ramps to A's new end
+        (`Animator::compress_to`, continuous, same curves; ≥ 100 ms left; never stretched on a slow-down;
+        an A already shorter than D keeps its designed hold). Drag storm −4.6…+10.8 ms vs A (RED ≤ +391);
+        real libmpv `srcs:*.speed` 4× mid-effect: RED +892 ms → on A's end.
   - [ ] **Shared looping A on `align:end`** caches its boundary (`target_end`, from the drop + k·length at the
         old speed) — a speed change doesn't move it. Unused by the backend today (same wallpaper on every
         output = never shared); re-anchor at the next wrap when per-monitor wallpapers land.

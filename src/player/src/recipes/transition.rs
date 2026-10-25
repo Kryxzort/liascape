@@ -49,6 +49,14 @@ pub const ALIGN_SLACK: Duration = Duration::from_secs(10);
 pub const AUDIO_SETTLE_TAIL: Duration = Duration::from_millis(15);
 /// Frame interval assumed until one is observed (the clips' 30 fps).
 const DEFAULT_FRAME_S: f64 = 1.0 / 30.0;
+/// full-live `align: end` compression (`Transitions::follow_a_end`): a running effect is
+/// finished early only when A's end moved more than this before the effect's end — the
+/// end estimate's own refinements (≤ ½ frame) never retime anything.
+const COMPRESS_MIN_GAIN: Duration = Duration::from_millis(10);
+/// …and never to less than this much remaining effect (or what remains, if less): an A
+/// whose end is already here holds its last frame ≤ this long rather than the picture
+/// cutting — an imperceptible hold, against up to D before.
+const COMPRESS_FLOOR: Duration = Duration::from_millis(100);
 
 /// Which sides hold their frame during the effect (spec §10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -270,6 +278,14 @@ struct Tr {
     settle_until: Duration,
     /// When the gain animations begun at t0 end (≥ t0 + 30 ms whatever the duration, R42).
     gain_end: Duration,
+    /// When the effect's picture ends (handoff): t0 + D, earlier once compressed.
+    end_at: Duration,
+    /// full-live `align: end`: how long A was meant to hold its last frame at the effect's
+    /// end when it started (s) — 0 on schedule; > 0 when A was already shorter than D (or B
+    /// late) at the first evaluation. Only a later *move* of A's end compresses the effect.
+    end_hold: Option<f64>,
+    /// The effect was compressed (a pending B onset then ramps within the new end).
+    compressed: bool,
     // `align: end` tracking of the lead A.
     /// Earliest estimate of A's iteration end (player-clock seconds): every observation
     /// `now + (duration − time_pos)/speed` is ≥ the true end (time_pos lags), so the
@@ -479,9 +495,16 @@ fn ramp_slot(
 /// `transition.done` can't fire before this ramp (started here, possibly well after the
 /// nominal effect end) actually finishes.
 fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration, reason: &str) {
-    let Some(onset) = tr.onset.take() else {
+    let Some(mut onset) = tr.onset.take() else {
         return;
     };
+    if tr.compressed && tr.phase == Phase::Running {
+        // the effect was compressed to A's new end (`follow_a_end`): ramp in by then
+        onset.dur = onset
+            .dur
+            .min(tr.gain_end.saturating_sub(now))
+            .max(ANTICLICK);
+    }
     let dur = onset.dur;
     onset.start(anim, now, reason);
     tr.settle_until = tr.settle_until.max(now + dur);
@@ -750,6 +773,9 @@ impl Transitions {
             swap_at: None,
             settle_until: now,
             gain_end: now,
+            end_at: now,
+            end_hold: None,
+            compressed: false,
             end_est: None,
             frame_dt: None,
             last_tp: None,
@@ -1315,7 +1341,8 @@ impl Transitions {
                     }
                 }
                 Some(_) => {
-                    if now >= tr.t0 + tr.dur {
+                    self.follow_a_end(tr, g, anim, now);
+                    if now >= tr.end_at {
                         self.handoff(tr, g, anim, now);
                     }
                 }
@@ -1431,7 +1458,90 @@ impl Transitions {
             return Some(now); // A shorter than the effect (or B late): start right away
         }
         // At most one tick late: start the effect on schedule so it ends exactly at A's end.
+        // Planned to end with A (no hold): a speed-up that moved the start instant further
+        // into the past is made up by compressing the effect (`follow_a_end`).
+        tr.end_hold = Some(0.0);
         Some(Duration::from_secs_f64(t.max(0.0)).max(self.prev_now))
+    }
+
+    /// A full-live `align: end` effect whose lead A it keeps ending with — the lead A, if
+    /// it is ours (not shared: a shared looping A's boundaries are cached, TODO) and a
+    /// playing kind (not a still).
+    fn follows_a_end(&self, tr: &Tr, g: &Graph) -> Option<String> {
+        if tr.effect_id.is_none() || tr.method != Method::FullLive || tr.align != Align::End {
+            return None;
+        }
+        let side = &tr.sides[tr.lead?];
+        let a = side.a.clone()?;
+        (!side.shared && is_source(g, &a) && !is_still(g, &a)).then_some(a)
+    }
+
+    /// full-live `align: end`, Running: the effect ends with A — a speed-up that moves A's
+    /// end earlier (dragged by the user's per-item slider before the effect started, or a
+    /// global speed reaching A through `srcs:*` mid-effect) compresses the effect's
+    /// REMAINING progress to A's new end (plus the hold it started with, `end_hold`), and
+    /// the gain ramps with it (audio follows the picture). `Animator::compress_to` rescales
+    /// time only: the picture and the gains continue from where they are, along the same
+    /// curves, never jump. Before, a fixed-length effect ended after A and A held its last
+    /// frame for the difference (up to 0.5 s seen under random 0.25–4× drags). Never
+    /// stretched: after a slow-down the effect ends before A, which is invisible (B is fully
+    /// shown) and keeps the requested D as the longest it runs.
+    fn follow_a_end(&mut self, tr: &mut Tr, g: &Graph, anim: &mut Animator, now: Duration) {
+        let Some(hold) = tr.end_hold else {
+            return;
+        };
+        let Some(a) = self.follows_a_end(tr, g) else {
+            return;
+        };
+        track_lead(tr, g, now);
+        // Moved? Judged on the raw estimate (an over-estimate by ≤ 1 frame, so an effect
+        // scheduled on the centred end is never "late" by its own centring); aimed at the
+        // centred end, like the start (`start_instant`).
+        let (Some(raw), Some(a_end)) = (tr.end_est, centered_end(tr, g, &a)) else {
+            return; // paused / no duration: nothing to follow
+        };
+        if raw + hold > secs(tr.end_at) - secs(COMPRESS_MIN_GAIN) {
+            return;
+        }
+        let want = a_end + hold;
+        let floor = now + COMPRESS_FLOOR.min(tr.end_at.saturating_sub(now));
+        let target = Duration::from_secs_f64(want.max(0.0)).max(floor);
+        if target + COMPRESS_MIN_GAIN > tr.end_at {
+            return;
+        }
+        let corr = tr.corr.clone();
+        for side in &tr.sides {
+            if let Some(fx) = &side.fx {
+                anim.compress_to(&path(fx, "progress"), &corr, now, target);
+            }
+        }
+        // R42: the gains still never move faster than a 30 ms ramp from t0.
+        let gain_target = target.max(tr.t0 + ANTICLICK).min(tr.gain_end);
+        if gain_target < tr.gain_end {
+            for side in &tr.sides {
+                if let (false, Some(sa)) = (side.shared, side.a.as_deref()) {
+                    anim.compress_to(&path(sa, "gain.xfade"), &corr, now, gain_target);
+                }
+            }
+            // B's ramp-in, if it has started (a pending one is fitted when it starts)
+            if tr.onset.is_none()
+                && anim.compress_to(&path(&tr.b, "gain.xfade"), &corr, now, gain_target)
+            {
+                tr.settle_until = tr.settle_until.min(gain_target.max(now));
+            }
+            tr.gain_end = gain_target;
+        }
+        log::event(
+            "transition",
+            Level::Info,
+            "transition.compressed",
+            Some(corr),
+            json!({ "a": a, "at_ms": ms(now), "end_ms": ms(tr.end_at), "to_end_ms": ms(target),
+                    "a_end_ms": a_end * 1000.0, "hold_ms": hold * 1000.0,
+                    "speed": get_f64(g, &a, "speed") }),
+        );
+        tr.end_at = target;
+        tr.compressed = true;
     }
 
     /// The lead A is shared and looping (so it never ends; End aligns to its boundaries).
@@ -1481,6 +1591,15 @@ impl Transitions {
 
         tr.phase = Phase::Running;
         tr.t0 = t0;
+        tr.end_at = t0 + tr.dur;
+        // An effect started at once (A already shorter than D, ended, B late, the M2
+        // fallback) keeps the last-frame hold it starts with; only a later move of A's
+        // end compresses it (`follow_a_end`).
+        if tr.end_hold.is_none() && self.follows_a_end(tr, g).is_some() {
+            // against the raw estimate, like `follow_a_end`'s check: the ½-frame centring
+            // appears once a frame step is seen and must not read as a move
+            tr.end_hold = tr.end_est.map(|e| (secs(tr.end_at) - e).max(0.0));
+        }
         // R42: gains never move faster than a 30 ms ramp, whatever the duration (the
         // picture may still cut instantly).
         let gd = tr.dur.max(ANTICLICK);
@@ -2371,10 +2490,266 @@ mod tests {
             let unavoidable = (changed_at - (a_end_ms - 2000.0)).max(0.0);
             assert!(
                 err > -20.0 && err < unavoidable + 10.0,
-                "seed {seed}: the effect ends {err:+.0} ms vs A's end (A at {speed:.2}x; \
+                "seed {seed}: the effect would end {err:+.0} ms vs A's end (A at {speed:.2}x; \
                  {unavoidable:.0} ms of it unavoidable)"
             );
+            // …and a start pushed into the past is made up: the effect is compressed to A's
+            // end (TODO "speed-up inside the last D"), at worst COMPRESS_FLOOR after the start
+            let handoff_ms = run_to_handoff(&mut h, &t, &a, &mut pos, speed, &mut since_obs);
+            let end_err = handoff_ms - a_end_ms;
+            let floor_late = (start_ms + ms(COMPRESS_FLOOR) - a_end_ms).max(0.0);
+            // a lateness below COMPRESS_MIN_GAIN (+ the raw estimate's ½ frame) is left alone;
+            // measured over the 60 seeds: −4.6…+10.8 ms (RED, uncompressed: up to +391 ms)
+            assert!(
+                end_err > -20.0 && end_err < floor_late + ms(COMPRESS_MIN_GAIN) + 5.0,
+                "seed {seed}: the effect ENDS {end_err:+.0} ms vs A's end (A at {speed:.2}x, \
+                 started {err:+.0} ms late)"
+            );
         }
+    }
+
+    /// Drive a full-live `align: end` transition (A playing at `speed`, `time_pos` observed
+    /// every 100 ms) until its handoff; returns the handoff instant (ms, player clock).
+    fn run_to_handoff(
+        h: &mut H,
+        t: &CorrId,
+        a: &str,
+        pos: &mut f64,
+        speed: f64,
+        since_obs: &mut u64,
+    ) -> f64 {
+        for _ in 0..10_000 {
+            h.tick(4, &[]);
+            *pos += 0.004 * speed;
+            *since_obs += 4;
+            if *since_obs >= 100 {
+                *since_obs = 0;
+                let dur = get_f64(&h.g, a, "duration").unwrap_or(0.0);
+                h.observe(a, "time_pos", PropValue::F64(pos.min(dur)));
+            }
+            if let Some(at) = h.events.iter().find_map(|e| match &e.kind {
+                TransitionEventKind::Handoff { .. } if &e.corr == t => Some(e.at_ms),
+                _ => None,
+            }) {
+                return at;
+            }
+        }
+        panic!("no handoff")
+    }
+
+    /// A synthetic playing A for the compression tests: its media position advances by the
+    /// wall delta × speed, `time_pos` is observed every 100 ms (the rate-limited `Position`).
+    struct PlayA {
+        id: String,
+        dur: f64,
+        pos: f64,
+        speed: f64,
+        since_obs: u64,
+    }
+
+    impl PlayA {
+        fn new(h: &mut H, dur: f64, pos: f64) -> PlayA {
+            let id = h.video(&["V1"], dur, pos);
+            PlayA {
+                id,
+                dur,
+                pos,
+                speed: 1.0,
+                since_obs: 0,
+            }
+        }
+        fn tick(&mut self, h: &mut H) {
+            h.tick(4, &[]);
+            self.pos = (self.pos + 0.004 * self.speed).min(self.dur);
+            self.since_obs += 4;
+            if self.since_obs >= 100 {
+                self.since_obs = 0;
+                h.observe(&self.id, "time_pos", PropValue::F64(self.pos));
+            }
+        }
+        fn set_speed(&mut self, h: &mut H, s: f64) {
+            self.speed = s;
+            h.g.set(&path(&self.id, "speed"), PropValue::F64(s))
+                .unwrap();
+        }
+        /// A's real end (ms, player clock) at its current speed.
+        fn end_ms(&self, h: &H) -> f64 {
+            secs(h.now) * 1000.0 + (self.dur - self.pos) / self.speed * 1000.0
+        }
+    }
+
+    fn event_ms(h: &H, t: &CorrId, name: &str) -> Option<f64> {
+        h.events
+            .iter()
+            .find(|e| &e.corr == t && e.kind.name() == name)
+            .map(|e| e.at_ms)
+    }
+
+    /// Starts a 2 s full-live `align: end` fade onto a ready B over `a`.
+    fn start_end_fade(h: &mut H) -> (CorrId, String) {
+        let mut r = req("/b.mkv", "full-live", "end", Some("fade"));
+        r["duration_ms"] = json!(2000);
+        let t = h.start(r);
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(4, &[(b.clone(), SourceEvent::Ready)]);
+        (t, b)
+    }
+
+    /// TODO "A speed-up inside the last D of an `align:end` wait / a global speed change
+    /// mid-effect": A sped up 4× half a second into a 2 s full-live effect (its end moves
+    /// from +1.5 s to +0.375 s) — the effect's REMAINING progress and both gain ramps are
+    /// compressed to A's new end, continuously (no jump in `progress` or A's gain). RED
+    /// before: the handoff came at t0 + 2 s, 1.11 s after A ended (A frozen on its last
+    /// frame, still audible).
+    #[test]
+    fn align_end_speed_up_mid_effect_compresses_to_a_end() {
+        let mut h = H::new(&["V1"]);
+        let mut a = PlayA::new(&mut h, 10.0, 6.0);
+        let (t, b) = start_end_fade(&mut h);
+        let mut prev: Option<(f64, f64)> = None; // (progress, A xfade dB)
+        let (mut max_dp, mut max_dg, mut sped) = (0.0f64, 0.0f64, None);
+        while event_ms(&h, &t, "transition.handoff").is_none() {
+            a.tick(&mut h);
+            let Some(start) = event_ms(&h, &t, "transition.started") else {
+                prev = None;
+                continue;
+            };
+            if sped.is_none() && secs(h.now) * 1000.0 >= start + 500.0 {
+                a.set_speed(&mut h, 4.0);
+                sped = Some(a.end_ms(&h));
+            }
+            let fx = get_str(&h.g, "lay:V1:main", "content");
+            if let Some(p) = get_f64(&h.g, &fx, "progress") {
+                // linear amplitude: dB changes without bound towards silence
+                let lin = db_to_lin(gain_db(&h.g, &a.id, "xfade"));
+                if let Some((pp, pl)) = prev {
+                    max_dp = max_dp.max((p - pp).abs());
+                    max_dg = max_dg.max((lin - pl).abs());
+                }
+                prev = Some((p, lin));
+            }
+            assert!(secs(h.now) < 30.0, "no handoff");
+        }
+        let a_end = sped.expect("never sped up");
+        let handoff = event_ms(&h, &t, "transition.handoff").unwrap();
+        let err = handoff - a_end;
+        assert!(
+            err > -20.0 && err < 12.0,
+            "the effect ends {err:+.0} ms vs A's end (RED: +1113)"
+        );
+        // compressed: 0.75 of progress over 375 ms ≈ 0.008 per tick (a restart would jump)
+        assert!(
+            max_dp < 0.02,
+            "progress jumped by {max_dp:.3} in one 4 ms tick"
+        );
+        assert!(
+            max_dg < 0.03,
+            "A's xfade jumped by {max_dg:.3} (linear) in one 4 ms tick"
+        );
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.xfade")).map(|v| v.round()),
+            Some(0.0),
+            "B ramps in to 0 dB"
+        );
+        assert!(
+            h.anim
+                .value_at(
+                    &path(&b, "gain.xfade"),
+                    Duration::from_secs_f64(a_end / 1000.0 + 0.012)
+                )
+                .is_some_and(|v| v > -0.01),
+            "B's ramp-in is complete by A's end"
+        );
+    }
+
+    /// The same speed-up 0.3 s before the planned start (A's end moves from +2.3 s to
+    /// +0.575 s — the start instant, end − D, is now 1.4 s in the past): the effect starts at
+    /// once and runs compressed, ending with A. RED before: it ran the full 2 s, ending
+    /// 1.43 s after A.
+    #[test]
+    fn align_end_speed_up_inside_last_d_of_the_wait_ends_with_a() {
+        let mut h = H::new(&["V1"]);
+        let mut a = PlayA::new(&mut h, 10.0, 5.0);
+        let (t, _b) = start_end_fade(&mut h);
+        while a.pos < 7.7 {
+            a.tick(&mut h);
+        }
+        assert!(
+            event_ms(&h, &t, "transition.started").is_none(),
+            "waits for end − D"
+        );
+        a.set_speed(&mut h, 4.0);
+        let a_end = a.end_ms(&h);
+        while event_ms(&h, &t, "transition.handoff").is_none() {
+            a.tick(&mut h);
+            assert!(secs(h.now) < 30.0, "no handoff");
+        }
+        let handoff = event_ms(&h, &t, "transition.handoff").unwrap();
+        let err = handoff - a_end;
+        assert!(
+            err > -20.0 && err < 12.0,
+            "the effect ends {err:+.0} ms vs A's end (RED: +1426)"
+        );
+    }
+
+    /// What compression must NOT change: an A already shorter than D when the effect
+    /// starts keeps its designed last-frame hold (only a later move of A's end shortens the
+    /// effect, by that move), and a slow-down never stretches an effect past D.
+    #[test]
+    fn align_end_compression_keeps_the_hold_and_never_stretches() {
+        // A has 0.5 s left: the 2 s effect starts at once and A holds its last 1.5 s
+        let mut h = H::new(&["V1"]);
+        let mut a = PlayA::new(&mut h, 10.0, 9.5);
+        let (t, _b) = start_end_fade(&mut h);
+        let start = event_ms(&h, &t, "transition.started").expect("starts at once");
+        while event_ms(&h, &t, "transition.handoff").is_none() {
+            a.tick(&mut h);
+        }
+        let d = event_ms(&h, &t, "transition.handoff").unwrap() - start;
+        assert!((d - 2000.0).abs() < 6.0, "short A: full D ({d:.0} ms)");
+
+        // …the same, sped up 4× 100 ms in: A's end moves 300 ms earlier → so does the effect's
+        let mut h = H::new(&["V1"]);
+        let mut a = PlayA::new(&mut h, 10.0, 9.5);
+        let (t, _b) = start_end_fade(&mut h);
+        let start = event_ms(&h, &t, "transition.started").unwrap();
+        while secs(h.now) * 1000.0 < start + 100.0 {
+            a.tick(&mut h);
+        }
+        let before = a.end_ms(&h);
+        a.set_speed(&mut h, 4.0);
+        let moved = before - a.end_ms(&h);
+        while event_ms(&h, &t, "transition.handoff").is_none() {
+            a.tick(&mut h);
+        }
+        let d = event_ms(&h, &t, "transition.handoff").unwrap() - start;
+        let e = d - (2000.0 - moved);
+        assert!(
+            e > -20.0 && e < 12.0,
+            "short A sped up: D − {moved:.0} ms, got {d:.0} ms"
+        );
+
+        // on schedule, slowed to 0.5× mid-effect: still D (B is fully shown at its end)
+        let mut h = H::new(&["V1"]);
+        let mut a = PlayA::new(&mut h, 10.0, 6.0);
+        let (t, _b) = start_end_fade(&mut h);
+        while event_ms(&h, &t, "transition.started").is_none() {
+            a.tick(&mut h);
+        }
+        let start = event_ms(&h, &t, "transition.started").unwrap();
+        while secs(h.now) * 1000.0 < start + 500.0 {
+            a.tick(&mut h);
+        }
+        a.set_speed(&mut h, 0.5);
+        while event_ms(&h, &t, "transition.handoff").is_none() {
+            a.tick(&mut h);
+        }
+        let d = event_ms(&h, &t, "transition.handoff").unwrap() - start;
+        assert!(
+            (d - 2000.0).abs() < 6.0,
+            "slow-down: never stretched ({d:.0} ms)"
+        );
     }
 
     /// M2: an A that errors mid-file counts as ended for alignment (it makes no more
