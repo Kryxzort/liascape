@@ -72,4 +72,9 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
 ## Rules
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.
 - `SettingsService.Load()` per request (no cached singleton) — daemons may have changed the file.
+- **`SettingsService.Save` is atomic** (a per-writer temp file renamed over `settings.json`) and `Load`
+  retries a file it can't parse. It used to truncate + write in place: a load mid-write got the C#
+  defaults (NoAudio on, volume 100, the legacy engine), applied them live, and the next save wrote them
+  back over everything — `/settings`'s own `prev` included (an engine "switch", the Steam tokens gone).
+  Never write a shared state file in place; guard: the matrix's `race:settingsSaveLoad` cell.
 - Never break a CLI flag / daemon / state-file format (`session.md`, `player.md`, `library.md`).
