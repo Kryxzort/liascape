@@ -129,8 +129,24 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   "is it playing" gate either (the store's `playingPath` is one side of a transition). Guard:
   `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes**
-  (LWE is 1×, so it'd be a no-op). The card→modal `layoutId` morph anchors the SAME `still()` src the card
-  uses (morphs from the thumbnail, not flying in from the side).
+  (LWE is 1×, so it'd be a no-op).
+- **Settings-modal morph (`components/morph.ts`, not framer).** The surface that opened the modal (card
+  `.thumb-wrap` / strip `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `settingsMorphId`) and is
+  `.lifted` (hidden) while the modal is out. WAAPI flights, both ways: the media box (`[data-morph-media]`,
+  transform-origin 0 0) moves with ONE uniform scale onto the cover-box of the source while a clip-path
+  `inset()` re-crops it to the source's visible crop (so it never stretches between a 16:9/square card crop
+  and the image's own aspect); a fixed `.morph-ghost` with the panel's bg/border/shadow grows source →
+  panel (the panel is see-through meanwhile, `[data-morph]`); the body is clipped to the growing ghost
+  (a `polygon()` clip — `inset()`s summing past the box get scaled down and stop tracking) and fades in
+  late / out early. Close re-measures the source (the strip may have scrolled) and lands on it, then
+  `closeItemSettings` (source shown in the same render); off-screen/missing source → fade. Escape closes.
+  The media box layers the card's own `still()` (cached → frame 1 IS the card), the sharp native image,
+  and the playing preview: the card's gif URL (same image → same animation) or the video, started where
+  the card's hover video was (`settingsSource`, read at the click — the card's layer unmounts on open).
+  framer's `layoutId` used to scale one `<img>` between aspects (stretched mid-flight), flew a low-res
+  still, and the strip's close vanished (the id was dropped at once, and the row clips). Guard:
+  `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a card and
+  a strip item: starts/ends on the source's crop, uniform aspect, smooth, lands; the preview animates).
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
 - **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend

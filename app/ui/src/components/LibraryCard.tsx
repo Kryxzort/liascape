@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { type LibraryItem } from "../api/client";
@@ -21,25 +21,18 @@ export const LibraryCard = memo(function LibraryCard({
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState(false);
-  // hide this card's animated overlay while ITS settings modal is open AND through the close-morph
-  // afterwards (else the gif snaps back into the card while the modal is still morphing closed).
+  // its settings modal plays the preview meanwhile (this card's own animated layer would be hidden anyway)
   const settingsOpen = useStore((s) => s.settingsItem?.videoPath === item.videoPath);
-  const [cooldown, setCooldown] = useState(false);
-  useEffect(() => {
-    if (settingsOpen) { setCooldown(true); return; }
-    const t = setTimeout(() => setCooldown(false), 360); // ~close-morph duration
-    return () => clearTimeout(t);
-  }, [settingsOpen]);
-  const active = !settingsOpen && !cooldown && (hover || (autoPlayGifs && hasGifAsset(item)));
-  // un-clip + raise this card while its modal opens/closes so the reverse morph isn't clipped to the frame
-  const morphing = settingsOpen || cooldown;
-  const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${item.hasCrashed ? " crashed" : ""}${morphing ? " morphing" : ""}`;
+  // COOL: the modal morphed out of THIS card → it's lifted out (hidden) until the modal morphs back in
+  const lifted = useStore((s) => s.settingsMorphId === `lib-${item.videoPath}`);
+  const active = !settingsOpen && (hover || (autoPlayGifs && hasGifAsset(item)));
+  const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
-      <div className="thumb-wrap" onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      <div className={`thumb-wrap${lifted ? " lifted" : ""}`} data-morph-id={`lib-${item.videoPath}`} onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         title="Click: apply · Ctrl/Shift: select · Right-click: menu">
-        <MotionThumb item={item} active={active} morphId={morphing ? `lib-${item.videoPath}` : undefined} />
+        <MotionThumb item={item} active={active} />
         {item.isScene && <span className="badge">SCENE</span>}
         {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
