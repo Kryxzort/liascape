@@ -335,7 +335,7 @@ public static class ServerHost
             long lastMs = 0;
             void Mark(string what) { long now = psw.ElapsedMilliseconds; phases.Add($"{what} {now - lastMs}"); lastMs = now; }
             AppSettings prev, s;
-            try { (prev, s) = SettingsService.Patch(body); }   // keeps LastSession + the Steam tokens from disk
+            try { (prev, s) = SettingsService.Patch(body); }   // keeps LastSession + the Steam sign-in from disk
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             Mark("load+save");
             // PlayerEngine changed → stop the old engine, replay the session on the new one (else just

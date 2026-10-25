@@ -84,7 +84,8 @@ public static class SettingsService
 
     // POST /settings: load → Merge the body over it → save. The fields the backend owns keep their saved
     // values whatever the body says: the UI caches the whole AppSettings at load and re-POSTs it on every
-    // change, and its copy of LastSession (apply/random/next write it) and the Steam tokens (QR sign-in)
+    // change, and its copy of LastSession (apply/random/next write it) and the Steam sign-in (QR sign-in /
+    // sign-out write the tokens AND SteamId — a stale SteamId 0 left a signed-in account with no cookie)
     // is stale — they're never edited through the form. One poster at a time, so parallel partial bodies
     // all land (each merges over the previous one's save, not over the same load). `prev` = what was saved.
     public static (AppSettings Prev, AppSettings Cur) Patch(JsonElement body)
@@ -94,6 +95,7 @@ public static class SettingsService
             var prev = Load();
             var s = Merge(prev, body);
             s.LastSession = prev.LastSession;
+            s.SteamId = prev.SteamId;
             s.SteamRefreshToken = prev.SteamRefreshToken;
             s.SteamAccessToken = prev.SteamAccessToken;
             s.SteamAccountName = prev.SteamAccountName;

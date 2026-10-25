@@ -76,8 +76,9 @@ whole body did (the API's web JSON defaults: camelCase or PascalCase keys, the s
 replaces its field as a unit — an array (`LweMonitors`, `GlobalTransitionEffectIds`) is the whole new
 list, an object the whole new object; an explicit `null` sets null (on a value-type field it's a bad
 value); unknown keys are ignored; a bad value (wrong type, a non-object body) is a **400 `{error}`** that
-saves nothing. `LastSession` + the Steam tokens keep their saved values whatever the body says (the UI's
-copy is stale). One poster at a time (a lock around load → merge → save): parallel partial bodies all
+saves nothing. `LastSession` + the Steam sign-in (tokens, `SteamId`) keep their saved values whatever the
+body says (the UI's copy is stale; a stale `SteamId` 0 used to get through and leave a signed-in account
+with no web cookie). One poster at a time (a lock around load → merge → save): parallel partial bodies all
 land (without it 64 of 80 were lost). The UI still posts its whole copy, so it behaves exactly as before;
 `prev` → `cur` for the live-apply diff = the saved settings → the merged ones, so a partial body applies
 live like any other. Hermetic test: `scripts/test-settings-merge.sh` (lp-player headless, ~10 s).

@@ -32,7 +32,7 @@ paths:
 - `Paths` — path(s) used; `Shuffle` — shuffle was on
 - `TimedIntervalSeconds`, `WaitForVideoEnd`, `AdvanceOnVideoEnd`, `OverrideGlobalSettings` — restores exact interval/mode rather than current globals
 
-**`LastSession` upkeep:** the `/settings` POST merges its body over the saved settings (PATCH — keys it leaves out keep their values, `web-backend.md`) and **preserves** `LastSession` (+ the Steam tokens) from disk whatever the body says (the UI re-POSTs a stale cached copy — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
+**`LastSession` upkeep:** the `/settings` POST merges its body over the saved settings (PATCH — keys it leaves out keep their values, `web-backend.md`) and **preserves** `LastSession` (+ the Steam sign-in: tokens, `SteamId`) from disk whatever the body says (the UI re-POSTs a stale cached copy — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
 
 ## Timed Playlist
 

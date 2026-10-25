@@ -208,8 +208,8 @@ near "$(cur gain.user)" "$(dB 30)" && ok "clearing the override → the partial 
 
 echo "== the full body (the UI's whole copy) behaves as before"
 snap f0
-# stale like the UI's copy: loaded before an apply (lastSession) and a QR sign-in (the Steam tokens)
-jq '.volume = 55 | .theme = "Dracula" | .lastSession = null | .steamRefreshToken = "stale" | .steamAccessToken = ""' "$T/f0.json" > "$T/full.json"
+# stale like the UI's copy: loaded before an apply (lastSession) and a QR sign-in (the Steam fields)
+jq '.volume = 55 | .theme = "Dracula" | .lastSession = null | .steamRefreshToken = "stale" | .steamAccessToken = "" | .steamId = 0' "$T/f0.json" > "$T/full.json"
 post /settings "$(cat "$T/full.json")" >/dev/null && ok "a full body → 200" || bad "a full body failed"
 sleep 0.3; snap f1
 [ "$(f .volume f1)" = 55 ] && [ "$(f .theme f1)" = '"Dracula"' ] && ok "volume 55, theme Dracula" || bad "volume $(f .volume f1) theme $(f .theme f1)"
@@ -217,11 +217,13 @@ same f0 f1 '["volume","theme"]' "the full body"
 near "$(cur gain.user)" "$(dB 55)" && ok "…and applied live (gain.user $(cur gain.user))" || bad "full body → gain.user $(cur gain.user), want $(dB 55)"
 [ "$(disk '.SteamRefreshToken == "test-refresh-token" and .SteamAccessToken == "test-access-token"')" = true ] \
   && ok "a stale copy's Steam tokens don't overwrite the saved ones" || bad "the full body overwrote the Steam tokens"
+[ "$(disk '.SteamId == 76561190000000000')" = true ] \
+  && ok "a stale copy's steamId doesn't overwrite the saved one (QR sign-in sets it)" || bad "the full body overwrote SteamId"
 [ "$(jq -r --arg p "$LP" '.LastSession.Paths[0] == $p' "$SJ")" = true ] \
   && ok "a stale copy's lastSession doesn't overwrite the saved one" || bad "the full body overwrote LastSession"
-post /settings '{"lastSession":null,"steamRefreshToken":""}' >/dev/null
-[ "$(jq -r --arg p "$LP" '.LastSession.Paths[0] == $p and .SteamRefreshToken == "test-refresh-token"' "$SJ")" = true ] \
-  && ok "a partial body can't touch the backend-owned fields either" || bad "a partial body changed LastSession / the refresh token"
+post /settings '{"lastSession":null,"steamRefreshToken":"","steamId":0}' >/dev/null
+[ "$(jq -r --arg p "$LP" '.LastSession.Paths[0] == $p and .SteamRefreshToken == "test-refresh-token" and .SteamId == 76561190000000000' "$SJ")" = true ] \
+  && ok "a partial body can't touch the backend-owned fields either" || bad "a partial body changed LastSession / the refresh token / SteamId"
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body retimes a running rotation (it follows the globals: interval 600 s)"
