@@ -2055,11 +2055,20 @@ fn track_lead(tr: &mut Tr, g: &Graph, now: Duration) {
         tr.drop_at = Some(secs(now));
         tr.dropped_now = true;
     }
-    if paused || tr.last_speed.is_some_and(|s| (s - speed).abs() > 1e-9) {
-        tr.end_est = None;
-    }
-    if tr.last_speed.is_some_and(|s| (s - speed).abs() > 1e-9) {
+    if let Some(s0) = tr.last_speed
+        && (s0 - speed).abs() > 1e-9
+    {
+        // A's remaining media now plays at `speed`: rescale the converged estimate's remaining
+        // wall time by s0/speed (still ≥ the true end, so the minimum keeps refining it). Never
+        // restart it from `time_pos`, which may be ~100 ms stale (`Position` is rate-limited) —
+        // under a continuous drag a fresh sample often never arrived between two changes and the
+        // effect started late (speed storm).
+        let n = secs(now);
+        tr.end_est = tr.end_est.map(|e| n + (e - n).max(0.0) * s0 / speed);
         tr.align_deadline = None; // M2: re-derive the fallback from the new speed
+    }
+    if paused {
+        tr.end_est = None;
     }
     tr.last_tp = Some(tp);
     tr.last_speed = Some(speed);
@@ -2302,6 +2311,65 @@ mod tests {
             h.tick(100, &[]);
         }
         assert!(h.has(&t, "transition.started"), "never fell back");
+    }
+
+    /// Speed storm: A's speed dragged every 90 ms while `align: end` waits (`time_pos` arriving
+    /// every 100 ms, as the rate-limited `Position` event does). Once the effect runs A's speed
+    /// holds (the UI's drag then moves B). The effect must END at A's real end — resetting the
+    /// end estimate on every change and re-deriving it from a `time_pos` up to 100 ms stale kept
+    /// it from converging: after a slow-down the effect started late, A frozen on its last frame
+    /// and its audio cut mid-fade. The one lateness allowed is physical: a speed-up that moves the
+    /// start instant into the past (before that change) — a fixed-length effect can't make it up.
+    #[test]
+    fn align_end_tracks_a_speed_dragged_continuously() {
+        for seed in 1u64..=60 {
+            let mut h = H::new(&["V1"]);
+            let a = h.video(&["V1"], 40.0, 0.0);
+            let mut r = req("/b.mkv", "full-live", "end", Some("fade"));
+            r["duration_ms"] = json!(2000);
+            let t = h.start(r);
+            let b = h.b_of(&t);
+            h.observe(&b, "ready", PropValue::Bool(true));
+            h.tick(4, &[(b.clone(), SourceEvent::Ready)]);
+            let (mut pos, mut speed, mut lcg) = (0.0f64, 1.0f64, seed);
+            let (mut since_speed, mut since_obs, mut changed_at) = (0u64, 0u64, 0.0f64);
+            let mut started = None;
+            for _ in 0..40_000 {
+                h.tick(4, &[]);
+                pos += 0.004 * speed;
+                since_speed += 4;
+                since_obs += 4;
+                if since_obs >= 100 {
+                    since_obs = 0;
+                    h.observe(&a, "time_pos", PropValue::F64(pos.min(40.0)));
+                }
+                started = h.events.iter().find_map(|e| match &e.kind {
+                    TransitionEventKind::Started { start_ms, .. } if e.corr == t => {
+                        Some(*start_ms)
+                    }
+                    _ => None,
+                });
+                if started.is_some() {
+                    break;
+                }
+                if since_speed >= 90 {
+                    since_speed = 0;
+                    lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    speed = 0.25 + 3.75 * ((lcg >> 33) as f64 / (1u64 << 31) as f64);
+                    h.g.set(&path(&a, "speed"), PropValue::F64(speed)).unwrap();
+                    changed_at = secs(h.now) * 1000.0;
+                }
+            }
+            let start_ms = started.expect("the effect never started");
+            let a_end_ms = secs(h.now) * 1000.0 + (40.0 - pos).max(0.0) / speed * 1000.0;
+            let err = start_ms + 2000.0 - a_end_ms;
+            let unavoidable = (changed_at - (a_end_ms - 2000.0)).max(0.0);
+            assert!(
+                err > -20.0 && err < unavoidable + 10.0,
+                "seed {seed}: the effect ends {err:+.0} ms vs A's end (A at {speed:.2}x; \
+                 {unavoidable:.0} ms of it unavoidable)"
+            );
+        }
     }
 
     /// M2: an A that errors mid-file counts as ended for alignment (it makes no more
