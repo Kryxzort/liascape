@@ -20,10 +20,15 @@
 #   N-th cell (`--shard i/N`, internal); builds once, merges <out>/cells.jsonl (each shard keeps its own
 #   dir <out>/shard-i/ + log <out>/shard-i.log), prints the combined MATRIX line. --jobs 1 = one stack,
 #   the cells in order (the original single run). A probe other than probe-matrix.js always runs alone.
+#   Each stack is a debug lp-player + a backend + a software-rendered Electron (~0.5 GB): 4 of them took a
+#   24-core desktop to load 22 (laggy to use meanwhile) — use --jobs 2 + LP_MATRIX_NICE=1 next to someone working.
+# LP_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
+# inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
 # electron-42). Exit 0 = every cell passed. Results: $LP_MATRIX_OUT (default: a dir printed at the end).
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-4}; SHARD=""; PROBE=""
 while [ $# -gt 0 ]; do
   case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
