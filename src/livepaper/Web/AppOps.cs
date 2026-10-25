@@ -277,7 +277,7 @@ public static class AppOps
             bool orderChanged = (prevP?.Settings.Order ?? PlaylistOrder.Sequential) != p.Settings.Order;
             bool listChanged = prevP == null || !prevP.VideoPaths.SequenceEqual(p.VideoPaths);
             if ((orderChanged || listChanged) && p.VideoPaths.Count > 0)
-                PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle);
+                PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle, prevP?.VideoPaths);
 
             var g = SettingsService.Load();
             (int iv, bool wait, bool adv) Eff(CustomPlaylist? c) =>
