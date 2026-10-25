@@ -19,6 +19,10 @@
 //!   swap (no commit) keeps the one requested callback for the next commit — never a
 //!   second request — and backs off ([`present_backoff`]: 100 ms, then 1 s while it keeps
 //!   failing; `frames` probe `present_failed`/`retry_in_ms`).
+//! - **No undispatched event queue (Task 20e):** `serve` turns NVIDIA's EGL explicit sync
+//!   off unless the caller set `__NV_DISABLE_EXPLICIT_SYNC` ([`apply_driver_env`]) and
+//!   [`OutputBackend::process`] dispatches libwayland's default queue every iteration —
+//!   otherwise each present left one `wl_buffer.release` (~224 B) queued for good.
 //! - **Hotplug:** a new `wl_output` → a surface + [`OutputChange::Added`]; a removed one →
 //!   [`OutputChange::Removed`] and its GPU side freed in [`OutputBackend::process`] with the
 //!   context current (surfaceless), window target before `wl_surface`. A `closed` layer
@@ -143,6 +147,80 @@ pub fn button_bit(code: u32) -> u32 {
     }
 }
 
+// ------------------------------------------------------------------ driver environment
+
+/// NVIDIA's explicit-sync switch: egl-wayland and egl-wayland2 read it when a Wayland
+/// `EGLDisplay` is initialized (`__NV_DISABLE_EXPLICIT_SYNC=1` → implicit/CPU sync).
+pub const NV_DISABLE_EXPLICIT_SYNC: &str = "__NV_DISABLE_EXPLICIT_SYNC";
+
+/// Who decided [`NV_DISABLE_EXPLICIT_SYNC`] for this process (Task 20e).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplicitSync {
+    /// It was unset: `serve` set it to `1` (the leak workaround, [`apply_driver_env`]).
+    Policy,
+    /// The caller's own value, kept as is (`0` keeps explicit sync on).
+    Env(String),
+}
+
+/// The choice for the environment's current value (pure; `None` = unset).
+pub fn explicit_sync_choice(current: Option<&std::ffi::OsStr>) -> ExplicitSync {
+    match current {
+        // Set-but-empty is treated as unset: the driver may read "" as false (explicit sync
+        // on), which would bring the leak back without anyone having chosen it.
+        None => ExplicitSync::Policy,
+        Some(v) if v.is_empty() => ExplicitSync::Policy,
+        Some(v) => ExplicitSync::Env(v.to_string_lossy().into_owned()),
+    }
+}
+
+static DRIVER_ENV: std::sync::OnceLock<ExplicitSync> = std::sync::OnceLock::new();
+
+/// Task 20e: turn NVIDIA's EGL explicit sync off for this process unless the caller chose.
+///
+/// egl-wayland2 ≤ 1.0.2 (NVIDIA 595's) creates its `wl_buffer`s on a per-swapchain event
+/// queue that it only dispatches without explicit sync; with explicit sync on, every
+/// `wl_buffer.release` the compositor sends (Hyprland sends one per present) stays queued
+/// there forever — one ~224 B `wl_closure` per present, read off the socket by our own
+/// `wl_display_read_events` (measured 224 B/present; the 1 h live soak's ~2 MiB/min).
+/// Without explicit sync it waits for the GPU at each swap instead (`glFinish`, the server
+/// being on an NVIDIA GPU too) and dispatches that queue itself. Measured cost, two outputs
+/// at 240/144 Hz mid-crosswarp: loop tick p99 0.1–0.3 → ~1.6 ms, max ≤ 3.5 ms, no missed
+/// frame, same CPU. Mesa ignores the variable. Call first thing in `serve`, before any
+/// thread exists (it may `setenv`).
+pub fn apply_driver_env() {
+    let choice = explicit_sync_choice(std::env::var_os(NV_DISABLE_EXPLICIT_SYNC).as_deref());
+    if choice == ExplicitSync::Policy {
+        // SAFETY: `runtime::serve` calls this before it spawns any thread; nothing reads
+        // the environment concurrently.
+        unsafe { std::env::set_var(NV_DISABLE_EXPLICIT_SYNC, "1") };
+    }
+    let _ = DRIVER_ENV.set(choice);
+}
+
+/// `{env, value, source: policy|env}` (`null` before [`apply_driver_env`] — headless).
+pub fn driver_env_json() -> serde_json::Value {
+    match DRIVER_ENV.get() {
+        None => serde_json::Value::Null,
+        Some(c) => json!({
+            "env": NV_DISABLE_EXPLICIT_SYNC,
+            "value": std::env::var(NV_DISABLE_EXPLICIT_SYNC).ok(),
+            "source": match c { ExplicitSync::Policy => "policy", ExplicitSync::Env(_) => "env" },
+        }),
+    }
+}
+
+/// `wl.driver_env` once the log is open.
+pub fn log_driver_env() {
+    log::event("wl", Level::Info, "wl.driver_env", None, driver_env_json());
+}
+
+#[link(name = "wayland-client")]
+unsafe extern "C" {
+    /// libwayland: dispatch the display's *default* queue (no read). wayland-rs never
+    /// dispatches it — every proxy it creates lives on its own queue.
+    fn wl_display_dispatch_pending(display: *mut c_void) -> std::ffi::c_int;
+}
+
 // ------------------------------------------------------------------ state
 
 /// The GPU side of one output's surface. Dropped before the surface it renders to
@@ -238,6 +316,9 @@ pub struct WlState {
 pub struct Wayland {
     conn: Connection,
     pub(crate) state: WlState,
+    /// Events dispatched from libwayland's default queue ([`Wayland::dispatch_default_queue`]).
+    default_queue_dispatched: u64,
+    default_queue_failed: bool,
 }
 
 fn wl_err(what: &str, e: impl std::fmt::Display) -> String {
@@ -300,12 +381,51 @@ impl Wayland {
             }),
         );
         let source = WaylandSource::new(conn.clone(), queue);
-        Ok((Wayland { conn, state }, source))
+        let wl = Wayland {
+            conn,
+            state,
+            default_queue_dispatched: 0,
+            default_queue_failed: false,
+        };
+        Ok((wl, source))
     }
 
     /// The raw `wl_display*` for [`Gfx::new_wayland`].
     pub fn display_ptr(&self) -> *mut c_void {
         self.conn.backend().display_ptr().cast()
+    }
+
+    /// Task 20e: dispatch what C code on our connection (the EGL platform library) left on
+    /// libwayland's default queue. Every event is read off the socket into its proxy's
+    /// queue by whoever reads (usually our `WaylandSource`); one nobody dispatches piles up
+    /// for good. A normal libwayland app dispatches the default queue in its main loop and
+    /// EGL relies on that: egl-wayland2's fix for its own leak (upstream 6235dd8, after
+    /// 1.0.2) moves explicit-sync `wl_buffer`s to the default queue, and without this their
+    /// `release` events leaked 224 B/present here (built from upstream, measured). Events
+    /// on proxies with no listener are just freed. Runs once per loop iteration
+    /// ([`OutputBackend::process`]), never while a read is prepared.
+    fn dispatch_default_queue(&mut self) {
+        // SAFETY: the display outlives `self.conn`; libwayland locks it; we are its only
+        // dispatcher thread.
+        let n = unsafe { wl_display_dispatch_pending(self.display_ptr()) };
+        if n > 0 {
+            self.default_queue_dispatched += n as u64;
+        } else if n < 0 && !self.default_queue_failed {
+            // A protocol error; wayland-rs reports it on its own next dispatch (loop.failed).
+            self.default_queue_failed = true;
+            log::event(
+                "wl",
+                Level::Warn,
+                "wl.default_queue_failed",
+                None,
+                json!({ "error": std::io::Error::last_os_error().to_string() }),
+            );
+        }
+    }
+
+    /// Events dispatched from the default queue so far (`frames` probe).
+    pub fn default_queue_dispatched(&self) -> u64 {
+        self.default_queue_dispatched
     }
 
     fn out(&self, name: &str) -> Option<&WlOut> {
@@ -508,6 +628,8 @@ impl OutputBackend for Wayland {
     }
 
     fn process(&mut self, gfx: &Gfx) {
+        // 0. Task 20e: libwayland's default queue (EGL's objects), every iteration.
+        self.dispatch_default_queue();
         let st = &mut self.state;
         // 1. Free what's dead — window target (EGL surface + wl_egl_window) before its
         //    wl_surface, with the context current but on no surface.
@@ -1013,6 +1135,24 @@ sctk::delegate_dispatch2!(WlState);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_sync_policy_keeps_the_callers_value() {
+        use std::ffi::OsStr;
+        assert_eq!(explicit_sync_choice(None), ExplicitSync::Policy);
+        // Set-but-empty counts as unset (the driver may read "" as explicit sync on).
+        assert_eq!(
+            explicit_sync_choice(Some(OsStr::new(""))),
+            ExplicitSync::Policy
+        );
+        for v in ["0", "1"] {
+            assert_eq!(
+                explicit_sync_choice(Some(OsStr::new(v))),
+                ExplicitSync::Env(v.to_string()),
+                "a set value ({v:?}) is the caller's choice"
+            );
+        }
+    }
 
     #[test]
     fn names_come_from_wl_output_v4_name() {
