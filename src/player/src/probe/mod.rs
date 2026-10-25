@@ -200,6 +200,7 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         "nodes_not_hosted": snapshots,
         "dying": rt.host.dying(),
         "opening": rt.host.opening(),
+        "open_pool": crate::sources::host::open_pool_stats(),
         "reaper_pending": reaper::pending(),
     }))
 }

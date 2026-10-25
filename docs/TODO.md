@@ -92,16 +92,28 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `lp-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
       Needs an actual rebuild from this branch, not a code change — **owner action:**
       `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
-- [ ] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
+- [x] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
       mechanism, `.claude/rules/player-core.md` § Sources "Async opens") — a burst of near-simultaneous
       switches/creates has no ceiling on how many `lp-open` threads it can spin up at once. Not exercised by
       anything in Task 20's battery (every cell opens sources well below any plausible concurrency ceiling);
       worth a bound + a test before Phase 2 leans on this path harder.
-- [ ] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
+      — done: `host::OpenPool`, a FIFO queue on ≤ `MAX_OPEN_WORKERS` (2) on-demand `lp-open` threads; a job
+      queued for a node destroyed meanwhile is skipped (no core made). Burst of 16 paused 1080p creates: all
+      made + opened 61–80 ms (uncapped 23–70, cap 4 58–71), all ready ~0.5 s either way, the loop's longest
+      open share 2–8 ms (uncapped 13–29). `tests/api.rs::i5_open_burst_is_capped_and_none_lost` (RED: 16 at
+      once; GREEN: peak 2, the 3 destroyed while queued skipped, quit with a queued burst 40 ms, no straggler).
+- [x] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
       currently just prints `"SKIP: no EGL device"` and returns on a GPU-less machine; there's no way to make
       a CI run that's *supposed* to have a GPU fail loudly instead of silently skipping everything. Not
       exercised in Task 20 (every run there had a real GPU) — worth adding before relying on CI coverage of
       this crate's GPU paths.
+      — done: `LP_REQUIRE_GPU=1` (anything but empty/`0`) turns every GPU-test skip into a failure via one
+      helper, `tests/common::skip_gpu` (`headless_gl`, `catalogue_dir` — the "no catalogue" skips too, since
+      nearly every GPU test needs it — and the inline lib unit test); opt-in/non-GPU skips (Wayland, private
+      PipeWire, credits) stay skips. GPU-less machine simulated (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no
+      file): the suite passed in ~3 s with 133 SKIPs; with `LP_REQUIRE_GPU=1` those 133 fail.
+      `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (RED: the old binary passed).
+      `player-core.md` § GFX / EGL.
 - [ ] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
       `gpu-hwdec-interop=no` and maps `hwdec` to copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`),
       because interop init (a CUDA context per render context, 65–90 ms) and `vulkan-copy`'s device creation
@@ -113,17 +125,28 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
       (arena address space +4.6 MiB/min, ~5.7 MiB per switch). Costs no RAM; the reaper's `malloc_trim` walks it
       (1.7 ms max now). Run `battery.sh soak --minutes 480`; if it doesn't plateau, consider fewer per-core
-      threads (mpv's Lua scripts) or reusing cores across switches.
+      threads or reusing cores across switches (the Lua scripts are gone since — 6 fewer threads and their
+      Lua VMs per core; re-measure the free-heap growth first).
 - [ ] **Explicit sync back on NVIDIA once egl-wayland2 > 1.0.2 ships** — Task 20e: 1.0.2 leaks one queued
       `wl_buffer.release` (~224 B) per present with explicit sync (upstream fix 6235dd8, 2026-09-09, unreleased),
       so `serve` defaults `__NV_DISABLE_EXPLICIT_SYNC=1` (cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, loop tick
       p99 ~0.3 → 1.6 ms, 0 missed) and drains libwayland's default queue every iteration. With a fixed driver
       the drain alone is leak-free: drop the env default (keep the drain). `player-core.md` § Wayland NVIDIA notes.
-- [ ] **mpv's built-in Lua scripts per core** (console, stats, auto_profiles, commands, select) start threads
+- [x] **mpv's built-in Lua scripts per core** (console, stats, auto_profiles, commands, select) start threads
       for every new source — `load-scripts`/`load-*=no`-style options would trim per-switch CPU (Task 20d note).
-- [ ] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
+      — done: `sources::mpv::SCRIPT_TRIMS` (`load-scripts`/`osc`/`load-stats-overlay`/`load-console`/
+      `load-auto-profiles`/`load-select`/`load-commands`/`load-positioning`/`load-context-menu`/
+      `input-builtin-bindings` = `no`, best-effort — an unknown name is skipped and logged once). A playing
+      1080p core 28 → 22 threads (6 Lua script threads gone); a core's create + initialize + destroy
+      37–47 → 3.7–5.7 ms CPU; ~1.3 MiB less RSS per live core; the loop's open share 3.6–7.5 → 0.8–3.9 ms.
+      `tests/sources.rs::builtin_scripts_are_not_loaded` (RED: `load-scripts` `yes`, 6 script threads).
+- [x] **Reaper trim at shutdown** — the reaper's `PENDING` drops after the batch's `malloc_trim`, so a trim
       slower than `REAPER_WAIT` during `quit` is reported as `mpv.reaper_stragglers`; skip the trim once
       shutdown has started (Task 20b review, cosmetic).
+      — done: no batch is trimmed once `reaper::shutdown` started, and `shutdown` reports cores not yet
+      destroyed (`undestroyed`), never a trim in flight; `pending()` keeps its "destroyed and trimmed" meaning.
+      Unit tests on the now generic `Reaper<T>` with slow fakes: a 400 ms trim in flight at a 50 ms wait →
+      0 stragglers (RED: 1); a 200 ms destroy at shutdown → done after ~180 ms, no trim (RED: 580 ms, 1 trim).
 - [x] **`transition.onset_timeout` on audio-less videos** — a B whose `aid` hasn't resolved yet (`has_audio`
       unknown → treated as audible) waits the full 150 ms `ONSET_TIMEOUT` before its (silent) ramp; 85 such
       timeouts in the Task 20 re-run. Harmless (nothing to hear) but noisy; resolve `has_audio` from the

@@ -1,7 +1,8 @@
 //! Task 7 brief, Step 1: clear a 64x64 FBO to a known color, read it back, and write it to
 //! a decodable PNG. This is the one test that must run on the real GPU (not skipped) on
 //! the owner's NVIDIA 595.84 machine — see `tests/common::headless_gl` for the one
-//! condition under which it legitimately skips instead (no EGL device at all).
+//! condition under which it legitimately skips instead (no EGL device at all) — and
+//! `LP_REQUIRE_GPU=1`, which turns that skip into a failure (last test here).
 
 mod common;
 
@@ -74,4 +75,51 @@ fn two_gfx_on_one_display_survive_each_others_drop() {
         a.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
     }
     assert_eq!(read_rgba(&a, &tex, 1, 1), [0, 255, 0, 255]);
+}
+
+/// TODO "`LP_REQUIRE_GPU` test mode": the same GPU test, re-run as a child of this binary
+/// with every EGL vendor hidden (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no file — glvnd
+/// then has no driver, so `Gfx::new_offscreen` fails as on a GPU-less machine): without
+/// `LP_REQUIRE_GPU` it passes with a `SKIP` line (the sandbox case), with
+/// `LP_REQUIRE_GPU=1` it fails and says why; `0`/empty = off.
+#[test]
+fn require_gpu_turns_a_missing_gpu_into_a_failure() {
+    let run = |require: Option<&str>| {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args([
+            "clear_readback",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(
+            "__EGL_VENDOR_LIBRARY_FILENAMES",
+            "/nonexistent/lp-no-egl-vendor.json",
+        )
+        .env_remove(common::REQUIRE_GPU_ENV);
+        if let Some(v) = require {
+            c.env(common::REQUIRE_GPU_ENV, v);
+        }
+        let out = c.output().expect("re-run this test binary");
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        (out.status.success(), text)
+    };
+    let (ok, text) = run(None);
+    assert!(ok, "without {}: {text}", common::REQUIRE_GPU_ENV);
+    assert!(text.contains("SKIP: no EGL device"), "{text}");
+    for off in ["0", ""] {
+        let (ok, text) = run(Some(off));
+        assert!(ok, "{}={off:?} is off: {text}", common::REQUIRE_GPU_ENV);
+    }
+    let (ok, text) = run(Some("1"));
+    assert!(
+        !ok,
+        "{}=1 must fail without a GPU: {text}",
+        common::REQUIRE_GPU_ENV
+    );
+    assert!(
+        text.contains("LP_REQUIRE_GPU is set but a GPU test would skip: no EGL device"),
+        "{text}"
+    );
 }

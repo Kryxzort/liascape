@@ -6,7 +6,8 @@
 //! its `PR_SET_PDEATHSIG` SIGTERM; it is SIGKILLed if it lingers), every spawned process
 //! has `PR_SET_PDEATHSIG(SIGKILL)` towards the test and `RLIMIT_CORE` 1 (the deliberate
 //! crashes reach no core dump handler). Skips (prints `SKIP: …`) only without an EGL device or a
-//! `transitions/` catalogue. One server at a time.
+//! `transitions/` catalogue — fails instead under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
+//! One server at a time.
 
 mod common;
 
@@ -20,7 +21,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use common::{ClipSpec, ensure_clip, headless_gl};
-use lp_player::gfx::Catalogue;
 use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_lp-player");
@@ -35,15 +35,9 @@ const EXIT_GAVE_UP: i32 = 4;
 /// `lp_player::supervise::TEST_COMPOSITOR_WAIT_ENV` (black-box: spelled out).
 const TEST_COMPOSITOR_WAIT_ENV: &str = "LP_PLAYER_TEST_COMPOSITOR_WAIT_MS";
 
+/// `LP_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
 fn can_run() -> bool {
-    if headless_gl().is_none() {
-        return false;
-    }
-    if Catalogue::resolve_dir().is_none() {
-        println!("SKIP: no transitions/ directory resolved");
-        return false;
-    }
-    true
+    headless_gl().is_some() && common::catalogue_dir().is_some()
 }
 
 fn new_root() -> PathBuf {

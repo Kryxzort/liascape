@@ -12,7 +12,8 @@
 //! colours come back within ±3 per channel after RGB→YUV→RGB plus mpv's output dither;
 //! `FrameIndex`'s neutral-grey `(n,n,n)` marker within ±1 (luma quantisation only).
 //!
-//! Skips (prints `SKIP: …`, returns) only when there's no EGL device at all.
+//! Skips (prints `SKIP: …`, returns) only when there's no EGL device at all — fails instead
+//! under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
 
 mod common;
 
@@ -844,6 +845,53 @@ fn defaults_applied_at_open_match_mpv() {
     );
     assert_eq!(src.mpv_get_f64("volume-gain"), Some(0.0));
     assert_eq!(src.mpv_get_f64("volume"), Some(100.0));
+}
+
+/// TODO "mpv's built-in Lua scripts per core": every core used to start six Lua script
+/// threads (`lua/commands`, `lua/console`, `lua/context_menu`, `lua/positioning`,
+/// `lua/select`, `lua/stats` — 6 of a 1080p core's 28 threads, measured) for an OSD, a
+/// console and menus nobody can open on a wallpaper. Each option reads back `no`, and no
+/// `lua/*`/`js/*` thread exists in this process while a source plays (sources from the
+/// other tests of this binary included: they all go through the same fixed options). RED
+/// before: every option `yes` (`load-auto-profiles` `auto`), 6 script threads per core.
+#[test]
+fn builtin_scripts_are_not_loaded() {
+    let Some(gfx) = headless_gl() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    settle(&gfx, &mut src);
+    let s = |n: &str| {
+        src.mpv_get_string(&format!("options/{n}"))
+            .unwrap_or_default()
+    };
+    for name in [
+        "load-scripts",
+        "osc",
+        "ytdl",
+        "load-stats-overlay",
+        "load-console",
+        "load-auto-profiles",
+        "load-select",
+        "load-commands",
+        "load-positioning",
+        "load-context-menu",
+        "input-builtin-bindings",
+        "input-default-bindings",
+    ] {
+        assert_eq!(s(name), "no", "options/{name}");
+    }
+    let mut scripts = Vec::new();
+    for t in std::fs::read_dir("/proc/self/task").expect("/proc/self/task") {
+        let comm = std::fs::read_to_string(t.unwrap().path().join("comm")).unwrap_or_default();
+        let comm = comm.trim();
+        if comm.starts_with("lua/") || comm.starts_with("js/") {
+            scripts.push(comm.to_string());
+        }
+    }
+    assert!(
+        scripts.is_empty(),
+        "mpv script threads running: {scripts:?}"
+    );
 }
 
 /// Fix round 1 (#8): a wrong-typed `open` option is `bad_type`; an mpv rejection of a
