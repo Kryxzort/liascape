@@ -211,3 +211,15 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 **`UpdateTimedSettings`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Never restarts current wallpaper.
 
 **App close**: the Electron shell (`app/shell/main.js`, `window-all-closed` / `before-quit`) kills `livepaper --serve`. The backend's ASP.NET `app.Lifetime.ApplicationStopping` hook (`Web/ServerHost.cs`) is the close handler: it `AudioMonitor.Stop()`s and hands mute back to a detached `--monitor` when AutoMute + playing.
+
+**One timer owner (`ReleaseTimer`, `OtherTimerOwner`).** The stopping backend `ReleaseTimer()`s FIRST —
+saves the timed state, disposes the tick, cancels its armed end-of-video wait (the new owner arms its
+own), without touching the session (`TeardownTimer` would clear it) — then clears `gui_timer.pid` (only
+its OWN pid: deleting the next backend's let `SpawnTimerDaemon`'s guard spawn a daemon next to it) and
+hands off to `--timer-daemon`. Before, it ticked on until the process exited — up to Kestrel's 30 s
+shutdown timeout while the UI's WebSocket held it open — next to the daemon and then the next backend
+(dotnet watch, an app relaunch): their aligned switches superseded each other and each "switched now",
+a switch every 1–16 s. Also: a GUI-mode tick checks `gui_timer.pid` once a second and yields when another
+live `--serve` backend (cmdline-checked, not liveness alone) owns it, and so does a superseded aligned
+switch; **a superseded aligned switch re-arms for A's end** (backoff) instead of switching now — this
+process cancels its own wait before it switches, so a supersede always means another requester.

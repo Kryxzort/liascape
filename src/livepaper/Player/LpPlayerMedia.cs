@@ -285,12 +285,47 @@ public static class LpPlayerMedia
         return af;
     }
 
+    // ---- in-place upgrade -----------------------------------------------------------------------
+    // A player older than its binary (rebuilt, reinstalled) restarts onto it with its snapshot
+    // (LpPlayerClient.UpgradeInPlace): before every switch (Switch above), and from this 10 s check
+    // while nothing is switching — never across an armed align:end switch (the restart would drop it
+    // and the rotation would switch early, failure path), so an advance-on-end playlist upgrades at
+    // its next switch. Queued: ordered with switches, so one queued before the check runs first.
+    private static System.Threading.Timer? _upgradeWatch;
+    public static void StartUpgradeWatch() => _upgradeWatch ??= new System.Threading.Timer(_ => UpgradeWatchTick(), null, 10_000, 10_000);
+
+    private static void UpgradeWatchTick()
+    {
+        if (!PlayerEngine.IsLpPlayer) return;
+        var client = C;
+        if (client.PlayerPid == null && !client.Reachable()) return; // a player started before this backend: learn its pid
+        if (client.StaleReason() == null) return;
+        Queue(() =>
+        {
+            if (client.StaleReason() is not string why || Switching(client)) return;
+            client.UpgradeInPlace(why);
+        });
+    }
+
+    // any transition not yet done (armed, waiting, running, handing off); unknown → treated as yes
+    private static bool Switching(LpPlayerClient client)
+    {
+        try
+        {
+            var st = client.Call("state", null, LpPlayerClient.QuickMs);
+            return st.TryGetProperty("transitions", out var t) && t.ValueKind == JsonValueKind.Array
+                && t.EnumerateArray().Any(x => Str(x, "phase") != "done");
+        }
+        catch (LpPlayerException) { return true; }
+    }
+
     // `transition {outputs:"out:*", to:{path, props}, effect from Pick(tcfg) or null (cut), method, align}`.
     // Returns the corr (or null when the player can't be reached / refused — logged with its hint).
     public static string? Switch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
     {
         var client = C;
         if (!client.EnsureRunning()) return null;
+        if (client.StaleReason() is string why) client.UpgradeInPlace(why); // A comes back as it was, then switches
         client.StartEvents();
         // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.

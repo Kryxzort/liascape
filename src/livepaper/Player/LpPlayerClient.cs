@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -307,9 +308,10 @@ public sealed class LpPlayerClient
 
     // Is `pid` CURRENTLY some lp-player process? (no prior identity to compare against — a liveness +
     // name check via `/proc/<pid>/exe`, never a cmdline substring.)
+    // A rebuilt binary leaves the running one as "lp-player (deleted)" — still the player.
     private static bool IsPlayerProcess(int pid)
     {
-        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget) == "lp-player"; }
+        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget)?.Replace(" (deleted)", "") is "lp-player" or ".lp-player-wrapped"; }
         catch { return false; }
     }
 
@@ -368,6 +370,140 @@ public sealed class LpPlayerClient
         return false;
     }
 
+    // ---- in-place upgrade --------------------------------------------------------------------------
+    // The player outlives the backend and the app on purpose (the wallpaper keeps playing), so a rebuilt
+    // or reinstalled binary never reached a running one by itself: fixes "persisted" for hours (a 13:26
+    // build still running at 19:00). Stale = the running compositor isn't the build this backend starts:
+    // a different file by size + mtime, read through open handles — `/proc/<pid>/exe` opens the running
+    // binary even after a rebuild replaced it, and path strings can't tell (one checkout is reachable as
+    // /home/… and /mnt/…/@home/…). Nix: by store path — every store file has mtime 1, and LP_PLAYER_BIN
+    // is the wrapProgram wrapper while the process runs `.lp-player-wrapped` (two files, one build).
+    // null = current, or unknown.
+    public string? StaleReason()
+    {
+        if (PlayerPid is not int pid || RunningExe(pid)?.Exe is not string exe) return null;
+        var bin = PlayerEngine.ResolveBinary(fresh: true);
+        if (bin == null) return null;
+        if (StoreRoot(exe) is string re && StoreRoot(bin) is string rb)
+            return re == rb ? null : $"it runs {re}, this backend starts {rb}";
+        if (BuildOf($"/proc/{pid}/exe") is not { } running || BuildOf(bin) is not { } wanted || running == wanted) return null;
+        // settled: a copy still being written (install.sh's `install`) is never started
+        if (DateTime.UtcNow - wanted.Built < TimeSpan.FromSeconds(2)) return null;
+        return $"it runs {exe} (built {running.Built.ToLocalTime():yyyy-MM-dd HH:mm:ss}), this backend starts {bin} (built {wanted.Built.ToLocalTime():yyyy-MM-dd HH:mm:ss})";
+    }
+
+    // /nix/store/<hash>-<name> of a store path, else null
+    private static string? StoreRoot(string path)
+    {
+        const string store = "/nix/store/";
+        if (!path.StartsWith(store)) return null;
+        int end = path.IndexOf('/', store.Length);
+        return end < 0 ? path : path[..end];
+    }
+
+    private readonly record struct Build(long Size, DateTime Built);
+    private static Build? BuildOf(string path)
+    {
+        try
+        {
+            using var h = File.OpenHandle(path, FileMode.Open, FileAccess.Read);
+            return new Build(RandomAccess.GetLength(h), File.GetLastWriteTimeUtc(h));
+        }
+        catch { return null; }
+    }
+
+    private static (string Exe, DateTime StartedUtc)? RunningExe(int pid)
+    {
+        try
+        {
+            var exe = new FileInfo($"/proc/{pid}/exe").LinkTarget;
+            return exe == null ? null : (exe, Process.GetProcessById(pid).StartTime.ToUniversalTime());
+        }
+        catch { return null; }
+    }
+
+    // /player-engine: which build runs (and whether it's out of date)
+    public object? RunningInfo()
+    {
+        if (PlayerPid is not int pid || RunningExe(pid) is not var (exe, started)) return null;
+        return new { pid, supervisor = SupervisorPid, exe, started = started.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), stale = StaleReason() };
+    }
+
+    // Restart the player onto the current binary, keeping what it shows: `quit` (it writes its final
+    // snapshot) and the same `serve` arguments again + `--restore` — the same wallpaper at the same place
+    // after ~0.2 s, settings re-applied by the Restarted handler (R81). Never twice onto the same build:
+    // one that still reads as stale after its upgrade (a wrapper this check can't see through) must not
+    // restart the player every 10 s — a new build may try again.
+    private string? _upgradedTo;
+    public bool UpgradeInPlace(string why)
+    {
+        lock (_spawnLock)
+        {
+            if (!AutoSpawn) return false;
+            var bin = PlayerEngine.ResolveBinary(fresh: true);
+            if (bin == null || (SupervisorPid ?? PlayerPid) is not int src) return false;
+            if (ServeArgs(src) is not { } args) { Log($"lp-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
+            var target = $"{bin} {BuildOf(bin)}";
+            if (target == _upgradedTo) { Log($"lp-player still reads as out of date after upgrading it onto {bin} ({why}) — not restarting it again for this build"); return false; }
+            _upgradedTo = target;
+            int? old = PlayerPid;
+            Log($"lp-player is out of date ({why}) — restarting it onto {bin} with --restore");
+            var evThread = _evThread;
+            QuitOrKill(); // also stops the event thread
+            args.Add("--restore");
+            try { Spawn(bin, args); }
+            catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 3000 && !Reachable()) Thread.Sleep(50);
+            bool ok = Reachable();
+            // resubscribe at once (the old event thread must be gone first, or StartEvents keeps it)
+            evThread?.Join(1000);
+            if (ok) { StartEvents(); WaitSubscribed(1000); }
+            Log(ok ? $"lp-player upgraded in place: pid {old} → {PlayerPid}" : $"lp-player upgrade: the new player didn't answer within 3 s (see ~/.cache/livepaper/lp-player-serve.log)");
+            if (!ok) Fail("lp-player did not come back after an in-place upgrade");
+            return ok;
+        }
+    }
+
+    // The `serve` arguments `pid` (a verified lp-player process) was started with, minus the restart
+    // plumbing the supervisor adds to its child — what an upgrade starts the new player with.
+    private static List<string>? ServeArgs(int pid)
+    {
+        if (!IsPlayerProcess(pid)) return null;
+        try
+        {
+            var argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0', StringSplitOptions.RemoveEmptyEntries).Skip(1).ToList();
+            if (argv.Count == 0 || argv[0] != "serve") return null;
+            var keep = new List<string>();
+            for (int i = 0; i < argv.Count; i++)
+            {
+                if (argv[i] is "--restore" or "--supervised") continue;
+                if (argv[i] == "--restarted") { i++; continue; }
+                keep.Add(argv[i]);
+            }
+            return keep;
+        }
+        catch { return null; }
+    }
+
+    // `setsid <bin> <args>` with stdio → the serve log (never a pipe: the player outlives this backend —
+    // a dead pipe would turn its next stderr write into an error).
+    private static Process? Spawn(string bin, List<string> args)
+    {
+        var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-player-serve.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
+        var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
+        psi.ArgumentList.Add("sh");
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >\"$LP_SERVE_LOG\" 2>&1");
+        psi.ArgumentList.Add(bin);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Environment["LP_SERVE_LOG"] = outLog;
+        var p = Process.Start(psi);
+        Log($"started `{bin} {string.Join(" ", args)}` (pid {p?.Id})");
+        return p;
+    }
+
     // ---- lifecycle ---------------------------------------------------------------------------------
     private readonly object _spawnLock = new();
 
@@ -401,24 +537,7 @@ public sealed class LpPlayerClient
             var bin = PlayerEngine.ResolveBinary();
             if (bin == null) { Fail(PlayerEngine.UnavailableReason); return false; }
             Process? p;
-            try
-            {
-                // stdio → a log file, never a pipe: the player outlives this backend (a dead pipe
-                // would turn its next stderr write into an error).
-                var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-player-serve.log");
-                Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
-                var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
-                psi.ArgumentList.Add("sh");
-                psi.ArgumentList.Add("-c");
-                psi.ArgumentList.Add(SocketPath == DefaultSocketPath()
-                    ? "exec \"$0\" serve </dev/null >\"$1\" 2>&1"
-                    : "exec \"$0\" serve --socket \"$2\" </dev/null >\"$1\" 2>&1");
-                psi.ArgumentList.Add(bin);
-                psi.ArgumentList.Add(outLog);
-                psi.ArgumentList.Add(SocketPath);
-                p = Process.Start(psi);
-                Log($"started `{bin} serve` (pid {p?.Id}) → {SocketPath}");
-            }
+            try { p = Spawn(bin, SocketPath == DefaultSocketPath() ? ["serve"] : ["serve", "--socket", SocketPath]); }
             catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 3000)

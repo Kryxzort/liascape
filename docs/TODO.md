@@ -142,6 +142,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the global
       Settings page beyond the nine playback settings, drag-reorder of the strip, saved playlists, the
       playlist-settings modal beyond advance-on-end, two controls in a row (only one control per state).
+- [x] **Stale player after a rebuild/reinstall** — the player outlives the backend, so fixes "persisted" (a
+      13:26 build ran at 19:00): the backend now restarts a stale player onto its binary with `--restore`
+      (before a switch, or from a 10 s check while nothing is armed — player-adapter.md § Lifecycle).
+- [x] **Two timer owners across a backend restart** (dotnet watch, app relaunch): switch storm every 1–16 s;
+      the stopping backend now releases the timer first, a backend yields to a newer one, a superseded
+      aligned switch re-arms instead of switching now (player.md § One timer owner).
+- [ ] **`bin/Debug/livepaper.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
+      next to the owner's `dotnet watch` (same `obj/`) — the next watch restart (`dotnet run --no-build`)
+      can't start without it. A plain `dotnet build` brought it back; cause not pinned down.
 - [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same
       round: the adapter's aligned-switch backstop, the 1× tempo-filter rebuild holes, the align:end estimate):
   - [ ] **Stall breaker trips without a slow player** — 6 trips in ~25 min of storm (the request after a trip
