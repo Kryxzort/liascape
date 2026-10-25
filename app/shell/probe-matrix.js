@@ -157,6 +157,8 @@ const PAGE = `window.__mx = {
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   async cardMenu(t, label) { this.ctx(this.card(t)?.querySelector(".thumb-wrap"), "card " + t); await this.sleep(250); this.click(this.byText(".lib-ctx button", label), label); },
   async stripMenu(t, label) { this.ctx(this.strip(t), "strip " + t); await this.sleep(250); this.click(this.byText(".pl-ctx button", label), label); },
+  // a real drag: many input events over time (the throttled preview + debounced persist interleave)
+  async drag(el, from, to, steps, ms, what) { for (let i = 1; i <= steps; i++) { this.setValue(el, +(from + (to - from) * i / steps).toFixed(2), what); await this.sleep(ms); } },
   setValue(el, v, what) { if (!el) throw new Error("not found: " + what); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     set.call(el, String(v)); el.dispatchEvent(new Event("input", { bubbles: true })); },
   setCheck(el, b, what) { if (!el) throw new Error("not found: " + what); if (el.checked !== b) el.click(); },
@@ -171,6 +173,8 @@ const PAGE = `window.__mx = {
 }; true`;
 async function loadUi() {
   await win.loadURL(U + "/");
+  // record what the page POSTs to /preview (its bodies — the backend only sees what arrives)
+  await js(`(() => { window.__mxReq = []; const f = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/preview")) window.__mxReq.push(o?.body ?? null); return f(u, o); }; })(); true`);
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
   await js(PAGE);
   await sleep(300);
@@ -292,6 +296,35 @@ for (const t of itemTargets) {
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
     return ov === 42 ? [] : [`${TITLE(c.target)} volumeOverride ${ov}, expected 42`];
   }, noSwitch: true };
+}
+// A REAL drag on an item's slider (40 steps over ~1.6 s), every source sampled every 40 ms meanwhile:
+// no source of another item may move — even for a moment (owner: "A's speed leaks into B while it changes
+// during a transition"; the single-step cells above only looked at the target, and only once)
+const effectiveOf = (c, p, field, global) => (c.before.lib || []).find((i) => i.videoPath === p)?.[field] ?? global;
+for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6], ["Vol", 0, "volumeOverride", 80, 20]]) for (const t of ["shown", "other"]) {
+  C[`item${kind}Drag:${t}`] = { async run(c) {
+    c.target = pick(c, t); if (!c.target) return c.skip = "no target";
+    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500);`);
+    c.samples = []; let on = true;
+    const sampler = (async () => { while (on) { try { c.samples.push({ t: Date.now(), st: await ctl.call("state") }); } catch {} await sleep(40); } })();
+    await ui(`await m.drag(m.modalRange(${idx}), ${from}, ${to}, 40, 40, "slider");`);
+    await sleep(400); on = false; await sampler;
+    c.previewBodies = await js(`window.__mxReq.slice(-20)`);
+    await ui(`m.closeModal();`);
+  }, check(c) {
+    const v = [];
+    for (const { st } of c.samples) for (const [id, n] of sourcesOf(st)) {
+      if (n.path === c.target) continue;
+      if (kind === "Spd") { const want = Math.min(4, Math.max(0.1, effectiveOf(c, n.path, field, c.before.s.speed)));
+        if (!near(n.speed, want, 0.001)) v.push(`${id}(${TITLE(n.path)}) speed ${n.speed} while ${TITLE(c.target)}'s slider moved (its own: ${want})`); }
+      else { const want = VolumeDb(effectiveOf(c, n.path, field, c.before.s.volume));
+        if (!near(n.gain?.user ?? 0, want)) v.push(`${id}(${TITLE(n.path)}) gain.user ${n.gain?.user} while ${TITLE(c.target)}'s slider moved (its own: ${want})`); }
+    }
+    const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.[field];
+    if (ov !== to) v.push(`${TITLE(c.target)} ${field} ${ov}, expected ${to}`);
+    if (v.length) v.push(`preview bodies: ${JSON.stringify((c.previewBodies || []).slice(0, 3).map((b) => String(b).replace(/\/tmp\/lpmx-[^/]+\/home\/.local\/share\/livepaper\/library\/imported\/[^/]+\//g, "")))}`);
+    return [...new Set(v)].slice(0, 4).concat(v.slice(-1));
+  } };
 }
 // global settings (the "other" live item gets its own override first, so the override/global split shows)
 const setting = (name, key, value, drive) => {
