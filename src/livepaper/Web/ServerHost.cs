@@ -509,9 +509,15 @@ public static class ServerHost
         app.MapPost("/stop", () => { PlayerHelper.Stop(); return Results.Ok(); });
         // `--action=<name>` (keybinds) forwarded by the one-shot CLI process (ActionForward): run here, on
         // this backend's own session state, so the UI hears about it. 409 {error} = couldn't run.
-        app.MapPost("/action", (NameReq r) => AppOps.RunAction(r.Name) is string err
-            ? Results.Json(new { error = err }, statusCode: AppOps.Actions.Contains(r.Name) ? 409 : 400)
-            : Results.Json(new { ok = true }));
+        app.MapPost("/action", (NameReq r) =>
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var err = AppOps.RunAction(r.Name);
+            if (sw.ElapsedMilliseconds > 500) Console.WriteLine($"/action {r.Name}: {sw.ElapsedMilliseconds} ms");
+            return err is string e
+                ? Results.Json(new { error = e }, statusCode: AppOps.Actions.Contains(r.Name) ? 409 : 400)
+                : Results.Json(new { ok = true });
+        });
         // next/prev/random step the library/playlist to pick an item — under lp-player Phase 1,
         // scenes are skipped exactly like AllowScenes=false (PlayerHelper.IsSkippedPath), but when
         // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()

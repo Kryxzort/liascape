@@ -81,7 +81,9 @@ async function http(method, p, body) {
 const post = (p, b = {}) => http("POST", p, b);
 const getSettings = async () => (await http("GET", "/settings")).json;
 function cli(action) {
-  return new Promise((res) => cp.execFile(E.LP_DOTNET, [E.LP_DLL, `--action=${action}`], { timeout: 15000 }, (err, out, errOut) => res({ code: err ? err.code ?? 1 : 0, out: String(out) + String(errOut) })));
+  const t0 = Date.now();
+  return new Promise((res) => cp.execFile(E.LP_DOTNET, [E.LP_DLL, `--action=${action}`], { timeout: 40000 }, (err, out, errOut) =>
+    res({ code: err ? err.code ?? (err.killed ? `killed (${err.signal}) after ${Date.now() - t0} ms` : 1) : 0, out: String(out) + String(errOut), ms: Date.now() - t0 })));
 }
 
 // ---------------------------------------------------------------- oracle
@@ -378,18 +380,42 @@ action("toggle-pause", () => [], { flipPause: true }); // the oracle checks play
 action("toggle-mute", () => [], { flipMute: true });
 action("volume-up", (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up from ${c.before.s.volume}`]));
 action("volume-down", (c) => (c.after.s.volume === Math.max(0, c.before.s.volume - 5) ? [] : [`volume ${c.after.s.volume} after volume-down from ${c.before.s.volume}`]));
-action("next-wallpaper", (c) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`next-wallpaper stayed on ${TITLE(c.before.cur.path)}`] : []), { switch: true });
+// user switches — paused: KeepPauseOnSwitch off (default) resumes and switches with the transition; on
+// (the `-keep` cells) stays paused and cuts to B's first frame
+const stayed = (c, a) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`${a} stayed on ${TITLE(c.before.cur.path)}`] : []);
+function pausedSwitch(c) {
+  if (!c.wasPaused || !c.before.cur?.path || c.after.cur?.path === c.before.cur.path) return [];
+  const sched = c.evs.filter((e) => e.event === "transition.scheduled");
+  const last = sched[sched.length - 1];
+  if (!last) return ["no switch was requested"];
+  if (c.keep && last.effect_id != null) return [`a switch while paused that keeps the pause used ${last.effect_id}, not a cut`];
+  if (!c.keep && !c.noOutput && last.effect_id == null) return ["a switch that resumes from a pause was a cut (transitions are on)"];
+  return [];
+}
 // a fresh playlist session at its first item has nothing before it: previous leaves it — and an armed
 // aligned switch — alone (it used to relaunch the playing item and cancel the armed switch)
-action("previous-wallpaper", (c) => {
+function prevCheck(c) {
   if (!c.before.cur?.path) return [];
-  if (!c.fresh) return c.after.cur?.path === c.before.cur.path ? [`previous-wallpaper stayed on ${TITLE(c.before.cur.path)}`] : [];
+  if (!c.fresh) return [...stayed(c, "previous-wallpaper"), ...pausedSwitch(c)];
   const v = [];
   if (c.after.cur?.path !== c.before.cur.path) v.push(`previous at the first item switched to ${TITLE(c.after.cur?.path)}`);
   for (const e of c.evs) if (e.event === "transition.scheduled" || e.event === "transition.cancelled") v.push(`previous at the first item: ${e.event} ${e.corr} ${TITLE(e.path) ?? ""}`);
   return v;
-}, { switch: true });
-action("random", () => [], { switch: true });
+}
+const SWITCHES = {
+  "next-wallpaper": (c) => [...stayed(c, "next-wallpaper"), ...pausedSwitch(c)],
+  "previous-wallpaper": prevCheck,
+  random: (c) => [...stayed(c, "random"), ...pausedSwitch(c)],
+};
+for (const [a, check] of Object.entries(SWITCHES)) {
+  // a user switch from a pause resumes (default) or keeps it (-keep); in a fresh session's no-op previous it keeps it either way
+  const userSwitch = (keep) => (c) => { c.wasPaused = !!c.exp.paused; c.keep = keep; if (c.wasPaused && !keep && !(a === "previous-wallpaper" && c.fresh)) c.exp.paused = false; };
+  C[`cli:${a}`] = { switch: true, async run(c) { userSwitch(false)(c); c.cli = await cli(a); }, check };
+  C[`cli:${a}-keep`] = { switch: true,
+    async pre() { const s = await getSettings(); s.keepPauseOnSwitch = true; await post("/settings", s); },
+    async run(c) { userSwitch(true)(c); if (c.wasPaused) c.noSettle = true; c.cli = await cli(a); },
+    check: (c) => [...check(c), ...(c.after.s.keepPauseOnSwitch ? [] : ["keepPauseOnSwitch not set"])] };
+}
 action("stop", (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after stop`] : []), { switch: true, exp: { paused: false } });
 
 function expectShown(c, want, { effect }) {
@@ -425,10 +451,7 @@ function notTargeted(c, p, { gone } = {}) {
 }
 
 // Cells whose expectation waits on an owner decision: reported as KNOWN (with the reason), not FAIL.
-const KNOWN = [
-  [/^paused × cli:(next-wallpaper|previous-wallpaper|random)$/, "pause × user switch: a single-item next/prev/random unpauses (Apply = new session), the documented contract says next/prev keep the pause — owner decision"],
-  [/^pausedEffect × cli:(next-wallpaper|previous-wallpaper)$/, "pause × user switch: in a paused playlist the tick holds next/prev until the resume, then switches — owner decision"],
-];
+const KNOWN = [];
 
 // ---------------------------------------------------------------- run
 async function runCell(stateName, ctlName) {
@@ -448,7 +471,8 @@ async function runCell(stateName, ctlName) {
   if (K_.exp) Object.assign(c.exp, K_.exp);
   if (K_.flipPause) c.exp.paused = !c.exp.paused;
   if (K_.flipMute) c.exp.muted = !(c.exp.muted ?? false);
-  if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
+  if (K_.switch && c.noSettle) { await sleep(1500); c.exp.settled = true; } // paused: the cut's ramps wait for the resume
+  else if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
   if (!c.mid) c.exp.settled = c.exp.settled ?? !c.pending;
   if (c.mid) c.exp.settled = false;
   c.after = await snapshot();
@@ -472,9 +496,11 @@ async function runCell(stateName, ctlName) {
   const strip = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); await m.sleep(600); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (strip && JSON.stringify(strip) !== JSON.stringify(want)) v.push(`UI strip ${JSON.stringify(strip)}, backend playlist ${JSON.stringify(want)}`);
-  if (c.cli && c.cli.code !== 0) v.push(`--action exit ${c.cli.code}: ${c.cli.out.trim().slice(0, 200)}`);
+  if (c.cli && c.cli.code !== 0) v.push(`--action exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
+  // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
+  const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`--action took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
   const known = v.length ? KNOWN.find(([re]) => re.test(`${stateName} × ${ctlName}`))?.[1] : undefined;
-  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known,
+  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings,
     target: c.target ? TITLE(c.target) : undefined, shown: c.shown ? TITLE(c.shown) : undefined,
     logs: v.length ? logsSince(logAt) : undefined,
     http: v.length ? httpLog.slice(h0).filter((r) => !asset.test(r.url)).map((r) => `+${r.t - t0}ms ${r.method} ${r.url.replace(U, "")} ${r.status}`) : undefined,
@@ -494,7 +520,7 @@ app.whenReady().then(async () => {
     let r;
     try { r = await runCell(st, k); } catch (e) { r = { state: st, control: k, result: "ERROR", violations: [String(e && e.stack || e)] }; }
     results.push(r); out.write(JSON.stringify(r) + "\n");
-    console.log(`${r.result.padEnd(5)} ${name}${r.violations?.length ? "\n        - " + r.violations.join("\n        - ") : ""}`);
+    console.log(`${r.result.padEnd(5)} ${name}${r.violations?.length ? "\n        - " + r.violations.join("\n        - ") : ""}${r.warnings?.length ? "\n        ! " + r.warnings.join("\n        ! ") : ""}`);
   }
   out.end();
   const n = (x) => results.filter((r) => r.result === x).length;

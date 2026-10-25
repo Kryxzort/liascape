@@ -8,6 +8,7 @@ sealed class Program
 {
     public static void Main(string[] args)
     {
+        var tMain = DateTime.Now;
         // hidden: MpvPropertyMap + protocol round-trip against a private headless lp-player (PASS/FAIL)
         if (args.Contains("--lp-player-selftest"))
             Environment.Exit(livepaper.Player.LpPlayerSelfTest.Run());
@@ -32,8 +33,12 @@ sealed class Program
         {
             // A running app backend owns the session: hand the action to it, so it acts on its own state
             // (history, timer, mute) and the UI hears about the switch. Run here only when none answers.
+            var tFwd = DateTime.Now;
             if (livepaper.Web.ActionForward.TryForward(action, out var code, out var message))
             {
+                var start = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+                if ((DateTime.Now - start).TotalMilliseconds > 1500) // a keybind should feel instant
+                    Console.Error.WriteLine($"livepaper --action={action}: slow — runtime start {(tMain - start).TotalMilliseconds:F0} ms, init {(tFwd - tMain).TotalMilliseconds:F0} ms, forward {(DateTime.Now - tFwd).TotalMilliseconds:F0} ms");
                 if (message != null) Console.Error.WriteLine($"livepaper --action={action}: {message}");
                 Environment.ExitCode = code;
                 return;

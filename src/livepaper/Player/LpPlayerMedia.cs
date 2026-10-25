@@ -614,12 +614,22 @@ public static class LpPlayerMedia
     {
         var client = C;
         if (!client.SocketExists) return false;
-        JsonElement v;
-        try { v = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value"); }
-        catch (LpPlayerException) { return false; }
-        if (v.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
-        bool now = v.ValueKind != JsonValueKind.True;
+        if (PlayerPaused(client) is not bool paused) return false;
+        bool now = !paused;
         return client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LpPlayerClient.QuickMs) != null;
+    }
+
+    // `get player.paused` (null = no player / no answer). Synchronous but quick (QuickMs).
+    public static bool IsPlayerPaused() => C is { SocketExists: true } client && PlayerPaused(client) == true;
+
+    private static bool? PlayerPaused(LpPlayerClient client)
+    {
+        try
+        {
+            var v = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value");
+            return v.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null };
+        }
+        catch (LpPlayerException) { return null; }
     }
 
     // I1 (final review): a NEW wallpaper session (Apply / ApplyPlaylist / a cold Launch) starts

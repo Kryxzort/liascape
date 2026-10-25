@@ -21,7 +21,10 @@ runs it on its own session state (`AppOps.RunAction` — the same switch the CLI
 it: run in the one-shot process, a single-session next/prev/random switched the wallpaper behind the
 backend's back (stale history, the UI kept marking the old one playing). It runs locally only when no
 backend answers `/health`; once the POST is sent it never falls back (a doubled next skips one, a doubled
-toggle undoes itself). Unknown action → exit 1 with the list.
+toggle undoes itself). Unknown action → exit 1 with the list. A keybind slower than 1.5 s prints its
+phases to stderr (`slow — runtime start / init / forward`; unloaded the whole CLI is ~0.14 s — the UI
+matrix saw 6–15 s only under the owner's desktop load, the forward itself < 1 s), and `/action` logs any
+run over 500 ms.
 
 ## Files
 - **`Web/ServerHost.cs`** — minimal-API endpoints (thin wrappers), CORS (for `vite dev`), static

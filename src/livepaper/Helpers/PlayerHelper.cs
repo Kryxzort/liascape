@@ -660,6 +660,12 @@ public static class PlayerHelper
         catch { }
     }
 
+    private static string? PeekPendingAction()
+    {
+        try { return File.Exists(PendingActionPath) ? File.ReadAllText(PendingActionPath).Trim() : null; }
+        catch { return null; }
+    }
+
     private static string? ConsumePendingAction()
     {
         try
@@ -716,7 +722,8 @@ public static class PlayerHelper
             }
             TeardownTimer();
             ClearTimedStateFile();
-            if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // I1: a new session plays
+            // I1: a new session plays — unless it's a user next/prev/random keeping the pause
+            if (PlayerEngine.IsLpPlayer && !_keepPauseNextSwitch) LpPlayerMedia.QueueNewSession();
             SwitchToFile(videoPath, mpvOptions);
             // Track the single item so QueryCurrentPath works for scenes (no mpv socket to query) and a
             // live override can identify what's playing. _timedPaths stays null → no timed-playlist logic.
@@ -973,6 +980,10 @@ public static class PlayerHelper
 
             if (_timedTimerPaused)
             {
+                // KeepPauseOnSwitch: a user next/prev/random made while paused runs now (a cut, the
+                // pause and the countdown stay); a restart waits for the resume as before
+                if (PeekPendingAction() is "next" or "prev" or "random" && ConsumePendingAction() is string act)
+                    DispatchPendingAction(act);
                 _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
                 return;
             }
@@ -1081,12 +1092,14 @@ public static class PlayerHelper
         // lp-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
         // no pre-launch crossover, no overlay, no IPC loadfile. Scenes are skipped in Phase 1 exactly
         // like AllowScenes=false (which stops playback here).
+        bool keepPause = _keepPauseNextSwitch; // a user switch staying paused: a cut (KeepPauseOnSwitch)
+        _keepPauseNextSwitch = false;
         if (PlayerEngine.IsLpPlayer)
         {
             if (IsScenePath(path)) { KillCurrentProcess(); return; }
             var lpSettings = SettingsService.Load();
             var lpCfg = TransitionService.CurrentConfig();
-            LpPlayerMedia.QueueSwitch(path, lpSettings, lpCfg.Enabled ? lpCfg : null, alignEnd: false); // queued: we may hold _lock
+            LpPlayerMedia.QueueSwitch(path, lpSettings, lpCfg.Enabled && !keepPause ? lpCfg : null, alignEnd: false); // queued: we may hold _lock
             _currentSpeed = ReadSpeedOverride(path) ?? lpSettings.Speed;
             OnWallpaperChanged?.Invoke(path);
             return;
@@ -1120,7 +1133,9 @@ public static class PlayerHelper
             var tcfg = TransitionService.CurrentConfig();
             if (tcfg.Enabled)
             {
-                if (!IsPlaying || !mpvAliveForTransition || _restartPending)
+                if (keepPause)
+                    TransitionService.TransLog("transition SKIPPED: a switch while paused keeps the pause (KeepPauseOnSwitch) → instant cut, B paused");
+                else if (!IsPlaying || !mpvAliveForTransition || _restartPending)
                     TransitionService.TransLog($"transition SKIPPED (V→V gate): playing={IsPlaying} mpvAlive={mpvAliveForTransition} restartPending={_restartPending} → instant cut");
                 else
                 {
@@ -1858,6 +1873,12 @@ public static class PlayerHelper
     private static double? TryQueryProperty(string prop)
     {
         if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.QueryMpv(prop);
+        return QueryMpvData(prop) is { ValueKind: JsonValueKind.Number } d ? d.GetDouble() : null;
+    }
+
+    // legacy: mpv's `get_property <prop>` reply `data` (cloned), null without an answer
+    private static JsonElement? QueryMpvData(string prop)
+    {
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -1875,8 +1896,8 @@ public static class PlayerHelper
                 try
                 {
                     using var doc = JsonDocument.Parse(line);
-                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Number)
-                        return data.GetDouble();
+                    if (doc.RootElement.TryGetProperty("data", out var data))
+                        return data.Clone();
                 }
                 catch { }
             }
@@ -2346,19 +2367,60 @@ public static class PlayerHelper
 
     private static void DispatchPendingAction(string action)
     {
-        switch (action)
+        // a user switch reaching the tick owner while paused (it may have been made in another
+        // process — a keybind with no app open — so decided here, not where it was asked for)
+        _keepPauseNextSwitch = action is "next" or "prev" or "random" && KeepsPause();
+        try
         {
-            case "next": AdvanceAndLaunch(); break;
-            case "prev": StepBackAndLaunch(); break;
-            case "random": RandomAndLaunch(); break;
-            case "restart": RestartCurrentAndLaunch(); break;
-            // defer: don't restart now — the next changeover's SwitchToFile becomes a cold relaunch (masked)
-            case "soft-restart": _restartPending = true; break;
+            switch (action)
+            {
+                case "next": AdvanceAndLaunch(); break;
+                case "prev": StepBackAndLaunch(); break;
+                case "random": RandomAndLaunch(); break;
+                case "restart": RestartCurrentAndLaunch(); break;
+                // defer: don't restart now — the next changeover's SwitchToFile becomes a cold relaunch (masked)
+                case "soft-restart": _restartPending = true; break;
+            }
         }
+        finally { _keepPauseNextSwitch = false; }
+    }
+
+    // ── Pause × a user switch (next / previous / random: keybind, CLI, /next /prev /random) ──────
+    // KeepPauseOnSwitch off (default): a switch made while paused resumes playback first, so it
+    // switches with its transition and plays — single and playlist alike (a paused playlist's tick
+    // used to hold the action until the resume, then switch; a single one already unpaused). On: the
+    // pause stays — the switch is a cut (an effect can't run with playback stopped: lp-player's clock
+    // is frozen) to the new wallpaper's first frame, paused, and a paused playlist's tick runs it at
+    // once (its countdown stays paused). A rotation never switches while paused.
+    private static bool _keepPauseNextSwitch; // consumed by the next SwitchToFile (and Apply)
+
+    private static bool KeepsPause() => SettingsService.Load().KeepPauseOnSwitch && IsPausedNow();
+
+    public static bool IsPausedNow() =>
+        PlayerEngine.IsLpPlayer ? LpPlayerMedia.IsPlayerPaused() : QueryMpvData("pause") is { ValueKind: JsonValueKind.True };
+
+    // Before a user switch: resume (default) — or leave the pause for the switch to keep (true)
+    private static bool BeforeUserSwitch()
+    {
+        if (!IsPausedNow()) return false;
+        if (SettingsService.Load().KeepPauseOnSwitch) return true;
+        if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // `set player.paused false`, queued ahead of the switch
+        else TrySendCommand("set_property", "pause", false);
+        SetTimerPaused(false); // the tick owner (maybe another process) counts again and runs the action
+        return false;
+    }
+
+    // Runs a non-timed user switch with the keep-pause flag set for its SwitchToFile, never leaving it set.
+    private static void UserSwitch(bool keep, Action run)
+    {
+        _keepPauseNextSwitch = keep;
+        try { run(); }
+        finally { _keepPauseNextSwitch = false; }
     }
 
     public static void NextWallpaper()
     {
+        bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
             WritePendingAction("next");
@@ -2366,19 +2428,18 @@ public static class PlayerHelper
         }
         // Single-wallpaper sessions (single, random) — step the library.
         // mpv-native playlist mode falls through to playlist-next.
-        if (TryStepLibrary(forward: true)) return;
-        SendCommand("playlist-next");
+        UserSwitch(keep, () => { if (!TryStepLibrary(forward: true)) SendCommand("playlist-next"); });
     }
 
     public static void PreviousWallpaper()
     {
+        bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
             WritePendingAction("prev");
             return;
         }
-        if (TryStepLibrary(forward: false)) return;
-        SendCommand("playlist-prev");
+        UserSwitch(keep, () => { if (!TryStepLibrary(forward: false)) SendCommand("playlist-prev"); });
     }
 
     // For single-wallpaper sessions (no playlist context), `next`/`prev`
@@ -2578,11 +2639,17 @@ public static class PlayerHelper
     // instead of letting Apply() 500.
     public static void ApplyRandom()
     {
+        bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
             WritePendingAction("random");
             return;
         }
+        UserSwitch(keep, ApplyRandomNow);
+    }
+
+    private static void ApplyRandomNow()
+    {
 
         var settings = SettingsService.Load();
         var library = LibraryService.LoadAll();
@@ -2671,18 +2738,34 @@ public static class PlayerHelper
         lock (_lock)
         {
             SendCommand("cycle", "pause");
-            try
-            {
-                if (!File.Exists(TimedStatePath)) return;
-                var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
-                if (state == null) return;
-                var updated = state with { TimerPaused = !state.TimerPaused, TimerStopped = false };
-                var tmp = TimedStatePath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(updated));
-                File.Move(tmp, TimedStatePath, overwrite: true);
-            }
-            catch { }
+            UpdateTimerPaused(p => !p);
         }
+    }
+
+    // the timed playlist's countdown pause, in the state file the tick owner reads (RefreshSignals)
+    private static void SetTimerPaused(bool paused)
+    {
+        lock (_lock)
+        {
+            if (_timedPaths != null) _timedTimerPaused = paused;
+            UpdateTimerPaused(_ => paused);
+        }
+    }
+
+    private static void UpdateTimerPaused(Func<bool, bool> f)
+    {
+        try
+        {
+            if (!File.Exists(TimedStatePath)) return;
+            var state = JsonSerializer.Deserialize<TimedState>(File.ReadAllText(TimedStatePath));
+            if (state == null) return;
+            var updated = state with { TimerPaused = f(state.TimerPaused), TimerStopped = false };
+            if (updated == state) return;
+            var tmp = TimedStatePath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(updated));
+            File.Move(tmp, TimedStatePath, overwrite: true);
+        }
+        catch { }
     }
 
     public static void SendCommand(params object[] args)
