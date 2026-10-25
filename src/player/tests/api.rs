@@ -931,6 +931,72 @@ fn stepped_align_end_reveal() {
     c.step_until_event(100, 30, "transition.done", &corr);
 }
 
+/// TODO "a speed-up inside the last D of an `align:end` wait / a global speed change
+/// mid-effect", real libmpv on the virtual clock: a 1.5 s full-live fade aligned to the end
+/// of a 3 s A, A sped up 4× (`srcs:*.speed`, the backend's global path) 300 ms into the
+/// effect — the effect is compressed and hands off at A's new end. RED before: at the
+/// requested 1.5 s, ~0.9 s after A ended (A frozen on its last frame meanwhile).
+#[test]
+fn align_end_speed_up_mid_effect_hands_off_at_a_end() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_3s", RED_3S)), "loop": true}),
+    );
+    show_all(&mut c, &a);
+    for _ in 0..3 {
+        c.step(100);
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 1500, "method": "full-live", "align": "end"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let evs = c.step_until_event(16, 300, "transition.started", &corr);
+    let started = evs
+        .iter()
+        .find(|e| e["event"] == "transition.started")
+        .unwrap()["at_ms"]
+        .as_f64()
+        .unwrap();
+    for _ in 0..19 {
+        c.step(16);
+    }
+    let now = c.ok("state", json!({}))["clock"]["now_ms"]
+        .as_f64()
+        .unwrap();
+    let tp = get(&mut c, &format!("{a}.time_pos"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    let t = c.ok("set", json!({"path": "srcs:*.speed", "value": 4.0}));
+    assert!(
+        t["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == &json!(a)),
+        "{t}"
+    );
+    let a_end = now + (3.0 - tp) / 4.0 * 1000.0;
+    let evs = c.step_until_event(16, 300, "transition.handoff", &corr);
+    let handoff = evs
+        .iter()
+        .find(|e| e["event"] == "transition.handoff")
+        .unwrap()["at_ms"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (handoff - a_end).abs() <= 40.0,
+        "handoff {:+.0} ms vs A's end (effect started at {started:.0}, A sped up at {now:.0}, \
+         time_pos {tp:.3}; RED: the full 1.5 s)",
+        handoff - a_end
+    );
+    c.step_until_event(16, 100, "transition.done", &corr);
+}
+
 /// Finds `id` in a `probe sources` reply.
 fn probe_source<'a>(probe: &'a Value, id: &str) -> &'a Value {
     probe["sources"]

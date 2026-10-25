@@ -203,6 +203,11 @@ cos/sin), `Step`. `eval` always clamps `x` to `[0,1]` first.
   animation that has started or starts within `horizon` — the fast gain timer's arm condition
   (the caller passes one main tick period). `len()`/`retain_targets(keep)` (the runtime drops
   animations on nodes that are gone — a never-started placeholder would otherwise stay forever).
+- **`compress_to(path, corr, now, end)`** (the `align: end` compression, § Transition recipe →
+  Align): the live animation `corr` added on `path` finishes at `end` instead of later — the rest
+  of its progress is rescaled in time (new `duration` = (end − now)/(1 − x₀), `start` moved back
+  so x(now) = x₀): value continuous, same curve. In place (same id); a not-started one keeps its
+  start (≤ `end`); never a finished one, never later, never another corr's.
 - **`add()` supersedes, permanently.** `Animator` holds at most one live animation per
   `PropPath` — `add()`ing a second animation on a target **removes** the earlier one
   outright (same as `cancel()`; retracting its completion from the `finished()` queue too,
@@ -1188,7 +1193,8 @@ root-caused to the `Animator`'s tick-rate coarseness on a 30 ms ramp (invariant 
 caveat), not the pause timing this fix controls — **resolved since** by R90's 1 kHz gain timer
 (Task 16d) and the detector's own R94/R96 alignment fixes (`docs/player/invariants.md` #8).
 
-`fx.progress` is Linear 0→1 over [t0, t0+D]; handoff happens on the first tick ≥ t0+D.
+`fx.progress` is Linear 0→1 over [t0, t0+D]; handoff happens on the first tick ≥ t0+D (`Tr::end_at`;
+earlier once a full-live `align: end` effect is compressed — Align below).
 reveal/frozen snapshot only an A whose picture can still change: a still (by **kind** —
 image/colour/snapshot; a video is never a still, even with no known duration) or an A that
 has ended (it holds its last frame) is held as itself. With snapshots the effect starts one
@@ -1203,11 +1209,27 @@ minus half a frame (`time_pos` is the shown frame's pts, so each sample over-est
 A's real `Ended`; a speed change **rescales** that minimum (`t + (end − t)·s0/s1`, still an
 over-estimate) instead of restarting it from a `time_pos` that may be 100 ms stale (`Position` is
 rate-limited — under a continuous drag no fresh sample arrived between two changes and the effect
-started late; `align_end_tracks_a_speed_dragged_continuously`). A speed-*up* that moves the start
-instant into the past can't be made up by a fixed-length effect: it starts at once and A holds its
-last frame for the difference, as for an A shorter than D; if that instant passed between two ticks the effect starts backdated (≤ one
-tick) so it still ends on time; if it's already past at the first evaluation (A shorter
-than D, or B late) it starts at once and A holds its last frame. reveal/frozen/cut *start*
+started late; `align_end_tracks_a_speed_dragged_continuously`). If the start instant passed between
+two ticks the effect starts backdated (≤ one tick) so it still ends on time; if it's already past
+at the first evaluation (A shorter than D, or B late) it starts at once and A holds its last frame
+for the difference (`Tr::end_hold`, by design). **The effect keeps ending with A
+(`Transitions::follow_a_end`, every Running tick; TODO "speed-up inside the last D"):** a speed-up
+that moves A's end earlier — before the start (the start instant jumped into the past: it starts at
+once) or mid-effect (a global speed reaches A through `srcs:*`) — **compresses the effect's
+remaining progress** to A's new end (+ `end_hold`), and A's/B's xfade ramps with it (audio follows
+the picture; a still-pending B onset ramps within the new end). `Animator::compress_to` only
+rescales the rest of each animation in time: value continuous at that instant, same curve, final
+value at the new end. Judged on the raw `end_est` (a move > `COMPRESS_MIN_GAIN` 10 ms; the centring
+never reads as one), aimed at the centred end, never to less than `COMPRESS_FLOOR` (100 ms) of
+remaining effect (an A whose end is already here holds ≤ 100 ms instead of the picture cutting),
+R42's 30 ms gain floor kept; `transition.compressed {a, end_ms, to_end_ms, a_end_ms, hold_ms,
+speed}` (info). **Never stretched:** after a slow-down the effect ends before A — invisible (B is
+fully shown) and D stays the longest it runs. Handoff = `Tr::end_at` (t0 + D unless compressed).
+Measured: the 60-seed drag storm ends −4.6…+10.8 ms vs A (RED, uncompressed: up to +391 ms); unit
+`align_end_speed_up_mid_effect_compresses_to_a_end` (RED +1113 ms), `…_inside_last_d_of_the_wait_ends_with_a`
+(RED +1426), `align_end_compression_keeps_the_hold_and_never_stretches`, `anim::compress_to_keeps_value_and_shape`;
+real libmpv `tests/api.rs::align_end_speed_up_mid_effect_hands_off_at_a_end` (stepped, `srcs:*.speed`
+4× 300 ms in; RED +892 ms). A shared looping A (boundary cached, TODO) isn't followed. reveal/frozen/cut *start*
 at A's `Ended` (tracked from events: set on `Ended`, cleared on `Ready` or a `Position`
 going back — so an A that ended before the request counts too). Shared looping A (loop
 untouched, no `Ended`): full-live aims at the current iteration's end, or the next one if
