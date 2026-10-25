@@ -219,6 +219,8 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         "max_busy_ms": s.max_busy_ms,
         "max_busy_excl_open_ms": s.max_busy_excl_open_ms,
         "max_open_ms": s.max_open_ms,
+        "max_request_ms": s.max_request_ms,
+        "max_request_cmd": s.max_request_cmd,
         "iterations": s.iterations,
         "wakes": s.wakes,
         "wake_pending": rt.wake_pending,
@@ -252,6 +254,8 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         rt.stats.max_busy_ms = 0.0;
         rt.stats.max_busy_excl_open_ms = 0.0;
         rt.stats.max_open_ms = 0.0;
+        rt.stats.max_request_ms = 0.0;
+        rt.stats.max_request_cmd.clear();
     }
     Ok(v)
 }

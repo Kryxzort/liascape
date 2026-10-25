@@ -277,8 +277,12 @@ pub(crate) struct LoopStats {
     pub tick_times: VecDeque<Instant>,
     pub last_phases: Map<String, Value>,
     /// Longest stretch of synchronous loop work (a tick, a step, the post-dispatch
-    /// source sync/update) since the last `probe loop {"reset": true}`.
+    /// source sync/update, one client's requests) since the last `probe loop {"reset": true}`.
     pub max_busy_ms: f64,
+    /// The slowest single request handler (its verb) since the last reset — a client that
+    /// waited on a reply sees this, whatever else the loop was doing (speed storm).
+    pub max_request_ms: f64,
+    pub max_request_cmd: String,
     /// The same with the synchronous source opens taken out (`max_open_ms` is those).
     pub max_busy_excl_open_ms: f64,
     pub max_open_ms: f64,
@@ -321,6 +325,15 @@ impl LoopStats {
         self.max_busy_ms = self.max_busy_ms.max(ms(d));
         self.max_busy_excl_open_ms = self.max_busy_excl_open_ms.max(ms(d.saturating_sub(open)));
         self.max_open_ms = self.max_open_ms.max(ms(open));
+    }
+
+    /// One request handler's run time.
+    pub(crate) fn request(&mut self, d: Duration, cmd: &str) {
+        let ms = d.as_secs_f64() * 1000.0;
+        if ms > self.max_request_ms {
+            self.max_request_ms = ms;
+            self.max_request_cmd = cmd.to_string();
+        }
     }
 
     /// R90: records one fast-timer gain push (bounded history, [`GAIN_PUSH_HISTORY`]).
@@ -3046,7 +3059,12 @@ impl Runtime {
                     continue;
                 }
                 match proto::parse(&line) {
-                    Ok(req) => match handlers::handle(self, cid, &req) {
+                    Ok(req) => match {
+                        let t = Instant::now();
+                        let r = handlers::handle(self, cid, &req);
+                        self.stats.request(t.elapsed(), &req.cmd);
+                        r
+                    } {
                         Some(r) => self.respond(cid, &req.id, r),
                         None => {
                             // Deferred (`step`) — unless it was answered at once.
@@ -3075,7 +3093,10 @@ impl Runtime {
         match self
             .handle
             .insert_source(src, move |r, _, rt: &mut Runtime| {
+                let t = Instant::now();
                 rt.client_io(cid, r.readable || r.error, r.writable);
+                let open = rt.host.take_open_time();
+                rt.stats.busy(t.elapsed(), open);
                 Ok(PostAction::Continue)
             }) {
             Ok(tok) => c.token = Some(tok),
