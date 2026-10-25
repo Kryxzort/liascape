@@ -5,7 +5,7 @@
 # `dotnet watch --serve` on a pinned port (5174), so .cs edits recompile in ~seconds without losing
 # the open window.
 set -e
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
 # Native helpers are core (transitions + scene-audio crossfade), not optional — build them so dev
 # exercises them too. The dotnet-watch backend runs with WorkingDirectory=repo and auto-discovers

@@ -27,7 +27,7 @@
 # Needs: dotnet (or DOTNET=/path/to/dotnet), ffmpeg, jq, curl, python3. Exit 0 = all pass.
 # Last line: `RESULT pass=N fail=M`.
 set -u
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -47,7 +47,25 @@ if [ $BUILD = 1 ]; then
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 
+# Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
+# bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
+# missing — stacks started then died ("backend didn't start": libhostpolicy.so … runtimeconfig.json not
+# found; 2 of 6 matrix shards once). Copied whole, retried until the DLL didn't change during the copy.
+snapshot_backend() {   # $1 = destination dir → prints the copied DLL's path
+  local src; src=$(dirname "$DLL")
+  for _ in $(seq 1 60); do
+    if [ -f "$src/livepaper.runtimeconfig.json" ] && [ -f "$DLL" ]; then
+      local m0; m0=$(stat -c %Y.%s "$DLL")
+      mkdir -p "$1" && cp -a "$src/." "$1/" 2>/dev/null
+      [ -f "$1/livepaper.runtimeconfig.json" ] && [ -f "$1/livepaper.dll" ] && [ "$(stat -c %Y.%s "$DLL")" = "$m0" ] \
+        && { echo "$1/livepaper.dll"; return 0; }
+    fi
+    sleep 1
+  done
+  return 1
+}
 T=$(mktemp -d /tmp/lpit-XXXXXX)   # short: a unix socket path must be < 108 bytes
+DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$T/bin"
 # the backend's player binary: a link to this build, replaced by a copy to stand in for a rebuild (upgrade test)
 ln -s "$B" "$T/bin/lp-player"

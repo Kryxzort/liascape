@@ -32,7 +32,7 @@
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
 # electron-42). Exit 0 = every cell passed. Results: $LP_MATRIX_OUT (default: a dir printed at the end).
 set -u
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-6}; SHARD=""; PROBE=""
 while [ $# -gt 0 ]; do
@@ -63,6 +63,24 @@ if [ $BUILD = 1 ]; then
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 
+# Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
+# bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
+# missing — stacks started then died ("backend didn't start": libhostpolicy.so … runtimeconfig.json not
+# found; 2 of 6 matrix shards once). Copied whole, retried until the DLL didn't change during the copy.
+snapshot_backend() {   # $1 = destination dir → prints the copied DLL's path
+  local src; src=$(dirname "$DLL")
+  for _ in $(seq 1 60); do
+    if [ -f "$src/livepaper.runtimeconfig.json" ] && [ -f "$DLL" ]; then
+      local m0; m0=$(stat -c %Y.%s "$DLL")
+      mkdir -p "$1" && cp -a "$src/." "$1/" 2>/dev/null
+      [ -f "$1/livepaper.runtimeconfig.json" ] && [ -f "$1/livepaper.dll" ] && [ "$(stat -c %Y.%s "$DLL")" = "$m0" ] \
+        && { echo "$1/livepaper.dll"; return 0; }
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------- --jobs N: N shards in parallel
 if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   P=$(mktemp -d /tmp/lpmx-XXXXXX)
@@ -87,6 +105,9 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   }
   trap pcleanup EXIT
   trap 'exit 130' INT TERM HUP
+  # one snapshot for every shard (they inherit LP_MATRIX_DLL and skip their own)
+  DLL=$(snapshot_backend "$P/backend") || { echo "ABORT: no complete backend build to snapshot ($(dirname "$DLL"))"; exit 2; }
+  export LP_MATRIX_DLL=$DLL LP_MATRIX_SNAPPED=1
   T0=$(date +%s)
   MINFREE=${LP_MATRIX_MIN_FREE_MB:-3072}
   memavail() { awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo; }
@@ -130,6 +151,9 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
 fi
 
 T=$(mktemp -d /tmp/lpmx-XXXXXX)   # short: a unix socket path must be < 108 bytes
+if [ -z "${LP_MATRIX_SNAPPED:-}" ]; then
+  DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
+fi
 OUT=${LP_MATRIX_OUT:-$T/out}
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$OUT"
 if [ -n "$UIDIR" ]; then

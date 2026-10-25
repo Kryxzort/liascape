@@ -4,7 +4,7 @@
 # wallpaper app's layer-shell + helper spawning). Reuses scripts/install.sh to build+stage the
 # components, then adds a bundled electron and a relocatable AppRun.
 set -e
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 APPDIR="$ROOT/AppDir"
 APPIMAGETOOL="$ROOT/scripts/appimagetool"
 OUTPUT="$ROOT/livepaper-x86_64.AppImage"
