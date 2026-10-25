@@ -4,7 +4,9 @@ Running list of things found while working that aren't done yet. Newest context 
 Tick items off in the commit that does them. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Waiting on owner
-- [ ] **Pause × a user switch** (UI × player-state matrix, `KNOWN` cells). Paused, then next/previous/random:
+- [x] **Pause × a user switch** — owner (2026-10-25): an Advanced toggle, resume by default →
+      `KeepPauseOnSwitch` (Settings → Playback "Stay paused when switching"). Was: (UI × player-state matrix,
+      `KNOWN` cells). Paused, then next/previous/random:
       a single wallpaper **unpauses** and switches (`TryStepLibrary` → `Apply` = a new session, I1); a playlist
       **keeps** the pause but its tick holds the action until the resume and switches then (the player clock is
       frozen, so a transition couldn't run anyway). The documented contract (I1) says next/prev keep the pause.

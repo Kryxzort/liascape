@@ -168,6 +168,8 @@ export const Settings = memo(function Settings() {
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => set("speed", +e.target.value)} /></Row>
+        {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="keepPauseOnSwitch">
+          <input type="checkbox" checked={g("keepPauseOnSwitch", false)} onChange={(e) => set("keepPauseOnSwitch", e.target.checked)} /></Row>}
         <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><input className="num" type="number" min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(e) => set("restartIntervalSeconds", +e.target.value)} /></Row>
         {adv && <Row label="Restart only at playlist changeover" hint="defer the restart to the next video change (no mid-video flash); lone videos still restart" rk="restartOnSwitchOnly"><input type="checkbox" checked={g("restartOnSwitchOnly", false)} onChange={(e) => set("restartOnSwitchOnly", e.target.checked)} /></Row>}
         <Help>Kills and relaunches mpvpaper periodically to prevent memory leaks.</Help>

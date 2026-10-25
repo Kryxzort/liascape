@@ -18,6 +18,8 @@ public static class ActionForward
     {
         code = 0; message = null;
         if (ReadPort() is not int port) return false;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long healthMs = -1;
         var url = $"http://127.0.0.1:{port}";
         // the port file outlives a crashed backend and the port can be reused: only a livepaper backend
         // answering /health counts
@@ -28,6 +30,7 @@ public static class ActionForward
             if (!h.IsSuccessStatusCode) return false;
             using var doc = JsonDocument.Parse(h.Content.ReadAsStringAsync().GetAwaiter().GetResult());
             if (!doc.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True) return false;
+            healthMs = sw.ElapsedMilliseconds;
         }
         catch { return false; }
         // From here the backend may have acted: never fall back to running it here too (a doubled
@@ -36,6 +39,8 @@ public static class ActionForward
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             var r = http.PostAsJsonAsync($"{url}/action", new { name = action }).GetAwaiter().GetResult();
+            if (sw.ElapsedMilliseconds > 1000) // a keybind should feel instant — say where the time went
+                Console.Error.WriteLine($"livepaper --action={action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
             if (r.IsSuccessStatusCode) return true;
             code = 1;
             try

@@ -180,8 +180,17 @@ in-process inside the compositor, never the supervisor, so this is the right pid
   reads it (logged) but never re-asserts it. A pause belongs to its **session**: `stop` clears it
   on the player side, and a new session — `Apply`, `ApplyPlaylist`, a cold `Launch` — queues `set
   player.paused false` (`LpPlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
-  fresh, playing mpvpaper; next/prev and rotation keep it. mpv's `pause` property maps to
-  `player.paused` too (M7).
+  fresh, playing mpvpaper; a rotation keeps it. **A user switch while paused** (next / previous /
+  random — keybind, CLI, `/next` `/prev` `/random`; owner's call 2026-10-25): `KeepPauseOnSwitch` off
+  (default) → `BeforeUserSwitch` resumes first (`QueueNewSession` + the timed countdown via
+  `SetTimerPaused`), so it switches with its transition and plays — a paused playlist's tick used to
+  hold the action until the resume, a single one already unpaused (`Apply`); on → the pause stays, the
+  switch is a **cut** (`_keepPauseNextSwitch`, consumed by `SwitchToFile`; `Apply` then skips
+  `QueueNewSession`) to B's first frame, paused, and the paused tick runs a pending
+  next/prev/random at once (its countdown stays paused). Decided where the switch runs (the tick
+  owner, `DispatchPendingAction`), since the action may come from another process. Legacy: the same
+  (resume = `set_property pause false`; keep = no overlay, the IPC `loadfile` keeps mpv's pause).
+  mpv's `pause` property maps to `player.paused` too (M7).
 - **Pause (R75, final)**: ONE `set player.paused` — the Player node's `paused` (player-core.md §
   Graph & properties "Player node paused", Task 16b) freezes every source's EFFECTIVE pause
   (`node.paused || player.paused`, never the node's own raw value — a recipe-held side, e.g. reveal's

@@ -61,6 +61,7 @@ public class AppSettings
     public bool DebugMode { get; set; } = false;             // UI: enable the lpdbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
     public bool RestartOnSwitchOnly { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
+    public bool KeepPauseOnSwitch { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
     public int GlobalIntervalSeconds { get; set; } = 1800;
