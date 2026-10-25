@@ -26,12 +26,14 @@ export function onScreen(b: Box): boolean {
 
 export function captureSource(morphId: string | null): MorphSource {
   const el = sourceEl(morphId);
-  const still = el?.querySelector<HTMLImageElement>("img.thumb:not(.anim)");
   const vid = el?.querySelector<HTMLVideoElement>("video.thumb.anim");
-  return {
-    aspect: still && still.naturalWidth && still.naturalHeight ? still.naturalWidth / still.naturalHeight : null,
-    videoTime: vid && !vid.paused ? vid.currentTime : null,
-  };
+  // the picture's aspect from whatever the source has loaded: its still, else its gif (a lazy still may
+  // not have loaded yet while the gif plays over it — Browse), else its video
+  let aspect: number | null = null;
+  for (const i of el?.querySelectorAll<HTMLImageElement>("img.thumb:not(.anim), img.thumb.anim") ?? [])
+    if (i.naturalWidth && i.naturalHeight) { aspect = i.naturalWidth / i.naturalHeight; break; }
+  if (aspect == null && vid?.videoWidth && vid.videoHeight) aspect = vid.videoWidth / vid.videoHeight;
+  return { aspect, videoTime: vid && !vid.paused ? vid.currentTime : null };
 }
 
 // the box of aspect `a` covering `s`, centred — where the whole picture is when `s` shows its cover-crop

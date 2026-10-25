@@ -1,5 +1,4 @@
 import { memo, useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
 
@@ -16,16 +15,9 @@ export const Card = memo(function Card({
   onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
-  // hide the overlay while this card is the open preview AND through the close-morph (no double gif /
-  // snap-back as the modal morphs shut)
-  const [cooldown, setCooldown] = useState(false);
-  useEffect(() => {
-    if (previewing) { setCooldown(true); return; }
-    const t = setTimeout(() => setCooldown(false), 360);
-    return () => clearTimeout(t);
-  }, [previewing]);
-  const active = !previewing && !cooldown && (hover || (autoPlayGifs && !!w.animatedThumbnailUrl));
-  const morphing = previewing || cooldown;
+  // COOL: the open preview morphed out of this card → it's lifted out (hidden) until the preview morphs
+  // back in (components/useMorph.ts); the preview plays the gif meanwhile
+  const active = !previewing && (hover || (autoPlayGifs && !!w.animatedThumbnailUrl));
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
   useEffect(() => { if (active) setMounted(true); }, [active]);
@@ -38,18 +30,15 @@ export const Card = memo(function Card({
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
   const downloading = progress !== undefined;
   return (
-    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${morphing ? " morphing" : ""}`}>
-      <div className="thumb-wrap"
+    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}`}>
+      <div className={`thumb-wrap${previewing ? " lifted" : ""}`} data-morph-id={`br-${w.pageUrl}`}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onClick={(e) => onClick(e, w)}
         onContextMenu={(e) => { e.preventDefault(); onContext(w); }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // stop middle-click autoscroll
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onMiddle(w); } }}
         title="Click: download & apply · Right-click: info · Middle-click: open source">
-        {/* only the morphing card is a framer layout node (else hundreds bog down the morph) */}
-        {morphing
-          ? <motion.img layoutId={`thumb-${w.pageUrl}`} className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" style={{ borderRadius: 14 }} />
-          : <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />}
+        <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
         {gifSrc && mounted && (
           // backgroundImage = the static frame → the gif's loop-gap shows the thumbnail, not black flicker
           <img className="thumb anim" src={gifSrc} decoding="async" alt=""

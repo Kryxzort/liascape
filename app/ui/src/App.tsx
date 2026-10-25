@@ -49,11 +49,7 @@ export default function App() {
   }, []); // eslint-disable-line
   useEvents(onEvent);
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setPreview(null); };
-    addEventListener("keydown", h);
-    return () => removeEventListener("keydown", h);
-  }, []);
+  // (Escape closes the preview from inside it — morphing back into its card, components/useMorph.ts)
 
   // FREEZE FIX: pause all gif animation when the window is hidden OR loses focus (you fullscreen
   // another app over it). On X11 an occluded window keeps reporting visible, so without this the
