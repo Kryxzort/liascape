@@ -20,6 +20,10 @@ const U = E.LP_URL;
 const K = JSON.parse(E.LP_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
 const OUT = E.LP_OUT;
 const ONLY = E.LP_ONLY ? new RegExp(E.LP_ONLY) : null;
+// `i/N` (test-ui-matrix.sh --jobs N runs N hermetic stacks in parallel): this instance runs the cells whose
+// index in the (--only filtered) cell list is ≡ i mod N — state-major order, so every shard gets a slice of
+// every state
+const SHARD = E.LP_SHARD ? E.LP_SHARD.split("/").map(Number) : null;
 const TITLE = (p) => (K.indexOf(p) >= 0 ? `k${K.indexOf(p) + 1}` : String(p));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (test-ui-matrix.sh runs it on a private Xvfb: --ozone-platform=x11 --disable-gpu)
@@ -547,11 +551,14 @@ app.whenReady().then(async () => {
   BASE_SETTINGS = await getSettings();
   const out = fs.createWriteStream(path.join(OUT, "cells.jsonl"));
   const results = [];
+  let idx = -1;
   for (const st of Object.keys(STATES)) for (const k of Object.keys(C)) {
     const name = `${st} × ${k}`;
     if (ONLY && !ONLY.test(name)) continue;
-    let r;
+    if (SHARD && ++idx % SHARD[1] !== SHARD[0]) continue;
+    let r; const t0 = Date.now();
     try { r = await runCell(st, k); } catch (e) { r = { state: st, control: k, result: "ERROR", violations: [String(e && e.stack || e)] }; }
+    r.ms = Date.now() - t0;
     results.push(r); out.write(JSON.stringify(r) + "\n");
     console.log(`${r.result.padEnd(5)} ${name}${r.violations?.length ? "\n        - " + r.violations.join("\n        - ") : ""}${r.warnings?.length ? "\n        ! " + r.warnings.join("\n        ! ") : ""}`);
   }
