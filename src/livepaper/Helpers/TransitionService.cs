@@ -35,6 +35,11 @@ public static class TransitionService
             : new Config(s.GlobalTransitionEnabled, s.GlobalTransitionEffectIds ?? [], s.GlobalTransitionDurationMs, s.GlobalTransitionDurationMaxMs, s.GlobalTransitionShuffle);
     }
 
+    // Same effect choice + timing (Config is a record, but its EffectIds list compares by reference).
+    public static bool SameConfig(Config a, Config b) =>
+        a.Enabled == b.Enabled && a.DurationMs == b.DurationMs && a.DurationMaxMs == b.DurationMaxMs
+        && a.Shuffle == b.Shuffle && (a.EffectIds ?? []).SequenceEqual(b.EffectIds ?? []);
+
     // The effective config for the CURRENT session (single apply => global; playlist => its settings).
     public static Config CurrentConfig()
     {

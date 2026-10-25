@@ -2330,6 +2330,24 @@ public static class PlayerHelper
         }
     }
 
+    // The transition (effect / duration / on-off / method) changed while an aligned switch is armed for A's
+    // end. lp-player: that switch was REQUESTED at arm time with the old effect + duration (the player
+    // times it), so re-request it with the new config — the next switch must use what the user just set
+    // (legacy picks the effect when its overlay starts, near A's end: already live). Same `next`.
+    public static void RearmAlignedSwitch()
+    {
+        if (!PlayerEngine.IsLpPlayer) return;
+        lock (_lock)
+        {
+            if (!_waitingForVideoEnd || _timerReleased || _waitCts == null || _history == null
+                || _historyIndex < 0 || _historyIndex >= _history.Count) return;
+            var next = _history[_historyIndex];
+            if (IsScenePath(next)) return;
+            CancelVideoEndWait();
+            ArmVideoEndWait(next);
+        }
+    }
+
     private static void CancelVideoEndWait()
     {
         _waitCts?.Cancel();
