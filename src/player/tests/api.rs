@@ -3512,6 +3512,94 @@ fn i2_pause_while_align_end_pending_is_ramped_both_ways() {
     assert_eq!(st["graph"][&a]["gain_effective_db"], json!(0.0), "{st}");
 }
 
+/// `KeepPauseOnSwitch` (the backend's "stay paused" on a user switch): a cut requested while
+/// the player is paused swaps at once and B shows its first frame, still paused. A's 30 ms
+/// anti-click ramp ran on the frozen clock, so the swap — and the picture — waited for the
+/// resume; an A the pause gate already holds silent needs no ramp. Then a second cut while
+/// still paused (A = the first cut's B), and a cut that interrupts a paused fade.
+#[test]
+fn cut_while_paused_swaps_at_once() {
+    let Some(srv) = real_serve(&[]) else { return };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    wait_for(Duration::from_secs(2), "A gated and paused", || {
+        (mpv_pause_of(&mut c, &a).as_deref() == Some("yes")).then_some(())
+    });
+    let mut prev = a.clone();
+    for (path, effect) in [(&blue, Value::Null), (&red, Value::Null)] {
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": path, "loop": true}, "effect_id": effect}),
+        );
+        let b = r["to"].as_str().unwrap().to_string();
+        wait_for(
+            Duration::from_secs(2),
+            "the cut to swap while paused",
+            || {
+                let st = c.ok("state", json!({}));
+                let shows = ["lay:VIRTUAL-1:main", "lay:VIRTUAL-2:main"]
+                    .iter()
+                    .all(|l| st["graph"][l]["content"] == json!(b));
+                (shows && st["graph"][&prev].is_null()).then_some(())
+            },
+        );
+        assert_eq!(get(&mut c, "player.paused")["result"]["value"], json!(true));
+        assert_eq!(
+            mpv_pause_of(&mut c, &b).as_deref(),
+            Some("yes"),
+            "B plays while paused"
+        );
+        prev = b;
+    }
+    // a paused fade, then a cut: the fade commits, the cut swaps, nothing waits for the resume
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    wait_playing(&mut c, &prev, 0.3);
+    c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": blue, "loop": true}, "effect_id": "fade", "duration_ms": 3000}),
+    );
+    wait_for(Duration::from_secs(5), "the fade running", || {
+        let st = c.ok("state", json!({}));
+        (st["transitions"][0]["phase"] == json!("running")).then_some(())
+    });
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    std::thread::sleep(Duration::from_millis(150));
+    let b = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": red, "loop": true}, "effect_id": null}),
+    )["to"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(
+        Duration::from_secs(2),
+        "the cut over a paused fade to swap",
+        || {
+            let st = c.ok("state", json!({}));
+            let shows = ["lay:VIRTUAL-1:main", "lay:VIRTUAL-2:main"]
+                .iter()
+                .all(|l| st["graph"][l]["content"] == json!(b));
+            let effects = st["graph"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|n| n["kind"] == json!("effect"));
+            (shows && !effects).then_some(())
+        },
+    );
+    // and it all plays again on the resume
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    wait_for(Duration::from_secs(3), "B audible after the resume", || {
+        let st = c.ok("state", json!({}));
+        (st["graph"][&b]["gain_effective_db"] == json!(0.0)).then_some(())
+    });
+}
+
 /// I2 (b): pause mid-gate, then a switch that fails / is cancelled / is superseded while
 /// paused — after the resume nothing that plays is left silent (no `anticlick` −96 on a
 /// playing source), and the current wallpaper is audible.

@@ -1508,7 +1508,12 @@ the fast timer, part of `gain_work_pending`, saved by the snapshot at its live t
 backend mutes with a 30 ms `animate srcs:*.gain.mute`: on the frozen clock a mute while paused
 reached no source until the resume, then raced the gate's ramp-in. The recipe's slots
 (`xfade`/`anticlick`) and every non-gain animation keep the player clock.
-`tests/api.rs::setting_gain_ramp_lands_while_paused`.
+`tests/api.rs::setting_gain_ramp_lands_while_paused`. **A cut while paused swaps at once:** the
+cut sets an already-silent A's anticlick (effective gain at −96 — what the pause gate holds a playing
+source at) instead of ramping it on the frozen clock, so the swap is due at once; `release` already
+buries a silent A at once, so a cut over a paused fade commits and swaps too; B shows its first frame,
+held by the pause (its xfade ramp-in and the gate run at the resume).
+`tests/api.rs::cut_while_paused_swaps_at_once`.
 
 **No output left: transitions are accepted (final review I4).** With zero outputs (R60 parked),
 `transition` on an `out:` alias goes to `Runtime::transition_parked`: B is created paused and
