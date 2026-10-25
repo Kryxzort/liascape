@@ -102,11 +102,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       made + opened 61–80 ms (uncapped 23–70, cap 4 58–71), all ready ~0.5 s either way, the loop's longest
       open share 2–8 ms (uncapped 13–29). `tests/api.rs::i5_open_burst_is_capped_and_none_lost` (RED: 16 at
       once; GREEN: peak 2, the 3 destroyed while queued skipped, quit with a queued burst 40 ms, no straggler).
-- [ ] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
+- [x] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
       currently just prints `"SKIP: no EGL device"` and returns on a GPU-less machine; there's no way to make
       a CI run that's *supposed* to have a GPU fail loudly instead of silently skipping everything. Not
       exercised in Task 20 (every run there had a real GPU) — worth adding before relying on CI coverage of
       this crate's GPU paths.
+      — done: `LP_REQUIRE_GPU=1` (anything but empty/`0`) turns every GPU-test skip into a failure via one
+      helper, `tests/common::skip_gpu` (`headless_gl`, `catalogue_dir` — the "no catalogue" skips too, since
+      nearly every GPU test needs it — and the inline lib unit test); opt-in/non-GPU skips (Wayland, private
+      PipeWire, credits) stay skips. GPU-less machine simulated (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no
+      file): the suite passed in ~3 s with 133 SKIPs; with `LP_REQUIRE_GPU=1` those 133 fail.
+      `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (RED: the old binary passed).
+      `player-core.md` § GFX / EGL.
 - [ ] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
       `gpu-hwdec-interop=no` and maps `hwdec` to copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`),
       because interop init (a CUDA context per render context, 65–90 ms) and `vulkan-copy`'s device creation

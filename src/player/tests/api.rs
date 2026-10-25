@@ -4,7 +4,8 @@
 //! ones), talks JSON lines over its socket, and kills the child on drop (also on panic).
 //! `--no-supervise` (Task 16): the spawned process *is* the compositor (pid checks, lock
 //! owner, SIGTERM); supervision has its own suite (`tests/supervise.rs`). Skips (prints
-//! `SKIP: …`) only without an EGL device or a `transitions/` catalogue.
+//! `SKIP: …`) only without an EGL device or a `transitions/` catalogue — fails instead
+//! under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
 //!
 //! One server at a time (a process-wide lock): parallel 1080p decoders starve each other
 //! and the teardown-timing test measures the loop itself.
@@ -20,7 +21,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use common::{ClipSpec, ensure_clip, headless_gl};
-use lp_player::gfx::Catalogue;
 use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_lp-player");
@@ -38,15 +38,9 @@ struct Serve {
     _serial: Option<MutexGuard<'static, ()>>,
 }
 
+/// `LP_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
 fn can_run() -> bool {
-    if headless_gl().is_none() {
-        return false;
-    }
-    if Catalogue::resolve_dir().is_none() {
-        println!("SKIP: no transitions/ directory resolved");
-        return false;
-    }
-    true
+    headless_gl().is_some() && common::catalogue_dir().is_some()
 }
 
 fn new_root() -> PathBuf {
@@ -4543,8 +4537,7 @@ fn t20e_wayland_present_heap_stays_flat() {
         return;
     };
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    if Catalogue::resolve_dir().is_none() {
-        println!("SKIP: no transitions/ directory resolved");
+    if common::catalogue_dir().is_none() {
         return;
     }
     let root = new_root();

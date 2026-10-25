@@ -470,6 +470,26 @@ is sufficient. Don't reach for either env var to "fix" a `gfx` build/test proble
 GPU, that's a real `Gfx::new_offscreen` failure (check the error string it prints) — not a
 missing environment variable.
 
+**`LP_REQUIRE_GPU=1` — a run that must have a GPU fails instead of skipping (TODO
+"`LP_REQUIRE_GPU` test mode").** Every GPU-test precondition goes through one helper,
+`tests/common::skip_gpu(reason)`: unset (default — the `nix build` sandbox, a GPU-less dev box) it
+prints `SKIP: <reason>` and the test returns (passes); set to anything but empty/`0` it **panics**
+with `LP_REQUIRE_GPU is set but a GPU test would skip: <reason>`. Its callers: `headless_gl` (no EGL
+device) and `catalogue_dir` (no `transitions/` — decided: covered too, because nearly every GPU test
+— `api`, `supervise`, `transition`, `compose`, `effects_all` — also needs the catalogue, so a GPU CI
+without it would still skip almost everything silently), i.e. `api`/`supervise`'s `can_run`, the
+transition `Harness`, `compose`/`effects_all`'s `setup`, `sources`, `gfx_basic`, and `t20e`'s catalogue
+check; the one lib unit test needing EGL (`gfx::egl` `shared_egl_state_outlives_gfx_…`) applies the same
+rule inline. **Not covered, on purpose** (not GPU preconditions): the opt-in Wayland test
+(`LP_PLAYER_TEST_WAYLAND`), `i7`'s private PipeWire binaries, `credits`' python3/repo, `dropout`'s
+ffmpeg-less unit test; `ensure_clip` already panics without ffmpeg. **Measured** (a GPU-less machine
+simulated with `__EGL_VENDOR_LIBRARY_FILENAMES=/nonexistent/…` — glvnd finds no driver, `new_offscreen`
+fails exactly like on one): the whole suite passed in ~3 s with 133 `SKIP: no EGL device` lines; with
+`LP_REQUIRE_GPU=1` the same 133 tests fail (8 targets), everything else passes. Guard:
+`tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (re-runs `clear_readback` in a
+child with the vendor hidden: unset/`0`/empty → passes with `SKIP`, `1` → fails naming the reason;
+RED with the pre-change binary: `LP_REQUIRE_GPU=1` passed, 2/2 tests ok).
+
 ## Effects
 
 `src/gfx/effects.rs` (spec §5.1 "Graphics": "the gl-transitions GLSL catalogue
@@ -497,7 +517,8 @@ if nothing resolves — true inside `nix build .#lp-player`'s sandboxed check ph
 `src/player` is built without its sibling `transitions/` directory present (the flake's
 `lp-player` derivation sets `src = ./src/player`, nothing wider). Every test in
 `tests/effects_all.rs` treats `None` the same way `tests/common::headless_gl` treats no
-EGL device: print `"SKIP: ..."` and return, never fail the build over it.
+EGL device: print `"SKIP: ..."` and return, never fail the build over it — unless
+`LP_REQUIRE_GPU=1` (§ GFX / EGL: `tests/common::catalogue_dir` then fails the test).
 
 **A failing effect is cached (final review M3).** `Catalogue::program` caches a load/compile
 failure (`Catalogue::failed(id)`), logs `effects.compile_failed {id, error}` once and returns the
@@ -1681,7 +1702,7 @@ add `--clock real`), temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `std::env::te
 every spawned `serve`/`ctl` child gets `PR_SET_PDEATHSIG(SIGKILL)` (`die_with_parent`) so
 an aborted/killed test run never leaves a stray server behind. One server at a time
 (process-wide lock, handed between the two servers of a two-run test). Skips only without
-EGL or a catalogue. **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
+EGL or a catalogue (fails instead under `LP_REQUIRE_GPU=1`, § GFX / EGL). **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
 kind (`video`/`image`/`color`/`snapshot` — the schema prop overwrites the node kind in the
 snapshot); recognise sources by `gain_effective_db`. And a log `fields` key named like a
 fixed key (`kind`, `corr`, …) overwrites it — `source.open`/`.teardown` say `source_kind`.

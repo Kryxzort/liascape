@@ -4,7 +4,8 @@
 //!
 //! Gain/progress assertions sample at exact virtual instants (`tick_to`) and are exact;
 //! playback-coupled ones (align End, frame-index corners) allow ± 1 frame (33 ms) / ± 1
-//! marker step. Skips (prints `SKIP: …`) only without an EGL device or a catalogue.
+//! marker step. Skips (prints `SKIP: …`) only without an EGL device or a catalogue — fails
+//! instead under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
 
 mod common;
 
