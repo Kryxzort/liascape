@@ -74,6 +74,13 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `{x,y}`. A grid card has `contain:content` (paint containment) and the strip has `backdrop-filter` —
   both create containing blocks that otherwise trap `position:fixed` inside them. Same reason the
   playlist Save/Load/Settings modals are portal'd out of `.strip` (they were landing off-screen).
+  **A portal still bubbles through the React tree:** a menu declared inside a clickable element
+  (the `.pl-item`, whose `onClick` is `playFrom`) receives every menu click too — opening
+  "Settings (volume / speed)" from the strip restarted playback from that item. Wrap the portal
+  content in a `display: contents` element that `stopPropagation`s click/contextmenu/pointerdown/
+  keydown, or declare the portal outside the clickable element (`LibraryCard` does). Guard:
+  `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback +
+  `/open`, so it never touches the live wallpaper or opens a window).
 - **`useSmoothScroll(ref, axis)`** (`hooks/`) — smooth wheel scrolling (wheel→velocity, rAF ease,
   friction 0.85). Wire on every `.scroll` container + the horizontal `.strip-row` (`"x"`).
 - **Never set `scrollbar-width`/`scrollbar-color`** — Chromium ≥121 then ignores `::-webkit-scrollbar`
