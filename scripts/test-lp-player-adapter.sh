@@ -404,6 +404,21 @@ for _ in $(seq 1 80); do [ "$(corr_has "$ac" handoff)" = 1 ] && break; sleep 0.1
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$(cur path)" = "$P2" ] && ok "resumed: the same aligned switch handed off at P1's end" || bad "after resume: handoff=$(corr_has "$ac" handoff) cur $(basename "$(cur path)")"
 post /stop '{}' >/dev/null; sleep 0.6
 
+echo "== /preview mid-transition reaches the edited item's source only (never the other side)"
+# The per-wallpaper modal drag-previews through /preview. Mid-effect `cur:*` is the INCOMING side, so a
+# drag on the outgoing A used to land on B (and stay there: the persist that follows targets A by path).
+post /apply "{\"path\":\"$E1\"}" >/dev/null; sleep 1.2
+TBp=$(ctl transition "{\"outputs\":\"out:*\",\"to\":{\"path\":\"$E2\",\"loop\":true,\"gain.user\":0,\"speed\":1},\"effect_id\":\"fade\",\"duration_ms\":8000,\"align\":\"now\"}" | jq -r .to)
+TAp=$(srcIdForPath "$E1"); sleep 0.8
+sv() { ctl get "{\"path\":\"$1.$2\"}" | jq -r .value; }
+[ "$(ctl state | jq -r '.transitions[0].phase // empty')" = running ] && ok "fade $TAp → $TBp running" || bad "transition not running: $(ctl state | jq -c .transitions)"
+post /preview "{\"volume\":20,\"speed\":1.5,\"paths\":[\"$E1\"]}" >/dev/null; sleep 0.4
+near "$(sv "$TAp" gain.user)" "$(dB 20)" && near "$(sv "$TAp" speed)" 1.5 && ok "A's drag moved A ($TAp: $(sv "$TAp" gain.user) dB, $(sv "$TAp" speed)x)" || bad "A's drag: A at $(sv "$TAp" gain.user) dB $(sv "$TAp" speed)x"
+near "$(sv "$TBp" gain.user)" 0 && near "$(sv "$TBp" speed)" 1 && ok "…and left B alone ($TBp: $(sv "$TBp" gain.user) dB, $(sv "$TBp" speed)x)" || bad "A's drag leaked into B: $(sv "$TBp" gain.user) dB $(sv "$TBp" speed)x"
+post /preview "{\"volume\":40,\"paths\":[\"$E2\"]}" >/dev/null; sleep 0.4
+near "$(sv "$TBp" gain.user)" "$(dB 40)" && near "$(sv "$TAp" gain.user)" "$(dB 20)" && ok "B's drag moved B only" || bad "B's drag: A $(sv "$TAp" gain.user) B $(sv "$TBp" gain.user)"
+post /stop '{}' >/dev/null; sleep 0.6
+
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"
