@@ -121,8 +121,13 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   themed/translucent/smooth-scrolled on Chromium/Linux, so all dropdowns use this.
 - **`LibrarySettingsModal`** (lifted to the store, rendered once in `App.tsx`): the volume/speed sliders
   **drag-preview live, persist on release**. Each `onChange` → optimistic `patchLibraryItem` (instant
-  bg/cards) + **throttled** `api.preview({volume|speed})` (~90ms, gated to "edited item == playing") +
-  **debounced** persist `api.libraryVolume|Speed` (250ms after the last tick → one index write). Reset
+  bg/cards) + **throttled** `api.preview({volume|speed, paths: targets})` (~90ms) + **debounced** persist
+  `api.libraryVolume|Speed` (250ms after the last tick → one index write; **one timer per field** — a
+  shared one let a speed drag drop the volume drag's save). **The preview names the edited item(s)**: the
+  backend moves exactly their sources, wherever they are, and nothing when none is live — never "what's
+  playing" (mid-transition that's the incoming side: a drag on A moved B and left it there). No UI
+  "is it playing" gate either (the store's `playingPath` is one side of a transition). Guard:
+  `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes**
   (LWE is 1×, so it'd be a no-op). The card→modal `layoutId` morph anchors the SAME `still()` src the card
   uses (morphs from the thumbnail, not flying in from the side).
