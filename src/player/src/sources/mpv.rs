@@ -1808,11 +1808,17 @@ mod tests {
             ("", "@lp-tempo:scaletempo2"),
             ("  ", "@lp-tempo:scaletempo2"),
             ("lavfi=[anull]", "lavfi=[anull],@lp-tempo:scaletempo2"),
-            ("lavfi=[loudnorm=I=-16]", "lavfi=[loudnorm=I=-16],@lp-tempo:scaletempo2"),
+            (
+                "lavfi=[loudnorm=I=-16]",
+                "lavfi=[loudnorm=I=-16],@lp-tempo:scaletempo2",
+            ),
             ("scaletempo2", "scaletempo2"),
             ("scaletempo=stride=30", "scaletempo=stride=30"),
             ("rubberband", "rubberband"),
-            ("lavfi=[anull],rubberband=pitch=quality", "lavfi=[anull],rubberband=pitch=quality"),
+            (
+                "lavfi=[anull],rubberband=pitch=quality",
+                "lavfi=[anull],rubberband=pitch=quality",
+            ),
         ] {
             assert_eq!(mpv_af(graph), mpv, "af {graph:?}");
         }
