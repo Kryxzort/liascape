@@ -825,7 +825,12 @@ fn defaults_applied_at_open_match_mpv() {
     assert_eq!(src.read("hwdec"), Some(PropValue::Str(String::new())));
     assert_eq!(s("hwdec"), "no");
     assert_eq!(s("vf"), "");
-    assert_eq!(s("af"), "");
+    assert_eq!(src.read("af"), Some(PropValue::Str(String::new())));
+    assert!(
+        s("af").contains("scaletempo2"),
+        "mpv's chain always holds a tempo filter (speed storm): af = {:?}",
+        s("af")
+    );
     assert_eq!(s("options/aid"), "auto");
     assert_eq!(src.mpv_get_f64("speed"), Some(1.0));
     assert_eq!(src.mpv_get_f64("audio-delay"), Some(0.0));
