@@ -110,13 +110,17 @@
           pkgs.libxkbcommon
           pkgs.pipewire
         ];
+        # The dropout detector's tests decode reference audio with ffmpeg (CPU only — they run
+        # in the sandbox; the GPU tests SKIP there without an EGL device).
+        nativeCheckInputs = [ pkgs.ffmpeg ];
         # R86: libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
         # NixOS lives outside the Nix store at /run/opengl-driver/lib (the standard impure
         # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
         # (not --set) so a caller's own LD_LIBRARY_PATH is extended, not clobbered; harmless on
         # non-NVIDIA machines (the path simply doesn't exist, so the prefix contributes nothing).
         postInstall = ''
-          wrapProgram $out/bin/lp-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib
+          wrapProgram $out/bin/lp-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
+            --suffix PATH : ${pkgs.ffmpeg}/bin
         '';
       };
 
