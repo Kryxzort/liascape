@@ -12,6 +12,8 @@
 # and the temp dir removed on every exit path.
 #
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
+#                                  [--probe <app/shell script>]  (default probe-matrix.js; probe-morph.js =
+#                                  the settings-modal morph probe, same hermetic stack)
 #   --ui-dir: drive an already-built UI bundle instead of building this tree's (e.g. an older commit's,
 #   to show a UI-side fix RED)
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
@@ -20,7 +22,7 @@ set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD=1; ONLY=""; UIDIR=""
 while [ $# -gt 0 ]; do
-  case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
+  case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
 done
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -95,6 +97,11 @@ for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
 CLIPS=$(for k in k1 k2 k3 k4; do post /library/import "{\"path\":\"$T/$k.mp4\",\"title\":\"$k\"}" | jq -c .videoPath; done | jq -sc .)
 echo "library: $CLIPS"
+# k1 looks like a Wallpaper Engine item: a SQUARE preview image + an animated gif next to its video (the
+# card crops it to 16:9, the settings modal shows it at its own aspect — the morph probe needs both)
+K1DIR=$(dirname "$(echo "$CLIPS" | jq -r '.[0]')")
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=480x480" -frames:v 1 "$K1DIR/k1.jpg"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=240x240:rate=12" -t 2 -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
 
 "$XVFB" -displayfd 3 -nolisten tcp -screen 0 1400x900x24 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
 for _ in $(seq 1 50); do [ -s "$T/xdisplay" ] && break; sleep 0.1; done
@@ -104,7 +111,7 @@ echo "== matrix"
   LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" \
   LP_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" LP_BACKEND_LOG="$T/backend.log" \
   LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" \
-  "$ELECTRON" --ozone-platform=x11 --disable-gpu probe-matrix.js 2>"$OUT/electron.stderr")
+  "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
 rc=$?
 echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null | sed 's/^/     /'
 exit $rc
