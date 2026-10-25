@@ -31,9 +31,10 @@ export function LibrarySettingsModal({
   const patchItem = useStore((s) => s.patchLibraryItem);
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
   const prevRef = useRef<{ vol: number | null; spd: number | null; last: number; tm: number | null }>({ vol: null, spd: null, last: 0, tm: null });
-  const persistRef = useRef<{ tm: number | null; fn: (() => void) | null }>({ tm: null, fn: null });
-  // flush a pending persist on unmount so a quick drag-then-close still saves the final value
-  useEffect(() => () => { const d = persistRef.current; if (d.tm != null) { clearTimeout(d.tm); d.fn?.(); d.tm = null; d.fn = null; } }, []);
+  // one pending persist PER FIELD — a shared one let a speed drag replace a volume drag's save
+  const persistRef = useRef<Record<"vol" | "spd", { tm: number | null; fn: (() => void) | null }>>({ vol: { tm: null, fn: null }, spd: { tm: null, fn: null } });
+  // flush pending persists on unmount so a quick drag-then-close still saves the final value
+  useEffect(() => () => { for (const d of Object.values(persistRef.current)) if (d.tm != null) { clearTimeout(d.tm); d.fn?.(); d.tm = null; d.fn = null; } }, []);
 
   useEffect(() => {
     if (!item) return;
@@ -80,8 +81,8 @@ export function LibrarySettingsModal({
     else if (r.tm == null) r.tm = window.setTimeout(flushPreview, 90 - dt);
   };
   // persist once, 250ms after the last drag tick (one index write, not ~60)
-  const queuePersist = (fn: () => void) => {
-    const d = persistRef.current;
+  const queuePersist = (field: "vol" | "spd", fn: () => void) => {
+    const d = persistRef.current[field];
     if (d.tm != null) clearTimeout(d.tm);
     d.fn = fn;
     d.tm = window.setTimeout(() => { d.tm = null; d.fn = null; fn(); }, 250);
@@ -92,7 +93,7 @@ export function LibrarySettingsModal({
     setVol(v); setVolOv(true);
     targets.forEach((t) => patchItem(t, { volumeOverride: v === globalVolume ? null : v }));
     queuePreview({ volume: v });
-    queuePersist(() => targets.forEach((t) => api.libraryVolume(t, v)));
+    queuePersist("vol", () => targets.forEach((t) => api.libraryVolume(t, v)));
   };
   const resetVolume = () => {
     setVolOv(false); setVol(globalVolume);
@@ -103,7 +104,7 @@ export function LibrarySettingsModal({
     setSpd(v); setSpdOv(true);
     targets.forEach((t) => patchItem(t, { speedOverride: v === globalSpeed ? null : v }));
     queuePreview({ speed: v });
-    queuePersist(() => targets.forEach((t) => api.librarySpeed(t, v)));
+    queuePersist("spd", () => targets.forEach((t) => api.librarySpeed(t, v)));
   };
   const resetSpeed = () => {
     setSpdOv(false); setSpd(globalSpeed);
