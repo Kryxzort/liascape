@@ -756,6 +756,26 @@ every new render context's first render — measured ~25–30 ms on the loop per
 dithering of the same 8-bit target is visually equivalent), **`gpu-hwdec-interop=no`** (Task 20d:
 no hwdec GL interop init on the loop — "Hardware decoding" below), and with opt `shader_cache_dir`
 (`serve` passes `<state>/shader-cache`) `gpu-shader-cache=yes` + `gpu-shader-cache-dir`.
+**No built-in scripts or bindings (`sources::mpv::SCRIPT_TRIMS`, TODO "mpv's built-in Lua scripts
+per core"):** `load-scripts=no`, `osc=no`, `load-stats-overlay=no`, `load-console=no`,
+`load-auto-profiles=no`, `load-select=no`, `load-commands=no`, `load-positioning=no`,
+`load-context-menu=no`, `input-builtin-bindings=no` (`ytdl=no` above covers `ytdl_hook`). Each
+built-in script is a Lua VM on its own thread (`lua/<name>`) serving an OSD, console or menu no one
+can open on a wallpaper. Set **best-effort** (`set_optional`): a libmpv that predates a name (older
+mpv lacks some `load-*`) still opens — the skipped ones are logged once per process as
+`mpv.options_skipped {skipped}` (info). **Measured** (mpv 0.41): a playing 1080p30 core had 28
+threads, 6 of them scripts (`commands`, `console`, `context_menu`, `positioning`, `select`, `stats`
+— `auto_profiles` stays out at `auto` without conditional profiles, `osc`/`ytdl_hook` were already
+off in libmpv) → **22**; one core's create + initialize + destroy (libmpv via ctypes, 40 cores × 3
+rounds) **37–47 → 3.7–5.7 ms CPU**, `mpv_terminate_destroy` median 0.8–1.3 → 0.4–0.6 ms; a live
+idle core's RSS ~1.3 MiB (3.5 on first touch) → 0.1 MiB; the loop's open share
+(`i5_switch_loop_busy` `max_open_ms`) 3.6–7.5 → 0.8–3.9 ms (open_with_core's synchronous
+property sets no longer queue behind six script clients registering on the core). The scripts
+used no measurable CPU in steady playback (0 ms in 10 s), so this is per-switch only; the switch's
+loop busy is still the render context + first render (§ Runtime "Switch cost"). Guards:
+`tests/sources.rs::builtin_scripts_are_not_loaded` (every option reads back `no`, no `lua/*`/`js/*`
+thread in the test process; RED before: `load-scripts` `yes`, 6 script threads per core), unit
+`unknown_trim_option_never_breaks_a_core`.
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
 `audio_delay_bias` (seconds **added** to every `audio_delay` before it reaches mpv's
@@ -1698,7 +1718,8 @@ gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the la
 20e), `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
-`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`, `effects.missing`,
+`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
+`mpv.options_skipped` (a script trim this libmpv doesn't know, once per process), `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
 `snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|

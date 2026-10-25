@@ -54,6 +54,41 @@ const OBS_AUDIO_SELECTED: u64 = 10;
 /// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
 const TEARDOWN_MAX: Duration = Duration::from_millis(500);
 
+/// TODO "mpv's built-in Lua scripts per core": what libmpv would otherwise load into every
+/// core at `mpv_initialize`. Each built-in script runs its own Lua VM on its own thread
+/// (`lua/<name>`) and observes properties / registers bindings for an OSD, a console and
+/// menus no one can open on a wallpaper (no input ever reaches a core). Measured (hermetic
+/// headless, 1080p30 h264, mpv 0.41, release): a playing core had 28 threads, 6 of them
+/// scripts (`commands`, `console`, `context_menu`, `positioning`, `select`, `stats`;
+/// `auto_profiles` stays out at `auto` without conditional profiles, `osc`/`ytdl_hook` are
+/// already off in libmpv) → 22. Applied best-effort by [`set_optional`]: a libmpv that
+/// predates one of these names still opens (`mpv.options_skipped`, once per process).
+pub(crate) const SCRIPT_TRIMS: [(&str, &str); 10] = [
+    // No user scripts (`~/.config/mpv/scripts`; `config=no` already keeps the config dir
+    // out — explicit, so no default can bring them back).
+    ("load-scripts", "no"),
+    // libmpv's own default already (the on-screen controller script); explicit.
+    ("osc", "no"),
+    ("load-stats-overlay", "no"),
+    ("load-console", "no"),
+    ("load-auto-profiles", "no"),
+    ("load-select", "no"),
+    ("load-commands", "no"),
+    ("load-positioning", "no"),
+    ("load-context-menu", "no"),
+    // The built-in key/mouse bindings (mpv's input.conf) — parsed per core, never used.
+    ("input-builtin-bindings", "no"),
+];
+
+/// Set each of `opts` on a core before `mpv_initialize`, skipping any this libmpv rejects
+/// (an unknown name on an older mpv — they are trims, never needed for correctness).
+/// Returns the skipped ones as `"<name>: <mpv error>"`.
+pub(crate) fn set_optional(handle: &Handle, opts: &[(&str, &str)]) -> Vec<String> {
+    opts.iter()
+        .filter_map(|(k, v)| handle.set_option(k, v).err().map(|e| format!("{k}: {e}")))
+        .collect()
+}
+
 /// mpv's own defaults, restored when a `demuxer_*_mib` property is set to 0 ("unset" —
 /// the legacy engine's convention: `AppSettings` only passes `--demuxer-max-*` when > 0).
 const DEMUXER_MAX_DEFAULT: &str = "150MiB";
@@ -557,6 +592,20 @@ impl MpvSource {
         ];
         for (k, v) in fixed {
             handle.set_option(k, v).map_err(api_err)?;
+        }
+        // No built-in scripts/bindings (6 threads per core fewer) — best-effort.
+        let skipped = set_optional(&handle, &SCRIPT_TRIMS);
+        if !skipped.is_empty() {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            ONCE.call_once(|| {
+                crate::log::event(
+                    "mpv",
+                    crate::log::Level::Info,
+                    "mpv.options_skipped",
+                    None,
+                    serde_json::json!({ "skipped": skipped }),
+                )
+            });
         }
         if let Some(dev) = &audio_device {
             handle.set_option("audio-device", dev).map_err(api_err)?;
@@ -1856,7 +1905,35 @@ impl Drop for MpvSource {
 
 #[cfg(test)]
 mod tests {
-    use super::{mpv_af, mpv_hwdec};
+    use super::{SCRIPT_TRIMS, mpv_af, mpv_hwdec, set_optional};
+    use crate::mpv::Handle;
+
+    /// TODO "mpv's built-in Lua scripts per core": the trims are best-effort — a name this
+    /// libmpv doesn't know (an older mpv lacks some `load-*`) is skipped and reported, the
+    /// rest still land and the core still initializes (no GL, no file: a bare core).
+    #[test]
+    fn unknown_trim_option_never_breaks_a_core() {
+        let h = Handle::create().expect("mpv_create");
+        let mut opts = SCRIPT_TRIMS.to_vec();
+        opts.insert(3, ("load-no-such-script-lp", "no"));
+        let skipped = set_optional(&h, &opts);
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert!(
+            skipped[0].starts_with("load-no-such-script-lp: "),
+            "{skipped:?}"
+        );
+        h.set_option("vo", "null").expect("vo");
+        h.set_option("ao", "null").expect("ao");
+        h.initialize()
+            .expect("mpv_initialize after a skipped option");
+        for (name, want) in SCRIPT_TRIMS {
+            assert_eq!(
+                h.get_property(&format!("options/{name}")).as_deref(),
+                Some(want),
+                "options/{name}"
+            );
+        }
+    }
 
     /// Speed storm: mpv's own tempo filter is inserted only while speed ≠ 1 and removed at
     /// exactly 1× — each rebuild of the audio chain cut 3–5 ms of digital silence into the
