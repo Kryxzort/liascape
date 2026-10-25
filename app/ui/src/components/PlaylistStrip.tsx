@@ -57,7 +57,11 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
       {glow && !playing && !isDragging && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
-        <>
+        // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
+        // onClick (playFrom) / sortable listeners — a menu click must stop here.
+        <div style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}>
           <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           {/* portal'd: the strip's backdrop-filter would otherwise trap position:fixed */}
           <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={() => setMenu(null)}>
@@ -65,7 +69,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
             <button onClick={() => openItemSettings(item, [item], `pl-${path}`)}>Settings (volume / speed)</button>
             <button onClick={() => openExternal({ path: item.videoPath, reveal: true, isScene: item.isScene, workshopId: item.workshopId, copiedSceneDir: item.copiedSceneDir })}>Open in file manager</button>
           </div>
-        </>, document.body)}
+        </div>, document.body)}
     </div>
   );
 }
