@@ -923,7 +923,19 @@ supersedes everything — and **arms it again when the load plays** (not paused;
 a restored source's fade-in waits for it), as does an audio re-route
 (`MpvSource::set_audio_route`, I7). Callers (the transition recipe, `Runtime`'s player-pause gain)
 bound the wait themselves (`recipes::transition::ONSET_TIMEOUT`) — the source itself
-never times out; it either confirms or waits.
+never times out; it either confirms or waits. **Two confirmations no further `audio-pts` change
+brings** (`MpvSource::confirm_flowing_by_time`, after every pump — every tick; TODO "onset_timeout on
+audio-less videos"): the margin is **real time** since the first change (it used to need a *later*
+change, so a stream that stalls right after starting never confirmed), and **the picture plays on
+without any audio** — `audio-pts` reported *unavailable* (mpv plays no audio: none selected yet —
+an audio-less file whose `aid` hadn't resolved — or the selected track already ended, e.g. a 30 ms
+track on a 4 s video) while the media position moved `NO_AUDIO_MEDIA_ADVANCE` (0.1 s, a wrap counts)
+since arming — with audio playing, mpv's clock is the audio, so the picture can't run ahead of it.
+Nothing will be heard, so the ramp may start. RED before: every onset onto such a B waited out the
+150 ms and logged `transition.onset_timeout` (all 6 method × align cells with a 30 ms track);
+`tests/api.rs::audio_less_b_never_times_out_its_onset_any_method_or_align` (no audio stream, a
+short track, then a 16-request switch storm; also asserts no `runtime.onset_timeout`). A core that
+never plays (no change, position stuck) still never confirms.
 
 **`has_audio` (R92, review of Task 16c/16d) — does the *file* genuinely have an audio
 track, mirrored into the graph like `kind`/`ready`.** Distinct from `no_audio` (our own
