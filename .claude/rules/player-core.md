@@ -1033,7 +1033,15 @@ measured), started on first use, then `malloc_trim(0)` once its queue is empty (
 under the same lock, so nothing writes the eventfd after that). `reaper::shutdown(timeout)`
 (`quit`: after `SourceHost::finish_teardown(500 ms)`, ≤ 2 s) closes the queue, waits and
 returns the stragglers (logged `mpv.reaper_stragglers`); later drops destroy
-synchronously. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
+synchronously. **A straggler is a core not destroyed yet, never a trim (TODO "Reaper trim at
+shutdown"):** once shutdown has started no batch is trimmed (the process is exiting), and a trim
+already running when the wait ends doesn't count — `shutdown` reports `undestroyed`, while
+`pending()` (probes, t20b) still drops only after its batch's trim. Before, `PENDING` dropped after
+the trim, so a slow trim during `quit` read as a straggler (and the `_exit` path). The reaper is a
+generic `Reaper<T>` (one `lp-mpv-reaper` instance) so its rules are unit-tested with slow fakes:
+`a_trim_in_flight_at_shutdown_is_no_straggler` (RED: 1 straggler), `no_trim_once_shutdown_started`
+(RED: waited 580 ms for a 200 ms destroy + a 400 ms trim), `a_destroy_slower_than_the_wait_is_a_straggler`,
+`batches_trim_once_and_reap_after_shutdown_is_synchronous`. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
 `tests/api.rs::destroy_never_stalls_the_loop`: max loop busy around the destroy of a
 playing video 1.7–3.0 ms (5 runs); RED with a synchronous core destroy 29.6 ms, with the
 reaper but a one-phase drop 21–32 ms (flaky against the 20 ms bound). Drop order vs the `Gfx` is irrelevant —
@@ -2405,7 +2413,8 @@ logged as `mem.policy` right after `log::init`, Warn on an unknown `LP_PLAYER_MA
   `lp-mpv-reaper` thread once its queue is empty — never the loop): the smaller chunks a
   destroyed core frees still fragment the arenas (+0.35 MiB retained per switch with the
   threshold alone); the trim returns those pages. Measured ≤ 2.4 ms (1.4 ms mean) per
-  switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug).
+  switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug). Skipped
+  once `reaper::shutdown` has started (exiting — § Sources "Teardown").
 - **No arena cap.** `M_ARENA_MAX` 4 on top changed little (373 vs 380 MiB after 300
   switches) and adds lock contention across the ~30 decoder/demux/audio threads.
 - **`LP_PLAYER_MALLOC=glibc`** skips the whole policy (A/B; the regression test's RED run);
