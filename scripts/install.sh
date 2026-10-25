@@ -13,7 +13,7 @@
 # Paths: everything is staged under $DESTDIR but the wrappers reference the RUNTIME paths ($PREFIX...),
 # so a packaged tree works once installed to $PREFIX regardless of where it was staged.
 set -e
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
 PREFIX="${PREFIX:-$HOME/.local}"
 DESTDIR="${DESTDIR:-}"
