@@ -130,6 +130,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes**
   (LWE is 1×, so it'd be a no-op).
+- **Global Volume/Speed sliders (Settings page) drag-preview live too** (`useGlobalPreview` in
+  `views/Settings.tsx`): each `onChange` → `setSetting` (the store's debounced 250 ms `/settings` save
+  persists) + a throttled (~90 ms, trailing) `api.preview({volume|speed, global: true})` — the backend
+  moves every live wallpaper that follows the global and never one with its own override. Before, the
+  desktop only changed 250 ms after the drag stopped. Guard: matrix `globalDragVol` / `globalDragSpd`
+  (a real 40-step drag, every source sampled every 40 ms).
 - **Settings-modal morph (`components/morph.ts`, not framer).** The surface that opened the modal (card
   `.thumb-wrap` / strip `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `settingsMorphId`) and is
   `.lifted` (hidden) while the modal is out. WAAPI flights, both ways: the media box (`[data-morph-media]`,

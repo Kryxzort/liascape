@@ -336,6 +336,41 @@ const setting = (name, key, value, drive) => {
     async run() { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); },
     check(c) { const got = c.after.s[key]; return JSON.stringify(got) === JSON.stringify(value) ? [] : [`settings.${key} = ${JSON.stringify(got)}, expected ${JSON.stringify(value)}`]; } };
 };
+// A REAL drag on the Settings page's GLOBAL Volume/Speed slider (40 steps over ~1.6 s), every source sampled
+// every 40 ms: a wallpaper that follows the global (no override of its own for that field) follows the drag
+// LIVE — through the values in between, during the drag (RED before: the global sliders only saved 250 ms
+// after the last tick; nothing moved while dragging) — and one with its own override never moves, not even
+// for a moment (override ?? global, R61). The persisted value afterwards is the drag's last one.
+for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
+  C[`globalDrag${kind}`] = {
+    async pre(c) { if (c.other) await post(kind === "Vol" ? "/library/volume" : "/library/speed", kind === "Vol" ? { path: c.other, intValue: own } : { path: c.other, doubleValue: own }); },
+    async run(c) {
+      await ui(`m.tab("Settings"); await m.sleep(500);`);
+      c.samples = []; let on = true;
+      const sampler = (async () => { while (on) { try { c.samples.push({ t: Date.now(), st: await ctl.call("state") }); } catch {} await sleep(40); } })();
+      c.t0 = Date.now();
+      await ui(`await m.drag(m.input(${JSON.stringify(label)}), ${from}, ${to}, 40, 40, "global ${label} slider");`);
+      c.t1 = Date.now();
+      await sleep(900); on = false; await sampler;
+    },
+    check(c) {
+      const v = [], lib = c.before.lib || [];
+      const ownOf = (p) => lib.find((i) => i.videoPath === p)?.[field];
+      const val = (n) => (kind === "Vol" ? n.gain?.user ?? 0 : n.speed);
+      const wantOwn = (o) => (kind === "Vol" ? VolumeDb(o) : o);
+      const seen = new Map(); // following source id → distinct values seen during the drag
+      for (const { t, st } of c.samples) for (const [id, n] of sourcesOf(st)) {
+        const o = ownOf(n.path);
+        if (o != null) { if (!near(val(n), wantOwn(o), eps)) v.push(`${id}(${TITLE(n.path)}) has its own ${field} ${o} but ${key} ${val(n)} while the global slider moved`); continue; }
+        if (t < c.t0 + 300 || t > c.t1) continue;
+        if (!seen.has(id)) seen.set(id, new Set());
+        seen.get(id).add(Math.round(val(n) * 1000) / 1000);
+      }
+      for (const [id, vals] of seen) if (vals.size < 3) v.push(`${id} follows the global but took only ${vals.size} value(s) during the drag (${[...vals].join(", ")}) — no live preview`);
+      if (JSON.stringify(c.after.s[key]) !== JSON.stringify(to)) v.push(`settings.${key} = ${JSON.stringify(c.after.s[key])} after the drag, expected ${to}`);
+      return [...new Set(v)].slice(0, 5);
+    } };
+}
 setting("volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`);
 setting("speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`);
 setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`);

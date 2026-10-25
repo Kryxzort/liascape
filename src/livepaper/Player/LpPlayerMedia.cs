@@ -689,6 +689,26 @@ public static class LpPlayerMedia
         if (speed is double sp) QueueSet("preview:speed:" + who, () => PreviewNow(null, sp, paths));
     }
 
+    // The Settings page's global Volume/Speed drag (`/preview {global:true}`): each live media source
+    // whose item has NO override for that field takes the dragged value (override ?? global, R61); an
+    // overridden one keeps its own. Coalescible per property; one `set` per following source from the
+    // cached map — no `state`, no `cur:*` read, no settings write (the UI's debounced /settings persists).
+    public static void PreviewGlobal(int? volume, double? speed)
+    {
+        if (volume is int v) QueueSet("preview-global:gain.user", () => PreviewGlobalNow("gain.user", MpvPropertyMap.VolumeDb(v)));
+        if (speed is double sp) QueueSet("preview-global:speed", () => PreviewGlobalNow("speed", Math.Clamp(sp, 0.1, 4.0)));
+    }
+
+    private static void PreviewGlobalNow(string prop, object value)
+    {
+        var client = C;
+        if (!client.SocketExists || SourceMap(client) is not { } map) return;
+        var follow = map.Keys.Where(p => prop == "gain.user"
+            ? LibraryService.ReadVolumeOverride(p) == null
+            : LibraryService.ReadSpeedOverride(p) == null).ToList();
+        if (follow.Count > 0) SetEach(client, follow, prop, value);
+    }
+
     // The coalescing key of a per-item command on `path` (same file → same key, like SamePath).
     public static string FullPath(string path)
     {
