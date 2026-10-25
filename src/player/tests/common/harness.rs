@@ -94,10 +94,7 @@ impl Harness {
     pub fn new(outputs: &[&str]) -> Option<Harness> {
         let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let gfx = headless_gl()?;
-        let Some(dir) = Catalogue::resolve_dir() else {
-            println!("SKIP: no transitions/ directory resolved");
-            return None;
-        };
+        let dir = super::catalogue_dir()?;
         let cat = Catalogue::load(&dir).expect("Catalogue::load");
         let composer = Composer::new(&gfx).expect("Composer::new");
         let mut graph = Graph::new();

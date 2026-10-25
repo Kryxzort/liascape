@@ -470,6 +470,26 @@ is sufficient. Don't reach for either env var to "fix" a `gfx` build/test proble
 GPU, that's a real `Gfx::new_offscreen` failure (check the error string it prints) — not a
 missing environment variable.
 
+**`LP_REQUIRE_GPU=1` — a run that must have a GPU fails instead of skipping (TODO
+"`LP_REQUIRE_GPU` test mode").** Every GPU-test precondition goes through one helper,
+`tests/common::skip_gpu(reason)`: unset (default — the `nix build` sandbox, a GPU-less dev box) it
+prints `SKIP: <reason>` and the test returns (passes); set to anything but empty/`0` it **panics**
+with `LP_REQUIRE_GPU is set but a GPU test would skip: <reason>`. Its callers: `headless_gl` (no EGL
+device) and `catalogue_dir` (no `transitions/` — decided: covered too, because nearly every GPU test
+— `api`, `supervise`, `transition`, `compose`, `effects_all` — also needs the catalogue, so a GPU CI
+without it would still skip almost everything silently), i.e. `api`/`supervise`'s `can_run`, the
+transition `Harness`, `compose`/`effects_all`'s `setup`, `sources`, `gfx_basic`, and `t20e`'s catalogue
+check; the one lib unit test needing EGL (`gfx::egl` `shared_egl_state_outlives_gfx_…`) applies the same
+rule inline. **Not covered, on purpose** (not GPU preconditions): the opt-in Wayland test
+(`LP_PLAYER_TEST_WAYLAND`), `i7`'s private PipeWire binaries, `credits`' python3/repo, `dropout`'s
+ffmpeg-less unit test; `ensure_clip` already panics without ffmpeg. **Measured** (a GPU-less machine
+simulated with `__EGL_VENDOR_LIBRARY_FILENAMES=/nonexistent/…` — glvnd finds no driver, `new_offscreen`
+fails exactly like on one): the whole suite passed in ~3 s with 133 `SKIP: no EGL device` lines; with
+`LP_REQUIRE_GPU=1` the same 133 tests fail (8 targets), everything else passes. Guard:
+`tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (re-runs `clear_readback` in a
+child with the vendor hidden: unset/`0`/empty → passes with `SKIP`, `1` → fails naming the reason;
+RED with the pre-change binary: `LP_REQUIRE_GPU=1` passed, 2/2 tests ok).
+
 ## Effects
 
 `src/gfx/effects.rs` (spec §5.1 "Graphics": "the gl-transitions GLSL catalogue
@@ -497,7 +517,8 @@ if nothing resolves — true inside `nix build .#lp-player`'s sandboxed check ph
 `src/player` is built without its sibling `transitions/` directory present (the flake's
 `lp-player` derivation sets `src = ./src/player`, nothing wider). Every test in
 `tests/effects_all.rs` treats `None` the same way `tests/common::headless_gl` treats no
-EGL device: print `"SKIP: ..."` and return, never fail the build over it.
+EGL device: print `"SKIP: ..."` and return, never fail the build over it — unless
+`LP_REQUIRE_GPU=1` (§ GFX / EGL: `tests/common::catalogue_dir` then fails the test).
 
 **A failing effect is cached (final review M3).** `Catalogue::program` caches a load/compile
 failure (`Catalogue::failed(id)`), logs `effects.compile_failed {id, error}` once and returns the
@@ -756,6 +777,26 @@ every new render context's first render — measured ~25–30 ms on the loop per
 dithering of the same 8-bit target is visually equivalent), **`gpu-hwdec-interop=no`** (Task 20d:
 no hwdec GL interop init on the loop — "Hardware decoding" below), and with opt `shader_cache_dir`
 (`serve` passes `<state>/shader-cache`) `gpu-shader-cache=yes` + `gpu-shader-cache-dir`.
+**No built-in scripts or bindings (`sources::mpv::SCRIPT_TRIMS`, TODO "mpv's built-in Lua scripts
+per core"):** `load-scripts=no`, `osc=no`, `load-stats-overlay=no`, `load-console=no`,
+`load-auto-profiles=no`, `load-select=no`, `load-commands=no`, `load-positioning=no`,
+`load-context-menu=no`, `input-builtin-bindings=no` (`ytdl=no` above covers `ytdl_hook`). Each
+built-in script is a Lua VM on its own thread (`lua/<name>`) serving an OSD, console or menu no one
+can open on a wallpaper. Set **best-effort** (`set_optional`): a libmpv that predates a name (older
+mpv lacks some `load-*`) still opens — the skipped ones are logged once per process as
+`mpv.options_skipped {skipped}` (info). **Measured** (mpv 0.41): a playing 1080p30 core had 28
+threads, 6 of them scripts (`commands`, `console`, `context_menu`, `positioning`, `select`, `stats`
+— `auto_profiles` stays out at `auto` without conditional profiles, `osc`/`ytdl_hook` were already
+off in libmpv) → **22**; one core's create + initialize + destroy (libmpv via ctypes, 40 cores × 3
+rounds) **37–47 → 3.7–5.7 ms CPU**, `mpv_terminate_destroy` median 0.8–1.3 → 0.4–0.6 ms; a live
+idle core's RSS ~1.3 MiB (3.5 on first touch) → 0.1 MiB; the loop's open share
+(`i5_switch_loop_busy` `max_open_ms`) 3.6–7.5 → 0.8–3.9 ms (open_with_core's synchronous
+property sets no longer queue behind six script clients registering on the core). The scripts
+used no measurable CPU in steady playback (0 ms in 10 s), so this is per-switch only; the switch's
+loop busy is still the render context + first render (§ Runtime "Switch cost"). Guards:
+`tests/sources.rs::builtin_scripts_are_not_loaded` (every option reads back `no`, no `lua/*`/`js/*`
+thread in the test process; RED before: `load-scripts` `yes`, 6 script threads per core), unit
+`unknown_trim_option_never_breaks_a_core`.
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
 `audio_delay_bias` (seconds **added** to every `audio_delay` before it reaches mpv's
@@ -1013,7 +1054,15 @@ measured), started on first use, then `malloc_trim(0)` once its queue is empty (
 under the same lock, so nothing writes the eventfd after that). `reaper::shutdown(timeout)`
 (`quit`: after `SourceHost::finish_teardown(500 ms)`, ≤ 2 s) closes the queue, waits and
 returns the stragglers (logged `mpv.reaper_stragglers`); later drops destroy
-synchronously. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
+synchronously. **A straggler is a core not destroyed yet, never a trim (TODO "Reaper trim at
+shutdown"):** once shutdown has started no batch is trimmed (the process is exiting), and a trim
+already running when the wait ends doesn't count — `shutdown` reports `undestroyed`, while
+`pending()` (probes, t20b) still drops only after its batch's trim. Before, `PENDING` dropped after
+the trim, so a slow trim during `quit` read as a straggler (and the `_exit` path). The reaper is a
+generic `Reaper<T>` (one `lp-mpv-reaper` instance) so its rules are unit-tested with slow fakes:
+`a_trim_in_flight_at_shutdown_is_no_straggler` (RED: 1 straggler), `no_trim_once_shutdown_started`
+(RED: waited 580 ms for a 200 ms destroy + a 400 ms trim), `a_destroy_slower_than_the_wait_is_a_straggler`,
+`batches_trim_once_and_reap_after_shutdown_is_synchronous`. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
 `tests/api.rs::destroy_never_stalls_the_loop`: max loop busy around the destroy of a
 playing video 1.7–3.0 ms (5 runs); RED with a synchronous core destroy 29.6 ms, with the
 reaper but a one-phase drop 21–32 ms (flaky against the 20 ms bound). Drop order vs the `Gfx` is irrelevant —
@@ -1082,7 +1131,25 @@ a worker error is the same `SourceEvent::Error` + `failed` as a synchronous one;
 meanwhile drops the result (`PreparedCore::drop` → reaper). `finish_teardown` waits (bounded)
 for outstanding workers; `host::opening_pending()` counts toward `mpv.reaper_stragglers`. R29
 `Ready` semantics are unchanged (still the first frame of the current load). Stepped mode and
-the harnesses open synchronously.
+the harnesses open synchronously. **Bounded (TODO "No explicit cap on concurrent `lp-open`
+worker threads"):** the cores are made by `host::OpenPool` — a FIFO queue served by at most
+`MAX_OPEN_WORKERS` (2) `lp-open` threads, spawned on demand and gone once the queue is empty
+(an idle player has none); before, every create spawned its own thread (a burst of 16 = 16 at
+once). A queued job holds its slot **weakly**: a node destroyed before a worker gets to it is
+skipped (no core made — `open_pool.skipped`), so a switch storm's superseded B's cost nothing; a
+running one holds it strongly (a node gone meanwhile drops the result → reaper, as before); a
+prop changed while queued lands because the source still opens from the node's current props.
+`finish_teardown`'s wait is then the ≤ 2 cores in progress. A job that panics doesn't kill its
+worker; a pool that can't start a thread with none running hands the open back (synchronous).
+**Measured** (release, hermetic headless, a burst of 16 paused 1080p creates, 3 rounds per cap):
+all made + opened 102–166 ms at cap 1, **61–80 at 2**, 58–71 at 4, 23–70 uncapped; all ready ~0.5 s
+whatever the cap (first frames dominate); the loop's longest open share 3–5, **2–8**, 11–24, 13–29
+ms (more finished cores land in one `sync` the higher the cap). Guards: `tests/api.rs::
+i5_open_burst_is_capped_and_none_lost` (16 creates in one write: peak ≤ 2, every kept one opens
+and readies, the 3 destroyed while queued are skipped or opened-and-retired — measured: all 3
+skipped —, the one un-paused while queued plays, quit with a second burst queued exits in ~40 ms
+with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_order_and_loses_none`,
+`open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
 **Audio re-route (final review I7).** `SourceHost::set_audio_route(device, bias)` — the bus went
 down (`None`: mpv's default device) or came back (`Some(bus device)`, bias = −latency): base
@@ -1570,7 +1637,8 @@ path.
 **Bounds (C1).** `probe loop` → `bounds`: the size of every per-source collection (graph nodes,
 `gain_history_tracks/samples`, animator entries, teardown ramps, pending destroys, onsets,
 fade-ins, dropout windows/due analyses, pause gates, `last_event`, `local`, wake registrations,
-warn keys, hosted/opening/dying sources, transitions/graves/ended/restore onsets). `GainHistory`
+warn keys, hosted/opening/dying sources, `open_queued` (opens waiting for an `lp-open` worker),
+transitions/graves/ended/restore onsets). `GainHistory`
 is run-length encoded (a steady source = two samples), drops a dead source's track
 `DEAD_LINGER` (30 s) after its last reading (its post-roll analysis needs it), and is capped at
 `MAX_TRACKS` 64 / `MAX_TOTAL_SAMPLES` 131 072 (least recently seen dead track first). Test:
@@ -1634,7 +1702,7 @@ add `--clock real`), temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `std::env::te
 every spawned `serve`/`ctl` child gets `PR_SET_PDEATHSIG(SIGKILL)` (`die_with_parent`) so
 an aborted/killed test run never leaves a stray server behind. One server at a time
 (process-wide lock, handed between the two servers of a two-run test). Skips only without
-EGL or a catalogue. **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
+EGL or a catalogue (fails instead under `LP_REQUIRE_GPU=1`, § GFX / EGL). **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
 kind (`video`/`image`/`color`/`snapshot` — the schema prop overwrites the node kind in the
 snapshot); recognise sources by `gain_effective_db`. And a log `fields` key named like a
 fixed key (`kind`, `corr`, …) overwrites it — `source.open`/`.teardown` say `source_kind`.
@@ -1698,7 +1766,8 @@ gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the la
 20e), `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
-`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`, `effects.missing`,
+`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
+`mpv.options_skipped` (a script trim this libmpv doesn't know, once per process), `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
 `snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|
@@ -1749,7 +1818,9 @@ loop's share of source opens taken out / that share alone — render context + p
 `loadfile`; the core itself is made on the `lp-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,
 gain_pushes, pause_gates, dropout_windows_open, bounds (§ Runtime "Bounds"),
-recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening`; `frames` (Task 13,
+recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening` + `open_pool`
+`{cap, workers, running, queued, peak, skipped, pending}` (the `lp-open` pool, § Sources "Async
+opens"); `frames` (Task 13,
 `probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000),
 explicit_sync ({env, value, source: policy|env}, null headless — Task 20e),
 default_queue_dispatched (events from libwayland's default queue; null headless), outputs:
@@ -2363,7 +2434,8 @@ logged as `mem.policy` right after `log::init`, Warn on an unknown `LP_PLAYER_MA
   `lp-mpv-reaper` thread once its queue is empty — never the loop): the smaller chunks a
   destroyed core frees still fragment the arenas (+0.35 MiB retained per switch with the
   threshold alone); the trim returns those pages. Measured ≤ 2.4 ms (1.4 ms mean) per
-  switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug).
+  switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug). Skipped
+  once `reaper::shutdown` has started (exiting — § Sources "Teardown").
 - **No arena cap.** `M_ARENA_MAX` 4 on top changed little (373 vs 380 MiB after 300
   switches) and adds lock contention across the ~30 decoder/demux/audio threads.
 - **`LP_PLAYER_MALLOC=glibc`** skips the whole policy (A/B; the regression test's RED run);

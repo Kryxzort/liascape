@@ -59,13 +59,140 @@ struct Opening {
     route_gen: u64,
 }
 
-/// Async-open workers still running (process-wide) — `finish_teardown` waits for them
-/// (bounded) and the runtime counts a straggler as a reaper straggler.
+/// Async opens submitted and not finished yet (queued + being made, process-wide) —
+/// `finish_teardown` waits for them (bounded) and the runtime counts a straggler as a
+/// reaper straggler.
 static OPENING: AtomicUsize = AtomicUsize::new(0);
 
-/// I5: async-open workers still creating a core.
+/// Queued opens whose node went before a worker got to them: skipped, no core made.
+static OPEN_SKIPPED: AtomicUsize = AtomicUsize::new(0);
+
+/// I5: async opens still queued or creating a core.
 pub fn opening_pending() -> usize {
     OPENING.load(Ordering::SeqCst)
+}
+
+/// TODO "No explicit cap on concurrent `lp-open` worker threads": at most this many mpv
+/// cores are made at once; the rest of a burst waits in submission order — before, a burst
+/// spun up one thread per create (16 at once, measured). Measured (release, hermetic
+/// headless, a burst of 16 paused 1080p creates, 3 rounds per cap): every core made and
+/// opened after 102–166 ms at 1, **61–80 at 2**, 58–71 at 4, 23–70 uncapped; every source
+/// ready ~0.5 s whatever the cap (the first frames dominate); the loop's open share in one
+/// stretch 3–5, **2–8**, 11–24, 13–29 ms — fewer finished cores land in the same `sync`.
+pub const MAX_OPEN_WORKERS: usize = 2;
+
+/// The async opens' pool (`lp-open` threads).
+static OPEN_POOL: OpenPool = OpenPool::new("lp-open", MAX_OPEN_WORKERS);
+
+/// The async-open pool (`sources` probe `open_pool`): `cap`, live `workers`, jobs
+/// `running`/`queued`, `peak` (most workers alive at once, process lifetime), `skipped`
+/// (queued opens whose node went first), `pending` (= [`opening_pending`]).
+pub fn open_pool_stats() -> Value {
+    let mut v = OPEN_POOL.stats();
+    v["skipped"] = json!(OPEN_SKIPPED.load(Ordering::SeqCst));
+    v["pending"] = json!(opening_pending());
+    v
+}
+
+/// A job for an [`OpenPool`].
+pub(crate) type PoolJob = Box<dyn FnOnce() + Send>;
+
+/// A bounded FIFO executor: jobs start in submission order on at most `cap` threads named
+/// `name`, spawned on demand; a worker exits as soon as the queue is empty, so an idle
+/// player keeps no `lp-open` thread. A job that panics doesn't take its worker down.
+pub(crate) struct OpenPool {
+    name: &'static str,
+    cap: usize,
+    state: Mutex<PoolState>,
+}
+
+struct PoolState {
+    queue: std::collections::VecDeque<PoolJob>,
+    workers: usize,
+    running: usize,
+    peak: usize,
+}
+
+impl OpenPool {
+    pub(crate) const fn new(name: &'static str, cap: usize) -> OpenPool {
+        OpenPool {
+            name,
+            cap,
+            state: Mutex::new(PoolState {
+                queue: std::collections::VecDeque::new(),
+                workers: 0,
+                running: 0,
+                peak: 0,
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PoolState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Queue `job`, starting a worker if fewer than `cap` run. `Err(job)` = no worker
+    /// exists and none could be started (the caller runs it some other way).
+    pub(crate) fn submit(&'static self, job: PoolJob) -> Result<(), PoolJob> {
+        let mut s = self.lock();
+        if s.workers < self.cap {
+            // Spawned under the lock: the new worker's first `lock` waits for this one.
+            let spawned = std::thread::Builder::new()
+                .name(self.name.into())
+                .spawn(move || self.work());
+            match spawned {
+                Ok(_) => {
+                    s.workers += 1;
+                    s.peak = s.peak.max(s.workers);
+                }
+                Err(_) if s.workers == 0 => return Err(job),
+                Err(_) => {} // a running worker gets to it
+            }
+        }
+        s.queue.push_back(job);
+        Ok(())
+    }
+
+    fn work(&self) {
+        loop {
+            let job = {
+                let mut s = self.lock();
+                match s.queue.pop_front() {
+                    Some(j) => {
+                        s.running += 1;
+                        j
+                    }
+                    None => {
+                        s.workers -= 1;
+                        return;
+                    }
+                }
+            };
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+            self.lock().running -= 1;
+        }
+    }
+
+    pub(crate) fn stats(&self) -> Value {
+        let s = self.lock();
+        json!({
+            "cap": self.cap,
+            "workers": s.workers,
+            "running": s.running,
+            "queued": s.queue.len(),
+            "peak": s.peak,
+        })
+    }
+
+    /// Jobs waiting for a worker (bounds).
+    pub(crate) fn queued(&self) -> usize {
+        self.lock().queue.len()
+    }
+}
+
+/// Async opens waiting for an `lp-open` worker (`loop` probe `bounds.open_queued`).
+pub fn open_queued() -> usize {
+    OPEN_POOL.queued()
 }
 
 /// Owns one live [`Source`] per graph `Source` node.
@@ -613,19 +740,26 @@ impl SourceHost {
             return false;
         }
         let slot: OpenSlot = Arc::new(Mutex::new(None));
-        let worker_slot = slot.clone();
+        // The job holds the slot weakly while queued: a node gone before a worker gets to
+        // it (its `Opening` dropped by `sync`/`finish_teardown`) is skipped — no core made.
+        // Once running it holds it strongly; a node gone meanwhile drops the result with
+        // the last reference (`PreparedCore::drop` → reaper), as before.
+        let weak = Arc::downgrade(&slot);
         let opts = self.base_opts.clone();
         OPENING.fetch_add(1, Ordering::SeqCst);
-        let spawned = std::thread::Builder::new()
-            .name("lp-open".into())
-            .spawn(move || {
-                let r = MpvSource::prepare_core(&opts);
-                *worker_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-                drop(worker_slot);
+        let job: PoolJob = Box::new(move || {
+            let Some(slot) = weak.upgrade() else {
+                OPEN_SKIPPED.fetch_add(1, Ordering::SeqCst);
                 OPENING.fetch_sub(1, Ordering::SeqCst);
-                waker();
-            });
-        if spawned.is_err() {
+                return;
+            };
+            let r = MpvSource::prepare_core(&opts);
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            drop(slot);
+            OPENING.fetch_sub(1, Ordering::SeqCst);
+            waker();
+        });
+        if OPEN_POOL.submit(job).is_err() {
             OPENING.fetch_sub(1, Ordering::SeqCst);
             return false;
         }
@@ -737,7 +871,8 @@ impl SourceHost {
     pub fn finish_teardown(&mut self, max: std::time::Duration) {
         let t = std::time::Instant::now();
         // I5: cores still being made go too (a worker finishing later hands its core to
-        // the reaper itself).
+        // the reaper itself); queued ones are skipped at once, so the wait below is the
+        // ≤ MAX_OPEN_WORKERS cores in progress (2–8 ms each).
         self.opening.clear();
         while opening_pending() > 0 && t.elapsed() < max {
             std::thread::sleep(std::time::Duration::from_millis(2));
@@ -799,5 +934,96 @@ impl SourceHost {
     /// iteration). Colour/snapshot sources have none.
     pub fn wake_fds(&self) -> Vec<RawFd> {
         self.sources.values().filter_map(|h| h.wake).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OpenPool, PoolJob};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    fn leak(cap: usize) -> &'static OpenPool {
+        Box::leak(Box::new(OpenPool::new("lp-open-test", cap)))
+    }
+
+    fn wait_idle(pool: &OpenPool) {
+        let t = Instant::now();
+        while pool.stats()["workers"] != 0 {
+            assert!(t.elapsed() < Duration::from_secs(5), "{}", pool.stats());
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// TODO "No explicit cap on concurrent `lp-open` worker threads": a burst of 20 jobs
+    /// (each 5 ms) never runs more than `cap` at once, starts them in submission order,
+    /// loses none, and leaves no worker behind once the queue is empty.
+    #[test]
+    fn open_pool_caps_concurrency_in_order_and_loses_none() {
+        let pool = leak(2);
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(Mutex::new(Vec::new()));
+        let done = Arc::new(AtomicUsize::new(0));
+        for i in 0..20 {
+            let (running, peak, started, done) =
+                (running.clone(), peak.clone(), started.clone(), done.clone());
+            let job: PoolJob = Box::new(move || {
+                let n = running.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(n, Ordering::SeqCst);
+                started.lock().unwrap().push(i);
+                std::thread::sleep(Duration::from_millis(5));
+                running.fetch_sub(1, Ordering::SeqCst);
+                done.fetch_add(1, Ordering::SeqCst);
+            });
+            assert!(pool.submit(job).is_ok());
+        }
+        assert!(pool.stats()["workers"].as_u64().unwrap() <= 2);
+        wait_idle(pool);
+        assert_eq!(done.load(Ordering::SeqCst), 20, "jobs lost");
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "never more than the cap at once"
+        );
+        assert_eq!(pool.stats()["peak"], 2);
+        assert_eq!(pool.stats()["queued"], 0);
+        // FIFO start order: with two workers, job i starts within one place of i.
+        let order = started.lock().unwrap().clone();
+        for (pos, i) in order.iter().enumerate() {
+            assert!(pos.abs_diff(*i) <= 1, "start order {order:?}");
+        }
+    }
+
+    /// A job that panics doesn't take its worker down: later jobs still run, and the pool
+    /// starts workers again after going idle.
+    #[test]
+    fn open_pool_survives_a_panicking_job_and_restarts_after_idle() {
+        let pool = leak(1);
+        let done = Arc::new(AtomicUsize::new(0));
+        assert!(
+            pool.submit(Box::new(|| panic!("job panics (expected)")))
+                .is_ok()
+        );
+        let d = done.clone();
+        assert!(
+            pool.submit(Box::new(move || {
+                d.fetch_add(1, Ordering::SeqCst);
+            }))
+            .is_ok()
+        );
+        wait_idle(pool);
+        assert_eq!(done.load(Ordering::SeqCst), 1);
+        let d = done.clone();
+        assert!(
+            pool.submit(Box::new(move || {
+                d.fetch_add(1, Ordering::SeqCst);
+            }))
+            .is_ok()
+        );
+        wait_idle(pool);
+        assert_eq!(done.load(Ordering::SeqCst), 2);
+        assert_eq!(pool.stats()["running"], 0);
     }
 }
