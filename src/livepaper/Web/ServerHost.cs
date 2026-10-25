@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.WebSockets;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -324,24 +325,18 @@ public static class ServerHost
             }
             return Results.Json(new { freedBytes = freed, count });
         });
-        app.MapPost("/settings", (AppSettings s) =>
+        // PATCH semantics: the body's keys over the saved settings, the rest kept (SettingsService.Patch —
+        // the UI posts its whole copy, a script or agent may post just {"Volume": 50}); a bad value → 400.
+        app.MapPost("/settings", (JsonElement body) =>
         {
             // phase timing: logged when the whole handler is slow (or always with LP_PROFILE_SETTINGS=1)
             var psw = System.Diagnostics.Stopwatch.StartNew();
             var phases = new List<string>();
             long lastMs = 0;
             void Mark(string what) { long now = psw.ElapsedMilliseconds; phases.Add($"{what} {now - lastMs}"); lastMs = now; }
-            var prev = SettingsService.Load();
-            // The UI caches the whole AppSettings at load and re-POSTs it on every change. Fields
-            // mutated backend-side WHILE the UI is open (LastSession via apply/random/next; steam
-            // tokens via QR sign-in) would be clobbered by the stale copy. Preserve those from disk
-            // — they are never edited through this form.
-            s.LastSession = prev.LastSession;
-            s.SteamRefreshToken = prev.SteamRefreshToken;
-            s.SteamAccessToken = prev.SteamAccessToken;
-            s.SteamAccountName = prev.SteamAccountName;
-            s.SteamLoginSecure = prev.SteamLoginSecure;
-            SettingsService.Save(s);
+            AppSettings prev, s;
+            try { (prev, s) = SettingsService.Patch(body); }   // keeps LastSession + the Steam tokens from disk
+            catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             Mark("load+save");
             // PlayerEngine changed → stop the old engine, replay the session on the new one (else just
             // refresh the cached engine + binary resolution). First, so everything below hits the new one.
