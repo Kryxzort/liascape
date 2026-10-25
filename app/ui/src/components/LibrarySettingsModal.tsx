@@ -29,7 +29,6 @@ export function LibrarySettingsModal({
   const [dur, setDur] = useState("");
   const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
-  const playingPath = useStore((s) => s.playingPath);
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
   const prevRef = useRef<{ vol: number | null; spd: number | null; last: number; tm: number | null }>({ vol: null, spd: null, last: 0, tm: null });
   const persistRef = useRef<{ tm: number | null; fn: (() => void) | null }>({ tm: null, fn: null });
@@ -62,17 +61,17 @@ export function LibrarySettingsModal({
   // apply to every selected sibling (or just this card).
   const targets = (siblings.length ? siblings : [item]).map((i) => i.videoPath);
   const multi = targets.length > 1;
-  const playingTargeted = !!playingPath && targets.includes(playingPath);
-  // throttled live preview (~90ms, trailing) — only meaningful when the edited item is what's playing.
+  // throttled live preview (~90ms, trailing). API: names the edited item(s) — the backend moves exactly
+  // their sources, wherever they are (on screen, either side of a transition, a pending switch), and
+  // nothing when none is live. Never "what's playing": mid-transition that's the OTHER wallpaper.
   const flushPreview = () => {
-    const r = prevRef.current; const body: { volume?: number; speed?: number } = {};
+    const r = prevRef.current; const body: { volume?: number; speed?: number; paths: string[] } = { paths: targets };
     if (r.vol != null) { body.volume = r.vol; r.vol = null; }
     if (r.spd != null) { body.speed = r.spd; r.spd = null; }
     r.last = Date.now(); r.tm = null;
     if (body.volume != null || body.speed != null) api.preview(body);
   };
   const queuePreview = (patch: { volume?: number; speed?: number }) => {
-    if (!playingTargeted) return;
     const r = prevRef.current;
     if (patch.volume != null) r.vol = patch.volume;
     if (patch.speed != null) r.spd = patch.speed;

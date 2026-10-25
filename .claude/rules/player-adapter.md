@@ -143,7 +143,7 @@ code below it is unchanged)
 | `ApplyPlaybackSettingsLive` | `ApplySettingsLive`: NoAudio/VideoFps/DisableCache/Demuxer*/HwDec → `srcs:*`; Loop only for a single non-timed video (the legacy guard) |
 | `ApplyOverrideLive` | the item's own source(s) by path (may be a pending B) |
 | `ApplyNormalizationLive` | `af` on the item's source(s) |
-| `/preview` (ServerHost) | `LpPlayerMedia.Preview` → the playing item's source(s), literal values |
+| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), one `state` read for a selection — on screen, either side of an effect, a pending B), literal values; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths` |
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
@@ -264,7 +264,8 @@ rotation → no switch storm (≤ 2 requests in 8 s), the last target parked and
 rotation resuming (I4); a pending B getting its OWN override while the global
 changes; **speed storm**: an aligned switch armed at 4× survives a drop to 0.5× and an aligned switch
 survives an 8 s pause (no cancel, no forced switch, no backstop log line), each then handing off at A's
-end (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
+end; `/preview {paths:[A]}` during a running 8 s fade moves A only and `{paths:[B]}` B only (RED before:
+A's values landed on B) (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
 while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
 pending B — `cur:*.paused`/a source's own raw `paused` never changes, by design); a SIGSTOPped player

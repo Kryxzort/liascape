@@ -124,7 +124,8 @@ export const api = {
   libraryVolume: (path: string, intValue: number | null) => jpost("/library/volume", { path, intValue }),
   librarySpeed: (path: string, doubleValue: number | null) => jpost("/library/speed", { path, doubleValue }),
   // live drag preview — set the playing wallpaper's volume/speed NOW, no persist (see /preview)
-  preview: (body: { volume?: number; speed?: number }) => jpost("/preview", body),
+  // API: paths = the item(s) being edited; omitted = whatever is playing
+  preview: (body: { volume?: number; speed?: number; paths?: string[] }) => jpost("/preview", body),
   libraryWhitelist: (path: string, value: boolean) => jpost("/library/whitelist", { path, value }),
   librarySync: () => jpost<{ added: string[] }>("/library/sync"),
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),

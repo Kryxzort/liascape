@@ -542,15 +542,25 @@ public static class LpPlayerMedia
         return SamePath(CurrentPath(), path) ? spd : null;
     }
 
-    // /preview (drag twin, no persist): the playing item's source(s), literal values.
-    public static void Preview(int? volume, double? speed) => Queue(() => PreviewNow(volume, speed));
+    // /preview (drag twin, no persist), literal values → the source(s) of `paths` — the item(s) the modal
+    // edits, wherever they are: on screen, the outgoing A or incoming B of an effect, a pending B. No
+    // paths → the playing item (`cur:*`, which mid-transition is the incoming side: a drag on A used to
+    // land on B there and stay, since the persist that follows targets A by path).
+    public static void Preview(int? volume, double? speed, IReadOnlyCollection<string>? paths = null) =>
+        Queue(() => PreviewNow(volume, speed, paths));
 
-    private static void PreviewNow(int? volume, double? speed)
+    private static void PreviewNow(int? volume, double? speed, IReadOnlyCollection<string>? paths)
     {
-        var cur = CurrentPath();
-        if (cur == null) return;
-        if (volume is int v) SetForPath(cur, "gain.user", MpvPropertyMap.VolumeDb(v));
-        if (speed is double sp) SetForPath(cur, "speed", Math.Clamp(sp, 0.1, 4.0));
+        if (paths is not { Count: > 0 })
+            paths = CurrentPath() is string cur ? [cur] : [];
+        if (paths.Count == 0) return;
+        var client = C;
+        var ids = SourcesFor(client, paths);
+        foreach (var id in ids)
+        {
+            if (volume is int v) client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.gain.user", ["value"] = MpvPropertyMap.VolumeDb(v) }, LpPlayerClient.QuickMs);
+            if (speed is double sp) client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.speed", ["value"] = Math.Clamp(sp, 0.1, 4.0) }, LpPlayerClient.QuickMs);
+        }
     }
 
     // ApplyPlaybackSettingsLive's lp-player twin: every changed decode/buffer/audio setting, live.
@@ -680,7 +690,10 @@ public static class LpPlayerMedia
     }
 
     // live media sources (not snapshots) whose path is `path`
-    private static List<string> SourcesFor(LpPlayerClient client, string path)
+    private static List<string> SourcesFor(LpPlayerClient client, string path) => SourcesFor(client, [path]);
+
+    // …whose path is any of `paths` (one `state` read for a whole selection)
+    private static List<string> SourcesFor(LpPlayerClient client, IReadOnlyCollection<string> paths)
     {
         var ids = new List<string>();
         if (Graph(client) is not { } g || g.ValueKind != JsonValueKind.Object) return ids;
@@ -688,7 +701,8 @@ public static class LpPlayerMedia
         {
             var v = n.Value;
             if (!v.TryGetProperty("gain_effective_db", out _) || Str(v, "kind") is "snapshot" or "color") continue; // sources only
-            if (SamePath(Str(v, "path"), path)) ids.Add(n.Name);
+            var sp = Str(v, "path");
+            if (paths.Any(p => SamePath(sp, p))) ids.Add(n.Name);
         }
         return ids;
     }

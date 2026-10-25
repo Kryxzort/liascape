@@ -403,8 +403,10 @@ public static class ServerHost
         // gates on "the edited item is the playing one", then persists once on release via /library/{volume,speed}.
         app.MapPost("/preview", (PreviewReq r) =>
         {
-            // lp-player: a per-item value → the playing item's source(s), not srcs:* (R61)
-            if (livepaper.Player.PlayerEngine.IsLpPlayer) { livepaper.Player.LpPlayerMedia.Preview(r.Volume, r.Speed); return Results.Ok(); }
+            // lp-player: a per-item value → the EDITED item's source(s), not srcs:* (R61) — mid-transition
+            // `cur:*` is the incoming side, so "what's playing" would move the other wallpaper.
+            if (livepaper.Player.PlayerEngine.IsLpPlayer) { livepaper.Player.LpPlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
+            if (r.Paths is { Count: > 0 } && !r.Paths.Contains(PlayerHelper.QueryCurrentPath() ?? "")) return Results.Ok();
             if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
         });
         app.MapPost("/library/whitelist", (WhitelistReq r) => { LibraryService.SetWhitelisted(r.Path, r.Value); return Results.Ok(); });
@@ -741,7 +743,8 @@ public static class ServerHost
     public record DetailReq(int Source, WallpaperResult Result);
     public record PathReq(string Path);
     public record OverrideReq(string Path, int? IntValue, double? DoubleValue);
-    public record PreviewReq(int? Volume, double? Speed);
+    // Paths = the item(s) being edited (the per-wallpaper modal); none = whatever is playing.
+    public record PreviewReq(int? Volume, double? Speed, List<string>? Paths = null);
     public record WhitelistReq(string Path, bool Value);
     public record ValueReq(int? Delta, int? Value);
     public record MuteReq(bool User, bool Value);
