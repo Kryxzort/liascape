@@ -129,8 +129,11 @@ pub struct ServeOpts {
 }
 
 /// Phase 2: whether the render worker runs when neither `--render-worker` nor
-/// `LP_PLAYER_RENDER_WORKER` says (§ Sources "Render worker").
-pub const RENDER_WORKER_DEFAULT: bool = false;
+/// `LP_PLAYER_RENDER_WORKER` says (§ Sources "Render worker"). On since 2026-10-26: the
+/// switch loop's warm median max_busy 16.3 → 1.3–3.6 ms, missed frames at 2× content on a
+/// 240 Hz output 2.2–3.3 → 1.8–2.5/s, full suite green with it on and off, the UI matrix
+/// 682/0 with it on. `off` stays the escape hatch.
+pub const RENDER_WORKER_DEFAULT: bool = true;
 
 /// The env knob for the render worker (`on`/`off`); `--render-worker` wins over it.
 pub const RENDER_WORKER_ENV: &str = "LP_PLAYER_RENDER_WORKER";
