@@ -504,6 +504,15 @@ action("toggle-pause", () => [], { flipPause: true }); // the oracle checks play
 action("toggle-mute", () => [], { flipMute: true });
 action("volume-up", (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up from ${c.before.s.volume}`]));
 action("volume-down", (c) => (c.after.s.volume === Math.max(0, c.before.s.volume - 5) ? [] : [`volume ${c.after.s.volume} after volume-down from ${c.before.s.volume}`]));
+// the same keybinds while every live item has its OWN volume (30): the global moves ±5 — the keyboard twin of the
+// Settings page's global slider — and no source with an override moves (the oracle: override ?? global, R61)
+for (const a of ["volume-up", "volume-down"]) C[`cli:${a}:overridden`] = { states: ["single", "playlist", "effect", "pending", "paused"],
+  async pre(c) { for (const p of [c.shown, c.other].filter(Boolean)) await post("/library/volume", { path: p, intValue: 30 }); },
+  async run(c) { c.cli = await cli(a); await sleep(400); },
+  check(c) {
+    const want = a === "volume-up" ? Math.min(100, c.before.s.volume + 5) : Math.max(0, c.before.s.volume - 5);
+    return c.after.s.volume === want ? [] : [`volume ${c.after.s.volume} after ${a} from ${c.before.s.volume}`];
+  } };
 // user switches — paused: KeepPauseOnSwitch off (default) resumes and switches with the transition; on
 // (the `-keep` cells) stays paused and cuts to B's first frame
 const stayed = (c, a) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`${a} stayed on ${TITLE(c.before.cur.path)}`] : []);
@@ -849,6 +858,32 @@ C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
     c.race = { bad, n, first };
   }, check: (c) => [...(c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /settings during saves were not the settings: ${JSON.stringify(c.race.first)}, saved ${JSON.stringify(c.want)}`] : []),
     ...(c.after.s.playerEngine !== c.want.playerEngine || c.after.s.volume !== c.want.volume ? [`after the saves: engine ${c.after.s.playerEngine} volume ${c.after.s.volume}`] : [])] };
+
+// The same race for the other shared state files: the current playlist (playlist_state.json — the strip saves it on
+// every edit; the UI's init, the tick's transition config and /settings read it) and a library index (index.json —
+// every override / loudness write rewrites it; every switch, /settings and /library read it). A read mid-save must
+// still see the file: a null playlist gave the UI an empty strip + the DEFAULT playlist settings (its next save
+// wrote those over the real ones), an empty index made every override read "follows the global".
+C["race:playlistSaveLoad"] = { states: ["idle"], async run(c) {
+    const pl = { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null };
+    let bad = 0, n = 0, first = null;
+    const writers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 25; i++) await post("/playlist/state", pl); });
+    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const g = (await http("GET", "/playlist/state")).json; n++;
+      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.advanceOnVideoEnd !== true) { bad++; first ??= g && { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds }; } } });
+    await Promise.all([...writers, ...readers]);
+    c.race = { bad, n, first };
+  }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /playlist/state during saves were not the playlist: ${JSON.stringify(c.race.first)}`] : []) };
+C["race:indexSaveLoad"] = { states: ["idle"],
+  async pre() { await post("/library/volume", { path: K[0], intValue: 30 }); await post("/library/speed", { path: K[1], doubleValue: 0.8 }); },
+  async run(c) {
+    let bad = 0, n = 0, first = null;
+    const writers = Array.from({ length: 3 }, async (_, w) => { for (let i = 0; i < 25; i++) await post("/library/volume", { path: K[2], intValue: 40 + ((i + w) % 2) }); });
+    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const lib = (await http("GET", "/library")).json || []; n++;
+      const a = lib.find((x) => x.videoPath === K[0]), b = lib.find((x) => x.videoPath === K[1]);
+      if (a?.volumeOverride !== 30 || b?.speedOverride !== 0.8) { bad++; first ??= { items: lib.length, k1: a?.volumeOverride ?? null, k2: b?.speedOverride ?? null }; } } });
+    await Promise.all([...writers, ...readers]);
+    c.race = { bad, n, first };
+  }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /library during index saves lost the overrides: ${JSON.stringify(c.race.first)} (k1 volume 30, k2 speed 0.8)`] : []) };
 
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
@@ -1373,8 +1408,8 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
     await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Unmute after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
-    tone(2000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    await waitFor(() => tones.size === 0, 5000, 50); const t1 = Date.now();
+    tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
+    await stopTones(); const t1 = Date.now(); // the stream ends here
     await sleep(3000); c.at3 = await muteNow(true);
     c.unmutedMs = (await waitFor(() => muteNow(false), 5000, 50)) ? Date.now() - t1 : null;
   }, check(c) {
