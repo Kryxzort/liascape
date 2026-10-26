@@ -12,8 +12,8 @@
 //! **Texture ownership** is what keeps a frame from tearing: a texture is the worker's (its
 //! free list, the one it renders into) or the loop's (front, back, a frame waiting for its
 //! fence) — never both. The worker renders only into its own, inserts a fence + `glFlush`,
-//! polls that fence (`glClientWaitSync(…, 0)`, every 1 ms while a frame is on the GPU), then
-//! publishes the frame (`Exchange::ready`, replacing — and taking back — an older one the loop
+//! polls that fence (`glClientWaitSync(…, 0)`, every [`FENCE_POLL`] while a frame is on the
+//! GPU), then publishes the frame (`Exchange::ready`, replacing — and taking back — an older one the loop
 //! never adopted) and writes the source's eventfd (a `dup`, so a dropped source can never leave
 //! it writing a reused fd number). The loop gives textures back through [`ExState::returned`],
 //! with a **release fence** when it sampled them (a replaced front): the worker renders into a
@@ -43,6 +43,19 @@ use crate::mpv::{Handle, RenderContext, WeakClient};
 /// the frame until `glClientWaitSync(…, 0)` says it signalled). A render that isn't done in
 /// this time is broken anyway; never seen.
 const FENCE_WAIT: Duration = Duration::from_millis(100);
+
+/// How often a frame still on the GPU is re-checked (`glClientWaitSync(…, 0)`). Each check
+/// past the frame's completion is latency the loop sees. Measured (release, hermetic, a
+/// 1080p120 clip at 2× on a content-paced 240 Hz output, 4 runs per cell, interleaved;
+/// `missed` = present intervals > 1.5 refresh periods): 1 ms → median 3.3 / 3.2 / 5.0
+/// missed/s (steady 2× / 2× ± 0.05 / random 1.6–2.4×), the loop renderer 2.2 / 3.3 / 3.2,
+/// **250 µs → 1.8 / 2.0 / 2.5**; worker CPU the same either way (1080p30 4.3–5.3 %, 4K60
+/// 24–27 % of a core in both).
+const FENCE_POLL: Duration = Duration::from_micros(250);
+
+/// The worker's poll backstop with nothing on the GPU (jobs, sizes and every render
+/// context's update callback write its eventfd).
+const IDLE_POLL: Duration = Duration::from_millis(100);
 
 /// Free textures a slot keeps around for reuse beyond the ones in flight (3 in steady state:
 /// the loop's front, the newest frame, one to render into).
@@ -551,11 +564,20 @@ impl Inner {
                 events: libc::POLLIN,
                 revents: 0,
             };
-            // A frame on the GPU is polled every 1 ms (never a blocking `glClientWaitSync`: on
-            // NVIDIA 595 that wait holds the driver's process-wide lock, so every other
-            // thread's GL — the compositor's included — queues behind the GPU work).
-            let timeout = if inflight.is_empty() { 100 } else { 1 };
-            unsafe { libc::poll(&mut pfd, 1, timeout) };
+            // A frame on the GPU is polled every FENCE_POLL (never a blocking
+            // `glClientWaitSync`: on NVIDIA 595 that wait holds the driver's process-wide lock,
+            // so every other thread's GL — the compositor's included — queues behind the GPU
+            // work); idle, the eventfd alone wakes it (100 ms backstop).
+            let wait = if inflight.is_empty() {
+                IDLE_POLL
+            } else {
+                FENCE_POLL
+            };
+            let ts = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: wait.as_nanos() as libc::c_long,
+            };
+            unsafe { libc::ppoll(&mut pfd, 1, &ts, std::ptr::null()) };
             let mut buf = 0u64;
             unsafe { libc::read(self.fd, &mut buf as *mut u64 as *mut libc::c_void, 8) };
             let (jobs, closing) = {
