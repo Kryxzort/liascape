@@ -30,7 +30,7 @@ library/
 
 ## `LibraryStore` (`Helpers/LibraryStore.cs`) — the index
 
-One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local, `<name>` for web/imported). One `LibMeta` per item:
+One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local, `<name>` for web/imported). Saved atomically (`AtomicFile`: temp + rename) and read with a retried parse — written in place, a read mid-save got an EMPTY index (matrix `race:indexSaveLoad`). One `LibMeta` per item:
 
 ```
 SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, Crashed, Whitelist,
