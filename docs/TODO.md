@@ -185,6 +185,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       a real bug — a resuming pause gate was dropped on a second clock read after its last `ramp_db`, so
       `gain.pause` stayed a hair under 0 dB for good (−0.0003 measured; −0.04…−0.56 dB with a 2 ms stall
       injected, 4/4 RED). The drop now writes the exact 0 dB.
+      Adapter IT (`scripts/test-lp-player-adapter.sh`), once at load avg ~10 (another lane's 4K decoder tests,
+      2026-10-26 08:0x, merge 48959da): 111/5 — `after SIGCONT` (read a pending B's override), `speed drop: E1
+      was cut early`, `after resume: handoff=1`, `volume-only (global) drag` (A already gone: `null dB`). The
+      rerun minutes later at load ~7: 115/0. Its real-clock fades (300–600 ms) have no slack for a stalled
+      backend; if these recur, stretch the fades the drag/pause sections act inside rather than retrying.
 - [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
       playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
       align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:
