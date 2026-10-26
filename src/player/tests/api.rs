@@ -4118,41 +4118,10 @@ fn i6_every_onset_waits_for_flowing_audio() {
 fn i5_switch_loop_busy() {
     let Some(srv) = real_serve(&[]) else { return };
     let mut c = srv.client();
-    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
-    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
-    let a = create_src(&mut c, json!({"path": red, "loop": true}));
-    show_all(&mut c, &a);
-    wait_playing(&mut c, &a, 0.3);
-    let mut busy = Vec::new();
-    let mut open = Vec::new();
-    for i in 0..10 {
-        std::thread::sleep(Duration::from_millis(300));
-        c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
-        let path = if i % 2 == 0 { &blue } else { &red };
-        let r = c.ok(
-            "transition",
-            json!({"outputs": "out:*", "to": {"path": path, "loop": true},
-                   "effect_id": if i % 4 < 2 { json!(null) } else { json!("fade") },
-                   "duration_ms": 300}),
-        );
-        let b = r["to"].as_str().unwrap().to_string();
-        wait_playing(&mut c, &b, 0.2);
-        wait_for(Duration::from_secs(5), "done", || {
-            let st = c.ok("state", json!({}));
-            st["transitions"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-                .then_some(())
-        });
-        let lp = c.ok("probe", json!({"name": "loop"}));
-        busy.push(lp["max_busy_ms"].as_f64().unwrap());
-        open.push(lp["max_open_ms"].as_f64().unwrap());
-    }
+    let (busy, open) = switch_loop_busy(&mut c);
     println!("I5 per-switch max_busy_ms: {busy:.1?}");
     println!("I5 per-switch max_open_ms: {open:.1?}");
-    let mut warm = busy[1..].to_vec();
-    warm.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    let warm = sorted(&busy[1..]);
     println!(
         "I5 warm median max_busy_ms {:.1}, worst {:.1}",
         warm[warm.len() / 2],
@@ -4171,6 +4140,49 @@ fn i5_switch_loop_busy() {
             "a warm switch still blocks the loop: {busy:?}"
         );
     }
+}
+
+fn sorted(v: &[f64]) -> Vec<f64> {
+    let mut v = v.to_vec();
+    v.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    v
+}
+
+/// 10 switches (cuts and 300 ms fades, alternating two fresh 1080p clips) on a real-clock
+/// server: per switch, the loop probe's `max_busy_ms` and `max_open_ms` (reset before each).
+fn switch_loop_busy(c: &mut Client) -> (Vec<f64>, Vec<f64>) {
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(c, json!({"path": red, "loop": true}));
+    show_all(c, &a);
+    wait_playing(c, &a, 0.3);
+    let mut busy = Vec::new();
+    let mut open = Vec::new();
+    for i in 0..10 {
+        std::thread::sleep(Duration::from_millis(300));
+        c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+        let path = if i % 2 == 0 { &blue } else { &red };
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": path, "loop": true},
+                   "effect_id": if i % 4 < 2 { json!(null) } else { json!("fade") },
+                   "duration_ms": 300}),
+        );
+        let b = r["to"].as_str().unwrap().to_string();
+        wait_playing(c, &b, 0.2);
+        wait_for(Duration::from_secs(5), "done", || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        });
+        let lp = c.ok("probe", json!({"name": "loop"}));
+        busy.push(lp["max_busy_ms"].as_f64().unwrap());
+        open.push(lp["max_open_ms"].as_f64().unwrap());
+    }
+    (busy, open)
 }
 
 /// `lp_player::sources::host::MAX_OPEN_WORKERS` (black-box: spelled out).
@@ -4845,5 +4857,316 @@ fn m13_animate_and_set_agree_on_an_empty_wildcard() {
     assert_eq!(
         e["code"], "no_such_node",
         "a concrete id still has to exist: {e}"
+    );
+}
+
+// ---------------------------------------------------------------- Phase 2: render worker
+
+/// A real-clock server with extra environment for the child.
+fn real_serve_env(extra: &[&str], env: &[(&str, &Path)]) -> Option<Serve> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    let mut args = vec!["--clock", "real"];
+    args.extend_from_slice(extra);
+    Some(Serve::spawn_env(new_root(), &args, env, Some(serial)))
+}
+
+fn source_probe(c: &mut Client, id: &str) -> Value {
+    let p = c.ok("probe", json!({"name": "sources"}));
+    p["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("{id} not hosted: {p}"))
+}
+
+/// Phase 2 (§ Sources "Render worker"): `serve --render-worker on|off` (else
+/// `LP_PLAYER_RENDER_WORKER`) decides where a real-clock player's mpv sources render — the
+/// flag wins over the environment —, a stepped player always renders on the loop (its
+/// captures stay deterministic), and the `sources` probe says which (`render_mode`, the
+/// per-source `render` stats, top-level `render_worker`). The picture is the same either way.
+#[test]
+fn render_worker_switch_picks_where_sources_render() {
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    for (flag, want) in [("on", "worker"), ("off", "loop")] {
+        let Some(srv) = real_serve(&["--render-worker", flag]) else {
+            return;
+        };
+        let mut c = srv.client();
+        let a = create_src(&mut c, json!({"path": red, "loop": true}));
+        show_all(&mut c, &a);
+        wait_playing(&mut c, &a, 0.3);
+        let src = source_probe(&mut c, &a);
+        let p = c.ok("probe", json!({"name": "sources"}));
+        println!(
+            "render worker {flag}: {} / {}",
+            src["render"], p["render_worker"]
+        );
+        assert_eq!(src["render_mode"], json!(want), "{src}");
+        if want == "worker" {
+            assert!(src["render"]["adopted"].as_u64().unwrap() > 3, "{src}");
+            assert!(p["render_worker"]["renders"].as_u64().unwrap() > 3, "{p}");
+            assert_eq!(p["render_worker"]["slots"], json!(1), "{p}");
+        } else {
+            assert!(src["render"].is_null(), "{src}");
+            assert!(p["render_worker"].is_null(), "{p}");
+        }
+        let png = srv.path("out.png");
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": png}));
+        near(png_pixel(&png, 320, 180), [255, 0, 0], 3, "red on screen");
+    }
+    let Some(srv) = Serve::start_with(&["--render-worker", "on"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    c.step(100);
+    let src = source_probe(&mut c, &a);
+    let p = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(src["render_mode"], json!("loop"), "stepped: {src}");
+    assert!(p["render_worker"].is_null(), "stepped: {p}");
+}
+
+const FLASH_A: ClipSpec = ClipSpec::Flash {
+    w: 128,
+    h: 72,
+    fps: 30,
+    frames: 56,
+};
+const FLASH_B: ClipSpec = ClipSpec::Flash {
+    w: 192,
+    h: 108,
+    fps: 24,
+    frames: 56,
+};
+
+/// A captured PNG's Flash frame index if the picture is ONE frame (every pixel within ±3 of
+/// the first, on the ladder), else why not.
+fn flash_frame(path: &Path) -> Result<u32, String> {
+    let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    let mut rd = dec.read_info().unwrap();
+    let mut buf = vec![0; rd.output_buffer_size().unwrap()];
+    let info = rd.next_frame(&mut buf).unwrap();
+    let px = |i: usize| [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
+    let first = px(0);
+    let n = common::flash_index(first).ok_or_else(|| format!("off the ladder: {first:?}"))?;
+    for i in (0..info.buffer_size()).step_by(4) {
+        let p = px(i);
+        if (0..3).any(|k| p[k].abs_diff(first[k]) > 3) {
+            let (x, y) = ((i / 4) as u32 % info.width, (i / 4) as u32 / info.width);
+            return Err(format!("not uniform: {first:?} at 0,0 vs {p:?} at {x},{y}"));
+        }
+    }
+    Ok(n)
+}
+
+/// Phase 2: the loop never samples a frame the render worker hasn't finished. Two Flash clips
+/// (every frame one uniform grey, a level per frame) at two sizes play on the two outputs,
+/// one under speed jitter, while the test captures both sources and an output back to back:
+/// every capture must be ONE frame (a partial frame isn't uniform), on the ladder (an
+/// uninitialised texture isn't) and never older than the one before it on that target (a
+/// stale, recycled texture is). Runs twice: as is, and with the worker's `slow-flush` test
+/// fault — every frame stays unfinished on the GPU for 30 ms, so only the fences keep it out
+/// of sight. RED: `LP_PLAYER_TEST_RENDER_WORKER_FAULT=publish-early` (each target handed to the
+/// loop before the worker renders into it). `no-fence` (frames published unfenced, before
+/// their flush) stays GREEN on NVIDIA 595: the driver serializes shared-texture access itself.
+#[test]
+fn render_worker_never_composes_a_torn_frame() {
+    let a_clip = s(&ensure_clip("flash_128x72_30", FLASH_A)).to_string();
+    let b_clip = s(&ensure_clip("flash_192x108_24", FLASH_B)).to_string();
+    let inherited = std::env::var("LP_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
+    for extra in ["", "slow-flush"] {
+        let fault: Vec<&str> = [inherited.as_str(), extra]
+            .into_iter()
+            .filter(|f| !f.is_empty())
+            .collect();
+        let fault = fault.join(",");
+        let Some(srv) = real_serve_env(
+            &["--render-worker", "on"],
+            &[("LP_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new(&fault))],
+        ) else {
+            return;
+        };
+        let mut c = srv.client();
+        let a = create_src(&mut c, json!({"path": a_clip, "paused": true}));
+        let b = create_src(&mut c, json!({"path": b_clip, "paused": true}));
+        c.ok(
+            "set",
+            json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
+        );
+        c.ok(
+            "set",
+            json!({"path": "lay:VIRTUAL-2:main.content", "value": b}),
+        );
+        wait_for(Duration::from_secs(10), "both ready", || {
+            let st = c.ok("state", json!({}));
+            (st["graph"][&a]["ready"] == json!(true) && st["graph"][&b]["ready"] == json!(true))
+                .then_some(())
+        });
+        c.ok_batch(&[
+            (
+                "set",
+                json!({"path": format!("{a}.paused"), "value": false}),
+            ),
+            (
+                "set",
+                json!({"path": format!("{b}.paused"), "value": false}),
+            ),
+        ]);
+        let targets = [a.clone(), b.clone(), "out:VIRTUAL-2".to_string()];
+        let mut seen: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
+        let mut bad = Vec::new();
+        let speeds = [1.4, 0.6, 1.0, 1.25, 0.8, 1.5, 0.7];
+        let t = Instant::now();
+        let mut k = 0usize;
+        while t.elapsed() < Duration::from_millis(2600) {
+            if k.is_multiple_of(6) {
+                let v = speeds[(k / 6) % speeds.len()];
+                c.ok("set", json!({"path": format!("{b}.speed"), "value": v}));
+            }
+            for (i, target) in targets.iter().enumerate() {
+                // The output (320×180, a debug-build PNG encode per capture) every 3rd round.
+                if i == 2 && !k.is_multiple_of(3) {
+                    continue;
+                }
+                let png = srv.path(&format!("cap-{i}.png"));
+                c.ok("capture", json!({"target": target, "path": png}));
+                match flash_frame(&png) {
+                    Ok(n) => {
+                        if let Some(&prev) = seen[i].last()
+                            && n < prev
+                        {
+                            bad.push(format!("{target} #{k}: frame {n} after {prev}"));
+                        }
+                        seen[i].push(n);
+                    }
+                    Err(e) => bad.push(format!("{target} #{k}: {e}")),
+                }
+            }
+            k += 1;
+        }
+        let distinct = |v: &Vec<u32>| {
+            let mut d = v.clone();
+            d.dedup();
+            d.len()
+        };
+        let p = c.ok("probe", json!({"name": "sources"}));
+        println!(
+            "torn-frame [{fault}]: {k} rounds; first/last {:?}; distinct {:?}; worker {}; a {}; b {}",
+            seen.iter()
+                .map(|v| (v.first().copied(), v.last().copied()))
+                .collect::<Vec<_>>(),
+            seen.iter().map(distinct).collect::<Vec<_>>(),
+            p["render_worker"],
+            source_probe(&mut c, &a)["render"],
+            source_probe(&mut c, &b)["render"],
+        );
+        assert!(
+            bad.is_empty(),
+            "[{fault}] {} bad captures of {}: {:#?}",
+            bad.len(),
+            seen.iter().map(Vec::len).sum::<usize>() + bad.len(),
+            &bad[..bad.len().min(20)]
+        );
+        // The captures followed the playback (not one frame held throughout).
+        for (i, v) in seen.iter().enumerate() {
+            let want = if i == 2 { 10 } else { 20 };
+            assert!(distinct(v) >= want, "[{fault}] {}: {v:?}", targets[i]);
+        }
+    }
+}
+
+/// Phase 2: with the render worker on, a switch costs the loop about a frame. The render
+/// context's creation and its first render (shader compile, scaler LUTs, FBO setup) — 6–20 ms
+/// on the loop before, the bulk of `i5_switch_loop_busy`'s per-switch busy — run on the
+/// worker; the loop only adopts finished textures. Same 10 switches as I5. `LP_RW_SWITCH=off`
+/// runs it with the worker off (the A/B and the RED run).
+#[test]
+fn render_worker_switch_keeps_the_loop_free() {
+    let flag = std::env::var("LP_RW_SWITCH").unwrap_or_else(|_| "on".into());
+    let Some(srv) = real_serve(&["--render-worker", &flag]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let (busy, open) = switch_loop_busy(&mut c);
+    let warm = sorted(&busy[1..]);
+    let (median, worst) = (warm[warm.len() / 2], warm[warm.len() - 1]);
+    println!("render worker {flag}: per-switch max_busy_ms {busy:.1?}");
+    println!("render worker {flag}: per-switch max_open_ms {open:.1?}");
+    println!("render worker {flag}: warm median {median:.1}, worst {worst:.1}");
+    let p = c.ok("probe", json!({"name": "sources"}));
+    println!("render worker {flag}: {}", p["render_worker"]);
+    assert!(
+        median < 8.0,
+        "a warm switch blocks the loop for {median:.1} ms (median): {busy:?}"
+    );
+}
+
+/// Phase 2: quit stays bounded and clean with the worker on, with sources playing, being
+/// opened (a burst of creates, cores still attaching) and torn down at once: exit 0 well
+/// within the bounds, the worker frees every render context (`render_worker.stopped {left:
+/// 0}`) and no `mpv.reaper_stragglers`.
+#[test]
+fn render_worker_quit_is_bounded() {
+    let Some(mut srv) = real_serve(&["--render-worker", "on"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    let b = create_src(&mut c, json!({"path": blue, "loop": true}));
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
+    );
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-2:main.content", "value": b}),
+    );
+    wait_playing(&mut c, &a, 0.3);
+    wait_playing(&mut c, &b, 0.3);
+    let mut reqs: Vec<(&str, Value)> = (0..6)
+        .map(|i| {
+            let path = if i % 2 == 0 { &red } else { &blue };
+            (
+                "create",
+                json!({"kind": "source", "props": {"path": path, "loop": true}}),
+            )
+        })
+        .collect();
+    reqs.push(("destroy", json!({ "id": b })));
+    c.ok_batch(&reqs);
+    std::thread::sleep(Duration::from_millis(15));
+    let t = Instant::now();
+    c.ok("quit", json!({}));
+    let st = srv
+        .wait_exit(Duration::from_secs(5))
+        .expect("quit with the worker on must exit");
+    let took = t.elapsed();
+    println!("render worker quit: exit after {took:?}");
+    assert!(st.success(), "{st}");
+    assert!(took < Duration::from_secs(3), "quit took {took:?}");
+    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    let stopped: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("render_worker.stopped"))
+        .collect();
+    println!("{stopped:?}");
+    assert_eq!(stopped.len(), 1, "{stopped:?}");
+    let v: Value = serde_json::from_str(stopped[0]).unwrap();
+    assert_eq!(v["left"], json!(0), "{v}");
+    assert!(
+        !log.contains("mpv.reaper_stragglers"),
+        "straggler at quit: {}",
+        log.lines()
+            .filter(|l| l.contains("stragglers"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

@@ -728,9 +728,14 @@ impl SourceHost {
         if s("kind") == "image" {
             opts.insert("kind".into(), json!("image"));
         }
-        let m = match core {
-            Some(core) => MpvSource::open_with_core(gfx, &s("path"), &opts, core),
-            None => MpvSource::open(gfx, &s("path"), &opts),
+        // A synchronous open still renders on the worker when there is one (the harness; a
+        // pool that couldn't start a thread) — every source of a player renders in one place.
+        let m = match (core, &self.render_worker) {
+            (Some(core), _) => MpvSource::open_with_core(gfx, &s("path"), &opts, core),
+            (None, Some(w)) => MpvSource::prepare_core(&opts)
+                .and_then(|core| core.attach_render(w))
+                .and_then(|core| MpvSource::open_with_core(gfx, &s("path"), &opts, core)),
+            (None, None) => MpvSource::open(gfx, &s("path"), &opts),
         }
         .map_err(|e| e.to_string())?;
         let wake = Some(m.wake_fd());
