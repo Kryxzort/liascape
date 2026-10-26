@@ -3788,4 +3788,19 @@ public static class PlayerHelper
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
+
+    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync): with normalization
+    // on, the item may be playing right now — unmeasured when it started (or when normalization was switched
+    // on), so it ran without the filter and nothing applied it once measured (until its next switch).
+    public static void OnLoudnessMeasured(string path)
+    {
+        try
+        {
+            if (!SettingsService.Load().NormalizeAudio || IsScenePath(path)) return;
+            if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
+            var cur = QueryCurrentPath();
+            if (cur != null && Path.GetFullPath(cur) == Path.GetFullPath(path)) ApplyNormalizationLive(cur);
+        }
+        catch { }
+    }
 }

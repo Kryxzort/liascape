@@ -93,8 +93,11 @@ public static class LibraryService
                 if (!double.IsFinite(v.I)) // silent track (-inf) → nothing to normalize, don't retry
                     LibraryStore.SetMeta(mediaPath, m => m.LoudnessSkip = true);
                 else
+                {
                     LibraryStore.SetMeta(mediaPath, m =>
                         { m.LoudnessI = v.I; m.LoudnessTP = v.TP; m.LoudnessLRA = v.LRA; m.LoudnessThresh = v.Thresh; });
+                    PlayerHelper.OnLoudnessMeasured(mediaPath); // it may be playing un-normalized right now
+                }
             }
         }
         finally { _measuring.TryRemove(mediaPath, out _); }
