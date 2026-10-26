@@ -19,20 +19,17 @@ public static class PlaylistService
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    // Atomic save + a retried load (AtomicFile): written in place, a read mid-save (the UI's init, the tick's
+    // transition config, /settings) got null — the UI showed an empty strip with the DEFAULT playlist settings.
     public static CustomPlaylist? LoadCurrentState()
     {
-        if (!File.Exists(CurrentStatePath)) return null;
-        try { return JsonSerializer.Deserialize<CustomPlaylist>(File.ReadAllText(CurrentStatePath)); }
+        try { return AtomicFile.ReadJson<CustomPlaylist>(CurrentStatePath); }
         catch { return null; }
     }
 
     public static void SaveCurrentState(CustomPlaylist playlist)
     {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(CurrentStatePath)!);
-            File.WriteAllText(CurrentStatePath, JsonSerializer.Serialize(playlist, JsonOpts));
-        }
+        try { AtomicFile.WriteAllText(CurrentStatePath, JsonSerializer.Serialize(playlist, JsonOpts)); }
         catch { }
     }
 
@@ -51,21 +48,14 @@ public static class PlaylistService
     {
         Directory.CreateDirectory(PlaylistsPath);
         string path = Path.Combine(PlaylistsPath, Sanitize(name) + ".json");
-        File.WriteAllText(path, JsonSerializer.Serialize(playlist, JsonOpts));
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(playlist, JsonOpts));
     }
 
     public static CustomPlaylist? Load(string name)
     {
         string path = Path.Combine(PlaylistsPath, Sanitize(name) + ".json");
-        if (!File.Exists(path)) return null;
-        try
-        {
-            return JsonSerializer.Deserialize<CustomPlaylist>(File.ReadAllText(path));
-        }
-        catch
-        {
-            return null;
-        }
+        try { return AtomicFile.ReadJson<CustomPlaylist>(path); }
+        catch { return null; }
     }
 
     public static string Sanitize(string name)

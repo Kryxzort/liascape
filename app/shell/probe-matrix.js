@@ -4,7 +4,8 @@
 // through the backend, operate the control through the real DOM (or a `--action=` keybind), then check
 // with the ORACLE what every live source of the player runs:
 //   gain.user / speed   = the source's OWN item's override ?? the global setting (whatever else is live)
-//   no_audio, hwdec, fps_cap, cache, demuxer_*, af = the globals; gain.mute = the user mute
+//   no_audio, hwdec, fps_cap, cache, demuxer_* = the globals; gain.mute = the user mute (or an auto-mute)
+//   af = none with normalization off; on (audio on) = the source's OWN item's loudnorm at the target once measured
 //   every main layer's fit = VideoScale; player.paused = what the cell expects
 //   the backend's /current, the screen (cur:*) and the UI's "playing" marker agree (when settled)
 //   no transition.failed / source.error / source.rejected; no unexpected cancel; no HTTP error
@@ -90,13 +91,38 @@ function cli(action) {
     res({ code: err ? err.code ?? (err.killed ? `killed (${err.signal}) after ${Date.now() - t0} ms` : 1) : 0, out: String(out) + String(errOut), ms: Date.now() - t0 })));
 }
 
+// ---------------------------------------------------------------- loudness: what the backend measured (the library's own index)
+// k1..k4 are imported items: <library>/imported/<key>/<key>.mp4, one index.json for the source
+const INDEX = path.join(path.dirname(path.dirname(K[0])), "index.json");
+function readIndex() { try { return JSON.parse(fs.readFileSync(INDEX, "utf8")); } catch { return {}; } }
+const keyOf = (p) => path.basename(path.dirname(p));
+const LOUD = ["loudnessI", "loudnessTP", "loudnessLRA", "loudnessThresh"];
+const measured = (idx, p) => { const m = p && idx[keyOf(p)]; return m && LOUD.every((k) => typeof m[k] === "number") ? m : null; };
+// LibraryService.LoudnormAf: C#'s invariant double formatting is the shortest round-trip, like JS's
+const loudnormAf = (m, target) => `loudnorm=I=${target}:TP=-1.5:LRA=11:measured_I=${m.loudnessI}:measured_TP=${m.loudnessTP}:measured_LRA=${m.loudnessLRA}:measured_thresh=${m.loudnessThresh}:linear=true`;
+// measure every clip once (the backend's own backfill: normalization on for a moment, nothing playing)
+async function measureAll(ms = 30000) {
+  if (K.every((p) => measured(readIndex(), p))) return true;
+  const s = await getSettings(); const was = !!s.normalizeAudio;
+  if (!was) await post("/settings", { ...s, normalizeAudio: true });
+  const ok = await waitFor(async () => K.every((p) => measured(readIndex(), p)), ms, 200);
+  if (!was) { const s2 = await getSettings(); s2.normalizeAudio = false; await post("/settings", s2); }
+  return ok;
+}
+// forget every clip's measurement (written like the backend would read it: whole file, renamed over)
+function unmeasureAll() {
+  const idx = readIndex();
+  for (const p of K) { const m = idx[keyOf(p)]; if (m) for (const k of [...LOUD, "loudnessSkip"]) delete m[k]; }
+  fs.writeFileSync(INDEX + ".mx", JSON.stringify(idx, null, 2)); fs.renameSync(INDEX + ".mx", INDEX);
+}
+
 // ---------------------------------------------------------------- oracle
 const VolumeDb = (p) => (p <= 0 ? -96 : Math.min(12, Math.max(-96, 60 * Math.log10(p / 100))));
 const near = (a, b, eps = 0.02) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= eps;
 async function snapshot() {
   const [st, s, lib, cur, ps] = [await ctl.call("state"), await getSettings(), (await http("GET", "/library")).json,
     (await http("GET", "/current")).json, (await http("GET", "/playlist/state")).json];
-  return { st, s, lib, cur, ps, muted: fs.existsSync(E.LP_USER_MUTE) };
+  return { st, s, lib, cur, ps, muted: fs.existsSync(E.LP_USER_MUTE), idx: readIndex() };
 }
 const sourcesOf = (st) => Object.entries(st.graph).filter(([, n]) => n && n.gain_effective_db !== undefined && n.kind !== "snapshot" && n.kind !== "color");
 // What's on screen per output: the main layer's content, through an effect to its `to`.
@@ -130,7 +156,13 @@ function oracle(snap, exp) {
     if (!near(n.demuxer_max_mib, Math.max(0, s.demuxerMaxBytes ?? 0), 0.001)) v.push(`${who} demuxer_max_mib ${n.demuxer_max_mib} ≠ ${s.demuxerMaxBytes}`);
     if (!near(n.demuxer_back_mib, Math.max(0, s.demuxerMaxBackBytes ?? 0), 0.001)) v.push(`${who} demuxer_back_mib ${n.demuxer_back_mib} ≠ ${s.demuxerMaxBackBytes}`);
     if (!s.normalizeAudio && (n.af ?? "") !== "") v.push(`${who} af "${n.af}" with normalization off`);
-    if (!near(gm, snap.muted ? -96 : 0, 0.5)) v.push(`${who} gain.mute ${gm} but user mute is ${snap.muted ? "on" : "off"}`);
+    // normalization on (audio on): a measured item's every source runs ITS OWN loudnorm at the target
+    // (unmeasured: nothing to check — the backend measures it in the background)
+    const lm = s.normalizeAudio && !s.noAudio && measured(snap.idx || {}, n.path);
+    if (lm && (n.af ?? "") !== loudnormAf(lm, s.normalizeTargetLufs))
+      v.push(`${who} af "${String(n.af ?? "").slice(0, 60)}" ≠ its own loudnorm at ${s.normalizeTargetLufs} LUFS (normalization on, measured I=${lm.loudnessI})`);
+    const wantMute = snap.muted || exp.autoMuted;
+    if (!near(gm, wantMute ? -96 : 0, 0.5)) v.push(`${who} gain.mute ${gm} but user mute is ${snap.muted ? "on" : "off"}${exp.autoMuted ? " (auto-muted)" : ""}`);
   }
   const fit = s.videoScale === "fit" ? "fit" : "fill";
   for (const [id, n] of Object.entries(st.graph)) if (id.startsWith("lay:") && id.endsWith(":main") && n.fit !== fit) v.push(`${id} fit ${n.fit} ≠ VideoScale ${s.videoScale}`);
@@ -185,8 +217,8 @@ async function loadUi() {
 }
 const ui = (code) => js(`(async () => { const m = window.__mx; ${code} })()`);
 
-// per-cell log excerpts (backend + adapter), attached to a FAIL
-const LOGS = [E.LP_BACKEND_LOG, E.LP_ADAPTER_LOG].filter(Boolean);
+// per-cell log excerpts (backend + adapter + the backend's transition/rotation log), attached to a FAIL
+const LOGS = [E.LP_BACKEND_LOG, E.LP_ADAPTER_LOG, E.LP_ADAPTER_LOG && path.join(path.dirname(E.LP_ADAPTER_LOG), "lp-transition.log")].filter(Boolean);
 const logSizes = () => LOGS.map((f) => { try { return fs.statSync(f).size; } catch { return 0; } });
 function logsSince(at) {
   return LOGS.map((f, i) => { try { const b = fs.readFileSync(f); return b.subarray(at[i]).toString().split("\n").filter((l) => l.trim() && !/SteamRefreshToken/.test(l)).slice(-25); } catch { return []; } }).flat();
@@ -218,6 +250,7 @@ async function reset(pl) {
   const st = await ctl.call("state");
   for (const [name, w, h] of [["VIRTUAL-1", 640, 360], ["VIRTUAL-2", 320, 180]])
     if (!st.outputs.some((o) => o.name === name)) await ctl.call("headless.add_output", { name, width: w, height: h, hz: 60 }).catch(() => {});
+  await stopTones();
   await post("/stop"); await sleep(300);
   await post("/mute", { user: true, value: false });
   while (((await http("GET", "/library/undo-depth")).json?.depth ?? 0) > 0) await post("/library/undo");
@@ -260,6 +293,11 @@ const STATES = {
       await post("/playlist/play", STATES.pendingGlobal.playlist());
       c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
       c.pending = true; } },
+  // like `playlist` with all four clips and 300 ms fades (timed, 600 s, its own rotation) — opt-in: the shuffle-order
+  // cells step through many switches here
+  playlist4: { optIn: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => ({ paths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300 }) }),
+    async enter(c) { c.playlist = true; c.fresh = true;
+      await post("/playlist/play", STATES.playlist4.playlist()); c.ok = await waitSettled(12000, K[0]); } },
 };
 
 // ---------------------------------------------------------------- controls
@@ -466,6 +504,15 @@ action("toggle-pause", () => [], { flipPause: true }); // the oracle checks play
 action("toggle-mute", () => [], { flipMute: true });
 action("volume-up", (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up from ${c.before.s.volume}`]));
 action("volume-down", (c) => (c.after.s.volume === Math.max(0, c.before.s.volume - 5) ? [] : [`volume ${c.after.s.volume} after volume-down from ${c.before.s.volume}`]));
+// the same keybinds while every live item has its OWN volume (30): the global moves ±5 — the keyboard twin of the
+// Settings page's global slider — and no source with an override moves (the oracle: override ?? global, R61)
+for (const a of ["volume-up", "volume-down"]) C[`cli:${a}:overridden`] = { states: ["single", "playlist", "effect", "pending", "paused"],
+  async pre(c) { for (const p of [c.shown, c.other].filter(Boolean)) await post("/library/volume", { path: p, intValue: 30 }); },
+  async run(c) { c.cli = await cli(a); await sleep(400); },
+  check(c) {
+    const want = a === "volume-up" ? Math.min(100, c.before.s.volume + 5) : Math.max(0, c.before.s.volume - 5);
+    return c.after.s.volume === want ? [] : [`volume ${c.after.s.volume} after ${a} from ${c.before.s.volume}`];
+  } };
 // user switches — paused: KeepPauseOnSwitch off (default) resumes and switches with the transition; on
 // (the `-keep` cells) stays paused and cuts to B's first frame
 const stayed = (c, a) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`${a} stayed on ${TITLE(c.before.cur.path)}`] : []);
@@ -812,6 +859,33 @@ C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
   }, check: (c) => [...(c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /settings during saves were not the settings: ${JSON.stringify(c.race.first)}, saved ${JSON.stringify(c.want)}`] : []),
     ...(c.after.s.playerEngine !== c.want.playerEngine || c.after.s.volume !== c.want.volume ? [`after the saves: engine ${c.after.s.playerEngine} volume ${c.after.s.volume}`] : [])] };
 
+// The same race for the other shared state files: the current playlist (playlist_state.json — the strip saves it on
+// every edit; the UI's init, the tick's transition config and /settings read it) and a library index (index.json —
+// every override / loudness write rewrites it; every switch, /settings and /library read it). A read mid-save must
+// still see the file: a null playlist gave the UI an empty strip + the DEFAULT playlist settings (its next save
+// wrote those over the real ones), an empty index made every override read "follows the global".
+C["race:playlistSaveLoad"] = { states: ["idle"], async run(c) {
+    const pl = { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null };
+    let bad = 0, n = 0, first = null;
+    await post("/playlist/state", pl); // the saves below write what's already there: any other read is a torn one
+    const writers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 25; i++) await post("/playlist/state", pl); });
+    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const g = (await http("GET", "/playlist/state")).json; n++;
+      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.advanceOnVideoEnd !== true) { bad++; first ??= g ? { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds } : "null"; } } });
+    await Promise.all([...writers, ...readers]);
+    c.race = { bad, n, first };
+  }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /playlist/state during saves were not the playlist: ${JSON.stringify(c.race.first)}`] : []) };
+C["race:indexSaveLoad"] = { states: ["idle"],
+  async pre() { await post("/library/volume", { path: K[0], intValue: 30 }); await post("/library/speed", { path: K[1], doubleValue: 0.8 }); },
+  async run(c) {
+    let bad = 0, n = 0, first = null;
+    const writers = Array.from({ length: 3 }, async (_, w) => { for (let i = 0; i < 40; i++) await post("/library/volume", { path: K[2], intValue: 40 + ((i + w) % 2) }); });
+    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 120; i++) { const lib = (await http("GET", "/library")).json || []; n++;
+      const a = lib.find((x) => x.videoPath === K[0]), b = lib.find((x) => x.videoPath === K[1]);
+      if (a?.volumeOverride !== 30 || b?.speedOverride !== 0.8) { bad++; first ??= { items: lib.length, k1: a?.volumeOverride ?? null, k2: b?.speedOverride ?? null }; } } });
+    await Promise.all([...writers, ...readers]);
+    c.race = { bad, n, first };
+  }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /library during index saves lost the overrides: ${JSON.stringify(c.race.first)} (k1 volume 30, k2 speed 0.8)`] : []) };
+
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
 // (pending) keeps its own (a global change never clobbers an override)
@@ -1014,6 +1088,512 @@ for (const t of ["shown", "other"]) C[`itemVolDragEsc:${t}`] = { states: ["singl
     if (ov !== 30) v.push(`${TITLE(c.target)} volumeOverride ${ov} after a drag to 30 closed with Escape`);
     if (c.open) v.push("the settings modal is still open 1.2 s after Escape");
     return v;
+  } };
+
+// ================================================================ round 3: the rest of the global Settings page, the
+// order a shuffle plays, three or more controls in a row
+
+// sample every source's state while a control runs (`every` ms apart; 0 = back to back)
+function sampler(c, every = 40) {
+  c.samples = []; let on = true;
+  const run = (async () => { while (on) { try { c.samples.push({ t: Date.now(), st: await ctl.call("state") }); } catch { /* retry */ } if (every) await sleep(every); } })();
+  return async () => { on = false; await run; };
+}
+// a switch to `want` was requested (not a cut, transitions are on) and it's on screen; at most `maxNow` user
+// switches (align:now) in the cell — aligned re-arms of an advance-on-end session don't count
+function expectShownN(c, want, maxNow) {
+  const v = [];
+  if (!c.noOutput && c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
+  const now = c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end");
+  const mine = now.filter((e) => e.path === want);
+  if (!mine.length) v.push(`no switch to ${TITLE(want)} was requested`);
+  else if (!c.noOutput && mine[mine.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
+  if (now.length > maxNow) v.push(`${now.length} switches requested (${now.map((e) => TITLE(e.path))}), expected ≤ ${maxNow}`);
+  return v;
+}
+const settingsTab = (drive) => `m.tab("Settings"); await m.sleep(600); ${drive}`;
+const gIntervalTo = (secs) => `const iv = m.row("Interval").querySelectorAll(".hms input"); m.setValue(iv[2], ${secs}, "s"); await m.sleep(300); m.setValue(iv[1], 0, "m");`;
+
+// --- Settings → Rotation (global): wait-for-end / advance-on-end. A timed playlist that follows the globals
+// (playlistGlobal: 600 s) takes them live; one with its own rotation (playlist: 600 s, no wait, no advance) never does
+// wait-for-video-end on + a 4 s interval: the interval's switch is armed for A's end (align:end), never made now
+C["gWaitEnd"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Wait for video to end after interval"), true, "wait"); await m.sleep(300); ${gIntervalTo(4)}`));
+    c.armed = await waitFor(async () => armedTo(await ctl.call("state")).length > 0, 9000, 100);
+    c.armedSt = await ctl.call("state");
+  }, check(c) {
+    const v = [];
+    if (c.after.s.globalWaitForVideoEnd !== true || c.after.s.globalIntervalSeconds !== 4) v.push(`globalWaitForVideoEnd ${c.after.s.globalWaitForVideoEnd} / globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected true / 4`);
+    const now = c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end");
+    if (now.length) v.push(`with wait-for-video-end the interval switched at once (to ${now.map((e) => TITLE(e.path))})`);
+    if (c.state === "playlistGlobal") {
+      const a = armedTo(c.armedSt), want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
+      if (!c.armed) v.push("following the globals: the 4 s interval passed but no switch was armed for A's end");
+      else if (a.length !== 1 || a[0] !== want) v.push(`armed ${JSON.stringify(a.map(TITLE))} after the interval, expected one to ${TITLE(want)}`);
+    } else if (c.armed) v.push(`a global wait-for-end + interval change armed ${JSON.stringify(armedTo(c.armedSt).map(TITLE))} on a playlist with its own rotation (600 s, no wait)`);
+    return [...v, ...keptShown(c)];
+  } };
+// advance-on-end on: following the globals → one aligned switch armed to the strip's next; its own rotation → nothing
+C["gAdvanceOn"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance");`)); await sleep(1200);
+  }, check(c) {
+    const v = c.after.s.globalAdvanceOnVideoEnd === true ? [] : ["globalAdvanceOnVideoEnd not saved on"];
+    const a = armedTo(c.after.st), want = succ(c.after.ps?.videoPaths, c.after.cur?.path);
+    if (c.state === "playlistGlobal" && (a.length !== 1 || a[0] !== want)) v.push(`following the globals: armed ${JSON.stringify(a.map(TITLE))} after advance-on-end on, expected one to ${TITLE(want)}`);
+    if (c.state === "playlist" && a.length) v.push(`a global advance-on-end change armed ${JSON.stringify(a.map(TITLE))} on a playlist with its own rotation`);
+    return [...v, ...noSwitchNow(c), ...keptShown(c)];
+  } };
+// the playlist modal's "Override global rotation settings" off while armed (pending: its own advance-on-end) → it
+// follows the globals (advance-on-end off): nothing stays armed
+C["plOverrideOff"] = { states: ["pending"], rearms: true, async run() {
+    await ui(`${plOpen} m.setCheck(m.plCheck("Override global rotation settings"), false, "override"); ${plClose}`); await sleep(1200);
+  }, check(c) {
+    const v = c.after.ps?.settings?.overrideGlobalSettings === false ? [] : [`overrideGlobalSettings ${c.after.ps?.settings?.overrideGlobalSettings}, expected false`];
+    return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c, null)];
+  } };
+// following the globals (advance-on-end on, armed) → override on (its own rotation: timed 600 s, advance off):
+// disarmed → its own "Switch when video ends" on: armed again to the strip's next, with ITS transition (fade 2500 ms)
+C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, async run(c) {
+    await ui(`${plOpen} m.setCheck(m.plCheck("Override global rotation settings"), true, "override"); await m.sleep(1200);`);
+    c.midArmed = armedTo(await ctl.call("state"));
+    await ui(`m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); ${plClose}`); await sleep(1200);
+  }, check(c) {
+    const v = [];
+    if (c.midArmed.length) v.push(`override on (its own rotation: no advance-on-end): still armed ${JSON.stringify(c.midArmed.map(TITLE))}`);
+    const s = c.after.ps?.settings;
+    if (s?.overrideGlobalSettings !== true || s?.advanceOnVideoEnd !== true) v.push(`playlist override ${s?.overrideGlobalSettings} advance ${s?.advanceOnVideoEnd}, expected true / true`);
+    const req = armedReq(c);
+    if (req && !(req.effect_id === "fade" && req.duration_ms === 2500)) v.push(`the armed switch runs ${fmtSw(req)}, the playlist's own transition is fade 2500 ms`);
+    return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
+  } };
+// advance-on-end off → on → next, following the globals: disarmed, re-armed to the strip's next, next plays it and arms the one after
+C["seq3:gAdvanceOff+On+next"] = { states: ["pendingGlobal"], rearms: true, switch: true, async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), false, "advance");`)); await sleep(1200);
+    c.offArmed = armedTo(await ctl.call("state"));
+    await ui(`m.setCheck(m.input("Switch when video ends"), true, "advance");`); await sleep(1200);
+    c.onArmed = armedTo(await ctl.call("state"));
+    c.want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
+    await cliStep(c, "next-wallpaper");
+  }, check(c) {
+    const v = [];
+    if (c.offArmed.length) v.push(`advance-on-end off (the playlist follows the globals): still armed ${JSON.stringify(c.offArmed.map(TITLE))}`);
+    if (c.onArmed.length !== 1 || c.onArmed[0] !== c.want) v.push(`advance-on-end back on: armed ${JSON.stringify(c.onArmed.map(TITLE))}, expected one to ${TITLE(c.want)}`);
+    return [...v, ...expectShownN(c, c.want, 1), ...armedCheck(c)];
+  } };
+
+// --- Settings → Normalize audio (EBU R128): every live source of a measured item runs ITS OWN loudnorm `af` at the
+// target (the oracle checks it in every cell; off → none). The clips are measured before the UI loads.
+const NORM_STATES = ["single", "playlist", "effect", "pending", "paused", "pausedEffect", "muted", "noOutput"];
+const normOn = async (target) => { const s = await getSettings(); s.normalizeAudio = true; if (target !== undefined) s.normalizeTargetLufs = target; await post("/settings", s); };
+const normMeasured = (c) => (c.measured ? [] : ["the clips were never measured (normalization's background backfill, 30 s)"]);
+C["set:normalizeOn"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); },
+  check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === true ? [] : ["normalizeAudio not saved on"])] };
+C["set:normalizeOff"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); await normOn(); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), false, "Normalize audio");`)); await sleep(900); },
+  check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === false ? [] : ["normalizeAudio not saved off"])] };
+// the target's preset (−14 → −19): every live measured source re-targets
+C["set:normalizeTarget"] = { states: ["single", "effect", "pending", "paused"], async pre(c) { c.measured = await measureAll(); await normOn(-14); },
+  async run() { await ui(settingsTab(`m.click(m.row("Target loudness")?.querySelector(".combo-caret"), "presets"); await m.sleep(300); m.click(m.byText(".sel-pop .sel-opt", "Quiet (−19)"), "Quiet");`)); await sleep(900); },
+  check: (c) => [...normMeasured(c), ...(c.after.s.normalizeTargetLufs === -19 ? [] : [`normalizeTargetLufs ${c.after.s.normalizeTargetLufs}, expected -19`])] };
+// switched on with nothing measured yet: the background backfill measures every clip — and what plays takes its
+// loudnorm once it's measured (not only at its next switch)
+C["set:normalizeFresh"] = { states: ["single", "playlist", "effect"], async pre() { unmeasureAll(); },
+  async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`));
+    c.measured = await waitFor(() => K.every((p) => measured(readIndex(), p)), 30000, 200);
+    await sleep(1500);
+  }, check: (c) => normMeasured(c) };
+// on, then next: B comes up normalized (its own measurement)
+C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async pre(c) { c.measured = await measureAll(); },
+  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); await cliStep(c, "next-wallpaper"); },
+  check: (c) => [...normMeasured(c), ...stayed(c, "next-wallpaper")] };
+// normalization on; Mute audio on → next (B starts with no audio: no filter) → Mute audio off: B's audio comes back
+// normalized — not only at its next switch
+C["seq3:normalize+noAudio+next+noAudioOff"] = { states: ["single", "playlist", "effect"], switch: true, async pre(c) { c.measured = await measureAll(); await normOn(); },
+  async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Mute audio"), true, "Mute audio");`)); await sleep(900);
+    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    await ui(`m.setCheck(m.input("Mute audio"), false, "Mute audio");`); await sleep(900);
+  }, check: (c) => [...normMeasured(c), ...stayed(c, "next-wallpaper"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
+
+// --- Settings → Appearance (theme / thumbnail aspect / card size / gif autoplay): UI-only — it must not touch
+// playback. Every source sampled back to back while the change saves (/settings posts the whole object): no
+// switch, no re-created source, no source property moved — not even for a moment — and an armed switch stays the
+// same one. (The other live item has its own volume/speed, so a re-applied global would show on it.)
+const SRC_PROPS = (n) => ({ path: n.path, "gain.user": +(n.gain?.user ?? 0).toFixed(2), "gain.mute": Math.round(n.gain?.mute ?? 0), speed: n.speed,
+  no_audio: n.no_audio, af: n.af ?? "", hwdec: n.hwdec, fps_cap: n.fps_cap, cache: n.cache, demuxer_max_mib: n.demuxer_max_mib, demuxer_back_mib: n.demuxer_back_mib });
+const armedCorrs = (st) => (st.transitions || []).filter((t) => t.phase === "waiting_start").map((t) => t.corr).join(",");
+function untouched(c) {
+  const v = [], seen = new Set(), b0 = c.base ?? c.before.st; // the baseline: right before the control (a state's own mute ramp has landed)
+  const base = Object.fromEntries(sourcesOf(b0).map(([id, n]) => [id, SRC_PROPS(n)]));
+  const fit = (st) => JSON.stringify(Object.entries(st.graph).filter(([id]) => id.startsWith("lay:") && id.endsWith(":main")).map(([id, n]) => [id, n.fit]));
+  const once = (k, msg) => { if (!seen.has(k)) { seen.add(k); v.push(msg); } };
+  for (const { t, st } of c.samples) {
+    for (const [id, n] of sourcesOf(st)) {
+      const b = base[id];
+      if (!b) { once(id, `a new source ${id}(${TITLE(n.path)}) appeared at +${t - c.t0} ms (a switch / relaunch)`); continue; }
+      const now = SRC_PROPS(n);
+      for (const k of Object.keys(b)) if (JSON.stringify(b[k]) !== JSON.stringify(now[k])) once(id + k, `${id}(${TITLE(n.path)}) ${k} ${JSON.stringify(b[k])} → ${JSON.stringify(now[k])} at +${t - c.t0} ms`);
+    }
+    if (fit(st) !== fit(b0)) once("fit", `layer fit ${fit(b0)} → ${fit(st)} at +${t - c.t0} ms`);
+    if (!!st.graph.player?.paused !== !!b0.graph.player?.paused) once("paused", `player.paused → ${!!st.graph.player?.paused} at +${t - c.t0} ms`);
+  }
+  if (armedCorrs(b0) !== armedCorrs(c.after.st)) v.push(`the armed switch ${armedCorrs(b0) || "–"} → ${armedCorrs(c.after.st) || "–"} (re-armed)`);
+  if (!c.samples.length) v.push("no state samples");
+  return v;
+}
+const APPEAR = {
+  "appear:theme": { states: ["idle", "single", "effect", "pending", "paused", "pausedEffect", "muted"], drive: (c) => `await m.select("Theme", ${JSON.stringify(c.theme)});`, saved: (c) => c.after.s.theme === c.theme },
+  "appear:aspect": { drive: () => `await m.select("Thumbnail aspect", "16:9");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
+  "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
+  "appear:gifs": { drive: () => `m.setCheck(m.input("Autoplay GIF thumbnails"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
+  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.wallpaperBgAllTabs === true },
+  // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under lp-player —
+  // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
+  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartIntervalSeconds === 2 },
+  "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
+    drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Restart only at playlist changeover"), true, "changeover");`,
+    saved: (c) => c.after.s.restartIntervalSeconds === 2 && c.after.s.restartOnSwitchOnly === true },
+};
+for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effect", "pending"], noSwitch: true,
+  async pre(c) { if (c.other) { await post("/library/volume", { path: c.other, intValue: 30 }); await post("/library/speed", { path: c.other, doubleValue: 0.8 }); } },
+  async run(c) {
+    if (k === "appear:theme") { const th = (await http("GET", "/themes")).json || []; c.theme = th.map((t) => t.name).find((n) => n !== (c.before.s.theme || "Catppuccin Mocha")); }
+    await ui(`m.tab("Settings"); await m.sleep(500);`);
+    c.base = await ctl.call("state");
+    const stop = sampler(c, 0); c.t0 = Date.now();
+    await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
+  }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
+
+// --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
+// $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
+// parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.
+const PULSE = E.LP_PULSE === "1";
+let TONE = null;
+const tones = new Set();
+function toneWav() { // 12 s of a 440 Hz sine at −12 dBFS, mono 48 kHz (bounded; written once)
+  if (TONE) return TONE;
+  const sr = 48000, n = sr * 12, b = Buffer.alloc(44 + n * 2);
+  b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVE", 8); b.write("fmt ", 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(8200 * Math.sin(2 * Math.PI * 440 * i / sr)), 44 + i * 2);
+  TONE = path.join(OUT, "tone.wav"); fs.writeFileSync(TONE, b); return TONE;
+}
+// a synthetic stream into the private null sink for `ms` (≤ 12 s); `name` = its application.name
+function tone(ms, name) {
+  const p = cp.spawn("paplay", ["--device=mx_null", ...(name ? [`--property=application.name=${name}`] : []), toneWav()], { stdio: "ignore" });
+  tones.add(p);
+  const t = setTimeout(() => p.kill("SIGTERM"), ms);
+  p.on("exit", () => { clearTimeout(t); tones.delete(p); });
+  p.on("error", () => { clearTimeout(t); tones.delete(p); });
+  return p;
+}
+async function stopTones() { for (const p of tones) p.kill("SIGTERM"); await waitFor(() => tones.size === 0, 3000, 50); }
+const muteOf = (st) => sourcesOf(st).map(([id, n]) => `${id}(${TITLE(n.path)}) ${Math.round(n.gain?.mute ?? 0)}`);
+const allMuted = (st, want) => { const s = sourcesOf(st); return s.length > 0 && s.every(([, n]) => near(n.gain?.mute ?? 0, want ? -96 : 0, 0.5)); };
+const muteNow = async (want) => allMuted(await ctl.call("state"), want);
+// the backend's stream watch is up: its `pactl subscribe` is a client of the private server (besides this check's own pactl)
+async function amReady() {
+  return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
+    res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
+}
+const amEnable = settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400);`);
+const amSkip = (c) => (PULSE ? false : (c.skip = "no private audio server (pulseaudio) for this stack"));
+const amReadyCheck = (c) => (c.ready ? [] : ["auto-mute's stream watch (pactl subscribe) never connected to the stack's audio server"]);
+// a stream plays: every live source mutes (ramped, while paused too); it ends: after the unmute delay (2 s) they unmute
+// — unless the user muted (then they stay muted)
+C["autoMute:tone"] = { states: ["single", "playlist", "effect", "pending", "paused", "pausedEffect", "muted", "noOutput"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(amEnable); c.ready = await amReady();
+    const t0 = Date.now(); tone(3000);
+    c.mutedMs = (await waitFor(() => muteNow(true), 3000, 40)) ? Date.now() - t0 : null;
+    c.during = await ctl.call("state");
+    await waitFor(() => tones.size === 0, 5000, 50); const t1 = Date.now();
+    if (c.exp.muted) { await sleep(3000); return; } // user-muted: it must STAY muted past the unmute delay (the oracle)
+    c.unmutedMs = (await waitFor(() => muteNow(false), 5000, 50)) ? Date.now() - t1 : null;
+  }, check(c) {
+    const v = [...amReadyCheck(c)];
+    if (c.mutedMs == null) v.push(`a stream played 3 s but the wallpaper wasn't auto-muted: ${JSON.stringify(muteOf(c.during))}`);
+    if (!c.exp.muted && c.unmutedMs == null) v.push("the stream ended but the wallpaper stayed muted > 5 s (unmute delay 2 s)");
+    if (c.after.s.autoMute !== true) v.push("autoMute not saved on");
+    return v;
+  } };
+// auto-muted, then next: B comes up muted while the stream still plays; the stream ends → both unmute
+C["autoMute:tone+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async run(c) {
+    if (amSkip(c)) return;
+    await ui(amEnable); c.ready = await amReady();
+    tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
+    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    c.during = await ctl.call("state"); c.duringTone = tones.size > 0;
+    await stopTones();
+    c.unmuted = await waitFor(() => muteNow(false), 5000, 50);
+  }, check(c) {
+    const v = [...amReadyCheck(c), ...stayed(c, "next-wallpaper")];
+    if (!c.muted1) v.push("not auto-muted before the next");
+    if (!c.duringTone) v.push("the 10 s stream ended before the switch settled");
+    else if (!allMuted(c.during, true)) v.push(`after next, the stream still playing: ${JSON.stringify(muteOf(c.during))} — not all muted`);
+    if (!c.unmuted) v.push("the stream ended but the wallpaper stayed muted > 5 s");
+    return v;
+  } };
+// toggle-mute ×3 around an auto-mute: auto-muted → the keybind unmutes now (the stream still plays) → mutes (user)
+// → the stream ends and the unmute delay passes: STILL muted (the user's) → the keybind unmutes
+C["seq:autoMute+toggleMute×3"] = { states: ["single", "playlist"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(amEnable); c.ready = await amReady();
+    tone(12000); c.s = [];
+    c.s.push(["auto-muted by the stream", await waitFor(() => muteNow(true), 3000, 40)]);
+    await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute while auto-muted: unmuted now", await waitFor(() => muteNow(false), 2000, 40)]);
+    await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute again: muted (the user's)", (await waitFor(() => muteNow(true), 2000, 40)) && fs.existsSync(E.LP_USER_MUTE)]);
+    c.s.push(["the stream still played through all that", tones.size > 0]);
+    await stopTones(); await sleep(3000);
+    c.s.push(["the stream ended + the unmute delay: still muted (user)", await muteNow(true)]);
+    await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute: unmuted", await waitFor(() => muteNow(false), 2000, 40)]);
+  }, exp: { muted: false }, check: (c) => [...amReadyCheck(c), ...c.s.filter(([, ok]) => !ok).map(([what]) => `not: ${what}`)] };
+// auto-muted, then auto-mute switched off in Settings: unmuted at once, the stream still playing
+C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(amEnable); c.ready = await amReady();
+    tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
+    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when system audio plays"), false, "auto-mute");`);
+    c.unmutedMs = (await waitFor(() => muteNow(false), 3000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
+  }, check(c) {
+    const v = [...amReadyCheck(c)];
+    if (!c.muted1) v.push("not auto-muted by the stream");
+    if (c.unmutedMs == null) v.push("auto-mute switched off while muted: still muted 3 s later");
+    else if (!c.duringTone) v.push("(the stream had ended — not proven while it plays)");
+    if (c.after.s.autoMute !== false) v.push("autoMute not saved off");
+    return v;
+  } };
+// streams that must never auto-mute: mpv's own (application.name mpv — the filter), one below the level threshold
+// (Min level −6 dB vs a −12 dBFS stream); then the threshold back to −70 while it plays → muted (the change is live)
+C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(amEnable); c.ready = await amReady();
+    tone(2500, "mpv"); const stop = sampler(c, 40); await waitFor(() => tones.size === 0, 5000, 50); await stop();
+  }, check(c) { const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => (n.gain?.mute ?? 0) < -1));
+    return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
+C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Min level (dB)"), -6, "min level"); await m.sleep(400);`));
+    await sleep(500); c.ready = await amReady();
+    tone(9000); const stop = sampler(c, 40); await sleep(2500); await stop();
+    const t = Date.now(); await ui(`m.setValue(m.input("Min level (dB)"), -70, "min level");`);
+    c.mutedMs = (await waitFor(() => muteNow(true), 4000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
+    await stopTones(); await waitFor(() => muteNow(false), 5000, 50);
+  }, check(c) {
+    const v = [...amReadyCheck(c)];
+    const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => (n.gain?.mute ?? 0) < -1));
+    if (m.length) v.push(`a −12 dBFS stream under a −6 dB threshold auto-muted (${m.length}/${c.samples.length} samples)`);
+    if (c.mutedMs == null) v.push(`the threshold back to −70 while the stream plays: not muted within 4 s${c.duringTone ? "" : " (the stream had ended)"}`);
+    if (c.after.s.autoMuteThresholdDb !== -70) v.push(`autoMuteThresholdDb ${c.after.s.autoMuteThresholdDb}`);
+    return v;
+  } };
+// Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
+C["autoMute:delay"] = { states: ["single"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Mute after (ms)"), 1500, "delay"); await m.sleep(400);`));
+    await sleep(500); c.ready = await amReady();
+    const t0 = Date.now(); tone(6000); await sleep(800); c.early = await muteNow(true);
+    c.mutedMs = (await waitFor(() => muteNow(true), 3500, 40)) ? Date.now() - t0 : null;
+    await stopTones(); await waitFor(() => muteNow(false), 5000, 50);
+  }, check(c) {
+    const v = [...amReadyCheck(c)];
+    if (c.early) v.push("muted 0.8 s into the stream with a 1500 ms mute delay");
+    if (c.mutedMs == null) v.push("not muted 4.3 s into the stream (mute delay 1500 ms)");
+    if (c.after.s.autoMuteDelayMs !== 1500) v.push(`autoMuteDelayMs ${c.after.s.autoMuteDelayMs}`);
+    return v;
+  } };
+// Unmute after 4000 ms (default 2000): still muted 3 s after the stream ended, unmuted by 8 s
+C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
+    if (amSkip(c)) return;
+    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Unmute after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
+    await sleep(500); c.ready = await amReady();
+    tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
+    await stopTones(); const t1 = Date.now(); // the stream ends here
+    await sleep(3000); c.at3 = await muteNow(true);
+    c.unmutedMs = (await waitFor(() => muteNow(false), 5000, 50)) ? Date.now() - t1 : null;
+  }, check(c) {
+    const v = [...amReadyCheck(c)];
+    if (!c.muted1) v.push("not auto-muted by the stream");
+    if (!c.at3) v.push("unmuted < 3 s after the stream ended with a 4000 ms unmute delay");
+    if (c.unmutedMs == null) v.push("still muted 8 s after the stream ended (unmute delay 4000 ms)");
+    if (c.after.s.autoUnmuteDelayMs !== 4000) v.push(`autoUnmuteDelayMs ${c.after.s.autoUnmuteDelayMs}`);
+    return v;
+  } };
+
+// --- the order a shuffle plays. Contract (session.md § Timed Playlist, PlayerHelper.AdvanceToNext): each CYCLE plays
+// every item of the playlist once, in a fresh random order; a new cycle never starts with the item the last one ended
+// on (no immediate repeat); turning Shuffle on mid-session keeps what plays and plays the REST once (in random order)
+// before the first full cycle; previous walks back through what actually played. Sequential = the strip's order.
+const plSeg = (label) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(label)}), ${JSON.stringify(label)}); ${plClose}`;
+// `n` next keybinds, each settled: the item each one put on screen
+async function nexts(c, n, a = "next-wallpaper") {
+  const out = [];
+  for (let i = 0; i < n; i++) { await cliStep(c, a); await sleep(300); await waitSettled(8000); out.push((await http("GET", "/current")).json?.path ?? null); }
+  return out;
+}
+// `plays` split at `cuts` (index of each cycle's first play) → every cycle a permutation of `items` (the last may be
+// partial: no item twice), no item twice in a row
+function shuffleOrder(plays, items, first = 0) {
+  const v = [], T = (l) => JSON.stringify(l.map(TITLE));
+  for (let i = 1; i < plays.length; i++) if (plays[i] === plays[i - 1]) v.push(`${TITLE(plays[i])} played twice in a row (plays ${T(plays)})`);
+  for (let at = first; at < plays.length; at += items.length) {
+    const cyc = plays.slice(at, at + items.length);
+    if (new Set(cyc).size !== cyc.length || cyc.some((p) => !items.includes(p))) v.push(`cycle ${T(cyc)} isn't one pass over ${T(items)} (plays ${T(plays)})`);
+  }
+  return [...new Set(v)];
+}
+const notStripOrder = (plays, strip, first) => {
+  const cyc = []; for (let at = first; at + strip.length <= plays.length; at += strip.length) cyc.push(plays.slice(at, at + strip.length));
+  return cyc.length >= 3 && cyc.every((x) => JSON.stringify(x) === JSON.stringify(strip)) ? [`shuffle on, but ${cyc.length} cycles all played the strip's order`] : [];
+};
+// Shuffle chosen in the playlist modal, then Play, then 11 nexts: 12 plays = three full cycles over the 4 clips
+C["shuffle:play+next×11"] = { states: ["idle"], switch: true,
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300 }), name: null }); },
+  async run(c) {
+    await ui(plSeg("Shuffle")); await sleep(500);
+    await ui(`m.click(document.querySelector(".play-btn"), "Play");`); await sleep(400); await waitSettled(10000);
+    c.plays = [(await http("GET", "/current")).json?.path ?? null, ...(await nexts(c, 11))];
+  }, check(c) {
+    const strip = [K[0], K[1], K[2], K[3]];
+    const v = [...shuffleOrder(c.plays, strip), ...notStripOrder(c.plays, strip, 0)];
+    if (c.after.ps?.settings?.order !== 1) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 1 (shuffle)`);
+    if (JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE)) !== JSON.stringify(strip.map(TITLE))) v.push(`the strip ${JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE))} — shuffling reordered it`);
+    return v;
+  } };
+// the same order contract for the rotation itself: Shuffle + a 2 s interval, Play, 11 interval switches
+C["shuffle:rotation"] = { states: ["idle"], switch: true,
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, intervalSeconds: 2 }), name: null }); },
+  async run(c) {
+    await ui(plSeg("Shuffle")); await sleep(500);
+    const t0 = Date.now();
+    await ui(`m.click(document.querySelector(".play-btn"), "Play");`);
+    const sched = () => events.filter((e) => e._t >= t0 && e.event === "transition.scheduled");
+    c.done = await waitFor(() => sched().length >= 12, 45000, 100);
+    c.plays = sched().slice(0, 12).map((e) => e.path);
+    await post("/stop"); // the 2 s rotation would go on switching through the snapshot
+  }, exp: { paused: false }, check(c) {
+    const strip = [K[0], K[1], K[2], K[3]];
+    const v = c.done ? [] : [`only ${c.plays.length} switches in 45 s with a 2 s interval`];
+    return [...v, ...shuffleOrder(c.plays, strip), ...notStripOrder(c.plays, strip, 0)];
+  } };
+// Shuffle turned on mid-session (playing k1 of k1..k4): the other three once each, then full cycles
+C["shuffle:onMidSession"] = { states: ["playlist4"], switch: true, async run(c) {
+    await ui(plSeg("Shuffle")); await sleep(500);
+    c.plays = [c.before.cur?.path, ...(await nexts(c, 11))];
+  }, check(c) {
+    const strip = c.before.ps?.videoPaths || [];
+    const v = [...shuffleOrder(c.plays, strip, 4)];
+    const rest = c.plays.slice(1, strip.length);
+    if (new Set(rest).size !== strip.length - 1 || rest.includes(c.plays[0])) v.push(`after Shuffle on, the rest of the cycle ${JSON.stringify(rest.map(TITLE))} isn't the other ${strip.length - 1} items once each`);
+    return [...v, ...psKept(c)];
+  } };
+// Shuffle on, 2 nexts, Sequential, 4 nexts: from where it is, the strip's order (wrapping)
+C["shuffle:offMidSession"] = { states: ["playlist4"], switch: true, async run(c) {
+    await ui(plSeg("Shuffle")); await sleep(500);
+    c.shuffled = await nexts(c, 2);
+    await ui(plSeg("Sequential")); await sleep(500);
+    c.plays = await nexts(c, 4);
+  }, check(c) {
+    const strip = c.before.ps?.videoPaths || [], v = [];
+    let prev = c.shuffled[c.shuffled.length - 1];
+    c.plays.forEach((p, i) => { const want = succ(strip, prev); if (p !== want) v.push(`Sequential again, next #${i + 1} from ${TITLE(prev)}: ${TITLE(p)}, expected ${TITLE(want)} (the strip's order)`); prev = p; });
+    if (c.after.ps?.settings?.order !== 0) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 0`);
+    return v;
+  } };
+// shuffled: previous walks back through what played (not the strip's previous), next forward again
+C["shuffle:prev+next"] = { states: ["playlist4"], switch: true, async run(c) {
+    await ui(plSeg("Shuffle")); await sleep(500);
+    c.fwd = [c.before.cur?.path, ...(await nexts(c, 2))];
+    c.back = await nexts(c, 2, "previous-wallpaper");
+    c.again = await nexts(c, 1);
+  }, check(c) {
+    const T = (l) => JSON.stringify(l.map(TITLE)), v = [];
+    if (T(c.back) !== T([c.fwd[1], c.fwd[0]])) v.push(`played ${T(c.fwd)}, then previous ×2 gave ${T(c.back)}, expected ${T([c.fwd[1], c.fwd[0]])}`);
+    if (c.again[0] !== c.fwd[1]) v.push(`then next gave ${TITLE(c.again[0])}, expected ${TITLE(c.fwd[1])} (forward through what played)`);
+    return v;
+  } };
+
+// --- three or more controls in a row (each in the states where all of them share state)
+// drag → next → pause → resume → next: both nexts follow the dragged order, the pause in between holds and ends
+C["seq5:stripDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
+    const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
+    await stripDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
+    c.t1 = succ(c.want, c.before.cur?.path); c.t2 = succ(c.want, c.t1);
+    c.first = (await nexts(c, 1))[0];
+    await cliStep(c, "toggle-pause"); await sleep(600); c.pausedMid = !!(await ctl.call("state")).graph.player?.paused;
+    await cliStep(c, "toggle-pause"); await sleep(300);
+    await cliStep(c, "next-wallpaper");
+  }, exp: { paused: false }, check(c) {
+    const v = [...expectShownN(c, c.t2, 2)];
+    if (c.first !== c.t1) v.push(`the first next after the drag played ${TITLE(c.first)}, expected ${TITLE(c.t1)} (the new order)`);
+    if (!c.pausedMid) v.push("toggle-pause after the next didn't pause");
+    const got = (c.after.ps?.videoPaths || []).map(TITLE), w = c.want.map(TITLE);
+    if (JSON.stringify(got) !== JSON.stringify(w)) v.push(`playlist ${JSON.stringify(got)}, expected the dragged order ${JSON.stringify(w)}`);
+    return v;
+  } };
+// mute → next → unmute: B came up muted, and everything is unmuted at the end
+C["seq3:mute+next+unmute"] = { states: ["single", ...PL_STATES], switch: true, async run(c) {
+    await cliStep(c, "toggle-mute"); await sleep(300);
+    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    c.midSt = await ctl.call("state");
+    await cliStep(c, "toggle-mute");
+  }, exp: { muted: false }, check: (c) => [...stayed(c, "next-wallpaper"), ...(allMuted(c.midSt, true) ? [] : [`muted, then next: ${JSON.stringify(muteOf(c.midSt))} — not all muted`])] };
+// trash the other live item → Undo → next: the undone item is back in its place and the next follows the restored strip
+C["seq3:trash+undo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    c.target = c.other; c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(900); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
+    await sleep(900);
+    c.want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
+    await cliStep(c, "next-wallpaper");
+  }, check(c) {
+    const at = (c.after.ps?.videoPaths || []).indexOf(c.target);
+    return [...(at === c.idx ? [] : [`${TITLE(c.target)} back at playlist index ${at}, was ${c.idx}`]), ...expectShownN(c, c.want, 1), ...armedCheck(c)];
+  } };
+// pause → drag the playing item's volume → resume: the drag reaches its source while paused and stays after the resume
+C["seq3:pause+itemVolDrag+resume"] = { states: ["single", "playlist", "effect"], async run(c) {
+    c.target = c.shown;
+    await cliStep(c, "toggle-pause"); await sleep(300);
+    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(0), 80, 25, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
+    await sleep(900); c.whilePaused = await ctl.call("state");
+    await cliStep(c, "toggle-pause");
+  }, check(c) {
+    const v = [];
+    const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
+    if (ov !== 25) v.push(`${TITLE(c.target)} volumeOverride ${ov}, expected 25`);
+    if (!c.whilePaused.graph.player?.paused) v.push("not paused during the drag");
+    for (const [id, n] of srcFor({ st: c.whilePaused }, c.target)) if (!near(n.gain?.user ?? 0, VolumeDb(25))) v.push(`while paused the drag didn't reach ${id}(${TITLE(c.target)}): ${n.gain?.user}`);
+    return v;
+  } };
+// global speed → next → previous: back on the first item, at the new global speed (the other one keeps its own)
+C["seq3:set:speed+next+prev"] = { states: ["playlist", "effect"], switch: true,
+  async pre(c) { if (c.other) await post("/library/speed", { path: c.other, doubleValue: 0.8 }); },
+  async run(c) {
+    await ui(settingsTab(`m.setValue(m.input("Speed"), 1.5, "Speed");`)); await sleep(900);
+    await nexts(c, 1); await cliStep(c, "previous-wallpaper");
+  }, check: (c) => [...(c.after.cur?.path === c.before.cur?.path ? [] : [`speed → next → previous from ${TITLE(c.before.cur?.path)} landed on ${TITLE(c.after.cur?.path)}`]),
+    ...(c.after.s.speed === 1.5 ? [] : [`settings.speed ${c.after.s.speed}, expected 1.5`])] };
+// next → pause → next: the second next (a user switch from a pause) resumes and switches with its transition
+C["seq3:next+pause+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    const s = c.before.ps?.videoPaths || []; c.want = succ(s, succ(s, c.before.cur?.path));
+    await nexts(c, 1);
+    await cliStep(c, "toggle-pause"); await sleep(500); c.pausedMid = !!(await ctl.call("state")).graph.player?.paused;
+    await cliStep(c, "next-wallpaper");
+  }, exp: { paused: false }, check: (c) => [...expectShownN(c, c.want, 2), ...(c.pausedMid ? [] : ["toggle-pause between the nexts didn't pause"]), ...armedCheck(c)] };
+// pause → trash what plays → Undo: the session plays on from the next item (a new session: the pause ends), the
+// trashed item is back in its place in the strip, and what plays now stays
+C["seq3:pause+trash:shown+undo"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    await cliStep(c, "toggle-pause"); await sleep(300);
+    c.target = c.shown; c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
+    c.want = succ(c.before.ps?.videoPaths, c.target);
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(1200); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
+    await sleep(900);
+  }, exp: { paused: false }, check(c) {
+    const at = (c.after.ps?.videoPaths || []).indexOf(c.target), v = [];
+    if (at !== c.idx) v.push(`${TITLE(c.target)} back at playlist index ${at}, was ${c.idx}`);
+    if (!(c.after.lib || []).some((i) => i.videoPath === c.target)) v.push(`${TITLE(c.target)} not back in the library`);
+    return [...v, ...expectShownN(c, c.want, 1), ...armedCheck(c)];
   } };
 
 function expectShown(c, want, { effect }) {

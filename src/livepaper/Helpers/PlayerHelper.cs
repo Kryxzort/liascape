@@ -3130,9 +3130,11 @@ public static class PlayerHelper
     }
 
 
-    // Adjust volume by `delta` (clamped 0-100). Updates the persisted setting
-    // so subsequent launches and the GUI slider reflect the change, and also
-    // pushes to the running mpv via IPC for an immediate effect.
+    // Adjust the GLOBAL volume by `delta` (clamped 0-100) — the keybind twin of the Settings page's global
+    // slider. Persisted (subsequent launches and the GUI slider reflect it) and pushed live as the playing
+    // item's EFFECTIVE volume (override ?? global, like /settings): an item with its own volume keeps it.
+    // It pushed the new global even then — the playing wallpaper jumped off its override until the next
+    // settings save (a theme change) snapped it back (UI matrix `cli:volume-up:overridden`).
     public static void AdjustVolume(int delta)
     {
         var settings = SettingsService.Load();
@@ -3140,7 +3142,8 @@ public static class PlayerHelper
         if (newVolume == settings.Volume) return;
         settings.Volume = newVolume;
         SettingsService.Save(settings);
-        SetVolume(newVolume);
+        var cur = QueryCurrentPath();
+        SetVolume((cur != null ? ReadVolumeOverride(cur) : null) ?? newVolume);
     }
 
     // Returns the next wallpaper path, extending history if needed.
@@ -3782,13 +3785,25 @@ public static class PlayerHelper
     // switch). null/scene/no-socket → no-op. Unmeasured → clears the filter + kicks a background measure.
     public static void ApplyNormalizationLive(string? path)
     {
-        // lp-player: loudnorm is per item → that item's source(s)
-        if (PlayerEngine.IsLpPlayer)
-        {
-            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.QueueSet("af:" + LpPlayerMedia.FullPath(path), () => LpPlayerMedia.SetForPath(path, "af", af)); }
-            return;
-        }
+        // lp-player: EVERY live source, each by its own item — the playing one, an effect's outgoing A, a
+        // pending B, any source while no output shows one (`path` = cur:* reached only the first)
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
+    }
+
+    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync): with normalization
+    // on, the item may be playing right now — unmeasured when it started (or when normalization was switched
+    // on), so it ran without the filter and nothing applied it once measured (until its next switch).
+    public static void OnLoudnessMeasured(string path)
+    {
+        try
+        {
+            if (!SettingsService.Load().NormalizeAudio || IsScenePath(path)) return;
+            if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
+            var cur = QueryCurrentPath();
+            if (cur != null && Path.GetFullPath(cur) == Path.GetFullPath(path)) ApplyNormalizationLive(cur);
+        }
+        catch { }
     }
 }
