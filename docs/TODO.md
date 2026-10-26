@@ -355,6 +355,16 @@ Two bug classes kept recurring; fix the class, not the instance:
       override) → each source's desired `gain.user`/`speed`/`af`/…, diffed against what it runs; every path
       calls it. Matrix cells to keep green: `set:*`, `appear:*`, `cli:volume-*`, `globalDrag*`, `itemVol*`.
 
+## Next up (handoff 2026-10-26, weekly limit)
+- [ ] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing
+      right AFTER the item is trashed: `SetMeta` creates the entry if missing → a ghost index entry for a trashed item
+      (a later download with that key inherits it), and Undo restores the pre-drag volume. Add a matrix cell (RED
+      first), then drop a save for an item that's gone (or write it into its trash record).
+- [ ] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
+- [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
+- [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.
+- [ ] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only an untracked app/shell/node_modules).
+
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
