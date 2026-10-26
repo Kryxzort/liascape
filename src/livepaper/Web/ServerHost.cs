@@ -475,12 +475,14 @@ public static class ServerHost
         // ---- playlist ---------------------------------------------------------------------
         app.MapGet("/playlist/state", () => Results.Json(PlaylistService.LoadCurrentState()));
         // PATCH semantics like /settings (JsonMerge): the UI posts the whole strip; a partial body keeps the rest
-        app.MapPost("/playlist/state", (JsonElement body) =>
+        app.MapPost("/playlist/state", (JsonElement body, HttpRequest req) =>
         {
             CustomPlaylist p;
             try { p = JsonMerge.Over(PlaylistService.LoadCurrentState(), body); }
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             AppOps.SavePlaylistState(p);
+            // the saving page's id (X-LP-Client): it skips its own echo, every other page re-reads the strip
+            EventBus.Broadcast("playlist-changed", new { client = req.Headers["X-LP-Client"].FirstOrDefault() });
             return Results.Ok();
         });
         app.MapGet("/playlist/names", () => Results.Json(PlaylistService.ListNames()));

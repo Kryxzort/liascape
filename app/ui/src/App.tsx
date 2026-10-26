@@ -9,6 +9,7 @@ import { PlaylistStrip } from "./components/PlaylistStrip";
 import { PreviewModal } from "./components/PreviewModal";
 import { LibrarySettingsModal } from "./components/LibrarySettingsModal";
 import type { Wallpaper } from "./api/client";
+import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { Select } from "./components/Select";
@@ -47,6 +48,8 @@ export default function App() {
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
     else if (e.type === "library-synced") s.loadLibrary();
     else if (e.type === "library-item-changed") s.itemChangedByBackend(e.payload.path, { volumeOverride: e.payload.volumeOverride });
+    // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
+    else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
   }, []); // eslint-disable-line
   useEvents(onEvent);
 

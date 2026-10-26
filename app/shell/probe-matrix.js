@@ -997,7 +997,7 @@ C["plState:partial"] = { states: ["idle"], async run(c) {
     c.a = (await http("GET", "/playlist/state")).json;
     await post("/playlist/state", { settings: { intervalSeconds: 77 } });
     c.b = (await http("GET", "/playlist/state")).json;
-    await post("/playlist/state", c.before.ps); // back to what the UI shows (it isn't told about another client's edits)
+    await sleep(400); // the page follows another client's edit (WS playlist-changed → re-read); the shared strip check sees it
   }, check(c) {
     const v = [], a = c.a?.settings, b = c.b?.settings;
     if (JSON.stringify(c.a?.videoPaths) !== JSON.stringify([K[1], K[0]])) v.push(`paths-only body: paths ${JSON.stringify(c.a?.videoPaths?.map(TITLE))}`);
