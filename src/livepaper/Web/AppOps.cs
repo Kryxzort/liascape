@@ -196,6 +196,17 @@ public static class AppOps
         return item;
     }
 
+    // A volume keybind (`--action=volume-up|down`, `/volume {delta}`): PlayerHelper.AdjustVolume moves the
+    // global or the playing wallpaper's own volume (`VolumeKeyTarget`); the UI holds its own copies of both
+    // and saves the settings whole — tell it which one changed, or its next save / open modal reverts it.
+    public static void VolumeKey(int delta)
+    {
+        if (PlayerHelper.AdjustVolume(delta) is string item)
+            EventBus.Broadcast("library-item-changed", new { path = item, volumeOverride = LibraryService.ReadVolumeOverride(item) });
+        else
+            EventBus.Broadcast("settings-changed", new { volume = SettingsService.Load().Volume });
+    }
+
     // The keybind actions (`--action=<name>`, forwarded to a running backend's `/action` — ActionForward).
     // null = done; else the reason it couldn't run. next-wallpaper/previous-wallpaper/random (and
     // play/toggle-play's Restore()) throw when the library/session has no item playable under the
@@ -248,9 +259,7 @@ public static class AppOps
                     break;
                 case "volume-up":
                 case "volume-down":
-                    PlayerHelper.AdjustVolume(action == "volume-up" ? 5 : -5);
-                    // the UI holds its own copy of the settings and saves it whole — it must take this one
-                    EventBus.Broadcast("settings-changed", new { volume = SettingsService.Load().Volume });
+                    VolumeKey(action == "volume-up" ? 5 : -5);
                     break;
             }
         }

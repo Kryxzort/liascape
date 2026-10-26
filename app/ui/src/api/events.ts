@@ -9,6 +9,7 @@ export type LpEvent =
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }
   | { type: "library-synced"; payload: { count: number } }
+  | { type: "library-item-changed"; payload: { path: string; volumeOverride: number | null } }
   | { type: "steam-qr"; payload: { png: string } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }
   | { type: "steam-qr-error"; payload: { message: string } }

@@ -8,7 +8,7 @@ paths:
 ## Settings & Session Persistence
 
 `AppSettings` (JSON at `~/.config/livepaper/settings.json`):
-- Playback: `Loop`, `NoAudio`, `DisableCache` (default **false**), `Volume` (0–100), `Speed` (0.1–4.0, default 1.0). Per-item volume/speed overrides live in the library `index.json`, not here (see `library.md`).
+- Playback: `Loop`, `NoAudio`, `DisableCache` (default **false**), `Volume` (0–100), `Speed` (0.1–4.0, default 1.0). Per-item volume/speed overrides live in the library `index.json`, not here (see `library.md`). `VolumeKeyTarget` (`auto` default | `item` | `global`): what the volume keybinds move (`web-backend.md` Live-apply).
 - Memory: `DemuxerMaxBytes`, `DemuxerMaxBackBytes` (int, MiB)
 - `HwDec`: `"auto"` | `"nvdec"` | `"vaapi"` | `"no"`
 - `VideoScale`: `"fill"` (panscan=1.0) | `"fit"` (panscan=0.0); `VideoFps` (0 = native, else caps video playback fps — scenes/LWE unaffected). VideoScale applies **live** (mpv `panscan` via IPC, incl. on advance). **All playback settings apply live now** (`PlayerHelper.ApplyPlaybackSettingsLive`, diffed): `Loop` (loop-file, single video only — the timed machinery owns it under a playlist), `NoAudio` (mpv `aid` / scene LWE mute), `VideoFps` (mpv `vf=fps`), `DisableCache` (`cache`), `DemuxerMax*Bytes`, `HwDec`. Only `LweMonitors` (per-monitor fps/primary) is genuinely launch-only (LWE has no live reconfigure).

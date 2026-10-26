@@ -3135,15 +3135,30 @@ public static class PlayerHelper
     // item's EFFECTIVE volume (override ?? global, like /settings): an item with its own volume keeps it.
     // It pushed the new global even then — the playing wallpaper jumped off its override until the next
     // settings save (a theme change) snapped it back (UI matrix `cli:volume-up:overridden`).
-    public static void AdjustVolume(int delta)
+    // The volume keybinds, ±delta clamped 0–100, by `VolumeKeyTarget`: "auto" (default) moves the playing
+    // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own
+    // (override ?? global → its override); "global" always the global — then an overridden wallpaper keeps
+    // its own (it used to get the new global pushed and snap back on the next settings save). Live either
+    // way: an override like /library/volume (save + ApplyOverrideLive), the global by the effective value.
+    // Returns the item whose override moved (null: the global did, or nothing changed) for the UI event.
+    public static string? AdjustVolume(int delta)
     {
         var settings = SettingsService.Load();
-        int newVolume = Math.Clamp(settings.Volume + delta, 0, 100);
-        if (newVolume == settings.Volume) return;
-        settings.Volume = newVolume;
-        SettingsService.Save(settings);
         var cur = QueryCurrentPath();
-        SetVolume((cur != null ? ReadVolumeOverride(cur) : null) ?? newVolume);
+        var own = cur != null ? ReadVolumeOverride(cur) : null;
+        if (cur != null && (settings.VolumeKeyTarget == "item" || (settings.VolumeKeyTarget != "global" && own != null)))
+        {
+            int from = own ?? settings.Volume, to = Math.Clamp(from + delta, 0, 100);
+            if (to == from) return null;
+            LibraryService.SaveVolumeOverride(cur, to);
+            ApplyOverrideLive(cur);
+            return cur;
+        }
+        int newVolume = Math.Clamp(settings.Volume + delta, 0, 100);
+        if (newVolume == settings.Volume) return null;
+        SettingsService.Update(s => s.Volume = newVolume);
+        SetVolume(own ?? newVolume);
+        return null;
     }
 
     // Returns the next wallpaper path, extending history if needed.

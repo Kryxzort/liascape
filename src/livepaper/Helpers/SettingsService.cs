@@ -65,6 +65,19 @@ public static class SettingsService
         .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
     private static readonly object PatchLock = new();
 
+    // A backend-side read-modify-write of the saved settings (a keybind's volume) under the same lock as
+    // POST /settings: a load → save outside it lost whichever of the two landed first.
+    public static AppSettings Update(Action<AppSettings> mutate)
+    {
+        lock (PatchLock)
+        {
+            var s = Load();
+            mutate(s);
+            Save(s);
+            return s;
+        }
+    }
+
     // `saved` with the fields `body` has laid over it; every field the body leaves out keeps its saved
     // value. The body is bound exactly like the old whole-body binding (same deserializer + options: the
     // setters' clamps, a bad value throws JsonException) and only the keys it HAS are copied over — so the

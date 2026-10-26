@@ -69,6 +69,7 @@ interface State {
   // library
   loadLibrary(): Promise<void>; applyItem(path: string): Promise<void>;
   patchLibraryItem(path: string, partial: Partial<LibraryItem>): void;
+  itemChangedByBackend(path: string, partial: Partial<LibraryItem>): void;
   trashItems(items: LibraryItem[]): Promise<void>; undo(): Promise<void>;
   setLibQuery(q: string): void; setLibSort(i: number): void;
   // playlist
@@ -224,6 +225,13 @@ export const useStore = create<State>((set, get) => ({
   // optimistic per-item patch (volume/speed override etc.) so consumers — incl. the live WallpaperBg —
   // reflect a change instantly without waiting for a full library reload.
   patchLibraryItem(path, partial) { set((s) => ({ libraryItems: s.libraryItems.map((i) => i.videoPath === path ? { ...i, ...partial } : i) })); },
+  // API: `library-item-changed` — the backend changed an item itself (a volume keybind on a wallpaper with its
+  // own volume, `VolumeKeyTarget`): the grid's copy AND an open settings modal's (it re-inits from settingsItem),
+  // else the modal shows — and its next slider save restores — the old value
+  itemChangedByBackend(path, partial) {
+    const p = (i: LibraryItem) => (i.videoPath === path ? { ...i, ...partial } : i);
+    set((s) => ({ libraryItems: s.libraryItems.map(p), settingsItem: s.settingsItem && p(s.settingsItem), settingsSiblings: s.settingsSiblings.map(p) }));
+  },
   async applyItem(path) {
     await api.apply(path); set({ playingPath: path });
     const t = get().libraryItems.find((i) => i.videoPath === path)?.title ?? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "");

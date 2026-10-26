@@ -504,14 +504,59 @@ action("toggle-pause", () => [], { flipPause: true }); // the oracle checks play
 action("toggle-mute", () => [], { flipMute: true });
 action("volume-up", (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up from ${c.before.s.volume}`]));
 action("volume-down", (c) => (c.after.s.volume === Math.max(0, c.before.s.volume - 5) ? [] : [`volume ${c.after.s.volume} after volume-down from ${c.before.s.volume}`]));
-// the same keybinds while every live item has its OWN volume (30): the global moves ±5 — the keyboard twin of the
-// Settings page's global slider — and no source with an override moves (the oracle: override ?? global, R61)
-for (const a of ["volume-up", "volume-down"]) C[`cli:${a}:overridden`] = { states: ["single", "playlist", "effect", "pending", "paused"],
-  async pre(c) { for (const p of [c.shown, c.other].filter(Boolean)) await post("/library/volume", { path: p, intValue: 30 }); },
-  async run(c) { c.cli = await cli(a); await sleep(400); },
-  check(c) {
-    const want = a === "volume-up" ? Math.min(100, c.before.s.volume + 5) : Math.max(0, c.before.s.volume - 5);
-    return c.after.s.volume === want ? [] : [`volume ${c.after.s.volume} after ${a} from ${c.before.s.volume}`];
+// the same keybinds by VolumeKeyTarget (Advanced → "Volume keys adjust"): "auto" (default) moves the playing
+// wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own (giving it
+// one); "global" always the global (an overridden one keeps its own). Every other item keeps its own, and every
+// source runs override ?? global (the general oracle, R61). `cur` = the playing item (mid-effect: the incoming).
+const volKey = (a, base) => (a === "volume-up" ? Math.min(100, base + 5) : Math.max(0, base - 5));
+const ovOf = (c, p) => (c.after.lib || []).find((i) => i.videoPath === p)?.volumeOverride ?? null;
+const VKS = ["single", "playlist", "effect", "pending", "paused"];
+for (const a of ["volume-up", "volume-down"]) {
+  C[`cli:${a}:overridden`] = { states: VKS, // auto, both live items at their own 30
+    async pre(c) { for (const p of [c.shown, c.other].filter(Boolean)) await post("/library/volume", { path: p, intValue: 30 }); },
+    async run(c) { c.cli = await cli(a); await sleep(400); },
+    check(c) {
+      const cur = c.before.cur?.path, v = [];
+      if (c.after.s.volume !== c.before.s.volume) v.push(`auto, ${TITLE(cur)} has its own volume: the global moved ${c.before.s.volume} → ${c.after.s.volume}`);
+      if (ovOf(c, cur) !== volKey(a, 30)) v.push(`auto: ${TITLE(cur)}'s own volume ${ovOf(c, cur)} after ${a} from 30, expected ${volKey(a, 30)}`);
+      for (const p of [c.shown, c.other].filter((p) => p && p !== cur)) if (ovOf(c, p) !== 30) v.push(`${TITLE(p)} (not playing) moved to ${ovOf(c, p)}`);
+      return v;
+    } };
+  C[`cli:${a}:item`] = { states: VKS, // "item", no overrides: the playing item gets one
+    async pre() { const s = await getSettings(); await post("/settings", { ...s, volumeKeyTarget: "item" }); },
+    async run(c) { c.cli = await cli(a); await sleep(400); },
+    check(c) {
+      const cur = c.before.cur?.path, g = c.before.s.volume, want = volKey(a, g), v = [];
+      if (c.after.s.volume !== g) v.push(`item mode: the global moved ${g} → ${c.after.s.volume}`);
+      if (ovOf(c, cur) !== (want === g ? null : want)) v.push(`item mode: ${TITLE(cur)}'s own volume ${ovOf(c, cur)} after ${a} from the global ${g}, expected ${want}`);
+      for (const p of [c.shown, c.other].filter((p) => p && p !== cur)) if (ovOf(c, p) != null) v.push(`${TITLE(p)} (not playing) got its own volume ${ovOf(c, p)}`);
+      return v;
+    } };
+  C[`cli:${a}:global`] = { states: VKS, // "global", both live items at their own 30: only the global moves
+    async pre(c) { const s = await getSettings(); await post("/settings", { ...s, volumeKeyTarget: "global" });
+      for (const p of [c.shown, c.other].filter(Boolean)) await post("/library/volume", { path: p, intValue: 30 }); },
+    async run(c) { c.cli = await cli(a); await sleep(400); },
+    check(c) {
+      const v = [];
+      if (c.after.s.volume !== volKey(a, c.before.s.volume)) v.push(`global mode: volume ${c.after.s.volume} after ${a} from ${c.before.s.volume}`);
+      for (const p of [c.shown, c.other].filter(Boolean)) if (ovOf(c, p) !== 30) v.push(`global mode: ${TITLE(p)}'s own volume moved to ${ovOf(c, p)}`);
+      return v;
+    } };
+}
+// the playing item's settings modal open while the keybind moves its own volume: the modal's slider follows (WS
+// `library-item-changed`), and closing it saves nothing that undoes the keybind
+C["cli:volume-up:modalOpen"] = { states: ["single", "playlist"],
+  async pre(c) { await post("/library/volume", { path: c.shown, intValue: 30 }); },
+  async run(c) {
+    const open = `await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600);`;
+    await ui(`${open}`); c.cli = await cli("volume-up"); await sleep(600);
+    c.shownValue = await ui(`return m.modalRange(0)?.value;`);
+    await ui(`m.closeModal();`); await sleep(900);
+  }, check(c) {
+    const v = [];
+    if (String(c.shownValue) !== "35") v.push(`the open modal's volume slider shows ${c.shownValue} after the keybind moved it 30 → 35`);
+    if (ovOf(c, c.shown) !== 35) v.push(`${TITLE(c.shown)}'s own volume ${ovOf(c, c.shown)} after the keybind + closing the modal, expected 35`);
+    return v;
   } };
 // user switches — paused: KeepPauseOnSwitch off (default) resumes and switches with the transition; on
 // (the `-keep` cells) stays paused and cuts to B's first frame
