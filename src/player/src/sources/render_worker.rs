@@ -1,0 +1,722 @@
+//! Phase 2 render worker (`.claude/rules/player-core.md` § Sources "Render worker"): one
+//! `lp-render` thread with its own EGL context in the compositor's share group owns every
+//! worker-mode `MpvSource`'s libmpv render context — its creation, its first render (shader
+//! compile, scaler LUTs, FBO setup: 6–20 ms on the loop before) and every later render into
+//! textures the loop adopts once complete — so the loop only composes finished textures.
+//!
+//! The loop keeps everything else of the source (the core's event pump, the async applies,
+//! `read`, load fencing, Ready, the front/back it shows). The two sides meet in one
+//! [`Exchange`] per source — a mutex never held across an mpv call (mpv invokes the render
+//! update callback with its own locks held; the callback only writes this worker's eventfd).
+//!
+//! **Texture ownership** is what keeps a frame from tearing: a texture is the worker's (its
+//! free list, the one it renders into) or the loop's (front, back, a frame waiting for its
+//! fence) — never both. The worker renders only into its own, inserts a fence + `glFlush`,
+//! waits for that fence on its own thread, then publishes the frame (`Exchange::ready`,
+//! replacing — and taking back — an older one the loop never adopted) and writes the source's
+//! eventfd (a `dup`, so a dropped source can never leave it writing a reused fd number). The
+//! loop gives textures back through [`ExState::returned`], with a **release fence** when it
+//! sampled them (a replaced front): the worker `glWaitSync`s it before rendering there again.
+
+use std::collections::{BTreeMap, HashMap};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+use std::sync::mpsc::{self, SyncSender};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use glow::HasContext;
+use serde_json::{Value, json};
+
+use super::mpv::{get_proc_address, on_wake, reset_gl};
+use super::reaper;
+use crate::gfx::gl::{new_fbo, new_tex};
+use crate::gfx::{Fbo, Gfx, SharedContext, Tex};
+use crate::log::{self, Level};
+use crate::mpv::{Handle, RenderContext, WeakClient};
+
+/// How long the worker waits on its own fence before publishing anyway (the loop then holds
+/// the frame until `glClientWaitSync(…, 0)` says it signalled). A render that isn't done in
+/// this time is broken anyway; never seen.
+const FENCE_WAIT: Duration = Duration::from_millis(100);
+
+/// Free textures a slot keeps around for reuse beyond the ones in flight (3 in steady state:
+/// the loop's front, the newest frame, one to render into).
+const FREE_KEEP: usize = 2;
+
+/// How long an `lp-open` job waits for the worker to make a render context. The core travels
+/// with the request, so a job that gives up loses nothing: the worker frees what it made and
+/// reaps the core itself.
+const ATTACH_WAIT: Duration = Duration::from_secs(3);
+
+/// A GL sync object handed between the two contexts (sync objects are shared across a share
+/// group). Held as its pointer value: `GLsync` is a raw pointer, not `Send`.
+#[derive(Debug)]
+pub(crate) struct SyncFence(usize);
+
+impl SyncFence {
+    /// `glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE)` on `gl`'s context (the caller flushes).
+    pub(crate) fn insert(gl: &glow::Context) -> Option<SyncFence> {
+        unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) }
+            .ok()
+            .map(|f| SyncFence(f.0 as usize))
+    }
+
+    fn raw(&self) -> glow::NativeFence {
+        glow::NativeFence(self.0 as *mut _)
+    }
+
+    /// Non-blocking: has it signalled? (`glClientWaitSync(…, 0, 0)`; a failed wait — an
+    /// invalid sync — counts as signalled, never as a frame held forever.)
+    pub(crate) fn signalled(&self, gl: &glow::Context) -> bool {
+        let r = unsafe { gl.client_wait_sync(self.raw(), 0, 0) };
+        r != glow::TIMEOUT_EXPIRED
+    }
+
+    pub(crate) fn delete(self, gl: &glow::Context) {
+        unsafe { gl.delete_sync(self.raw()) };
+    }
+}
+
+/// One complete frame on its way to the loop.
+pub(crate) struct Frame {
+    pub tex: Tex,
+    /// Signalled once the render finished on the GPU (the worker already waited for it; the
+    /// loop re-checks without blocking).
+    pub fence: Option<SyncFence>,
+    /// FILE_LOADED events mpv had emitted when this render started (§ "Load fencing").
+    pub file_loaded: u64,
+}
+
+/// What the loop and the worker share for one source.
+#[derive(Default)]
+pub(crate) struct ExState {
+    /// Loop → worker: the size to render at (`MpvSource::target_size`).
+    pub size: Option<(u32, u32)>,
+    /// Loop → worker: textures given back, with a release fence when the loop sampled them.
+    pub returned: Vec<(Tex, Option<SyncFence>)>,
+    /// Worker → loop: the newest complete frame not adopted yet.
+    pub ready: Option<Frame>,
+    /// Worker → loop: the last render failure (mpv's error), for `last_error_log`.
+    pub error: Option<String>,
+    // Probe counters (worker-side).
+    pub renders: u64,
+    pub first_render_ms: Option<f64>,
+    pub max_render_ms: f64,
+    pub last_render_ms: f64,
+    /// Frames replaced by a newer one before the loop adopted them.
+    pub superseded: u64,
+}
+
+pub(crate) struct Exchange {
+    m: Mutex<ExState>,
+}
+
+impl Exchange {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, ExState> {
+        self.m.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// A core whose render context lives on the worker (`PreparedCore`/`MpvSource`).
+pub(crate) struct Attached {
+    pub id: u64,
+    pub ex: Arc<Exchange>,
+    pub worker: Arc<RenderWorker>,
+}
+
+/// An mpv core moved between threads. SAFETY: libmpv's client API is thread-safe
+/// (`client.h`); whoever holds this is the only user of the handle.
+struct SendHandle(Handle);
+unsafe impl Send for SendHandle {}
+
+enum Job {
+    /// Make a render context (+ weak client) for `core`; reply with the core back.
+    Attach {
+        core: SendHandle,
+        loop_wake: OwnedFd,
+        reply: SyncSender<(SendHandle, Result<(u64, Arc<Exchange>), String>)>,
+    },
+    /// Free slot `id` (render context with this context current, weak client, every texture),
+    /// delete `fences`, then hand `core` to the reaper.
+    Free {
+        id: u64,
+        core: Option<SendHandle>,
+        fences: Vec<SyncFence>,
+    },
+}
+
+#[derive(Default)]
+struct Stats {
+    slots: usize,
+    attaches: u64,
+    attach_ms_max: f64,
+    renders: u64,
+    render_ms_max: f64,
+    first_render_ms_max: f64,
+    frees: u64,
+    free_ms_max: f64,
+    fence_wait_ms_max: f64,
+    fence_timeouts: u64,
+    passes: u64,
+}
+
+struct State {
+    jobs: std::collections::VecDeque<Job>,
+    closing: bool,
+    /// The thread is gone: nothing more is accepted.
+    exited: bool,
+    stats: Stats,
+}
+
+/// The render worker (one per player). Cheap to clone through its `Arc`.
+pub struct RenderWorker {
+    state: Mutex<State>,
+    /// Woken by jobs, by the loop (size changes, textures given back) and by every render
+    /// context's update callback (`on_wake`, the fd number is the callback context). Never
+    /// closed (`into_raw_fd`): a render context leaked at a timed-out shutdown may still write it.
+    fd: RawFd,
+    done: Mutex<Option<(mpsc::Receiver<()>, JoinHandle<()>)>>,
+}
+
+impl RenderWorker {
+    /// Start the worker on a context shared with `gfx`'s (`Gfx::share_context`).
+    pub fn start(gfx: &Gfx) -> Result<Arc<RenderWorker>, String> {
+        let ctx = gfx.share_context()?;
+        let raw = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if raw < 0 {
+            return Err(format!("eventfd: {}", std::io::Error::last_os_error()));
+        }
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) }.into_raw_fd();
+        let w = Arc::new(RenderWorker {
+            state: Mutex::new(State {
+                jobs: Default::default(),
+                closing: false,
+                exited: false,
+                stats: Stats::default(),
+            }),
+            fd,
+            done: Mutex::new(None),
+        });
+        let (tx, rx) = mpsc::channel();
+        let (ok_tx, ok_rx) = mpsc::channel::<Result<(), String>>();
+        let me = Arc::clone(&w);
+        let thread = std::thread::Builder::new()
+            .name("lp-render".into())
+            .spawn(move || {
+                me.run(ctx, ok_tx);
+                me.lock().exited = true;
+                let _ = tx.send(());
+            })
+            .map_err(|e| format!("spawn lp-render: {e}"))?;
+        match ok_rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let _ = thread.join();
+                return Err(e);
+            }
+            Err(_) => return Err("lp-render exited during startup".into()),
+        }
+        *w.done.lock().unwrap_or_else(|e| e.into_inner()) = Some((rx, thread));
+        Ok(w)
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Wake the worker (a job, a new size, textures given back).
+    pub(crate) fn wake(&self) {
+        let one: u64 = 1;
+        unsafe { libc::write(self.fd, &one as *const u64 as *const libc::c_void, 8) };
+    }
+
+    fn send(&self, job: Job) -> Result<(), Job> {
+        {
+            let mut s = self.lock();
+            if s.exited {
+                return Err(job);
+            }
+            s.jobs.push_back(job);
+        }
+        self.wake();
+        Ok(())
+    }
+
+    /// Give `core`'s rendering to the worker: it creates the render context (worker context
+    /// current, update callback on the worker's eventfd) and a weak FILE_LOADED client. Called
+    /// on an `lp-open` thread (it waits). `Err(core)` = the worker can't (gone, failed, timed
+    /// out — logged); the caller renders on the loop instead. `Err(None)`: the wait timed out
+    /// and the core stays with the worker, which frees what it made and reaps it.
+    pub(crate) fn attach(
+        self: &Arc<Self>,
+        core: Handle,
+        loop_wake: RawFd,
+    ) -> Result<(Handle, Attached), Option<Handle>> {
+        let dup = unsafe { libc::fcntl(loop_wake, libc::F_DUPFD_CLOEXEC, 0) };
+        if dup < 0 {
+            return Err(Some(core));
+        }
+        let loop_wake = unsafe { OwnedFd::from_raw_fd(dup) };
+        let (reply, rx) = mpsc::sync_channel(1);
+        if let Err(Job::Attach { core, .. }) = self.send(Job::Attach {
+            core: SendHandle(core),
+            loop_wake,
+            reply,
+        }) {
+            return Err(Some(core.0));
+        }
+        match rx.recv_timeout(ATTACH_WAIT) {
+            // The core comes back with the reply: the caller owns it again.
+            Ok((core, Ok((id, ex)))) => Ok((
+                core.0,
+                Attached {
+                    id,
+                    ex,
+                    worker: Arc::clone(self),
+                },
+            )),
+            Ok((core, Err(e))) => {
+                log::event(
+                    "render",
+                    Level::Warn,
+                    "render_worker.attach_failed",
+                    None,
+                    json!({ "reason": e }),
+                );
+                Err(Some(core.0))
+            }
+            Err(_) => {
+                // The worker frees what it made and reaps the core when its reply fails.
+                log::event(
+                    "render",
+                    Level::Warn,
+                    "render_worker.attach_failed",
+                    None,
+                    json!({ "reason": "timed out", "waited_ms": ATTACH_WAIT.as_millis() as u64 }),
+                );
+                Err(None)
+            }
+        }
+    }
+
+    /// Free slot `id`, then reap `core` (on the worker). `Err` = the worker is gone (the
+    /// caller leaks the core rather than freeing a render context without its context).
+    pub(crate) fn free(
+        &self,
+        id: u64,
+        core: Option<Handle>,
+        fences: Vec<SyncFence>,
+    ) -> Result<(), Option<Handle>> {
+        match self.send(Job::Free {
+            id,
+            core: core.map(SendHandle),
+            fences,
+        }) {
+            Ok(()) => Ok(()),
+            Err(Job::Free { core, .. }) => Err(core.map(|c| c.0)),
+            Err(_) => Err(None),
+        }
+    }
+
+    /// Stop: finish every queued job (frees), exit once no slot is left; wait up to
+    /// `timeout`. Returns the slots still alive (render contexts not freed — stragglers).
+    pub fn shutdown(&self, timeout: Duration) -> usize {
+        self.lock().closing = true;
+        self.wake();
+        let done = self.done.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some((rx, thread)) = done
+            && rx.recv_timeout(timeout).is_ok()
+        {
+            let _ = thread.join();
+        }
+        self.lock().stats.slots
+    }
+
+    /// The `sources` probe's `render_worker`.
+    pub fn stats(&self) -> Value {
+        let s = self.lock();
+        let st = &s.stats;
+        json!({
+            "slots": st.slots,
+            "queued_jobs": s.jobs.len(),
+            "attaches": st.attaches,
+            "attach_ms_max": st.attach_ms_max,
+            "renders": st.renders,
+            "render_ms_max": st.render_ms_max,
+            "first_render_ms_max": st.first_render_ms_max,
+            "frees": st.frees,
+            "free_ms_max": st.free_ms_max,
+            "fence_wait_ms_max": st.fence_wait_ms_max,
+            "fence_timeouts": st.fence_timeouts,
+            "passes": st.passes,
+            "closing": s.closing,
+            "exited": s.exited,
+        })
+    }
+
+    // ------------------------------------------------------------------ the thread
+
+    fn run(&self, ctx: SharedContext, ok: mpsc::Sender<Result<(), String>>) {
+        if let Err(e) = ctx.make_current() {
+            let _ = ok.send(Err(e));
+            return;
+        }
+        let gl = ctx.load_gl();
+        let _ = ok.send(Ok(()));
+        let mut slots: BTreeMap<u64, Slot> = BTreeMap::new();
+        let mut next_id = 1u64;
+        loop {
+            let mut pfd = libc::pollfd {
+                fd: self.fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            unsafe { libc::poll(&mut pfd, 1, 100) };
+            let mut buf = 0u64;
+            unsafe { libc::read(self.fd, &mut buf as *mut u64 as *mut libc::c_void, 8) };
+            let (jobs, closing) = {
+                let mut s = self.lock();
+                (std::mem::take(&mut s.jobs), s.closing)
+            };
+            for job in jobs {
+                match job {
+                    Job::Attach {
+                        core,
+                        loop_wake,
+                        reply,
+                    } => {
+                        let t = Instant::now();
+                        let r = Slot::create(&core.0, loop_wake, self.fd);
+                        let ms = t.elapsed().as_secs_f64() * 1000.0;
+                        match r {
+                            Ok(slot) => {
+                                let id = next_id;
+                                next_id += 1;
+                                let ex = Arc::clone(&slot.ex);
+                                slots.insert(id, slot);
+                                if let Err(mpsc::SendError((core, _))) =
+                                    reply.send((core, Ok((id, ex))))
+                                {
+                                    // The `lp-open` job gave up: undo, reap the core here.
+                                    if let Some(s) = slots.remove(&id) {
+                                        s.free(&gl);
+                                    }
+                                    reaper::reap(core.0);
+                                }
+                                let mut s = self.lock();
+                                s.stats.attaches += 1;
+                                s.stats.attach_ms_max = s.stats.attach_ms_max.max(ms);
+                            }
+                            Err(e) => {
+                                if let Err(mpsc::SendError((core, _))) = reply.send((core, Err(e)))
+                                {
+                                    reaper::reap(core.0);
+                                }
+                            }
+                        }
+                    }
+                    Job::Free { id, core, fences } => {
+                        let t = Instant::now();
+                        if let Some(s) = slots.remove(&id) {
+                            s.free(&gl);
+                        }
+                        for f in fences {
+                            f.delete(&gl);
+                        }
+                        if let Some(c) = core {
+                            reaper::reap(c.0);
+                        }
+                        let ms = t.elapsed().as_secs_f64() * 1000.0;
+                        let mut s = self.lock();
+                        s.stats.frees += 1;
+                        s.stats.free_ms_max = s.stats.free_ms_max.max(ms);
+                    }
+                }
+            }
+            self.lock().stats.slots = slots.len();
+            if closing && slots.is_empty() {
+                break;
+            }
+            // One render pass: render every slot with a frame due, flush once, wait for each
+            // fence, publish.
+            let mut out: Vec<(u64, Frame, f64)> = Vec::new();
+            for (id, slot) in slots.iter_mut() {
+                if let Some((f, ms)) = slot.render(&gl) {
+                    out.push((*id, f, ms));
+                }
+            }
+            if out.is_empty() {
+                continue;
+            }
+            unsafe { gl.flush() };
+            let mut wait_max = 0f64;
+            let mut timeouts = 0u64;
+            for (_, f, _) in &out {
+                if let Some(fence) = &f.fence {
+                    let t = Instant::now();
+                    let r = unsafe {
+                        gl.client_wait_sync(
+                            fence.raw(),
+                            glow::SYNC_FLUSH_COMMANDS_BIT,
+                            FENCE_WAIT.as_nanos() as i32,
+                        )
+                    };
+                    if r == glow::TIMEOUT_EXPIRED {
+                        timeouts += 1;
+                    }
+                    wait_max = wait_max.max(t.elapsed().as_secs_f64() * 1000.0);
+                }
+            }
+            let mut render_max = 0f64;
+            let mut first_max = 0f64;
+            let n = out.len() as u64;
+            for (id, f, ms) in out {
+                render_max = render_max.max(ms);
+                if let Some(slot) = slots.get_mut(&id) {
+                    if let Some(first) = slot.publish(&gl, f, ms) {
+                        first_max = first_max.max(first);
+                    }
+                }
+            }
+            let mut s = self.lock();
+            s.stats.passes += 1;
+            s.stats.renders += n;
+            s.stats.render_ms_max = s.stats.render_ms_max.max(render_max);
+            s.stats.first_render_ms_max = s.stats.first_render_ms_max.max(first_max);
+            s.stats.fence_wait_ms_max = s.stats.fence_wait_ms_max.max(wait_max);
+            s.stats.fence_timeouts += timeouts;
+        }
+        drop(slots);
+        drop(gl);
+        drop(ctx);
+    }
+}
+
+/// One source's render state on the worker.
+struct Slot {
+    render: Option<RenderContext>,
+    weak: Option<WeakClient>,
+    ex: Arc<Exchange>,
+    loop_wake: OwnedFd,
+    /// Every texture this slot made (wherever it is now) and its worker-side FBO.
+    targets: HashMap<u32, (Tex, Fbo)>,
+    /// Textures the worker may render into (+ the loop's release fence, if it sampled them).
+    free: Vec<(u32, Option<SyncFence>)>,
+    /// FILE_LOADED events seen on the weak client.
+    file_loaded: u64,
+    /// Size and tag of the last frame rendered (a size change re-renders it).
+    last: Option<((u32, u32), u64)>,
+    /// The weak client saw SHUTDOWN (the core is going): render nothing more.
+    dead: bool,
+}
+
+fn tex_copy(t: &Tex) -> Tex {
+    Tex {
+        id: t.id,
+        w: t.w,
+        h: t.h,
+    }
+}
+
+impl Slot {
+    fn create(core: &Handle, loop_wake: OwnedFd, worker_fd: RawFd) -> Result<Slot, String> {
+        // SAFETY: the core is alive (its owner waits for this reply) and outlives the weak
+        // client and the render context (the slot is freed before the core is reaped).
+        let weak = unsafe { WeakClient::create(core.raw()) }.map_err(|e| e.to_string())?;
+        let render = unsafe { RenderContext::create_raw(core.raw(), get_proc_address) }
+            .map_err(|e| e.to_string())?;
+        // SAFETY: the worker's eventfd is never closed.
+        unsafe { render.set_update_callback(Some(on_wake), worker_fd as usize as *mut _) };
+        Ok(Slot {
+            render: Some(render),
+            weak: Some(weak),
+            ex: Arc::new(Exchange {
+                m: Mutex::new(ExState::default()),
+            }),
+            loop_wake,
+            targets: HashMap::new(),
+            free: Vec::new(),
+            file_loaded: 0,
+            last: None,
+            dead: false,
+        })
+    }
+
+    /// Render a due frame (mpv has a new one, or the size changed since the last): returns it
+    /// (fenced, not yet flushed) and the render's CPU time.
+    fn render(&mut self, gl: &glow::Context) -> Option<(Frame, f64)> {
+        if self.dead {
+            return None;
+        }
+        if let Some(w) = &self.weak {
+            let ev = w.poll();
+            self.file_loaded += ev.file_loaded;
+            if ev.shutdown {
+                self.dead = true;
+                return None;
+            }
+        }
+        let (size, returned) = {
+            let mut st = self.ex.lock();
+            (st.size, std::mem::take(&mut st.returned))
+        };
+        for (t, fence) in returned {
+            self.free.push((t.id.0.get(), fence));
+        }
+        // Called every pass, like the loop renderer did every update (it also runs mpv's
+        // render-thread dispatch queue); level-triggered — a frame we can't render yet
+        // (no size) stays pending.
+        let pending = self.render.as_ref()?.frame_pending();
+        let size = size?;
+        let redraw = !pending && self.last.is_some_and(|(s, _)| s != size);
+        if !pending && !redraw {
+            return None;
+        }
+        // A redraw shows the frame it re-renders: it keeps that frame's tag.
+        let tag = match (pending, self.last) {
+            (false, Some((_, t))) => t,
+            _ => self.file_loaded,
+        };
+        let id = self.take_free(gl, size);
+        let (tex, fbo) = self.targets.get(&id).expect("a free target is known");
+        let fbo = fbo.id.0.get();
+        let tex = tex_copy(tex);
+        let t = Instant::now();
+        // R25: FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
+        let render = self.render.as_ref()?;
+        let res = unsafe { render.render(fbo, size.0, size.1, glow::RGBA8, false) };
+        reset_gl(gl);
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        match res {
+            Ok(()) => {
+                self.last = Some((size, tag));
+                Some((
+                    Frame {
+                        tex,
+                        fence: SyncFence::insert(gl),
+                        file_loaded: tag,
+                    },
+                    ms,
+                ))
+            }
+            Err(e) => {
+                self.free.push((id, None));
+                self.ex.lock().error = Some(e.to_string());
+                None
+            }
+        }
+    }
+
+    /// A free target of `size` (made if there's none; free ones of another size are deleted).
+    fn take_free(&mut self, gl: &glow::Context, size: (u32, u32)) -> u32 {
+        let mut i = 0;
+        while i < self.free.len() {
+            let id = self.free[i].0;
+            let fits = self
+                .targets
+                .get(&id)
+                .is_some_and(|(t, _)| (t.w, t.h) == size);
+            if fits {
+                i += 1;
+                continue;
+            }
+            let (_, fence) = self.free.swap_remove(i);
+            if let Some(f) = fence {
+                f.delete(gl);
+            }
+            self.delete_target(gl, id);
+        }
+        if let Some((id, fence)) = self.free.pop() {
+            if let Some(f) = fence {
+                // The loop's last reads of it come first (server-side: never blocks here).
+                unsafe { gl.wait_sync(f.raw(), 0, glow::TIMEOUT_IGNORED) };
+                f.delete(gl);
+            }
+            return id;
+        }
+        let tex = new_tex(gl, size.0, size.1);
+        let fbo = new_fbo(gl, &tex);
+        let id = tex.id.0.get();
+        self.targets.insert(id, (tex, fbo));
+        id
+    }
+
+    fn delete_target(&mut self, gl: &glow::Context, id: u32) {
+        if let Some((tex, fbo)) = self.targets.remove(&id) {
+            unsafe {
+                gl.delete_framebuffer(fbo.id);
+                gl.delete_texture(tex.id);
+            }
+        }
+    }
+
+    /// Hand `f` (complete) to the loop; an older frame it never adopted comes back. Returns
+    /// the render time if this was the slot's first frame.
+    fn publish(&mut self, gl: &glow::Context, f: Frame, ms: f64) -> Option<f64> {
+        let (old, first) = {
+            let mut st = self.ex.lock();
+            st.renders += 1;
+            st.last_render_ms = ms;
+            st.max_render_ms = st.max_render_ms.max(ms);
+            let first = st.first_render_ms.is_none();
+            if first {
+                st.first_render_ms = Some(ms);
+            }
+            let old = st.ready.replace(f);
+            if old.is_some() {
+                st.superseded += 1;
+            }
+            (old, first)
+        };
+        if let Some(old) = old {
+            if let Some(fence) = old.fence {
+                fence.delete(gl);
+            }
+            // Never sampled by the loop: no release fence needed.
+            self.free.push((old.tex.id.0.get(), None));
+        }
+        while self.free.len() > FREE_KEEP {
+            let (id, fence) = self.free.remove(0);
+            if let Some(fence) = fence {
+                fence.delete(gl);
+            }
+            self.delete_target(gl, id);
+        }
+        let one: u64 = 1;
+        unsafe {
+            libc::write(
+                self.loop_wake.as_raw_fd(),
+                &one as *const u64 as *const libc::c_void,
+                8,
+            )
+        };
+        first.then_some(ms)
+    }
+
+    /// Render context freed (this context current — the worker's whole life), weak client
+    /// destroyed, every texture/FBO and fence deleted. The caller reaps the core after.
+    fn free(mut self, gl: &glow::Context) {
+        drop(self.render.take());
+        drop(self.weak.take());
+        let ready = self.ex.lock().ready.take();
+        if let Some(Frame { fence: Some(f), .. }) = ready {
+            f.delete(gl);
+        }
+        for (t, f) in std::mem::take(&mut self.ex.lock().returned) {
+            let _ = t;
+            if let Some(f) = f {
+                f.delete(gl);
+            }
+        }
+        for (_, f) in std::mem::take(&mut self.free) {
+            if let Some(f) = f {
+                f.delete(gl);
+            }
+        }
+        let ids: Vec<u32> = self.targets.keys().copied().collect();
+        for id in ids {
+            self.delete_target(gl, id);
+        }
+    }
+}
