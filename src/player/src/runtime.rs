@@ -2467,10 +2467,18 @@ impl Runtime {
         self.host.finish_teardown(Duration::from_millis(500));
         // Phase 2: the render worker frees every render context it still holds (each before
         // its core goes to the reaper) and exits; one it couldn't free is a straggler too.
-        let render_left = self
-            .host
-            .render_worker()
-            .map_or(0, |w| w.shutdown(REAPER_WAIT));
+        let render_left = self.host.render_worker().map_or(0, |w| {
+            let t = Instant::now();
+            let left = w.shutdown(REAPER_WAIT);
+            log::event(
+                "runtime",
+                if left > 0 { Level::Warn } else { Level::Info },
+                "render_worker.stopped",
+                None,
+                json!({ "left": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+            );
+            left
+        });
         // I5: an async open still creating its core counts like a reaper straggler.
         let left =
             reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending() + render_left;

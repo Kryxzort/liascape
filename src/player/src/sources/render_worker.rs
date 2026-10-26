@@ -12,11 +12,15 @@
 //! **Texture ownership** is what keeps a frame from tearing: a texture is the worker's (its
 //! free list, the one it renders into) or the loop's (front, back, a frame waiting for its
 //! fence) — never both. The worker renders only into its own, inserts a fence + `glFlush`,
-//! waits for that fence on its own thread, then publishes the frame (`Exchange::ready`,
-//! replacing — and taking back — an older one the loop never adopted) and writes the source's
-//! eventfd (a `dup`, so a dropped source can never leave it writing a reused fd number). The
-//! loop gives textures back through [`ExState::returned`], with a **release fence** when it
-//! sampled them (a replaced front): the worker `glWaitSync`s it before rendering there again.
+//! polls that fence (`glClientWaitSync(…, 0)`, every 1 ms while a frame is on the GPU), then
+//! publishes the frame (`Exchange::ready`, replacing — and taking back — an older one the loop
+//! never adopted) and writes the source's eventfd (a `dup`, so a dropped source can never leave
+//! it writing a reused fd number). The loop gives textures back through [`ExState::returned`],
+//! with a **release fence** when it sampled them (a replaced front): the worker renders into a
+//! returned texture only once that fence has signalled (polled too). No blocking GL wait
+//! anywhere — `glWaitSync`/a blocking `glClientWaitSync` across contexts holds NVIDIA's
+//! process-wide driver lock for the GPU work's duration (measured: renders on the other thread
+//! stalled for seconds under parallel tests).
 
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
@@ -48,6 +52,54 @@ const FREE_KEEP: usize = 2;
 /// with the request, so a job that gives up loses nothing: the worker frees what it made and
 /// reaps the core itself.
 const ATTACH_WAIT: Duration = Duration::from_secs(3);
+
+/// Test-only fault injection, `LP_PLAYER_TEST_RENDER_WORKER_FAULT` (comma-separated, read once):
+/// - `slow-flush` — sleep [`SLOW_FLUSH`] between a render pass and its `glFlush`, so every frame
+///   stays unsubmitted that long (a slow GPU submission; the fences must keep it out of sight);
+/// - `no-fence` — publish each frame right after its render, before the flush and without a
+///   fence (what the sync objects exist to prevent). Measured: NO visible effect on NVIDIA 595
+///   even with `slow-flush` — the driver serializes access to a shared texture across the share
+///   group itself (the same process-wide lock § Sources "Render worker" works around), so the
+///   loop never read a texture with the worker's commands for it still unsubmitted. The fences
+///   stay: the GL spec (and Mesa) only guarantee another context's changes once they completed;
+/// - `publish-early` — hand the loop each target BEFORE rendering into it ([`SLOW_FLUSH`] later):
+///   the texture-ownership rule broken (a texture is the worker's until its frame is finished).
+///
+/// The torn-frame guard (`tests/api.rs::render_worker_never_composes_a_torn_frame`) is GREEN
+/// as is and with `slow-flush`, RED with `publish-early`.
+#[derive(Clone, Copy, Default)]
+struct Faults {
+    slow_flush: bool,
+    no_fence: bool,
+    publish_early: bool,
+}
+
+/// [`Faults`]' `slow-flush` / `publish-early` delay.
+const SLOW_FLUSH: Duration = Duration::from_millis(30);
+
+fn faults() -> Faults {
+    static F: std::sync::OnceLock<Faults> = std::sync::OnceLock::new();
+    *F.get_or_init(|| {
+        let v = std::env::var("LP_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
+        let has = |k: &str| v.split(',').any(|p| p.trim() == k);
+        let f = Faults {
+            slow_flush: has("slow-flush"),
+            no_fence: has("no-fence"),
+            publish_early: has("publish-early"),
+        };
+        if f.slow_flush || f.no_fence || f.publish_early {
+            log::event(
+                "render",
+                Level::Warn,
+                "render_worker.test_fault",
+                None,
+                json!({ "slow_flush": f.slow_flush, "no_fence": f.no_fence,
+                        "publish_early": f.publish_early }),
+            );
+        }
+        f
+    })
+}
 
 /// A GL sync object handed between the two contexts (sync objects are shared across a share
 /// group). Held as its pointer value: `GLsync` is a raw pointer, not `Send`.
@@ -413,6 +465,7 @@ impl Inner {
         // Rendered, flushed, fence not signalled yet: (slot, frame, render ms, rendered at).
         let mut inflight: Vec<(u64, Frame, f64, Instant)> = Vec::new();
         let mut next_id = 1u64;
+        let faults = faults();
         loop {
             let mut pfd = libc::pollfd {
                 fd: self.fd,
@@ -505,13 +558,23 @@ impl Inner {
                 if inflight.iter().any(|(sid, ..)| sid == id) {
                     continue;
                 }
-                if let Some((f, ms)) = slot.render(&gl) {
+                if let Some((mut f, ms)) = slot.render(&gl) {
                     rendered += 1;
                     render_max = render_max.max(ms);
+                    if faults.no_fence {
+                        if let Some(fence) = f.fence.take() {
+                            fence.delete(&gl);
+                        }
+                        slot.publish(&gl, f, ms);
+                        continue;
+                    }
                     inflight.push((*id, f, ms, Instant::now()));
                 }
             }
             if rendered > 0 {
+                if faults.slow_flush {
+                    std::thread::sleep(SLOW_FLUSH);
+                }
                 unsafe { gl.flush() };
             }
             // Publish every frame whose fence signalled (polled, `timeout 0`); one still not
@@ -654,6 +717,16 @@ impl Slot {
         let (tex, fbo) = self.targets.get(&id).expect("a free target is known");
         let fbo = fbo.id.0.get();
         let tex = tex_copy(tex);
+        let early = faults().publish_early;
+        if early {
+            let f = Frame {
+                tex: tex_copy(&tex),
+                fence: None,
+                file_loaded: tag,
+            };
+            self.publish(gl, f, 0.0);
+            std::thread::sleep(SLOW_FLUSH);
+        }
         let t = Instant::now();
         let render = self.render.as_ref()?;
         // R25: FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
@@ -661,6 +734,10 @@ impl Slot {
         reset_gl(gl);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         match res {
+            Ok(()) if early => {
+                self.last = Some((size, tag));
+                None
+            }
             Ok(()) => {
                 self.last = Some((size, tag));
                 Some((

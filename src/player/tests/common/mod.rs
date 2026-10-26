@@ -134,6 +134,30 @@ pub enum ClipSpec {
         bottom: [u8; 3],
         secs: f64,
     },
+    /// `frames` frames at `fps`, `w`×`h`, every frame ONE uniform grey: frame `n` is
+    /// `16 + 4·n` (`frames` ≤ 56, so 16…236), no audio — Phase 2's torn-frame test: a
+    /// composed picture that isn't uniform is a partial frame, a level that goes backwards
+    /// (outside a loop wrap) is a stale texture, one off the ladder is uninitialised memory.
+    /// [`flash_index`] decodes a pixel back to `n`.
+    Flash {
+        w: u32,
+        h: u32,
+        fps: u32,
+        frames: u32,
+    },
+}
+
+/// [`ClipSpec::Flash`]'s frame index for a decoded pixel, if it is one: grey (channels within
+/// ±3) and on the `16 + 4·n` ladder within ±1 (a neutral grey survives the YUV round trip
+/// within ±1 — § Sources "Tests"), so a step of 4 never decodes to a neighbour.
+#[allow(dead_code)]
+pub fn flash_index(px: [u8; 4]) -> Option<u32> {
+    let [r, g, b, _] = px.map(i32::from);
+    if (r - g).abs() > 3 || (g - b).abs() > 3 || !(15..=237).contains(&g) {
+        return None;
+    }
+    let n = ((g - 16) as f64 / 4.0).round() as i32;
+    ((g - (16 + 4 * n)).abs() <= 1).then_some(n.max(0) as u32)
 }
 
 #[allow(dead_code)]
@@ -326,6 +350,28 @@ pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
                 &format!("[0]format=rgb24[a];[1]format=rgb24[b];[a][b]vstack,{TO_YUV}[v]"),
                 "-map",
                 "[v]",
+            ]);
+            push(&video_codec);
+        }
+        ClipSpec::Flash { w, h, fps, frames } => {
+            assert!(
+                frames <= 56,
+                "Flash: at most 56 frames (grey 16 + 4n ≤ 236)"
+            );
+            let secs = frames as f64 / fps as f64;
+            // A 16×16 geq per frame, scaled up with `neighbor`: uniform, and cheap to make.
+            push(&[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=black:s=16x16:r={fps}:d={secs}"),
+                "-vf",
+                &format!(
+                    "format=rgb24,geq=r=16+4*N:g=16+4*N:b=16+4*N,\
+                     scale={w}:{h}:flags=neighbor,format=rgb24,{TO_YUV}"
+                ),
+                "-frames:v",
+                &frames.to_string(),
             ]);
             push(&video_codec);
         }
