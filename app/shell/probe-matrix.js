@@ -1239,7 +1239,7 @@ C["plOverrideOff"] = { states: ["pending"], rearms: true, async run() {
     return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c, null)];
   } };
 // following the globals (advance-on-end on, armed) → override on (its own rotation: timed 600 s, advance off):
-// disarmed → its own "Switch when video ends" on: armed again to the strip's next, with ITS transition (fade 2500 ms)
+// disarmed → its own "Switch when video ends" on: armed again to the strip's next, with ITS transition (fade, PS()'s duration)
 C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, async run(c) {
     await ui(`${plOpen} m.setCheck(m.plCheck("Override global rotation settings"), true, "override"); await m.sleep(1200);`);
     c.midArmed = armedTo(await ctl.call("state"));
@@ -1250,7 +1250,8 @@ C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, asy
     const s = c.after.ps?.settings;
     if (s?.overrideGlobalSettings !== true || s?.advanceOnVideoEnd !== true) v.push(`playlist override ${s?.overrideGlobalSettings} advance ${s?.advanceOnVideoEnd}, expected true / true`);
     const req = armedReq(c);
-    if (req && !(req.effect_id === "fade" && req.duration_ms === 2500)) v.push(`the armed switch runs ${fmtSw(req)}, the playlist's own transition is fade 2500 ms`);
+    const own = PS().transitionDurationMs;
+    if (req && !(req.effect_id === "fade" && req.duration_ms === own)) v.push(`the armed switch runs ${fmtSw(req)}, the playlist's own transition is fade ${own} ms`);
     return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
   } };
 // advance-on-end off → on → next, following the globals: disarmed, re-armed to the strip's next, next plays it and arms the one after
