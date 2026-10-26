@@ -3782,12 +3782,9 @@ public static class PlayerHelper
     // switch). null/scene/no-socket → no-op. Unmeasured → clears the filter + kicks a background measure.
     public static void ApplyNormalizationLive(string? path)
     {
-        // lp-player: loudnorm is per item → that item's source(s)
-        if (PlayerEngine.IsLpPlayer)
-        {
-            if (path != null && !IsScenePath(path)) { var af = NormalizeAf(path) ?? ""; LpPlayerMedia.QueueSet("af:" + LpPlayerMedia.FullPath(path), () => LpPlayerMedia.SetForPath(path, "af", af)); }
-            return;
-        }
+        // lp-player: EVERY live source, each by its own item — the playing one, an effect's outgoing A, a
+        // pending B, any source while no output shows one (`path` = cur:* reached only the first)
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
