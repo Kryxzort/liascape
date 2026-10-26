@@ -196,9 +196,36 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
       the playing item from the strip restarted the rotation from the top (now: from its place).
       `LP_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
-      **Not covered yet:** the legacy engine, scenes, Browse/download/Steam, per-monitor content, the rest of
-      the global Settings page (auto-mute, normalization, appearance, global wait-for-end), which order a
-      shuffle actually plays, deleting a saved playlist (no UI for it), three or more controls in a row.
+      **Round 3** (2026-10-26): 40 controls / 110 cells. The rest of the global Settings page: Rotation
+      wait-for-end / advance-on-end vs a playlist following the globals (`playlistGlobal` / `pendingGlobal`)
+      and one with its own override, the playlist's "Override global rotation" both ways while armed;
+      Normalize audio (on / off / target preset / switched on unmeasured / then next / across a NoAudio round
+      trip — the oracle now checks every live source runs ITS OWN item's loudnorm); appearance (theme, aspect,
+      card size, gifs, live bg) and the legacy-only leak-restart, every source sampled back to back while the
+      change saves (nothing may move, even for a moment); auto-mute against a PRIVATE PulseAudio the script
+      starts (own socket under the stack's runtime dir, one null sink, no device / D-Bus / autospawn — the
+      session's audio server is never seen; no pulseaudio → the cells SKIP): a synthetic stream mutes every
+      live source in every state and unmutes after the delay, B comes up muted, toggle-mute around it, off
+      while muted, mpv's own stream and one under the level threshold never mute, mute / unmute delays. The
+      order a shuffle plays (the backend's contract: each cycle one pass in a fresh order, no repeat across
+      cycles, shuffle on mid-session plays the rest once first, previous walks back through what played,
+      Sequential again = the strip's order). Seven chains of three or more controls. The volume keybinds with
+      overridden items. Fixed: normalization reached `cur:*` only — an effect's A, a pending B and every
+      source while no output shows one kept the old `af` (RED 9 of 20); a loudness measurement landing while
+      its item played was never applied, it played un-normalized until its next switch (RED 3 of 3); every
+      settings save (a theme change too: the UI posts the whole object) set `srcs:*` to the playing item's
+      volume + speed and fixed the others up after — for one round trip an effect's other side / a pending B
+      ran the playing item's (RED 12 of 20, deterministic with back-to-back sampling); the volume keybind
+      pushed the new global onto a playing item with its own volume — it jumped off its override until the
+      next settings save snapped it back (RED 10 of 10). Decided: the keybind is the keyboard twin of the global
+      slider, so an overridden item keeps its volume (option: make it bump the playing item's override).
+      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player skips
+      them), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
+      backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
+      private dbus-daemon + a fake player would make it hermetic; not built), Settings → Player engine (to
+      legacy) / Clear settings / Autostart / Resume from last / Debug mode, a shuffle with advance-on-end (the
+      same `AdvanceToNext`; 12 plays of ≥ 10 s clips is too slow for a cell), deleting a saved playlist (no
+      UI for it).
 - [x] **Stale player after a rebuild/reinstall** — the player outlives the backend, so fixes "persisted" (a
       13:26 build ran at 19:00): the backend now restarts a stale player onto its binary with `--restore`
       (before a switch, or from a 10 s check while nothing is armed — player-adapter.md § Lifecycle).
