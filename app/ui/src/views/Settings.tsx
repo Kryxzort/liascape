@@ -347,6 +347,10 @@ export const Settings = memo(function Settings() {
         {adv && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live A-sync offset" hint="Full-live only: aim the outgoing video this many ms vs the live wallpaper at the cover, to cancel per-machine sync drift (negative = aim ahead). If you see a slight rewind raise it toward 0; a slight skip-ahead lower it. ~-30 here." rk="transitionLagOffsetMs">
           <input className="num" type="number" min={-200} max={200} step={5} value={g("transitionLagOffsetMs", -30)} onChange={(e) => set("transitionLagOffsetMs", +e.target.value || 0)} /><span>ms</span>
         </Row>}
+        {adv && <Row label="Volume keys adjust" hint="what the volume-up / volume-down keybinds change — Auto: the playing wallpaper's own volume if it has one, else the global; This wallpaper: always the playing wallpaper's own volume (gives it one); Global: always the global (a wallpaper with its own volume doesn't change)" rk="volumeKeyTarget">
+          <Select value={g("volumeKeyTarget", "auto")} onChange={(v) => set("volumeKeyTarget", v)}
+            options={[{ value: "auto", label: "Auto" }, { value: "item", label: "This wallpaper" }, { value: "global", label: "Global" }]} />
+        </Row>}
         {adv && <Row label="Live wallpaper behind all tabs" hint="show the live wallpaper behind the grid on Browse & Library (visible in the gaps between cards)" rk="wallpaperBgAllTabs"><input type="checkbox" checked={g("wallpaperBgAllTabs", false)} onChange={(e) => set("wallpaperBgAllTabs", e.target.checked)} /></Row>}
         {adv && <Row label="Debug mode" hint="enable the lpdbg bridge + perf metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>}
         {adv && g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics HUD" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}

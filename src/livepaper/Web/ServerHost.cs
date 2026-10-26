@@ -566,7 +566,7 @@ public static class ServerHost
         app.MapPost("/pause", () => { PlayerHelper.TogglePause(); return Results.Ok(); });
         app.MapPost("/volume", (ValueReq r) =>
         {
-            if (r.Delta is int d) PlayerHelper.AdjustVolume(d);
+            if (r.Delta is int d) AppOps.VolumeKey(d);
             else if (r.Value is int v) PlayerHelper.SetVolume(v);
             return Results.Ok();
         });

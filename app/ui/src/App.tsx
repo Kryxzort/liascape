@@ -46,6 +46,7 @@ export default function App() {
     else if (e.type === "unsub-progress")
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
     else if (e.type === "library-synced") s.loadLibrary();
+    else if (e.type === "library-item-changed") s.itemChangedByBackend(e.payload.path, { volumeOverride: e.payload.volumeOverride });
   }, []); // eslint-disable-line
   useEvents(onEvent);
 
