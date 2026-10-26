@@ -7,9 +7,11 @@
 #
 # Hermetic like scripts/test-lp-player-adapter.sh: its own temp HOME / XDG_* dirs (own settings.json,
 # library, lp-player socket + event log), its own backend port, a private `lp-player serve --headless
-# --clock real --ao null`, the UI built into the temp dir and served by that backend (LP_UI_DIR). It
-# never touches the dev backend, the real library or the real player; everything it started is stopped
-# and the temp dir removed on every exit path.
+# --clock real --ao null`, the UI built into the temp dir and served by that backend (LP_UI_DIR), and a
+# private PulseAudio (its own socket, one null sink, no device) that the backend's auto-mute watches and
+# the auto-mute cells play synthetic streams into. It never touches the dev backend, the real library,
+# the real player or the session's audio server; everything it started is stopped and the temp dir
+# removed on every exit path.
 #
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
 #                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
@@ -30,7 +32,8 @@
 # LP_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
-# electron-42). Exit 0 = every cell passed. Results: $LP_MATRIX_OUT (default: a dir printed at the end).
+# electron-42); pulseaudio (PULSEAUDIO=…) + pactl / paplay / parec for the auto-mute cells (they SKIP
+# without). Exit 0 = every cell passed. Results: $LP_MATRIX_OUT (default: a dir printed at the end).
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
@@ -167,10 +170,14 @@ export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cach
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions LP_UI_DIR=$T/ui
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_PORT
-SP=""; BP=""; XP=""
+# audio: every pulse client of the stack (the backend's pactl/parec, the probe's paplay) resolves the PRIVATE server
+# started below ($XDG_RUNTIME_DIR/pulse/native) — never the session's
+unset PULSE_SERVER PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH
+SP=""; BP=""; XP=""; PA=""
 cleanup() {
   trap - EXIT INT TERM HUP
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
+  [ -n "$PA" ] && kill "$PA" 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
@@ -193,6 +200,21 @@ cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
  "TransitionMethod":"full-live","GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,
  "GlobalIntervalSeconds":600,"AutoMute":false,"AdvancedSettings":true,"RestartIntervalSeconds":0}
 EOF
+
+# A private PulseAudio for the auto-mute cells: its own socket under $XDG_RUNTIME_DIR/pulse, ONE null sink (mx_null),
+# no device module, no D-Bus, no autospawn (client.conf) — the backend's AudioMonitor (pactl subscribe + parec) and
+# the probe's synthetic streams only ever meet there; the owner's audio server, routing and streams are never seen.
+# Missing pulseaudio/pactl/paplay/parec → the auto-mute cells SKIP.
+mkdir -p "$T/home/.config/pulse"; printf 'autospawn = no\n' >"$T/home/.config/pulse/client.conf"
+PULSEAUDIO=${PULSEAUDIO:-$(command -v pulseaudio || ls /nix/store/*-pulseaudio-*/bin/pulseaudio 2>/dev/null | head -1)}
+LP_PULSE=0
+if [ -n "$PULSEAUDIO" ] && [ -x "$PULSEAUDIO" ] && command -v pactl >/dev/null && command -v paplay >/dev/null && command -v parec >/dev/null; then
+  (unset DBUS_SESSION_BUS_ADDRESS; exec "$PULSEAUDIO" -n --daemonize=no --exit-idle-time=-1 --use-pid-file=no --disable-shm=yes \
+     -L "module-native-protocol-unix auth-anonymous=1" -L "module-null-sink sink_name=mx_null" >"$T/pulse.log" 2>&1) & PA=$!
+  for _ in $(seq 1 50); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
+  if [ "$(pactl info 2>/dev/null | sed -n 's/^Server String: //p')" = "$XDG_RUNTIME_DIR/pulse/native" ]; then LP_PULSE=1
+  else echo "(no private PulseAudio — the auto-mute cells skip)"; tail -3 "$T/pulse.log"; kill "$PA" 2>/dev/null; PA=""; fi
+else echo "(pulseaudio / pactl / paplay / parec not found — the auto-mute cells skip)"; fi
 
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
@@ -220,7 +242,7 @@ echo "== matrix"
 (cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LP_URL="$U" LP_PLAYER_SOCKET="$XDG_RUNTIME_DIR/livepaper/lp-player.sock" \
   LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" LP_SHARD="$SHARD" \
   LP_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" LP_BACKEND_LOG="$T/backend.log" \
-  LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" \
+  LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" LP_PULSE="$LP_PULSE" \
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
 rc=$?
 echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null | sed 's/^/     /'
