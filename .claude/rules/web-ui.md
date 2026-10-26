@@ -176,7 +176,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Origin**: production = `http://127.0.0.1:<backend port>`; `main.js` reuses the last port while free
   (`LP_PORT`) so localStorage prefs survive a relaunch; WS connects to `location.origin` when `API` is "".
 - Guard: `scripts/test-ui-matrix.sh` (every control × every player state through the real UI, hermetic;
-  `--jobs N` shards it, default 6 ≈ 10 min). Its window is **shown** (on a private Xvfb) and focused: a
+  `--jobs N` shards it, default 6 ≈ 10 min; **`--changed [<rev>]`** runs only the cells the change can affect —
+  `scripts/matrix-cells-for.sh` maps changed files → cell families, central files → the full matrix, docs /
+  uncovered areas → none: use it before a commit, the full run before a merge or a release build). Its window is **shown** (on a private Xvfb) and focused: a
   hidden BrowserWindow renders no frames — rAF never fires, so framer-motion / WAAPI exits never finish,
   dnd-kit's rAF-aligned pointermoves coalesce (a drop lands on a stale target) and `appActive` stays false.
   Drags that need real hit-testing go through `webContents.sendInputEvent` (the strip's dnd-kit reorder).

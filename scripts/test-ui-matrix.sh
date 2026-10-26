@@ -16,6 +16,10 @@
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
 #                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
 #                                  probe-morph.js = the settings-modal morph probe, same hermetic stack)
+#                                  [--changed [<rev>]]
+#   --changed: only the cells the change can affect (scripts/matrix-cells-for.sh maps changed files → cells;
+#   no rev = the uncommitted change, <rev> = everything since it). Central files mean the full matrix, docs
+#   and areas the matrix doesn't cover mean none. Use it before a commit; the full run is the merge gate.
 #   --ui-dir: drive an already-built UI bundle instead of building this tree's (e.g. an older commit's,
 #   to show a UI-side fix RED)
 #   --jobs N (default 6, env LP_MATRIX_JOBS): N complete hermetic stacks in parallel, each running every
@@ -37,11 +41,25 @@
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
-BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-6}; SHARD=""; PROBE=""
+BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-6}; SHARD=""; PROBE=""; CHANGED=""
 while [ $# -gt 0 ]; do
   case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
-    --jobs) JOBS=$2; shift ;; --shard) SHARD=$2; shift ;; *) echo "unknown arg $1"; exit 2 ;; esac; shift
+    --jobs) JOBS=$2; shift ;; --shard) SHARD=$2; shift ;;
+    --changed) CHANGED=HEAD; if [ $# -gt 1 ] && [ "${2#--}" = "$2" ]; then CHANGED=$2; shift; fi ;;
+    *) echo "unknown arg $1"; exit 2 ;; esac; shift
 done
+# --changed [<rev>]: only the cells the change can affect (scripts/matrix-cells-for.sh — the uncommitted change,
+# or everything since <rev>); FULL when it touches something central, nothing when the matrix covers none of it
+if [ -n "$CHANGED" ] && [ -z "$SHARD" ]; then
+  [ -n "$ONLY" ] && { echo "--changed and --only don't combine"; exit 2; }
+  echo "== cells for the change (${CHANGED/HEAD/uncommitted}):"
+  sel=$(bash "$ROOT/scripts/matrix-cells-for.sh" $([ "$CHANGED" = HEAD ] || echo "$CHANGED")) || exit 2
+  case "$sel" in
+    NONE) echo "== the matrix covers nothing in this change — skipped"; exit 0 ;;
+    FULL) echo "== → the full matrix" ;;
+    *) ONLY=$sel; echo "== → --only '$ONLY'" ;;
+  esac
+fi
 case "$JOBS" in ''|*[!0-9]*|0) echo "--jobs wants a positive number"; exit 2 ;; esac
 [ -n "$PROBE" ] && [ "$PROBE" != probe-matrix.js ] && JOBS=1
 SELF=$ROOT/scripts/$(basename "${BASH_SOURCE[0]}")

@@ -1701,31 +1701,35 @@ const KNOWN = [];
 async function runCell(stateName, ctlName) {
   const S = STATES[stateName], K_ = C[ctlName];
   const c = { state: stateName, control: ctlName, exp: { ...S.exp } };
+  // where each cell's time goes (cells.jsonl `phases`, ms) — what the matrix's speed work measures against
+  let tp = Date.now(); const ph = (c.phases = {}); const lap = (k) => { const n = Date.now(); ph[k] = (ph[k] ?? 0) + n - tp; tp = n; };
   [c.shown, c.other] = S.roles();
-  await reset(S.playlist?.());
+  await reset(S.playlist?.()); lap("reset");
   if (S.pre) await S.pre(c);
   if (K_.pre) await K_.pre(c); // before the UI loads: it reads overrides/settings at start, like a real session
   const logAt = logSizes();
-  await loadUi();
-  await S.enter(c);
+  await loadUi(); lap("ui");
+  await S.enter(c); lap("enter");
   if (c.ok === false) { // what the state's entry saw (a SETUP is usually load: the run's timing, not a product bug)
     const st = await ctl.call("state").catch(() => null);
     return { state: stateName, control: ctlName, result: "SETUP", violations: [`state ${stateName} not reached`],
       seen: st && { transitions: (st.transitions || []).map((t) => `${t.corr} ${t.phase} → ${TITLE(st.graph[t.to]?.path)}`), screen: Object.values(screen(st)).map(TITLE),
         current: TITLE((await http("GET", "/current")).json?.path) }, logs: logsSince(logAt) };
   }
-  c.before = await snapshot();
+  c.before = await snapshot(); lap("snap");
   const t0 = Date.now(); const h0 = httpLog.length;
   try { await K_.run(c); } catch (e) { return { ...c, result: "ERROR", violations: [`control failed: ${e.message}`] }; }
+  lap("run");
   if (c.skip) return { ...c, result: "SKIP" };
   if (K_.exp) Object.assign(c.exp, K_.exp);
   if (K_.flipPause) c.exp.paused = !c.exp.paused;
   if (K_.flipMute) c.exp.muted = !(c.exp.muted ?? false);
   if (K_.switch && c.noSettle) { await sleep(1500); c.exp.settled = true; } // paused: the cut's ramps wait for the resume
   else if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
+  lap("settle");
   if (!c.mid) c.exp.settled = c.exp.settled ?? !c.pending;
   if (c.mid) c.exp.settled = false;
-  c.after = await snapshot();
+  c.after = await snapshot(); lap("snap");
   c.evs = events.filter((e) => e._t >= t0);
   const v = [...oracle(c.after, c.exp), ...(K_.check ? K_.check(c, c.before, c.after) : [])];
   for (const e of c.evs) {
@@ -1749,8 +1753,9 @@ async function runCell(stateName, ctlName) {
   if (c.cli && c.cli.code !== 0) v.push(`--action exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
   // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`--action took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
+  lap("post");
   const known = v.length ? KNOWN.find(([re]) => re.test(`${stateName} × ${ctlName}`))?.[1] : undefined;
-  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings,
+  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings, phases: ph,
     target: c.target ? TITLE(c.target) : undefined, shown: c.shown ? TITLE(c.shown) : undefined,
     logs: v.length ? logsSince(logAt) : undefined,
     http: v.length ? httpLog.slice(h0).filter((r) => !asset.test(r.url)).map((r) => `+${r.t - t0}ms ${r.method} ${r.url.replace(U, "")} ${r.status}`) : undefined,
