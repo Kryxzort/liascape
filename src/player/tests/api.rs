@@ -4925,7 +4925,15 @@ fn render_worker_switch_picks_where_sources_render() {
     let mut c = srv.client();
     let a = create_src(&mut c, json!({"path": red, "loop": true}));
     show_all(&mut c, &a);
-    c.step(100);
+    let r = c.call("step", json!({"ms": 100}));
+    if r["ok"] != json!(true) {
+        // Seen once in ~10 runs (never in 60 loops of the same sequence): the first step's
+        // seek reply not in within 2 s — stepped mode, which never uses the worker. Keep the
+        // whole story for when it recurs.
+        let logs = c.ok("logs", json!({"limit": 200}));
+        let probe = c.ok("probe", json!({"name": "sources"}));
+        panic!("stepped: step failed: {r}\nsources: {probe}\nlogs: {logs}");
+    }
     let src = source_probe(&mut c, &a);
     let p = c.ok("probe", json!({"name": "sources"}));
     assert_eq!(src["render_mode"], json!("loop"), "stepped: {src}");
@@ -5252,4 +5260,237 @@ fn render_worker_death_fails_the_player() {
         !srv.path("run/livepaper/lp-player.sock").exists(),
         "socket left behind"
     );
+}
+
+// ------------------------------------------------- Phase 2: render worker A/B (measurement)
+
+const BENCH_1080P30: ClipSpec = ClipSpec::TestSrc {
+    w: 1920,
+    h: 1080,
+    fps: 30,
+    secs: 10,
+};
+const BENCH_4K60: ClipSpec = ClipSpec::TestSrc {
+    w: 3840,
+    h: 2160,
+    fps: 60,
+    secs: 6,
+};
+const BENCH_1080P120: ClipSpec = ClipSpec::TestSrc {
+    w: 1920,
+    h: 1080,
+    fps: 120,
+    secs: 6,
+};
+
+/// Per thread of `pid`: (comm, utime + stime in clock ticks).
+fn thread_ticks(pid: u32) -> std::collections::BTreeMap<u32, (String, u64)> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(rd) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let Ok(tid) = e.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(e.path().join("stat")) else {
+            continue;
+        };
+        let (Some(l), Some(r)) = (stat.find('('), stat.rfind(')')) else {
+            continue;
+        };
+        let comm = stat[l + 1..r].to_string();
+        let f: Vec<&str> = stat[r + 2..].split_whitespace().collect();
+        let ticks = f[11].parse::<u64>().unwrap_or(0) + f[12].parse::<u64>().unwrap_or(0);
+        out.insert(tid, (comm, ticks));
+    }
+    out
+}
+
+/// CPU over `secs` as % of one core: (the loop thread, `lp-render`, the whole process).
+fn cpu_split(pid: u32, secs: f64) -> (f64, f64, f64) {
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
+    let a = thread_ticks(pid);
+    std::thread::sleep(Duration::from_secs_f64(secs));
+    let b = thread_ticks(pid);
+    let (mut main, mut render, mut total) = (0u64, 0u64, 0u64);
+    for (tid, (comm, t1)) in &b {
+        let t0 = a.get(tid).map_or(0, |(_, t)| *t);
+        let d = t1.saturating_sub(t0);
+        total += d;
+        if *tid == pid {
+            main += d;
+        } else if comm == "lp-render" {
+            render += d;
+        }
+    }
+    let pct = |t: u64| t as f64 / hz / secs * 100.0;
+    (pct(main), pct(render), pct(total))
+}
+
+/// The `frames` probe's first output, `all` window (reset after reading).
+fn frames_all(c: &mut Client) -> Value {
+    let f = c.ok("probe", json!({"name": "frames", "args": {"reset": true}}));
+    f["outputs"][0]["all"].clone()
+}
+
+/// Phase 2 measurement (not a check — `cargo test --release --test api -- --ignored
+/// bench_render_worker_ab --nocapture`; rounds `LP_BENCH_ROUNDS`, default 3): the render
+/// worker off vs on, interleaved (off/on, then on/off, …), each run on a fresh server.
+/// Prints one `BENCH {json}` line per run:
+/// - `switch`: the I5 switch loop (`switch_loop_busy`, 640×360 + 320×180): per-switch
+///   `max_busy_ms` (warm median, worst), `max_open_ms` (worst);
+/// - `cpu`: steady state on two 1920×1080@60 outputs, % of one core for the loop thread,
+///   `lp-render` and the process — a 1080p30 clip (`hwdec` no) and a 4K60 one (`nvdec-copy`);
+/// - `pace`: one 1920×1080@240 output, `--redraw-policy content`, a 1080p120 clip at 2× (240
+///   fps content), then 2× ± 0.05 every 90 ms, then a random 1.6–2.4× every 90 ms (192–288
+///   fps: every content interval < 1.5 refresh periods, so each `missed` is a hitch, never a
+///   slow frame rate): the `frames` probe's `all` window per 2 s (`missed` = intervals > 1.5
+///   refresh periods, `fps`, p95, max) and the loop's `max_busy_ms`.
+///
+/// `LP_BENCH_ONLY=switch,cpu,pace` runs a subset.
+#[test]
+#[ignore]
+fn bench_render_worker_ab() {
+    let rounds: usize = std::env::var("LP_BENCH_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3);
+    let c1080 = s(&ensure_clip("bench_testsrc_1080p30", BENCH_1080P30)).to_string();
+    let c4k = s(&ensure_clip("bench_testsrc_4k60", BENCH_4K60)).to_string();
+    let c120 = s(&ensure_clip("bench_testsrc_1080p120", BENCH_1080P120)).to_string();
+    for round in 0..rounds {
+        let order = if round % 2 == 0 {
+            ["off", "on"]
+        } else {
+            ["on", "off"]
+        };
+        let only = std::env::var("LP_BENCH_ONLY").unwrap_or_default();
+        let run = |k: &str| only.is_empty() || only.split(',').any(|o| o == k);
+        for mode in order {
+            // 1. Switch cost.
+            if run("switch") {
+                let Some(srv) = real_serve(&["--render-worker", mode]) else {
+                    return;
+                };
+                let mut c = srv.client();
+                let (busy, open) = switch_loop_busy(&mut c);
+                let warm = sorted(&busy[1..]);
+                println!(
+                    "BENCH {}",
+                    json!({"round": round, "mode": mode, "kind": "switch",
+                       "busy": busy, "open": open,
+                       "warm_median": warm[warm.len() / 2], "warm_worst": warm[warm.len() - 1],
+                       "open_worst": sorted(&open)[open.len() - 1]})
+                );
+                drop(c);
+                drop(srv);
+            }
+
+            // 2. Steady-state CPU.
+            if run("cpu") {
+                let Some(srv) = real_serve(&[
+                    "--render-worker",
+                    mode,
+                    "--outputs",
+                    "1920x1080@60,1920x1080@60",
+                ]) else {
+                    return;
+                };
+                let pid = srv.child.as_ref().unwrap().id();
+                let mut c = srv.client();
+                for (name, clip, hwdec) in [("1080p30", &c1080, ""), ("4k60", &c4k, "nvdec-copy")] {
+                    let r = c.ok(
+                        "transition",
+                        json!({"outputs": "out:*",
+                           "to": {"path": clip, "loop": true, "hwdec": hwdec}}),
+                    );
+                    let b = r["to"].as_str().unwrap().to_string();
+                    wait_playing(&mut c, &b, 0.5);
+                    std::thread::sleep(Duration::from_millis(1500));
+                    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+                    let (main, render, total) = cpu_split(pid, 6.0);
+                    let lp = c.ok("probe", json!({"name": "loop"}));
+                    let src = source_probe(&mut c, &b);
+                    println!(
+                        "BENCH {}",
+                        json!({"round": round, "mode": mode, "kind": "cpu", "clip": name,
+                           "loop_pct": main, "render_pct": render, "total_pct": total,
+                           "max_busy_ms": lp["max_busy_ms"], "render": src["render"],
+                           "hwdec_current": src["mpv_hwdec_current"]})
+                    );
+                }
+                drop(c);
+                drop(srv);
+            }
+
+            // 3. Pacing with high-fps content under speed jitter.
+            if !run("pace") {
+                continue;
+            }
+            let Some(srv) = real_serve(&[
+                "--render-worker",
+                mode,
+                "--outputs",
+                "1920x1080@240",
+                "--redraw-policy",
+                "content",
+            ]) else {
+                return;
+            };
+            let mut c = srv.client();
+            let a = create_src(&mut c, json!({"path": c120, "loop": true, "speed": 2.0}));
+            show_all(&mut c, &a);
+            wait_playing(&mut c, &a, 0.5);
+            std::thread::sleep(Duration::from_millis(1000));
+            let speed_path = format!("{a}.speed");
+            let mut seed = 0x9e37_79b9_u32.wrapping_add(round as u32);
+            let mut rnd = move || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as f64 / u32::MAX as f64
+            };
+            for phase in ["steady2x", "jitter2x", "random"] {
+                let _ = frames_all(&mut c);
+                c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+                let mut windows = Vec::new();
+                for _ in 0..3 {
+                    let t = Instant::now();
+                    let mut k = 0u32;
+                    while t.elapsed() < Duration::from_secs(2) {
+                        let v = match phase {
+                            "steady2x" => None,
+                            "jitter2x" => Some(if k.is_multiple_of(2) { 2.05 } else { 1.95 }),
+                            _ => Some(1.6 + 0.8 * rnd()),
+                        };
+                        if let Some(v) = v {
+                            c.ok("set", json!({"path": speed_path, "value": v}));
+                        }
+                        k += 1;
+                        std::thread::sleep(Duration::from_millis(90));
+                    }
+                    windows.push(frames_all(&mut c));
+                }
+                let lp = c.ok("probe", json!({"name": "loop"}));
+                let missed: Vec<u64> = windows
+                    .iter()
+                    .map(|w| w["missed"].as_u64().unwrap_or(0))
+                    .collect();
+                println!(
+                    "BENCH {}",
+                    json!({"round": round, "mode": mode, "kind": "pace", "phase": phase,
+                           "missed_per_2s": missed,
+                           "missed_per_s": missed.iter().sum::<u64>() as f64 / 6.0,
+                           "fps": windows.iter().map(|w| w["fps"].clone()).collect::<Vec<_>>(),
+                           "p95_ms": windows.iter().map(|w| w["p95_ms"].clone()).collect::<Vec<_>>(),
+                           "max_ms": windows.iter().map(|w| w["max_ms"].clone()).collect::<Vec<_>>(),
+                           "max_busy_ms": lp["max_busy_ms"]})
+                );
+                if phase != "random" {
+                    c.ok("set", json!({"path": speed_path, "value": 2.0}));
+                }
+            }
+        }
+    }
 }
