@@ -885,6 +885,27 @@ C["race:indexSaveLoad"] = { states: ["idle"],
     await Promise.all([...writers, ...readers]);
     c.race = { bad, n, first };
   }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /library during index saves lost the overrides: ${JSON.stringify(c.race.first)} (k1 volume 30, k2 speed 0.8)`] : []) };
+// …and the lost update: every writer of an index must read-modify-write it under ONE lock. Trash / undo (and the WE
+// sync, a direct-download reconcile) loaded the index, worked, and saved their stale copy back — over an override
+// saved meanwhile (a slider released while another item is trashed: the release is gone, "follows the global").
+C["race:indexLostUpdate"] = { states: ["idle"], async run(c) {
+    const s = await getSettings();
+    const vals = Array.from({ length: 60 }, (_, i) => 11 + i).filter((v) => v !== s.volume).slice(0, 40);
+    const item = ((await http("GET", "/library")).json || []).find((x) => x.videoPath === K[3]);
+    let lost = 0, first = null, cycles = 0;
+    const writer = (async () => { for (const v of vals) {
+      await post("/library/volume", { path: K[0], intValue: v });
+      const got = ((await http("GET", "/library")).json || []).find((x) => x.videoPath === K[0])?.volumeOverride;
+      if (got !== v) { lost++; first ??= { wrote: v, read: got ?? null }; } } })();
+    const trasher = (async () => { for (let i = 0; i < 15 && item; i++) { await post("/library/trash", { items: [item] }); await post("/library/undo"); cycles++; } })();
+    await Promise.all([writer, trasher]);
+    await sleep(200);
+    const fin = ((await http("GET", "/library")).json || []).find((x) => x.videoPath === K[0])?.volumeOverride;
+    c.race = { lost, first, n: vals.length, cycles, last: vals.at(-1), fin: fin ?? null, item: !!item };
+  }, check: (c) => [
+    ...(!c.race.item ? ["k4 not in the library — nothing to trash"] : []),
+    ...(c.race.lost ? [`${c.race.lost}/${c.race.n} k1 volume saves were gone right after (trash/undo of k4 ×${c.race.cycles} saved a stale index over them): first ${JSON.stringify(c.race.first)}`] : []),
+    ...(c.race.fin !== c.race.last ? [`k1's override ends at ${c.race.fin}, the last save was ${c.race.last}`] : [])] };
 
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
