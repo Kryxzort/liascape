@@ -75,7 +75,7 @@ public static class ServerHost
         app.Start();
         var port = new Uri(app.Urls.First()).Port;
         Directory.CreateDirectory(ConfigDir);
-        File.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this
+        AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
         Console.WriteLine($"livepaper --serve listening on 127.0.0.1:{port}");
 
         // The serve backend owns the AudioMonitor in-process while running: take over from any detached

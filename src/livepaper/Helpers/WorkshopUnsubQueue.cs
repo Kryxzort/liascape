@@ -48,7 +48,7 @@ public static class WorkshopUnsubQueue
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(s));
+            AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(s));
         }
         catch { }
     }
