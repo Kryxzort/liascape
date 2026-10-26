@@ -634,13 +634,17 @@ public static class LpPlayerMedia
     // ---- properties --------------------------------------------------------------------------------
     // A global setting → `srcs:*` (layer props → `lay:*:main`; mute ramps over 30 ms, never a step).
     // gain.user / speed: `/settings` passes the effective value (override ?? global) of the PLAYING item;
-    // any other source in srcs:* (an in-flight transition's other side) then gets ITS own effective value.
+    // any other source (an in-flight transition's other side, a pending B) gets ITS own effective value —
+    // set per source, never `srcs:*` first and fixed up after: that broadcast handed every other source
+    // the playing item's volume + speed for one round trip on every settings save (a theme change mid-
+    // effect blipped the outgoing wallpaper to the incoming one's volume — UI matrix `appear:*`).
     // item 6: every call here uses QuickMs — a queued property set, never the 2000 ms default.
     public static List<string> Set(string prop, object value)
     {
         var client = C;
         if (!client.SocketExists) return []; // nothing plays → nothing to set (sources take settings at creation)
         const int q = LpPlayerClient.QuickMs;
+        if (prop is "gain.user" or "speed" && SetPerItem(client, prop, value) is { } done) return done;
         try
         {
             if (prop is "fit" or "viewport" or "opacity")
@@ -662,6 +666,36 @@ public static class LpPlayerMedia
             return t;
         }
         catch (LpPlayerException e) { LpPlayerClient.Log($"set {prop}={value} failed — {e}"); return []; }
+    }
+
+    // gain.user / speed on every live media source, each with its own value: `value` for the playing item's
+    // source(s), `override ?? global` for any other item's. From the cached source map; null = no map (no
+    // answer) → the caller falls back to `srcs:*` + FixupPerItem. A source gone meanwhile → re-read once.
+    private static List<string>? SetPerItem(LpPlayerClient client, string prop, object value)
+    {
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            if (SourceMap(client) is not { } map) return null;
+            var cur = CurrentPath(); // null (no output shows one): every source takes its own
+            var s = SettingsService.Load();
+            var done = new List<string>();
+            bool stale = false;
+            foreach (var (path, ids) in map)
+            {
+                object v = SamePath(path, cur) ? value
+                    : prop == "gain.user" ? MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume)
+                    : Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
+                foreach (var id in ids)
+                {
+                    try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs); done.Add(id); }
+                    catch (LpPlayerException e) when (e.Code == "no_such_node") { stale = true; }
+                    catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop} failed — {e}"); }
+                }
+            }
+            if (!stale) return done;
+            InvalidateSources();
+        }
+        return null;
     }
 
     private static void FixupPerItem(LpPlayerClient client, string prop, List<string> targets)
