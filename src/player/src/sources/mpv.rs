@@ -9,14 +9,16 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::{CStr, c_char, c_void};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use glow::HasContext;
 use serde_json::{Map, Value};
 
+use super::render_worker::{Attached, Frame, RenderWorker, SyncFence};
 use super::{Source, SourceEvent, bad_type, io_error, num, out_of_range, unsupported};
 use crate::gfx::{Fbo, Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
@@ -127,7 +129,7 @@ pub fn fence_stub_calls() -> u64 {
 
 /// `get_proc_address` for `mpv_render_context_create`: everything from
 /// `eglGetProcAddress`, except `glFenceSync` → [`stub_fence_sync`].
-unsafe extern "C" fn get_proc_address(_ctx: *mut c_void, name: *const c_char) -> *mut c_void {
+pub(crate) unsafe extern "C" fn get_proc_address(_ctx: *mut c_void, name: *const c_char) -> *mut c_void {
     if unsafe { CStr::from_ptr(name) }.to_bytes() == b"glFenceSync" {
         return stub_fence_sync as *mut c_void;
     }
@@ -137,7 +139,7 @@ unsafe extern "C" fn get_proc_address(_ctx: *mut c_void, name: *const c_char) ->
 /// Wakeup + render-update callback (any mpv thread): bump the eventfd whose number is the
 /// callback context. Only `write(2)` — no mpv calls, no allocation, never blocks
 /// (`EFD_NONBLOCK`; a saturated counter just means "already signalled").
-unsafe extern "C" fn on_wake(ctx: *mut c_void) {
+pub(crate) unsafe extern "C" fn on_wake(ctx: *mut c_void) {
     let fd = ctx as usize as RawFd;
     let one: u64 = 1;
     unsafe { libc::write(fd, &one as *const u64 as *const c_void, 8) };
@@ -330,18 +332,68 @@ type Target = (Tex, Fbo);
 pub struct PreparedCore {
     handle: Option<Handle>,
     wake: Option<OwnedFd>,
+    /// Phase 2: its render context already lives on the render worker
+    /// ([`PreparedCore::attach_render`]).
+    render: Option<Attached>,
 }
 
-// SAFETY: libmpv's client API is thread-safe (`client.h`); a prepared core has no render
-// context yet and is only ever moved between threads, never used from two at once.
+// SAFETY: libmpv's client API is thread-safe (`client.h`); a prepared core is only ever
+// moved between threads, never used from two at once (a render context attached to it is
+// the render worker's, which only it touches).
 unsafe impl Send for PreparedCore {}
+
+impl PreparedCore {
+    /// Phase 2 (render worker): give this core's rendering to `worker` — it creates the render
+    /// context on its own context (`RenderWorker::attach`, which this waits for — call it on
+    /// an `lp-open` thread, never the loop). A worker that can't leaves the core as it was:
+    /// the source then renders on the loop. Only a timed-out attach (the core stayed with
+    /// the worker, which reaps it) is an error.
+    pub(crate) fn attach_render(mut self, worker: &Arc<RenderWorker>) -> Result<Self, ApiError> {
+        let (Some(h), Some(fd)) = (self.handle.take(), self.wake.as_ref().map(|w| w.as_raw_fd()))
+        else {
+            return Ok(self);
+        };
+        match worker.attach(h, fd) {
+            Ok((h, att)) => {
+                self.handle = Some(h);
+                self.render = Some(att);
+                Ok(self)
+            }
+            Err(Some(h)) => {
+                self.handle = Some(h);
+                Ok(self)
+            }
+            Err(None) => {
+                // The core's wakeup callback still writes this eventfd until the worker
+                // clears it: keep the fd open for good rather than let its number be reused.
+                if let Some(w) = self.wake.take() {
+                    let _ = w.into_raw_fd();
+                }
+                Err(io_error(
+                    "render worker didn't answer in time; the mpv core was handed to it",
+                ))
+            }
+        }
+    }
+}
 
 impl Drop for PreparedCore {
     fn drop(&mut self) {
         if let Some(h) = self.handle.take() {
             // No write to the eventfd once this returns; the fd closes after (field drop).
             unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
-            super::reaper::reap(h);
+            match self.render.take() {
+                // The worker frees the render context (its context current), then reaps.
+                Some(att) => {
+                    if let Err(Some(h)) = att.worker.free(att.id, Some(h), Vec::new()) {
+                        // Worker gone (only at exit): never free a render context without
+                        // its context — leak it, silent.
+                        let _ = h.command_async(0, &["stop"]);
+                        std::mem::forget(h);
+                    }
+                }
+                None => super::reaper::reap(h),
+            }
         }
     }
 }
@@ -361,6 +413,25 @@ pub struct MpvSource {
     back: Option<Target>,
     /// `back` holds a frame of the current load, rendered after its FILE_LOADED.
     back_valid: bool,
+
+    // Phase 2 (render worker, § Sources "Render worker"): `Some` = the render context lives
+    // on the worker; `render`/`front`/`back` above stay `None` and these hold the textures
+    // the worker handed over (it owns their FBOs and deletes them).
+    worker: Option<Attached>,
+    w_front: Option<Tex>,
+    w_back: Option<Tex>,
+    /// The newest frame taken from the worker whose fence hadn't signalled yet.
+    w_pending: Option<Frame>,
+    /// The size last told to the worker.
+    w_size: Option<(u32, u32)>,
+    /// Frames whose fence wasn't signalled when first seen (kept the previous frame).
+    w_adopt_deferred: u64,
+    w_adopted: u64,
+    /// FILE_LOADED events pumped (every one, current load or not — the worker's weak client
+    /// counts the same), and that count at the current load's FILE_LOADED: a worker frame
+    /// tagged with it was rendered after that FILE_LOADED.
+    fl_seen: u64,
+    loaded_fl: Option<u64>,
 
     kind: &'static str,
     path: String,
@@ -642,6 +713,7 @@ impl MpvSource {
         Ok(PreparedCore {
             handle: Some(handle),
             wake: Some(wake),
+            render: None,
         })
     }
 
@@ -705,22 +777,30 @@ impl MpvSource {
         // (and its wakeup callback) is gone.
         let wake = core.wake.take().expect("a prepared core has its eventfd");
         let handle = core.handle.take().expect("a prepared core has its handle");
+        // Phase 2: a render context made on the render worker (nothing to create here; from
+        // now on `MpvSource::drop` hands it back to the worker).
+        let worker = core.render.take();
         drop(core);
         let wake_ctx = wake.as_raw_fd() as usize as *mut c_void;
 
         // The render context must be created with *this* Gfx's context current — don't
         // assume it is (another Gfx may have been made current since).
         let gl = gfx.keep_alive();
-        let render = {
-            let cur = gl.make_current();
-            if !cur.is_current() {
-                return Err(io_error("can't make the source's GL context current"));
+        let render = match &worker {
+            Some(_) => None,
+            None => {
+                let cur = gl.make_current();
+                if !cur.is_current() {
+                    return Err(io_error("can't make the source's GL context current"));
+                }
+                // SAFETY: context current (above); Drop frees the render context with it
+                // current and before the core.
+                let r = unsafe { RenderContext::create(&handle, get_proc_address) }
+                    .map_err(api_err)?;
+                unsafe { r.set_update_callback(Some(on_wake), wake_ctx) };
+                Some(r)
             }
-            // SAFETY: context current (above); Drop frees the render context with it
-            // current and before the core.
-            unsafe { RenderContext::create(&handle, get_proc_address) }.map_err(api_err)?
         };
-        unsafe { render.set_update_callback(Some(on_wake), wake_ctx) };
 
         let mut writable = BTreeMap::new();
         for (name, pd) in props::schema_for_kind(NodeKind::Source) {
@@ -732,13 +812,22 @@ impl MpvSource {
         writable.insert("path".into(), PropValue::Str(path.into()));
 
         let mut src = MpvSource {
-            render: Some(render),
+            render,
             handle: Some(handle),
             wake,
             gl,
             front: None,
             back: None,
             back_valid: false,
+            worker,
+            w_front: None,
+            w_back: None,
+            w_pending: None,
+            w_size: None,
+            w_adopt_deferred: 0,
+            w_adopted: 0,
+            fl_seen: 0,
+            loaded_fl: None,
             kind,
             path: path.to_string(),
             props: writable,
@@ -1072,6 +1161,7 @@ impl MpvSource {
         self.props
             .insert("path".into(), PropValue::Str(path.into()));
         self.file_loaded = false;
+        self.loaded_fl = None;
         self.restarted = false;
         self.ready = false;
         self.back_valid = false;
@@ -1284,6 +1374,7 @@ impl MpvSource {
                     self.idle_after_end = false;
                     if self.is_current() {
                         self.file_loaded = false;
+                        self.loaded_fl = None;
                         self.restarted = false;
                         self.time_pos = None;
                         self.duration = None;
@@ -1291,8 +1382,12 @@ impl MpvSource {
                     }
                 }
                 Event::FileLoaded => {
+                    // Counted for every load (the render worker's weak client sees the same
+                    // broadcast events in the same order).
+                    self.fl_seen += 1;
                     if self.is_current() {
                         self.file_loaded = true;
+                        self.loaded_fl = Some(self.fl_seen);
                     }
                 }
                 Event::PlaybackRestart => {
@@ -1479,6 +1574,156 @@ impl MpvSource {
         }
     }
 
+    /// Phase 2 (render worker): `update`'s GL half when the render context lives on the
+    /// worker — tell it the size, adopt the newest complete frame it handed over (only once
+    /// its fence has signalled: else the previous frame stays, re-checked next call), front
+    /// vs staging back and Ready promotion exactly as the loop renderer does, and give back
+    /// every texture no longer held (a sampled one with a release fence).
+    fn update_worker(&mut self, gfx: &Gfx) -> bool {
+        let keep = self.gl.clone();
+        let cur = keep.make_current();
+        if !cur.is_current() {
+            return false;
+        }
+        let Some(att) = self.worker.as_ref() else {
+            return false;
+        };
+        let ex = Arc::clone(&att.ex);
+        let worker = Arc::clone(&att.worker);
+        let gl = &gfx.gl;
+        let size = self.target_size();
+        let mut wake = false;
+        let (frame, error) = {
+            let mut st = ex.lock();
+            if size != self.w_size {
+                st.size = size;
+                self.w_size = size;
+                wake = true;
+            }
+            (st.ready.take(), st.error.take())
+        };
+        if let Some(e) = error {
+            self.last_error_log = Some(e);
+        }
+        let mut give_back: Vec<(Tex, Option<SyncFence>)> = Vec::new();
+        let mut sampled_released = false;
+        if let Some(f) = frame
+            && let Some(old) = self.w_pending.replace(f)
+        {
+            // Superseded before its fence signalled: never sampled.
+            if let Some(fence) = old.fence {
+                fence.delete(gl);
+            }
+            give_back.push((old.tex, None));
+        }
+        let mut changed = false;
+        let signalled = self
+            .w_pending
+            .as_ref()
+            .map(|f| f.fence.as_ref().is_none_or(|fence| fence.signalled(gl)));
+        match signalled {
+            Some(false) => self.w_adopt_deferred += 1,
+            Some(true) => {
+                let f = self.w_pending.take().expect("checked above");
+                if let Some(fence) = f.fence {
+                    fence.delete(gl);
+                }
+                self.w_adopted += 1;
+                if self.ready {
+                    if let Some(old) = self.w_front.replace(f.tex) {
+                        give_back.push((old, SyncFence::insert(gl)));
+                        sampled_released = true;
+                    }
+                    changed = true;
+                } else {
+                    // Not ready yet (or a superseded load's leftovers): stage it. Of the
+                    // current load iff rendered after its FILE_LOADED (the worker's tag).
+                    if let Some(old) = self.w_back.replace(f.tex) {
+                        give_back.push((old, None));
+                    }
+                    self.back_valid = self.is_current()
+                        && self.file_loaded
+                        && self.loaded_fl == Some(f.file_loaded);
+                }
+            }
+            None => {}
+        }
+        // Ready = restarted AND a frame of the current load staged, in either order — the
+        // same rule as the loop renderer; the back becomes the front in this very call.
+        if !self.ready && self.restarted && self.back_valid {
+            if let Some(new) = self.w_back.take()
+                && let Some(old) = self.w_front.replace(new)
+            {
+                give_back.push((old, SyncFence::insert(gl)));
+                sampled_released = true;
+            }
+            self.back_valid = false;
+            self.ready = true;
+            self.pending.push(SourceEvent::Ready);
+            changed = true;
+        }
+        if sampled_released {
+            // The worker `glWaitSync`s these; another context can only wait on a flushed one.
+            unsafe { gl.flush() };
+        }
+        if !give_back.is_empty() {
+            ex.lock().returned.extend(give_back);
+            wake = true;
+        }
+        if wake {
+            worker.wake();
+        }
+        drop(cur);
+        changed
+    }
+
+    /// `"worker"` (Phase 2 render worker) or `"loop"` — where this source renders (probe).
+    pub fn render_mode(&self) -> &'static str {
+        if self.worker.is_some() {
+            "worker"
+        } else {
+            "loop"
+        }
+    }
+
+    /// The `sources` probe's per-source `render` object (worker-side timings + adoption
+    /// counters; `null` for a loop-rendered source).
+    pub fn render_stats(&self) -> Value {
+        let Some(att) = &self.worker else {
+            return Value::Null;
+        };
+        let st = att.ex.lock();
+        serde_json::json!({
+            "renders": st.renders,
+            "first_render_ms": st.first_render_ms,
+            "max_render_ms": st.max_render_ms,
+            "last_render_ms": st.last_render_ms,
+            "superseded": st.superseded,
+            "adopted": self.w_adopted,
+            "adopt_deferred": self.w_adopt_deferred,
+        })
+    }
+
+    /// `Drop` for a worker-rendered source: no GL here — the core's wakeup callback is
+    /// cleared (nothing writes the eventfd after this), then the core and the fence of a frame
+    /// still waiting go to the worker, which frees the render context with its own context
+    /// current, deletes every texture the slot made (including the ones this source held)
+    /// and only then hands the core to the reaper.
+    fn drop_worker(&mut self, att: Attached) {
+        if let Some(h) = &self.handle {
+            unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
+        }
+        let fences: Vec<SyncFence> = self.w_pending.take().and_then(|f| f.fence).into_iter().collect();
+        self.w_front = None;
+        self.w_back = None;
+        let core = self.handle.take();
+        if let Err(Some(h)) = att.worker.free(att.id, core, fences) {
+            // Worker gone (only at exit): leak the render context and the core, silent.
+            let _ = h.command_async(0, &["stop"]);
+            std::mem::forget(h);
+        }
+    }
+
     /// Native display size, capped at [`MAX_TEXTURE_EDGE`] (aspect kept). `None` until
     /// mpv has reported `dwidth`/`dheight`.
     fn target_size(&self) -> Option<(u32, u32)> {
@@ -1510,8 +1755,12 @@ fn json_prop(name: &str, v: &Value) -> Result<PropValue, ApiError> {
 /// Undo the GL state libmpv's renderer leaves behind, so the compositor (which sets its
 /// own blend/viewport/program per draw) starts from defaults.
 fn reset_gl_state(gfx: &Gfx) {
+    reset_gl(&gfx.gl);
+}
+
+/// [`reset_gl_state`] on any context (the render worker's own after each render).
+pub(crate) fn reset_gl(gl: &glow::Context) {
     unsafe {
-        let gl = &gfx.gl;
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         gl.use_program(None);
         gl.bind_vertex_array(None);
@@ -1596,6 +1845,9 @@ impl Source for MpvSource {
             }
             return false;
         }
+        if self.worker.is_some() {
+            return self.update_worker(gfx);
+        }
         let cur = self.gl.make_current(); // a no-op unless another context is current
         if !cur.is_current() {
             return false;
@@ -1652,11 +1904,11 @@ impl Source for MpvSource {
     }
 
     fn texture(&self) -> Option<&Tex> {
-        self.front.as_ref().map(|(t, _)| t)
+        self.front.as_ref().map(|(t, _)| t).or(self.w_front.as_ref())
     }
 
     fn size(&self) -> (u32, u32) {
-        self.front.as_ref().map_or((0, 0), |(t, _)| (t.w, t.h))
+        self.texture().map_or((0, 0), |t| (t.w, t.h))
     }
 
     fn apply(&mut self, prop: &str, v: &PropValue) -> Result<(), ApiError> {
@@ -1862,6 +2114,10 @@ impl Source for MpvSource {
 
 impl Drop for MpvSource {
     fn drop(&mut self) {
+        if let Some(att) = self.worker.take() {
+            self.drop_worker(att);
+            return;
+        }
         // 1. Render context + our FBOs/textures, with the GL context current
         //    (lp-transition gotcha). `gl` keeps the EGL context alive even if the Gfx is
         //    already gone, and the guard restores whatever was current before.

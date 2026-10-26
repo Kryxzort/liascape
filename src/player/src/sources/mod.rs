@@ -19,11 +19,13 @@ pub mod color;
 pub mod host;
 pub mod mpv;
 pub mod reaper;
+pub mod render_worker;
 pub mod snapshot;
 
 pub use color::ColorSource;
 pub use host::SourceHost;
 pub use mpv::{MpvSource, PreparedCore, StepStatus};
+pub use render_worker::RenderWorker;
 pub use snapshot::SnapshotSource;
 
 use crate::gfx::{Gfx, Tex};

@@ -16,7 +16,9 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 
-use super::{ColorSource, MpvSource, PreparedCore, SnapshotSource, Source, SourceEvent};
+use super::{
+    ColorSource, MpvSource, PreparedCore, RenderWorker, SnapshotSource, Source, SourceEvent,
+};
 use crate::anim::PropPath;
 use crate::gfx::{Gfx, Tex};
 use crate::graph::ApiError;
@@ -231,6 +233,9 @@ pub struct SourceHost {
     opening: BTreeMap<String, Opening>,
     /// I7: bumped by every `set_audio_route` (a core prepared before it is re-routed).
     route_gen: u64,
+    /// Phase 2: async opens hand their core's rendering to this worker (§ Sources "Render
+    /// worker"); `None` = every mpv source renders on the loop.
+    render_worker: Option<Arc<RenderWorker>>,
 }
 
 impl SourceHost {
@@ -248,6 +253,7 @@ impl SourceHost {
             async_open: None,
             opening: BTreeMap::new(),
             route_gen: 0,
+            render_worker: None,
         }
     }
 
@@ -293,6 +299,18 @@ impl SourceHost {
     /// loop thread). `None` = synchronous opens (the default).
     pub fn set_async_open(&mut self, waker: Option<OpenWaker>) {
         self.async_open = waker;
+    }
+
+    /// Phase 2 (§ Sources "Render worker"): render every mpv source opened asynchronously
+    /// from now on on `worker` (its `lp-open` job attaches the core there). Synchronous opens
+    /// (stepped mode, the harnesses, a pool that can't start a thread) keep rendering on the
+    /// loop. `None` = off.
+    pub fn set_render_worker(&mut self, worker: Option<Arc<RenderWorker>>) {
+        self.render_worker = worker;
+    }
+
+    pub fn render_worker(&self) -> Option<&Arc<RenderWorker>> {
+        self.render_worker.as_ref()
     }
 
     /// Sources whose core is still being created (probes/bounds).
@@ -746,6 +764,7 @@ impl SourceHost {
         // the last reference (`PreparedCore::drop` → reaper), as before.
         let weak = Arc::downgrade(&slot);
         let opts = self.base_opts.clone();
+        let worker = self.render_worker.clone();
         OPENING.fetch_add(1, Ordering::SeqCst);
         let job: PoolJob = Box::new(move || {
             let Some(slot) = weak.upgrade() else {
@@ -753,7 +772,11 @@ impl SourceHost {
                 OPENING.fetch_sub(1, Ordering::SeqCst);
                 return;
             };
-            let r = MpvSource::prepare_core(&opts);
+            // Phase 2: the render context is made on the render worker too, not the loop.
+            let r = MpvSource::prepare_core(&opts).and_then(|core| match &worker {
+                Some(w) => core.attach_render(w),
+                None => Ok(core),
+            });
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
             drop(slot);
             OPENING.fetch_sub(1, Ordering::SeqCst);

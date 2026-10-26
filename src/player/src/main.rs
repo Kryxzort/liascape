@@ -4,7 +4,7 @@
 //! lp-player --version
 //! lp-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
 //!                 [--log-level error|warn|info|debug|trace] [--restore] [--debug]
-//!                 [--no-supervise]                                  (Wayland outputs)
+//!                 [--no-supervise] [--render-worker on|off]          (Wayland outputs)
 //! lp-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
 //!                 [same options]
 //! lp-player ctl <verb> ['<json args>']
@@ -35,7 +35,7 @@ const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[
                            [--redraw-policy content|every_tick]] [--clock real|stepped] \
                            [--ao <mpv ao>] [--socket <path>] \
                            [--log-level error|warn|info|debug|trace] [--restore] \
-                           [--no-supervise] [--debug]";
+                           [--no-supervise] [--debug] [--render-worker on|off]";
 
 fn serve_main(args: &[String]) -> ExitCode {
     let mut headless = false;
@@ -51,6 +51,7 @@ fn serve_main(args: &[String]) -> ExitCode {
     let mut restarted = None;
     let mut redraw_content = false;
     let mut debug = false;
+    let mut render_worker: Option<bool> = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| -> Result<String, String> {
@@ -89,6 +90,12 @@ fn serve_main(args: &[String]) -> ExitCode {
                     }
                 }
                 "--debug" => debug = true,
+                "--render-worker" => {
+                    let v = val("--render-worker")?;
+                    render_worker = Some(lp_player::runtime::parse_on_off(&v).ok_or_else(
+                        || format!("--render-worker {v:?}: expected on|off"),
+                    )?);
+                }
                 "--socket" => socket = Some(std::path::PathBuf::from(val("--socket")?)),
                 "--log-level" => {
                     let l = val("--log-level")?;
@@ -158,6 +165,7 @@ fn serve_main(args: &[String]) -> ExitCode {
         }),
         redraw_content,
         debug,
+        render_worker: lp_player::runtime::render_worker_enabled(render_worker),
     };
     match serve(opts) {
         Ok(()) => ExitCode::SUCCESS,
