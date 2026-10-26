@@ -196,7 +196,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
       the playing item from the strip restarted the rotation from the top (now: from its place).
       `LP_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
-      **Round 3** (2026-10-26): 40 controls / 110 cells. The rest of the global Settings page: Rotation
+      **Round 3** (2026-10-26): 42 controls / 112 cells. The rest of the global Settings page: Rotation
       wait-for-end / advance-on-end vs a playlist following the globals (`playlistGlobal` / `pendingGlobal`)
       and one with its own override, the playlist's "Override global rotation" both ways while armed;
       Normalize audio (on / off / target preset / switched on unmeasured / then next / across a NoAudio round
@@ -210,7 +210,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       order a shuffle plays (the backend's contract: each cycle one pass in a fresh order, no repeat across
       cycles, shuffle on mid-session plays the rest once first, previous walks back through what played,
       Sequential again = the strip's order). Seven chains of three or more controls. The volume keybinds with
-      overridden items. Fixed: normalization reached `cur:*` only — an effect's A, a pending B and every
+      overridden items. Read-while-save races on playlist_state.json and index.json. Fixed: normalization reached `cur:*` only — an effect's A, a pending B and every
       source while no output shows one kept the old `af` (RED 9 of 20); a loudness measurement landing while
       its item played was never applied, it played un-normalized until its next switch (RED 3 of 3); every
       settings save (a theme change too: the UI posts the whole object) set `srcs:*` to the playing item's
@@ -219,6 +219,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       pushed the new global onto a playing item with its own volume — it jumped off its override until the
       next settings save snapped it back (RED 10 of 10). Decided: the keybind is the keyboard twin of the global
       slider, so an overridden item keeps its volume (option: make it bump the playing item's override).
+      playlist_state.json and the library's index.json were written in place: a read mid-save got a null
+      playlist (the UI's init then held the DEFAULT playlist settings — the full run's pending × plAdvanceOff
+      failed that way) or an empty index (every override read "follows the global") — RED 3–12 of 240 / 7–13
+      of 360 reads per run; now atomic (`AtomicFile`, temp + rename) with a retried parse. Still in place:
+      `SaveTimedState`'s timed_state.json (its other two writers already rename) and legacy's
+      playlist_observer_paths.json — no cell reaches them (read by the daemons / the next process).
       **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player skips
       them), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
