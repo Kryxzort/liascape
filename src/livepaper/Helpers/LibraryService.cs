@@ -343,7 +343,7 @@ public static class LibraryService
         if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return added;
         var localDir = LibraryStore.SourceDir(LibraryStore.Local);
         Directory.CreateDirectory(localDir);
-        var idx = LibraryStore.LoadIndex(LibraryStore.Local);
+        var adds = new Dictionary<string, LibMeta>(); // applied under the index lock at the end
         var have = ExistingWorkshopIds();
         var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
 
@@ -372,18 +372,19 @@ public static class LibraryService
                 if (!File.Exists(Path.Combine(dir, file!))) continue;
                 var link = Path.Combine(localDir, id);
                 try { if (!Directory.Exists(link) && !File.Exists(link)) File.CreateSymbolicLink(link, dir); } catch { continue; }
-                idx[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st ? st : id, WorkshopId = id };
+                adds[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st ? st : id, WorkshopId = id };
                 added.Add(Path.Combine(link, file!));
             }
             else if (isScene && allowScenes)
             {
                 var link = Path.Combine(localDir, id);                          // local/<id> → WE dir; the folder IS the scene
                 try { if (!Directory.Exists(link) && !File.Exists(link)) File.CreateSymbolicLink(link, dir); } catch { continue; }
-                idx[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st2 ? st2 : id, WorkshopId = id, IsScene = true };
+                adds[id] = new LibMeta { Title = SanitizeName(title) is { Length: > 0 } st2 ? st2 : id, WorkshopId = id, IsScene = true };
                 added.Add(link);
             }
         }
-        LibraryStore.SaveIndex(LibraryStore.Local, idx);
+        if (adds.Count > 0)
+            LibraryStore.UpdateIndex(LibraryStore.Local, idx => { foreach (var (id, m) in adds) idx[id] = m; return true; });
         return added;
     }
 
@@ -405,9 +406,7 @@ public static class LibraryService
         if (!Directory.Exists(workshopLib)) return;
         var localDir = LibraryStore.SourceDir(LibraryStore.Local);
         Directory.CreateDirectory(localDir);
-        var localIdx = LibraryStore.LoadIndex(LibraryStore.Local);
-        var workshopIdx = LibraryStore.LoadIndex(LibraryStore.Workshop);
-        bool changed = false, localChanged = false;
+        var moved = new List<string>();
         foreach (var dir in SafeDirs(workshopLib).ToList())
         {
             var id = Path.GetFileName(dir);
@@ -418,15 +417,21 @@ public static class LibraryService
             try
             {
                 File.CreateSymbolicLink(link, weDir);          // local/<id> → WE dir (scene-ness rides in meta.IsScene)
-                var meta = workshopIdx.GetValueOrDefault(id) ?? new LibMeta { WorkshopId = id };
-                localIdx[id] = meta; localChanged = true;
                 Directory.Delete(dir, recursive: true);        // drop the direct-DL copy (reclaim disk)
-                workshopIdx.Remove(id); changed = true;
+                moved.Add(id);
             }
             catch { try { if (File.Exists(link) || Directory.Exists(link)) File.Delete(link); } catch { } }
         }
-        if (localChanged) LibraryStore.SaveIndex(LibraryStore.Local, localIdx);
-        if (changed) LibraryStore.SaveIndex(LibraryStore.Workshop, workshopIdx);
+        if (moved.Count == 0) return;
+        // each moved entry (with its overrides as they are NOW) goes workshop → local under the index lock; local
+        // is saved first, so a reader never finds the item in neither index
+        LibraryStore.UpdateIndex(LibraryStore.Workshop, workshopIdx =>
+        {
+            var metas = moved.ToDictionary(id => id, id => workshopIdx.GetValueOrDefault(id) ?? new LibMeta { WorkshopId = id });
+            LibraryStore.UpdateIndex(LibraryStore.Local, localIdx => { foreach (var (id, m) in metas) localIdx[id] = m; return true; });
+            foreach (var id in moved) workshopIdx.Remove(id);
+            return true;
+        });
     }
 
     // ---------- trash / delete / restore ----------
@@ -441,13 +446,14 @@ public static class LibraryService
         // move the item's folder (scene → the folder IS VideoPath; video → its parent); record the index
         // entry so Restore can replay it. Directory.Move on a local/ symlink moves the link, not its target.
         var assetDir = item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath)!;
-        var idx = LibraryStore.LoadIndex(loc.Value.Source);
-        if (idx.TryGetValue(loc.Value.Key, out var meta))
+        LibraryStore.UpdateIndex(loc.Value.Source, idx =>
         {
+            if (!idx.TryGetValue(loc.Value.Key, out var meta)) return false;
             try { File.WriteAllText(Path.Combine(dest, loc.Value.Key + ".meta.json"),
                 JsonSerializer.Serialize(new TrashedEntry(loc.Value.Source, loc.Value.Key, item.IsScene, meta))); } catch { }
-            idx.Remove(loc.Value.Key); LibraryStore.SaveIndex(loc.Value.Source, idx);
-        }
+            idx.Remove(loc.Value.Key);
+            return true;
+        });
         if (Directory.Exists(assetDir)) { try { Directory.Move(assetDir, Path.Combine(dest, loc.Value.Key)); } catch { } }
     }
 
@@ -459,7 +465,7 @@ public static class LibraryService
         foreach (var sourceDir in Directory.GetDirectories(batchDir))
         {
             var source = Path.GetFileName(sourceDir);
-            var idx = LibraryStore.LoadIndex(source);
+            var restored = new Dictionary<string, LibMeta>(); // replayed under the index lock below
             var target = LibraryStore.SourceDir(source);
             Directory.CreateDirectory(target);
             foreach (var entryFile in SafeFiles(sourceDir, "*.meta.json"))
@@ -471,11 +477,12 @@ public static class LibraryService
                     var folderSrc = Path.Combine(sourceDir, e.Key);            // scene + video both restore the folder
                     if (Directory.Exists(folderSrc) && !Directory.Exists(Path.Combine(target, e.Key)))
                         Directory.Move(folderSrc, Path.Combine(target, e.Key));
-                    idx[e.Key] = e.Meta;
+                    restored[e.Key] = e.Meta;
                 }
                 catch { }
             }
-            LibraryStore.SaveIndex(source, idx);
+            if (restored.Count > 0)
+                LibraryStore.UpdateIndex(source, idx => { foreach (var (k, m) in restored) idx[k] = m; return true; });
         }
         try { Directory.Delete(batchDir, recursive: true); } catch { }
     }

@@ -253,6 +253,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       of 360 reads per run; now atomic (`AtomicFile`, temp + rename) with a retried parse. Still in place:
       `SaveTimedState`'s timed_state.json (its other two writers already rename) and legacy's
       playlist_observer_paths.json — no cell reaches them (read by the daemons / the next process).
+      Then the LOST update (the likely cause of the merged run's `paused × itemVol|stripVol:other` — "k3
+      volumeOverride null" under load, both passed alone 3/3; inferred, not reproduced in those cells): trash,
+      undo, the WE sync and the direct-download reconcile loaded index.json, worked, and saved their copy back
+      outside `LibraryStore`'s lock — over an override saved meanwhile. `race:indexLostUpdate` (40 k1 volume saves
+      while k4 is trashed + undone ×15): RED 3/40 and 2/40 lost; every index write now goes through
+      `SetMeta`/`Remove`/`UpdateIndex` under the one lock (`SaveIndex` private) — GREEN 3/3 runs.
       **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player skips
       them), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
