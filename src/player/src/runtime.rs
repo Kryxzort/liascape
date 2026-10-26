@@ -2472,9 +2472,8 @@ impl Runtime {
             .render_worker()
             .map_or(0, |w| w.shutdown(REAPER_WAIT));
         // I5: an async open still creating its core counts like a reaper straggler.
-        let left = reaper::shutdown(REAPER_WAIT)
-            + crate::sources::host::opening_pending()
-            + render_left;
+        let left =
+            reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending() + render_left;
         if left > 0 {
             log::event(
                 "runtime",

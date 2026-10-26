@@ -129,7 +129,10 @@ pub fn fence_stub_calls() -> u64 {
 
 /// `get_proc_address` for `mpv_render_context_create`: everything from
 /// `eglGetProcAddress`, except `glFenceSync` → [`stub_fence_sync`].
-pub(crate) unsafe extern "C" fn get_proc_address(_ctx: *mut c_void, name: *const c_char) -> *mut c_void {
+pub(crate) unsafe extern "C" fn get_proc_address(
+    _ctx: *mut c_void,
+    name: *const c_char,
+) -> *mut c_void {
     if unsafe { CStr::from_ptr(name) }.to_bytes() == b"glFenceSync" {
         return stub_fence_sync as *mut c_void;
     }
@@ -348,9 +351,11 @@ impl PreparedCore {
     /// an `lp-open` thread, never the loop). A worker that can't leaves the core as it was:
     /// the source then renders on the loop. Only a timed-out attach (the core stayed with
     /// the worker, which reaps it) is an error.
-    pub(crate) fn attach_render(mut self, worker: &Arc<RenderWorker>) -> Result<Self, ApiError> {
-        let (Some(h), Some(fd)) = (self.handle.take(), self.wake.as_ref().map(|w| w.as_raw_fd()))
-        else {
+    pub fn attach_render(mut self, worker: &Arc<RenderWorker>) -> Result<Self, ApiError> {
+        let (Some(h), Some(fd)) = (
+            self.handle.take(),
+            self.wake.as_ref().map(|w| w.as_raw_fd()),
+        ) else {
             return Ok(self);
         };
         match worker.attach(h, fd) {
@@ -432,6 +437,9 @@ pub struct MpvSource {
     /// tagged with it was rendered after that FILE_LOADED.
     fl_seen: u64,
     loaded_fl: Option<u64>,
+    /// An `Ended` held back until this load's `Ready` (worker mode: a render stalled past a
+    /// short clip's end must not report the end of a source that never showed a frame).
+    w_ended_held: bool,
 
     kind: &'static str,
     path: String,
@@ -795,8 +803,8 @@ impl MpvSource {
                 }
                 // SAFETY: context current (above); Drop frees the render context with it
                 // current and before the core.
-                let r = unsafe { RenderContext::create(&handle, get_proc_address) }
-                    .map_err(api_err)?;
+                let r =
+                    unsafe { RenderContext::create(&handle, get_proc_address) }.map_err(api_err)?;
                 unsafe { r.set_update_callback(Some(on_wake), wake_ctx) };
                 Some(r)
             }
@@ -828,6 +836,7 @@ impl MpvSource {
             w_adopted: 0,
             fl_seen: 0,
             loaded_fl: None,
+            w_ended_held: false,
             kind,
             path: path.to_string(),
             props: writable,
@@ -1162,6 +1171,7 @@ impl MpvSource {
             .insert("path".into(), PropValue::Str(path.into()));
         self.file_loaded = false;
         self.loaded_fl = None;
+        self.w_ended_held = false;
         self.restarted = false;
         self.ready = false;
         self.back_valid = false;
@@ -1267,7 +1277,13 @@ impl MpvSource {
         }
         if !self.ended_sent && self.kind != "image" {
             self.ended_sent = true;
-            self.pending.push(SourceEvent::Ended);
+            if self.worker.is_some() && !self.ready {
+                // Worker mode: pushed right after this load's Ready (`update_worker`) —
+                // Ready always precedes Ended, as with the loop renderer.
+                self.w_ended_held = true;
+            } else {
+                self.pending.push(SourceEvent::Ended);
+            }
         }
     }
 
@@ -1660,6 +1676,9 @@ impl MpvSource {
             self.back_valid = false;
             self.ready = true;
             self.pending.push(SourceEvent::Ready);
+            if std::mem::take(&mut self.w_ended_held) {
+                self.pending.push(SourceEvent::Ended);
+            }
             changed = true;
         }
         if sampled_released {
@@ -1713,7 +1732,12 @@ impl MpvSource {
         if let Some(h) = &self.handle {
             unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
         }
-        let fences: Vec<SyncFence> = self.w_pending.take().and_then(|f| f.fence).into_iter().collect();
+        let fences: Vec<SyncFence> = self
+            .w_pending
+            .take()
+            .and_then(|f| f.fence)
+            .into_iter()
+            .collect();
         self.w_front = None;
         self.w_back = None;
         let core = self.handle.take();
@@ -1904,7 +1928,10 @@ impl Source for MpvSource {
     }
 
     fn texture(&self) -> Option<&Tex> {
-        self.front.as_ref().map(|(t, _)| t).or(self.w_front.as_ref())
+        self.front
+            .as_ref()
+            .map(|(t, _)| t)
+            .or(self.w_front.as_ref())
     }
 
     fn size(&self) -> (u32, u32) {

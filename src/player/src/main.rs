@@ -92,9 +92,10 @@ fn serve_main(args: &[String]) -> ExitCode {
                 "--debug" => debug = true,
                 "--render-worker" => {
                     let v = val("--render-worker")?;
-                    render_worker = Some(lp_player::runtime::parse_on_off(&v).ok_or_else(
-                        || format!("--render-worker {v:?}: expected on|off"),
-                    )?);
+                    render_worker = Some(
+                        lp_player::runtime::parse_on_off(&v)
+                            .ok_or_else(|| format!("--render-worker {v:?}: expected on|off"))?,
+                    );
                 }
                 "--socket" => socket = Some(std::path::PathBuf::from(val("--socket")?)),
                 "--log-level" => {

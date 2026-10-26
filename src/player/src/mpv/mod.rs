@@ -536,8 +536,7 @@ impl RenderContext {
             },
         ];
         let mut raw = ptr::null_mut();
-        let rc =
-            unsafe { ffi::mpv_render_context_create(&mut raw, core, params.as_mut_ptr()) };
+        let rc = unsafe { ffi::mpv_render_context_create(&mut raw, core, params.as_mut_ptr()) };
         check(rc, || "mpv_render_context_create (OpenGL)".to_string())?;
         NonNull::new(raw)
             .map(|raw| RenderContext { raw })
@@ -563,6 +562,26 @@ impl RenderContext {
     pub fn frame_pending(&self) -> bool {
         let flags = unsafe { ffi::mpv_render_context_update(self.raw.as_ptr()) };
         flags & ffi::mpv_render_update_flag::MPV_RENDER_UPDATE_FRAME as u64 != 0
+    }
+
+    /// `MPV_RENDER_PARAM_NEXT_FRAME_INFO`: the pending frame is a **redraw** of the frame
+    /// last rendered (`MPV_RENDER_FRAME_INFO_REDRAW` — the VO re-presenting its current
+    /// frame, e.g. after a reset/reconfig), not a new one. Phase 2's render worker tags such a
+    /// frame like the one it repeats: mpv redraws the OLD file's last frame after a new
+    /// file's FILE_LOADED. Never blocks.
+    pub fn next_frame_is_redraw(&self) -> bool {
+        let mut info = ffi::mpv_render_frame_info {
+            flags: 0,
+            target_time: 0,
+        };
+        let param = ffi::mpv_render_param {
+            type_: ffi::mpv_render_param_type::MPV_RENDER_PARAM_NEXT_FRAME_INFO,
+            data: &mut info as *mut _ as *mut c_void,
+        };
+        let rc = unsafe { ffi::mpv_render_context_get_info(self.raw.as_ptr(), param) };
+        rc >= 0
+            && info.flags & ffi::mpv_render_frame_info_flag::MPV_RENDER_FRAME_INFO_REDRAW as u64
+                != 0
     }
 
     /// `mpv_render_context_render` into GL framebuffer `fbo` (`w`×`h`, `internal_format`),
