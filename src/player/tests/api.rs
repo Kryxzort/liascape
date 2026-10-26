@@ -5170,3 +5170,86 @@ fn render_worker_quit_is_bounded() {
             .join("\n")
     );
 }
+
+/// Phase 2: a render worker that can't start (its shared context fails — test fault
+/// `no-context`: the `lp-render` thread reports a failed start after creating it) never takes
+/// the player down: `render_worker.unavailable` is logged, every mpv source renders on the
+/// loop (`render_mode: loop`, no `render_worker` in the probe) and the picture is right.
+#[test]
+fn render_worker_unavailable_falls_back_to_the_loop() {
+    let Some(srv) = real_serve_env(
+        &["--render-worker", "on"],
+        &[(
+            "LP_PLAYER_TEST_RENDER_WORKER_FAULT",
+            Path::new("no-context"),
+        )],
+    ) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    let src = source_probe(&mut c, &a);
+    let p = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(src["render_mode"], json!("loop"), "{src}");
+    assert!(p["render_worker"].is_null(), "{p}");
+    let logs = c.ok("logs", json!({"kind_prefix": "render_worker."}));
+    let kinds: Vec<&str> = logs["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["kind"].as_str())
+        .collect();
+    assert!(kinds.contains(&"render_worker.unavailable"), "{logs}");
+    assert!(!kinds.contains(&"render_worker.started"), "{logs}");
+    let png = srv.path("out.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": png}));
+    near(png_pixel(&png, 320, 180), [255, 0, 0], 3, "red on screen");
+}
+
+/// Phase 2: the render worker dying (a panic on `lp-render` — test fault `panic`, at its first
+/// render) is a runtime failure like a lost compositor, never a silent freeze: before, the
+/// thread just ended — every picture froze on its last frame, each new open waited out the 3 s
+/// attach timeout, freed cores leaked — and the player kept serving. Now the loop sees it
+/// (`render_worker.died {reason}`), silences + tears down like `loop.failed` and exits
+/// `EXIT_RUNTIME` (3) — the supervisor restarts it with `--restore` — also when a leaked core
+/// makes it leave through `_exit` (that path used to exit 0, which ends supervision).
+#[test]
+fn render_worker_death_fails_the_player() {
+    let Some(mut srv) = real_serve_env(
+        &["--render-worker", "on"],
+        &[("LP_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new("panic"))],
+    ) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    let st = srv
+        .wait_exit(Duration::from_secs(8))
+        .expect("a dead render worker must fail the player");
+    assert_eq!(st.code(), Some(3), "{st}: {}", srv.stderr());
+    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    let died: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("\"render_worker.died\""))
+        .collect();
+    assert_eq!(died.len(), 1, "{log}");
+    assert!(died[0].contains("test fault"), "{}", died[0]);
+    assert!(
+        log.lines().any(|l| l.contains("\"loop.failed\"")),
+        "no loop.failed: {log}"
+    );
+    // Its core was leaked (no worker left to free its render context): the `_exit` path.
+    assert!(
+        log.lines().any(|l| l.contains("\"mpv.reaper_stragglers\"")),
+        "the leaked core isn't a straggler: {log}"
+    );
+    assert!(
+        !srv.path("run/livepaper/lp-player.sock").exists(),
+        "socket left behind"
+    );
+}

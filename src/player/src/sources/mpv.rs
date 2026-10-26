@@ -391,10 +391,11 @@ impl Drop for PreparedCore {
                 // The worker frees the render context (its context current), then reaps.
                 Some(att) => {
                     if let Err(Some(h)) = att.worker.free(att.id, Some(h), Vec::new()) {
-                        // Worker gone (only at exit): never free a render context without
-                        // its context — leak it, silent.
+                        // Worker gone (at exit, or it died): never free a render context
+                        // without its context — leak it, silent.
                         let _ = h.command_async(0, &["stop"]);
                         std::mem::forget(h);
+                        super::render_worker::note_leaked();
                     }
                 }
                 None => super::reaper::reap(h),
@@ -1508,7 +1509,12 @@ impl MpvSource {
             (OBS_DHEIGHT, PropData::I64(h)) => self.dsize.1 = h,
             (OBS_EOF, PropData::Flag(true)) if live => self.mark_ended(),
             // Seeked back / looped: the next end is a new play-through.
-            (OBS_EOF, PropData::Flag(false)) if self.is_current() => self.ended_sent = false,
+            (OBS_EOF, PropData::Flag(false)) if self.is_current() => {
+                // Re-armed (a seek back, a loop): an end held back for Ready (worker mode)
+                // no longer stands either.
+                self.ended_sent = false;
+                self.w_ended_held = false;
+            }
             // Stepped: mpv is paused for good; `paused` stays the logical value.
             (OBS_PAUSE, PropData::Flag(p)) if !self.stepped => {
                 self.props.insert("paused".into(), PropValue::Bool(p));
@@ -1742,9 +1748,10 @@ impl MpvSource {
         self.w_back = None;
         let core = self.handle.take();
         if let Err(Some(h)) = att.worker.free(att.id, core, fences) {
-            // Worker gone (only at exit): leak the render context and the core, silent.
+            // Worker gone (at exit, or it died): leak the render context and the core, silent.
             let _ = h.command_async(0, &["stop"]);
             std::mem::forget(h);
+            super::render_worker::note_leaked();
         }
     }
 

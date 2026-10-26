@@ -63,7 +63,13 @@ const ATTACH_WAIT: Duration = Duration::from_secs(3);
 ///   loop never read a texture with the worker's commands for it still unsubmitted. The fences
 ///   stay: the GL spec (and Mesa) only guarantee another context's changes once they completed;
 /// - `publish-early` — hand the loop each target BEFORE rendering into it ([`SLOW_FLUSH`] later):
-///   the texture-ownership rule broken (a texture is the worker's until its frame is finished).
+///   the texture-ownership rule broken (a texture is the worker's until its frame is finished);
+/// - `no-context` — the thread reports a failed start right after its context was made (what a
+///   driver refusing the shared context looks like): `serve` must fall back to the loop
+///   (`tests/api.rs::render_worker_unavailable_falls_back_to_the_loop`);
+/// - `panic` — panic at the first render (a bug or an allocation `expect` on `lp-render`): the
+///   player must fail like a lost compositor, not freeze (`tests/api.rs::
+///   render_worker_death_fails_the_player`).
 ///
 /// The torn-frame guard (`tests/api.rs::render_worker_never_composes_a_torn_frame`) is GREEN
 /// as is and with `slow-flush`, RED with `publish-early`.
@@ -72,6 +78,8 @@ struct Faults {
     slow_flush: bool,
     no_fence: bool,
     publish_early: bool,
+    no_context: bool,
+    panic: bool,
 }
 
 /// [`Faults`]' `slow-flush` / `publish-early` delay.
@@ -86,15 +94,18 @@ fn faults() -> Faults {
             slow_flush: has("slow-flush"),
             no_fence: has("no-fence"),
             publish_early: has("publish-early"),
+            no_context: has("no-context"),
+            panic: has("panic"),
         };
-        if f.slow_flush || f.no_fence || f.publish_early {
+        if f.slow_flush || f.no_fence || f.publish_early || f.no_context || f.panic {
             log::event(
                 "render",
                 Level::Warn,
                 "render_worker.test_fault",
                 None,
                 json!({ "slow_flush": f.slow_flush, "no_fence": f.no_fence,
-                        "publish_early": f.publish_early }),
+                        "publish_early": f.publish_early, "no_context": f.no_context,
+                        "panic": f.panic }),
             );
         }
         f
@@ -221,7 +232,20 @@ struct State {
     closing: bool,
     /// The thread is gone: nothing more is accepted.
     exited: bool,
+    /// The thread panicked (why): see [`RenderWorker::died`].
+    died: Option<String>,
     stats: Stats,
+}
+
+/// Cores leaked because the worker was gone when their render context had to be freed
+/// ([`note_leaked`]): never destroyed (that would need a render context freed with its GL
+/// context current first). Counted as stragglers at quit, so the process `_exit`s instead of
+/// running libmpv's static destructors under them.
+static LEAKED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A core whose render context lived on a worker that is gone was leaked (stopped, silent).
+pub(crate) fn note_leaked() {
+    LEAKED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// What the thread and every [`RenderWorker`] handle share.
@@ -287,11 +311,17 @@ impl RenderWorker {
             return Err(format!("eventfd: {}", std::io::Error::last_os_error()));
         }
         let fd = unsafe { OwnedFd::from_raw_fd(raw) }.into_raw_fd();
+        // Before any render context exists (nothing else can be writing it): closed again if
+        // the worker never starts.
+        let close_fd = || unsafe {
+            libc::close(fd);
+        };
         let inner = Arc::new(Inner {
             state: Mutex::new(State {
                 jobs: Default::default(),
                 closing: false,
                 exited: false,
+                died: None,
                 stats: Stats::default(),
             }),
             fd,
@@ -303,18 +333,54 @@ impl RenderWorker {
         let thread = std::thread::Builder::new()
             .name("lp-render".into())
             .spawn(move || {
-                me.run(ctx, ok_tx);
-                me.lock().exited = true;
+                // A panic here must never leave a silent, frozen worker behind: the slots'
+                // render contexts are dropped by the unwind (this context still current), the
+                // worker is marked gone (every later attach/free is refused — new sources
+                // render on the loop, freed cores are leaked silent) and `died` makes the
+                // runtime fail like a lost compositor (exit 3, restarted with `--restore`).
+                let r =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| me.run(ctx, ok_tx)));
+                let mut s = me.lock();
+                s.exited = true;
+                if let Err(p) = r {
+                    let reason = p
+                        .downcast_ref::<&str>()
+                        .map(|m| m.to_string())
+                        .or_else(|| p.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "panic".into());
+                    s.died = Some(reason.clone());
+                    // The unwind dropped every slot (render contexts freed, this context
+                    // current); their cores stay with their sources, leaked when those go.
+                    let slots = std::mem::take(&mut s.stats.slots);
+                    drop(s);
+                    log::event(
+                        "render",
+                        Level::Error,
+                        "render_worker.died",
+                        None,
+                        json!({ "reason": reason, "slots": slots }),
+                    );
+                } else {
+                    drop(s);
+                }
                 let _ = tx.send(());
             })
-            .map_err(|e| format!("spawn lp-render: {e}"))?;
+            .map_err(|e| {
+                close_fd();
+                format!("spawn lp-render: {e}")
+            })?;
         match ok_rx.recv() {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 let _ = thread.join();
+                close_fd();
                 return Err(e);
             }
-            Err(_) => return Err("lp-render exited during startup".into()),
+            Err(_) => {
+                let _ = thread.join();
+                close_fd();
+                return Err("lp-render exited during startup".into());
+            }
         }
         *inner.done.lock().unwrap_or_else(|e| e.into_inner()) = Some((rx, thread));
         Ok(Arc::new(RenderWorker { inner }))
@@ -409,8 +475,15 @@ impl RenderWorker {
         }
     }
 
+    /// Why the `lp-render` thread died (it panicked), if it did — the runtime then fails like
+    /// a lost compositor (§ Sources "Render worker" → "Failure").
+    pub fn died(&self) -> Option<String> {
+        self.lock().died.clone()
+    }
+
     /// Stop: finish every queued job (frees), exit once no slot is left; wait up to
-    /// `timeout`. Returns the slots still alive (render contexts not freed — stragglers).
+    /// `timeout`. Returns the slots still alive (render contexts not freed) plus the cores
+    /// leaked because the worker was gone ([`note_leaked`]) — stragglers either way.
     pub fn shutdown(&self, timeout: Duration) -> usize {
         self.lock().closing = true;
         self.wake();
@@ -425,7 +498,7 @@ impl RenderWorker {
         {
             let _ = thread.join();
         }
-        self.lock().stats.slots
+        self.lock().stats.slots + LEAKED.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// The `sources` probe's `render_worker`.
@@ -447,6 +520,8 @@ impl RenderWorker {
             "passes": st.passes,
             "closing": s.closing,
             "exited": s.exited,
+            "died": s.died,
+            "leaked": LEAKED.load(std::sync::atomic::Ordering::SeqCst),
         })
     }
 }
@@ -459,13 +534,17 @@ impl Inner {
             let _ = ok.send(Err(e));
             return;
         }
+        let faults = faults();
+        if faults.no_context {
+            let _ = ok.send(Err("test fault no-context: no shared context".into()));
+            return;
+        }
         let gl = ctx.load_gl();
         let _ = ok.send(Ok(()));
         let mut slots: BTreeMap<u64, Slot> = BTreeMap::new();
         // Rendered, flushed, fence not signalled yet: (slot, frame, render ms, rendered at).
         let mut inflight: Vec<(u64, Frame, f64, Instant)> = Vec::new();
         let mut next_id = 1u64;
-        let faults = faults();
         loop {
             let mut pfd = libc::pollfd {
                 fd: self.fd,
@@ -491,7 +570,13 @@ impl Inner {
                         reply,
                     } => {
                         let t = Instant::now();
-                        let r = Slot::create(&core.0, loop_wake, self.fd);
+                        // Quitting: no new render context (the core goes back; nobody will
+                        // show it — its open is being dropped too).
+                        let r = if closing {
+                            Err("render worker is closing".to_string())
+                        } else {
+                            Slot::create(&core.0, loop_wake, self.fd)
+                        };
                         let ms = t.elapsed().as_secs_f64() * 1000.0;
                         match r {
                             Ok(slot) => {
@@ -676,6 +761,9 @@ impl Slot {
     fn render(&mut self, gl: &glow::Context) -> Option<(Frame, f64)> {
         if self.dead {
             return None;
+        }
+        if faults().panic {
+            panic!("test fault panic: lp-render panicked in a render");
         }
         if let Some(w) = &self.weak {
             let ev = w.poll();

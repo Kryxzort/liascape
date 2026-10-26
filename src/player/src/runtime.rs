@@ -3624,6 +3624,25 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             break;
         }
         rt.after_dispatch();
+        // Phase 2: the render worker died (a panic on `lp-render`): every mpv picture would
+        // freeze and every open wait out the attach timeout — fail like a lost compositor
+        // instead (silenced + torn down, exit 3: the supervisor restarts with `--restore`).
+        if rt.quit_at.is_none()
+            && let Some(reason) = rt.host.render_worker().and_then(|w| w.died())
+        {
+            log::event(
+                "runtime",
+                Level::Error,
+                "loop.failed",
+                None,
+                json!({ "error": format!("render worker died: {reason}"),
+                        "backend": rt.backend.kind() }),
+            );
+            fatal = Some(format!("render worker died: {reason}"));
+            rt.snapshot_final();
+            rt.stop_all(true);
+            break;
+        }
         rt.apply_output_changes();
         rt.pointer_events();
         if rt.backend.paced() {
@@ -3639,9 +3658,15 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         // An mpv core is still being destroyed on the reaper thread: a normal exit would
         // run atexit/static destructors (libmpv, ffmpeg, EGL) under it. The log is already
         // on disk (every event is flushed), so remove the socket + lock and leave now with
-        // a clean status (item 16).
+        // the status a normal return would give (item 16) — a failed loop's EXIT_RUNTIME,
+        // never 0: the supervisor ends supervision on 0, so a failure must not read as one.
         socket_file.remove_now();
-        unsafe { libc::_exit(0) };
+        let code = if fatal.is_some() {
+            i32::from(supervise::EXIT_RUNTIME)
+        } else {
+            0
+        };
+        unsafe { libc::_exit(code) };
     }
     drop(socket_file);
     fatal.map_or(Ok(()), |m| Err(ServeError::Runtime(m)))
