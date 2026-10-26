@@ -84,5 +84,10 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
   retries a file it can't parse. It used to truncate + write in place: a load mid-write got the C#
   defaults (NoAudio on, volume 100, the legacy engine), applied them live, and the next save wrote them
   back over everything — `/settings`'s own `prev` included (an engine "switch", the Steam tokens gone).
-  Never write a shared state file in place; guard: the matrix's `race:settingsSaveLoad` cell.
+  Never write a shared state file in place; guard: the matrix's `race:settingsSaveLoad` cell. The same holds
+  for `playlist_state.json` / saved playlists (`PlaylistService`) and every library `index.json`
+  (`LibraryStore.SaveIndex`): `AtomicFile.WriteAllText` (temp + rename) + `AtomicFile.ReadJson` (retries a
+  torn file) — written in place, a read mid-save got a null playlist (the UI's init then held the DEFAULT
+  playlist settings) or an empty index (every override "follows the global"); guards
+  `race:playlistSaveLoad` / `race:indexSaveLoad`.
 - Never break a CLI flag / daemon / state-file format (`session.md`, `player.md`, `library.md`).
