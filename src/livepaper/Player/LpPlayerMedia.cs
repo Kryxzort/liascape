@@ -269,7 +269,7 @@ public static class LpPlayerMedia
         Set("demuxer_back_mib", (double)Math.Max(0, s.DemuxerMaxBackBytes));
         Set("gain.mute", PlayerHelper.IsMuted ? MpvPropertyMap.SilentDb : 0.0);
         Set("fit", Fit(s));
-        if (cur != null) SetForPath(cur, "af", NormalizeAf(cur, s) ?? "");
+        ApplyNormalizationNow(); // every source's own af
         // I3 (final review): pause is NOT re-asserted. Its one authority is the player itself
         // (`player.paused`, persisted in its snapshot and restored with it): a keybind toggle runs
         // in a separate one-shot CLI process, and a restarted backend has no memory of it, so any
@@ -365,6 +365,32 @@ public static class LpPlayerMedia
     }
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
+
+    // Loudness normalization, live, on EVERY live media source — each by its own item (loudnorm is per
+    // item): the playing one, the outgoing A of an effect, a pending B (armed for A's end: it would play
+    // its whole clip with the old filter), and any source while no output shows one (no `cur:*`). It used
+    // to reach `cur:*` only (UI matrix `set:normalize*`). Diffed against each source's current `af` (one
+    // `state` read), so an unchanged one gets nothing — every /settings save calls this. Coalescible.
+    public static void ApplyNormalizationAll() => QueueSet("af:*", ApplyNormalizationNow);
+
+    private static void ApplyNormalizationNow()
+    {
+        var client = C;
+        if (Graph(client) is not { ValueKind: JsonValueKind.Object } g) return;
+        var s = SettingsService.Load();
+        foreach (var n in g.EnumerateObject())
+        {
+            var v = n.Value;
+            if (!v.TryGetProperty("gain_effective_db", out _) || Str(v, "kind") is "snapshot" or "color" or "image") continue; // media sources with audio
+            var path = Str(v, "path");
+            if (path.Length == 0) continue;
+            var want = NormalizeAf(path, s) ?? "";
+            if (Str(v, "af") == want) continue;
+            try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{n.Name}.af", ["value"] = want }, LpPlayerClient.QuickMs); }
+            catch (LpPlayerException e) when (e.Code == "no_such_node") { } // gone meanwhile
+            catch (LpPlayerException e) { LpPlayerClient.Log($"set {n.Name}.af failed — {e}"); }
+        }
+    }
 
     // Loudness normalization for `path` under `s` (mirrors PlayerHelper.NormalizeAf): unmeasured →
     // no filter now + a background measure for next time.
