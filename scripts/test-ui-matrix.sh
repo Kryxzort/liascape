@@ -214,7 +214,7 @@ clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3
 
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 {"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
- "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":2500,"GlobalTransitionShuffle":false,
+ "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,
  "GlobalIntervalSeconds":600,"AutoMute":false,"AdvancedSettings":true,"RestartIntervalSeconds":0}
 EOF

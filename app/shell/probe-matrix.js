@@ -244,14 +244,32 @@ const waitPhase = (phase, ms = 8000) => waitFor(async () => (await live()).some(
 
 // ---------------------------------------------------------------- baseline + states
 let BASE_SETTINGS;
+// Fades: 1200 ms (global too — test-ui-matrix.sh's settings); the mid-effect states' playlist keeps EFFECT_MS so a
+// control still lands inside the running effect. Was 2500 everywhere: every switch a cell made waited it out.
+const EFFECT_MS = 2500;
 const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, waitForVideoEnd: false,
-  transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 2500, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
+  transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
+// Getting INTO a state isn't what a cell tests: its entry switches run as ENTRY_MS fades BEFORE the UI loads (the
+// app opened onto a playing wallpaper, as in real use), then the configured durations go back — so the UI reads
+// those. The fade-in from nothing at 2500 ms was ~40 % of a run (phases: enter 2.76 s/cell).
+const ENTRY_MS = 250;
+async function withGlobalMs(ms, fn) {
+  const s = await getSettings(), was = s.globalTransitionDurationMs; // full bodies: an older backend (LP_MATRIX_DLL) replaced the whole settings
+  await post("/settings", { ...s, globalTransitionDurationMs: ms });
+  try { return await fn(); } finally { await post("/settings", { ...(await getSettings()), globalTransitionDurationMs: was }); }
+}
+async function playFast(c, paths, settings) {
+  await post("/playlist/play", { paths, settings: { ...settings, transitionDurationMs: ENTRY_MS } });
+  c.ok = await waitSettled(12000, paths[0]);
+  await post("/playlist/state", { videoPaths: paths, settings, name: null }); // the real durations, live (a 600 s timer: no switch)
+}
 async function reset(pl) {
   const st = await ctl.call("state");
   for (const [name, w, h] of [["VIRTUAL-1", 640, 360], ["VIRTUAL-2", 320, 180]])
     if (!st.outputs.some((o) => o.name === name)) await ctl.call("headless.add_output", { name, width: w, height: h, hz: 60 }).catch(() => {});
   await stopTones();
-  await post("/stop"); await sleep(300);
+  await post("/stop"); // gone when nothing is hosted or switching any more (was a fixed 300 ms)
+  await waitFor(async () => { const t = await ctl.call("state"); return !(t.transitions || []).length && !sourcesOf(t).length; }, 1500, 25);
   await post("/mute", { user: true, value: false });
   while (((await http("GET", "/library/undo-depth")).json?.depth ?? 0) > 0) await post("/library/undo");
   await post("/settings", BASE_SETTINGS);
@@ -264,19 +282,22 @@ const STATES = {
   // roles: which item is on screen (`shown`) and which other item is live in the state (`other`: the
   // incoming B of an effect, the pending B of an end-wait) or, with nothing else live, an off-screen one
   idle: { exp: { paused: false }, roles: () => [null, null], async enter() {} },
-  single: { exp: { paused: false }, roles: () => [K[0], K[2]], async enter(c) { await post("/apply", { path: K[0] }); c.ok = await waitSettled(12000, K[0]); } },
+  // `enter` runs before the UI loads (short entry fades), `late` after it (what must still be running when the cell acts)
+  single: { exp: { paused: false }, roles: () => [K[0], K[2]], async enter(c) {
+    await withGlobalMs(ENTRY_MS, async () => { await post("/apply", { path: K[0] }); c.ok = await waitSettled(12000, K[0]); }); } },
   playlist: { exp: { paused: false }, roles: () => [K[0], K[1]], async enter(c) { c.playlist = true; c.fresh = true;
-    await post("/playlist/play", { paths: [K[0], K[1], K[2]], settings: PS() }); c.ok = await waitSettled(12000, K[0]); } },
-  // A → B with both live (from non-empty — never a fade in from nothing)
-  effect: { exp: { paused: false }, roles: () => [K[0], K[1]], async enter(c) {
-    await STATES.playlist.enter(c); if (c.ok === false) return;
-    c.fresh = false; await post("/next"); c.ok = await waitFor(async () => (await live()).some((t) => t.phase === "running" && (t.from || []).length > 0), 8000, 50); c.mid = true; } },
+    await playFast(c, [K[0], K[1], K[2]], PS()); } },
+  // A → B with both live (from non-empty — never a fade in from nothing), an EFFECT_MS fade the control lands inside
+  effect: { exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => ({ paths: [K[0], K[1], K[2]], settings: PS({ transitionDurationMs: EFFECT_MS }) }),
+    async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, [K[0], K[1], K[2]], PS({ transitionDurationMs: EFFECT_MS })); },
+    async late(c) { c.fresh = false; await post("/next"); c.ok = await waitFor(async () => (await live()).some((t) => t.phase === "running" && (t.from || []).length > 0), 8000, 50); c.mid = true; } },
   pending: { exp: { paused: false }, roles: () => [K[3], K[0]], playlist: PENDING_PL, async enter(c) { c.playlist = true; c.fresh = true;
     await post("/playlist/play", PENDING_PL());
     c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
     c.pending = true; } },
   paused: { exp: { paused: true }, roles: () => [K[0], K[2]], async enter(c) { await STATES.single.enter(c); if (c.ok !== false) await post("/pause"); } },
-  pausedEffect: { exp: { paused: true }, roles: () => [K[0], K[1]], async enter(c) { await STATES.effect.enter(c); if (c.ok !== false) await post("/pause"); } },
+  pausedEffect: { exp: { paused: true }, roles: () => [K[0], K[1]], playlist: () => STATES.effect.playlist(), async enter(c) { await STATES.effect.enter(c); },
+    async late(c) { await STATES.effect.late(c); if (c.ok !== false) await post("/pause"); } },
   noOutput: { exp: { paused: false }, roles: () => [K[0], K[2]], async enter(c) {
     await STATES.single.enter(c); if (c.ok === false) return;
     await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" }); c.noOutput = true; } },
@@ -1708,8 +1729,9 @@ async function runCell(stateName, ctlName) {
   if (S.pre) await S.pre(c);
   if (K_.pre) await K_.pre(c); // before the UI loads: it reads overrides/settings at start, like a real session
   const logAt = logSizes();
-  await loadUi(); lap("ui");
   await S.enter(c); lap("enter");
+  if (c.ok !== false) { await loadUi(); lap("ui"); }
+  if (c.ok !== false && S.late) { await S.late(c); lap("enter"); }
   if (c.ok === false) { // what the state's entry saw (a SETUP is usually load: the run's timing, not a product bug)
     const st = await ctl.call("state").catch(() => null);
     return { state: stateName, control: ctlName, result: "SETUP", violations: [`state ${stateName} not reached`],
@@ -1742,12 +1764,12 @@ async function runCell(stateName, ctlName) {
   const asset = /\/(media|img|anim|assets|transitions)\b|favicon|icons\.svg/;
   for (const r of httpLog.slice(h0)) if (r.status >= 400 && r.status !== 409 && !asset.test(r.url)) v.push(`HTTP ${r.status} ${r.method} ${r.url.replace(U, "")}`);
   if (c.exp.settled && !c.noOutput) {
-    const p = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); await m.sleep(600); } return m.playing();`).catch(() => null);
+    const p = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return m.playing();`).catch(() => null);
     const cur = c.after.cur?.path ? TITLE(c.after.cur.path) : null;
     if (p && cur && !p.cards.includes(cur)) v.push(`UI marks ${JSON.stringify(p.cards)} as playing, backend plays ${cur}`);
   }
   // the strip the UI shows == the backend's playlist (a stale strip saves itself back over it)
-  const strip = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); await m.sleep(600); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
+  const strip = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (strip && JSON.stringify(strip) !== JSON.stringify(want)) v.push(`UI strip ${JSON.stringify(strip)}, backend playlist ${JSON.stringify(want)}`);
   if (c.cli && c.cli.code !== 0) v.push(`--action exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
