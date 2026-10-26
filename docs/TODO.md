@@ -101,9 +101,17 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
 - [x] **Final-review fixes**: GainHistory bounded (C1), pause lifetime (I1/I3), the pause gate on its own slot
       (I2), switches with no output (I4), async mpv core open (I5), one onset helper (I6), bus reconnect (I7).
-- [ ] **Phase 2: render worker** — move every `MpvSource` render context (creation + first render, the
+- [x] **Phase 2: render worker** — move every `MpvSource` render context (creation + first render, the
       residual ~6–25 ms per switch on the loop after I5) to a worker thread with a shared EGL context;
       `.claude/rules/player-core.md` § Runtime "Switch cost and the Phase 2 render worker".
+      — done 2026-10-26 (`sources/render_worker.rs`, § Sources "Render worker"), **default on**
+      (`--render-worker off` / `LP_PLAYER_RENDER_WORKER=off` = the loop renderer): the switch loop's warm median
+      max_busy 16.3 → 1.3–3.6 ms; missed frames at 2× 1080p120 on a 240 Hz content-paced output 2.2/3.3/3.2 →
+      1.8/2.0/2.5 per s (steady / ±0.05 / random 1.6–2.4×); full suite green with it on and off; UI matrix
+      682/0 with it on (an `lp-render` thread verified in the matrix's player); a nested sway on NVIDIA 595
+      green both ways. Guards: torn-frame (RED with `publish-early`: 42/196 bad captures), switch-busy, death
+      → exit 3 → supervisor restart, no-context → loop fallback, bounded quit. Bench:
+      `cargo test --release --test api -- --ignored bench_render_worker_ab --nocapture`.
 - [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=lp-player`** (Task 20 battery,
       `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
       `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
@@ -190,6 +198,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       was cut early`, `after resume: handoff=1`, `volume-only (global) drag` (A already gone: `null dB`). The
       rerun minutes later at load ~7: 115/0. Its real-clock fades (300–600 ms) have no slack for a stalled
       backend; if these recur, stretch the fades the drag/pause sections act inside rather than retrying.
+      **Stepped `step` timeouts** — `step: no frame within 2 s from srcN (t=0.000s, waiting for seek reply |
+      ready)` on a fresh stepped server's first step (`stepped_is_deterministic`, `hotplug_added_before_running_
+      joins_transition`, `remove_output_retires_what_only_it_showed`, `settings_reach_pending_b`): pre-existing —
+      an interleaved A/B of 3 of them (2026-10-26) failed 1/30 on the base 2e4186f, 0/30 with the render worker
+      branch; one full run had 3 within 2 min (a transient system stall). mpv answering a first seek > 2 s late
+      at t=0 — `Client::step` now dumps the sources probe + the last 300 events with the failure: read those
+      next time before raising `STEP_TIMEOUT`.
 - [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
       playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
       align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:
@@ -310,7 +325,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] **Shared looping A on `align:end`** caches its boundary (`target_end`, from the drop + k·length at the
         old speed) — a speed change doesn't move it. Unused by the backend today (same wallpaper on every
         output = never shared); re-anchor at the next wrap when per-monitor wallpapers land.
-  - [ ] **Missed frames scale with content fps**: steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
+  - [ ] **Missed frames scale with content fps** (render worker: 2.2–3.3 → 1.8–2.5/s at 2× 1080p120 — better, not
+        gone; what's left is the loop's own compose/present): steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
         240 Hz output; random 0.25–4× (up to 240 fps content) 1–1.4/s vs 0.16/s at 1×. Phase 2 render worker.
   - [x] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
         previews) and a no-op `POST /settings` costs ~150 ms in the backend — profile it.
@@ -318,6 +334,26 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         (and parsing index.json twice per item): 330–550 ms → median 8 ms with 300 items
         (`scripts/test-settings-latency.sh`); the global Volume/Speed sliders preview through a throttled
         `/preview {global:true}` (only wallpapers without their own override move; matrix `globalDrag*`).
+
+## Backend structure (2026-10-26, after the matrix's ~19 seam bugs)
+Two bug classes kept recurring; fix the class, not the instance:
+- [x] **Shared state files written in place** (settings, playlist_state, index — torn reads, lost updates).
+      — done: every shared state file goes through `AtomicFile` (temp + rename): settings, playlist state,
+      saved playlists, every library index (+ one lock for every index read-modify-write, `UpdateIndex`), the
+      timed-playlist state, `workshop_unsub.json`, legacy's `playlist_observer_paths.json`, the gui-timer /
+      timer-daemon / restart-daemon / monitor pid files (a torn read = "no owner" → two timers) and
+      `serve.port` (Electron reads it at launch). Left: `user_mute.state` (presence-only), the trash
+      `.meta.json` (written once, read on undo), logs (append).
+- [ ] **Cross-process writers.** The locks are per process; the CLI (`--restore`'s WE sync, keybinds run locally
+      when no backend answers) and the daemons can still race the backend on a read-modify-write. Either a
+      file lock (`flock` on a sidecar) in `AtomicFile`/`LibraryStore`/`SettingsService`, or route every
+      write through the running backend (keybinds already forward). Phase 3 retires the daemons.
+- [ ] **One effective-settings resolver.** Each path picks its targets itself: `/settings` (`Set` +
+      `SetPerItem`), keybinds (`AdjustVolume`), `/preview`, the per-switch reapply, normalization
+      (`ApplyNormalizationAll`). Bugs from it: normalization on `cur:*` only, the srcs:* broadcast blip, the
+      keybind override, mute while paused. Make one function: live sources (source map) × (global, item
+      override) → each source's desired `gain.user`/`speed`/`af`/…, diffed against what it runs; every path
+      calls it. Matrix cells to keep green: `set:*`, `appear:*`, `cli:volume-*`, `globalDrag*`, `itemVol*`.
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

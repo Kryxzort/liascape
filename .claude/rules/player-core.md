@@ -1152,7 +1152,7 @@ with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_
 `open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
 **Render worker (Phase 2, `sources/render_worker.rs`; `serve --render-worker on|off`, env
-`LP_PLAYER_RENDER_WORKER`; default off while it's built).** One `lp-render` thread per process owns
+`LP_PLAYER_RENDER_WORKER`; **default on** since 2026-10-26 — `off` renders every source on the loop as before).** One `lp-render` thread per process owns
 every *worker-mode* `MpvSource`'s render context — creation, the first render (shader compile,
 LUTs), every later render, the free — so the loop only adopts finished textures and composes.
 - **Context.** `Gfx::share_context` makes a second context on the **same** `EGLDisplay` (one per
