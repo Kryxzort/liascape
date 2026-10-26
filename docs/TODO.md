@@ -366,8 +366,10 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [x] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
       — done: `JsonMerge.Over` (nested `settings` merge by key). `plState:partial` RED (paths-only → settings at the C#
       defaults; settings-only → no paths) → GREEN; playlist families 173/0.
-- [ ] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the strip
+- [x] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the strip
       stays stale and its next save writes itself back). Broadcast `playlist-changed` → `syncPlaylist()`.
+      — done: `playlist-changed {client}` + `X-LP-Client` (own echo skipped); `plState:partial` RED (stale strip) →
+      GREEN, playlist families 196/0.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 - [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.
 - [x] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only a node_modules symlink) — done.

@@ -34,6 +34,10 @@ export const CARD_STILL_W = 640;
 export const thumb = (u: string, referer?: string) =>
   /^https?:/i.test(u) ? img(u, referer) : media(u);
 
+// API: this page's id on every POST (X-LP-Client) — a state broadcast names the client that made the change, so a
+// page ignores the echo of its own save (a resync over a pending strip edit) and follows everyone else's
+export const CLIENT_ID = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+
 async function jget<T>(path: string): Promise<T> {
   const r = await fetch(`${API}${path}`);
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
@@ -42,7 +46,7 @@ async function jget<T>(path: string): Promise<T> {
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-LP-Client": CLIENT_ID },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
