@@ -3130,9 +3130,11 @@ public static class PlayerHelper
     }
 
 
-    // Adjust volume by `delta` (clamped 0-100). Updates the persisted setting
-    // so subsequent launches and the GUI slider reflect the change, and also
-    // pushes to the running mpv via IPC for an immediate effect.
+    // Adjust the GLOBAL volume by `delta` (clamped 0-100) — the keybind twin of the Settings page's global
+    // slider. Persisted (subsequent launches and the GUI slider reflect it) and pushed live as the playing
+    // item's EFFECTIVE volume (override ?? global, like /settings): an item with its own volume keeps it.
+    // It pushed the new global even then — the playing wallpaper jumped off its override until the next
+    // settings save (a theme change) snapped it back (UI matrix `cli:volume-up:overridden`).
     public static void AdjustVolume(int delta)
     {
         var settings = SettingsService.Load();
@@ -3140,7 +3142,8 @@ public static class PlayerHelper
         if (newVolume == settings.Volume) return;
         settings.Volume = newVolume;
         SettingsService.Save(settings);
-        SetVolume(newVolume);
+        var cur = QueryCurrentPath();
+        SetVolume((cur != null ? ReadVolumeOverride(cur) : null) ?? newVolume);
     }
 
     // Returns the next wallpaper path, extending history if needed.
