@@ -67,10 +67,25 @@ public static class LibraryStore
         catch { return new(); }
     }
 
-    public static void SaveIndex(string source, Dictionary<string, LibMeta> idx)
+    // Private: every write is a read-modify-write under `_lock` (SetMeta / Remove / UpdateIndex). Trash, undo, the
+    // WE sync and the direct-download reconcile used to LoadIndex, work, then SaveIndex their copy outside it —
+    // over an override saved meanwhile (matrix race:indexLostUpdate: 2–3 of 40 slider saves reverted by
+    // trash/undo cycles of another item).
+    private static void SaveIndex(string source, Dictionary<string, LibMeta> idx)
     {
         try { AtomicFile.WriteAllText(IndexPath(source), JsonSerializer.Serialize(idx, _json)); }
         catch { }
+    }
+
+    // Read-modify-write a whole source's index under the same lock as SetMeta; `mutate` returns whether to save.
+    // Reentrant (Monitor), so a writer touching two indexes can nest them and save in the order it needs.
+    public static void UpdateIndex(string source, Func<Dictionary<string, LibMeta>, bool> mutate)
+    {
+        lock (_lock)
+        {
+            var idx = LoadIndex(source);
+            if (mutate(idx)) SaveIndex(source, idx);
+        }
     }
 
     // mediaPath (library/<source>/<key>/<file>…) → (source, key). Null if outside the library / malformed.
