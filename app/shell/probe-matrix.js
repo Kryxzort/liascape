@@ -867,9 +867,10 @@ C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
 C["race:playlistSaveLoad"] = { states: ["idle"], async run(c) {
     const pl = { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null };
     let bad = 0, n = 0, first = null;
+    await post("/playlist/state", pl); // the saves below write what's already there: any other read is a torn one
     const writers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 25; i++) await post("/playlist/state", pl); });
     const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const g = (await http("GET", "/playlist/state")).json; n++;
-      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.advanceOnVideoEnd !== true) { bad++; first ??= g && { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds }; } } });
+      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.advanceOnVideoEnd !== true) { bad++; first ??= g ? { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds } : "null"; } } });
     await Promise.all([...writers, ...readers]);
     c.race = { bad, n, first };
   }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /playlist/state during saves were not the playlist: ${JSON.stringify(c.race.first)}`] : []) };
@@ -877,8 +878,8 @@ C["race:indexSaveLoad"] = { states: ["idle"],
   async pre() { await post("/library/volume", { path: K[0], intValue: 30 }); await post("/library/speed", { path: K[1], doubleValue: 0.8 }); },
   async run(c) {
     let bad = 0, n = 0, first = null;
-    const writers = Array.from({ length: 3 }, async (_, w) => { for (let i = 0; i < 25; i++) await post("/library/volume", { path: K[2], intValue: 40 + ((i + w) % 2) }); });
-    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const lib = (await http("GET", "/library")).json || []; n++;
+    const writers = Array.from({ length: 3 }, async (_, w) => { for (let i = 0; i < 40; i++) await post("/library/volume", { path: K[2], intValue: 40 + ((i + w) % 2) }); });
+    const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 120; i++) { const lib = (await http("GET", "/library")).json || []; n++;
       const a = lib.find((x) => x.videoPath === K[0]), b = lib.find((x) => x.videoPath === K[1]);
       if (a?.volumeOverride !== 30 || b?.speedOverride !== 0.8) { bad++; first ??= { items: lib.length, k1: a?.volumeOverride ?? null, k2: b?.speedOverride ?? null }; } } });
     await Promise.all([...writers, ...readers]);
