@@ -356,10 +356,13 @@ Two bug classes kept recurring; fix the class, not the instance:
       calls it. Matrix cells to keep green: `set:*`, `appear:*`, `cli:volume-*`, `globalDrag*`, `itemVol*`.
 
 ## Next up (handoff 2026-10-26, weekly limit)
-- [ ] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing
+- [x] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing
       right AFTER the item is trashed: `SetMeta` creates the entry if missing → a ghost index entry for a trashed item
       (a later download with that key inherits it), and Undo restores the pre-drag volume. Add a matrix cell (RED
       first), then drop a save for an item that's gone (or write it into its trash record).
+      — done: `race:saveAfterTrash` RED (a ghost `{"volume":55}` for the trashed k4) → `SetMeta` creates no entry for an
+      item whose folder is gone; Undo restores its trashed entry. Affected cells (`--changed`) green; 4 transient
+      fails (3× `paused × cli:volume-up*` with a blank UI page, 1× `muted × itemSpd:off`) passed 8/8 on rerun.
 - [ ] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 - [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.

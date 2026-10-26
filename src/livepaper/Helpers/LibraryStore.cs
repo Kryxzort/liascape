@@ -117,7 +117,14 @@ public static class LibraryStore
         lock (_lock)
         {
             var idx = LoadIndex(loc.Value.Source);
-            if (!idx.TryGetValue(loc.Value.Key, out var m)) { m = new LibMeta(); idx[loc.Value.Key] = m; }
+            if (!idx.TryGetValue(loc.Value.Key, out var m))
+            {
+                // an item that's gone (trashed, deleted) gets no entry: a save landing after its trash (the modal's
+                // persist 250 ms after release, an "item"-mode volume key) left a ghost a later item with that key
+                // inherited (matrix race:saveAfterTrash); Undo restores its trashed entry anyway
+                if (!Directory.Exists(Path.Combine(SourceDir(loc.Value.Source), loc.Value.Key))) return;
+                m = new LibMeta(); idx[loc.Value.Key] = m;
+            }
             mutate(m);
             SaveIndex(loc.Value.Source, idx);
         }

@@ -973,6 +973,22 @@ C["race:indexLostUpdate"] = { states: ["idle"], async run(c) {
     ...(c.race.lost ? [`${c.race.lost}/${c.race.n} k1 volume saves were gone right after (trash/undo of k4 ×${c.race.cycles} saved a stale index over them): first ${JSON.stringify(c.race.first)}`] : []),
     ...(c.race.fin !== c.race.last ? [`k1's override ends at ${c.race.fin}, the last save was ${c.race.last}`] : [])] };
 
+// A volume save that lands AFTER its item was trashed (the modal's persist fires 250 ms after release; a volume key in
+// "item" mode): it must not create an index entry for the gone item (a ghost a later download with that key
+// inherits), and Undo brings the item back with what it had when it was trashed.
+C["race:saveAfterTrash"] = { states: ["idle"],
+  async pre() { await post("/library/volume", { path: K[3], intValue: 30 }); },
+  async run(c) {
+    const item = ((await http("GET", "/library")).json || []).find((x) => x.videoPath === K[3]);
+    await post("/library/trash", { items: [item] });
+    await post("/library/volume", { path: K[3], intValue: 55 }); // the late persist
+    c.ghost = readIndex()[keyOf(K[3])] ?? null;
+    await post("/library/undo"); await sleep(200);
+    c.back = ((await http("GET", "/library")).json || []).find((x) => x.videoPath === K[3]) ?? null;
+  }, check: (c) => [
+    ...(c.ghost ? [`a save after the trash wrote an index entry for the trashed k4: ${JSON.stringify(c.ghost)}`] : []),
+    ...(!c.back ? ["k4 not back after Undo"] : c.back.volumeOverride !== 30 ? [`k4 back with volume ${c.back.volumeOverride}, it was trashed at 30`] : [])] };
+
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
 // (pending) keeps its own (a global change never clobbers an override)
