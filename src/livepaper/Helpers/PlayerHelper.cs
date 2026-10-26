@@ -285,7 +285,7 @@ public static class PlayerHelper
         {
             var path = GuiTimerPidPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, Environment.ProcessId.ToString());
+            AtomicFile.WriteAllText(path, Environment.ProcessId.ToString()); // a reader mid-write saw no owner
         }
         catch { }
     }
@@ -414,7 +414,7 @@ public static class PlayerHelper
         {
             var path = TimerDaemonPidPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, Environment.ProcessId.ToString());
+            AtomicFile.WriteAllText(path, Environment.ProcessId.ToString()); // a reader mid-write saw no owner
         }
         catch { }
     }
@@ -445,7 +445,7 @@ public static class PlayerHelper
         {
             var path = RestartDaemonPidPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, Environment.ProcessId.ToString());
+            AtomicFile.WriteAllText(path, Environment.ProcessId.ToString()); // a reader mid-write saw no owner
         }
         catch { }
     }
@@ -644,7 +644,7 @@ public static class PlayerHelper
                 _waitForVideoEnd, _advanceOnVideoEnd, _waitingForVideoEnd);
             var path = TimedStatePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(state));
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(state));
         }
         catch { }
     }
@@ -1840,7 +1840,7 @@ public static class PlayerHelper
                 var newObserverPaths = new List<string> { currentPath };
                 newObserverPaths.AddRange(rest);
                 StartPlaylistObserver(newObserverPaths);
-                try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
+                try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
             }
         }
     }
@@ -1883,7 +1883,7 @@ public static class PlayerHelper
                     // Extend observer paths with appended items
                     var extendedPaths = _currentObserverPaths.Concat(appendedPaths).ToList();
                     StartPlaylistObserver(extendedPaths);
-                    try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(extendedPaths)); } catch { }
+                    try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(extendedPaths)); } catch { }
                     return;
                 }
             }
@@ -1926,7 +1926,7 @@ public static class PlayerHelper
             var newObserverPaths = new List<string> { currentPath };
             newObserverPaths.AddRange(rest);
             StartPlaylistObserver(newObserverPaths);
-            try { File.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
+            try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
         }
     }
 

@@ -87,7 +87,7 @@ public static class AudioMonitor
         {
             var path = MonitorPidPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, Environment.ProcessId.ToString());
+            AtomicFile.WriteAllText(path, Environment.ProcessId.ToString()); // a reader mid-write saw no owner
         }
         catch { }
     }
