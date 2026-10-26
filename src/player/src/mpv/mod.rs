@@ -503,6 +503,20 @@ impl RenderContext {
     /// resolve GL functions for it, and the returned context must be dropped before
     /// `handle` (with that GL context current).
     pub unsafe fn create(handle: &Handle, get_proc: GetProcAddress) -> Result<Self, MpvError> {
+        unsafe { RenderContext::create_raw(handle.raw(), get_proc) }
+    }
+
+    /// [`create`](Self::create) on a raw core (Phase 2: the render worker creates the render
+    /// context of a core another thread owns — `client.h`: the core may be used from any
+    /// thread).
+    ///
+    /// # Safety
+    /// As [`create`](Self::create), plus: `core` stays alive (and is not destroyed) until the
+    /// returned context is dropped.
+    pub unsafe fn create_raw(
+        core: *mut ffi::mpv_handle,
+        get_proc: GetProcAddress,
+    ) -> Result<Self, MpvError> {
         let mut init = ffi::mpv_opengl_init_params {
             get_proc_address: Some(get_proc),
             get_proc_address_ctx: ptr::null_mut(),
@@ -522,8 +536,7 @@ impl RenderContext {
             },
         ];
         let mut raw = ptr::null_mut();
-        let rc =
-            unsafe { ffi::mpv_render_context_create(&mut raw, handle.raw(), params.as_mut_ptr()) };
+        let rc = unsafe { ffi::mpv_render_context_create(&mut raw, core, params.as_mut_ptr()) };
         check(rc, || "mpv_render_context_create (OpenGL)".to_string())?;
         NonNull::new(raw)
             .map(|raw| RenderContext { raw })
@@ -549,6 +562,26 @@ impl RenderContext {
     pub fn frame_pending(&self) -> bool {
         let flags = unsafe { ffi::mpv_render_context_update(self.raw.as_ptr()) };
         flags & ffi::mpv_render_update_flag::MPV_RENDER_UPDATE_FRAME as u64 != 0
+    }
+
+    /// `MPV_RENDER_PARAM_NEXT_FRAME_INFO`: the pending frame is a **redraw** of the frame
+    /// last rendered (`MPV_RENDER_FRAME_INFO_REDRAW` — the VO re-presenting its current
+    /// frame, e.g. after a reset/reconfig), not a new one. Phase 2's render worker tags such a
+    /// frame like the one it repeats: mpv redraws the OLD file's last frame after a new
+    /// file's FILE_LOADED. Never blocks.
+    pub fn next_frame_is_redraw(&self) -> bool {
+        let mut info = ffi::mpv_render_frame_info {
+            flags: 0,
+            target_time: 0,
+        };
+        let param = ffi::mpv_render_param {
+            type_: ffi::mpv_render_param_type::MPV_RENDER_PARAM_NEXT_FRAME_INFO,
+            data: &mut info as *mut _ as *mut c_void,
+        };
+        let rc = unsafe { ffi::mpv_render_context_get_info(self.raw.as_ptr(), param) };
+        rc >= 0
+            && info.flags & ffi::mpv_render_frame_info_flag::MPV_RENDER_FRAME_INFO_REDRAW as u64
+                != 0
     }
 
     /// `mpv_render_context_render` into GL framebuffer `fbo` (`w`×`h`, `internal_format`),
@@ -605,5 +638,69 @@ impl Drop for RenderContext {
             ffi::mpv_render_context_set_update_callback(self.raw.as_ptr(), None, ptr::null_mut());
             ffi::mpv_render_context_free(self.raw.as_ptr());
         }
+    }
+}
+
+/// A weak second client on a core (`mpv_create_weak_client`) that receives **only**
+/// FILE_LOADED (every other maskable event is turned off; SHUTDOWN and QUEUE_OVERFLOW can't
+/// be) and observes no property — Phase 2's render worker counts FILE_LOADED with it in
+/// mpv's own event order (`sources::render_worker`). With no observed property and no log
+/// level requested, [`WeakClient::poll`]'s `mpv_wait_event(…, 0)` only takes this client's
+/// own lock (never the core's), so it's safe on a render thread. Must be dropped
+/// (`mpv_destroy`) before the core's `mpv_terminate_destroy`, which otherwise waits for it.
+pub struct WeakClient {
+    raw: NonNull<ffi::mpv_handle>,
+}
+
+/// What [`WeakClient::poll`] drained.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct WeakEvents {
+    pub file_loaded: u64,
+    pub shutdown: bool,
+    /// Events were dropped (the count can't be trusted any more).
+    pub overflow: bool,
+}
+
+impl WeakClient {
+    /// # Safety
+    /// `core` must be a live, initialized core that outlives this client.
+    pub unsafe fn create(core: *mut ffi::mpv_handle) -> Result<WeakClient, MpvError> {
+        let raw = unsafe { ffi::mpv_create_weak_client(core, c"lp-render".as_ptr()) };
+        let raw = NonNull::new(raw).ok_or_else(|| {
+            MpvError::new(ffi::mpv_error::MPV_ERROR_NOMEM, "mpv_create_weak_client")
+        })?;
+        // Every event id but FILE_LOADED off (an id this libmpv doesn't know, or one that
+        // can't be masked, just errors — ignored).
+        for id in 1..64 {
+            if id != ev::MPV_EVENT_FILE_LOADED {
+                unsafe { ffi::mpv_request_event(raw.as_ptr(), id, 0) };
+            }
+        }
+        Ok(WeakClient { raw })
+    }
+
+    /// Drain the queue (never blocks).
+    pub fn poll(&self) -> WeakEvents {
+        let mut out = WeakEvents::default();
+        loop {
+            let e = unsafe { &*ffi::mpv_wait_event(self.raw.as_ptr(), 0.0) };
+            match e.event_id {
+                ev::MPV_EVENT_NONE => break,
+                ev::MPV_EVENT_FILE_LOADED => out.file_loaded += 1,
+                ev::MPV_EVENT_SHUTDOWN => {
+                    out.shutdown = true;
+                    break;
+                }
+                ev::MPV_EVENT_QUEUE_OVERFLOW => out.overflow = true,
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+impl Drop for WeakClient {
+    fn drop(&mut self) {
+        unsafe { ffi::mpv_destroy(self.raw.as_ptr()) }
     }
 }

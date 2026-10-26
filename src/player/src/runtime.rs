@@ -122,6 +122,41 @@ pub struct ServeOpts {
     /// auto-trigger after every `transition.done`); equivalent to `set player.debug true`
     /// once running.
     pub debug: bool,
+    /// Phase 2 (`--render-worker on|off`, env `LP_PLAYER_RENDER_WORKER`): render mpv sources
+    /// on the `lp-render` worker thread (§ Sources "Render worker"). Real clock only — the
+    /// stepped clock renders on the loop whatever this says.
+    pub render_worker: bool,
+}
+
+/// Phase 2: whether the render worker runs when neither `--render-worker` nor
+/// `LP_PLAYER_RENDER_WORKER` says (§ Sources "Render worker").
+pub const RENDER_WORKER_DEFAULT: bool = false;
+
+/// The env knob for the render worker (`on`/`off`); `--render-worker` wins over it.
+pub const RENDER_WORKER_ENV: &str = "LP_PLAYER_RENDER_WORKER";
+
+/// `on|off` (also `1|0`, `true|false`, `yes|no`).
+pub fn parse_on_off(v: &str) -> Option<bool> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" | "yes" => Some(true),
+        "off" | "0" | "false" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+/// `--render-worker` (if given), else `LP_PLAYER_RENDER_WORKER` (an unparsable value is
+/// ignored with a stderr note), else [`RENDER_WORKER_DEFAULT`].
+pub fn render_worker_enabled(flag: Option<bool>) -> bool {
+    if let Some(f) = flag {
+        return f;
+    }
+    match std::env::var(RENDER_WORKER_ENV) {
+        Ok(v) if !v.is_empty() => parse_on_off(&v).unwrap_or_else(|| {
+            eprintln!("lp-player serve: {RENDER_WORKER_ENV}={v:?} ignored (expected on|off)");
+            RENDER_WORKER_DEFAULT
+        }),
+        _ => RENDER_WORKER_DEFAULT,
+    }
 }
 
 /// This compositor runs under the supervisor (Task 16).
@@ -2430,8 +2465,23 @@ impl Runtime {
         self.sync_sources();
         let t = Instant::now();
         self.host.finish_teardown(Duration::from_millis(500));
+        // Phase 2: the render worker frees every render context it still holds (each before
+        // its core goes to the reaper) and exits; one it couldn't free is a straggler too.
+        let render_left = self.host.render_worker().map_or(0, |w| {
+            let t = Instant::now();
+            let left = w.shutdown(REAPER_WAIT);
+            log::event(
+                "runtime",
+                if left > 0 { Level::Warn } else { Level::Info },
+                "render_worker.stopped",
+                None,
+                json!({ "left": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+            );
+            left
+        });
         // I5: an async open still creating its core counts like a reaper straggler.
-        let left = reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending();
+        let left =
+            reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending() + render_left;
         if left > 0 {
             log::event(
                 "runtime",
@@ -3491,6 +3541,29 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| format!("event loop: {}", e.error))?;
         rt.host
             .set_async_open(Some(Arc::new(move || open_ping.ping())));
+        // Phase 2: render contexts (creation, first render, every frame) on `lp-render`.
+        // Real clock only, like the async opens it rides on.
+        if opts.render_worker {
+            match crate::sources::RenderWorker::start(&rt.gfx) {
+                Ok(w) => {
+                    log::event(
+                        "render",
+                        Level::Info,
+                        "render_worker.started",
+                        None,
+                        json!({}),
+                    );
+                    rt.host.set_render_worker(Some(w));
+                }
+                Err(e) => log::event(
+                    "render",
+                    Level::Warn,
+                    "render_worker.unavailable",
+                    None,
+                    json!({ "reason": e, "hint": "mpv sources render on the loop" }),
+                ),
+            }
+        }
         let period = rt.tick_period;
         handle
             .insert_source(
@@ -3551,6 +3624,25 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             break;
         }
         rt.after_dispatch();
+        // Phase 2: the render worker died (a panic on `lp-render`): every mpv picture would
+        // freeze and every open wait out the attach timeout — fail like a lost compositor
+        // instead (silenced + torn down, exit 3: the supervisor restarts with `--restore`).
+        if rt.quit_at.is_none()
+            && let Some(reason) = rt.host.render_worker().and_then(|w| w.died())
+        {
+            log::event(
+                "runtime",
+                Level::Error,
+                "loop.failed",
+                None,
+                json!({ "error": format!("render worker died: {reason}"),
+                        "backend": rt.backend.kind() }),
+            );
+            fatal = Some(format!("render worker died: {reason}"));
+            rt.snapshot_final();
+            rt.stop_all(true);
+            break;
+        }
         rt.apply_output_changes();
         rt.pointer_events();
         if rt.backend.paced() {
@@ -3566,9 +3658,15 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         // An mpv core is still being destroyed on the reaper thread: a normal exit would
         // run atexit/static destructors (libmpv, ffmpeg, EGL) under it. The log is already
         // on disk (every event is flushed), so remove the socket + lock and leave now with
-        // a clean status (item 16).
+        // the status a normal return would give (item 16) — a failed loop's EXIT_RUNTIME,
+        // never 0: the supervisor ends supervision on 0, so a failure must not read as one.
         socket_file.remove_now();
-        unsafe { libc::_exit(0) };
+        let code = if fatal.is_some() {
+            i32::from(supervise::EXIT_RUNTIME)
+        } else {
+            0
+        };
+        unsafe { libc::_exit(code) };
     }
     drop(socket_file);
     fatal.map_or(Ok(()), |m| Err(ServeError::Runtime(m)))

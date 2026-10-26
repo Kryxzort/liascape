@@ -123,10 +123,23 @@ impl Drop for Shared {
             let _ = self.egl.make_current(self.display, None, None, None);
         }
         let _ = self.egl.destroy_context(self.display, self.context);
+        let _life = display_lifecycle();
         if display_release(self.display) {
             let _ = self.egl.terminate(self.display);
         }
     }
+}
+
+/// Held across "initialize + count a user" and across "uncount + terminate", so the two never
+/// interleave: before, a `Gfx` dropped on one thread could `eglTerminate` the shared display
+/// between another thread's `eglInitialize` and its `display_acquire` — that thread's display
+/// was then uninitialized under it (`EGL_NOT_INITIALIZED` at its next `eglCreateContext`;
+/// found by the Phase 2 render-worker tests, one test's teardown overlapping the next one's
+/// setup — the "latent race between parallel GPU tests" Task 10 noted).
+static DISPLAY_LIFECYCLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn display_lifecycle() -> std::sync::MutexGuard<'static, ()> {
+    DISPLAY_LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Live [`Shared`]s per EGL display handle. **Every surfaceless `Gfx` in a process gets the
@@ -224,6 +237,8 @@ impl Gfx {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
 
+        // Initialize + count this user under one lock (`DISPLAY_LIFECYCLE`).
+        let life = display_lifecycle();
         let (display, path) = pick_offscreen_display(&egl, &client_ext)?;
 
         require_surfaceless_context(&egl, display, &path)?;
@@ -237,6 +252,7 @@ impl Gfx {
         let gl = load_gl(&egl);
 
         display_acquire(display);
+        drop(life);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -271,6 +287,7 @@ impl Gfx {
             get_platform_display_ext(&egl, PLATFORM_WAYLAND_KHR, display_ptr).map_err(|e| {
                 format!("eglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_KHR) failed: {e}")
             })?;
+        let life = display_lifecycle();
         egl.initialize(display)
             .map_err(|e| format!("eglInitialize (wayland) failed: {e}"))?;
 
@@ -288,6 +305,7 @@ impl Gfx {
         let gl = load_gl(&egl);
 
         display_acquire(display);
+        drop(life);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -445,6 +463,7 @@ impl Drop for WindowTarget {
 /// FBO/texture must be deleted in that context too — regardless of whether the owning
 /// `Gfx` was dropped first. Holding this makes the drop order irrelevant: the EGL context
 /// can't be torn down while a source still owns objects in it.
+#[derive(Clone)]
 pub struct GlKeepAlive {
     shared: Rc<Shared>,
     delete_textures: Option<unsafe extern "system" fn(i32, *const u32)>,
@@ -562,6 +581,91 @@ impl Gfx {
             shared: Rc::clone(&self.shared),
             delete_textures: load("glDeleteTextures"),
             delete_framebuffers: load("glDeleteFramebuffers"),
+        }
+    }
+
+    /// Phase 2 (render worker): a second desktop-GL 3.3 core context in **this** context's
+    /// share group — same `EGLDisplay` (one per process: NVIDIA, § GFX / EGL; the display's
+    /// user count goes up, so `eglTerminate` waits for it too), same config,
+    /// `share_context` = this one — for another thread to make current **surfaceless**
+    /// ([`SharedContext::make_current`]). Textures and sync objects made in either context
+    /// are visible to both; FBOs/VAOs (container objects) are not. Created here on the
+    /// owner's thread, then moved to the thread that uses it.
+    pub fn share_context(&self) -> Result<SharedContext, String> {
+        let egl = load_egl()?;
+        let display = self.shared.display;
+        let display_ext = egl
+            .query_string(Some(display), egl::EXTENSIONS)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !has_ext(&display_ext, "EGL_KHR_surfaceless_context") {
+            return Err(format!(
+                "EGL_KHR_surfaceless_context missing on display ({}); a render worker needs it",
+                self.path
+            ));
+        }
+        egl.bind_api(egl::OPENGL_API)
+            .map_err(|e| format!("eglBindAPI(EGL_OPENGL_API) failed: {e}"))?;
+        let attribs = [
+            egl::CONTEXT_MAJOR_VERSION,
+            3,
+            egl::CONTEXT_MINOR_VERSION,
+            3,
+            egl::CONTEXT_OPENGL_PROFILE_MASK,
+            egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            egl::NONE,
+        ];
+        let context = egl
+            .create_context(display, self.config, Some(self.shared.context), &attribs)
+            .map_err(|e| format!("eglCreateContext (shared, desktop GL 3.3 core) failed: {e}"))?;
+        display_acquire(display);
+        Ok(SharedContext {
+            egl,
+            display,
+            context,
+        })
+    }
+}
+
+/// A context in another [`Gfx`]'s share group ([`Gfx::share_context`]) for a worker thread:
+/// made current there surfaceless for the thread's life. `Drop` (on that thread) unbinds it
+/// if current, destroys it and releases the display (terminating it if this was its last
+/// user — `display_release`).
+pub struct SharedContext {
+    egl: EglInstance,
+    display: egl::Display,
+    context: egl::Context,
+}
+
+// SAFETY: an EGL context may be created on one thread and made current on another, as long
+// as it is never current on two threads at once. A `SharedContext` is created on the owner's
+// thread, moved once to its worker thread and only ever made current (and destroyed) there.
+unsafe impl Send for SharedContext {}
+
+impl SharedContext {
+    /// `eglMakeCurrent(display, NO_SURFACE, NO_SURFACE, context)` on the calling thread.
+    pub fn make_current(&self) -> Result<(), String> {
+        self.egl
+            .make_current(self.display, None, None, Some(self.context))
+            .map_err(|e| format!("eglMakeCurrent (shared, surfaceless) failed: {e}"))
+    }
+
+    /// A glow context loaded through `eglGetProcAddress` — the worker's own GL loader (real
+    /// `glFenceSync`, never libmpv's stubbed table). Call with this context current.
+    pub fn load_gl(&self) -> glow::Context {
+        load_gl(&self.egl)
+    }
+}
+
+impl Drop for SharedContext {
+    fn drop(&mut self) {
+        if self.egl.get_current_context() == Some(self.context) {
+            let _ = self.egl.make_current(self.display, None, None, None);
+        }
+        let _ = self.egl.destroy_context(self.display, self.context);
+        let _life = display_lifecycle();
+        if display_release(self.display) {
+            let _ = self.egl.terminate(self.display);
         }
     }
 }

@@ -1151,6 +1151,49 @@ skipped —, the one un-paused while queued plays, quit with a second burst queu
 with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_order_and_loses_none`,
 `open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
+**Render worker (Phase 2, `sources/render_worker.rs`; `serve --render-worker on|off`, env
+`LP_PLAYER_RENDER_WORKER`; default off while it's built).** One `lp-render` thread per process owns
+every *worker-mode* `MpvSource`'s render context — creation, the first render (shader compile,
+LUTs), every later render, the free — so the loop only adopts finished textures and composes.
+- **Context.** `Gfx::share_context` makes a second context on the **same** `EGLDisplay` (one per
+  process, refcounted terminate — § GFX / EGL), same config, `share_context` = the compositor's;
+  the thread makes it current **surfaceless** for its whole life and loads its **own** glow (real
+  `glFenceSync`/`glClientWaitSync`). mpv still gets `get_proc_address` with the fence stub;
+  `opengl-pbo=no` stays.
+- **Split.** The loop keeps the core: event pump, async applies, `read`, load fencing, Ready, the
+  front/back textures it shows. The `lp-open` job hands its freshly prepared core to the worker
+  (`RenderWorker::attach`, the job waits) which creates the render context with the update callback
+  on the worker's eventfd, then the loop's `open_with_core` only applies props + `loadfile`.
+- **Hand-off (per source `Exchange`, a mutex never held across an mpv call).** Loop → worker: the
+  target size (observed `dwidth`/`dheight`, capped), textures given back. Worker → loop: the
+  newest complete frame (an unadopted older one goes back to the free list — the latest COMPLETE
+  frame wins), a render error. The worker renders only into textures it owns (never the loop's
+  front/back/unadopted frame); after each render `glFenceSync` + `glFlush`, it waits on that fence
+  itself (client wait, bounded) and only then publishes + writes a `dup` of the source's eventfd.
+  The loop adopts a frame only when `glClientWaitSync(fence, 0, 0)` reports it signalled (else it
+  keeps the previous one and re-checks next iteration) — never a half-rendered frame; the sampler
+  re-binds the texture (GL share-group visibility rule). A texture the loop sampled (a replaced
+  front) goes back with a **release fence** (+ `glFlush`) that the worker `glWaitSync`s before
+  rendering into it again. `SnapshotSource` blits `texture()` = an adopted (complete) front.
+- **Load fencing / Ready.** Every frame is tagged with the number of FILE_LOADED events mpv had
+  emitted when its render started — counted by the worker through a **weak client** on the core
+  (`mpv_create_weak_client`, every event but FILE_LOADED masked off, no observed properties, so its
+  `wait_event(0)` never touches the core lock); the loop counts the same broadcast events and a
+  frame is "of the current load, rendered after its FILE_LOADED" iff its tag equals the count at
+  the current load's FILE_LOADED. Same rule as the loop renderer, but on mpv's own event order
+  instead of the loop's pump time — a single-frame image/paused clip whose only frame the worker
+  rendered before the loop pumped FILE_LOADED would otherwise never become Ready. front/back
+  promotion, orientation (FLIP_Y = 0) and `reset_gl_state` (on the worker's context) unchanged.
+  A size change re-renders mpv's current frame at the new size (tagged like the frame it redraws).
+- **Teardown.** Two-phase as before; `Drop` clears the core's wakeup callback and hands the core +
+  every texture it holds to the worker (`Free`): render context freed with the worker's context
+  current, weak client destroyed, textures/FBOs deleted, then the core to the reaper — no GL on the
+  loop. A `PreparedCore` dropped with a render context attached goes the same way. `quit`:
+  `finish_teardown`, then `render_worker::shutdown`, then `reaper::shutdown`.
+- **Real clock only** (like async opens): stepped mode and the harnesses render on the loop
+  (`stepped_is_deterministic` untouched); a source opened synchronously in real-clock mode renders
+  on the loop too — the two modes mix per source. Audio is untouched.
+
 **Audio re-route (final review I7).** `SourceHost::set_audio_route(device, bias)` — the bus went
 down (`None`: mpv's default device) or came back (`Some(bus device)`, bias = −latency): base
 opts change for new sources, every hosted mpv source gets `MpvSource::set_audio_route` (async
