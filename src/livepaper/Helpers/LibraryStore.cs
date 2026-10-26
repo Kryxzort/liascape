@@ -58,24 +58,18 @@ public static class LibraryStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    // Atomic save + a retried load (AtomicFile): written in place, a read mid-save (every switch's override,
+    // /settings, /library, SetMeta's own read-modify-write) got an EMPTY index — every override read as
+    // "follows the global", and a SetMeta then saved that empty index + one entry over everything.
     public static Dictionary<string, LibMeta> LoadIndex(string source)
     {
-        try
-        {
-            var p = IndexPath(source);
-            if (!File.Exists(p)) return new();
-            return JsonSerializer.Deserialize<Dictionary<string, LibMeta>>(File.ReadAllText(p), _json) ?? new();
-        }
+        try { return AtomicFile.ReadJson<Dictionary<string, LibMeta>>(IndexPath(source), _json) ?? new(); }
         catch { return new(); }
     }
 
     public static void SaveIndex(string source, Dictionary<string, LibMeta> idx)
     {
-        try
-        {
-            Directory.CreateDirectory(SourceDir(source));
-            File.WriteAllText(IndexPath(source), JsonSerializer.Serialize(idx, _json));
-        }
+        try { AtomicFile.WriteAllText(IndexPath(source), JsonSerializer.Serialize(idx, _json)); }
         catch { }
     }
 
