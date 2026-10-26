@@ -130,12 +130,15 @@ pub(crate) struct Attached {
 struct SendHandle(Handle);
 unsafe impl Send for SendHandle {}
 
+/// The worker's answer to an attach: the core back, and the slot id + exchange (or why not).
+type AttachReply = (SendHandle, Result<(u64, Arc<Exchange>), String>);
+
 enum Job {
     /// Make a render context (+ weak client) for `core`; reply with the core back.
     Attach {
         core: SendHandle,
         loop_wake: OwnedFd,
-        reply: SyncSender<(SendHandle, Result<(u64, Arc<Exchange>), String>)>,
+        reply: SyncSender<AttachReply>,
     },
     /// Free slot `id` (render context with this context current, weak client, every texture),
     /// delete `fences`, then hand `core` to the reaper.
@@ -169,8 +172,8 @@ struct State {
     stats: Stats,
 }
 
-/// The render worker (one per player). Cheap to clone through its `Arc`.
-pub struct RenderWorker {
+/// What the thread and every [`RenderWorker`] handle share.
+struct Inner {
     state: Mutex<State>,
     /// Woken by jobs, by the loop (size changes, textures given back) and by every render
     /// context's update callback (`on_wake`, the fd number is the callback context). Never
@@ -178,6 +181,50 @@ pub struct RenderWorker {
     fd: RawFd,
     done: Mutex<Option<(mpsc::Receiver<()>, JoinHandle<()>)>>,
 }
+
+impl Inner {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn wake(&self) {
+        let one: u64 = 1;
+        unsafe { libc::write(self.fd, &one as *const u64 as *const libc::c_void, 8) };
+    }
+
+    fn send(&self, job: Job) -> Result<(), Job> {
+        {
+            let mut s = self.lock();
+            if s.exited {
+                return Err(job);
+            }
+            s.jobs.push_back(job);
+        }
+        self.wake();
+        Ok(())
+    }
+}
+
+/// The render worker (one per player): a handle on the `lp-render` thread. Every source it
+/// renders holds one (`Attached`), so the thread outlives them all; when the last handle goes
+/// (the runtime's and every source's) the thread finishes its queued frees and exits by
+/// itself — [`RenderWorker::shutdown`] is the bounded wait for that at `quit`.
+pub struct RenderWorker {
+    inner: Arc<Inner>,
+}
+
+impl Drop for RenderWorker {
+    /// The last handle: the thread finishes its queued frees, destroys its context and exits
+    /// — waited for here (bounded), so no `lp-render` thread is still inside the driver when
+    /// the process exits (NVIDIA's atexit teardown under a live GL thread crashed a test
+    /// binary at exit). In the player this is after [`RenderWorker::shutdown`] (a no-op then).
+    fn drop(&mut self) {
+        self.shutdown(SHUTDOWN_WAIT);
+    }
+}
+
+/// [`RenderWorker`]'s `Drop` waits this long for its thread.
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 
 impl RenderWorker {
     /// Start the worker on a context shared with `gfx`'s (`Gfx::share_context`).
@@ -188,7 +235,7 @@ impl RenderWorker {
             return Err(format!("eventfd: {}", std::io::Error::last_os_error()));
         }
         let fd = unsafe { OwnedFd::from_raw_fd(raw) }.into_raw_fd();
-        let w = Arc::new(RenderWorker {
+        let inner = Arc::new(Inner {
             state: Mutex::new(State {
                 jobs: Default::default(),
                 closing: false,
@@ -200,7 +247,7 @@ impl RenderWorker {
         });
         let (tx, rx) = mpsc::channel();
         let (ok_tx, ok_rx) = mpsc::channel::<Result<(), String>>();
-        let me = Arc::clone(&w);
+        let me = Arc::clone(&inner);
         let thread = std::thread::Builder::new()
             .name("lp-render".into())
             .spawn(move || {
@@ -217,30 +264,21 @@ impl RenderWorker {
             }
             Err(_) => return Err("lp-render exited during startup".into()),
         }
-        *w.done.lock().unwrap_or_else(|e| e.into_inner()) = Some((rx, thread));
-        Ok(w)
+        *inner.done.lock().unwrap_or_else(|e| e.into_inner()) = Some((rx, thread));
+        Ok(Arc::new(RenderWorker { inner }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.inner.lock()
     }
 
     /// Wake the worker (a job, a new size, textures given back).
     pub(crate) fn wake(&self) {
-        let one: u64 = 1;
-        unsafe { libc::write(self.fd, &one as *const u64 as *const libc::c_void, 8) };
+        self.inner.wake();
     }
 
     fn send(&self, job: Job) -> Result<(), Job> {
-        {
-            let mut s = self.lock();
-            if s.exited {
-                return Err(job);
-            }
-            s.jobs.push_back(job);
-        }
-        self.wake();
-        Ok(())
+        self.inner.send(job)
     }
 
     /// Give `core`'s rendering to the worker: it creates the render context (worker context
@@ -324,7 +362,12 @@ impl RenderWorker {
     pub fn shutdown(&self, timeout: Duration) -> usize {
         self.lock().closing = true;
         self.wake();
-        let done = self.done.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let done = self
+            .inner
+            .done
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         if let Some((rx, thread)) = done
             && rx.recv_timeout(timeout).is_ok()
         {
@@ -354,9 +397,11 @@ impl RenderWorker {
             "exited": s.exited,
         })
     }
+}
 
-    // ------------------------------------------------------------------ the thread
+// ---------------------------------------------------------------------- the thread
 
+impl Inner {
     fn run(&self, ctx: SharedContext, ok: mpsc::Sender<Result<(), String>>) {
         if let Err(e) = ctx.make_current() {
             let _ = ok.send(Err(e));
@@ -365,6 +410,8 @@ impl RenderWorker {
         let gl = ctx.load_gl();
         let _ = ok.send(Ok(()));
         let mut slots: BTreeMap<u64, Slot> = BTreeMap::new();
+        // Rendered, flushed, fence not signalled yet: (slot, frame, render ms, rendered at).
+        let mut inflight: Vec<(u64, Frame, f64, Instant)> = Vec::new();
         let mut next_id = 1u64;
         loop {
             let mut pfd = libc::pollfd {
@@ -372,7 +419,11 @@ impl RenderWorker {
                 events: libc::POLLIN,
                 revents: 0,
             };
-            unsafe { libc::poll(&mut pfd, 1, 100) };
+            // A frame on the GPU is polled every 1 ms (never a blocking `glClientWaitSync`: on
+            // NVIDIA 595 that wait holds the driver's process-wide lock, so every other
+            // thread's GL — the compositor's included — queues behind the GPU work).
+            let timeout = if inflight.is_empty() { 100 } else { 1 };
+            unsafe { libc::poll(&mut pfd, 1, timeout) };
             let mut buf = 0u64;
             unsafe { libc::read(self.fd, &mut buf as *mut u64 as *mut libc::c_void, 8) };
             let (jobs, closing) = {
@@ -418,6 +469,14 @@ impl RenderWorker {
                     }
                     Job::Free { id, core, fences } => {
                         let t = Instant::now();
+                        inflight.retain_mut(|(sid, f, _, _)| {
+                            if *sid == id
+                                && let Some(fence) = f.fence.take()
+                            {
+                                fence.delete(&gl);
+                            }
+                            *sid != id
+                        });
                         if let Some(s) = slots.remove(&id) {
                             s.free(&gl);
                         }
@@ -438,54 +497,60 @@ impl RenderWorker {
             if closing && slots.is_empty() {
                 break;
             }
-            // One render pass: render every slot with a frame due, flush once, wait for each
-            // fence, publish.
-            let mut out: Vec<(u64, Frame, f64)> = Vec::new();
+            // One render pass: every slot with a frame due and none on the GPU renders (a frame
+            // mpv queues meanwhile stays pending — level-triggered), one flush for them all.
+            let mut rendered = 0u64;
+            let mut render_max = 0f64;
             for (id, slot) in slots.iter_mut() {
+                if inflight.iter().any(|(sid, ..)| sid == id) {
+                    continue;
+                }
                 if let Some((f, ms)) = slot.render(&gl) {
-                    out.push((*id, f, ms));
+                    rendered += 1;
+                    render_max = render_max.max(ms);
+                    inflight.push((*id, f, ms, Instant::now()));
                 }
             }
-            if out.is_empty() {
-                continue;
+            if rendered > 0 {
+                unsafe { gl.flush() };
             }
-            unsafe { gl.flush() };
+            // Publish every frame whose fence signalled (polled, `timeout 0`); one still not
+            // done after FENCE_WAIT goes anyway — the loop re-checks its fence before using it.
             let mut wait_max = 0f64;
             let mut timeouts = 0u64;
-            for (_, f, _) in &out {
-                if let Some(fence) = &f.fence {
-                    let t = Instant::now();
-                    let r = unsafe {
-                        gl.client_wait_sync(
-                            fence.raw(),
-                            glow::SYNC_FLUSH_COMMANDS_BIT,
-                            FENCE_WAIT.as_nanos() as i32,
-                        )
-                    };
-                    if r == glow::TIMEOUT_EXPIRED {
-                        timeouts += 1;
-                    }
-                    wait_max = wait_max.max(t.elapsed().as_secs_f64() * 1000.0);
-                }
-            }
-            let mut render_max = 0f64;
             let mut first_max = 0f64;
-            let n = out.len() as u64;
-            for (id, f, ms) in out {
-                render_max = render_max.max(ms);
-                if let Some(slot) = slots.get_mut(&id) {
-                    if let Some(first) = slot.publish(&gl, f, ms) {
-                        first_max = first_max.max(first);
-                    }
+            let mut i = 0;
+            while i < inflight.len() {
+                let (_, f, _, at) = &inflight[i];
+                let done = f.fence.as_ref().is_none_or(|fence| fence.signalled(&gl));
+                let late = at.elapsed() >= FENCE_WAIT;
+                if !done && !late {
+                    i += 1;
+                    continue;
+                }
+                let (id, f, ms, at) = inflight.swap_remove(i);
+                timeouts += u64::from(!done);
+                wait_max = wait_max.max(at.elapsed().as_secs_f64() * 1000.0);
+                if let Some(slot) = slots.get_mut(&id)
+                    && let Some(first) = slot.publish(&gl, f, ms)
+                {
+                    first_max = first_max.max(first);
                 }
             }
-            let mut s = self.lock();
-            s.stats.passes += 1;
-            s.stats.renders += n;
-            s.stats.render_ms_max = s.stats.render_ms_max.max(render_max);
-            s.stats.first_render_ms_max = s.stats.first_render_ms_max.max(first_max);
-            s.stats.fence_wait_ms_max = s.stats.fence_wait_ms_max.max(wait_max);
-            s.stats.fence_timeouts += timeouts;
+            if rendered > 0 || wait_max > 0.0 {
+                let mut s = self.lock();
+                s.stats.passes += 1;
+                s.stats.renders += rendered;
+                s.stats.render_ms_max = s.stats.render_ms_max.max(render_max);
+                s.stats.first_render_ms_max = s.stats.first_render_ms_max.max(first_max);
+                s.stats.fence_wait_ms_max = s.stats.fence_wait_ms_max.max(wait_max);
+                s.stats.fence_timeouts += timeouts;
+            }
+        }
+        for (_, f, _, _) in inflight {
+            if let Some(fence) = f.fence {
+                fence.delete(&gl);
+            }
         }
         drop(slots);
         drop(gl);
@@ -573,9 +638,16 @@ impl Slot {
         if !pending && !redraw {
             return None;
         }
-        // A redraw shows the frame it re-renders: it keeps that frame's tag.
-        let tag = match (pending, self.last) {
-            (false, Some((_, t))) => t,
+        // A redraw shows the frame it re-renders, so it keeps that frame's tag: ours (a size
+        // change) and mpv's own (`MPV_RENDER_FRAME_INFO_REDRAW` — the VO re-presents its
+        // current frame; after a path change that's the OLD file's last frame, queued after
+        // the new FILE_LOADED: measured, a red→green path change promoted red with the plain
+        // "rendered after FILE_LOADED" tag once the worker rendered it late). Only a genuinely
+        // new frame takes the FILE_LOADED count: mpv drops a superseded load's queued frames
+        // when it ends (VO reset), so a new one pending after FILE_LOADED is the new file's.
+        let repeat = !pending || self.render.as_ref()?.next_frame_is_redraw();
+        let tag = match (repeat, self.last) {
+            (true, Some((_, t))) => t,
             _ => self.file_loaded,
         };
         let id = self.take_free(gl, size);
@@ -583,8 +655,8 @@ impl Slot {
         let fbo = fbo.id.0.get();
         let tex = tex_copy(tex);
         let t = Instant::now();
-        // R25: FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
         let render = self.render.as_ref()?;
+        // R25: FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
         let res = unsafe { render.render(fbo, size.0, size.1, glow::RGBA8, false) };
         reset_gl(gl);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -627,10 +699,21 @@ impl Slot {
             }
             self.delete_target(gl, id);
         }
-        if let Some((id, fence)) = self.free.pop() {
+        // Only a target whose release fence has signalled (the loop's last reads of it are
+        // done) — polled, never waited on server-side: a `glWaitSync` on another context's
+        // fence put that dependency into this context's GPU queue, and on NVIDIA 595 a fence
+        // whose context went away (or one never flushed) then stalled this queue for good —
+        // measured: a worker's `eglDestroyContext` stuck in an ioctl at exit while every other
+        // thread's GL calls (renders in other workers) waited behind it. One not ready yet
+        // stays free for later; a fresh target is made instead (rare: a release is a tick old
+        // by the time the next frame renders).
+        if let Some(i) = self
+            .free
+            .iter()
+            .rposition(|(_, f)| f.as_ref().is_none_or(|f| f.signalled(gl)))
+        {
+            let (id, fence) = self.free.remove(i);
             if let Some(f) = fence {
-                // The loop's last reads of it come first (server-side: never blocks here).
-                unsafe { gl.wait_sync(f.raw(), 0, glow::TIMEOUT_IGNORED) };
                 f.delete(gl);
             }
             return id;

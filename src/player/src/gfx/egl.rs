@@ -123,10 +123,23 @@ impl Drop for Shared {
             let _ = self.egl.make_current(self.display, None, None, None);
         }
         let _ = self.egl.destroy_context(self.display, self.context);
+        let _life = display_lifecycle();
         if display_release(self.display) {
             let _ = self.egl.terminate(self.display);
         }
     }
+}
+
+/// Held across "initialize + count a user" and across "uncount + terminate", so the two never
+/// interleave: before, a `Gfx` dropped on one thread could `eglTerminate` the shared display
+/// between another thread's `eglInitialize` and its `display_acquire` — that thread's display
+/// was then uninitialized under it (`EGL_NOT_INITIALIZED` at its next `eglCreateContext`;
+/// found by the Phase 2 render-worker tests, one test's teardown overlapping the next one's
+/// setup — the "latent race between parallel GPU tests" Task 10 noted).
+static DISPLAY_LIFECYCLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn display_lifecycle() -> std::sync::MutexGuard<'static, ()> {
+    DISPLAY_LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Live [`Shared`]s per EGL display handle. **Every surfaceless `Gfx` in a process gets the
@@ -224,6 +237,8 @@ impl Gfx {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
 
+        // Initialize + count this user under one lock (`DISPLAY_LIFECYCLE`).
+        let life = display_lifecycle();
         let (display, path) = pick_offscreen_display(&egl, &client_ext)?;
 
         require_surfaceless_context(&egl, display, &path)?;
@@ -237,6 +252,7 @@ impl Gfx {
         let gl = load_gl(&egl);
 
         display_acquire(display);
+        drop(life);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -271,6 +287,7 @@ impl Gfx {
             get_platform_display_ext(&egl, PLATFORM_WAYLAND_KHR, display_ptr).map_err(|e| {
                 format!("eglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_KHR) failed: {e}")
             })?;
+        let life = display_lifecycle();
         egl.initialize(display)
             .map_err(|e| format!("eglInitialize (wayland) failed: {e}"))?;
 
@@ -288,6 +305,7 @@ impl Gfx {
         let gl = load_gl(&egl);
 
         display_acquire(display);
+        drop(life);
         Ok(Gfx {
             gl,
             shared: Rc::new(Shared {
@@ -645,6 +663,7 @@ impl Drop for SharedContext {
             let _ = self.egl.make_current(self.display, None, None, None);
         }
         let _ = self.egl.destroy_context(self.display, self.context);
+        let _life = display_lifecycle();
         if display_release(self.display) {
             let _ = self.egl.terminate(self.display);
         }

@@ -24,7 +24,7 @@ use common::{ClipSpec, ensure_clip, headless_gl, read_rgba};
 use glow::HasContext;
 use lp_player::gfx::Gfx;
 use lp_player::graph::PropValue;
-use lp_player::sources::{ColorSource, MpvSource, Source, SourceEvent};
+use lp_player::sources::{ColorSource, MpvSource, RenderWorker, Source, SourceEvent};
 use serde_json::{Map, Value, json};
 
 /// `opts` for `MpvSource::open`, always with `ao: "null"` (R26).
@@ -32,6 +32,44 @@ fn opts(v: Value) -> Map<String, Value> {
     let mut m = v.as_object().expect("opts must be an object").clone();
     m.insert("ao".into(), json!("null"));
     m
+}
+
+/// `MpvSource::open`, or — with the render worker on (`LP_PLAYER_RENDER_WORKER`, the same
+/// switch `serve` reads; § Sources "Render worker") — the same open with the render context
+/// on a worker sharing `gfx`'s context, exactly as the real-clock runtime's async open does
+/// it (`prepare_core` → `attach_render` → `open_with_core`). Each source gets its own worker;
+/// it is joined when the source (its last handle) drops. So the whole file runs in both modes.
+fn open_src(
+    gfx: &Gfx,
+    path: &str,
+    o: &Map<String, Value>,
+) -> Result<MpvSource, lp_player::graph::ApiError> {
+    if !worker_mode() {
+        return MpvSource::open(gfx, path, o);
+    }
+    let worker = RenderWorker::start(gfx).expect("render worker");
+    let core = MpvSource::prepare_core(o)?.attach_render(&worker)?;
+    MpvSource::open_with_core(gfx, path, o, core)
+}
+
+fn worker_mode() -> bool {
+    lp_player::runtime::render_worker_enabled(None)
+}
+
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Every test's GPU context — and, with the render worker on, a process-wide lock held for
+/// the whole test: one player renders through ONE worker, but 24 of these tests at once are
+/// 24 more threads in the NVIDIA driver, whose process-wide lock (libnvidia-glsi; even
+/// `glBindTexture` on a shared context takes it) a new context's first `eglMakeCurrent` holds
+/// through a GPU ioctl — renders then waited ~1 s (p90 832 ms vs 262 ms on the loop),
+/// past mpv's 200 ms VO flip timeout, which drops a still/paused source's only frame
+/// (measured; same reason the transition harness and `tests/api.rs` run one at a time).
+/// Bind it as `(_serial, gfx)`: locals drop in reverse order, so the context goes before the
+/// lock is released.
+fn gpu() -> Option<(Option<std::sync::MutexGuard<'static, ()>>, Gfx)> {
+    let serial = worker_mode().then(|| SERIAL.lock().unwrap_or_else(|e| e.into_inner()));
+    headless_gl().map(|g| (serial, g))
 }
 
 fn path_str(p: &std::path::Path) -> &str {
@@ -149,7 +187,7 @@ fn errors(evs: &[SourceEvent]) -> Vec<String> {
 }
 
 fn open_ready(gfx: &Gfx, path: &str, o: Value) -> MpvSource {
-    let mut src = MpvSource::open(gfx, path, &opts(o)).expect("MpvSource::open");
+    let mut src = open_src(gfx, path, &opts(o)).expect("MpvSource::open");
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(gfx, &mut src, wake, Duration::from_secs(3), |e, _| ready(e));
     assert!(ok, "no Ready within 3 s for {path}; events: {evs:?}");
@@ -158,7 +196,7 @@ fn open_ready(gfx: &Gfx, path: &str, o: Value) -> MpvSource {
 
 #[test]
 fn first_frame_and_ready() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let src = open_ready(&gfx, path_str(&clip), json!({}));
     assert_eq!(src.kind(), "video");
@@ -183,7 +221,7 @@ fn first_frame_and_ready() {
 /// as uploading image rows top-down, which is what `gfx::compose` expects of a raw source.
 #[test]
 fn source_texture_holds_image_top_at_t0() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip(
         "split_red_over_blue",
         ClipSpec::SplitV {
@@ -212,7 +250,7 @@ fn source_texture_holds_image_top_at_t0() {
 
 #[test]
 fn frame_exact_seek() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
     let mut src = open_ready(&gfx, path_str(&clip), json!({"paused": true}));
     let wake = Some(src.wake_fd());
@@ -251,7 +289,7 @@ fn frame_exact_seek() {
 /// `loop = true`: never `Ended`; `Position` keeps flowing at ≤ ~10 Hz.
 #[test]
 fn loop_never_ends_and_position_is_rate_limited() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip(
         "solid_blue_1s",
         ClipSpec::Solid {
@@ -261,8 +299,7 @@ fn loop_never_ends_and_position_is_rate_limited() {
             tone_dbfs: -20.0,
         },
     );
-    let mut src =
-        MpvSource::open(&gfx, path_str(&clip), &opts(json!({"loop": true}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({"loop": true}))).expect("open");
     let wake = Some(src.wake_fd());
     let (evs, _) = pump(&gfx, &mut src, wake, Duration::from_millis(2500), |_, _| {
         false
@@ -290,7 +327,7 @@ fn loop_never_ends_and_position_is_rate_limited() {
 /// The `glFenceSync` stub (mpvpaper PR #132 technique) is on libmpv's actual path.
 #[test]
 fn fence_sync_stub_is_used() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&clip), json!({}));
     let wake = Some(src.wake_fd());
@@ -305,7 +342,7 @@ fn fence_sync_stub_is_used() {
 
 #[test]
 fn ended_holds_last_frame() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip(
         "solid_blue_1s",
         ClipSpec::Solid {
@@ -315,8 +352,7 @@ fn ended_holds_last_frame() {
             tone_dbfs: -20.0,
         },
     );
-    let mut src =
-        MpvSource::open(&gfx, path_str(&clip), &opts(json!({"loop": false}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({"loop": false}))).expect("open");
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(5), |e, _| {
         ended(e)
@@ -378,9 +414,9 @@ fn ended_holds_last_frame() {
 
 #[test]
 fn gain_maps_to_volume_gain() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     src.apply("gain.user", &PropValue::F64(-6.0)).unwrap();
     src.apply("gain.xfade", &PropValue::F64(-3.0103)).unwrap();
     settle(&gfx, &mut src);
@@ -401,7 +437,7 @@ fn gain_maps_to_volume_gain() {
 
 #[test]
 fn image_source() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
     let mut src = open_ready(&gfx, path_str(&clip), json!({}));
     assert_eq!(src.kind(), "image");
@@ -418,7 +454,7 @@ fn image_source() {
 
 #[test]
 fn no_audio_live() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&clip), json!({"loop": true}));
     let wake = Some(src.wake_fd());
@@ -465,7 +501,7 @@ fn no_audio_live() {
 /// with nothing else asked of it.
 #[test]
 fn has_audio_reflects_real_track_presence() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
 
     let with_audio = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&with_audio), json!({}));
@@ -493,9 +529,9 @@ fn has_audio_reflects_real_track_presence() {
 /// The brief's property map, checked against what mpv itself reports.
 #[test]
 fn property_map_reaches_mpv() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     let s = |src: &MpvSource, n: &str| src.mpv_get_string(n).unwrap_or_default();
     // Every apply is async on the render thread; settle before reading mpv back.
     let ap = |src: &mut MpvSource, p: &str, v: PropValue| {
@@ -561,7 +597,7 @@ fn property_map_reaches_mpv() {
 /// old frame is held until the new one lands, and `kind` follows mpv's image flag.
 #[test]
 fn path_change_is_live() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let red = ensure_clip("solid_red_2s", RED_2S);
     let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
     let mut src = open_ready(&gfx, path_str(&red), json!({"loop": true}));
@@ -608,7 +644,7 @@ fn path_change_is_live() {
 /// gain changes.
 #[test]
 fn apply_never_blocks_the_render_thread() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&clip), json!({"loop": true}));
     std::thread::sleep(Duration::from_millis(80)); // render thread "busy": no update()
@@ -644,7 +680,7 @@ fn apply_never_blocks_the_render_thread() {
 /// R45: a refused write is `Rejected` (the source is fine), never a load `Error`.
 #[test]
 fn rejected_property_is_a_rejected_event() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(&gfx, path_str(&clip), json!({}));
     let before = src.read("af");
@@ -675,11 +711,10 @@ fn rejected_property_is_a_rejected_event() {
 /// produce `Ready`, exactly once, and the texture at that moment is the new file's.
 #[test]
 fn path_change_before_first_pump_shows_only_new_file() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let red = ensure_clip("solid_red_2s", RED_2S);
     let blue = ensure_clip("solid_blue_1s", BLUE_1S);
-    let mut src =
-        MpvSource::open(&gfx, path_str(&red), &opts(json!({"loop": true}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&red), &opts(json!({"loop": true}))).expect("open");
     // Let A load fully — its FILE_LOADED / PLAYBACK_RESTART / first frame all queued —
     // without pumping anything, then move on: every one of those is now stale.
     std::thread::sleep(Duration::from_millis(300));
@@ -714,10 +749,10 @@ fn path_change_before_first_pump_shows_only_new_file() {
 /// must not be reported — least of all under the NEW path — and the new file plays.
 #[test]
 fn stale_load_error_is_not_reported_for_new_path() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let red = ensure_clip("solid_red_2s", RED_2S);
     let missing = "/nonexistent/lp-player-stale-error.mkv";
-    let mut src = MpvSource::open(&gfx, missing, &opts(json!({"loop": true}))).expect("open");
+    let mut src = open_src(&gfx, missing, &opts(json!({"loop": true}))).expect("open");
     std::thread::sleep(Duration::from_millis(300)); // A's END_FILE(ERROR) queued, unpumped
     src.apply("path", &PropValue::Str(path_str(&red).into()))
         .unwrap();
@@ -738,7 +773,7 @@ fn stale_load_error_is_not_reported_for_new_path() {
 /// path (the old frame stays), and changing back to a valid file recovers with Ready.
 #[test]
 fn path_change_to_missing_then_back() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let red = ensure_clip("solid_red_2s", RED_2S);
     let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
     let mut src = open_ready(&gfx, path_str(&red), json!({"loop": true}));
@@ -779,17 +814,17 @@ fn path_change_to_missing_then_back() {
 /// truncated/stripped into a different path or filter.
 #[test]
 fn nul_bytes_are_rejected() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let code = |r: Result<(), lp_player::graph::ApiError>| r.unwrap_err().code;
     let nul_path = format!("{}\0.png", path_str(&clip));
     assert_eq!(
-        MpvSource::open(&gfx, &nul_path, &opts(json!({})))
+        open_src(&gfx, &nul_path, &opts(json!({})))
             .err()
             .map(|e| e.code),
         Some("out_of_range")
     );
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     assert_eq!(
         code(src.apply("path", &PropValue::Str(nul_path.clone()))),
         "out_of_range"
@@ -808,9 +843,9 @@ fn nul_bytes_are_rejected() {
 /// before anything is applied.
 #[test]
 fn defaults_applied_at_open_match_mpv() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     settle(&gfx, &mut src);
     let s = |n: &str| src.mpv_get_string(n).unwrap_or_default();
     assert_eq!(src.read("cache"), Some(PropValue::Bool(true)));
@@ -856,9 +891,9 @@ fn defaults_applied_at_open_match_mpv() {
 /// before: every option `yes` (`load-auto-profiles` `auto`), 6 script threads per core.
 #[test]
 fn builtin_scripts_are_not_loaded() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     settle(&gfx, &mut src);
     let s = |n: &str| {
         src.mpv_get_string(&format!("options/{n}"))
@@ -898,10 +933,10 @@ fn builtin_scripts_are_not_loaded() {
 /// well-typed value at open is `out_of_range` (not `io`, which is for real I/O).
 #[test]
 fn open_error_codes() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let code = |o: Value| {
-        MpvSource::open(&gfx, path_str(&clip), &opts(o))
+        open_src(&gfx, path_str(&clip), &opts(o))
             .err()
             .map(|e| e.code)
     };
@@ -910,9 +945,7 @@ fn open_error_codes() {
     let mut o = opts(json!({}));
     o.insert("ao".into(), json!(5));
     assert_eq!(
-        MpvSource::open(&gfx, path_str(&clip), &o)
-            .err()
-            .map(|e| e.code),
+        open_src(&gfx, path_str(&clip), &o).err().map(|e| e.code),
         Some("bad_type")
     );
     assert_eq!(
@@ -926,7 +959,7 @@ fn open_error_codes() {
 /// comes up (not just decoder-side audio-params), and mute again tears it down.
 #[test]
 fn start_muted_then_unmute_live() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_ready(
         &gfx,
@@ -959,10 +992,10 @@ fn start_muted_then_unmute_live() {
 /// instead of rendering with it — then works again with the right one.
 #[test]
 fn update_with_foreign_context_is_refused() {
-    let Some(gfx1) = headless_gl() else { return };
+    let Some((_serial, gfx1)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let gfx2 = headless_gl().expect("second context"); // now gfx2's context is current
-    let mut src = MpvSource::open(&gfx1, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx1, path_str(&clip), &opts(json!({}))).expect("open");
     let t0 = Instant::now();
     let mut evs = Vec::new();
     while t0.elapsed() < Duration::from_millis(500) {
@@ -986,9 +1019,9 @@ fn update_with_foreign_context_is_refused() {
 /// `apply` gates values through the graph's own schema (same codes, same order).
 #[test]
 fn apply_validates_like_graph() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let mut src = MpvSource::open(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
     let code = |r: Result<(), lp_player::graph::ApiError>| r.unwrap_err().code;
     assert_eq!(
         code(src.apply("speed", &PropValue::F64(9.0))),
@@ -1015,9 +1048,9 @@ fn apply_validates_like_graph() {
 
 #[test]
 fn missing_file_reports_error_with_path() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let path = "/nonexistent/lp-player-test-missing.mkv";
-    let mut src = MpvSource::open(&gfx, path, &opts(json!({}))).expect("open is async");
+    let mut src = open_src(&gfx, path, &opts(json!({}))).expect("open is async");
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
         e.iter().any(|e| matches!(e, SourceEvent::Error { .. }))
@@ -1041,7 +1074,7 @@ fn missing_file_reports_error_with_path() {
 /// created it was dropped first (the source keeps the EGL context alive).
 #[test]
 fn source_outlives_gfx_safely() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let src = open_ready(&gfx, path_str(&clip), json!({}));
     drop(gfx);
@@ -1050,7 +1083,7 @@ fn source_outlives_gfx_safely() {
 
 #[test]
 fn color_source() {
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
     let mut c = ColorSource::new([0, 255, 0]);
     assert_eq!(c.kind(), "color");
     assert_eq!(
@@ -1083,7 +1116,7 @@ fn color_source() {
 #[test]
 fn snapshot_copies_frame_and_orientation() {
     use lp_player::sources::SnapshotSource;
-    let Some(gfx) = headless_gl() else { return };
+    let Some((_serial, gfx)) = gpu() else { return };
 
     // Orientation + exact copy: top red / bottom blue.
     let clip = ensure_clip(
