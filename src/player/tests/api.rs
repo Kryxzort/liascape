@@ -307,7 +307,14 @@ impl Client {
     }
 
     fn step(&mut self, ms: u64) {
-        self.ok("step", json!({ "ms": ms }));
+        let r = self.call("step", json!({ "ms": ms }));
+        if r["ok"] != json!(true) {
+            // A step timeout names the source and what it waits for; its story is in the
+            // log (the source's events, the seek/frame order) — keep it with the failure.
+            let probe = self.call("probe", json!({"name": "sources"}));
+            let logs = self.call("logs", json!({"limit": 300}));
+            panic!("step {ms} failed: {r}\nsources: {probe}\nlogs: {logs}");
+        }
     }
 
     /// Every event received so far (queued + whatever is already buffered).
@@ -5492,5 +5499,116 @@ fn bench_render_worker_ab() {
                 }
             }
         }
+    }
+}
+
+/// Phase 2 on a real compositor (opt-in like t20e — it draws on that compositor's outputs for
+/// ~10 s: `LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path>`; a nested headless sway is
+/// enough): with the render worker off and on, a video plays on every output (`render_mode`
+/// as asked, the right picture in `capture`, frame callbacks keep presents going), a fade to
+/// another clip completes, and quit exits 0 with every render context freed. The worker's
+/// context shares a Wayland-platform `EGLDisplay` here (headless tests only ever exercise the
+/// surfaceless one).
+#[test]
+fn wayland_render_worker_plays_video() {
+    let Some(display) = std::env::var_os("LP_PLAYER_TEST_WAYLAND") else {
+        println!("SKIP: set LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run");
+        return;
+    };
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if common::catalogue_dir().is_none() {
+        return;
+    }
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let moving = s(&ensure_clip("bench_testsrc_1080p30", BENCH_1080P30)).to_string();
+    let mut serial = Some(serial);
+    for mode in ["off", "on"] {
+        let root = new_root();
+        let mut cmd = Command::new(BIN);
+        die_with_parent(&mut cmd);
+        cmd.args(["serve", "--no-supervise", "--clock", "real", "--ao", "null"])
+            .args(["--render-worker", mode])
+            .env("XDG_RUNTIME_DIR", root.join("run"))
+            .env("XDG_STATE_HOME", root.join("state"))
+            .env("WAYLAND_DISPLAY", &display)
+            .env_remove("DISPLAY")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(
+                std::fs::File::create(root.join("stderr-wayland.log")).unwrap(),
+            ));
+        let mut srv = Serve {
+            child: Some(cmd.spawn().expect("spawn lp-player serve (wayland)")),
+            sock: root.join("run/livepaper/lp-player.sock"),
+            root,
+            _serial: serial.take(),
+        };
+        srv.wait_up();
+        let mut c = srv.client();
+        let st = c.ok("state", json!({}));
+        let out = st["outputs"][0]["name"].as_str().unwrap().to_string();
+        let a = create_src(&mut c, json!({"path": red, "loop": true}));
+        show_all(&mut c, &a);
+        wait_playing(&mut c, &a, 0.5);
+        let want = if mode == "on" { "worker" } else { "loop" };
+        assert_eq!(source_probe(&mut c, &a)["render_mode"], json!(want));
+        let png = srv.path("out.png");
+        c.ok(
+            "capture",
+            json!({"target": format!("out:{out}"), "path": png}),
+        );
+        let (w, h) = (
+            st["outputs"][0]["width"].as_u64().unwrap() as u32,
+            st["outputs"][0]["height"].as_u64().unwrap() as u32,
+        );
+        near(
+            png_pixel(&png, w / 2, h / 2),
+            [255, 0, 0],
+            3,
+            "red on the output",
+        );
+        c.ok("probe", json!({"name": "frames", "args": {"reset": true}}));
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": moving, "loop": true},
+                   "effect_id": "fade", "duration_ms": 500}),
+        );
+        let b = r["to"].as_str().unwrap().to_string();
+        wait_playing(&mut c, &b, 0.5);
+        wait_for(Duration::from_secs(5), "fade done", || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        });
+        std::thread::sleep(Duration::from_millis(1500));
+        let f = c.ok("probe", json!({"name": "frames"}));
+        let lp = c.ok("probe", json!({"name": "loop"}));
+        let fps = f["outputs"][0]["all"]["fps"].as_f64().unwrap();
+        println!(
+            "wayland render worker {mode}: {out} fps {fps:.1}, paced {}, loop max_busy {} ms, \
+             render {}",
+            f["outputs"][0]["paced"],
+            lp["max_busy_ms"],
+            source_probe(&mut c, &b)["render"]
+        );
+        assert_eq!(source_probe(&mut c, &b)["render_mode"], json!(want));
+        assert!(fps > 20.0, "a 30 fps clip presents ~30/s: {f}");
+        c.ok("quit", json!({}));
+        let st = srv.wait_exit(Duration::from_secs(5)).expect("quit exits");
+        assert!(st.success(), "{st}: {}", srv.stderr());
+        let log =
+            std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+        assert!(log.contains("\"wl.connected\""), "not on Wayland?");
+        if mode == "on" {
+            assert!(
+                log.lines()
+                    .any(|l| l.contains("render_worker.stopped") && l.contains("\"left\":0")),
+                "render contexts left at quit"
+            );
+        }
+        serial = srv._serial.take();
     }
 }
