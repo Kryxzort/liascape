@@ -50,6 +50,9 @@ run over 500 ms.
   playlist session plays on from the **next surviving strip item after it** (`PlayFrom`, wrapping), a
   single one stops. The UI drops the items from its strip before the request and re-reads
   `/playlist/state` after trash and undo (a stale strip saves itself back over the backend's).
+- **`POST /playlist/state` merges too** (`JsonMerge.Over` over the saved state: a partial body keeps the rest, a
+  nested `settings` merges key by key, lists replace) — a paths-only body used to reset the rotation and
+  transitions to the C# defaults (matrix `plState:partial`). The UI still posts its whole strip.
 - **`PlayFrom`** plays `[clicked, rest…]` but persists the strip in **its own order** (`persistPaths`) —
   persisting the play order reordered the strip on the next launch.
 - **Removing the playing item from the strip** (X / context menu → `/playlist/state` without it): it keeps

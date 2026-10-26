@@ -989,6 +989,23 @@ C["race:saveAfterTrash"] = { states: ["idle"],
     ...(c.ghost ? [`a save after the trash wrote an index entry for the trashed k4: ${JSON.stringify(c.ghost)}`] : []),
     ...(!c.back ? ["k4 not back after Undo"] : c.back.volumeOverride !== 30 ? [`k4 back with volume ${c.back.volumeOverride}, it was trashed at 30`] : [])] };
 
+// POST /playlist/state with only some keys (a script, an agent): the rest of the saved playlist stays — like /settings
+// (a body of just the paths reset its rotation + transitions to the C# defaults); a nested `settings` merges by key
+C["plState:partial"] = { states: ["idle"], async run(c) {
+    await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null });
+    await post("/playlist/state", { videoPaths: [K[1], K[0]] });
+    c.a = (await http("GET", "/playlist/state")).json;
+    await post("/playlist/state", { settings: { intervalSeconds: 77 } });
+    c.b = (await http("GET", "/playlist/state")).json;
+    await post("/playlist/state", c.before.ps); // back to what the UI shows (it isn't told about another client's edits)
+  }, check(c) {
+    const v = [], a = c.a?.settings, b = c.b?.settings;
+    if (JSON.stringify(c.a?.videoPaths) !== JSON.stringify([K[1], K[0]])) v.push(`paths-only body: paths ${JSON.stringify(c.a?.videoPaths?.map(TITLE))}`);
+    if (!(a?.intervalSeconds === 321 && a?.advanceOnVideoEnd === true && a?.transitionDurationMs === PS().transitionDurationMs)) v.push(`paths-only body reset the playlist settings: ${JSON.stringify({ iv: a?.intervalSeconds, adv: a?.advanceOnVideoEnd, ms: a?.transitionDurationMs })}`);
+    if (!(b?.intervalSeconds === 77 && b?.advanceOnVideoEnd === true && JSON.stringify(c.b?.videoPaths) === JSON.stringify([K[1], K[0]]))) v.push(`a settings-only body lost the rest: ${JSON.stringify({ iv: b?.intervalSeconds, adv: b?.advanceOnVideoEnd, n: c.b?.videoPaths?.length })}`);
+    return v;
+  } };
+
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
 // (pending) keeps its own (a global change never clobbers an override)

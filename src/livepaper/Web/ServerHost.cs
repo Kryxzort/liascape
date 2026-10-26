@@ -474,7 +474,15 @@ public static class ServerHost
 
         // ---- playlist ---------------------------------------------------------------------
         app.MapGet("/playlist/state", () => Results.Json(PlaylistService.LoadCurrentState()));
-        app.MapPost("/playlist/state", (CustomPlaylist p) => { AppOps.SavePlaylistState(p); return Results.Ok(); });
+        // PATCH semantics like /settings (JsonMerge): the UI posts the whole strip; a partial body keeps the rest
+        app.MapPost("/playlist/state", (JsonElement body) =>
+        {
+            CustomPlaylist p;
+            try { p = JsonMerge.Over(PlaylistService.LoadCurrentState(), body); }
+            catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
+            AppOps.SavePlaylistState(p);
+            return Results.Ok();
+        });
         app.MapGet("/playlist/names", () => Results.Json(PlaylistService.ListNames()));
         app.MapPost("/playlist/save", (SavePlaylistReq r) => { PlaylistService.Save(r.Name, r.Playlist); return Results.Ok(); });
         app.MapPost("/playlist/load", (NameReq r) => Results.Json(PlaylistService.Load(r.Name)));
