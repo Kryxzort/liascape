@@ -145,6 +145,12 @@ pub enum ClipSpec {
         fps: u32,
         frames: u32,
     },
+    /// ffmpeg's `testsrc2` (a moving pattern: every frame differs, so decode + upload cost
+    /// what real content costs) at `w`×`h`, `fps`, `secs` long, no audio — Phase 2's
+    /// render-worker A/B (`tests/api.rs::bench_render_worker_ab`: 1080p30, 4K60, 1080p120).
+    /// `ultrafast` CRF 23 instead of the near-lossless default: a 4K60 clip stays small and
+    /// quick to make.
+    TestSrc { w: u32, h: u32, fps: u32, secs: u32 },
 }
 
 /// [`ClipSpec::Flash`]'s frame index for a decoded pixel, if it is one: grey (channels within
@@ -374,6 +380,34 @@ pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
                 &frames.to_string(),
             ]);
             push(&video_codec);
+        }
+        ClipSpec::TestSrc { w, h, fps, secs } => {
+            push(&[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("testsrc2=s={w}x{h}:r={fps}:d={secs}"),
+                "-t",
+                &secs.to_string(),
+                "-vf",
+                TO_YUV,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "23",
+                "-g",
+                &(2 * fps).to_string(),
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-color_range",
+                "tv",
+            ]);
         }
     }
     args.push(tmp.to_string_lossy().into_owned());
