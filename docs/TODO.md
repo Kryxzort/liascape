@@ -363,10 +363,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       — done: `race:saveAfterTrash` RED (a ghost `{"volume":55}` for the trashed k4) → `SetMeta` creates no entry for an
       item whose folder is gone; Undo restores its trashed entry. Affected cells (`--changed`) green; 4 transient
       fails (3× `paused × cli:volume-up*` with a blank UI page, 1× `muted × itemSpd:off`) passed 8/8 on rerun.
-- [ ] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
+- [x] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
+      — done: `JsonMerge.Over` (nested `settings` merge by key). `plState:partial` RED (paths-only → settings at the C#
+      defaults; settings-only → no paths) → GREEN; playlist families 173/0.
+- [ ] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the strip
+      stays stale and its next save writes itself back). Broadcast `playlist-changed` → `syncPlaylist()`.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 - [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.
-- [ ] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only an untracked app/shell/node_modules).
+- [x] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only a node_modules symlink) — done.
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
