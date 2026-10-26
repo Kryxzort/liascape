@@ -29,52 +29,72 @@ pub struct Fbo {
     pub id: glow::Framebuffer,
 }
 
+/// [`Gfx::tex`] on any context (Phase 2: the render worker's own, `sources::render_worker`):
+/// a `w`×`h` `GL_RGBA8` texture with the fixed defaults. Textures are shared across a share
+/// group, so one made on the worker's context is sampled by the compositor's too.
+pub(crate) fn new_tex(gl: &glow::Context, w: u32, h: u32) -> Tex {
+    unsafe {
+        let id = gl.create_texture().expect("glow: create_texture failed");
+        gl.bind_texture(glow::TEXTURE_2D, Some(id));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        for (k, v) in [
+            (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
+            (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
+            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_2D, k, v as i32);
+        }
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Tex { id, w, h }
+    }
+}
+
+/// [`Gfx::fbo`] on any context. FBOs (container objects) are **not** shared across a share
+/// group: one made on the render worker's context is only usable there.
+pub(crate) fn new_fbo(gl: &glow::Context, tex: &Tex) -> Fbo {
+    unsafe {
+        let id = gl
+            .create_framebuffer()
+            .expect("glow: create_framebuffer failed");
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(id));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::TEXTURE_2D,
+            Some(tex.id),
+            0,
+        );
+        let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        assert_eq!(
+            status,
+            glow::FRAMEBUFFER_COMPLETE,
+            "Gfx::fbo: incomplete framebuffer (status 0x{status:x}) for a {}x{} texture",
+            tex.w,
+            tex.h
+        );
+        Fbo { id }
+    }
+}
+
 impl Gfx {
     /// Allocate a `w`×`h` `GL_RGBA8` texture with the brief's fixed defaults (`LINEAR`
     /// min/mag, `CLAMP_TO_EDGE` wrap). Storage is allocated (`tex_image_2d` with no pixel
     /// data) but left uninitialized — callers that need a known starting color clear it
     /// through an `Fbo`.
     pub fn tex(&self, w: u32, h: u32) -> Tex {
-        unsafe {
-            let id = self
-                .gl
-                .create_texture()
-                .expect("glow: create_texture failed");
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(id));
-            self.gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA8 as i32,
-                w as i32,
-                h as i32,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(None),
-            );
-            self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
-            );
-            self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
-            );
-            self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-            self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_T,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-            self.gl.bind_texture(glow::TEXTURE_2D, None);
-            Tex { id, w, h }
-        }
+        new_tex(&self.gl, w, h)
     }
 
     /// Wrap `tex` in a new FBO with it bound at `GL_COLOR_ATTACHMENT0`. Leaves `GL_NONE`
@@ -82,30 +102,7 @@ impl Gfx {
     /// effect) and panics if the attachment is incomplete — that's a programming error
     /// (wrong format/size), not a recoverable runtime condition.
     pub fn fbo(&self, tex: &Tex) -> Fbo {
-        unsafe {
-            let id = self
-                .gl
-                .create_framebuffer()
-                .expect("glow: create_framebuffer failed");
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(id));
-            self.gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(tex.id),
-                0,
-            );
-            let status = self.gl.check_framebuffer_status(glow::FRAMEBUFFER);
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            assert_eq!(
-                status,
-                glow::FRAMEBUFFER_COMPLETE,
-                "Gfx::fbo: incomplete framebuffer (status 0x{status:x}) for a {}x{} texture",
-                tex.w,
-                tex.h
-            );
-            Fbo { id }
-        }
+        new_fbo(&self.gl, tex)
     }
 
     /// Compile and link a shader program from GLSL source. On failure, the error string

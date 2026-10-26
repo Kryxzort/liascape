@@ -26,7 +26,7 @@ use lp_player::gfx::{Catalogue, Composer, Fbo, Gfx, Tex};
 use lp_player::graph::{Graph, NodeKind, PropValue};
 use lp_player::log::CorrId;
 use lp_player::recipes::{TransitionEvent, TransitionEventKind, TransitionReq, Transitions};
-use lp_player::sources::{SourceEvent, SourceHost};
+use lp_player::sources::{RenderWorker, SourceEvent, SourceHost};
 use serde_json::{Map, Value, json};
 
 use super::{headless_gl, read_rgba};
@@ -113,6 +113,12 @@ impl Harness {
         }
         let mut base = Map::new();
         base.insert("ao".into(), json!("null")); // R26: silent test runs
+        let mut host = SourceHost::new(base);
+        // `LP_PLAYER_RENDER_WORKER=on` (the switch `serve` reads): every source renders on a
+        // worker sharing this context, as in the real-clock runtime (§ Sources "Render worker").
+        if lp_player::runtime::render_worker_enabled(None) {
+            host.set_render_worker(Some(RenderWorker::start(&gfx).expect("render worker")));
+        }
         Some(Harness {
             gfx,
             cat,
@@ -120,7 +126,7 @@ impl Harness {
             graph,
             anim: Animator::new(),
             clock: SteppedClock::new(),
-            host: SourceHost::new(base),
+            host,
             tr: Transitions::new(),
             outputs: outs,
             src_events: Vec::new(),

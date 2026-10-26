@@ -178,6 +178,9 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes only).
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
+            // Phase 2: where it renders, and the worker's timings for it.
+            o.insert("render_mode".into(), json!(m.render_mode()));
+            o.insert("render".into(), m.render_stats());
             o.insert("stepped".into(), json!(m.is_stepped()));
             o.insert(
                 "step_status".into(),
@@ -201,6 +204,7 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         "dying": rt.host.dying(),
         "opening": rt.host.opening(),
         "open_pool": crate::sources::host::open_pool_stats(),
+        "render_worker": rt.host.render_worker().map(|w| w.stats()),
         "reaper_pending": reaper::pending(),
     }))
 }
