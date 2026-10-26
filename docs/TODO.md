@@ -196,7 +196,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
       the playing item from the strip restarted the rotation from the top (now: from its place).
       `LP_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
-      **Round 3** (2026-10-26): 42 controls / 112 cells. The rest of the global Settings page: Rotation
+      **Round 3** (2026-10-26): 42 controls / 112 cells (full run now 709 cells: 681 pass, 28 structural skips,
+      20m48s at `--jobs 4`). The rest of the global Settings page: Rotation
       wait-for-end / advance-on-end vs a playlist following the globals (`playlistGlobal` / `pendingGlobal`)
       and one with its own override, the playlist's "Override global rotation" both ways while armed;
       Normalize audio (on / off / target preset / switched on unmeasured / then next / across a NoAudio round
