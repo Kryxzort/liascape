@@ -264,6 +264,27 @@ waitfor $WAIT next_shown; after=$(cur path)
 nh2=$(handoffs)   # counted after /next's own handoff: the next one is the rotation's
 waitfor $WAIT handed_more "$nh2" && ok "rotation continues after /next" || bad "rotation stalled after /next ($(( $(handoffs) - nh2 )) handoffs in ${WAIT} ms)"
 
+echo "== /next during the aligned switch's EFFECT → the item after its B (B already shows)"
+# Once an aligned switch's effect runs, B is what shows (`cur:*` = B; a new request commits it, a cancel
+# snaps back to A). The backend counted it only from its handoff: a /next in that window cancelled it and
+# switched "now" to the same B — the user's next did nothing (the flaky "cur a.mp4 → a.mp4" above, ~1 in 6
+# /next with 2 s clips and a 300 ms fade). A 1.5 s fade on a 4 s clip makes the window deterministic.
+setting '.GlobalTransitionDurationMs = 1500'
+post /playlist/play "{\"paths\":[\"$P1\",\"$P2\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
+al_corr() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" '[.events[] | select(.align=="end" and .path==$p)][-1].corr // empty'; }
+al_running() { ac=$(al_corr "$P2") && [ -n "$ac" ] && [ "$(corr_has "$ac" started)" -ge 1 ]; }
+waitfor 15000 al_running || bad "no aligned p1 → p2 effect started (corr ${ac:-none})"
+nw0=$(nows); post /next '{}' >/dev/null
+now_path() { [ "$(nows)" -gt "$nw0" ] && np=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r '[.events[] | select(.align=="now")][-1].path // empty') && [ -n "$np" ]; }
+waitfor $WAIT now_path
+[ "${np:-}" = "$E1" ] && ok "/next mid-effect (p1 → p2, $ac) → e1.mp4, the item after p2" || bad "/next mid-effect (p1 → p2, $ac) → $(basename "${np:-none}"), expected e1.mp4"
+al_out() { ctl logs "{\"corr\":\"$ac\",\"kind_prefix\":\"transition.\"}" | jq -r '[.events[] | select(.kind=="transition.handoff" or .kind=="transition.cancelled")][-1].kind // empty'; }
+al_done() { ao=$(al_out); [ -n "$ao" ]; }
+waitfor $WAIT al_done
+[ "$ao" = transition.handoff ] && ok "the running p1 → p2 effect was committed (handoff), not cancelled" || bad "the running p1 → p2 effect ended in ${ao:-nothing}, expected transition.handoff"
+waitfor $WAIT cur_is path "$E1" && ok "e1.mp4 on screen after the /next" || bad "after /next mid-effect: cur $(basename "$(cur path)")"
+setting '.GlobalTransitionDurationMs = 300'
+
 echo "== /stop"
 post /stop '{}' >/dev/null
 waitfor $WAIT nothing_shown && ok "/stop → nothing on screen" || bad "/stop left $(cur path)"

@@ -199,8 +199,9 @@ public static class LpPlayerMedia
         // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         var outcome = OutcomeOf(kind, e);
-        if (outcome == null || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
+        if ((outcome == null && kind != "transition.started") || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
         var corr = c.GetString()!;
+        if (outcome == null) { Started(corr); return; }
         Interlocked.Increment(ref _eventOutcomes);
         Record(corr, outcome);
         // our latest switch FAILED (a file mpv can't play): A stays on screen, but every client was told B when it was
@@ -228,6 +229,8 @@ public static class LpPlayerMedia
         LpPlayerClient.Log("lp-player restarted (new pid) — pending switch waits end as failed");
         InvalidateSources();
         _recent.Clear();
+        _startedAt.Clear();
+        _onStarted.Clear();
         _lastCorr = null;
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
         ReapplyAll();
@@ -281,6 +284,28 @@ public static class LpPlayerMedia
         if (_waiters.Count > 256) // abandoned (timed-out) waits on corrs that never ended
             foreach (var (k, w) in _waiters) if (w.Task.IsCompleted) _waiters.TryRemove(k, out _);
         if (_waiters.TryRemove(corr, out var tcs)) tcs.TrySetResult(outcome);
+    }
+
+    // `transition.started` = Running: the effect animates and `cur:*` already names B — from here a new
+    // request COMMITS it (→ handoff) and a cancel snaps back to A. An aligned switch is the session's
+    // current item from here (DoVideoEndWait's `onStarted`), not only from its handoff. The event can beat
+    // the request's reply (different connections), so it's remembered by corr.
+    private static readonly ConcurrentDictionary<string, long> _startedAt = new();
+    private static readonly ConcurrentDictionary<string, Action> _onStarted = new();
+
+    private static void Started(string corr)
+    {
+        long now = Environment.TickCount64;
+        _startedAt[corr] = now;
+        if (_startedAt.Count > 256)
+            foreach (var (k, at) in _startedAt) if (now - at > 120_000) _startedAt.TryRemove(k, out _);
+        if (_onStarted.TryRemove(corr, out var cb)) _ = Task.Run(cb); // off the event thread: it takes PlayerHelper's _lock
+    }
+
+    private static void WhenStarted(string corr, Action cb)
+    {
+        _onStarted[corr] = cb;
+        if (_startedAt.ContainsKey(corr) && _onStarted.TryRemove(corr, out var already)) _ = Task.Run(already);
     }
 
     // "handoff" | "cancelled:<reason>" | "failed:<reason>" | null (not a terminal-for-us event)
@@ -451,8 +476,11 @@ public static class LpPlayerMedia
 
     // Switch, then wait for ITS outcome: "handoff" | "cancelled:<why>" | "failed:<why>" | "unreachable"
     // | "caller-cancelled" (ct fired → `cancel {corr}` sent; an `unsupported` reply = it had already
-    // handed off). align:end waits as long as A plays.
-    public static async Task<string> SwitchAndWait(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct)
+    // handed off). align:end waits as long as A plays. `onStarted` runs once (on the thread pool) if the
+    // switch reaches Running — never for one cancelled / superseded / failed before that; a missed
+    // `transition.started` event (a reconnect gap) → just the terminal outcome, as without it.
+    public static async Task<string> SwitchAndWait(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct,
+        Action? onStarted = null)
     {
         var client = C;
         if (!await Task.Run(client.EnsureRunning).ConfigureAwait(false)) return "unreachable";
@@ -468,6 +496,14 @@ public static class LpPlayerMedia
         double? lastPos = alignEnd ? await Task.Run(() => Query("time_pos")).ConfigureAwait(false) : null; // A when armed
         var corr = await QueueEssential(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets; never dropped
         if (corr == null) return "failed:request refused";
+        if (onStarted == null) return await WaitSwitch(client, corr, alignEnd, remaining, lastPos, ct).ConfigureAwait(false);
+        WhenStarted(corr, onStarted);
+        try { return await WaitSwitch(client, corr, alignEnd, remaining, lastPos, ct).ConfigureAwait(false); }
+        finally { _onStarted.TryRemove(corr, out _); }
+    }
+
+    private static async Task<string> WaitSwitch(LpPlayerClient client, string corr, bool alignEnd, double? remaining, double? lastPos, CancellationToken ct)
+    {
         int bound = alignEnd ? BackstopMs(remaining) : 60_000;
         string outcome;
         while (true)
