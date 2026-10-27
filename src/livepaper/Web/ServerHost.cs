@@ -346,21 +346,32 @@ public static class ServerHost
             // change never clobbers an active override (effective = override ?? new global).
             var curPlaying = PlayerHelper.QueryCurrentPath();
             Mark("current");
-            PlayerHelper.SetVolume((curPlaying != null ? LibraryService.ReadVolumeOverride(curPlaying) : null) ?? s.Volume);
-            PlayerHelper.SetSpeed((curPlaying != null ? LibraryService.ReadSpeedOverride(curPlaying) : null) ?? s.Speed);
-            PlayerHelper.SetVideoScale(s.VideoScale); // fill/fit applies live to the playing video (no relaunch)
-            Mark("volume/speed/scale");
-            // loudness normalization: apply live to the playing wallpaper (toggle/retune now), and when
-            // it's on, (re)start the background measurement backfill so all clips get measured while open.
-            PlayerHelper.ApplyNormalizationLive(curPlaying);
-            Mark("normalize");
-            // off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
+            bool lp = livepaper.Player.PlayerEngine.IsLpPlayer;
+            if (lp)
+            {
+                // lp-player: ONE resolver pass for all of it — every live source its own effective volume/speed,
+                // af, mute and decode settings + the layer fit, diffed against what it runs (player-adapter.md
+                // § Targeting); covers the legacy calls below and ApplyPlaybackSettingsLive's
+                PlayerHelper.ApplyEffectiveLive(prev, s, curPlaying);
+                Mark("resolve");
+            }
+            else
+            {
+                PlayerHelper.SetVolume((curPlaying != null ? LibraryService.ReadVolumeOverride(curPlaying) : null) ?? s.Volume);
+                PlayerHelper.SetSpeed((curPlaying != null ? LibraryService.ReadSpeedOverride(curPlaying) : null) ?? s.Speed);
+                PlayerHelper.SetVideoScale(s.VideoScale); // fill/fit applies live to the playing video (no relaunch)
+                Mark("volume/speed/scale");
+                // loudness normalization: apply live to the playing wallpaper (toggle/retune now)
+                PlayerHelper.ApplyNormalizationLive(curPlaying);
+                Mark("normalize");
+            }
+            // when normalization is on, (re)start the background measurement backfill so all clips get measured
+            // while open — off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
             if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
             Mark("backfill");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFps, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
-            PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying);
-            Mark("playback");
+            if (!lp) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
             // restart-daemon interval/mode changed → re-arm the in-process leak-restart timer now
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)

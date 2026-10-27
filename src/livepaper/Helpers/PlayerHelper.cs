@@ -2957,14 +2957,11 @@ public static class PlayerHelper
     // the timed-playlist cache (_currentSpeed) in sync, so later ticks/advances use the new value too.
     public static void ApplyOverrideLive(string path)
     {
-        // lp-player: the source(s) showing THAT item (may be an in-flight transition's pending B)
+        // lp-player: the resolver, on the source(s) showing THAT item (may be an in-flight transition's
+        // pending B); coalescible — it re-reads the override when it runs
         if (PlayerEngine.IsLpPlayer)
         {
-            // coalescible: it re-reads the override when it runs, so the newest request covers older ones
-            LpPlayerMedia.QueueSet("override:" + LpPlayerMedia.FullPath(path), () =>
-            {
-                if (LpPlayerMedia.ApplyOverride(path) is double lpSpd) { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); }
-            });
+            LpPlayerMedia.ApplyOverride(path, lpSpd => { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); });
             return;
         }
         var cur = QueryCurrentPath();
@@ -2987,19 +2984,29 @@ public static class PlayerHelper
         SendCommand("set_property", "panscan", panscan);
     }
 
+    // lp-player's `/settings` live-apply: ONE resolver pass (LpPlayerMedia.ApplyEffective) — every live
+    // source gets its own effective volume/speed (override ?? global), af, mute and decode/buffer settings,
+    // and the layer its fit, each diffed against what it runs (only what differs is sent; a no-op save
+    // sends nothing). It replaces SetVolume/SetSpeed/SetVideoScale/ApplyNormalizationLive/
+    // ApplyPlaybackSettingsLive there. Loop keeps the legacy guard (a single, non-timed wallpaper only);
+    // the timed tick's speed factor follows the playing item's effective speed, as SetSpeed keeps it.
+    public static void ApplyEffectiveLive(AppSettings prev, AppSettings cur, string? playingPath)
+    {
+        LpPlayerMedia.ApplyEffective();
+        if (prev.Loop != cur.Loop && !_waitingForVideoEnd && !IsTimedPlaylistActive()) LpPlayerMedia.SetLoop(cur.Loop);
+        var speed = (playingPath != null ? ReadSpeedOverride(playingPath) : null) ?? cur.Speed;
+        lock (_lock) { _currentSpeed = speed; }
+        _speedChangeTcs?.TrySetResult(true);
+    }
+
     // Apply CHANGED playback settings LIVE to the currently-playing wallpaper — no stop/replay/relaunch.
     // Diffs prev→cur so we only poke mpv/LWE for what actually changed (needlessly re-applying vf/hwdec/
     // cache re-inits the decoder → a visible stall). Volume/Speed/VideoScale/Normalization/AutoMute are
     // applied by the /settings handler; this covers Loop, NoAudio, VideoFps, DisableCache, Demuxer*, HwDec
     // (video, via mpv IPC properties) + NoAudio (scene, via LWE mute). All of these were formerly
-    // launch-only (needed a stop/replay to take effect).
+    // launch-only (needed a stop/replay to take effect). Legacy only — lp-player: ApplyEffectiveLive.
     public static void ApplyPlaybackSettingsLive(AppSettings prev, AppSettings cur, string? playingPath)
     {
-        if (PlayerEngine.IsLpPlayer)
-        {
-            LpPlayerMedia.ApplySettingsLive(prev, cur, loopAllowed: !_waitingForVideoEnd && !IsTimedPlaylistActive());
-            return;
-        }
         bool scene = IsLweRunning;
         bool mpvAlive = File.Exists(IpcSocket) && MpvpaperProcs().Length > 0;
 
@@ -3158,7 +3165,9 @@ public static class PlayerHelper
         int prevVolume = 0;
         var saved = SettingsService.Update(s => { prevVolume = s.Volume; s.Volume = Math.Clamp(s.Volume + delta, 0, 100); });
         if (saved.Volume == prevVolume) return null;
-        SetVolume(own ?? saved.Volume);
+        // lp-player: the resolver — every live source its own effective volume (an overridden one keeps it)
+        if (PlayerEngine.IsLpPlayer) LpPlayerMedia.ApplyEffective();
+        else SetVolume(own ?? saved.Volume);
         return null;
     }
 
@@ -3801,9 +3810,9 @@ public static class PlayerHelper
     // switch). null/scene/no-socket → no-op. Unmeasured → clears the filter + kicks a background measure.
     public static void ApplyNormalizationLive(string? path)
     {
-        // lp-player: EVERY live source, each by its own item — the playing one, an effect's outgoing A, a
-        // pending B, any source while no output shows one (`path` = cur:* reached only the first)
-        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
+        // lp-player: the resolver — EVERY live source its own item's af: the playing one, an effect's outgoing
+        // A, a pending B, any source while no output shows one (`path` = cur:* reached only the first)
+        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyEffective(); return; }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
@@ -3816,7 +3825,7 @@ public static class PlayerHelper
         try
         {
             if (!SettingsService.Load().NormalizeAudio || IsScenePath(path)) return;
-            if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyNormalizationAll(); return; }
+            if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyEffective(); return; }
             var cur = QueryCurrentPath();
             if (cur != null && Path.GetFullPath(cur) == Path.GetFullPath(path)) ApplyNormalizationLive(cur);
         }

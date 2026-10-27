@@ -324,6 +324,25 @@ public static class LpPlayerSelfTest
                 if (perPreview > 1.05) fails.Add($"/preview costs {perPreview:0.##} requests per value (want 1: one `set` on the cached source; map reads {LpPlayerMedia.SourceMapReads - reads0})");
                 if (Math.Abs(guPrev - MpvPropertyMap.VolumeDb(50)) > 1e-3) fails.Add($"/preview's last value didn't land: gain.user {guPrev:0.###}, want {MpvPropertyMap.VolumeDb(50):0.###}");
                 Phase($"/preview: {perPreview:0.##} requests per value over {nPrev} (map reads {LpPlayerMedia.SourceMapReads - reads0})");
+
+                // the effective-settings resolver's diff (player-adapter.md § Targeting): a full pass over a source
+                // that already runs every effective value costs its one `state` read and sends nothing; a value
+                // another client changed behind our back is put back by the next full pass
+                var spBefore = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.speed" }).GetProperty("value").GetDouble();
+                LpPlayerMedia.ApplyEffective(); LpPlayerMedia.Drain().Wait(2000); // A now runs the settings' own values
+                long rq0 = client.RequestCount;
+                LpPlayerMedia.ApplyEffective(); LpPlayerMedia.Drain().Wait(2000);
+                long noop = client.RequestCount - rq0;
+                if (noop != 1) fails.Add($"a no-op resolver pass cost {noop} requests (want 1: the `state` read, no `set`)");
+                var behind = new LpPlayerClient(sock) { AutoSpawn = false };
+                behind.Call("set", new Dictionary<string, object?> { ["path"] = "cur:*.speed", ["value"] = 2.5 });
+                LpPlayerMedia.ApplyEffective(); LpPlayerMedia.Drain().Wait(2000);
+                var spBack = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.speed" }).GetProperty("value").GetDouble();
+                double spWant = Math.Clamp(SettingsService.Load().Speed, 0.1, 4.0);
+                if (Math.Abs(spBack - spWant) > 1e-6) fails.Add($"a full resolver pass left another client's speed 2.5 (speed {spBack}, want {spWant})");
+                else Phase($"resolver: a no-op pass costs {noop} request; another client's speed change put back");
+                behind.Call("set", new Dictionary<string, object?> { ["path"] = "cur:*.speed", ["value"] = spBefore }); // the clip's timing below stays as it was
+                LpPlayerMedia.InvalidateSources(); // …and no cached value pretends otherwise
                 LpPlayerMedia.Mpv(["set_property", "volume", 50]); LpPlayerMedia.Drain().Wait(2000); // back to the global (srcs:*)
 
                 // transitions OFF + video end (the gapless branch): cut at A's end

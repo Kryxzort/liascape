@@ -6,8 +6,8 @@ namespace livepaper.Player;
 
 // Legacy mpv IPC property commands → lp-player graph properties (see .claude/rules/player-adapter.md
 // § Property map). PlayerHelper still speaks mpv (`SendCommand("set_property", "volume", 80)`); under
-// PlayerEngine=lp-player its dispatch hands those args here and LpPlayerMedia.Set routes the result
-// (source props → `srcs:*`, layer props → `lay:*:main`).
+// PlayerEngine=lp-player its dispatch hands those args here and LpPlayerMedia.Mpv routes the result
+// (volume/speed/mute → the effective-settings resolver, layer props → `lay:*:main`, the rest → `srcs:*`).
 public static class MpvPropertyMap
 {
     public const double SilentDb = -96.0;  // mpv volume-gain-min = lp-player's silent

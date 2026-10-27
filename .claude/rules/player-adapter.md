@@ -51,8 +51,8 @@ PlayerHelper calls its primitives while holding `_lock` (Stop/KillAll, Apply, th
 video-end lock block…). A stalled player must never stall volume/speed/pause/tick, so:
 - **Every mutation is queued** — `LpPlayerMedia.Queue(…)`: ONE ordered worker (FIFO task chain on the
   thread pool, never faults). `SwitchToFile`/`Launch` → `QueueSwitch`, `KillCurrentProcess` →
-  `QueueStop`, every `SendCommand`/`TrySendCommand` property set and `cycle pause`, `ApplySettingsLive`,
-  `ApplyOverrideLive`, normalization, `/preview` — all return at once. `SwitchAndWait` switches through
+  `QueueStop`, every `SendCommand`/`TrySendCommand` property set and `cycle pause`, every resolver pass
+  (`/settings`, `ApplyOverrideLive`, normalization, `/preview`, mute — § Targeting) — all return at once. `SwitchAndWait` switches through
   the same queue (ordered after a queued stop/set) and `WaitLastHandoff` first drains it (a still-queued
   switch is "the last switch").
 - **Queries stay synchronous but quick**: `LpPlayerClient.QuickMs` = 300 ms (`cur:*` gets, `IsPlaying`,
@@ -84,11 +84,12 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
     toward the depth) and a **barrier** — nothing coalesces across it, so a set is never reordered
     across a switch/stop.
   - **coalescible** (`QueueSet(key, …)`, key = target + property): `Mpv()`'s property sets
-    (`set:<prop>` — `Set` always targets the same alias for a prop), `ApplySettingsLive` (one
-    `set:<prop>` per CHANGED field, the same keys), `/preview` (`preview:<prop>:<sorted full paths>`,
-    or `<playing>` without paths), `ApplyOverrideLive` (`override:<path>`, re-reads the override when it
-    runs), `ApplyNormalizationLive` / a loudness measurement landing (`af:*` — every live source's own
-    `af`, read when it runs), `ReapplyAll` (`reapply`). A new one **removes** a
+    (`set:<prop>` — a volume/speed literal and a mute change are resolver passes, the rest `Set`, which
+    always targets the same alias for a prop) and every resolver pass (§ Targeting — each reads all its
+    inputs when it runs, so the newest pending one covers older ones): `resolve` (`ApplyEffective` —
+    `/settings`, the volume key on the global, normalization, a loudness measurement landing),
+    `override:<path>` (`ApplyOverride`), `preview:<prop>:<sorted full paths>` (or `<playing>` without
+    paths), `preview-global:<prop>`, `reapply` (`ReapplyAll`); plus `set:loop` (`SetLoop`). A new one **removes** a
     still-pending command with its key enqueued since the last barrier and goes to the tail: every
     other command keeps its order and only a write that a later write of the same targets overwrites
     anyway is lost — the final state is what the whole sequence would leave, and a burst (a slider
@@ -175,15 +176,16 @@ code below it is unchanged)
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
 | `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `RearmAlignedSwitch` (from `/playlist/state` when the playlist's transitions change, `/settings` when the global ones or `TransitionMethod` do) | the armed aligned switch was **requested at arm time** with the effect + duration of then (the player times it for A's end — legacy picks its effect when the overlay starts, near A's end), so a transition change while one is armed (advance-on-end: for the whole clip) ran the OLD effect at A's end: cancel the wait and re-arm it to the same `next` (`CancelVideoEndWait` + `ArmVideoEndWait`) → a fresh request with the new config. No-op under legacy / with nothing armed. Guard: matrix `pending × plTrOff/plTrDuration/plTrEffect` |
-| `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → `Set`; `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
+| `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → a volume/speed literal (`/volume {value}`) = a resolver pass with it as the PLAYING item's transient value (every other source keeps its own), `mute` (SetMute / SetUserMute) = a forced resolver pass of `gain.mute` from `PlayerHelper.IsMuted`, the rest → `Set` (layer props → `lay:*:main`, `pause` → `player.paused`, else `srcs:*`); `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
 | `KillCurrentProcess` (→ `KillAll`, `Stop`) | a queued `stop` (callers hold `_lock`) |
 | `IsPlaying` | something is on screen (`cur:*.path`) |
-| `ApplyPlaybackSettingsLive` | `ApplySettingsLive`: NoAudio/VideoFps/DisableCache/Demuxer*/HwDec → `srcs:*`; Loop only for a single non-timed video (the legacy guard) |
-| `ApplyOverrideLive` | the item's own source(s) by path (may be a pending B) |
-| `ApplyNormalizationLive` (every `/settings` save, the R81 reapply) | `ApplyNormalizationAll` → **every** live media source (no image/colour/snapshot) gets ITS OWN item's `af` (`NormalizeAf(its path)`: loudnorm at the target, "" when off / NoAudio / unmeasured — that one kicks a measure), diffed against its current `af` from one `state` read, so an unchanged source gets nothing. It used to set `cur:*`'s item only: an effect's outgoing A, a pending B (armed for A's end — it then played its whole clip with the old filter) and every source while no output shows one (no `cur:*`) kept the old `af`. Guard: matrix `set:normalizeOn/Off/Target` × effect / pending / pausedEffect / noOutput |
-| `PlayerHelper.OnLoudnessMeasured` (from `LibraryService.EnsureLoudnessAsync`, once a measurement is stored) | normalization on → the same `ApplyNormalizationAll`: an item that started unmeasured (or was playing when normalization was switched on) gets its loudnorm the moment it's measured — it used to play un-normalized until its next switch. Legacy: `set af` when it's mpv's current file. Guard: matrix `set:normalizeFresh` |
-| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → the source(s) of `paths` (the modal's edited item(s), from the cached source map — on screen, either side of an effect, a pending B), literal values, ONE `set` per source per value; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: every source in the map whose item has NO override for that field (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
+| `/settings` (ServerHost) | `PlayerHelper.ApplyEffectiveLive(prev, cur, playing)` instead of SetVolume/SetSpeed/SetVideoScale/ApplyNormalizationLive/ApplyPlaybackSettingsLive: ONE resolver pass (`ApplyEffective`, Fresh — every live source its own value of every resolved setting + the layer fit, diffed against one `state` read: a no-op save, e.g. a theme change, sends nothing), Loop via `SetLoop` (`srcs:*`) only when it changed and the wallpaper is a single non-timed one (the legacy guard: under rotation the recipe owns A's loop), and the timed tick's speed factor (`_currentSpeed`) = the playing item's effective speed |
+| `ApplyPlaybackSettingsLive` | legacy only (`/settings` → `ApplyEffectiveLive` under lp-player) |
+| `AdjustVolume` (the volume keys) | on an item's own volume → `ApplyOverrideLive` (below); on the global → `ApplyEffective` (every source its own effective volume — an overridden one keeps it) |
+| `ApplyOverrideLive` | `ApplyOverride(path)`: a resolver pass on that item's own source(s) (may be a pending B) — `gain.user` + `speed`, diffed against the cached values; reports the effective speed back when it's what `cur:*` shows (`_currentSpeed`) |
+| `ApplyNormalizationLive` / `PlayerHelper.OnLoudnessMeasured` (from `LibraryService.EnsureLoudnessAsync`, once a measurement is stored) | `ApplyEffective` → **every** live media source gets ITS OWN item's `af` (`NormalizeAf(its path)`: loudnorm at the target, "" when off / NoAudio / unmeasured — that one kicks a measure), diffed. It used to set `cur:*`'s item only: an effect's outgoing A, a pending B (armed for A's end — it then played its whole clip with the old filter) and every source while no output shows one (no `cur:*`) kept the old `af`; and an item that started unmeasured (or was playing when normalization was switched on) played un-normalized until its next switch — now it gets its loudnorm the moment it's measured (normalization on). Legacy: `set af` when it's mpv's current file. Guard: matrix `set:normalizeOn/Off/Target/Fresh` × effect / pending / pausedEffect / noOutput |
+| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → a resolver pass on the source(s) of `paths` only (the modal's edited item(s) — on screen, either side of an effect, a pending B), the dragged value as their transient (nothing persisted), the dragged prop only, diffed against the cached values: ONE `set` per source per value, no `state` read while the map is cached; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: a pass over every source with the dragged value as the transient GLOBAL — an item with its own override for that field keeps it (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
 | scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
 | `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
@@ -200,27 +202,48 @@ in-process inside the compositor, never the supervisor, so this is the right pid
 `target.object`/`Sink:` = the `lp-player-bus` sink (index via `pactl list short sinks`), or
 `application.name == "lp-player"` (an extra match, not the only one). Legacy: unchanged.
 
-## Targeting (R61)
-- **Global settings → `srcs:*`** (on-screen sources + an in-flight transition's pending B, so a setting
-  changed while a transition waits still reaches the incoming wallpaper). **Except `gain.user`/`speed`**
-  (`Set` → `SetPerItem`): `/settings` (and `SetVolume`/`SetSpeed`, the R81 reapply) passes the effective
-  (`override ?? global`) value of the PLAYING item (`cur:*`); every live media source in the cached
-  source map is set ITS OWN value — the passed one for the playing item's source(s), `override ?? global`
-  for any other item's (an effect's other side, a pending B; every source its own while no output shows
-  one) — one `set` per source, never a broadcast. It used to `set srcs:*` with the playing item's value
-  and then fix the others up (`FixupPerItem`): for one round trip on EVERY settings save (a theme change
-  too, since the UI posts the whole object) the other side of an effect / a pending B ran the playing
-  item's volume + speed (matrix `appear:*`, sampling every source back to back). No map (no `state`
-  answer) or a source gone twice in a row → that old `srcs:*` + fix-up path.
-- **Normalization `af`** → every live media source, each by its own item (`ApplyNormalizationAll`,
-  dispatch table above).
-- **Per-item overrides** (`ApplyOverrideLive`, `/library/volume|speed`, `/preview`)
-  → the source(s) whose `path` is that item (may be the pending B), from the **cached path → source-id
-  map** (`SourceMap`, below) — one `set` per source, no `state` read.
-- **The path → source-id map** (`LpPlayerMedia.SourceMap`/`SourcesFor`/`SetEach`, speed storm: every
+## Targeting (R61): ONE effective-settings resolver
+Every setting reaches the live sources through **`LpPlayerMedia.ResolveNow`** (design note at the top of
+its code): the live sources (the cached source map: source id → item path — every live media source: on
+screen, either side of an effect, a pending B, a parked one) × (the global settings, each item's overrides
++ loudness, the mute, a request's transient values) → each source's desired values, **diffed against what
+it runs**, and only the differing ones sent — `set <id>.<prop>`, one per source, never a broadcast. A new
+source's create props (`SourceProps`) are the same per-source computation (`Desired`). Before, each path
+picked its targets and values itself and they disagreed: normalization reached `cur:*` only; `/settings`
+`set srcs:*` the playing item's volume + speed and fixed the others up after (`FixupPerItem`) — for one
+round trip on EVERY save (a theme change too) an effect's other side / a pending B ran the playing item's
+values (matrix `appear:*`); the volume key pushed the new global over a playing override; a literal
+computed for the playing item at request time landed on whatever played when it ran.
+- **Per source**: `gain.user` = VolumeDb(transient item ?? its override ?? transient global ?? `Volume`),
+  `speed` = clamp(the same chain over `Speed`, 0.1, 4), `af` = its OWN item's loudnorm at the target (""
+  off / NoAudio / unmeasured — that kicks a measure), `no_audio`/`hwdec`/`fps_cap`/`cache`/
+  `demuxer_max_mib`/`demuxer_back_mib` = the global settings, `gain.mute` = −96 when `PlayerHelper.IsMuted`
+  (user + auto) else 0; and the layer: `lay:*:main.fit` = VideoScale (Fresh passes, one `set` when any
+  main layer differs). Every input is read when the pass RUNS (a coalesced pass applies the newest state).
+  Not resolved: `loop` (`SetLoop`, the legacy guard) and `player.paused` (§ Pause).
+- **Diff**: numbers within 1e-4, strings/bools exact. A **Fresh** pass reads `state` (and refreshes the
+  cache); a cached pass diffs against the **value cache** (that read's values + every value a pass `set`
+  since — only on success; dropped with the map). `gain.mute` goes as `animate` over 30 ms; mid-ramp it can
+  read as its old value, so a mute CHANGE always sends (`Force`). A source gone (`no_such_node`) → the map
+  is re-read once; no answer / a stalled player → the pass gives up (R81 re-applies when it answers).
+- **Callers** (queue key → scope / props / transient / diff):
+
+  | caller | key | sources | props | transient | diff |
+  |---|---|---|---|---|---|
+  | `/settings` (`ApplyEffectiveLive`), volume key on the global, normalization, a loudness landing → `ApplyEffective` | `resolve` | all | all + fit | — | Fresh |
+  | R81 → `ReapplyAll` | `reapply` | all | all + fit | — | Fresh |
+  | `/library/volume\|speed`, volume key on an item → `ApplyOverride(path)` | `override:<path>` | that item's | gain.user, speed | — | cached |
+  | `/preview {paths}` → `Preview` | `preview:<prop>:<paths>` | those items' (none → the playing item's) | the dragged one | the value, for those items | cached |
+  | `/preview {global}` → `PreviewGlobal` | `preview-global:<prop>` | all | the dragged one | the value, as the global | cached |
+  | an mpv volume/speed literal (`/volume {value}`) → `Mpv` | `set:<prop>` | all | that one | the value, for the playing item | cached |
+  | a mute change (SetMute / SetUserMute → mpv `mute`) → `Mpv` | `set:gain.mute` | all | gain.mute | — | Force |
+
+  So a drag value is ONE `set` per source (no `state` while the map is cached, nothing persisted) and a
+  no-op `/settings` save sends nothing but its one `state` read.
+- **The live-source cache** (`LpPlayerMedia.CachedLive`/`ReadLive`, speed storm: every
   `/preview` cost a full `state` + the `set`s — 2 round trips per value with paths, 3 without — and
   saturated the one worker at ~50/s). One `state` read builds `full path → [ids]` for every live media
-  source (no snapshot/colour); it's reused until the graph's SOURCES change. Ids are never reused within
+  source (no snapshot/colour), each source's values and the main layers' `fit`; it's reused until the graph's SOURCES change. Ids are never reused within
   a player process and a source's path never changes, so only these change it, and each **invalidates**
   it (`InvalidateSources`): our own `Switch` (finally), `Stop`, `StopAndQuit`, a `cancel`, the in-place
   upgrade — synchronously, on the queue's worker where every reader runs; the player's own changes and
@@ -229,14 +252,14 @@ in-process inside the compositor, never the supervisor, so this is the right pid
   `source.retire`, a handful per switch; `source.position` is still never subscribed); a new compositor
   (`Generation`, `OnRestarted`). It is **only trusted while the event connection is live**
   (`EventsLive`; every (re)subscription invalidates — a reconnect gap loses events), a map read while an
-  invalidation happened is never stored (epoch), and a `set` that hits `no_such_node` (an id retired
-  meanwhile) invalidates and re-reads once. `SetPerItem` (and its fallback `FixupPerItem`) uses it too. Self-test evidence:
+  invalidation happened is never stored (epoch), and a pass that hits `no_such_node` (an id retired
+  meanwhile) invalidates and re-reads once. Self-test evidence:
   `SourceMapReads`, `SourceEpoch`, `LpPlayerClient.RequestCount`.
-- **Layer settings** (`fit` ← VideoScale) → `lay:*:main` (also re-asserted on every switch, so a
-  hotplugged output matches).
-- **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → `animate srcs:*.gain.mute` over
-  30 ms, never a step (a setting slot: it ramps on the player's unpaused clock, so it lands while
-  paused too — player-core.md § Runtime).
+- **Layer settings** (`fit` ← VideoScale) → `lay:*:main` (the resolver's Fresh passes; also re-asserted
+  on every switch, so a hotplugged output matches).
+- **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → the resolver: `animate
+  <id>.gain.mute` over 30 ms per source, never a step (a setting slot: it ramps on the player's unpaused
+  clock, so it lands while paused too — player-core.md § Runtime).
 - **Pause — the contract (final review I1/I3).** The PLAYER owns pause: `player.paused`, persisted
   in its snapshot and restored with it across a crash restart. The backend keeps **no copy**:
   `TogglePause` reads `get player.paused` and sets the opposite (so a keybind's one-shot
@@ -264,7 +287,8 @@ in-process inside the compositor, never the supervisor, so this is the right pid
   override, so it wouldn't reflect the current pause state). The interim R75a ruling (write every
   `srcs:*.paused` directly) is gone.
 - New sources (`SourceProps`) carry every setting at creation: path, kind (image by extension, else
-  video), loop, speed, `gain.user`, `gain.mute`, no_audio, hwdec, fps_cap, cache, demuxer_*, af.
+  video), loop + the resolver's own per-source values (`Desired`: speed, `gain.user`, `gain.mute`,
+  no_audio, hwdec, fps_cap, cache, demuxer_*, af) — never a second copy of that computation.
 
 ## Property map (`MpvPropertyMap.Translate(object[] mpvArgs) → (prop, value)?`)
 `["set_property", name, v]` / `["set", name, "v"]`:
@@ -287,11 +311,11 @@ never `Drain().Wait()` inside the handler, which runs on the client's own callba
   it was open was dropped, never replayed on its own otherwise — the "New concern" from the first
   review round).
 
-`ReapplyAllNow` pushes, through the SAME queue as every other mutation (ordered, never races a
-concurrent switch/set): the playing item's effective `gain.user`/`speed` (`Set` → every source its own
-effective value, a pending B included, same split as a live `/settings` change, R61),
-`no_audio`/`hwdec`/`fps_cap`/`cache`/`demuxer_max_mib`/`demuxer_back_mib`, `gain.mute`,
-the layer `fit`, every source's own `af` — and **not** `player.paused` (I3: the player is its
+`ReapplyAllNow` runs, through the SAME queue as every other mutation (ordered, never races a
+concurrent switch/set), the resolver's full Fresh pass (§ Targeting): every live source — a pending B
+included — its own effective `gain.user`/`speed`/`af`/`no_audio`/`hwdec`/`fps_cap`/`cache`/
+`demuxer_max_mib`/`demuxer_back_mib`/`gain.mute`, and the layer `fit`, diffed against a fresh `state`
+(after a restart: what the snapshot restored; after a stall: what the dropped mutations left) — and **not** `player.paused` (I3: the player is its
 authority and restores it from its snapshot; re-asserting a backend copy flipped the pause after a
 crash/stall when the toggle came from a keybind's CLI process or a restarted backend). The reapply
 logs the player's value (`… (player.paused = true, kept)`). `LpPlayerMedia.ReapplyCount` counts how many times it's
@@ -393,6 +417,9 @@ subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; **a sl
 (`MaxQueueDepth + 61` volume sets behind a 600 ms clog) lands its NEWEST value and queues ≤ 3 commands
 (RED before: depth 256, the last ~60 dropped, gain.user stuck at the 255th value); **20 `/preview`s
 on A cost 1 request each** (`client.RequestCount`; RED before: 2 — `state` + `set`) and the last lands;
+**the resolver's diff**: a full pass (`ApplyEffective`) over a source that already runs every effective value
+costs exactly 1 request (its `state` read, no `set`), and a speed another client set behind our back is put
+back by the next full pass;
 a cut with `align:end` hands off at A's end, then a preview on B reaches B's NEW source (the map was
 invalidated by the switch), and a pending B requested by ANOTHER client (raw `transition`) gets a
 preview once its `transition.scheduled` event bumped `SourceEpoch`; a cancelled aligned switch → `cancel {corr}` → `transition.cancelled`, A stays; a
