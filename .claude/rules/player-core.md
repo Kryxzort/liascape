@@ -1235,9 +1235,20 @@ checks no GL error is left behind.
 only** (logical — what the graph says, mirrored back unchanged; observed `pause` is not
 mirrored), and `eof-reached`/EOF never emit `Ended`. The runtime drives frames:
 `step_seek(t)` sends `seek <t:.6> absolute exact` (async), and `step_status()` is `Done`
-once the seek's reply, then a PLAYBACK_RESTART, then a rendered frame have been seen
+once the seek's reply, then a PLAYBACK_RESTART and the target frame have been seen
 (mpv completes the `seek` command before the playloop executes it, so the reply always
-precedes that seek's restart), `Pending(what)` meanwhile, `Broken(reason)` for a load error
+precedes that seek's restart). **The frame may come before the restart:** mpv queues it to
+the VO in the playloop iteration that then emits PLAYBACK_RESTART, so the loop can render it
+before it pumps the event (under load: every step) — a **new** frame (not
+`next_frame_is_redraw`) rendered after the reply counts (`StepSeek::target_frame`), as does any
+frame after the restart; a redraw before the restart is the previous step's picture and never
+counts; completing on that early frame, the restart handler reads `time-pos` once
+synchronously (stepped only: the core is paused and its frame rendered) so the step still
+returns a settled state. Before, only a frame after the restart did — mpv's redraw of the
+target, which didn't always follow (2.8 s into a 3 s clip with its loop off: `step` timed
+out, 8/8 loaded runs). A source the step had to wait to **open** gets a fresh `STEP_TIMEOUT`
+for its seek once ready (`StepWait::opened` — under load an open alone took ~2 s).
+`Pending(what)` meanwhile, `Broken(reason)` for a load error
 / rejected seek / dead core (not waited on). `step_end(at_end)` queues `Ended` when the
 virtual time first reaches a non-looping end (a paused exact seek to the end never sets
 `eof-reached` — measured) and re-arms it once back before the end. `step_target()`,
@@ -2568,9 +2579,12 @@ binary as the supervisor even after a rebuild replaced the file.
   budget's own events), `corrupt_snapshot_starts_empty`,
   `transition_in_flight_restores_as_b`, `parked_restores_parked`,
   `output_props_survive_replug`, `supervisor_sigkill_reaps_child_fast` (Task 16b: SIGKILL
-  the supervisor, assert the compositor child is gone within 300 ms — asserted directly,
-  no fallback kill of ours in the way; `Sup::drop`'s own, much more generous, teardown
-  fallback never gets the chance to mask a PDEATHSIG regression here). `tests/api.rs` runs
+  the supervisor; the child's PDEATHSIG SIGTERM — its `player.quitting {why: signal}` — must be
+  stamped ≤ 300 ms after it (measured 3.5–10.3 ms under CPU + IO load), and the child must
+  exit on its own within 30 s — its clean quit fsyncs the final snapshot, 0.1–11.8 s under IO
+  load, which failed the old 300 ms bound on the whole exit; asserted directly, no fallback kill
+  of ours in the way, so `Sup::drop`'s own teardown fallback never masks a PDEATHSIG
+  regression). Snapshot preconditions wait `SNAPSHOT_WAIT` (20 s, condition-based). `tests/api.rs` runs
   `--no-supervise` (its pid/lock/SIGTERM checks are about the compositor itself);
   `wayland_serve_args_and_missing_compositor` now also passes `--no-supervise` for its
   "not available yet" (exit `EXIT_NO_COMPOSITOR`, Task 16b) assertion — the supervised
