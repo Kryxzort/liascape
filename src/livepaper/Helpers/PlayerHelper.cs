@@ -92,6 +92,7 @@ public static class PlayerHelper
                 var existing = new HashSet<string>(_timedPaths, StringComparer.Ordinal);
                 foreach (var p in paths)
                     if (existing.Add(p)) _timedPaths.Add(p);
+                EnsureTimedTick(takeBack: false);
             }
             else if (IsPlaying)
             {
@@ -546,8 +547,11 @@ public static class PlayerHelper
     private static void RestartCurrentAndLaunch()
     {
         if (PlayerEngine.IsLpPlayer) return; // a stale "restart" pending action — nothing leaks under lp-player
-        if (_history == null || _historyIndex < 0 || _historyIndex >= _history.Count) return;
-        var current = _history[_historyIndex];
+        // what PLAYS: an advance-on-end session's _historyIndex is its pre-fetched next (a restart relaunched
+        // that — reachable in every advance-on-end session now that pure advance-on-end ticks too)
+        int playing = PlayingHistoryIndex;
+        if (_history == null || playing < 0 || playing >= _history.Count) return;
+        var current = _history[playing];
         KillCurrentProcess();
         _current = Launch(_timedOptions, current);
         // deliberately does not touch _timedRemainingMs — the countdown continues unaffected
@@ -855,8 +859,7 @@ public static class PlayerHelper
 
             SaveTimedState();
 
-            if (ordered.Count > 1 && intervalSeconds > 0)
-                StartTimedTimer();
+            EnsureTimedTick();
         }
         UpdateRestartTimer();
     }
@@ -928,8 +931,7 @@ public static class PlayerHelper
             SwitchToFile(_history[playingHistIdx], _timedOptions);
             SaveTimedState();
 
-            if (_timedPaths.Count > 1 && _timedInterval.TotalSeconds > 0)
-                StartTimedTimer();
+            EnsureTimedTick();
 
             RearmAdvanceOnVideoEnd();
             ok = true;
@@ -951,14 +953,28 @@ public static class PlayerHelper
             _timedTimerPaused = false;
             // _timedRemainingMs is restored from state — preserves the countdown
 
-            if (_timedPaths.Count > 1 && _timedInterval.TotalSeconds > 0)
-                StartTimedTimer();
+            EnsureTimedTick();
 
             RearmAdvanceOnVideoEnd();
             ok = true;
         }
         if (ok) UpdateRestartTimer();
         return ok;
+    }
+
+    // The tick runs the interval AND takes every queued user switch (pending_action.txt: next / previous /
+    // random / restart — a keybind, the UI, another process), so a timed session with something to rotate to
+    // has one whatever its interval (pure advance-on-end too: Tick ignores its countdown there). It used to
+    // start only at a session (re)start with > 1 item AND an interval: a pure advance-on-end session never
+    // took a next, and a session that started with one item (a trash leaving one survivor) never got one
+    // when items came back (Undo, a strip add, AppendToActivePlaylist) — every queued next sat untaken while
+    // /current said timed. `takeBack: false` (a live list edit): not once this process released the timer
+    // to another owner (ReleaseTimer); a session (re)started here takes it back as before.
+    private static void EnsureTimedTick(bool takeBack = true)
+    {
+        if (_playlistTimer != null || _timedTimerStopped || _timedPaths is not { Count: > 1 }) return;
+        if (!takeBack && _timerReleased) return;
+        StartTimedTimer();
     }
 
     private static void StartTimedTimer()
@@ -1691,11 +1707,8 @@ public static class PlayerHelper
 
             SaveTimedState();
 
-            if (ordered.Count > 1 && intervalSeconds > 0)
-            {
-                StartTimedTimer();
-                if (instantAdvance) AdvanceAndLaunch();
-            }
+            EnsureTimedTick();
+            if (ordered.Count > 1 && intervalSeconds > 0 && instantAdvance) AdvanceAndLaunch();
         }
     }
 
@@ -1806,6 +1819,7 @@ public static class PlayerHelper
                 }
 
                 SaveTimedState();
+                EnsureTimedTick(takeBack: false); // the list grew past one item (Undo of a trash, a strip add)
             }
             else
             {
@@ -2646,11 +2660,9 @@ public static class PlayerHelper
                 _advanceOnVideoEnd = advanceOnVideoEnd;
             }
 
-            // Crossing into timed mode (interval 0→positive, e.g. pure advance-on-end → timed) needs the
-            // interval timer started — it wasn't running while interval was 0. (Positive→0 leaves the
-            // timer ticking harmlessly; the `_timedInterval > Zero` guard in Tick suppresses the advance.)
-            if (_timedPaths!.Count > 1 && intervalSeconds > 0 && _playlistTimer == null)
-                StartTimedTimer();
+            // (Positive→0 leaves the timer ticking harmlessly; the `_timedInterval > Zero` guard in Tick
+            // suppresses the advance.)
+            EnsureTimedTick(takeBack: false);
 
             SaveTimedState();
         }

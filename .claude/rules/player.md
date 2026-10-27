@@ -202,6 +202,12 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed.
 
+**`EnsureTimedTick(takeBack = true)`** — the only way to start the tick (`StartTimedTimer`): any timed session with
+> 1 item has one, whatever its interval (it takes the queued next/prev/random/restart — a pure advance-on-end session
+and a 1-item session grown back by an Undo had none, so every queued switch sat untaken). Call it wherever the list
+or rotation changes; `takeBack: false` for live edits (no restart after `ReleaseTimer`). Details: `session.md` §
+Timed Playlist.
+
 **`RandomAndLaunch`** (a timed session's `random`) — a switch OUTSIDE the rotation's order, so it re-seats both
 cursors: `_timedIndex` = the pick's index in `_timedPaths` (the rotation goes on from the pick: next / the re-armed
 aligned switch = the item after it), and the history after the playing item is dropped before the pick is appended
