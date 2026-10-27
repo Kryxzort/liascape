@@ -452,6 +452,43 @@ fn image_source() {
     assert!(!ended(&evs), "an image must never end: {evs:?}");
 }
 
+/// mpv's VO waits only 200 ms for us to render a frame (vo_libmpv `flip_page`), then drops it. A
+/// playing source sends the next one, but a paused source (a transition's pending B) or an image has
+/// none: when its only frame went unrendered — the loop busy past that (a burst of switches and
+/// teardowns, a debug build, a loaded machine), or not yet knowing the size to render at — it never
+/// became Ready and the switch failed after 10 s ("no first frame"; the UI matrix's
+/// race:settingsDuringApply, 4/4 on the debug player). Here nothing pumps or renders the source while
+/// mpv shows its first frame and gives up on it — then it must still become Ready, with that frame.
+#[test]
+fn dropped_first_frame_of_a_paused_source_or_image_still_readies() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
+    for (path, o, rgb) in [
+        (&red, json!({"paused": true}), [255, 0, 0]),
+        (&green, json!({}), [0, 255, 0]),
+    ] {
+        let mut src = open_src(&gfx, path_str(path), &opts(o)).expect("MpvSource::open");
+        std::thread::sleep(Duration::from_millis(800)); // the loop stalls: > 3 × mpv's flip timeout
+        let wake = Some(src.wake_fd());
+        let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+            ready(e)
+        });
+        assert!(
+            ok,
+            "{}: never Ready after its first frame was dropped; events: {evs:?}",
+            path.display()
+        );
+        let tex = src.texture().expect("texture after Ready");
+        assert_rgb(
+            read_rgba(&gfx, tex, tex.w / 2, tex.h / 2),
+            rgb,
+            3,
+            "the first frame",
+        );
+    }
+}
+
 #[test]
 fn no_audio_live() {
     let Some((_serial, gfx)) = gpu() else { return };

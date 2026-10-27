@@ -178,6 +178,8 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes only).
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
+            // How often its dropped first frame was asked for again (`REFETCH_AFTER`, sources/mpv.rs).
+            o.insert("frame_refetches".into(), json!(m.frame_refetches()));
             // Phase 2: where it renders, and the worker's timings for it.
             o.insert("render_mode".into(), json!(m.render_mode()));
             o.insert("render".into(), m.render_stats());

@@ -947,6 +947,25 @@ foreign-context `update`, or a core shutdown; a failed async property/command re
 frame is still on screen; the visible boundary (frame 0) follows one frame later (measured
 33.9–34.3 ms at 30 fps).
 
+**A dropped first frame is asked for again (`REFETCH_AFTER`).** mpv's VO waits 200 ms for the API
+user to render a frame (vo_libmpv `flip_page`), then drops it — `mpv_render_context_update` stops
+reporting `UPDATE_FRAME`, so the "level-triggered" pending frame is gone. A playing source sends its next
+frame anyway; a **paused** one (a transition's pending B, held paused until Ready) or an **image** has no
+next frame: if its only frame went unrendered — the loop busy past 200 ms (a burst of switches and
+teardowns with every `/settings`'s live sets landing on the opening B's, the debug build, a loaded
+machine; the render worker can't render either until the loop has passed it the size) — it never became
+Ready and the transition failed after 10 s (`no first frame within 10 s`). Measured: UI matrix
+`race:settingsDuringApply` 4/4 on the debug player; a direct repro (8 transitions 5–80 ms apart + a `set`
+of `gain.user`/`speed` on each B, hwdec auto, debug build) 3/8, render worker on or off. `refetch_lost_frame`
+(every `update`): a paused source or image whose current load restarted `REFETCH_AFTER` (300 ms) ago with
+no frame staged → `seek <time_pos> absolute exact` — the same frame again, a new `PLAYBACK_RESTART`, no
+FILE_LOADED (the worker's frame tag still matches) — backing off ×2 up to 2.4 s; never a playing source
+(re-seeking a merely slow one would restart its decode), never stepped mode. `source.frame_refetched
+{path, pos, since_restart_ms, dsize}` (info, comp `mpv`), `sources` probe `frame_refetches`. After: repro
+0/10 (6 of them needed one refetch, size already known — the loop simply hadn't rendered in time), the
+matrix cell GREEN. Guard: `tests/sources.rs::dropped_first_frame_of_a_paused_source_or_image_still_readies`
+(open, no `update` for 800 ms, then Ready with that frame; RED in both render modes: only `Position(0.0)`).
+
 **`AudioFlowing` (Task 16c, R85, invariant #8) — real audio output confirmed, not just
 un-paused.** `apply("paused", false)` on a source that was paused arms a wait
 (`awaiting_flowing`) rather than assuming audio starts the instant mpv's `pause` flips:
@@ -1809,7 +1828,7 @@ gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the la
 20e), `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
-`step.timeout`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
+`step.timeout`, `source.frame_refetched`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
 `mpv.options_skipped` (a script trim this libmpv doesn't know, once per process), `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
@@ -1918,7 +1937,12 @@ worst reply stays < 500 ms during a 40 000-request flood).
 4. `ctl capture '{"target":"out:DP-1","path":"/tmp/x.png"}'` — look at the picture.
 5. Reproduce deterministically: `serve --headless --clock stepped --ao null`, replay the
    commands, `step`, `capture`.
-6. Audio specifically (a dropout, a glitchy fade): `docs/player/debugging.md` — symptom →
+6. What an mpv core itself did (a VO that gave up waiting for a render, a decoder that never opened):
+   `LP_PLAYER_MPV_LOG=v` in `serve`'s environment prints every core's mpv log to stderr
+   (`lp-player-serve.log` under the backend) as `[mpv <file> <t_mono s>] <level> <prefix>: <text>` — the
+   time is when the loop PUMPED the line, not when mpv logged it: a burst of lines at one instant means
+   nothing pumped that source meanwhile. Without it only `error` lines are requested.
+7. Audio specifically (a dropout, a glitchy fade): `docs/player/debugging.md` — symptom →
    probe/log query → likely cause, seeded with the bugs the reference monitor
    (`probe dropout`, Task 15) found in the legacy engine, plus `meter.window`/`bus`.
 

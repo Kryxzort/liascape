@@ -470,6 +470,11 @@ pub struct MpvSource {
     playing_entry: Option<i64>,
     file_loaded: bool,
     restarted: bool,
+    /// When the current load (re)started, and when its lost frame was last asked for again
+    /// ([`REFETCH_AFTER`]); `refetches` counts those requests (process lifetime, `sources` probe).
+    restarted_at: Option<Instant>,
+    refetched_at: Option<(Instant, Duration)>,
+    refetches: u32,
 
     // Observed mpv state (of the current load).
     time_pos: Option<f64>,
@@ -571,6 +576,15 @@ pub struct MpvSource {
 /// genuinely slower than this still gets its ramp started by the outer timeout rather
 /// than this constant silently absorbing an even larger lag.
 const FLOWING_CONFIRM_MARGIN: Duration = Duration::from_millis(40);
+
+/// mpv's VO waits 200 ms for the API user to render a frame (vo_libmpv `flip_page`), then drops it
+/// (`next_frame = NULL`: `mpv_render_context_update` stops reporting `UPDATE_FRAME`). A paused source or
+/// an image whose only frame went unrendered — the loop or the render worker busy past that, or the
+/// size (`dwidth`/`dheight`) not pumped yet — has no next frame: it never became Ready. After this long
+/// restarted without a staged frame it asks mpv for the frame again (`refetch_lost_frame`), backing off
+/// ×2 per try up to `REFETCH_MAX`.
+const REFETCH_AFTER: Duration = Duration::from_millis(300);
+const REFETCH_MAX: Duration = Duration::from_millis(2400);
 
 /// Media seconds the picture must have played since an `AudioFlowing` wait was armed, with
 /// `audio-pts` unavailable throughout, before "no audio is playing at all" is believed
@@ -699,7 +713,12 @@ impl MpvSource {
                 .map_err(api_err)?;
         }
         handle.initialize().map_err(api_err)?;
-        handle.request_log_messages("error").map_err(api_err)?;
+        // Debug: LP_PLAYER_MPV_LOG=<mpv level, e.g. v> prints every core's mpv log to stderr (serve: its log
+        // file) — what the core was doing, e.g. a VO that gave up waiting for a render.
+        let diag = std::env::var("LP_PLAYER_MPV_LOG").ok();
+        handle
+            .request_log_messages(diag.as_deref().unwrap_or("error"))
+            .map_err(api_err)?;
         for (id, name, f) in [
             (OBS_TIME_POS, "time-pos", Format::F64),
             (OBS_DURATION, "duration", Format::F64),
@@ -854,6 +873,9 @@ impl MpvSource {
             playing_entry: None,
             file_loaded: false,
             restarted: false,
+            restarted_at: None,
+            refetched_at: None,
+            refetches: 0,
             time_pos: None,
             duration: None,
             dsize: (0, 0),
@@ -1174,6 +1196,8 @@ impl MpvSource {
         self.loaded_fl = None;
         self.w_ended_held = false;
         self.restarted = false;
+        self.restarted_at = None;
+        self.refetched_at = None;
         self.ready = false;
         self.back_valid = false;
         self.ended_sent = false;
@@ -1393,6 +1417,8 @@ impl MpvSource {
                         self.file_loaded = false;
                         self.loaded_fl = None;
                         self.restarted = false;
+                        self.restarted_at = None;
+                        self.refetched_at = None;
                         self.time_pos = None;
                         self.duration = None;
                         self.has_audio = None;
@@ -1409,6 +1435,9 @@ impl MpvSource {
                 }
                 Event::PlaybackRestart => {
                     if self.is_current() && self.file_loaded {
+                        if !self.restarted {
+                            self.restarted_at = Some(Instant::now());
+                        }
                         self.restarted = true;
                         if let Some(st) = self.step.as_mut()
                             && st.replied
@@ -1434,8 +1463,24 @@ impl MpvSource {
                         _ => {}
                     }
                 }
-                Event::LogMessage { prefix, text, .. } => {
-                    self.last_error_log = Some(format!("{prefix}: {}", text.trim_end()));
+                Event::LogMessage {
+                    prefix,
+                    text,
+                    level,
+                    ..
+                } => {
+                    if std::env::var_os("LP_PLAYER_MPV_LOG").is_some() {
+                        // [mpv <file> <t_mono s, when pumped — not when mpv logged it>] <level> <prefix>: <text>
+                        eprintln!(
+                            "[mpv {} {:.3}] {level} {prefix}: {}",
+                            self.path.rsplit('/').next().unwrap_or(""),
+                            crate::log::mono_start().map_or(0.0, |t| t.elapsed().as_secs_f64()),
+                            text.trim_end()
+                        );
+                    }
+                    if matches!(level.as_str(), "error" | "fatal") {
+                        self.last_error_log = Some(format!("{prefix}: {}", text.trim_end()));
+                    }
                 }
                 Event::PropertyChange { id, value, .. } => self.on_prop(id, value),
                 Event::Shutdown => {
@@ -1755,6 +1800,64 @@ impl MpvSource {
         }
     }
 
+    /// A paused source or an image restarted [`REFETCH_AFTER`] ago with no frame staged: mpv gave
+    /// up waiting for us to render its only frame and dropped it. Ask for it again — an exact seek
+    /// to where it is (same frame, a new `PLAYBACK_RESTART`; no FILE_LOADED, so the worker's frame
+    /// tag still matches). A playing source sends its next frame by itself, and re-seeking one that
+    /// is merely slow would restart its decode, so it's never touched. Stepped mode seeks itself.
+    fn refetch_lost_frame(&mut self) {
+        let still =
+            self.kind == "image" || matches!(self.props.get("paused"), Some(PropValue::Bool(true)));
+        if self.stepped
+            || self.dead
+            || self.ready
+            || !self.restarted
+            || self.back_valid
+            || !still
+            || !self.is_current()
+        {
+            return;
+        }
+        let Some(restarted_at) = self.restarted_at else {
+            return;
+        };
+        let (since, wait) = self.refetched_at.unwrap_or((restarted_at, REFETCH_AFTER));
+        if since.elapsed() < wait {
+            return;
+        }
+        let pos = self.time_pos.unwrap_or(0.0).max(0.0);
+        let ts = format!("{pos:.6}");
+        let Some(h) = self.handle.as_ref() else {
+            return;
+        };
+        // Untracked (id 0): a failure leaves it unready, and the next try or the caller's own
+        // timeout (the transition recipe's 10 s) takes it from there.
+        if h.command_async(0, &["seek", &ts, "absolute", "exact"])
+            .is_err()
+        {
+            return;
+        }
+        self.refetches += 1;
+        self.refetched_at = Some((Instant::now(), (wait * 2).min(REFETCH_MAX)));
+        crate::log::event(
+            "mpv",
+            crate::log::Level::Info,
+            "source.frame_refetched",
+            None,
+            serde_json::json!({
+                "path": self.path,
+                "pos": pos,
+                "since_restart_ms": restarted_at.elapsed().as_secs_f64() * 1000.0,
+                "dsize": [self.dsize.0, self.dsize.1],
+            }),
+        );
+    }
+
+    /// How many times a lost first frame was asked for again ([`REFETCH_AFTER`]).
+    pub fn frame_refetches(&self) -> u32 {
+        self.refetches
+    }
+
     /// Native display size, capped at [`MAX_TEXTURE_EDGE`] (aspect kept). `None` until
     /// mpv has reported `dwidth`/`dheight`.
     fn target_size(&self) -> Option<(u32, u32)> {
@@ -1862,6 +1965,7 @@ impl Source for MpvSource {
     fn update(&mut self, gfx: &Gfx) -> bool {
         self.drain_wake();
         self.pump();
+        self.refetch_lost_frame();
         // Rendering libmpv through any context but its own is UB (render.h): refuse.
         if !self.gl.is_for(gfx) {
             if !self.ctx_error_sent {
