@@ -11,6 +11,7 @@
 - `ffmpeg` — thumbnail extraction (Import) + frozen-frame grabs + transition frame capture (→ raw RGBA)
 - `wl-clipboard` — `wl-copy` for keybind Copy buttons (renderer uses `navigator.clipboard`, falls back to `wl-copy`)
 - `linux-wallpaperengine` *(optional)* — WE **scene** support (Settings → "Allow scene support")
+- *(build-time, required unless `install.sh --no-scenes`)* `cmake` + `git` + SDL2/freetype/glm/lz4/zlib/FFmpeg/libGL dev — build LWE's `next-v2` core from the owner's fork (`third_party/lwe/PIN`, `scripts/lwe.sh`, `UPSTREAM.md`) for lp-player's scene worker; the flake + devShell build it themselves
 - `grim` — *fallback* scene-frame capture for transitions (scene-A cover); the primary path is LWE's own `--screenshot` (windowless framebuffer dump per output)
 - *(build-time, REQUIRED)* `cc` + `make` + `wayland-scanner` + wayland/EGL/GLES + `mpv` dev headers — build `lp-transition` (transition renderer). Transitions animate every wallpaper switch and are a core feature, never a no-op — `install.sh` hard-fails if the toolchain is missing (the flake handles it automatically)
 - *(build-time, REQUIRED)* `cc` + `libpulse` dev — build `lp-audio` (event-driven scene-audio crossfade helper) so scene switches crossfade instead of hard-cutting audio

@@ -61,7 +61,8 @@ happen regardless of timing.
   `src/bin/lp-scene-worker/` — the worker binary (second `[[bin]]`; `ring.rs`,
   `synthetic.rs`). `src/scene/` — pure scene helpers (`cover_size`, the synthetic spec).
   `src/sources/scene.rs` — `SceneSource`. `src/gfx/dmabuf.rs` — dmabuf export/import +
-  native fences on `Gfx`. § Scene worker.
+  native fences on `Gfx`. `src/bin/lp-scene-worker/lwe.rs` — LWE's core (feature `lwe`).
+  § Scene worker.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -2793,12 +2794,13 @@ no systemd-coredump/DrKonqi —, `abort()`), `hang_after_ms:N` (stops answering)
 EOF — only SIGKILL ends it), `spam_stderr:N`. The worker sets its socket `CLOEXEC`
 (nothing it starts may hold it: EOF is the crash signal).
 
-**Build feature `lwe` — default OFF for now** (the LWE track flips it to `default =
-["lwe"]` when its build lands). With it: `build.rs` emits `cargo::rustc-link-arg-bin=
-lp-scene-worker=` `-L$LP_LWE_CORE_DIR/lib -llinux-wallpaperengine-core -Wl,-rpath,…` (the
-compositor binary never links LWE); without `LP_LWE_CORE_DIR` the build fails naming
-`scripts/lwe.sh build` and the feature. Without it the worker runs `--stub` and the
-synthetic renderer only. **`paths::scene_worker_bin()`**: `$LP_SCENE_WORKER_BIN` (used only if
+**Build feature `lwe` — default ON** (Tasks 1–2; § "LWE core" below). `build.rs` emits
+`cargo::rustc-link-arg-bin=lp-scene-worker=` `-L$LP_LWE_CORE_DIR/lib
+-llinux-wallpaperengine-core -Wl,-rpath,<$LP_LWE_RPATH or $LP_LWE_CORE_DIR/lib>` (the
+compositor binary never links LWE — `tests/lwe_build.rs::worker_links_the_core` checks both);
+without `LP_LWE_CORE_DIR`, or with one lacking the `.so`, the build fails naming the devShell,
+`scripts/lwe.sh` and `--no-default-features`. `--no-default-features`: the worker runs `--stub`
+and the synthetic renderer only (`install.sh --no-scenes`). **`paths::scene_worker_bin()`**: `$LP_SCENE_WORKER_BIN` (used only if
 it names a file) → `lp-scene-worker` next to `/proc/self/exe` (dev `target/<profile>/`, the
 flake's `$out/bin` — the wrapper's `.lp-player-wrapped` sits there too) → `PATH`; unit
 `scene_worker_resolution_order`.
@@ -2957,3 +2959,72 @@ second `buffer` set of the *same* generation — slot ids already unique); the s
 pause-excised; `Ready`/`texture()` into `SourceHost` (wake fd = `wake_fd()`, stable);
 spawn from the loop thread; `stop()` on a fatal `error`; `stats()`/`latencies_ms()`/`sync()` →
 the `workers` probe.
+
+### LWE core (Tasks 1–2)
+
+linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `UPSTREAM.md`
+§ linux-wallpaperengine is the source of truth for the pin, the patch series and the resync recipe.
+- **Where it comes from.** `third_party/lwe/PIN` (JSON) → the flake's `lwe-src`
+  (`fetchFromGitHub` of the fork at `rev`, submodules, `nix_hash`) → `lwe-core` (CMake, the
+  `linux-wallpaperengine-core` target only — `all` would build the GLFW dev-viewer/CEF
+  webhelper objects; ~50 s at 8 jobs) = `lib/liblinux-wallpaperengine-core.so*` +
+  `include/linux-wallpaperengine/*.h` + `REV`. The `lp-player` package and the **devShell** set
+  `LP_LWE_CORE_DIR` to it (first entry into the devShell after a pin bump builds it). Outside
+  Nix: `scripts/lwe.sh fetch prepare build` (clone into `~/.cache/livepaper/src/lwe-<rev>`,
+  every submodule verified against the PIN; a copy without VCS dirs in `build/lwe-src-<rev>`;
+  built in `build/lwe-build-<rev>`; installed to `build/lwe-core`, `-j${LWE_JOBS:-8}`).
+  `install.sh` does that, copies the `.so*` into `~/.local/share/livepaper-web/lib/` and builds
+  the worker with `LP_LWE_RPATH='$ORIGIN/../lib'`.
+- **Patch work.** `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test` builds a working
+  tree in place (`build/lwe-build-dev`, incremental; `REV` = `dev:<dir>`, which
+  `core_is_the_pinned_one` skips), then `LP_LWE_CORE_DIR=$PWD/build/lwe-core cargo …`.
+  `bash scripts/lwe.sh --nix …` runs any command inside the devShell.
+- **The patched API** (`patches/lwe/0003`): `wp_config_set_audio_output(cfg, {sample_rate,
+  channels})` before `wp_context_create` → the context uses `HostAudioDriver`: no SDL audio
+  subsystem, no device. `wp_context_audio_pull(ctx, float*, frames)` = the unity-gain mix of every
+  stream, F32 interleaved, always `frames` (silence where nothing is decoded; 0 on an SDL context
+  / null buffer); it **never waits for decoding** (an empty packet queue = silence for that pull),
+  so the worker may call it from its PipeWire process callback. Not pulling = paused (the read
+  threads wait on full queues); the frames pulled per second of the host's clock = the speed, so
+  Task 6's scaletempo stage pulls `speed × frames` and stretches them (owner: scene speed scales
+  animation AND audio, pitch-corrected). `config.volume` and the mute check's pause still exist
+  but the worker never sets them (dB gains are ours). A mono source reaches each stereo channel at
+  −3 dB (FFmpeg's default mono→stereo rematrix — measured 0.354 for a 0.5 sine).
+  `wp_context_audio_stream_count` (0 until the first `wp_render_frame` builds the scene's sound
+  objects), `wp_context_audio_driver_name` (`"host"|"sdl"`). Stop pulling before
+  `wp_context_destroy`. **0004:** a project whose renderer build threw renders nothing ever again
+  (no SIGSEGV on the 2nd call), size stays 1×1. **0005:** `engine.setTimeout/setInterval` run on
+  the context's `renderTime` (the host clock), a clock going back reschedules them. **0006:** a mono
+  sound on a stereo output corrupted the heap in `resampleAudio` (found by 0003's test).
+- **The headers are C++-only** (struct tags used as type names), so `lwe.rs` declares the ~20
+  calls it uses by hand (`unsafe extern "C"`), and `patches/lwe/tests/host_api_test.cpp` is C++.
+- **`lwe.rs`** (feature `lwe`): `Scene::load(dir, assets)` (config with the explicit assets dir +
+  the host audio output at 48 kHz stereo, context with our `eglGetProcAddress` and a `Cell<f32>`
+  clock, `wp_project_load_folder`; NULL → `Err("load failed")`), `first_render(scratch_fbo)` →
+  native size or `Err` when ≤ 1, `render(t, fbo)` (native-sized FBO; no flip, alpha 0 — the caller
+  forces 1), `pull_audio`, `audio_streams`, `audio_driver`. Task 7's `render.rs` builds on it.
+  **`lp-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S]`** renders a
+  real scene offscreen (frames at 30 fps of scene time), writes `lwe-smoke-1s.png`/`-3s.png`
+  (upright, opaque) and prints one JSON line (`native`, `load_ms`, `build_ms`, `frame_ms_*` with a
+  `glFinish` per frame, `lit_pixels`, `changed_pixels_1s_to_end`, `gl_error`, `audio_driver`,
+  `audio_streams`, `audio_peak` of 0.5 s pulled); exit 0 = rendered and animating. Measured
+  (release, RTX 3070 Ti): 2371103399 3840×1080 build 735 ms, 0.81 ms/frame, 0 GL errors, 1 sound
+  stream through the host driver; 1726902114 2048×1423 build 126 ms, 0.14 ms/frame.
+- **Assets-free scenes (D7 probe):** a scene of only a clear colour (`patches/lwe/tests/fixtures/
+  min-scene`, 64×32) builds and renders **without** WE's `assets/` (centre pixel = the clear
+  colour) — usable as a hermetic real-LWE fixture; anything with an image/particle/effect needs
+  `assets/shaders/*`. `fail-scene` (an object whose parent doesn't exist) loads, then its build
+  throws — the deterministic broken-build fixture.
+- **Tests.** `bash scripts/lwe.sh test` (`host_api_test.cpp`, `SDL_AUDIODRIVER=dummy`; EGL tests
+  SKIP without a surfaceless context; the audio-mix test needs `LP_WE_ASSETS_DIR`):
+  `host_output_replaces_sdl`, `pull_without_streams_is_silence`,
+  `render_after_failed_build_returns` (RED unpatched: SIGSEGV), `min_scene_renders_without_assets`,
+  `host_pull_mixes_scene_sound_at_unity_gain` (a generated looping mono WAV: peak 0.354 on both
+  channels, 5 blocks without a gap; RED before 0006: `double free or corruption`),
+  `sdl_stays_default_without_host_output`, `pull_on_sdl_context_returns_zero`.
+  `tests/lwe_build.rs` (core tests SKIP without `LP_LWE_CORE_DIR`, FAIL then under
+  `LP_REQUIRE_SCENES=1`; repo tests SKIP in the flake's sandbox): `core_exports_only_wp_symbols`
+  (⊇ `tests/fixtures/lwe_exports.txt`, 70), `core_is_the_pinned_one` (`REV` = PIN.rev),
+  `worker_links_the_core` (NEEDED + RUNPATH; the compositor binary links no LWE),
+  `patch_headers_are_complete`, `pin_matches_flake` (the flake reads the PIN; the last patch is
+  PIN.rev's commit).

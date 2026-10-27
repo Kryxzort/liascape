@@ -10,10 +10,23 @@
 #   LP_ELECTRON  electron binary the GUI runs   (default: 'electron' on PATH; AppImage sets a bundled one)
 #   SKIP_BUILD   1 = don't compile, only stage  (unused split; reserved)
 #
+# Options:
+#   --no-scenes  build without Wallpaper Engine scene support under lp-player (no LWE core, no
+#                cmake/SDL2/freetype/glm/lz4 needed): lp-scene-worker plays nothing but test scenes
+#
 # Paths: everything is staged under $DESTDIR but the wrappers reference the RUNTIME paths ($PREFIX...),
 # so a packaged tree works once installed to $PREFIX regardless of where it was staged.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
+
+NO_SCENES=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-scenes) NO_SCENES=1 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    *) echo "install.sh: unknown option '$arg' (see --help)" >&2; exit 2 ;;
+  esac
+done
 
 PREFIX="${PREFIX:-$HOME/.local}"
 DESTDIR="${DESTDIR:-}"
@@ -81,6 +94,14 @@ MSG
   exit 1
 fi
 
+# Wallpaper Engine scenes under lp-player: the scene worker links LWE's core (linux-wallpaperengine
+# next-v2, built from source at third_party/lwe/PIN). Its build deps are required unless --no-scenes —
+# preflighted here too, before any build side effect (scripts/lwe.sh deps prints the package lines).
+if [ "$NO_SCENES" = 0 ]; then
+  echo "==> checking Wallpaper Engine scene build deps (LWE core: cmake, SDL2, freetype, glm, lz4, FFmpeg)"
+  bash "$ROOT/scripts/lwe.sh" deps || exit 1
+fi
+
 echo "==> building React UI"
 (cd "$ROOT/app/ui" && npm install && npm run build)
 
@@ -111,9 +132,24 @@ for d in "$ROOT"/src/native/*/; do
   install -Dm755 "${d}${name}" "$S_LIB/$name"
 done
 
-echo "==> building lp-player (Rust compositor) → $WEBDIR/bin/lp-player"
-(cd "$ROOT" && cargo build --release --locked --manifest-path src/player/Cargo.toml)
+if [ "$NO_SCENES" = 0 ]; then
+  # fetched into ~/.cache/livepaper/src (git clone, once per pin), built in $ROOT/build/
+  echo "==> building LWE core (Wallpaper Engine scenes) → $WEBDIR/lib"
+  LWE_CORE="$ROOT/build/lwe-core"
+  LP_LWE_CORE_DIR="$LWE_CORE" bash "$ROOT/scripts/lwe.sh" fetch prepare build check
+  mkdir -p "$S_WEB/lib"
+  find "$S_WEB/lib" -maxdepth 1 -name 'liblinux-wallpaperengine-core.so*' -delete
+  cp -P "$LWE_CORE"/lib/liblinux-wallpaperengine-core.so* "$S_WEB/lib/"
+  echo "==> building lp-player + lp-scene-worker (Rust compositor) → $WEBDIR/bin"
+  # the worker finds the core next to it at runtime ($WEBDIR/bin/../lib), not in the build tree
+  (cd "$ROOT" && LP_LWE_CORE_DIR="$LWE_CORE" LP_LWE_RPATH='$ORIGIN/../lib' \
+    cargo build --release --locked --manifest-path src/player/Cargo.toml)
+else
+  echo "==> building lp-player + lp-scene-worker without scene support (--no-scenes) → $WEBDIR/bin"
+  (cd "$ROOT" && cargo build --release --locked --no-default-features --manifest-path src/player/Cargo.toml)
+fi
 install -Dm755 "$ROOT/src/player/target/release/lp-player" "$S_WEB/bin/lp-player"
+install -Dm755 "$ROOT/src/player/target/release/lp-scene-worker" "$S_WEB/bin/lp-scene-worker"
 
 echo "==> ensuring Electron is available for the GUI"
 # The GUI runs: <electron> <shell-dir>. By default use a system 'electron' (PATH) — the bundled
@@ -167,4 +203,4 @@ echo ""
 echo "Done. Installed to $LIBDIR (runtime prefix $PREFIX)."
 echo "  GUI:  livepaper            (bare = open the app; livepaper-ui also works)"
 echo "  CLI:  livepaper --restore | --action=next-wallpaper | --kill | --serve | …"
-[ -z "$DESTDIR" ] && echo "  Ensure $BINDIR is on PATH."
+if [ -z "$DESTDIR" ]; then echo "  Ensure $BINDIR is on PATH."; fi  # (a bare `[ ] &&` made a DESTDIR install exit 1)

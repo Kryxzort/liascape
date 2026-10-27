@@ -1,0 +1,480 @@
+From ccdf046853f4fb9fae9115f9e4ebaaf65c609681 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Tue, 27 Oct 2026 20:52:06 +0530
+Subject: [PATCH 3/6] audio: host audio output driver
+ (wp_config_set_audio_output)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An embedder that owns audio output (its own mixer, a PipeWire stream with
+dB gains and ramps) had no way to take LWE's sound: every context opened an
+SDL audio device at creation, even with audio disabled, and the only
+controls were a coarse linear 0..128 volume and a mute check that pauses.
+
+wp_config_set_audio_output (config, {sample_rate, channels}) makes contexts
+created from that configuration use a new HostAudioDriver instead of the SDL
+one: no SDL audio subsystem, no device. The host pulls the unity-gain mix of
+every stream as F32 interleaved PCM with wp_context_audio_pull, from its
+own audio thread. A pull never waits for decoding (an empty packet queue is
+silence for that pull and wakes the read thread), so it is safe from a
+real-time callback. Not pulling pauses the sound where it is; the frames a
+host pulls per second of its own clock set the playback rate, so it can
+also change speed through a time-stretch stage of its own.
+
+wp_context_audio_stream_count and wp_context_audio_driver_name ("host" |
+"sdl") report what a context plays. Without an output nothing changes:
+SDL stays the default. The driver's stream list is mutex-guarded
+(add/remove come from the render thread, pulls from the host's) and frees
+its buffers on removal.
+
+Origin: ours
+Why: lp-player owns scene audio as a dB-gained PipeWire stream (ramps, equal-power crossfades, speed with pitch correction); the SDL device could only be controlled from outside (docs/player/spikes/lwe-core.md §4.1)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/configuration.h |  22 ++++
+ include/linux-wallpaperengine/context.h       |  35 +++++
+ src/core/CMakeLists.txt                       |   1 +
+ .../Audio/Drivers/HostAudioDriver.cpp         | 123 ++++++++++++++++++
+ .../Audio/Drivers/HostAudioDriver.h           |  71 ++++++++++
+ src/core/WallpaperEngine/Configuration.h      |   2 +
+ src/core/WallpaperEngine/Context.cpp          |  14 +-
+ src/core/frontends/configuration.cpp          |  12 ++
+ src/core/frontends/context.cpp                |  38 +++++-
+ 9 files changed, 316 insertions(+), 2 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+ create mode 100644 src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
+
+diff --git a/include/linux-wallpaperengine/configuration.h b/include/linux-wallpaperengine/configuration.h
+index f011be8..3af86d3 100644
+--- a/include/linux-wallpaperengine/configuration.h
++++ b/include/linux-wallpaperengine/configuration.h
+@@ -41,6 +41,17 @@ struct wp_rendering_pause_check {
+     bool (*is_paused) (void* user_parameter);
+ };
+ 
++/**
++ * Audio output owned by the host (see wp_config_set_audio_output). The host pulls F32 interleaved
++ * samples at this rate and channel count with wp_context_audio_pull.
++ */
++typedef struct wp_audio_output {
++    /** samples per second per channel (8000..192000) */
++    int sample_rate;
++    /** 1 (mono) or 2 (stereo, interleaved L R) */
++    int channels;
++} wp_audio_output;
++
+ /**
+  * Allocates and sets up some sensible defaults for the renderer
+  *
+@@ -106,6 +117,17 @@ WPENGINE_API bool wp_config_detect_steam_dir (wp_configuration* config);
+  */
+ WPENGINE_API void wp_config_enable_audio (wp_configuration* config, bool enable);
+ 
++/**
++ * Makes contexts created from this configuration hand their audio to the host instead of opening
++ * an SDL audio device: no device, no SDL audio subsystem; the host pulls the unity-gain mix of every
++ * stream with wp_context_audio_pull and applies volume, mute and pause itself
++ * (wp_config_set_audio_volume does not apply to it). Takes effect for contexts created afterwards.
++ *
++ * @param config
++ * @param output The output format the host pulls, NULL to go back to the SDL output (the default)
++ */
++WPENGINE_API void wp_config_set_audio_output (wp_configuration* config, const wp_audio_output* output);
++
+ /**
+  * Sets the desired background's volume (value ranges from 0 to 128)
+  *
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 8f42743..5adf65f 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -3,6 +3,8 @@
+ 
+ #define WP_AUDIO_INPUT_FRAME_SIZE 1024
+ 
++#include <stddef.h>
++
+ #include "configuration.h"
+ #include "export.h"
+ 
+@@ -117,6 +119,39 @@ WPENGINE_API void wp_context_set_time_counter (wp_context* context, wp_time_coun
+  */
+ WPENGINE_API void wp_context_set_audio_input_mix (wp_context* context, wp_audio_input_mix* mix);
+ 
++/**
++ * Pulls the next frames of the context's audio: the unity-gain mix of every playing stream, as F32
++ * interleaved samples in the format given to wp_config_set_audio_output. Never waits for decoding:
++ * whatever is not decoded yet is silence. Call it from the host's audio output (any one thread), and
++ * stop pulling before wp_context_destroy.
++ *
++ * The host controls the rate: frames pulled per second of its own clock = playback speed (pull
++ * faster or slower and time-stretch the result to change speed without changing pitch); not pulling
++ * pauses the sound where it is.
++ *
++ * @param context A context created from a configuration with a host audio output
++ * @param interleaved Room for frames * channels floats
++ * @param frames The number of frames to fill
++ *
++ * @return The frames written (always frames), 0 when the context has no host audio output
++ */
++WPENGINE_API size_t wp_context_audio_pull (wp_context* context, float* interleaved, size_t frames);
++
++/**
++ * @param context
++ *
++ * @return The number of audio streams the context's backgrounds currently play (0 until a scene's
++ * renderer is built by its first wp_render_frame)
++ */
++WPENGINE_API int wp_context_audio_stream_count (wp_context* context);
++
++/**
++ * @param context
++ *
++ * @return "host" when the host pulls the audio (wp_config_set_audio_output), "sdl" otherwise
++ */
++WPENGINE_API const char* wp_context_audio_driver_name (wp_context* context);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 41054e9..5d6a977 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -20,6 +20,7 @@ set(TARGET_SOURCE_FILES
+ 
+     WallpaperEngine/Audio/Drivers/AudioDriver.cpp
+     WallpaperEngine/Audio/Drivers/SDLAudioDriver.cpp
++    WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+ 
+     WallpaperEngine/Audio/PlaybackRecorder.cpp
+     WallpaperEngine/Audio/AudioPlayingDetector.cpp
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+new file mode 100644
+index 0000000..fd35a05
+--- /dev/null
++++ b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+@@ -0,0 +1,123 @@
++#include <algorithm>
++#include <ranges>
++
++#include <SDL.h>
++
++#include "HostAudioDriver.h"
++
++#include "WallpaperEngine/Audio/AudioPlayingDetector.h"
++#include "WallpaperEngine/Context.h"
++
++using namespace WallpaperEngine::Audio;
++using namespace WallpaperEngine::Audio::Drivers;
++
++HostAudioDriver::HostAudioDriver (Context& applicationContext, const int sampleRate, const int channels) :
++    AudioDriver (applicationContext), m_sampleRate (std::clamp (sampleRate, 8000, 192000)),
++    m_channels (std::clamp (channels, 1, 2)) { }
++
++HostAudioDriver::~HostAudioDriver () {
++    std::lock_guard lock (this->m_streamsMutex);
++
++    for (const auto* buffer : this->m_streams | std::views::values) {
++	delete buffer;
++    }
++
++    this->m_streams.clear ();
++}
++
++int HostAudioDriver::addStream (AudioStream* stream) {
++    std::lock_guard lock (this->m_streamsMutex);
++    const int newStreamId = this->m_lastStreamID++;
++
++    this->m_streams.insert_or_assign (newStreamId, new HostAudioBuffer { .stream = stream });
++
++    return newStreamId;
++}
++
++void HostAudioDriver::removeStream (const int streamId) {
++    std::lock_guard lock (this->m_streamsMutex);
++    const auto it = this->m_streams.find (streamId);
++
++    if (it == this->m_streams.end ()) {
++	return;
++    }
++
++    delete it->second;
++    this->m_streams.erase (it);
++}
++
++int HostAudioDriver::streamCount () {
++    std::lock_guard lock (this->m_streamsMutex);
++
++    return static_cast<int> (this->m_streams.size ());
++}
++
++size_t HostAudioDriver::pull (float* out, const size_t frames) {
++    if (out == nullptr || frames == 0) {
++	return 0;
++    }
++
++    const size_t samples = frames * this->m_channels;
++
++    std::fill_n (out, samples, 0.0f);
++
++    // the configuration's mute check pauses every stream, exactly like the SDL driver's callback
++    if (this->getContext ().audio->getDetector ().anythingPlaying ()) {
++	return frames;
++    }
++
++    std::lock_guard lock (this->m_streamsMutex);
++
++    for (auto* buffer : this->m_streams | std::views::values) {
++	if (!buffer->stream->isInitialized ()) {
++	    continue;
++	}
++
++	size_t written = 0;
++
++	while (written < samples && this->getContext ().isRunning) {
++	    if (buffer->index >= buffer->size) {
++		// decodeFrame blocks on an empty packet queue; a pull must never wait for decoding, so an
++		// empty queue is silence for the rest of this pull (and wakes the read thread)
++		if (buffer->stream->isQueueEmpty ()) {
++		    SDL_CondSignal (buffer->stream->getWaitCondition ());
++		    break;
++		}
++
++		const int bytes = buffer->stream->decodeFrame (buffer->data, sizeof (buffer->data));
++
++		buffer->index = 0;
++
++		if (bytes < 0) {
++		    // decode error: a short stretch of silence, like the SDL driver
++		    buffer->size = 256;
++		    std::fill_n (reinterpret_cast<float*> (buffer->data), buffer->size, 0.0f);
++		} else {
++		    buffer->size = std::min (static_cast<size_t> (bytes), sizeof (buffer->data)) / sizeof (float);
++		}
++
++		if (buffer->size == 0) {
++		    break;
++		}
++	    }
++
++	    const auto* source = reinterpret_cast<const float*> (buffer->data) + buffer->index;
++	    const size_t count = std::min (samples - written, buffer->size - buffer->index);
++
++	    for (size_t i = 0; i < count; i++) {
++		out[written + i] += source[i];
++	    }
++
++	    written += count;
++	    buffer->index += count;
++	}
++    }
++
++    return frames;
++}
++
++AVSampleFormat HostAudioDriver::getFormat () const { return AV_SAMPLE_FMT_FLT; }
++
++int HostAudioDriver::getSampleRate () const { return this->m_sampleRate; }
++
++int HostAudioDriver::getChannels () const { return this->m_channels; }
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
+new file mode 100644
+index 0000000..8458157
+--- /dev/null
++++ b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
+@@ -0,0 +1,71 @@
++#pragma once
++
++#include <cstddef>
++#include <map>
++#include <mutex>
++
++#include "WallpaperEngine/Audio/AudioStream.h"
++#include "WallpaperEngine/Audio/Drivers/AudioDriver.h"
++
++namespace WallpaperEngine::Audio::Drivers {
++/**
++ * Decode state of one stream played through the host driver
++ */
++struct HostAudioBuffer {
++    AudioStream* stream = nullptr;
++    /** decoded F32 interleaved samples; same capacity as the SDL driver's per-stream buffer */
++    alignas (float) uint8_t data[(192000 * 3) / 2] = { 0 };
++    /** valid samples in data */
++    size_t size = 0;
++    /** next sample to mix */
++    size_t index = 0;
++};
++
++/**
++ * Audio driver for embedders that own audio output themselves (wp_config_set_audio_output).
++ *
++ * Opens no device: the host pulls F32 interleaved PCM at the configured rate and channel count with
++ * wp_context_audio_pull, from whatever thread drives its own output (a real-time callback included:
++ * a pull never waits for decoding — what is not decoded yet is silence). Every stream is mixed at
++ * unity gain; volume, ramps, mute and pause are the host's (not pulling = paused: the decode queues
++ * fill and the read threads wait). Because the host decides how many frames it pulls per second it
++ * can also play a scene's sound faster or slower, e.g. through a time-stretch stage of its own.
++ */
++class HostAudioDriver final : public AudioDriver {
++public:
++    HostAudioDriver (Context& applicationContext, int sampleRate, int channels);
++    ~HostAudioDriver () override;
++
++    /** @inheritdoc */
++    int addStream (AudioStream* stream) override;
++    /** @inheritdoc */
++    void removeStream (int streamId) override;
++
++    /** @inheritdoc */
++    [[nodiscard]] AVSampleFormat getFormat () const override;
++    /** @inheritdoc */
++    [[nodiscard]] int getSampleRate () const override;
++    /** @inheritdoc */
++    [[nodiscard]] int getChannels () const override;
++
++    /**
++     * Mixes the next frames of every stream into out (frames * channels floats), silence where
++     * nothing is decoded yet
++     *
++     * @return frames written (always frames, 0 for a null buffer)
++     */
++    size_t pull (float* out, size_t frames);
++
++    /**
++     * @return The number of streams currently registered
++     */
++    [[nodiscard]] int streamCount ();
++
++private:
++    int m_sampleRate;
++    int m_channels;
++    int m_lastStreamID = 0;
++    std::mutex m_streamsMutex;
++    std::map<int, HostAudioBuffer*> m_streams {};
++};
++} // namespace WallpaperEngine::Audio::Drivers
+diff --git a/src/core/WallpaperEngine/Configuration.h b/src/core/WallpaperEngine/Configuration.h
+index 0bdd668..34d6b72 100644
+--- a/src/core/WallpaperEngine/Configuration.h
++++ b/src/core/WallpaperEngine/Configuration.h
+@@ -47,6 +47,8 @@ public:
+     wp_mute_check* mute_check;
+     int volume;
+     bool enableAudio;
++    /** set: contexts hand their audio to the host (wp_config_set_audio_output) instead of SDL */
++    std::optional<wp_audio_output> audioOutput;
+     bool disableParticles;
+     bool disableParallax;
+     int web_fps;
+diff --git a/src/core/WallpaperEngine/Context.cpp b/src/core/WallpaperEngine/Context.cpp
+index 5f7130e..8433444 100644
+--- a/src/core/WallpaperEngine/Context.cpp
++++ b/src/core/WallpaperEngine/Context.cpp
+@@ -1,5 +1,6 @@
+ #include "Context.h"
+ 
++#include "Audio/Drivers/HostAudioDriver.h"
+ #include "Audio/Drivers/SDLAudioDriver.h"
+ #include "WallpaperEngine/Audio/AudioPlayingDetector.h"
+ #include "WallpaperEngine/Audio/Drivers/AudioDriver.h"
+@@ -12,8 +13,19 @@ WallpaperEngine::Context::Context (
+     texture_cache (std::make_unique<TextureCache> ()), config (config), gl_proc_address (gl_proc_addresses),
+     time_counter (time_counter), audio_input_mix (audio_input_mix), isRunning (true), renderTime (0.0f),
+     renderTimeLast (0.0f), daytime (0.0f) {
++    // a host audio output replaces SDL entirely: no SDL audio subsystem, no device
++    std::unique_ptr<Audio::Drivers::AudioDriver> driver;
++
++    if (config.audioOutput.has_value ()) {
++	driver = std::make_unique<Audio::Drivers::HostAudioDriver> (
++	    *this, config.audioOutput->sample_rate, config.audioOutput->channels
++	);
++    } else {
++	driver = std::make_unique<Audio::Drivers::SDLAudioDriver> (*this);
++    }
++
+     this->audio = std::make_unique<Audio::AudioContext> (
+-	std::make_unique<Audio::Drivers::SDLAudioDriver> (*this), std::make_unique<Audio::PlaybackRecorder> (*this),
++	std::move (driver), std::make_unique<Audio::PlaybackRecorder> (*this),
+ 	std::make_unique<Audio::AudioPlayingDetector> (*this)
+     );
+ }
+diff --git a/src/core/frontends/configuration.cpp b/src/core/frontends/configuration.cpp
+index a0338b8..62d414c 100644
+--- a/src/core/frontends/configuration.cpp
++++ b/src/core/frontends/configuration.cpp
+@@ -69,6 +69,18 @@ WPENGINE_API void wp_config_enable_audio (wp_configuration* config, const bool e
+     WPENGINE_CONFIG_API_END ();
+ }
+ 
++WPENGINE_API void wp_config_set_audio_output (wp_configuration* config, const wp_audio_output* output) {
++    WPENGINE_CONFIG_API_BEGIN
++    auto* configuration = static_cast<WallpaperEngine::Configuration*> (config);
++
++    if (output == nullptr) {
++	configuration->audioOutput.reset ();
++    } else {
++	configuration->audioOutput = *output;
++    }
++    WPENGINE_CONFIG_API_END ();
++}
++
+ WPENGINE_API void wp_config_set_audio_volume (wp_configuration* config, const int volume) {
+     WPENGINE_CONFIG_API_BEGIN
+     static_cast<WallpaperEngine::Configuration*> (config)->volume = std::max (0, std::min (volume, 128));
+diff --git a/src/core/frontends/context.cpp b/src/core/frontends/context.cpp
+index 02f2cf5..43ff14a 100644
+--- a/src/core/frontends/context.cpp
++++ b/src/core/frontends/context.cpp
+@@ -1,5 +1,7 @@
+ #include "linux-wallpaperengine/context.h"
+ 
++#include "WallpaperEngine/Audio/Drivers/HostAudioDriver.h"
++#include "WallpaperEngine/Audio/Drivers/SDLAudioDriver.h"
+ #include "WallpaperEngine/Context.h"
+ #include <SDL.h>
+ 
+@@ -61,4 +63,38 @@ WPENGINE_API void wp_project_notify_playback_state_change (wp_context* context,
+ 
+ WPENGINE_API void wp_project_notify_playback_position_change (wp_context* context, double position) { }
+ 
+-WPENGINE_API void wp_project_notify_playback_duration_change (wp_context* context, double duration) { }
+\ No newline at end of file
++WPENGINE_API void wp_project_notify_playback_duration_change (wp_context* context, double duration) { }
++
++static WallpaperEngine::Audio::Drivers::HostAudioDriver* host_audio_driver (wp_context* context) {
++    return dynamic_cast<WallpaperEngine::Audio::Drivers::HostAudioDriver*> (
++	&static_cast<WallpaperEngine::Context*> (context)->audio->getDriver ()
++    );
++}
++
++WPENGINE_API size_t wp_context_audio_pull (wp_context* context, float* interleaved, size_t frames) {
++    WPENGINE_CONTEXT_API_BEGIN
++    auto* driver = host_audio_driver (context);
++
++    return driver == nullptr ? 0 : driver->pull (interleaved, frames);
++    WPENGINE_CONTEXT_API_END (0)
++}
++
++WPENGINE_API int wp_context_audio_stream_count (wp_context* context) {
++    WPENGINE_CONTEXT_API_BEGIN
++    if (auto* driver = host_audio_driver (context)) {
++	return driver->streamCount ();
++    }
++
++    auto* sdl = dynamic_cast<WallpaperEngine::Audio::Drivers::SDLAudioDriver*> (
++	&static_cast<WallpaperEngine::Context*> (context)->audio->getDriver ()
++    );
++
++    return sdl == nullptr ? 0 : static_cast<int> (sdl->getStreams ().size ());
++    WPENGINE_CONTEXT_API_END (0)
++}
++
++WPENGINE_API const char* wp_context_audio_driver_name (wp_context* context) {
++    WPENGINE_CONTEXT_API_BEGIN
++    return host_audio_driver (context) != nullptr ? "host" : "sdl";
++    WPENGINE_CONTEXT_API_END (nullptr)
++}

@@ -30,4 +30,11 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 
 ## Patches
 
-*(no patches yet — nothing is vendored; see `UPSTREAM.md` § "How to resync")*
+| Project | Patch | Subject | Origin | Author |
+|---|---|---|---|---|
+| lwe | `0001-build-accept-WPBUILD_VERSION_OVERRIDE-when-there-is-.patch` | build: accept WPBUILD_VERSION_OVERRIDE when there is no git tag | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0002-build-drop-the-stray-gmpxx-include-declare-glm.patch` | build: drop the stray gmpxx include, declare glm | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0003-audio-host-audio-output-driver-wp_config_set_audio_o.patch` | audio: host audio output driver (wp_config_set_audio_output) | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0004-render-never-render-a-project-whose-renderer-failed-.patch` | render: never render a project whose renderer failed to build | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0005-scripting-run-engine-timers-on-the-host-s-clock.patch` | scripting: run engine timers on the host's clock | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0006-audio-size-resampled-buffers-by-the-output-s-channel.patch` | audio: size resampled buffers by the output's channel count | ours | Kryxzort <virajslko@gmail.com> |

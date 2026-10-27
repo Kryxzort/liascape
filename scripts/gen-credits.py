@@ -116,6 +116,11 @@ def parse_patch(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
 
+    # `git format-patch` folds a long Subject: onto indented continuation lines (RFC 2822);
+    # unfold the header block (up to the first blank line) before matching
+    head, _, body = text.partition("\n\n")
+    text = re.sub(r"\n[ \t]+", " ", head) + "\n\n" + body
+
     info = {"path": path}
     for key, pat in (
         ("from", r"^From:\s*(.+?)\s*$"),

@@ -41,25 +41,41 @@ fn main() {
     bindings.write_to_file(&out).expect("write mpv_bindings.rs");
 }
 
-/// Phase 2 (feature `lwe`): only `lp-scene-worker` links LWE's core — the compositor binary
-/// never does (`rustc-link-arg-bin`). The core comes from `scripts/lwe.sh build`, which
-/// leaves it in `$LP_LWE_CORE_DIR/lib`.
+/// Phase 2 (feature `lwe`, default on): only `lp-scene-worker` links LWE's core — the
+/// compositor binary never does (`rustc-link-arg-bin`). The core is `$LP_LWE_CORE_DIR/lib`:
+/// the flake's `lwe-core` (its devShell and the `lp-player` package set it), or
+/// `scripts/lwe.sh build` (`build/lwe-core`). The worker's RUNPATH is that dir, or
+/// `$LP_LWE_RPATH` when set (`install.sh`: `$ORIGIN/../lib`, the core installed beside it).
 fn lwe_link() {
     println!("cargo::rerun-if-env-changed=LP_LWE_CORE_DIR");
+    println!("cargo::rerun-if-env-changed=LP_LWE_RPATH");
     if env::var_os("CARGO_FEATURE_LWE").is_none() {
         return;
     }
     let dir = env::var("LP_LWE_CORE_DIR").ok().filter(|d| !d.is_empty());
     let Some(dir) = dir else {
         panic!(
-            "feature `lwe` needs LWE's core: run `scripts/lwe.sh build` and set \
-             LP_LWE_CORE_DIR to the directory it prints (the one holding lib/), or build \
-             without the feature (`--no-default-features` once it is on by default) — \
-             lp-scene-worker then plays synthetic scenes only"
+            "feature `lwe` (on by default) needs LWE's core: build inside the repo's devShell \
+             (`nix develop` sets LP_LWE_CORE_DIR), or run `bash scripts/lwe.sh fetch prepare \
+             build` and set LP_LWE_CORE_DIR to the directory it prints (the one holding lib/), \
+             or build without it (`--no-default-features`) — lp-scene-worker then plays \
+             synthetic scenes only"
         );
     };
+    let so = std::path::Path::new(&dir).join("lib/liblinux-wallpaperengine-core.so");
+    if !so.exists() {
+        panic!(
+            "LP_LWE_CORE_DIR={dir} has no lib/liblinux-wallpaperengine-core.so — run \
+             `bash scripts/lwe.sh fetch prepare build` (or point it at the flake's lwe-core)"
+        );
+    }
+    println!("cargo::rerun-if-changed={}", so.display());
+    let rpath = env::var("LP_LWE_RPATH")
+        .ok()
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| format!("{dir}/lib"));
     let bin = "lp-scene-worker";
     println!("cargo::rustc-link-arg-bin={bin}=-L{dir}/lib");
     println!("cargo::rustc-link-arg-bin={bin}=-llinux-wallpaperengine-core");
-    println!("cargo::rustc-link-arg-bin={bin}=-Wl,-rpath,{dir}/lib");
+    println!("cargo::rustc-link-arg-bin={bin}=-Wl,-rpath,{rpath}");
 }

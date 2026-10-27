@@ -1,0 +1,58 @@
+From c5c2caddff06964611a7ae08e6406df3c3f3bcd9 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Tue, 27 Oct 2026 20:54:01 +0530
+Subject: [PATCH 6/6] audio: size resampled buffers by the output's channel
+ count
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+With FFmpeg's channel-layout API (FF_API_OLD_CHANNEL_LAYOUT off, FFmpeg >= 7)
+AudioStream::resampleAudio sized its output buffer — and the byte count it
+returns — from the INPUT's channel count, while the resampler converts to
+the driver's layout. A mono sound played on a stereo output (the SDL
+driver's and the host driver's default) made swr_convert write two
+channels into a one-channel buffer: heap corruption, "double free or
+corruption" on a later free, and half-length audio in between.
+
+Use the output's channel count, matching the layout the resampler was set
+up with in the constructor (the old-API branch already did).
+
+Reproduced by patches/lwe/tests/host_api_test.cpp
+host_pull_mixes_scene_sound_at_unity_gain (livepaper repo): a scene with one
+looping mono WAV aborted on the first pull.
+
+Origin: ours
+Why: any scene with a mono sound crashed the scene worker's process (found by the host driver's test)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Audio/AudioStream.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Audio/AudioStream.cpp b/src/core/WallpaperEngine/Audio/AudioStream.cpp
+index 768353f..27ea6da 100644
+--- a/src/core/WallpaperEngine/Audio/AudioStream.cpp
++++ b/src/core/WallpaperEngine/Audio/AudioStream.cpp
+@@ -491,7 +491,20 @@ int AudioStream::resampleAudio (uint8_t* out_buf, const int out_size) {
+ 
+     out_nb_channels = av_get_channel_layout_nb_channels (out_channel_layout);
+ #else
+-    out_nb_channels = this->getContext ()->ch_layout.nb_channels;
++    // the OUTPUT's channel count (the layout the resampler was set up with in the constructor), not
++    // the input's: a mono sound resampled for a stereo output writes two channels, and a buffer
++    // sized for one overflows the heap
++    switch (this->m_audioContext.getChannels ()) {
++	case 1:
++	    out_nb_channels = 1;
++	    break;
++	case 2:
++	    out_nb_channels = 2;
++	    break;
++	default:
++	    out_nb_channels = 3; // AV_CH_LAYOUT_SURROUND
++	    break;
++    }
+ #endif
+     ret = av_samples_alloc_array_and_samples (
+ 	&resampled_data, &out_linesize, out_nb_channels, out_nb_samples, this->m_audioContext.getFormat (), 0

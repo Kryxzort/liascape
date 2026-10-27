@@ -18,7 +18,13 @@
 //! acquire fence (`sync: fence`) or a CPU wait on its own `sync_file` (`sync: fdpoll`, env
 //! `LP_SCENE_SYNC=fdpoll` or no `EGL_ANDROID_native_fence_sync`). Only synthetic scenes so far
 //! (`synthetic.rs`, gated by `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`); LWE is Task 7.
+//!
+//! `--lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]` (feature `lwe`): a
+//! diagnostic outside the protocol — renders a real scene through LWE's core offscreen, writes
+//! two PNGs, prints one JSON line (`lwe.rs`).
 
+#[cfg(feature = "lwe")]
+mod lwe;
 mod ring;
 mod synthetic;
 
@@ -69,6 +75,11 @@ fn usage() -> ! {
 }
 
 fn main() {
+    // a diagnostic, not part of the protocol: render a real scene through LWE's core offscreen
+    #[cfg(feature = "lwe")]
+    if std::env::args().nth(1).as_deref() == Some("--lwe-smoke") {
+        lwe::smoke(&std::env::args().skip(1).collect::<Vec<_>>());
+    }
     let mut fd: Option<i32> = None;
     let mut parent: Option<i32> = None;
     let mut stub = false;

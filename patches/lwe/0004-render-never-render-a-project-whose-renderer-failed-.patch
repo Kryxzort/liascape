@@ -1,0 +1,49 @@
+From 1381aa30b6a63479673c1f2eebfed97ae5b6a5cf Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Tue, 27 Oct 2026 20:52:34 +0530
+Subject: [PATCH 4/6] render: never render a project whose renderer failed to
+ build
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Project::render builds the renderer lazily on its first call: it creates the
+RenderContext, then CWallpaper::fromWallpaper. When that throws (a missing
+WE asset, an object with a missing parent, …) wp_render_frame catches the
+exception at the API boundary, but renderContext is already set and
+wallpaper is still null. The next wp_render_frame skips the build (the
+context exists) and dereferences the null wallpaper: SIGSEGV.
+
+Return early when there is no wallpaper. The project keeps reporting 1x1,
+which a host can read as "broken"; it can be destroyed normally.
+
+Reproduced by patches/lwe/tests/host_api_test.cpp
+render_after_failed_build_returns (livepaper repo): a scene whose only object
+names a parent that does not exist loads, fails its build, and the second
+render crashed.
+
+Origin: ours
+Why: a scene that fails its renderer build (missing assets) must not crash the host on the next frame (docs/player/spikes/lwe-core.md §4.4)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Project.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 26a9ace..7fc8ec0 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -227,6 +227,12 @@ void WallpaperEngine::Project::render () {
+ 	this->renderContext->albumArtUrlChange (this->mediaInfo.url);
+     }
+ 
++    // the renderer failed to build on an earlier call (CWallpaper::fromWallpaper threw after the
++    // render context was created): there is nothing to render, ever — and wallpaper is null
++    if (this->wallpaper == nullptr) {
++	return;
++    }
++
+     this->wallpaper->render ();
+ }
+ 

@@ -220,15 +220,15 @@ Task 14 will find (Phase 1's battery produced four).
   `rebase <rev>` → re-applies every patch onto `<rev>` in a scratch copy, prints ok/conflict per patch, changes
   nothing on failure.
 
-- [ ] **Step 1: Write failing tests** (`tests/lwe_build.rs`; SKIP when `LP_LWE_CORE_DIR` is unset, FAIL then under
+- [x] **Step 1: Write failing tests** (`tests/lwe_build.rs`; SKIP when `LP_LWE_CORE_DIR` is unset, FAIL then under
   `LP_REQUIRE_SCENES=1`):
   - `core_exports_only_wp_symbols`: `nm -D --defined-only` of the `.so` → every symbol starts `wp_`; the set ⊇ the
     66 of the pin (fixture list `tests/fixtures/lwe_exports_ddea3b4.txt`).
   - `patch_headers_are_complete`: every `patches/lwe/*.patch` has `From:`, `Subject:`, `Origin:` ∈ {ours,
     upstream-PR, upstream-commit}, `Why:`, `Status:` ∈ {candidate-for-upstream, local-only}.
   - `pin_matches_flake`: `PIN.rev` and `PIN.nix_hash` equal the values in `flake.nix` (text match).
-- [ ] **Step 2:** `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q --test lwe_build` → FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2:** `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q --test lwe_build` → FAIL.
+- [x] **Step 3: Implement.**
   - 0001: accept `-DWPBUILD_VERSION_OVERRIDE`; without it and without a tag keep upstream's `FATAL_ERROR`.
   - 0002: delete `#include <gmpxx.h>` in `core/WallpaperEngine/Render/FBOProvider.cpp`; add glm's include dir to
     `common-object` (the spike needed `CPATH`).
@@ -242,15 +242,30 @@ Task 14 will find (Phase 1's battery produced four).
     `RUNPATH $ORIGIN/../lib`).
   - `UPSTREAM.md`: pin, patch table, `scripts/lwe.sh rebase` + corpus runner (Task 13) as the resync recipe, last
     sync date; regenerate `CREDITS.md`.
-- [ ] **Step 4:** `bash scripts/lwe.sh fetch prepare build check` → exit 0; `nix build .#lwe-core` → ok; the test
+- [x] **Step 4:** `bash scripts/lwe.sh fetch prepare build check` → exit 0; `nix build .#lwe-core` → ok; the test
   target PASSES; `tests/credits.rs` PASSES. Record the clean build time (spike: 69 s / 24 threads, 688 MB RSS).
-- [ ] **Step 5:** `bash scripts/install.sh --no-scenes` on this machine still installs (no cmake used), and without
+- [x] **Step 5:** `bash scripts/install.sh --no-scenes` on this machine still installs (no cmake used), and without
   `--no-scenes` with `cmake` hidden from `PATH` it exits 1 printing the package lines.
-- [ ] **Step 6 (D7 probe):** write `patches/lwe/tests/fixtures/min-scene/` (`project.json` type scene + a
+- [x] **Step 6 (D7 probe):** write `patches/lwe/tests/fixtures/min-scene/` (`project.json` type scene + a
   `scene.json` with only `general.clearcolor`) and run the spike host against it with an empty assets dir. Record
   in `docs/player/spikes/lwe-core.md` §7 whether it renders; if it does, Task 4–9 tests may use it as a second
   fixture.
-- [ ] **Step 7:** Commit `Vendor LWE next-v2 Core With Build Patches`.
+- [x] **Step 7:** Commit `Vendor LWE next-v2 Core With Build Patches`.
+
+**Done 2026-10-27 — as built (deviations, per D3):** the build fetches the owner's fork
+`Kryxzort/linux-wallpaperengine` branch `livepaper/next-v2` at `rev` (= base `ddea3b4` + our
+commits); the flake reads `third_party/lwe/PIN` itself (`builtins.fromJSON`), so
+`pin_matches_flake` checks that it keeps doing so (no duplicated literals); `lwe-core` builds the
+fork's tree as is (no `patches =`); `patches/lwe/` is `git format-patch base..rev`
+(`lwe.sh patches`), and `lwe.sh verify` proves base + patches == rev. `lwe.sh` gained `verify`,
+`patches`, `deps` (the per-distro lines `install.sh` prints), `--nix` and `LWE_DEV_SRC` (patch
+work in place). Export fixture: `tests/fixtures/lwe_exports.txt` (70 = 66 + 0003's 4). Extra
+tests: `core_is_the_pinned_one`, `worker_links_the_core`. Build: `lwe.sh` 54–56 s at `-j8`, the
+flake's `lwe-core` 49 s. Step 6 (D7): a clear-colour-only scene renders without assets —
+recorded in `docs/player/spikes/lwe-core.md` §8 (§7 was taken). `install.sh` also installs
+`lp-scene-worker` (+ the core in `livepaper-web/lib`, worker RUNPATH `$ORIGIN/../lib`), and a
+DESTDIR install no longer exits 1 (its last line). The `lwe` feature is **on by default**: the
+devShell and the `lp-player` package set `LP_LWE_CORE_DIR`.
 
 **Size: L** (1.5–2 days; nix hash + CMake quirks + three distros' package names).
 
@@ -279,17 +294,30 @@ WPENGINE_API const char* wp_context_audio_driver_name (wp_context* ctx);        
 - 0005: `Scripting/EngineObject.cpp` timers read the context's time counter instead of `std::chrono::steady_clock`
   (invariant #7: pause freezes time). Status: candidate-for-upstream.
 
-- [ ] **Step 1: Write failing tests** in `host_api_test.c` (env `SDL_AUDIODRIVER=dummy`):
+- [x] **Step 1: Write failing tests** in `host_api_test.c` (env `SDL_AUDIODRIVER=dummy`):
   - `host_output_replaces_sdl`: with an output set → `driver_name == "host"` and `SDL_WasInit(SDL_INIT_AUDIO) == 0`.
   - `pull_without_streams_is_silence`: pull 1024 frames → returns 1024, all samples `0.0f`.
   - `sdl_stays_default_without_host_output`: no output → `driver_name == "sdl"`.
   - `render_after_failed_build_returns`: the Task 1 `min-scene` with an empty assets dir → `wp_render_frame` twice,
     no SIGSEGV, width ≤ 1.
-- [ ] **Step 2:** `bash scripts/lwe.sh test` → FAIL (symbols missing).
-- [ ] **Step 3:** Write the three patches; regenerate the export fixture; `scripts/lwe.sh prepare build`.
-- [ ] **Step 4:** `bash scripts/lwe.sh test` → PASS; `cargo test -q --test lwe_build --test credits` → PASS.
+- [x] **Step 2:** `bash scripts/lwe.sh test` → FAIL (symbols missing).
+- [x] **Step 3:** Write the three patches; regenerate the export fixture; `scripts/lwe.sh prepare build`.
+- [x] **Step 4:** `bash scripts/lwe.sh test` → PASS; `cargo test -q --test lwe_build --test credits` → PASS.
   (`0005` is verified on-machine in Task 14, step "pause on a scripted scene".)
-- [ ] **Step 5:** Commit `Add LWE Host Audio Driver And Render Fixes`.
+- [x] **Step 5:** Commit `Add LWE Host Audio Driver And Render Fixes`.
+
+**Done 2026-10-27 — as built:** the test is `patches/lwe/tests/host_api_test.cpp` (LWE's public
+headers are C++-only) with two committed fixtures (`min-scene`, `fail-scene` — the failed build
+needs no missing assets: an object with a missing parent) and three extra cases
+(`min_scene_renders_without_assets`, `host_pull_mixes_scene_sound_at_unity_gain` with
+`LP_WE_ASSETS_DIR`, `pull_on_sdl_context_returns_zero`). The audio-mix test found a heap overflow
+for mono sounds on a stereo output → **patch 0006** (resample buffer sized by the output's
+channels). 0003's pull never waits for decoding (safe in a PipeWire RT callback) and the frames
+pulled per host second set the speed — the hook for the owner's pitch-corrected scene speed
+(Task 6's time-stretch). RED seen: compile failure (no symbols), SIGSEGV on the 2nd render
+(before 0004), `double free or corruption` (before 0006). Real-scene smoke: `lp-scene-worker
+--lwe-smoke` (`lwe.rs`, the seed of Task 7's renderer). `.claude/rules/player-core.md` § Scene
+worker → "LWE core".
 
 **Size: M–L** (1–1.5 days; LWE's decode threading is the unknown — Risk 3).
 

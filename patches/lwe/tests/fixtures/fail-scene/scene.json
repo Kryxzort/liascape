@@ -1,0 +1,22 @@
+{
+	"camera" : {
+		"center" : "0.00000 0.00000 -1.00000",
+		"eye" : "0.00000 0.00000 0.00000",
+		"up" : "0.00000 1.00000 0.00000"
+	},
+	"general" : {
+		"clearcolor" : "0.20000 0.40000 0.60000",
+		"orthogonalprojection" : {
+			"width" : 64,
+			"height" : 32
+		}
+	},
+	"objects" : [
+		{
+			"id" : 1,
+			"name" : "orphan",
+			"solid" : true,
+			"parent" : 99
+		}
+	]
+}

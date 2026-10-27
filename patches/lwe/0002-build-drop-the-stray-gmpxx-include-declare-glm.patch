@@ -1,0 +1,64 @@
+From a104e7fb85ebb05456c4126a6bf84cf9642f8a7e Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Tue, 27 Oct 2026 20:40:12 +0530
+Subject: [PATCH 2/6] build: drop the stray gmpxx include, declare glm
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two undeclared build dependencies of the core library:
+
+- core/WallpaperEngine/Render/FBOProvider.cpp includes <gmpxx.h> (GMP's
+  C++ bindings) and uses nothing from it, so building the core needs GMP's
+  development headers for no reason.
+- glm is used throughout common/ and core/, but no CMake target finds it or
+  adds its include directory; the build only works where glm sits on the
+  compiler's default include path (not on Nix, nor with a custom prefix).
+  common-object now finds glm (its CMake config, else glm/glm.hpp) and
+  carries the include dir PUBLIC, so core-object inherits it.
+
+Origin: ours
+Why: livepaper's Nix and install.sh builds of the core failed without gmpxx headers and without glm on CPATH (docs/player/spikes/lwe-core.md §1)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/common/CMakeLists.txt                       | 16 +++++++++++++++-
+ src/core/WallpaperEngine/Render/FBOProvider.cpp |  1 -
+ 2 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/CMakeLists.txt b/src/common/CMakeLists.txt
+index 9295f3c..042cd27 100644
+--- a/src/common/CMakeLists.txt
++++ b/src/common/CMakeLists.txt
+@@ -16,4 +16,18 @@ add_library(${TARGET_NAME}-object OBJECT ${TARGET_SOURCE_FILES})
+ target_include_directories(${TARGET_NAME}-object PUBLIC
+     ${CMAKE_CURRENT_SOURCE_DIR}
+     ${EXTERNAL_DEPS_DIR}/source-parsers/packages
+-    ${EXTERNAL_DEPS_DIR}/source-parsers/packages/vdfparser)
+\ No newline at end of file
++    ${EXTERNAL_DEPS_DIR}/source-parsers/packages/vdfparser)
++
++# glm (header-only) is used throughout common/ and core/ but was never declared, so the build only
++# worked where glm sits on the compiler's default include path. Find it explicitly; PUBLIC so every
++# target linking this object library (core included) gets the include dir too.
++find_package(glm CONFIG QUIET)
++if(TARGET glm::glm)
++    target_link_libraries(${TARGET_NAME}-object PUBLIC glm::glm)
++else()
++    find_path(GLM_INCLUDE_DIR glm/glm.hpp)
++    if(NOT GLM_INCLUDE_DIR)
++        message(FATAL_ERROR "glm not found (install glm's development package)")
++    endif()
++    target_include_directories(${TARGET_NAME}-object PUBLIC ${GLM_INCLUDE_DIR})
++endif()
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/FBOProvider.cpp b/src/core/WallpaperEngine/Render/FBOProvider.cpp
+index 556a6eb..5067a99 100644
+--- a/src/core/WallpaperEngine/Render/FBOProvider.cpp
++++ b/src/core/WallpaperEngine/Render/FBOProvider.cpp
+@@ -1,5 +1,4 @@
+ #include "FBOProvider.h"
+-#include <gmpxx.h>
+ 
+ using namespace WallpaperEngine::Render;
+ using namespace WallpaperEngine::Data::Model;
