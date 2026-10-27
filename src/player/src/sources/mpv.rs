@@ -450,9 +450,9 @@ pub struct MpvSource {
     /// tagged with it was rendered after that FILE_LOADED.
     fl_seen: u64,
     loaded_fl: Option<u64>,
-    /// An `Ended` held back until this load's `Ready` (worker mode: a render stalled past a
+    /// An `Ended` held back until this load's `Ready` (either renderer: a render stalled past a
     /// short clip's end must not report the end of a source that never showed a frame).
-    w_ended_held: bool,
+    ended_held: bool,
 
     kind: &'static str,
     path: String,
@@ -870,7 +870,7 @@ impl MpvSource {
             w_adopted: 0,
             fl_seen: 0,
             loaded_fl: None,
-            w_ended_held: false,
+            ended_held: false,
             kind,
             path: path.to_string(),
             props: writable,
@@ -1208,7 +1208,7 @@ impl MpvSource {
             .insert("path".into(), PropValue::Str(path.into()));
         self.file_loaded = false;
         self.loaded_fl = None;
-        self.w_ended_held = false;
+        self.ended_held = false;
         self.restarted = false;
         self.restarted_at = None;
         self.refetched_at = None;
@@ -1316,10 +1316,11 @@ impl MpvSource {
         }
         if !self.ended_sent && self.kind != "image" {
             self.ended_sent = true;
-            if self.worker.is_some() && !self.ready {
-                // Worker mode: pushed right after this load's Ready (`update_worker`) —
-                // Ready always precedes Ended, as with the loop renderer.
-                self.w_ended_held = true;
+            if !self.ready {
+                // Pushed right after this load's Ready (`update` / `update_worker`): Ready always
+                // precedes Ended. The loop renderer reported it first when its first frames were
+                // dropped under load (`ended_holds_last_frame` failed once in a loaded full run).
+                self.ended_held = true;
             } else {
                 self.pending.push(SourceEvent::Ended);
             }
@@ -1572,7 +1573,7 @@ impl MpvSource {
                 // Re-armed (a seek back, a loop): an end held back for Ready (worker mode)
                 // no longer stands either.
                 self.ended_sent = false;
-                self.w_ended_held = false;
+                self.ended_held = false;
             }
             // Stepped: mpv is paused for good; `paused` stays the logical value.
             (OBS_PAUSE, PropData::Flag(p)) if !self.stepped => {
@@ -1741,7 +1742,7 @@ impl MpvSource {
             self.back_valid = false;
             self.ready = true;
             self.pending.push(SourceEvent::Ready);
-            if std::mem::take(&mut self.w_ended_held) {
+            if std::mem::take(&mut self.ended_held) {
                 self.pending.push(SourceEvent::Ended);
             }
             changed = true;
@@ -1814,14 +1815,16 @@ impl MpvSource {
         }
     }
 
-    /// A paused source or an image restarted [`REFETCH_AFTER`] ago with no frame staged: mpv gave
+    /// A paused source, an image or a clip at its end, restarted [`REFETCH_AFTER`] ago with no frame staged: mpv gave
     /// up waiting for us to render its only frame and dropped it. Ask for it again — an exact seek
     /// to where it is (same frame, a new `PLAYBACK_RESTART`; no FILE_LOADED, so the worker's frame
     /// tag still matches). A playing source sends its next frame by itself, and re-seeking one that
     /// is merely slow would restart its decode, so it's never touched. Stepped mode seeks itself.
     fn refetch_lost_frame(&mut self) {
-        let still =
-            self.kind == "image" || matches!(self.props.get("paused"), Some(PropValue::Bool(true)));
+        // No next frame will come: an image, a paused source, a clip at its end (keep-open holds it).
+        let still = self.kind == "image"
+            || self.ended_sent
+            || matches!(self.props.get("paused"), Some(PropValue::Bool(true)));
         if self.stepped
             || self.dead
             || self.ready
@@ -2046,6 +2049,9 @@ impl Source for MpvSource {
             self.back_valid = false;
             self.ready = true;
             self.pending.push(SourceEvent::Ready);
+            if std::mem::take(&mut self.ended_held) {
+                self.pending.push(SourceEvent::Ended);
+            }
             changed = true;
         }
         drop(cur);
