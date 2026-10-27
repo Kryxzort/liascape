@@ -295,7 +295,9 @@ policy compares it with the revision an output last presented (§ Wayland).
 
 **Output props.** `name`/`width`/`height`/`refresh_hz` (read-only; kept current with
 `set_observed` on a mode change), `layer` = `background|bottom|top|overlay` (live, §
-Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland).
+Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland),
+`scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at, 0–480, default 30,
+0 = the refresh; live — § Scene worker → "The `scene` Source kind").
 
 **Observed values and node accessors (Task 11).** `Graph::set_observed(path, v)` writes
 what a live source *reports* (`SourceHost` mirrors `ready`/`duration`/`time_pos`/`width`/
@@ -303,7 +305,9 @@ what a live source *reports* (`SourceHost` mirrors `ready`/`duration`/`time_pos`
 and is **never** recorded in `drain_changes` — an observation must not be forwarded back to
 the source as a command. `kind_of(id)`, `ids_of(kind)`, `props_of(id)` (every prop + set
 `gain.<slot>`s, what a source is opened from) and `effective_gain_db(id)` are plain reads.
-`Source.kind` also allows `snapshot`, with read-only `of` (seeded at create).
+`Source.kind` also allows `snapshot`, with read-only `of` (seeded at create), and (Phase 2
+Task 5) `scene` — plus `Source.preview` (Str). `outputs_of(id)` is the inverse of
+`srcs:<c>` (a scene's demand). § Scene worker → "The `scene` Source kind".
 
 **Snapshot shape.** `Graph::snapshot()` is one JSON object keyed by node id; each node's
 object has `kind` plus **every** schema property (defaults included — a property is never
@@ -1267,7 +1271,8 @@ colour layer) and does nothing.
 source.** `SourceHost::new(base_opts)` (merged into every `MpvSource::open`, e.g. `{"ao":
 "null"}` in tests). Per loop iteration, in this order: `sync(gfx, graph, changes)` drops
 sources whose node is gone, opens one for every new `Source` node from `props_of` (`color` →
-`ColorSource`, `snapshot` → `SnapshotSource` of `of`'s *current* texture, else `MpvSource`;
+`ColorSource`, `snapshot` → `SnapshotSource` of `of`'s *current* texture, `scene` →
+`SceneSource` (Phase 2 Task 5 — then every scene's demand, § Scene worker), else `MpvSource`;
 colour/snapshot get every writable prop applied so `read` agrees with the node), then
 forwards each drained change to `apply` (skipping sources it just opened — their props
 already include it); a refused `apply` is logged (`source.rejected`) and queued as
@@ -1954,7 +1959,7 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5), headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
 | `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
@@ -1962,7 +1967,7 @@ note on stderr and exits 0 (or stdout closes).
 | `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}` (a broadcast alias matching nothing: `targets: []`, like `set` — M13); `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
 | `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` (`parked: true` when no output exists — § Runtime, I4) | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
-| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked}` | — | `ctl state` |
+| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
 | `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
 | `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
@@ -2079,8 +2084,9 @@ asked for — copy modes, Task 20d, unless the render context loaded the worker'
 off: summed lane counters, `hwdec_interop`, `lanes` — § Sources "Render worker"); `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
-`mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +
-one `PROBES` entry.
+`mpv_audio_device` / `mpv_audio_delay` (what mpv really runs); `workers` (Phase 2 Task 5,
+`probe/workers.rs`) — one entry per scene source's worker (§ Scene worker). A new probe = a
+file here + one `PROBES` entry.
 
 **Isolation (`api/server.rs`).** Non-blocking, edge-triggered client sockets; per wake a
 client gets ≤ 256 KiB read and ≤ 32 requests handled (the rest next iteration, round
@@ -2697,7 +2703,7 @@ gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaning
 ## Scene worker
 
 Phase 2 (plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`, Tasks
-3–4; spec §4.1, §5.2, §6.3; evidence `docs/player/spikes/dmabuf.md`). A WE scene renders in
+3–5; spec §4.1, §5.2, §6.3; evidence `docs/player/spikes/dmabuf.md`). A WE scene renders in
 its own `lp-scene-worker` process; the compositor drives it over a socket and samples its
 frames. `src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the worker.
 
@@ -2871,8 +2877,8 @@ LWE's core leaves 0 in every pixel) and `frame {slot, seq, t}` + an acquire fenc
 `fdpoll` the worker `poll`s its own fence (≤ 2 s) and sends no fd; no native fence at all →
 a bounded `glClientWaitSync` — **never `glFinish`** (spike §5: it spins a core under load).
 No flip (R25: image top at texture row 0). Slot ids are unique per worker lifetime (0, 1,
-2, then 3… for a re-export) so a later ring can't be confused with this one; **`resize` is
-not handled yet** (logged once — the re-export is Task 5's, with its test). `gpu_ms` is
+2, then 3… for a re-export) so a later ring can't be confused with this one; `resize`
+re-exports the ring (Task 5, below). `gpu_ms` is
 `None` (Task 8 adds GPU timing). Synthetic and env knobs (`crash_after_ms`,
 `hang_after_ms`) both apply.
 
@@ -2953,12 +2959,7 @@ continues), `fdpoll_fallback_is_equally_correct` (300 frames), `scene_texture_ho
 `four_workers_latch_independently`, `transport_meets_the_spike_budget`,
 `context_priorities_compositor_high_worker_low`.
 
-**What Task 5 builds on:** `SceneSource::open(gfx, SceneOpts)` → its `open(gfx, node_props,
-base_opts)`; `tick_hz`/`max_size` → demand (`Resize` + the worker's re-export, handling a
-second `buffer` set of the *same* generation — slot ids already unique); the scene clock →
-pause-excised; `Ready`/`texture()` into `SourceHost` (wake fd = `wake_fd()`, stable);
-spawn from the loop thread; `stop()` on a fatal `error`; `stats()`/`latencies_ms()`/`sync()` →
-the `workers` probe.
+**What Task 5 builds on:** (done — § "The `scene` Source kind (Task 5)" below).
 
 ### LWE core (Tasks 1–2)
 
@@ -3028,3 +3029,144 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `worker_links_the_core` (NEEDED + RUNPATH; the compositor binary links no LWE),
   `patch_headers_are_complete`, `pin_matches_flake` (the flake reads the PIN; the last patch is
   PIN.rev's commit).
+
+### The `scene` Source kind (Task 5)
+
+A WE scene is a graph `Source` like any other: `create {kind: source, props: {kind: scene,
+path: <item folder>, position?, paused?, speed?, preview?}}`. The transition recipe, aliases
+(`srcs:`/`cur:`), the snapshot and the adapter stay kind-agnostic; only the places that
+hard-coded `kind == "video"` learned about `scene`.
+
+- **Schema.** `Source.kind` enum + `scene`; `Source.preview` (Str, the item's preview image —
+  stored on every kind, used by Task 10); `Output.scene_fps` (F64 0–480, default **30** = D5,
+  `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
+  `out:<c>` whose `srcs:` holds `id` — shown there, or held there by a transition).
+  `onset::kind_has_audio(kind)` = `video | scene` (`has_audio`, `audible`, the restore fade,
+  the snapshot's `playing` and the periodic refresh all go through it).
+- **`SourceHost`.** `kind: scene` → `SceneSource::open(gfx, id, node, base_opts)` on the loop
+  (never the `lp-open` pool: no core to make, and the worker's PDEATHSIG follows the spawning
+  thread). Base opts (`serve` fills them): `scene_worker` (`paths::scene_worker_bin()`; none →
+  the open fails naming it), `allow_synthetic` (only when `serve` runs with
+  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: a folder with `lp-synthetic.json` plays the synthetic
+  renderer, and the worker gets the env too), `scene_crash_dir` (`<state>/crashes`),
+  `scene_assets` (Task 7), `ao`/`audio_device` (the `Start.audio` route: `null` → `Null`, the
+  bus device → `Device`, else `Default`), `stepped` (`MpvSource::open_with_core` skips the
+  `scene_*`/`allow_synthetic` keys — the base opts reach every mpv source too; without that
+  every video failed `no_such_prop`). **Every `sync` ends with each scene's
+  demand** (`host::demand_for(graph, id)` → `[OutputDemand {name, width, height, refresh_hz,
+  scene_fps}]` from `outputs_of`): **the worker is spawned at the first demand that names an
+  output** (so the ring is exported at the right size from the start; a node created but not
+  shown has no worker); `max_size` = the largest width and height over the outputs (the cover
+  size covers each), tick rate = max `eff_fps(scene_fps, refresh)` (`scene_fps` capped at the
+  refresh; 0 → the refresh; neither known → 30; Task 8 adds the GPU cap); a change of
+  `max_size` sends **`Resize`** (stats `resizes`); no output at all (every output unplugged —
+  parked) changes nothing. `set_audio_route` re-routes scenes too (`ToWorker::Route`).
+  `SourceHost::scene(id)`/`scene_mut(id)`, `workers_info()`; `Source::as_scene(_mut)`.
+- **The wake fd** is the source's **own epoll fd** (stable across spawns and path changes)
+  over the current `WorkerHost::wake_fd()` **plus each queued frame's acquire fence, one-shot**
+  (`EPOLLIN|EPOLLONESHOT`; `update` drains the epoll first, so a signalled fence wakes the loop
+  once, never in a busy loop; closing the fd — superseded/latched — removes it; the latched
+  one is `DEL`ed before `gpu_wait_fence` takes it). Found by the stepped determinism test: a
+  frame whose fence hadn't signalled when its `Frame` woke the loop was latched only at the
+  step's 2 s deadline (a stepped loop has no timer) — 60 steps took 155 s; after: ~20 ms each.
+- **Scene clock (`SceneClock`, unit `scene_clock_excises_pauses_and_scales_by_speed`).** Scene
+  seconds that advance at **`speed`** (owner decision round 2: speed scales a scene's
+  animation; the pitch-corrected audio half is Task 6's), with paused intervals **excised**
+  (never stopped-and-jumped). It runs only once the load's **first frame** is shown (like a
+  video's `time_pos`, nothing passes while the worker starts), while not `paused` and not
+  stepped. A live `speed` set re-rates from now; a live `position` set jumps it; `time_pos` =
+  the clock. `Tick.t` = the clock at send.
+- **Ready = the first latched frame of a load**, at exactly `position`: before it, exactly
+  **one tick** (`t = position`) is sent, paused or not — then the clock starts and ticks flow
+  at the tick rate (grid-scheduled, `TICK_SLACK` 2 ms early is on time, a whole period behind
+  skips ahead, ≤ `MAX_INFLIGHT` 2). `ready` = loaded; one `Ready` per load (a worker restart is
+  not a load; a `path` change is). `AudioFlowing` is reported at once (after Ready, on an
+  un-pause) when the worker said `has_audio: false` or in stepped mode; a scene with audio
+  reports it from its stream (Task 6). `Position` events ~10 Hz while playing.
+- **Pause.** `paused` (the effective one, `node.paused || player.paused` — R75 composes it in
+  `SourceHost` exactly as for videos) **stops ticks and latching at once**: a frame in flight at
+  the pause never latches, so the held texture is exactly the one shown when it applied (no
+  paused-mpv frame drift); the worker gets `Paused` (Task 6 stops pulling audio). Exceptions:
+  the load's first frame (a scene opened paused shows it — exactly one tick), and a `position`
+  set while paused (`exact_pending`: one tick at the new time, its frame latches). Resume
+  continues the clock where it stopped. Player pause, parking (pause + −96 via the runtime)
+  and hotplug need no scene code beyond this.
+- **`path` (live)** = a new worker on the new folder (`WorkerHost` dropped: `quit`, reaped off
+  the loop; `Latch::forget_worker()` — the old frame stays shown, never released, until the new
+  worker's first frame latches), clock back to 0, `Ready` again; not a crash (`restarts` 0,
+  `spawns` + 1), no crash record.
+- **Re-export (`resize {max_size}` in the worker).** The worker computes the new
+  `cover_size(native, max_size)`; equal to the current ring → nothing; else a new ring with
+  fresh slot ids (3 more), its `buffer`s, and the old ring dropped (the compositor's imports of
+  the old slots keep their memory — a dmabuf lives while anyone holds it). The compositor
+  imports the new set into the **same generation's** ring; once a frame of the new set latched
+  it drops that ring's other slots (`ImportedRing::retain_slots`; `latest_set`). The texture is
+  never `None` in between.
+- **Stepped mode.** No self-ticking: `begin_step` gives a scene the same virtual time as a
+  video (`LocalTime`, advanced by `ms × speed` while not paused/player-paused; no duration, so
+  never clamped) and calls `SceneSource::step_to(t)` — one tick at exactly `t` unless the
+  target is unchanged; `check_step` waits (non-blocking, the fence wake above) for
+  `step_status() == Done` = **the latched frame's seq ≥ the step's tick seq** (by seq, never by
+  comparing `t`: it crosses JSON twice and serde_json's default float parsing can land an ulp
+  off — found: a step never finished at `t = 0.192`), `Pending("ready")` while the worker
+  starts (a worker that came up mid-step gets a fresh `STEP_TIMEOUT`, like an mpv open),
+  `Broken` on an error. Seqs (= frame_index markers) are deterministic: one tick per step that
+  moves `t`.
+- **Errors.** A fatal worker `error` → `SourceEvent::Error {"<path>: <reason>"}` + the worker
+  stopped (no restart loop, no crash record); `broken` (restart budget spent) → also `Error`
+  for now (Task 10 adds `source.broken` and the preview); either holds until `path` changes.
+- **Property semantics:** `path` live (above); `paused` freezes; `position` = scene time at
+  start/restore/crash resume, a live set jumps; `speed` scales the clock (stepped: the step
+  advance does); `kind` change → `unsupported` (both ways: `MpvSource` refuses `scene`);
+  `color` → `unsupported`; `loop`, `hwdec`, `fps_cap`, `cache`, `demuxer_*`, `af`,
+  `audio_delay`, `preview`, `gain.*`, `no_audio` stored (gains/no_audio: Task 6). Observed:
+  `kind` `scene`, `ready`, `time_pos` (the clock), `duration` 0, `width`/`height` (export
+  size), `has_audio` (the worker's `Ready`, `true` until then — R92), `paused`.
+- **Snapshot.** A scene is saved like a video: position = `time_pos` once ready, `playing`
+  (`kind_has_audio`), refreshed every 2 s while it plays (`Runtime::media_playing`); a restore
+  recreates it at that position on a fresh worker (the old one died with its compositor).
+- **Probes / API.** `hello.capabilities` has `scene` when `paths::scene_worker_bin()`
+  resolves (Task 7 adds: and an assets dir unless synthetic scenes are allowed); `state.workers`
+  = the `workers` probe's entries; `workers` (`probe/workers.rs`) — per scene source `{id, path,
+  pid, state (not_spawned|starting|running|restarting N|broken|stopped), restarts_60s,
+  total_restarts, sync, fourcc (e.g. `AB24`), modifier (hex), size (export), native, max_size
+  (demand), fps_target, fps_actual (latched in the last second), paused, stepped, ready,
+  scene_time, latched_t, latched, stale_reuses, queued, ticks_sent, frames_received, resizes,
+  buffer_sets, spawns, rings, last_error}` + `reaping`; `sources` adds for a scene `pid,
+  scene_time, latched_t, fps_target, export_size, native, step_status, error`.
+- **Task 4's direct path** is `SceneSource::open_opts(gfx, SceneOpts)` (spawns at once unless
+  `defer_spawn`); `SceneOpts` gained `paused`, `speed`, `stepped`, `assets_dir`, `audio`,
+  `defer_spawn`. `SceneStats` gained `resizes`, `buffer_sets`, `spawns`, `slots`.
+
+**Tests.** `tests/scene.rs` (Harness — the harness's base opts now carry `scene_worker`,
+`allow_synthetic` and a private crash dir, its `run` refreshes `srcs:`'s transition half like
+the runtime, and it has `scene(name, spec, extra)`, `scene_src(id)`, `add_graph_output`):
+`scene_ready_is_first_latched_frame` (seq 0 at `t = 5.0`, one Ready, export 640×360),
+`paused_scene_readies_with_its_first_frame` (1 tick, identical for 1 s),
+`pause_freezes_picture_exactly` (paused with a tick in flight: no latch after the apply; RED
+with the latch gate removed), `scene_clock_follows_speed_and_position` (2× and 0.5× live, a
+jump to 100 s), `scene_tick_rate_follows_demand` (30 → 60 /s live, same pid),
+`path_change_restarts_worker_and_holds_frame`, `demand_change_reexports_without_black` (+ a
+2560×1440 graph output: one Resize, two buffer sets, one ring of 3 slots after; RED before the
+worker's re-export). `tests/api.rs`: `scene_capability_state_and_workers_probe`,
+`player_pause_freezes_scene` (real clock), `stepped_scene_is_deterministic` (two servers, 60
+steps: byte-identical captures, `latched_t` = 59 × 0.016, 60 ticks; 60 steps < 15 s — RED
+155 s before the fence wake), `scene_create_and_destroy_never_stall_the_loop` (max busy ≤ 3
+ms around each, worker gone ≤ 600 ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
+`capture_scene_source_is_upright`. `tests/supervise.rs`: `scene_snapshot_restores_at_position`
+(SIGSEGV → restored within ±2 s, new worker, the old one gone; RED with the periodic refresh
+video-only). Units: `scene_clock_excises_pauses_and_scales_by_speed`, `eff_fps_and_demand`,
+`scene_kind_in_schema_and_kind_change_unsupported` (sources/scene.rs),
+`kind_has_audio_counts_scenes` (onset.rs), `outputs_of` in `srcs_alias_layers_pending_and_exclusions`.
+
+**For Tasks 6/9/11.** Task 6: `SceneSource::apply` stores `gain.*`/`no_audio` — send the
+effective dB as `Gain` from there (the 1 kHz `push_gain` path calls `apply` too) and re-send
+gain/`NoAudio` after a restart's `Ready` (`WorkerEvent::Restarted` → `worker_ready = false`;
+hook the next `FromWorker::Ready`); `FromWorker::AudioFlowing` → push
+`SourceEvent::AudioFlowing` when `flow_armed` (armed at open-unpaused, un-pause, path change);
+`set_audio_route` already sends `Route`. Task 9: kind-agnostic already — a scene B is held in
+`srcs:` by the transition (so its worker spawns at `start`), opened paused it readies with its
+first frame (exactly one tick), un-paused it plays; `is_still` is false for a scene;
+`SnapshotSource` blits its latched texture. Task 11: `create {kind: scene, path, position,
+paused, preview}`; `hello.capabilities` `scene`; `state.workers`; `set out:<c>.scene_fps`
+(live, same pid).

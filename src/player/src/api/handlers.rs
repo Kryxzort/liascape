@@ -126,6 +126,11 @@ fn hint(s: &str) -> String {
 
 fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     let mut caps = vec!["video", "image", "color", "transition"];
+    // Phase 2 Task 5: scenes play when the worker binary resolves (Task 7 adds: and WE's
+    // assets dir, unless synthetic scenes are allowed).
+    if crate::paths::scene_worker_bin().is_some() {
+        caps.push("scene");
+    }
     if rt.backend.kind() == "headless" {
         caps.push("headless");
     }
@@ -164,6 +169,8 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "backend": rt.backend.kind(),
         "sources": rt.host.ids(),
         "parked": rt.parked.as_ref().map(|p| p.id.clone()),
+        // Phase 2 Task 5: every scene source's worker (the `workers` probe's entries).
+        "workers": rt.host.workers_info(),
     }))
 }
 

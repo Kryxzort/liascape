@@ -683,6 +683,21 @@ impl Graph {
         }
     }
 
+    /// The inverse of `srcs:<connector>` (Phase 2 Task 5): every output (`out:<c>`, sorted)
+    /// whose `srcs:` includes source `id` — where its picture is (or an in-flight transition
+    /// on that output holds it). What a scene's ring is sized and ticked for.
+    pub fn outputs_of(&self, id: &str) -> Vec<String> {
+        self.nodes
+            .values()
+            .filter(|n| n.kind == NodeKind::Output)
+            .filter(|n| {
+                let c = n.id.strip_prefix("out:").unwrap_or(&n.id);
+                self.srcs_for_connector(c).contains(id)
+            })
+            .map(|n| n.id.clone())
+            .collect()
+    }
+
     /// The `srcs:<connector>` alias (module doc): sources shown by any layer of the output
     /// (directly or as an effect side) plus what in-flight transitions on it hold —
     /// snapshots and (transition-held) graves excluded; empty for an unknown output.
@@ -1319,6 +1334,12 @@ mod tests {
         assert_eq!(g.resolve("srcs:A"), vec!["a", "pend"], "grave excluded");
         assert_eq!(g.resolve("srcs:*"), vec!["a", "b", "pend"]);
         assert!(g.resolve("srcs:NOPE").is_empty());
+        // `outputs_of` is the inverse (Phase 2 Task 5: a scene's demand).
+        assert_eq!(g.outputs_of("a"), vec!["out:A"]);
+        assert_eq!(g.outputs_of("b"), vec!["out:B"]);
+        assert_eq!(g.outputs_of("pend"), vec!["out:A"], "held by a transition");
+        assert!(g.outputs_of("grave").is_empty());
+        assert!(g.outputs_of("snap").is_empty());
         // `set` on the alias reaches the pending one too.
         let t = g.set_json(&p("srcs:*.gain.user"), &json!(-6)).unwrap();
         assert_eq!(t, vec!["a", "b", "pend"]);

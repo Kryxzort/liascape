@@ -157,6 +157,13 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "pointer",
                 def(PropType::List3, true, PropValue::List(vec![0.0, 0.0, 0.0])),
             ),
+            // Phase 2 Task 5: the frame rate scene sources shown here are rendered at (D5:
+            // 30, LWE's default); 0 = this output's refresh. A scene shown on several
+            // outputs ticks at the highest of their `eff(scene_fps, refresh_hz)`.
+            (
+                "scene_fps",
+                ranged(PropType::F64, (0.0, 480.0), "0–480", PropValue::F64(30.0)),
+            ),
         ],
         NodeKind::Layer => vec![
             (
@@ -192,7 +199,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "kind",
                 def(
-                    PropType::Enum(&["video", "image", "color", "snapshot"]),
+                    PropType::Enum(&["video", "image", "color", "snapshot", "scene"]),
                     false,
                     PropValue::Str("video".to_string()),
                 ),
@@ -258,6 +265,12 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "audio_delay",
                 def(PropType::F64, false, PropValue::F64(0.0)),
+            ),
+            // Phase 2 Task 5: a `scene`'s still image (the item's preview), shown while no
+            // worker frame exists (Task 10). Stored on every kind, used by scenes only.
+            (
+                "preview",
+                def(PropType::Str, false, PropValue::Str(String::new())),
             ),
         ],
         NodeKind::Effect => vec![

@@ -1015,3 +1015,83 @@ fn output_props_survive_replug() {
         "present again after the restart: its remembered layer"
     );
 }
+
+/// Phase 2 Task 5: a scene shown when the compositor crashes is saved at its scene time
+/// (`time_pos`, refreshed while it plays) and restored there by the restarted child, on a
+/// fresh worker (the old one died with its compositor: PDEATHSIG).
+#[test]
+fn scene_snapshot_restores_at_position() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let mut sup = Sup::spawn_in(
+        new_root(),
+        &[],
+        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
+        Some(serial),
+        true,
+    );
+    let dir = common::synthetic_scene(
+        "sup-scene",
+        &lp_player::scene::synthetic::SyntheticSpec::default(),
+    );
+    let mut c = sup.client();
+    let id = c.create(json!({"kind": "scene", "path": s(&dir), "position": 3.0}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    wait_state(&mut c, Duration::from_secs(10), |st| {
+        st["graph"][&id]["time_pos"].as_f64().unwrap_or(0.0) >= 4.5
+    });
+    let old_worker = c.state()["workers"][0]["pid"].as_u64().expect("a worker");
+    // The periodic refresh (2 s while a scene plays) saved a position past the start.
+    let snap = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["sources"].as_object().is_some_and(|m| {
+            m.values()
+                .any(|s| s["path"] == s_json(&dir) && s["position"].as_f64().unwrap_or(0.0) >= 4.0)
+        })
+    });
+    let saved = snap["sources"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|s| s["path"] == s_json(&dir))
+        .unwrap()
+        .clone();
+    assert_eq!(saved["kind"], json!("scene"), "{saved}");
+    assert_eq!(saved["playing"], json!(true), "{saved}");
+    let saved_pos = saved["position"].as_f64().unwrap();
+    drop(c);
+    let (_h, latency) = sup.crash(libc::SIGSEGV);
+    println!("restart latency {latency:?}; saved scene position {saved_pos:.3}");
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| {
+        sources(st)
+            .iter()
+            .any(|(_, n)| n["path"] == s_json(&dir) && n["ready"] == json!(true))
+    });
+    let (nid, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s_json(&dir))
+        .unwrap();
+    assert_eq!(node["kind"], json!("scene"), "{node}");
+    let pos = node["time_pos"].as_f64().unwrap();
+    println!("restored {nid}: time_pos {pos:.3} (saved {saved_pos:.3})");
+    assert!(
+        (pos - saved_pos).abs() <= 2.0,
+        "restored at {pos}, saved {saved_pos}"
+    );
+    for conn in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&st, conn), nid, "{conn} shows the restored scene");
+    }
+    let w = &st["workers"][0];
+    let new_worker = w["pid"].as_u64().expect("a new worker");
+    assert_ne!(new_worker, old_worker);
+    assert!(
+        !alive(old_worker as u32),
+        "the old worker died with its compositor"
+    );
+}
+
+fn s_json(p: &Path) -> Value {
+    json!(s(p))
+}

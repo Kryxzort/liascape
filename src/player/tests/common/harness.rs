@@ -113,6 +113,16 @@ impl Harness {
         }
         let mut base = Map::new();
         base.insert("ao".into(), json!("null")); // R26: silent test runs
+        // Phase 2 Task 5: `kind: scene` sources play the synthetic renderer (D7) through
+        // this crate's worker binary; crash records stay in a private dir.
+        base.insert(
+            "scene_worker".into(),
+            json!(env!("CARGO_BIN_EXE_lp-scene-worker")),
+        );
+        base.insert("allow_synthetic".into(), json!(true));
+        let crashes =
+            std::env::temp_dir().join(format!("lp-harness-crashes-{}", std::process::id()));
+        base.insert("scene_crash_dir".into(), json!(crashes));
         let mut host = SourceHost::new(base);
         // `LP_PLAYER_RENDER_WORKER=on` (the switch `serve` reads): every source renders on a
         // worker sharing this context, as in the real-clock runtime (§ Sources "Render worker").
@@ -223,6 +233,10 @@ impl Harness {
         }
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
         self.tr_events.extend(self.tr.drain_events());
+        // The runtime's `refresh_srcs`: a transition's held B/A's are part of `srcs:` (a
+        // scene B's demand — the outputs it will show on — comes from it).
+        let (held, graves) = self.tr.held_sources();
+        self.graph.set_transition_sources(held, graves);
         let host = &self.host;
         let textures = |id: &str| host.texture(id);
         for (id, _, fbo) in &self.outputs {
@@ -243,6 +257,37 @@ impl Harness {
                 props.as_object().expect("props object").clone(),
             )
             .expect("create source")
+    }
+
+    /// A synthetic scene source (Phase 2, D7): `common::synthetic_scene(name, spec)` as a
+    /// `kind: scene` node with `extra` props. Not shown anywhere yet.
+    pub fn scene(
+        &mut self,
+        name: &str,
+        spec: &lp_player::scene::synthetic::SyntheticSpec,
+        extra: Value,
+    ) -> String {
+        let dir = super::synthetic_scene(name, spec);
+        let mut props = extra.as_object().cloned().unwrap_or_default();
+        props.insert("kind".into(), json!("scene"));
+        props.insert("path".into(), json!(dir.to_str().expect("utf-8 path")));
+        self.source(Value::Object(props))
+    }
+
+    /// The live scene source of node `id`.
+    pub fn scene_src(&self, id: &str) -> &lp_player::sources::scene::SceneSource {
+        self.host.scene(id).expect("a hosted scene source")
+    }
+
+    /// A graph-only output `out:<name>` (`w`×`h`, not composed by this harness) — a demand
+    /// for scenes shown on it.
+    pub fn add_graph_output(&mut self, name: &str, w: u32, h: u32) {
+        let mut props = Map::new();
+        props.insert("width".into(), json!(w));
+        props.insert("height".into(), json!(h));
+        self.graph
+            .create(NodeKind::Output, Some(format!("out:{name}")), props)
+            .expect("create output");
     }
 
     pub fn show(&mut self, output: &str, id: &str) {

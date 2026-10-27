@@ -495,7 +495,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
 | `preview` | image shown while no worker frame exists (Task 10) |
 | observed | `ready`, `width`/`height` (export size), `time_pos` (scene clock), `duration` 0, `has_audio` (Task 6) |
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - unit `scene_kind_in_schema_and_kind_change_unsupported`; unit `kind_has_audio_counts_scenes`
   - `scene_ready_is_first_latched_frame` (one Ready; texture = the frame of `t = position`)
   - `paused_scene_readies_with_its_first_frame` (opened paused: Ready, then identical for 1 s, exactly one Tick)
@@ -512,9 +512,19 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   - api `capture_scene_source_is_upright`
   - api `demand_change_reexports_without_black` (add a 2560×1440 virtual output → one `Resize`, a new `Buffer` set
     at the new cover size, the texture never None in between)
-- [ ] **Step 2:** run the new tests → FAIL. **Step 3:** implement. **Step 4:** full suite → PASS (render worker on
+- [x] **Step 2:** run the new tests → FAIL. **Step 3:** implement. **Step 4:** full suite → PASS (render worker on
   and off: `LP_PLAYER_RENDER_WORKER=off cargo test -q`).
-- [ ] **Step 5:** Commit `Add Scene Source Kind`.
+- [x] **Step 5:** Commit `Add Scene Source Kind`.
+
+**Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "The
+`scene` Source kind"): `SceneSource::open` takes the node id too (`open(gfx, id, node, base)`;
+Task 4's direct path is `open_opts`); the clock runs from the load's first frame (Ready = the
+frame of exactly `position`); scene speed scales the clock (owner decision; audio is Task 6);
+the wake fd is the source's own epoll incl. one-shot acquire fences (a stepped loop has no
+timer); step completion by tick seq, not `t`; `demand_change_reexports_without_black` is a
+harness test (exact ring stats) instead of an api one; a broken worker already reports
+`SourceEvent::Error` (Task 10 adds `source.broken`); added `scene_clock_follows_speed_and_position`
+and the supervise test's new-worker checks.
 
 **Size: L** (2–3 days; `runtime.rs` is 3.7 k lines of interlocking rules).
 

@@ -264,7 +264,8 @@ struct Renderer {
     crash_at: Option<Instant>,
     hang_at: Option<Instant>,
     exit_code: Option<i32>,
-    resize_noted: bool,
+    /// The scene's native size (a `resize` re-exports at its cover size).
+    native: (u32, u32),
 }
 
 /// `poll` a `sync_file` until it signals (bounded; a kernel wait, never a spin).
@@ -338,6 +339,7 @@ impl Renderer {
             self.hang_at = Some(now + Duration::from_millis(ms));
         }
         let native = (spec.native[0].max(1), spec.native[1].max(1));
+        self.native = native;
         let (w, h) = cover_size(native, (max_size[0], max_size[1]));
         let ready = FromWorker::Ready {
             native: [native.0, native.1],
@@ -348,19 +350,45 @@ impl Renderer {
             Ok(s) => s,
             Err(e) => return self.fatal(e),
         };
-        let (ring, buffers) = match ring::Ring::new(&self.gfx, w, h, RING_SLOTS, self.next_slot_id)
-        {
-            Ok(r) => r,
-            Err(e) => return self.fatal(format!("export the frame ring: {e}")),
-        };
+        if let Err(e) = self.export(w, h) {
+            return self.fatal(format!("export the frame ring: {e}"));
+        }
+        self.scene = Some(scene);
+        self.send(&ready);
+    }
+
+    /// Allocate and export a ring of `w`×`h` (fresh slot ids) and send its `buffer`s; it
+    /// replaces the current one. The compositor's imports of the old slots keep their memory
+    /// (a dmabuf lives while anyone holds it), so the frame it shows stays valid.
+    fn export(&mut self, w: u32, h: u32) -> Result<(), String> {
+        let (ring, buffers) = ring::Ring::new(&self.gfx, w, h, RING_SLOTS, self.next_slot_id)?;
         self.next_slot_id = self.next_slot_id.wrapping_add(RING_SLOTS);
         for (m, fds) in &buffers {
             let b: Vec<_> = fds.iter().map(|f| f.as_fd()).collect();
             let _ = proto::send(self.sock.as_fd(), m, &b);
         }
         self.ring = Some(ring);
-        self.scene = Some(scene);
-        self.send(&ready);
+        Ok(())
+    }
+
+    /// `resize {max_size}` (Task 5): the largest output showing the scene changed — re-export
+    /// the ring at the new cover size (nothing to do if that size is the current one).
+    fn resize(&mut self, max_size: [u32; 2]) {
+        let Some(r) = self.ring.as_ref() else {
+            return; // not started: the restart's/Start's max_size already carries it
+        };
+        let (w, h) = cover_size(self.native, (max_size[0], max_size[1]));
+        if (w, h) == (r.w, r.h) {
+            return;
+        }
+        let from = (r.w, r.h);
+        match self.export(w, h) {
+            Ok(()) => self.log(format!(
+                "resize: ring re-exported {}x{} -> {w}x{h}",
+                from.0, from.1
+            )),
+            Err(e) => self.fatal(format!("re-export the frame ring at {w}x{h}: {e}")),
+        }
     }
 
     fn on_message(&mut self, m: ToWorker, fds: Vec<OwnedFd>) {
@@ -388,12 +416,7 @@ impl Renderer {
             }
             ToWorker::Pointer { x, y, .. } => self.pointer = (x as f32, y as f32),
             ToWorker::Ping { seq } => self.send(&FromWorker::Pong { seq }),
-            ToWorker::Resize { .. } if !self.resize_noted => {
-                self.resize_noted = true;
-                self.log(
-                    "resize: ring re-export arrives with Phase 2 Task 5; keeping the size".into(),
-                );
-            }
+            ToWorker::Resize { max_size } if !self.dead => self.resize(max_size),
             ToWorker::Quit => std::process::exit(0),
             _ => {}
         }
@@ -535,7 +558,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         crash_at: k.crash_after_ms.map(|ms| now + Duration::from_millis(ms)),
         hang_at: k.hang_after_ms.map(|ms| now + Duration::from_millis(ms)),
         exit_code: k.exit_code,
-        resize_noted: false,
+        native: (1, 1),
     };
     r.log(format!(
         "gfx: context priority requested low, granted {}",

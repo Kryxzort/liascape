@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use glow::HasContext;
 use lp_player::gfx::{Gfx, Tex};
 use lp_player::scene::synthetic::{MARKER, PROBE, Pattern, SyntheticSpec, grad_rgb, marker_rgb};
+use lp_player::sources::Source;
 use lp_player::sources::scene::{SceneOpts, SceneSource};
 use lp_player::worker::RestartBudget;
 
@@ -56,7 +57,7 @@ fn open_with(
     o.env = vec![("LP_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into())];
     o.crash_dir = crash_dir(name);
     tweak(&mut o);
-    SceneSource::open(gfx, o).expect("open the scene source")
+    SceneSource::open_opts(gfx, o).expect("open the scene source")
 }
 
 /// Run `update` (waiting ≤ 1 ms on the wake fd between calls) until `f` says stop or
@@ -554,4 +555,310 @@ fn worker_context_is_low_priority() {
             .any(|l| l.contains("context priority requested low, granted low")),
         "{tail:?}"
     );
+}
+
+// ---------------------------------------------------------------- Task 5: the `scene` Source kind
+
+use common::harness::Harness;
+use lp_player::anim::PropPath;
+use lp_player::graph::PropValue;
+use lp_player::sources::SourceEvent;
+use serde_json::json;
+
+/// A harness (GPU + catalogue, else SKIP) with the scene lock held first.
+fn harness(outputs: &[&str]) -> Option<(std::sync::MutexGuard<'static, ()>, Harness)> {
+    let g = gpu_lock();
+    let h = Harness::new(outputs)?;
+    Some((g, h))
+}
+
+fn readies(h: &Harness, id: &str) -> usize {
+    h.src_events
+        .iter()
+        .filter(|(_, i, e)| i == id && *e == SourceEvent::Ready)
+        .count()
+}
+
+fn set(h: &mut Harness, path: &str, v: PropValue) {
+    h.graph
+        .set(&PropPath(path.to_string()), v)
+        .unwrap_or_else(|e| panic!("set {path}: {e}"));
+}
+
+/// Tick for `d` of wall time (the harness clock follows the wall).
+fn tick_for(h: &mut Harness, d: Duration) {
+    let end = Instant::now() + d;
+    while Instant::now() < end {
+        h.tick();
+    }
+}
+
+/// Ready is the first *latched* frame, at exactly `position` (the clock waits for it), and
+/// it comes once.
+#[test]
+fn scene_ready_is_first_latched_frame() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene(
+        "t5-ready",
+        &spec(Pattern::FrameIndex),
+        json!({"position": 5.0}),
+    );
+    h.show("VIRTUAL-1", &id);
+    let ok = h.tick_until(Duration::from_secs(10), |h| {
+        h.host.scene(&id).is_some_and(|s| s.texture().is_some())
+    });
+    assert!(ok, "no frame: {:?}", h.src_events);
+    let s = h.scene_src(&id);
+    assert_eq!(readies(&h, &id), 1, "Ready with the first latched frame");
+    assert!(h.bool(&format!("{id}.ready")));
+    assert_eq!(
+        (s.latched_seq(), s.latched_t()),
+        (Some(0), Some(5.0)),
+        "the frame of t = position"
+    );
+    assert_eq!(h.corner(&id), Some(marker_rgb(0)[0]));
+    assert_eq!(h.str(&format!("{id}.kind")), "scene");
+    tick_for(&mut h, Duration::from_millis(500));
+    assert_eq!(readies(&h, &id), 1, "one Ready per load");
+    assert!(h.scene_src(&id).stats().latched > 5, "it plays on");
+    let tp = h.f64(&format!("{id}.time_pos"));
+    assert!(
+        (5.3..6.0).contains(&tp),
+        "time_pos {tp} after ~0.5 s from 5.0"
+    );
+    assert_eq!(
+        h.f64(&format!("{id}.width")),
+        640.0,
+        "exported at the output's cover size"
+    );
+}
+
+/// A scene opened paused shows its first frame (Ready) and nothing else: exactly one tick.
+#[test]
+fn paused_scene_readies_with_its_first_frame() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene(
+        "t5-paused",
+        &spec(Pattern::FrameIndex),
+        json!({"paused": true}),
+    );
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    let px0 = h.corner(&id).expect("a frame");
+    let t0 = h.f64(&format!("{id}.time_pos"));
+    tick_for(&mut h, Duration::from_secs(1));
+    let st = h.scene_src(&id).stats();
+    assert_eq!(st.ticks_sent, 1, "exactly one tick: {st:?}");
+    assert_eq!(st.latched, 1, "{st:?}");
+    assert_eq!(h.corner(&id), Some(px0), "identical for 1 s");
+    assert_eq!(h.f64(&format!("{id}.time_pos")), t0, "the clock is stopped");
+    assert_eq!(readies(&h, &id), 1);
+}
+
+/// `paused` freezes the picture at once (no latch after the apply) and the clock; resuming
+/// continues the clock where it stopped (within one tick).
+#[test]
+fn pause_freezes_picture_exactly() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene("t5-pause", &spec(Pattern::FrameIndex), json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    tick_for(&mut h, Duration::from_millis(300));
+    // Pause with a tick in flight: its frame must never latch.
+    let ok = h.tick_until(Duration::from_secs(2), |h| {
+        let st = h.scene_src(&id).stats();
+        st.ticks_sent > st.frames_received
+    });
+    assert!(ok, "a tick in flight");
+    let latched = h.scene_src(&id).stats().latched;
+    let seq = h.scene_src(&id).latched_seq();
+    let px = h.corner(&id);
+    set(&mut h, &format!("{id}.paused"), PropValue::Bool(true));
+    h.tick(); // the apply
+    let frozen = h.f64(&format!("{id}.time_pos"));
+    tick_for(&mut h, Duration::from_millis(500));
+    let s = h.scene_src(&id);
+    assert_eq!(s.stats().latched, latched, "no latch after the apply");
+    assert_eq!(s.latched_seq(), seq);
+    assert_eq!(h.corner(&id), px, "the held texture is exact");
+    assert_eq!(h.f64(&format!("{id}.time_pos")), frozen, "time_pos frozen");
+    set(&mut h, &format!("{id}.paused"), PropValue::Bool(false));
+    h.tick();
+    let resumed = h.f64(&format!("{id}.time_pos"));
+    assert!(
+        resumed >= frozen && resumed - frozen <= 1.0 / 30.0 + 0.02,
+        "resume continues: {frozen} → {resumed}"
+    );
+    let ok = h.tick_until(Duration::from_secs(2), |h| {
+        h.scene_src(&id).stats().latched > latched
+    });
+    assert!(ok, "frames flow again");
+    let t = h.scene_src(&id).latched_t().unwrap();
+    assert!(
+        t >= frozen && t - frozen < 0.2,
+        "the first frame after the resume: {t} vs {frozen}"
+    );
+}
+
+/// `time_pos` advances at `speed` (owner decision: speed scales a scene's animation), a
+/// live `position` set jumps the clock.
+#[test]
+fn scene_clock_follows_speed_and_position() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene(
+        "t5-speed",
+        &spec(Pattern::FrameIndex),
+        json!({"speed": 2.0}),
+    );
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    let tp = format!("{id}.time_pos");
+    let rate = |h: &mut Harness| {
+        let (t0, w0) = (h.f64(&tp), Instant::now());
+        tick_for(h, Duration::from_millis(800));
+        (h.f64(&tp) - t0) / w0.elapsed().as_secs_f64()
+    };
+    let r = rate(&mut h);
+    assert!((r - 2.0).abs() < 0.2, "speed 2: {r:.3} scene s per s");
+    set(&mut h, &format!("{id}.speed"), PropValue::F64(0.5));
+    h.tick();
+    let r = rate(&mut h);
+    assert!((r - 0.5).abs() < 0.1, "speed 0.5 live: {r:.3}");
+    set(&mut h, &format!("{id}.position"), PropValue::F64(100.0));
+    h.tick();
+    let t = h.f64(&tp);
+    assert!((100.0..100.1).contains(&t), "jumped: {t}");
+    let ok = h.tick_until(Duration::from_secs(2), |h| {
+        h.scene_src(&id).latched_t().is_some_and(|t| t >= 100.0)
+    });
+    assert!(ok, "frames of the new time");
+}
+
+/// The tick rate follows the outputs' `scene_fps` (D5: 30 by default), live, same worker.
+#[test]
+fn scene_tick_rate_follows_demand() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene("t5-fps", &spec(Pattern::FrameIndex), json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    tick_for(&mut h, Duration::from_millis(300));
+    let pid = h.scene_src(&id).pid();
+    let fps = |h: &mut Harness, d: Duration| {
+        let (l0, w0) = (h.scene_src(&id).stats().latched, Instant::now());
+        tick_for(h, d);
+        (h.scene_src(&id).stats().latched - l0) as f64 / w0.elapsed().as_secs_f64()
+    };
+    let f30 = fps(&mut h, Duration::from_secs(2));
+    assert!(
+        (f30 - 30.0).abs() <= 2.0,
+        "default scene_fps 30: {f30:.2}/s"
+    );
+    set(&mut h, "out:VIRTUAL-1.scene_fps", PropValue::F64(60.0));
+    tick_for(&mut h, Duration::from_millis(500));
+    let f60 = fps(&mut h, Duration::from_secs(1));
+    assert!((f60 - 60.0).abs() <= 3.0, "scene_fps 60: {f60:.2}/s");
+    assert_eq!(h.scene_src(&id).pid(), pid, "same worker");
+    assert_eq!(h.scene_src(&id).tick_hz(), 60.0);
+}
+
+/// A live `path` change is a new worker on the new folder, the old frame held (never None)
+/// until the new one's first frame — not a crash, not a restart.
+#[test]
+fn path_change_restarts_worker_and_holds_frame() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let mut red = spec(Pattern::Solid);
+    red.rgb = [255, 0, 0];
+    let mut blue = spec(Pattern::Solid);
+    blue.rgb = [0, 0, 255];
+    let blue_dir = common::synthetic_scene("t5-path-blue", &blue);
+    let id = h.scene("t5-path-red", &red, json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    let pid = h.scene_src(&id).pid().unwrap();
+    let px = |h: &Harness| {
+        let t = h
+            .scene_src(&id)
+            .texture()
+            .expect("the texture is never None");
+        common::read_rgba(&h.gfx, t, 100, 100)
+    };
+    assert_eq!(px(&h)[..3], [255, 0, 0]);
+    set(
+        &mut h,
+        &format!("{id}.path"),
+        PropValue::Str(blue_dir.to_str().unwrap().into()),
+    );
+    let mut reds = 0;
+    let ok = h.tick_until(Duration::from_secs(10), |h| {
+        let p = px(h);
+        if p[..3] == [255, 0, 0] {
+            reds += 1;
+        }
+        p[..3] == [0, 0, 255]
+    });
+    assert!(ok, "the new folder's frame: {:?}", h.src_events);
+    let s = h.scene_src(&id);
+    assert_ne!(s.pid(), Some(pid), "a new worker");
+    assert!(reds >= 1, "the old frame was held meanwhile");
+    let st = s.stats();
+    assert_eq!((st.restarts, st.spawns), (0, 2), "not a crash: {st:?}");
+    assert_eq!(readies(&h, &id), 2, "Ready once per load");
+    assert!(
+        !h.src_events
+            .iter()
+            .any(|(_, i, e)| i == &id && matches!(e, SourceEvent::Error { .. })),
+        "{:?}",
+        h.src_events
+    );
+    assert!(s.error().is_none() && s.broken().is_none());
+}
+
+/// A demand change that moves the largest output (a 2560×1440 output shows the scene too)
+/// re-exports the ring once at the new cover size; the texture is never None meanwhile and
+/// the old slots go once a new frame latched.
+#[test]
+fn demand_change_reexports_without_black() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let mut s = spec(Pattern::FrameIndex);
+    s.native = [3840, 2160];
+    let id = h.scene("t5-demand", &s, json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    assert_eq!(
+        h.scene_src(&id).size(),
+        Some((640, 360)),
+        "VIRTUAL-1's cover size"
+    );
+    let pid = h.scene_src(&id).pid();
+    h.add_graph_output("BIG", 2560, 1440);
+    h.show("BIG", &id);
+    let ok = h.tick_until(Duration::from_secs(10), |h| {
+        assert!(h.scene_src(&id).texture().is_some(), "never None");
+        h.scene_src(&id).size() == Some((2560, 1440))
+    });
+    assert!(ok, "re-exported: {:?}", h.scene_src(&id).stats());
+    tick_for(&mut h, Duration::from_millis(200));
+    let src = h.scene_src(&id);
+    let st = src.stats();
+    assert_eq!((st.resizes, st.buffer_sets), (1, 2), "{st:?}");
+    assert_eq!((st.rings, st.slots), (1, 3), "the old slots went: {st:?}");
+    assert_eq!(src.pid(), pid, "same worker");
+    assert_eq!(src.max_size(), [2560, 1440]);
+    let tex = src.texture().unwrap();
+    let seq = src.latched_seq().unwrap();
+    check_frame(&h.gfx, tex, seq).expect("a whole frame at the new size");
 }

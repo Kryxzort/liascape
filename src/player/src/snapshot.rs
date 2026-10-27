@@ -262,7 +262,9 @@ fn source_snap(
     let kind = get_str(g, id, "kind");
     let ready = get_bool(g, id, "ready");
     let paused = get_bool(g, id, "paused");
-    let position = if ready && kind == "video" {
+    // A playing video's or scene's (Phase 2) own clock; else the requested start.
+    let media = crate::onset::kind_has_audio(&kind);
+    let position = if ready && media {
         get_f64(g, id, "time_pos").unwrap_or(0.0)
     } else {
         get_f64(g, id, "position").unwrap_or(0.0)
@@ -293,7 +295,7 @@ fn source_snap(
         }
     }
     SourceSnap {
-        playing: kind == "video" && ready && !paused,
+        playing: media && ready && !paused,
         path: get_str(g, id, "path"),
         position: if position.is_finite() {
             position.max(0.0)

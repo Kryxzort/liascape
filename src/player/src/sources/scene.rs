@@ -1,34 +1,166 @@
 //! `SceneSource` — a WE scene rendered by an `lp-scene-worker` process (Phase 2; `.claude/
-//! rules/player-core.md` § Scene worker). Task 4 builds the **texture path**: spawn the
-//! worker ([`WorkerHost`]), import its exported ring once ([`ImportedRing`]), tick it at a
-//! fixed `tick_hz`, latch only frames whose fence already signalled ([`Latch`]) and return
-//! each replaced slot with a release fence. The latched texture survives the worker's death
-//! (spike §6); a restarted worker's new ring replaces the old one only once its first frame
-//! latched. Task 5 turns this into a graph `Source` (demand-driven ticks and size, pause,
-//! Ready, properties); until then it is driven directly (tests).
+//! rules/player-core.md` § Scene worker). Task 4 built the **texture path**: spawn the
+//! worker ([`WorkerHost`]), import its exported ring once ([`ImportedRing`]), tick it, latch
+//! only frames whose fence already signalled ([`Latch`]) and return each replaced slot with a
+//! release fence. The latched texture survives the worker's death (spike §6); a restarted
+//! worker's new ring replaces the old one only once its first frame latched.
+//!
+//! Task 5 makes it a graph [`Source`] (`kind: scene`): opened by `SourceHost` from the node's
+//! props ([`SceneSource::open`]), the worker spawned at the first [`set_demand`] that names an
+//! output (the ring is exported at the cover size of the largest output showing it), ticked
+//! at the outputs' `eff(scene_fps, refresh)`, on a **scene clock** that excises paused time
+//! and advances at `speed` ([`SceneClock`]); `paused` stops ticks and latching at once (the
+//! held texture is exact); `Ready` = the first latched frame of a load; a live `path` change
+//! = a new worker on the new folder with the old frame held until its first frame; stepped
+//! mode ticks exactly the step's scene time ([`step_to`]).
 //!
 //! Imports, latching and release fences run on the caller's (the loop's) context — plan
 //! "Render worker interplay": a one-off import per slot and an fd poll per frame, so no
 //! share-group rebind and no extra thread hop.
+//!
+//! [`set_demand`]: SceneSource::set_demand
+//! [`step_to`]: SceneSource::step_to
 
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, VecDeque};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde_json::json;
+use serde_json::{Map, Value, json};
 
+use super::{Source, SourceEvent, StepStatus, unsupported};
 use crate::gfx::dmabuf::DmabufDesc;
 use crate::gfx::{Gfx, GlKeepAlive, Tex};
+use crate::graph::props::{self, PropValue};
+use crate::graph::{ApiError, NodeKind};
 use crate::log::{self, Level};
 use crate::worker::dmabuf::{ImportedRing, Latch};
 use crate::worker::proto::{AudioRoute, FromWorker, ToWorker};
-use crate::worker::{HANG_TIMEOUT, RestartBudget, WorkerEvent, WorkerHost, WorkerSpec};
+use crate::worker::{
+    HANG_TIMEOUT, RestartBudget, WorkerEvent, WorkerHost, WorkerSpec, WorkerState,
+};
 
 /// Most ticks in flight (sent, no `Frame` yet): a slow worker isn't flooded, and one tick
 /// is always queued behind the frame it's rendering.
 const MAX_INFLIGHT: u64 = 2;
 
-/// How to open a scene (Task 5 replaces `tick_hz`/`max_size` with the graph's demand).
+/// A tick due within this much is sent now (the loop's own tick jitter must not cost a
+/// frame when the scene runs at the loop's rate).
+const TICK_SLACK: Duration = Duration::from_millis(2);
+
+/// The scene frame rate when nothing says otherwise (D5: LWE's default).
+pub const DEFAULT_SCENE_FPS: f64 = 30.0;
+
+/// `Position` events at most this often (like `MpvSource`).
+const POSITION_EVERY: Duration = Duration::from_millis(100);
+
+/// One output showing a scene ([`SceneSource::set_demand`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputDemand {
+    /// `out:<connector>`.
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    /// The output's refresh (0 = unknown).
+    pub refresh_hz: f64,
+    /// `out:<c>.scene_fps` (0 = the refresh).
+    pub scene_fps: f64,
+}
+
+/// The frame rate a scene runs at for one output: `scene_fps`, never above the refresh;
+/// `0` = the refresh; neither known → [`DEFAULT_SCENE_FPS`].
+pub fn eff_fps(scene_fps: f64, refresh_hz: f64) -> f64 {
+    let r = if scene_fps <= 0.0 {
+        refresh_hz
+    } else if refresh_hz > 0.0 {
+        scene_fps.min(refresh_hz)
+    } else {
+        scene_fps
+    };
+    if r > 0.0 { r } else { DEFAULT_SCENE_FPS }
+}
+
+/// What the ring is exported for and how fast the scene ticks, from every output showing
+/// it: `max_size` = the largest width and height (so the cover size covers each output),
+/// tick rate = the highest [`eff_fps`]. `None` for no output.
+pub fn demand_of(outs: &[OutputDemand]) -> Option<([u32; 2], f64)> {
+    if outs.is_empty() {
+        return None;
+    }
+    let w = outs.iter().map(|o| o.width).max().unwrap_or(0).max(1);
+    let h = outs.iter().map(|o| o.height).max().unwrap_or(0).max(1);
+    let hz = outs
+        .iter()
+        .map(|o| eff_fps(o.scene_fps, o.refresh_hz))
+        .fold(0.0, f64::max);
+    Some(([w, h], hz))
+}
+
+/// The scene clock (plan Task 5): scene seconds that advance at `speed` while running, with
+/// paused intervals excised — never stopped-and-jumped. Pure (the caller passes `now`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneClock {
+    /// Scene time at `since` (or the frozen time while stopped).
+    base: f64,
+    /// Running since this instant; `None` = stopped.
+    since: Option<Instant>,
+    speed: f64,
+}
+
+impl SceneClock {
+    /// Stopped at `position`.
+    pub fn new(position: f64, speed: f64) -> SceneClock {
+        SceneClock {
+            base: position,
+            since: None,
+            speed,
+        }
+    }
+
+    pub fn now(&self, now: Instant) -> f64 {
+        match self.since {
+            Some(s) => self.base + now.saturating_duration_since(s).as_secs_f64() * self.speed,
+            None => self.base,
+        }
+    }
+
+    pub fn running(&self) -> bool {
+        self.since.is_some()
+    }
+
+    pub fn speed(&self) -> f64 {
+        self.speed
+    }
+
+    /// Start (from where it stopped) or stop (keeping the time it reached).
+    pub fn set_running(&mut self, run: bool, now: Instant) {
+        if run == self.running() {
+            return;
+        }
+        self.base = self.now(now);
+        self.since = run.then_some(now);
+    }
+
+    /// A new rate from `now` on (the time so far is kept).
+    pub fn set_speed(&mut self, speed: f64, now: Instant) {
+        self.base = self.now(now);
+        if self.since.is_some() {
+            self.since = Some(now);
+        }
+        self.speed = speed;
+    }
+
+    /// Jump to scene time `t` (a `position` set).
+    pub fn jump(&mut self, t: f64, now: Instant) {
+        self.base = t;
+        if self.since.is_some() {
+            self.since = Some(now);
+        }
+    }
+}
+
+/// How to open a scene. [`SceneSource::open`] fills it from a graph node; tests drive
+/// [`SceneSource::open_opts`] directly.
 #[derive(Debug, Clone)]
 pub struct SceneOpts {
     /// The source id (logs, crash records).
@@ -44,33 +176,49 @@ pub struct SceneOpts {
     pub synthetic: bool,
     /// Scene time at start (s).
     pub position: f64,
+    pub paused: bool,
+    pub speed: f64,
+    /// Stepped clock: tick only what [`SceneSource::step_to`] asks for.
+    pub stepped: bool,
+    /// WE's `assets/` (Task 7; `None` = the worker resolves it).
+    pub assets_dir: Option<String>,
+    pub audio: AudioRoute,
     pub env: Vec<(String, String)>,
     pub budget: RestartBudget,
     pub hang_timeout: Duration,
     pub crash_dir: PathBuf,
+    /// Spawn the worker at the first [`SceneSource::set_demand`] naming an output instead of
+    /// at open (the graph path: the ring is exported at the right size from the start).
+    pub defer_spawn: bool,
 }
 
 impl SceneOpts {
     /// Defaults: 30 ticks/s (D5), a 1920×1080 demand, LWE (not synthetic), position 0,
-    /// production restart budget / hang timeout / crash dir.
+    /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open.
     pub fn new(path: impl Into<PathBuf>, worker_bin: impl Into<PathBuf>) -> SceneOpts {
         SceneOpts {
             id: "scene".into(),
             path: path.into(),
             worker_bin: worker_bin.into(),
-            tick_hz: 30.0,
+            tick_hz: DEFAULT_SCENE_FPS,
             max_size: [1920, 1080],
             synthetic: false,
             position: 0.0,
+            paused: false,
+            speed: 1.0,
+            stepped: false,
+            assets_dir: None,
+            audio: AudioRoute::Null,
             env: Vec::new(),
             budget: RestartBudget::default(),
             hang_timeout: HANG_TIMEOUT,
             crash_dir: crate::paths::crash_dir(),
+            defer_spawn: false,
         }
     }
 }
 
-/// Transport counters (the `workers` probe, Task 5).
+/// Transport counters (the `workers` probe).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SceneStats {
     pub latched: u64,
@@ -83,13 +231,25 @@ pub struct SceneStats {
     pub restarts: u32,
     /// Imported rings alive (2 only between a restart and its first latched frame).
     pub rings: usize,
-    /// Worker generation of the latched frame (bumps at each restart).
+    /// Worker generation of the latched frame (bumps at each restart and path change).
     pub latched_gen: u32,
+    /// `Resize` messages sent (a demand change that moved the largest output).
+    pub resizes: u64,
+    /// `Buffer` sets received (1 per worker process + 1 per re-export).
+    pub buffer_sets: u64,
+    /// Workers spawned for this source (1 + one per `path` change; restarts not counted).
+    pub spawns: u64,
+    /// Slots imported in the latched frame's ring (3 once a re-export's old ones went).
+    pub slots: usize,
 }
 
 pub struct SceneSource {
     keep: GlKeepAlive,
-    host: WorkerHost,
+    opts: SceneOpts,
+    host: Option<WorkerHost>,
+    /// Our own epoll fd over the current host's wake fd: stable across spawns and path
+    /// changes (what `SourceHost` registers).
+    wake: OwnedFd,
     rings: Vec<ImportedRing>,
     latch: Latch,
     modifiers: Vec<(u32, Vec<(u64, bool)>)>,
@@ -97,27 +257,148 @@ pub struct SceneSource {
     next_tick: Option<Instant>,
     seq: u64,
     inflight: u64,
-    clock_start: Instant,
-    position: f64,
+    clock: SceneClock,
+    paused: bool,
+    /// The current load has shown its first frame (`Ready` sent).
+    loaded: bool,
+    /// The current load got its first tick (a paused scene gets exactly one).
+    load_ticked: bool,
+    /// A `position` set while paused: one tick at the new time is due…
+    exact_pending: bool,
+    /// …and frames up to this tick may latch while paused.
+    exact_seq: Option<u64>,
+    /// Stepped: the scene time the current step wants, and the tick sent for it.
+    step_target: Option<f64>,
+    step_seq: Option<u64>,
     worker_ready: bool,
     native: Option<[u32; 2]>,
     size: Option<(u32, u32)>,
+    format: Option<(u32, u64)>,
+    /// The latest `Buffer` set (generation, w, h, slot ids): after a re-export, the older
+    /// slots of that generation go once one of these latched.
+    latest_set: Option<(u32, u32, u32, Vec<u8>)>,
+    has_audio: Option<bool>,
+    /// Report `AudioFlowing` once known (an un-pause, a load that plays).
+    flow_armed: bool,
     error: Option<String>,
     broken: Option<String>,
     sync: Option<String>,
     stats: SceneStats,
+    props: BTreeMap<String, PropValue>,
+    events: Vec<SourceEvent>,
+    last_position: Option<Instant>,
     /// Ticks sent, by seq (≤ 64 kept), for the tick → latch latency.
-    sent_at: std::collections::VecDeque<(u64, Instant)>,
+    sent_at: VecDeque<(u64, Instant)>,
     /// The last 1024 tick → latch latencies (ms).
-    latency_ms: std::collections::VecDeque<f32>,
+    latency_ms: VecDeque<f32>,
+    /// Latch instants of the last second (`fps_actual`).
+    latch_times: VecDeque<Instant>,
+}
+
+fn epoll_new() -> Result<OwnedFd, String> {
+    let fd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+    if fd < 0 {
+        return Err(format!("epoll: {}", std::io::Error::last_os_error()));
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+fn epoll_ctl(ep: &OwnedFd, op: i32, fd: RawFd) {
+    epoll_ctl_ev(ep, op, fd, libc::EPOLLIN as u32);
+}
+
+fn epoll_ctl_ev(ep: &OwnedFd, op: i32, fd: RawFd, events: u32) {
+    let mut ev = libc::epoll_event {
+        events,
+        u64: fd as u64,
+    };
+    unsafe { libc::epoll_ctl(ep.as_raw_fd(), op, fd, &mut ev) };
+}
+
+/// Consume what `ep` reports (never blocks): a one-shot fence entry that fired is disarmed,
+/// so a signalled fence wakes the loop once, never in a busy loop.
+fn epoll_drain(ep: &OwnedFd) {
+    let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 16];
+    unsafe { libc::epoll_wait(ep.as_raw_fd(), evs.as_mut_ptr(), evs.len() as i32, 0) };
 }
 
 impl SceneSource {
-    /// Spawn the worker for `opts.path` on `gfx`'s display. `Err` = this display can't
-    /// import dmabufs or make native fences (both required — no CPU-copy path is built), or
-    /// the worker can't be spawned. Spawn from a long-lived thread (the loop): the worker's
-    /// `PR_SET_PDEATHSIG` follows the spawning thread.
-    pub fn open(gfx: &Gfx, opts: SceneOpts) -> Result<SceneSource, String> {
+    /// Open the scene of graph node `id` (`kind: scene`) from its props (`path`,
+    /// `position`, `paused` — the effective one —, `speed`, the rest stored) and `base`
+    /// (`SourceHost`'s base opts: `scene_worker` (the binary; else
+    /// [`crate::paths::scene_worker_bin`]), `allow_synthetic` (a folder with
+    /// `lp-synthetic.json` plays the synthetic renderer, D7 — tests only), `scene_assets`,
+    /// `scene_crash_dir`, `ao`/`audio_device` (the route), `stepped`). The worker is
+    /// spawned at the first [`set_demand`](Self::set_demand) naming an output.
+    pub fn open(
+        gfx: &Gfx,
+        id: &str,
+        node: &[(String, PropValue)],
+        base: &Map<String, Value>,
+    ) -> Result<SceneSource, ApiError> {
+        let get = |k: &str| node.iter().find(|(n, _)| n == k).map(|(_, v)| v);
+        let s = |k: &str| match get(k) {
+            Some(PropValue::Str(s)) => s.clone(),
+            _ => String::new(),
+        };
+        let f = |k: &str, d: f64| match get(k) {
+            Some(v) => super::num(v),
+            None => d,
+        };
+        let bs = |k: &str| base.get(k).and_then(Value::as_str).map(str::to_string);
+        let bb = |k: &str| base.get(k).and_then(Value::as_bool).unwrap_or(false);
+        let bin = bs("scene_worker")
+            .map(PathBuf::from)
+            .or_else(crate::paths::scene_worker_bin)
+            .ok_or_else(|| {
+                unsupported(
+                    "scenes need lp-scene-worker: none found (LP_SCENE_WORKER_BIN, next to \
+                     lp-player, PATH)",
+                )
+            })?;
+        let path = s("path");
+        let allow_synthetic = bb("allow_synthetic");
+        let mut o = SceneOpts::new(&path, bin);
+        o.id = id.to_string();
+        o.synthetic = allow_synthetic && Path::new(&path).join("lp-synthetic.json").is_file();
+        if allow_synthetic {
+            o.env
+                .push(("LP_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into()));
+        }
+        o.position = f("position", 0.0);
+        o.paused = matches!(get("paused"), Some(PropValue::Bool(true)));
+        o.speed = f("speed", 1.0);
+        o.stepped = bb("stepped");
+        o.assets_dir = bs("scene_assets").filter(|a| !a.is_empty());
+        if let Some(d) = bs("scene_crash_dir") {
+            o.crash_dir = PathBuf::from(d);
+        }
+        o.audio = match (bs("ao").as_deref(), bs("audio_device")) {
+            (Some("null"), _) => AudioRoute::Null,
+            (_, Some(d)) => AudioRoute::Device(d),
+            _ => AudioRoute::Default,
+        };
+        o.defer_spawn = true;
+        let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
+        for (k, v) in node {
+            if k.starts_with("gain.")
+                || props::schema_for(NodeKind::Source, k).is_some_and(|d| !d.readonly)
+            {
+                src.props.insert(k.clone(), v.clone());
+            }
+        }
+        src.props
+            .insert("kind".into(), PropValue::Str("scene".into()));
+        src.props
+            .insert("paused".into(), PropValue::Bool(src.paused));
+        Ok(src)
+    }
+
+    /// Open from explicit opts. `Err` = this display can't import dmabufs or make native
+    /// fences (both required — no CPU-copy path is built), or the worker can't be spawned.
+    /// Spawn from a long-lived thread (the loop): the worker's `PR_SET_PDEATHSIG` follows
+    /// the spawning thread.
+    pub fn open_opts(gfx: &Gfx, opts: SceneOpts) -> Result<SceneSource, String> {
         for ext in [
             "EGL_EXT_image_dma_buf_import",
             "EGL_EXT_image_dma_buf_import_modifiers",
@@ -130,25 +411,10 @@ impl SceneSource {
                 ));
             }
         }
-        let start = ToWorker::Start {
-            path: opts.path.to_string_lossy().into_owned(),
-            assets_dir: None,
-            steam_dir: None,
-            position: opts.position,
-            paused: false,
-            audio: AudioRoute::Null,
-            max_size: opts.max_size,
-            synthetic: opts.synthetic,
-        };
-        let mut spec = WorkerSpec::new(opts.id.clone(), opts.worker_bin.clone(), start);
-        spec.env = opts.env.clone();
-        spec.budget = opts.budget;
-        spec.hang_timeout = opts.hang_timeout;
-        spec.crash_dir = opts.crash_dir.clone();
-        let host = WorkerHost::spawn(spec).map_err(|e| format!("scene worker: {e}"))?;
-        Ok(SceneSource {
+        let mut src = SceneSource {
             keep: gfx.keep_alive(),
-            host,
+            host: None,
+            wake: epoll_new()?,
             rings: vec![ImportedRing::new(0)],
             latch: Latch::new(),
             modifiers: Vec::new(),
@@ -156,58 +422,135 @@ impl SceneSource {
             next_tick: None,
             seq: 0,
             inflight: 0,
-            clock_start: Instant::now(),
-            position: opts.position,
+            clock: SceneClock::new(opts.position, opts.speed),
+            paused: opts.paused,
+            loaded: false,
+            load_ticked: false,
+            exact_pending: false,
+            exact_seq: None,
+            step_target: None,
+            step_seq: None,
             worker_ready: false,
             native: None,
             size: None,
+            format: None,
+            latest_set: None,
+            has_audio: None,
+            flow_armed: !opts.paused,
             error: None,
             broken: None,
             sync: None,
             stats: SceneStats::default(),
-            sent_at: std::collections::VecDeque::new(),
-            latency_ms: std::collections::VecDeque::new(),
-        })
+            props: BTreeMap::new(),
+            events: Vec::new(),
+            last_position: None,
+            sent_at: VecDeque::new(),
+            latency_ms: VecDeque::new(),
+            latch_times: VecDeque::new(),
+            opts,
+        };
+        if !src.opts.defer_spawn {
+            src.spawn()?;
+        }
+        Ok(src)
     }
 
-    /// Never blocks: worker messages, imports, latching, releases, the next tick. Returns
-    /// whether the texture changed. Call on every wake of [`wake_fd`](Self::wake_fd) and
-    /// at least at `tick_hz`.
-    pub fn update(&mut self, gfx: &Gfx) -> bool {
-        if !self.keep.is_for(gfx) {
-            return false;
+    fn spawn(&mut self) -> Result<(), String> {
+        let start = ToWorker::Start {
+            path: self.opts.path.to_string_lossy().into_owned(),
+            assets_dir: self.opts.assets_dir.clone(),
+            steam_dir: None,
+            position: self.clock.now(Instant::now()),
+            paused: self.paused,
+            audio: self.opts.audio.clone(),
+            max_size: self.opts.max_size,
+            synthetic: self.opts.synthetic,
+        };
+        let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
+        spec.env = self.opts.env.clone();
+        spec.budget = self.opts.budget;
+        spec.hang_timeout = self.opts.hang_timeout;
+        spec.crash_dir = self.opts.crash_dir.clone();
+        let host = WorkerHost::spawn(spec).map_err(|e| format!("scene worker: {e}"))?;
+        epoll_ctl(&self.wake, libc::EPOLL_CTL_ADD, host.wake_fd());
+        self.host = Some(host);
+        self.stats.spawns += 1;
+        Ok(())
+    }
+
+    /// The scene clock runs once the load's first frame (at `position`) is shown, while not
+    /// paused and not stepped — like a video's `time_pos`, nothing passes while it loads.
+    fn clock_should_run(&self) -> bool {
+        self.loaded && !self.paused && !self.opts.stepped
+    }
+
+    /// The outputs showing this scene now (`SourceHost::sync`, every iteration): the ring is
+    /// exported at the cover size of the largest (a change → `Resize`; the worker re-exports
+    /// and the old frame stays until the first new one latched), ticks at the highest
+    /// [`eff_fps`]. The first call naming an output spawns the worker. No output (all
+    /// unplugged — parked) changes nothing.
+    pub fn set_demand(&mut self, outs: &[OutputDemand]) {
+        let Some((max, hz)) = demand_of(outs) else {
+            return;
+        };
+        let hz = hz.clamp(1.0, 1000.0);
+        if (hz - self.opts.tick_hz).abs() > 1e-9 {
+            self.opts.tick_hz = hz;
+            self.tick_period = Duration::from_secs_f64(1.0 / hz);
         }
-        let keep = self.keep.clone();
-        let guard = keep.make_current();
-        if !guard.is_current() {
-            return false;
-        }
-        let now = Instant::now();
-        for ev in self.host.poll(now) {
-            self.on_event(gfx, now, ev);
-        }
-        let mut changed = false;
-        if let Some(l) = self.latch.latch(|| gfx.native_fence().ok()) {
-            // Already signalled — a free safety net, never a wait (spike §2 step 2).
-            if let Some(fd) = l.acquire {
-                let _ = gfx.gpu_wait_fence(fd);
+        if max != self.opts.max_size {
+            self.opts.max_size = max;
+            if let Some(h) = self.host.as_mut() {
+                let _ = h.send(&ToWorker::Resize { max_size: max }, &[]);
+                self.stats.resizes += 1;
             }
-            self.rings.retain(|r| r.generation >= l.generation);
-            self.host.set_resume_position(l.t);
-            if let Some(&(_, at)) = self.sent_at.iter().find(|(s, _)| *s == l.seq) {
-                if self.latency_ms.len() == 1024 {
-                    self.latency_ms.pop_front();
-                }
-                self.latency_ms.push_back(at.elapsed().as_secs_f32() * 1e3);
+        }
+        if self.host.is_none()
+            && self.error.is_none()
+            && let Err(e) = self.spawn()
+        {
+            self.fail(e);
+        }
+    }
+
+    /// Stepped mode: show exactly scene time `t` (one tick, unless that frame is shown or
+    /// asked for already). [`step_status`](Self::step_status) says when it latched.
+    pub fn step_to(&mut self, t: f64) {
+        if self.step_target == Some(t) {
+            return;
+        }
+        self.step_target = Some(t);
+        self.step_seq = None;
+        self.clock.jump(t, Instant::now());
+    }
+
+    pub fn step_status(&self) -> StepStatus {
+        if let Some(e) = self.error.as_ref().or(self.broken.as_ref()) {
+            return StepStatus::Broken(e.clone());
+        }
+        if !self.worker_ready {
+            return StepStatus::Pending("ready");
+        }
+        // By the tick's seq, never by comparing `t`: it crosses JSON twice (serde_json's
+        // default float parsing may land one ulp off).
+        match (self.step_target, self.step_seq, self.latch.current()) {
+            (Some(_), Some(s), Some((_, seq, _, g)))
+                if seq >= s && g == self.latch.generation() && self.loaded =>
+            {
+                StepStatus::Done
             }
-            changed = true;
+            (None, _, _) if self.loaded => StepStatus::Done,
+            _ => StepStatus::Pending("frame"),
         }
-        for (slot, fence) in self.latch.take_releases() {
-            let fds: Vec<BorrowedFd> = fence.iter().map(|f| f.as_fd()).collect();
-            let _ = self.host.send(&ToWorker::Release { slot }, &fds);
-        }
-        self.tick(now);
-        changed
+    }
+
+    /// The current load has shown its first frame.
+    pub fn is_ready(&self) -> bool {
+        self.loaded
+    }
+
+    fn latch_allowed(&self) -> bool {
+        self.opts.stepped || !self.paused || !self.loaded || self.exact_seq.is_some()
     }
 
     fn on_event(&mut self, gfx: &Gfx, now: Instant, ev: WorkerEvent) {
@@ -218,12 +561,24 @@ impl SceneSource {
                 self.latch.forget_worker();
                 self.worker_ready = false;
                 self.inflight = 0;
+                self.step_seq = None;
+                if !self.loaded {
+                    self.load_ticked = false; // the first frame's tick died with it
+                }
+                if self.exact_seq.is_some() {
+                    self.exact_seq = None;
+                    self.exact_pending = true;
+                }
             }
             WorkerEvent::Broken { record } => {
-                self.broken = Some(format!(
-                    "scene worker broken (crash record {})",
-                    record.display()
-                ));
+                let reason = format!("scene worker broken (crash record {})", record.display());
+                if self.broken.is_none() {
+                    // Task 10 adds `source.broken`; the source is broken until its path changes.
+                    self.events.push(SourceEvent::Error {
+                        reason: reason.clone(),
+                    });
+                }
+                self.broken = Some(reason);
             }
             WorkerEvent::Exited { .. } | WorkerEvent::Hung { .. } => {}
         }
@@ -244,6 +599,15 @@ impl SceneSource {
                 if !self.rings.iter().any(|r| r.generation == generation) {
                     self.rings.push(ImportedRing::new(generation));
                 }
+                match &mut self.latest_set {
+                    Some((g, lw, lh, slots)) if *g == generation && (*lw, *lh) == (w, h) => {
+                        slots.push(slot)
+                    }
+                    _ => {
+                        self.latest_set = Some((generation, w, h, vec![slot]));
+                        self.stats.buffer_sets += 1;
+                    }
+                }
                 let table = self.modifier_table(gfx, fourcc);
                 let desc = DmabufDesc {
                     w,
@@ -258,33 +622,54 @@ impl SceneSource {
                     .find(|r| r.generation == generation)
                     .unwrap();
                 match ring.import(gfx, slot, &desc, fds, &table) {
-                    Ok(()) => self.size = Some((w, h)),
+                    Ok(()) => {
+                        self.size = Some((w, h));
+                        self.format = Some((fourcc, modifier));
+                    }
                     Err(e) => self.fail(e),
                 }
             }
             FromWorker::Frame { slot, seq, t, .. } => {
                 self.stats.frames_received += 1;
                 self.inflight = self.seq.saturating_sub(seq + 1);
-                self.latch.push(slot, seq, t, fds.into_iter().next());
+                let acquire = fds.into_iter().next();
+                if let Some(f) = &acquire {
+                    // Wake the loop when it signals (once): a frame whose fence wasn't ready
+                    // at its `Frame` must not wait for the next tick — a stepped loop has none.
+                    // Closing the fd (superseded/latched) removes the entry.
+                    epoll_ctl_ev(
+                        &self.wake,
+                        libc::EPOLL_CTL_ADD,
+                        f.as_raw_fd(),
+                        (libc::EPOLLIN | libc::EPOLLONESHOT) as u32,
+                    );
+                }
+                self.latch.push(slot, seq, t, acquire);
             }
-            FromWorker::Ready { native, .. } => {
+            FromWorker::Ready {
+                native, has_audio, ..
+            } => {
                 self.native = Some(native);
+                self.has_audio = Some(has_audio);
                 self.worker_ready = true;
-                if self.next_tick.is_none() {
+                if self.next_tick.is_none() || !self.paused {
                     self.next_tick = Some(now);
                 }
             }
+            FromWorker::HasAudio { on } => self.has_audio = Some(on),
             FromWorker::Error { reason, fatal } => {
                 if fatal {
                     self.fail(reason);
-                    self.host.stop();
+                    if let Some(h) = self.host.as_mut() {
+                        h.stop();
+                    }
                 } else {
                     log::event(
                         "scene",
                         Level::Warn,
                         "scene.worker_error",
                         None,
-                        json!({"reason": reason}),
+                        json!({"id": self.opts.id, "reason": reason}),
                     );
                 }
             }
@@ -307,50 +692,203 @@ impl SceneSource {
             Level::Error,
             "scene.error",
             None,
-            json!({"reason": reason}),
+            json!({"id": self.opts.id, "path": self.opts.path, "reason": reason}),
         );
         if self.error.is_none() {
+            self.events.push(SourceEvent::Error {
+                reason: format!("{}: {reason}", self.opts.path.display()),
+            });
             self.error = Some(reason);
         }
     }
 
-    fn tick(&mut self, now: Instant) {
-        if !self.worker_ready || self.error.is_some() || self.inflight >= MAX_INFLIGHT {
-            return;
-        }
-        let Some(next) = self.next_tick else { return };
-        if now < next {
-            return;
-        }
-        let t = self.position
-            + now
-                .saturating_duration_since(self.clock_start)
-                .as_secs_f64();
+    fn send_tick(&mut self, now: Instant, t: f64) -> Option<u64> {
+        let host = self.host.as_mut()?;
+        let seq = self.seq;
         let tick = ToWorker::Tick {
-            seq: self.seq,
+            seq,
             t,
             input: None,
         };
-        match self.host.send(&tick, &[]) {
+        match host.send(&tick, &[]) {
             Ok(()) => {
                 self.seq += 1;
                 self.inflight += 1;
                 self.stats.ticks_sent += 1;
+                self.load_ticked = true;
                 if self.sent_at.len() == 64 {
                     self.sent_at.pop_front();
                 }
-                self.sent_at.push_back((self.seq - 1, now));
+                self.sent_at.push_back((seq, now));
+                Some(seq)
             }
-            Err(_) => self.stats.tick_send_failures += 1,
+            Err(_) => {
+                self.stats.tick_send_failures += 1;
+                None
+            }
         }
+    }
+
+    fn tick(&mut self, now: Instant) {
+        if self.host.is_none()
+            || !self.worker_ready
+            || self.error.is_some()
+            || self.broken.is_some()
+        {
+            return;
+        }
+        if self.opts.stepped {
+            if let Some(t) = self.step_target
+                && self.step_seq.is_none()
+            {
+                self.step_seq = self.send_tick(now, t);
+            }
+            return;
+        }
+        if !self.loaded {
+            // The load's first frame, at its start time (the clock waits for it): exactly
+            // one tick, paused or not.
+            if !self.load_ticked {
+                let t = self.clock.now(now);
+                self.send_tick(now, t);
+            }
+            return;
+        }
+        if self.paused {
+            let t = self.clock.now(now);
+            if self.exact_pending {
+                self.exact_seq = self.send_tick(now, t);
+                self.exact_pending = self.exact_seq.is_none();
+            }
+            return;
+        }
+        if self.inflight >= MAX_INFLIGHT {
+            return;
+        }
+        let Some(next) = self.next_tick else { return };
+        if now + TICK_SLACK < next {
+            return;
+        }
+        let t = self.clock.now(now);
+        self.send_tick(now, t);
         let mut n = next + self.tick_period;
         if n <= now {
-            n = now + self.tick_period; // behind: skip ahead, never burst
+            n = now + self.tick_period; // a whole period behind: skip ahead, never burst
         }
         self.next_tick = Some(n);
     }
 
-    /// The latched frame (kept through a worker crash and restart); `None` before the first.
+    fn change_path(&mut self, path: String) {
+        // A new worker on the new folder; the old frame stays shown (foreign: never
+        // released) until the new worker's first frame latches. Not a crash.
+        if let Some(h) = self.host.take() {
+            epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, h.wake_fd());
+            drop(h); // `quit`, reaped off the loop
+        }
+        self.latch.forget_worker();
+        self.opts.path = PathBuf::from(&path);
+        self.opts.synthetic = self
+            .opts
+            .env
+            .iter()
+            .any(|(k, v)| k == "LP_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
+            && Path::new(&path).join("lp-synthetic.json").is_file();
+        let now = Instant::now();
+        self.clock.set_running(false, now);
+        self.clock.jump(0.0, now);
+        self.worker_ready = false;
+        self.inflight = 0;
+        self.loaded = false;
+        self.load_ticked = false;
+        self.exact_pending = false;
+        self.exact_seq = None;
+        self.step_seq = None;
+        self.native = None;
+        self.has_audio = None;
+        self.error = None;
+        self.broken = None;
+        self.sync = None;
+        self.flow_armed = !self.paused;
+        self.next_tick = None;
+        if let Err(e) = self.spawn() {
+            self.fail(e);
+        }
+    }
+
+    /// The player bus went down (`None`: the default device) or came back: the worker's
+    /// stream moves (Task 6 plays it; the route is kept for a restart's `Start`).
+    pub fn set_audio_route(&mut self, device: Option<&str>) {
+        if matches!(self.opts.audio, AudioRoute::Null) {
+            return;
+        }
+        let route = match device {
+            Some(d) => AudioRoute::Device(d.to_string()),
+            None => AudioRoute::Default,
+        };
+        self.opts.audio = route.clone();
+        if let Some(h) = self.host.as_mut() {
+            let _ = h.send(&ToWorker::Route { audio: route }, &[]);
+        }
+    }
+
+    fn set_paused(&mut self, paused: bool) {
+        if paused == self.paused {
+            return;
+        }
+        let now = Instant::now();
+        self.paused = paused;
+        self.clock.set_running(self.clock_should_run(), now);
+        if let Some(h) = self.host.as_mut() {
+            let _ = h.send(&ToWorker::Paused { paused }, &[]);
+        }
+        if paused {
+            self.exact_pending = false;
+            self.exact_seq = None;
+        } else {
+            self.next_tick = Some(now);
+            self.flow_armed = true;
+        }
+    }
+
+    fn on_latched(&mut self, now: Instant, l: crate::worker::dmabuf::Latched) {
+        self.rings.retain(|r| r.generation >= l.generation);
+        if let Some((g, _, _, slots)) = &self.latest_set
+            && *g == l.generation
+            && slots.contains(&l.slot)
+            && let Some(r) = self.rings.iter_mut().find(|r| r.generation == *g)
+        {
+            r.retain_slots(slots);
+        }
+        if let Some(h) = self.host.as_mut() {
+            h.set_resume_position(l.t);
+        }
+        if let Some(&(_, at)) = self.sent_at.iter().find(|(s, _)| *s == l.seq) {
+            if self.latency_ms.len() == 1024 {
+                self.latency_ms.pop_front();
+            }
+            self.latency_ms.push_back(at.elapsed().as_secs_f32() * 1e3);
+        }
+        self.latch_times.push_back(now);
+        while self
+            .latch_times
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(1))
+        {
+            self.latch_times.pop_front();
+        }
+        if self.exact_seq.is_some_and(|s| l.seq >= s) {
+            self.exact_seq = None;
+        }
+        if !self.loaded && l.generation == self.latch.generation() {
+            self.loaded = true;
+            self.events.push(SourceEvent::Ready);
+            self.clock.set_running(self.clock_should_run(), now);
+            self.next_tick = Some(now + self.tick_period);
+        }
+    }
+
+    /// The latched frame (kept through a worker crash, restart and path change); `None`
+    /// before the first.
     pub fn texture(&self) -> Option<&Tex> {
         let (slot, _, _, generation) = self.latch.current()?;
         self.rings
@@ -362,6 +900,16 @@ impl SceneSource {
     /// The latched frame's tick `seq`.
     pub fn latched_seq(&self) -> Option<u64> {
         self.latch.current().map(|c| c.1)
+    }
+
+    /// The latched frame's scene time.
+    pub fn latched_t(&self) -> Option<f64> {
+        self.latch.current().map(|c| c.2)
+    }
+
+    /// The scene clock now (stepped: the step's time).
+    pub fn scene_time(&self) -> f64 {
+        self.clock.now(Instant::now())
     }
 
     /// The export size (`Buffer` w×h).
@@ -384,22 +932,36 @@ impl SceneSource {
         self.error.as_deref()
     }
 
-    /// The worker crashed past its restart budget (Task 10 turns this into `Error`).
+    /// The worker crashed past its restart budget (also reported as `SourceEvent::Error`).
     pub fn broken(&self) -> Option<&str> {
         self.broken.as_deref()
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.host.pid()
+        self.host.as_ref().and_then(WorkerHost::pid)
     }
 
-    /// Readable when [`update`](Self::update) has worker input (stable across restarts).
-    pub fn wake_fd(&self) -> std::os::fd::RawFd {
-        self.host.wake_fd()
+    /// Readable when [`update`](Self::update) has worker input (stable across restarts and
+    /// path changes: our own epoll fd over the current worker's).
+    pub fn wake_fd(&self) -> RawFd {
+        self.wake.as_raw_fd()
     }
 
     pub fn log_tail(&self) -> Vec<String> {
-        self.host.log_tail()
+        self.host
+            .as_ref()
+            .map(WorkerHost::log_tail)
+            .unwrap_or_default()
+    }
+
+    /// The tick rate the outputs ask for.
+    pub fn tick_hz(&self) -> f64 {
+        self.opts.tick_hz
+    }
+
+    /// The size the ring is exported for (the largest output).
+    pub fn max_size(&self) -> [u32; 2] {
+        self.opts.max_size
     }
 
     /// The last ≤ 1024 tick → latch latencies, ms (tick sent → its frame latched here).
@@ -416,7 +978,317 @@ impl SceneSource {
             queued: self.latch.queued(),
             rings: self.rings.iter().filter(|r| !r.is_empty()).count(),
             latched_gen: self.latch.current().map_or(0, |c| c.3),
+            slots: self
+                .latch
+                .current()
+                .and_then(|c| self.rings.iter().find(|r| r.generation == c.3))
+                .map_or(0, ImportedRing::len),
             ..self.stats
         }
+    }
+
+    /// The `workers` probe's entry (and `state.workers`).
+    pub fn worker_info(&self) -> Value {
+        let now = Instant::now();
+        let st = self.stats();
+        let (state, restarts_60s, total_restarts) = match &self.host {
+            Some(h) => {
+                let (w, t) = h.restarts(now);
+                let s = match h.state() {
+                    WorkerState::Starting => "starting".to_string(),
+                    WorkerState::Running => "running".to_string(),
+                    WorkerState::Restarting { attempt } => format!("restarting {attempt}"),
+                    WorkerState::Broken { .. } => "broken".to_string(),
+                    WorkerState::Stopped => "stopped".to_string(),
+                };
+                (s, w, t)
+            }
+            None => ("not_spawned".to_string(), 0, 0),
+        };
+        let fps_actual = self
+            .latch_times
+            .iter()
+            .filter(|t| now.duration_since(**t) <= Duration::from_secs(1))
+            .count();
+        json!({
+            "id": self.opts.id,
+            "path": self.opts.path,
+            "pid": self.pid(),
+            "state": state,
+            "restarts_60s": restarts_60s,
+            "total_restarts": total_restarts,
+            "sync": self.sync,
+            "fourcc": self.format.map(|(f, _)| String::from_utf8_lossy(&f.to_le_bytes()).into_owned()),
+            "modifier": self.format.map(|(_, m)| format!("{m:#018x}")),
+            "size": self.size(),
+            "native": self.native,
+            "max_size": self.opts.max_size,
+            "fps_target": self.opts.tick_hz,
+            "fps_actual": fps_actual,
+            "paused": self.paused,
+            "stepped": self.opts.stepped,
+            "ready": self.loaded,
+            "scene_time": self.scene_time(),
+            "latched_t": self.latched_t(),
+            "latched": st.latched,
+            "stale_reuses": st.stale_reuses,
+            "queued": st.queued,
+            "ticks_sent": st.ticks_sent,
+            "frames_received": st.frames_received,
+            "resizes": st.resizes,
+            "buffer_sets": st.buffer_sets,
+            "spawns": st.spawns,
+            "rings": st.rings,
+            "last_error": self.error.as_ref().or(self.broken.as_ref()),
+        })
+    }
+}
+
+impl Source for SceneSource {
+    fn kind(&self) -> &'static str {
+        "scene"
+    }
+
+    /// Never blocks: worker messages, imports, latching (not while paused, beyond the first
+    /// frame of a load or a paused seek's frame), releases, the next tick. Returns whether
+    /// the texture changed. Call on every wake of [`wake_fd`](SceneSource::wake_fd) and at
+    /// least at the tick rate.
+    fn update(&mut self, gfx: &Gfx) -> bool {
+        if !self.keep.is_for(gfx) {
+            return false;
+        }
+        let keep = self.keep.clone();
+        let guard = keep.make_current();
+        if !guard.is_current() {
+            return false;
+        }
+        let now = Instant::now();
+        epoll_drain(&self.wake);
+        let evs = match self.host.as_mut() {
+            Some(h) => h.poll(now),
+            None => Vec::new(),
+        };
+        for ev in evs {
+            self.on_event(gfx, now, ev);
+        }
+        let mut changed = false;
+        if self.latch_allowed()
+            && let Some(mut l) = self.latch.latch(|| gfx.native_fence().ok())
+        {
+            // Already signalled — a free safety net, never a wait (spike §2 step 2).
+            if let Some(fd) = l.acquire.take() {
+                epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, fd.as_raw_fd());
+                let _ = gfx.gpu_wait_fence(fd);
+            }
+            self.on_latched(now, l);
+            changed = true;
+        }
+        let releases = self.latch.take_releases();
+        if let Some(h) = self.host.as_mut() {
+            for (slot, fence) in releases {
+                let fds: Vec<BorrowedFd> = fence.iter().map(|f| f.as_fd()).collect();
+                let _ = h.send(&ToWorker::Release { slot }, &fds);
+            }
+        }
+        self.tick(now);
+        if self.flow_armed
+            && self.loaded
+            && !self.paused
+            && (self.opts.stepped || self.has_audio == Some(false))
+        {
+            // Nothing to hear (or stepped: never real audio) — nothing to wait for. A scene
+            // with audio reports it from its stream (Task 6).
+            self.flow_armed = false;
+            self.events.push(SourceEvent::AudioFlowing);
+        }
+        if self.loaded
+            && !self.paused
+            && !self.opts.stepped
+            && self
+                .last_position
+                .is_none_or(|t| now.duration_since(t) >= POSITION_EVERY)
+        {
+            self.last_position = Some(now);
+            self.events.push(SourceEvent::Position(self.clock.now(now)));
+        }
+        changed
+    }
+
+    fn texture(&self) -> Option<&Tex> {
+        SceneSource::texture(self)
+    }
+
+    fn size(&self) -> (u32, u32) {
+        SceneSource::size(self).unwrap_or((0, 0))
+    }
+
+    fn apply(&mut self, prop: &str, v: &PropValue) -> Result<(), ApiError> {
+        props::validate_value(NodeKind::Source, prop, v, true)?;
+        let b = matches!(v, PropValue::Bool(true));
+        let now = Instant::now();
+        match prop {
+            "kind" => {
+                if !matches!(v, PropValue::Str(k) if k == "scene") {
+                    return Err(kind_change_unsupported(v));
+                }
+            }
+            "color" => {
+                return Err(unsupported(
+                    "`color` applies to colour sources, not a scene source",
+                ));
+            }
+            "path" => {
+                if let PropValue::Str(p) = v
+                    && Path::new(p) != self.opts.path
+                {
+                    self.change_path(p.clone());
+                }
+            }
+            "paused" => self.set_paused(b),
+            "position" => {
+                let t = super::num(v);
+                if self.opts.stepped {
+                    // The runtime's step drives the clock (`step_to`).
+                } else {
+                    self.clock.jump(t, now);
+                    // Paused: show the new time's frame (once the load's first one is in).
+                    if self.paused && self.load_ticked {
+                        self.exact_pending = true;
+                    }
+                }
+            }
+            // Stepped: the runtime's step advances by `ms × speed` itself.
+            "speed" if !self.opts.stepped => self.clock.set_speed(super::num(v), now),
+            // Everything else (loop, hwdec, fps_cap, cache, demuxer_*, af, audio_delay,
+            // preview; gain.* and no_audio until Task 6) is stored: a global `set` never
+            // fails on a scene, and a scene has nothing for them to do yet.
+            _ => {}
+        }
+        self.props.insert(prop.to_string(), v.clone());
+        Ok(())
+    }
+
+    fn read(&self, prop: &str) -> Option<PropValue> {
+        if prop.starts_with("gain.") {
+            return Some(self.props.get(prop).cloned().unwrap_or(PropValue::F64(0.0)));
+        }
+        match prop {
+            "kind" => Some(PropValue::Str("scene".into())),
+            "ready" => Some(PropValue::Bool(self.loaded)),
+            "duration" => Some(PropValue::F64(0.0)),
+            "time_pos" => Some(PropValue::F64(self.scene_time())),
+            "width" => SceneSource::size(self).map(|(w, _)| PropValue::I64(w as i64)),
+            "height" => SceneSource::size(self).map(|(_, h)| PropValue::I64(h as i64)),
+            "has_audio" => Some(PropValue::Bool(self.has_audio.unwrap_or(true))),
+            "paused" => Some(PropValue::Bool(self.paused)),
+            "color" => None,
+            _ => self.props.get(prop).cloned(),
+        }
+    }
+
+    fn poll_events(&mut self) -> Vec<SourceEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    fn as_scene(&self) -> Option<&SceneSource> {
+        Some(self)
+    }
+
+    fn as_scene_mut(&mut self) -> Option<&mut SceneSource> {
+        Some(self)
+    }
+}
+
+/// A live `kind` change away from `scene` (or onto it — `MpvSource` refuses that side).
+pub fn kind_change_unsupported(v: &PropValue) -> ApiError {
+    let to = match v {
+        PropValue::Str(s) => s.as_str(),
+        _ => "?",
+    };
+    unsupported(format!(
+        "can't change a live scene source to {to:?}; create a new source"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_clock_excises_pauses_and_scales_by_speed() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut c = SceneClock::new(5.0, 1.0);
+        assert_eq!(c.now(at(1000)), 5.0, "stopped until started");
+        c.set_running(true, at(0));
+        assert!((c.now(at(500)) - 5.5).abs() < 1e-9);
+        c.set_running(false, at(1000));
+        assert!(
+            (c.now(at(3000)) - 6.0).abs() < 1e-9,
+            "paused time is excised"
+        );
+        c.set_running(true, at(3000));
+        assert!(
+            (c.now(at(3500)) - 6.5).abs() < 1e-9,
+            "no jump at the resume"
+        );
+        c.set_speed(2.0, at(3500));
+        assert!(
+            (c.now(at(4000)) - 7.5).abs() < 1e-9,
+            "×2 from the change on"
+        );
+        c.jump(1.0, at(4000));
+        assert!(
+            (c.now(at(4250)) - 1.5).abs() < 1e-9,
+            "a jump keeps running at speed"
+        );
+        c.set_running(false, at(4250));
+        c.set_speed(0.5, at(9000));
+        assert!(
+            (c.now(at(9000)) - 1.5).abs() < 1e-9,
+            "a speed change while stopped"
+        );
+        c.set_running(true, at(9000));
+        assert!((c.now(at(10000)) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn eff_fps_and_demand() {
+        assert_eq!(eff_fps(30.0, 60.0), 30.0);
+        assert_eq!(eff_fps(144.0, 60.0), 60.0, "never above the refresh");
+        assert_eq!(eff_fps(0.0, 144.0), 144.0, "0 = the refresh");
+        assert_eq!(eff_fps(45.0, 0.0), 45.0, "unknown refresh");
+        assert_eq!(eff_fps(0.0, 0.0), DEFAULT_SCENE_FPS);
+        let o = |w, h, hz, fps| OutputDemand {
+            name: "out:X".into(),
+            width: w,
+            height: h,
+            refresh_hz: hz,
+            scene_fps: fps,
+        };
+        assert_eq!(demand_of(&[]), None);
+        assert_eq!(
+            demand_of(&[o(1920, 1080, 60.0, 30.0), o(1080, 1920, 144.0, 60.0)]),
+            Some(([1920, 1920], 60.0)),
+            "covers every output; the fastest wins"
+        );
+    }
+
+    #[test]
+    fn scene_kind_in_schema_and_kind_change_unsupported() {
+        let kind = props::schema_for(NodeKind::Source, "kind").unwrap();
+        let ok = PropValue::Str("scene".into());
+        props::validate_value(NodeKind::Source, "kind", &ok, true).expect("scene is a kind");
+        assert!(matches!(kind.ty, props::PropType::Enum(v) if v.contains(&"scene")));
+        let e = kind_change_unsupported(&PropValue::Str("video".into()));
+        assert_eq!(e.code, "unsupported");
+        assert!(e.message.contains("create a new source"), "{e}");
+        // `preview` is a Source prop; `scene_fps` an Output one (D5: 30, 0–480).
+        assert!(props::schema_for(NodeKind::Source, "preview").is_some());
+        let fps = props::schema_for(NodeKind::Output, "scene_fps").unwrap();
+        assert_eq!(fps.default, PropValue::F64(30.0));
+        let e = props::validate_value(NodeKind::Output, "scene_fps", &PropValue::F64(481.0), true)
+            .unwrap_err();
+        assert_eq!(e.code, "out_of_range");
     }
 }
