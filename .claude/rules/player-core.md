@@ -797,6 +797,29 @@ loop busy is still the render context + first render (§ Runtime "Switch cost").
 `tests/sources.rs::builtin_scripts_are_not_loaded` (every option reads back `no`, no `lua/*`/`js/*`
 thread in the test process; RED before: `load-scripts` `yes`, 6 script threads per core), unit
 `unknown_trim_option_never_breaks_a_core`.
+**No native clipboard (`sources::mpv::CLIPBOARD_OFF`: `clipboard-backends=` — an empty list, set
+best-effort the same way).** mpv ≥ 0.40 starts a clipboard in every core at `mpv_initialize`
+(default backends `wayland`, `x11`, `vo`): with `WAYLAND_DISPLAY` its own `ext-data-control`
+connection to the compositor + a thread (fed every clipboard change of the session — every test
+server inherited the owner's and so connected to the live Hyprland), without it and with a reachable
+`DISPLAY` its own **X connection** + a thread (named after its creator, `lp-open`). That one crashed
+the player (2026-10-26, rapid-switch repro, `--headless` without `WAYLAND_DISPLAY`): when the X
+connection drops, mpv's clipboard thread `XCloseDisplay`s it → `XSync` fails → Xlib's *default* I/O
+error handler `exit(1)`s from that thread → the atexit handlers tear NVIDIA's EGL down under the
+loop's GL → **SIGSEGV** in `glBindFramebuffer` (stderr `X connection to :1 broken (explicit kill or
+server shutdown)`; core dump: two cores' clipboard threads in `XCloseDisplay`, the reaper idle — both
+live connections broke at once, 2 ms after an Electron's scope ended: most likely a UI-matrix shard's
+private `Xvfb -displayfd`, which comes up as `:1` on this machine, going away with its shard; the
+switches were incidental — 48 rapid-switch runs against a private Xvfb never broke a connection).
+Nothing in the player needs X: with this set, a core has no X or Wayland connection of its own.
+Guards: `tests/api.rs::losing_the_x_server_never_kills_the_player` (`DISPLAY` = a
+private `Xvfb` on a display nothing uses — never `-displayfd`, which took the session's `:1` —, no
+`WAYLAND_DISPLAY`, a playing `hwdec=auto` video; the X server killed →
+the player plays on, switches, quits 0; RED before: SIGSEGV within ms; SKIP without `Xvfb`),
+`tests/sources.rs::no_clipboard_backend_per_core` (`current-clipboard-backend` unavailable,
+`options/clipboard-backends` empty; RED before: `wayland` under the session's environment). **Not
+covered:** a decoder that talks to X itself (an explicit `vdpau`/`vdpau-copy`) opens its own
+connection through its driver; `auto` resolves to `nvdec-copy` here (none — the guard runs it).
 `opts` = any writable `Source` property (`position` → mpv `start`), plus `ao` (default
 `pipewire`), `audio_device` (mpv `audio-device`; `serve` passes the bus, § Audio bus),
 `audio_delay_bias` (seconds **added** to every `audio_delay` before it reaches mpv's

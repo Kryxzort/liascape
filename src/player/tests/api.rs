@@ -5612,3 +5612,164 @@ fn wayland_render_worker_plays_video() {
         serial = srv._serial.take();
     }
 }
+
+// ---------------------------------------------------------------- the X server going away
+
+/// A private X server for one test, on a display nothing else uses (no lock file, no socket
+/// path, no live abstract socket). `None` (the test skips) without `Xvfb` on the PATH.
+/// **Never `-displayfd`:** measured here, `Xvfb -displayfd` came up as `:1` while the
+/// session's Xwayland held `/tmp/.X1-lock` for `:1` (Hyprland's Xwayland has no abstract
+/// socket, and its `/tmp/.X11-unix/X1` path was gone) — and libxcb tries the abstract socket
+/// first, so the session's new X clients reached the test's server until it exited.
+struct Xvfb {
+    child: Child,
+    display: String,
+}
+
+impl Xvfb {
+    fn start() -> Option<Xvfb> {
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::SocketAddr;
+        let abstract_live = |n: u32| {
+            SocketAddr::from_abstract_name(format!("/tmp/.X11-unix/X{n}"))
+                .is_ok_and(|a| UnixStream::connect_addr(&a).is_ok())
+        };
+        let base = 200 + std::process::id() % 400;
+        for n in (base..base + 40).map(|n| 200 + (n - 200) % 400) {
+            if Path::new(&format!("/tmp/.X11-unix/X{n}")).exists()
+                || Path::new(&format!("/tmp/.X{n}-lock")).exists()
+                || abstract_live(n)
+            {
+                continue;
+            }
+            let mut c = Command::new("Xvfb");
+            die_with_parent(&mut c);
+            c.args([
+                &format!(":{n}"),
+                "-nolisten",
+                "tcp",
+                "-screen",
+                "0",
+                "64x64x24",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+            let mut child = c.spawn().ok()?;
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_secs(10) {
+                if abstract_live(n) {
+                    return Some(Xvfb {
+                        child,
+                        display: format!(":{n}"),
+                    });
+                }
+                if child.try_wait().ok().flatten().is_some() {
+                    break; // lost a race for that display: the next one
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        None
+    }
+
+    /// The X server goes away (a session's Xwayland restarting, a logout): every client's
+    /// connection breaks at once. SIGTERM, so it removes its socket and lock file (a
+    /// SIGKILLed Xvfb leaves both behind); SIGKILL if it lingers.
+    fn kill(&mut self) {
+        if self.child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) {
+            if self.child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for Xvfb {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// Crash on rapid superseding switches (2026-10-26): the compositor died with SIGSEGV in
+/// `glBindFramebuffer` (compose) while mpv's clipboard thread was in `XCloseDisplay` →
+/// `_XIOError` → Xlib's default handler → `exit(1)`, whose atexit handlers tore NVIDIA's EGL
+/// down under the loop; its stderr: `X connection to :1 broken (explicit kill or server
+/// shutdown)`. mpv ≥ 0.40 gives every core a native clipboard — without `WAYLAND_DISPLAY`
+/// (that run's environment) its own X connection — and those connections broke (both live
+/// cores' at once, 2 ms after an Electron's scope ended: most likely a UI-matrix shard's
+/// private `Xvfb -displayfd`, which comes up as `:1` here, going away with its shard). A
+/// headless wallpaper player must not die with an X server it never needed.
+/// Here: a video plays (`DISPLAY` = a private `Xvfb`, no `WAYLAND_DISPLAY`), the X server
+/// goes away, the player plays on, switches and quits cleanly. RED before: SIGSEGV within
+/// ms of the X loss, `X connection to :N broken …` on its stderr.
+#[test]
+fn losing_the_x_server_never_kills_the_player() {
+    let Some(mut probe) = Serve::start() else {
+        return;
+    };
+    let serial = probe._serial.take();
+    drop(probe);
+    let Some(mut x) = Xvfb::start() else {
+        println!("SKIP: no Xvfb on the PATH");
+        return;
+    };
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let mut srv = Serve::spawn_env_without(
+        new_root(),
+        &["--clock", "real"],
+        &[("DISPLAY", Path::new(&x.display))],
+        &["WAYLAND_DISPLAY", "WAYLAND_SOCKET"],
+        serial,
+    );
+    let mut c = srv.client();
+    let pid = c.ok("hello", json!({}))["pid"].clone();
+    let a = create_src(&mut c, json!({"path": red, "loop": true, "hwdec": "auto"}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+
+    x.kill();
+    std::thread::sleep(Duration::from_millis(1000));
+    if let Some(st) = srv.child.as_mut().unwrap().try_wait().unwrap() {
+        panic!("the player died with the X server ({st}): {}", srv.stderr());
+    }
+    assert_eq!(c.ok("hello", json!({}))["pid"], pid);
+    // It plays on and still switches.
+    let t0 = f64_of(&mut c, &format!("{a}.time_pos")).unwrap_or(0.0);
+    wait_playing(&mut c, &a, t0 + 0.2);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": blue, "loop": true, "hwdec": "auto"},
+               "effect_id": "fade", "duration_ms": 200}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    wait_playing(&mut c, &b, 0.2);
+    wait_for(
+        Duration::from_secs(10),
+        "the switch after the X loss",
+        || {
+            let st = c.ok("state", json!({}));
+            st["transitions"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                .then_some(())
+        },
+    );
+    assert_eq!(content(&mut c, "VIRTUAL-1"), b);
+    c.ok("quit", json!({}));
+    let st = srv.wait_exit(Duration::from_secs(5)).expect("quit exits");
+    assert!(st.success(), "{st}: {}", srv.stderr());
+    assert!(!srv.stderr().contains("X connection"), "{}", srv.stderr());
+}
