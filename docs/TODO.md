@@ -378,6 +378,11 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.
 - [x] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only a node_modules symlink) — done.
 
+- [x] **Rapid switches: "no first frame within 10 s"** (2026-10-27) — a paused B's only frame went unrendered
+      past mpv's 200 ms VO flip timeout (loop busy: 8 switches + live sets in 300 ms, debug build) and mpv dropped
+      it; a paused source has no next frame. `MpvSource::refetch_lost_frame` re-seeks to where it is after 300 ms
+      (player-core.md § Sources). Matrix `race:settingsDuringApply` RED 4/4 → GREEN; repro 3/8 → 0/10.
+
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.

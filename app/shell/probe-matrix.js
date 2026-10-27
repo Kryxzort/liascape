@@ -1019,6 +1019,21 @@ C["apply:broken"] = { states: ["single", "paused"], expectFail: true, exp: { pau
     try { fs.unlinkSync(bad); fs.rmdirSync(dir); } catch {}
   }, check: (c) => c.failed ? [] : ["the switch to the broken file never failed (the cell tests a FAILED switch)"] };
 
+// A /settings change landing while an apply runs: /apply (and random, next, a playlist play) loaded the settings, ran the
+// switch, then saved that whole copy back for its LastSession — reverting whatever /settings saved in between. Also 8
+// switches in ~300 ms with every /settings's live sets landing on the opening B's: the last B's only (paused) frame went
+// unrendered past mpv's 200 ms VO flip timeout and was dropped — "no first frame within 10 s" (sources/mpv.rs REFETCH_AFTER)
+C["race:settingsDuringApply"] = { states: ["idle", "single"], switch: true, async run(c) {
+    c.lost = [];
+    for (let i = 0; i < 8; i++) {
+      const want = i % 2 === 0;
+      await Promise.all([post("/apply", { path: K[i % 3] }), (async () => { await sleep([10, 40, 80][i % 3]); await post("/settings", { resumeFromLast: want }); })()]);
+      const got = (await getSettings()).resumeFromLast;
+      if (got !== want) c.lost.push(`#${i} resumeFromLast ${got}, posted ${want}`);
+    }
+    c.target = K[7 % 3];
+  }, check: (c) => c.lost.length ? [`${c.lost.length}/8 settings saves reverted by an apply: ${c.lost.join("; ")}`] : [] };
+
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
 // (pending) keeps its own (a global change never clobbers an override)
