@@ -70,3 +70,14 @@ stepped-mode fix (`eb2b251`), the two fuzz playlist bugs (`8c83331` random re-se
 `EnsureTimedTick`). Worktrees of finished agents can be removed. Running: Phase 2 Track A (LWE fork build + patches,
 pushes a branch to `Kryxzort/linux-wallpaperengine`). Gate for `main`: full matrix + adapter + settings-merge on the
 merged tree (then merge `lp-player` → `main`, push, re-pin instructions below).
+
+## `main` merged (2026-10-27 night)
+`main` fast-forwarded to `b33eec9` and pushed to `Kryxzort/livepaper-pro` after a quiet gate on that exact tip:
+matrix 716/0 (load 2), adapter IT 118/0 ×2, settings-merge 53/0, player crate suites green in both render modes.
+**Owner: re-pin NixOS** — in `/etc/nixos/livepaper.nix` replace the `git+file…ref=lp-player&rev=3ae0937…` line with
+```nix
+  livepaperFlake = builtins.getFlake "github:Kryxzort/livepaper-pro/b33eec9d772682285287914020cb8be9158a6b89";
+```
+then `sudo nixos-rebuild switch` (no `--impure` needed for a github: pin). The first build also builds the LWE core
+from `Kryxzort/linux-wallpaperengine` (pinned by hash in `third_party/lwe/PIN`). Phase 2 work after `b33eec9`
+(Task 7 real scenes, …) stays on `lp-player` until its own gate.
