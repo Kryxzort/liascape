@@ -48,11 +48,16 @@ filter, D5 30 fps, D6 skip unless whitelisted, D7 synthetic + real SFW 431960 sc
 corrected audio; mouse on; properties editor IN Phase 2; install hard-fails; GPU budget setting default throttle;
 VRAM-low rule Pause/Stop/Off default Stop + per-scene limit off by default; loudness learned on first play; broken
 scene advances).
-- **Track A (Tasks 1–2, LWE build + patches) is blocked on the owner's OK to create the public fork
-  `Kryxzort/linux-wallpaperengine`** (gh is logged in as Kryxzort) — ask first; outward action.
+- **Track A (Tasks 1–2, LWE build + patches): the fork exists** — `Kryxzort/linux-wallpaperengine` (public, created
+  2026-10-27 with the owner's OK). Put our patches on a branch there; pin by hash. Not started.
 - Track B running (above). Task 5 (`scene` Source kind) after Track B's interfaces land.
 
-## Open questions for the owner
-1. OK to create the fork `Kryxzort/linux-wallpaperengine`?
-2. Agent model/effort policy: Phase 2 tracks + bug hunts at high effort, mechanical chores on Sonnet — yes?
-3. (earlier, still open) push/merge `lp-player` → re-pin `/etc/nixos/livepaper.nix`.
+## Owner answers (2026-10-27)
+1. Fork: OK — done.
+2. Model/effort: "whatever you think is best balance" → hard work (Phase 2 tracks, hunts) Opus high effort;
+   chores (flakes, docs, merges, gate runs) Sonnet.
+3. Push/merge + re-pin: OK. `lp-player` is PUSHED to `Kryxzort/livepaper-pro` (remote `fork`; SSH has no key in the
+   agent shell → push with `git -c credential.helper= -c credential.helper='!gh auth git-credential' push
+   https://github.com/Kryxzort/livepaper-pro.git lp-player`). **Merge into `main` only after a quiet full-matrix
+   gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/livepaper.nix` re-pin to
+   GitHub (never commit in /etc/nixos; the owner runs `nixos-rebuild`).
