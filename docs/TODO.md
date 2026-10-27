@@ -144,13 +144,21 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       file): the suite passed in ~3 s with 133 SKIPs; with `LP_REQUIRE_GPU=1` those 133 fail.
       `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (RED: the old binary passed).
       `player-core.md` § GFX / EGL.
-- [ ] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
+- [x] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
       `gpu-hwdec-interop=no` and maps `hwdec` to copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`),
       because interop init (a CUDA context per render context, 65–90 ms) and `vulkan-copy`'s device creation
       (230–320 ms without an X server) ran on the loop at every switch. Cost: 4K60 nvdec interop ~11 % of a
       core → nvdec-copy ~56 % (flake build); the copy upload also runs on the loop (8–13 ms at 4K60). Once
       render contexts live on the render worker, re-enable interop there. `player-core.md` § Sources
       "Hardware decoding".
+      — done (2026-10-27): a worker render context loads the GPU's interop (`cuda` on NVIDIA, `vaapi` on
+      AMD/Intel; libcuda preloaded for the dev binary) for a source whose `hwdec` would use it, `hwdec` maps to
+      the zero-copy decoder + its copy twin; loop-rendered sources keep the copy modes. The init blocks its
+      `lp-render` thread, so the worker runs three lanes (one froze the playing wallpaper 66–74 ms per switch).
+      Measured (A/B interleaved, medians): 4K60 49.4 → 6.8 % of a core, 1080p30 7.8 → 3.2 %; loop busy per
+      switch 0.7 → 0.3 ms, first frame 330 → 326 ms, A's longest frame interval 34.8 → 34.3 ms; +60 MiB VRAM per
+      source. `LP_PLAYER_HWDEC_INTEROP=off` = the old behaviour. Vulkan stays copy (no GL interop; the
+      X-less driver lock is process-wide).
 - [ ] **8 h soak: does glibc's free heap plateau?** The final 1 h live soak (Task 20, `phase1.md` § 4)
       passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
       (arena address space +4.6 MiB/min, ~5.7 MiB per switch). Costs no RAM; the reaper's `malloc_trim` walks it
@@ -375,7 +383,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       — done: `playlist-changed {client}` + `X-LP-Client` (own echo skipped); `plState:partial` RED (stale strip) →
       GREEN, playlist families 196/0.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
-- [ ] Zero-copy hwdec on the render worker (TODO item above) — optional.
+- [x] Zero-copy hwdec on the render worker (TODO item above) — optional. — done 2026-10-27.
 - [x] Remove the leftover worktree `.claude/worktrees/agent-a2f6c6e0846e73e15` (only a node_modules symlink) — done.
 
 - [x] **Rapid switches: "no first frame within 10 s"** (2026-10-27) — a paused B's only frame went unrendered

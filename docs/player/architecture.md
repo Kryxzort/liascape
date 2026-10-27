@@ -276,7 +276,10 @@ missed:
 
 - **Done early from Phase 2: the render worker** (2026-10-26, default on) — every mpv source's render context
   lives on an `lp-render` thread in the compositor's share group; the loop only adopts finished, fenced frames
-  (`.claude/rules/player-core.md` § Sources "Render worker"). Zero-copy hwdec on it is still to do.
+  (`.claude/rules/player-core.md` § Sources "Render worker"). Since 2026-10-27 hardware decoding on it is
+  zero-copy: the render contexts load the GPU's GL interop (CUDA on NVIDIA, VAAPI on AMD/Intel), whose init
+  runs on one of three `lp-render` lanes beside the playing wallpaper's — never the loop, never in front of A
+  (§ Sources "Hardware decoding").
 - **Scenes are skipped**, exactly like `AllowScenes=false` (`PlayerEngine.ScenesPlayable`) — LWE
   is not vendored yet. **Phase 2** vendors LWE's `next-v2` branch (pinned commit; the approach and
   its required local patches were proven by the Phase 0 spike,

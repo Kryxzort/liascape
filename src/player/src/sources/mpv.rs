@@ -162,7 +162,7 @@ pub(crate) unsafe extern "C" fn on_wake(ctx: *mut c_void) {
 
 /// `"image"` for common still-image extensions, else `"video"`. Refined after load by
 /// mpv's own `current-tracks/video/image` flag.
-fn infer_kind(path: &str) -> &'static str {
+pub(crate) fn infer_kind(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
         "png" | "jpg" | "jpeg" | "webp" | "bmp" | "tif" | "tiff" | "jxl" | "avif" | "heic"
@@ -205,20 +205,92 @@ fn yes_no(b: bool) -> &'static str {
 /// libcuda) and `vaapi-copy` is the normal pick; anything else falls through to mpv's list.
 const AUTO_COPY: [&str; 2] = ["nvdec-copy", "vaapi-copy"];
 
-/// Task 20d (R107): the mpv `hwdec` value for a graph `hwdec` — **never a GL interop mode**.
-/// mpv's render context runs every hwdec interop's init inside the render thread — our loop
-/// — and with `gpu-hwdec-interop=auto` it loads the CUDA interop (a CUDA context) in
-/// `mpv_render_context_create` itself: 65–90 ms per switch whenever libcuda is loadable,
-/// even with `hwdec=no`. So every core runs `gpu-hwdec-interop=no` (`prepare_core`) and the
-/// hardware decoder is used in its copy mode: `""`/`no` → `no`; `auto`, `auto-safe`, `yes`,
-/// `auto-copy`, `auto-copy-safe`, `auto-unsafe`, `auto-copy-unsafe` → [`AUTO_COPY`] + mpv's
-/// `auto-copy[-safe|-unsafe]`; an interop name (every mpv 0.41 decoder with a `-copy` twin:
-/// `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`, `amf`, `v4l2m2m`) → its `-copy` twin; anything
-/// else (a `-copy` mode, a name mpv doesn't know — mpv rejects it and the prop reverts, R45)
-/// passes through unchanged. A comma
-/// list maps element by element (duplicates dropped, order kept). The graph keeps the
+/// The zero-copy decoders a render context that loaded `gpu-hwdec-interop=<interop>` can show
+/// (`auto`'s preference first): the CUDA interop takes nvdec's/cuda's frames, the VAAPI one
+/// vaapi's, drmprime v4l2m2m's. Every other interop decoder has no GL interop on our EGL
+/// renderer (`vulkan` needs mpv's Vulkan renderer, `vdpau` GLX, `amf` D3D/Vulkan) — always its
+/// copy twin.
+fn zero_copy_decoders(interop: Option<&str>) -> &'static [&'static str] {
+    match interop {
+        Some("cuda") => &["nvdec", "cuda"],
+        Some("vaapi") => &["vaapi"],
+        Some("drmprime") => &["v4l2m2m"],
+        Some("all") => &["nvdec", "vaapi", "cuda", "v4l2m2m"],
+        _ => &[],
+    }
+}
+
+/// The mpv `hwdec` value for a graph `hwdec`, given the `gpu-hwdec-interop` the source's
+/// render context loaded (`interop`; § Sources "Hardware decoding").
+///
+/// **`interop: None` — copy modes only (Task 20d, R107).** A render context on the LOOP
+/// (render worker off, stepped mode, a synchronous open) runs `gpu-hwdec-interop=no`: mpv's
+/// render context runs every hwdec interop's init inside the render thread, and with
+/// `gpu-hwdec-interop=auto` it loads the CUDA interop (a CUDA context) in
+/// `mpv_render_context_create` itself: 65–90 ms per switch whenever libcuda is loadable, even
+/// with `hwdec=no`. So the hardware decoder is used in its copy mode: `""`/`no` → `no`;
+/// `auto`, `auto-safe`, `yes`, `auto-copy`, `auto-copy-safe`, `auto-unsafe`,
+/// `auto-copy-unsafe` → [`AUTO_COPY`] + mpv's `auto-copy[-safe|-unsafe]`; an interop name
+/// (every mpv 0.41 decoder with a `-copy` twin: `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`,
+/// `amf`, `v4l2m2m`) → its `-copy` twin; anything else (a `-copy` mode, a name mpv doesn't
+/// know — mpv rejects it and the prop reverts, R45) passes through unchanged.
+///
+/// **`interop: Some(i)` — zero-copy on the render worker.** The render context lives on the
+/// `lp-render` thread, so the interop's init costs that thread, not the loop. A decoder the
+/// interop can show ([`zero_copy_decoders`]) is asked for as itself, **followed by its copy
+/// twin** (an interop that failed to load — no libcuda yet — or a codec the GPU can't do in
+/// zero-copy falls back to the copy, never to software); `auto`, `auto-safe`, `yes`,
+/// `auto-unsafe` put the interop's decoders ahead of the copy list (`cuda`: `nvdec,
+/// nvdec-copy,vaapi-copy,auto-copy`); the `auto-copy*` family stays copy (asked for
+/// explicitly); every other interop name → its copy twin as above.
+///
+/// A comma list maps element by element (duplicates dropped, order kept). The graph keeps the
 /// user's value (`read("hwdec")`); the `sources` probe shows both (`mpv_hwdec`,
-/// `mpv_hwdec_current`).
+/// `mpv_hwdec_current`) and the source's `hwdec_interop`.
+pub fn mpv_hwdec(value: &str, interop: Option<&str>) -> String {
+    let zero = zero_copy_decoders(interop);
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        if !out.iter().any(|o| o == s) {
+            out.push(s.to_string());
+        }
+    };
+    for e in value.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        match e {
+            "auto" | "auto-copy" | "auto-safe" | "yes" | "auto-copy-safe" | "auto-unsafe"
+            | "auto-copy-unsafe" => {
+                if !e.starts_with("auto-copy") {
+                    // `cuda` names the same decoder as `nvdec` (mpv's older alias): auto
+                    // asks for it once.
+                    for z in zero.iter().filter(|z| **z != "cuda") {
+                        push(z);
+                    }
+                }
+                for a in AUTO_COPY {
+                    push(a);
+                }
+                push(match e {
+                    "auto" | "auto-copy" => "auto-copy",
+                    "auto-unsafe" | "auto-copy-unsafe" => "auto-copy-unsafe",
+                    _ => "auto-copy-safe",
+                });
+            }
+            "nvdec" | "cuda" | "vaapi" | "vdpau" | "vulkan" | "amf" | "v4l2m2m" => {
+                if zero.contains(&e) {
+                    push(e);
+                }
+                push(&format!("{e}-copy"))
+            }
+            other => push(other),
+        }
+    }
+    if out.is_empty() {
+        "no".to_string()
+    } else {
+        out.join(",")
+    }
+}
+
 /// The `af` chain mpv runs for graph `af` (the user's chain, e.g. the backend's loudnorm): that
 /// chain plus a permanent `scaletempo2` (label `@lp-tempo`). With pitch correction on (mpv's
 /// default) mpv adds its own tempo filter only while `speed` ≠ 1 and drops it at exactly 1× —
@@ -251,39 +323,6 @@ pub fn mpv_af(value: &str) -> String {
 
 /// The tempo filter [`mpv_af`] keeps in every chain.
 const TEMPO_AF: &str = "@lp-tempo:scaletempo2";
-
-pub fn mpv_hwdec(value: &str) -> String {
-    let mut out: Vec<String> = Vec::new();
-    let mut push = |s: &str| {
-        if !out.iter().any(|o| o == s) {
-            out.push(s.to_string());
-        }
-    };
-    for e in value.split(',').map(str::trim).filter(|e| !e.is_empty()) {
-        match e {
-            "auto" | "auto-copy" | "auto-safe" | "yes" | "auto-copy-safe" | "auto-unsafe"
-            | "auto-copy-unsafe" => {
-                for a in AUTO_COPY {
-                    push(a);
-                }
-                push(match e {
-                    "auto" | "auto-copy" => "auto-copy",
-                    "auto-unsafe" | "auto-copy-unsafe" => "auto-copy-unsafe",
-                    _ => "auto-copy-safe",
-                });
-            }
-            "nvdec" | "cuda" | "vaapi" | "vdpau" | "vulkan" | "amf" | "v4l2m2m" => {
-                push(&format!("{e}-copy"))
-            }
-            other => push(other),
-        }
-    }
-    if out.is_empty() {
-        "no".to_string()
-    } else {
-        out.join(",")
-    }
-}
 
 /// What an in-flight async request was, so its reply can be reported/reverted.
 struct Request {
@@ -350,6 +389,9 @@ pub struct PreparedCore {
     /// Phase 2: its render context already lives on the render worker
     /// ([`PreparedCore::attach_render`]).
     render: Option<Attached>,
+    /// The `gpu-hwdec-interop` that render context loaded (zero-copy hwdec; `None` = copy
+    /// modes, [`mpv_hwdec`]).
+    interop: Option<&'static str>,
 }
 
 // SAFETY: libmpv's client API is thread-safe (`client.h`); a prepared core is only ever
@@ -363,20 +405,42 @@ impl PreparedCore {
     /// an `lp-open` thread, never the loop). A worker that can't leaves the core as it was:
     /// the source then renders on the loop. Only a timed-out attach (the core stayed with
     /// the worker, which reaps it) is an error.
-    pub fn attach_render(mut self, worker: &Arc<RenderWorker>) -> Result<Self, ApiError> {
+    ///
+    /// `interop`: load the worker's hwdec GL interop (`RenderWorker::hwdec_interop`) into
+    /// the render context — zero-copy hardware decoding (§ Sources "Hardware decoding"). Its
+    /// init (a CUDA context on NVIDIA, 85–220 ms) runs in `mpv_render_context_create`, i.e. on
+    /// the worker; so only an attach the LOOP doesn't wait for may ask (the `lp-open` job —
+    /// never a synchronous open, which waits for this reply on the loop), and only for a
+    /// source that will decode in hardware (the caller knows its `hwdec` and kind).
+    pub fn attach_render(
+        mut self,
+        worker: &Arc<RenderWorker>,
+        interop: bool,
+    ) -> Result<Self, ApiError> {
         let (Some(h), Some(fd)) = (
             self.handle.take(),
             self.wake.as_ref().map(|w| w.as_raw_fd()),
         ) else {
             return Ok(self);
         };
+        // Read by `mpv_render_context_create` (prepare_core set `no`; an option set after
+        // `mpv_initialize` is the `options/` property — no render context exists yet).
+        let interop = worker
+            .hwdec_interop()
+            .filter(|_| interop)
+            .filter(|i| h.set_option("gpu-hwdec-interop", i).is_ok());
         match worker.attach(h, fd) {
             Ok((h, att)) => {
                 self.handle = Some(h);
                 self.render = Some(att);
+                self.interop = interop;
                 Ok(self)
             }
             Err(Some(h)) => {
+                // Rendering on the loop after all: no interop init there (Task 20d).
+                if interop.is_some() {
+                    let _ = h.set_option("gpu-hwdec-interop", "no");
+                }
                 self.handle = Some(h);
                 Ok(self)
             }
@@ -402,7 +466,7 @@ impl Drop for PreparedCore {
             match self.render.take() {
                 // The worker frees the render context (its context current), then reaps.
                 Some(att) => {
-                    if let Err(Some(h)) = att.worker.free(att.id, Some(h), Vec::new()) {
+                    if let Err(Some(h)) = att.free(Some(h), Vec::new()) {
                         // Worker gone (at exit, or it died): never free a render context
                         // without its context — leak it, silent.
                         let _ = h.command_async(0, &["stop"]);
@@ -436,6 +500,10 @@ pub struct MpvSource {
     // on the worker; `render`/`front`/`back` above stay `None` and these hold the textures
     // the worker handed over (it owns their FBOs and deletes them).
     worker: Option<Attached>,
+    /// The `gpu-hwdec-interop` the worker's render context loaded (zero-copy hwdec: `hwdec`
+    /// asks for the interop decoders first, `mpv_hwdec`); `None` = copy modes (every
+    /// loop-rendered source, and a worker one opened without it).
+    hwdec_interop: Option<&'static str>,
     w_front: Option<Tex>,
     w_back: Option<Tex>,
     /// The newest frame taken from the worker whose fence hadn't signalled yet.
@@ -756,6 +824,7 @@ impl MpvSource {
             handle: Some(handle),
             wake: Some(wake),
             render: None,
+            interop: None,
         })
     }
 
@@ -822,6 +891,7 @@ impl MpvSource {
         // Phase 2: a render context made on the render worker (nothing to create here; from
         // now on `MpvSource::drop` hands it back to the worker).
         let worker = core.render.take();
+        let hwdec_interop = core.interop.filter(|_| worker.is_some());
         drop(core);
         let wake_ctx = wake.as_raw_fd() as usize as *mut c_void;
 
@@ -862,6 +932,7 @@ impl MpvSource {
             back: None,
             back_valid: false,
             worker,
+            hwdec_interop,
             w_front: None,
             w_back: None,
             w_pending: None,
@@ -1671,7 +1742,7 @@ impl MpvSource {
             return false;
         };
         let ex = Arc::clone(&att.ex);
-        let worker = Arc::clone(&att.worker);
+        let (worker, lane) = (Arc::clone(&att.worker), att.lane);
         let gl = &gfx.gl;
         let size = self.target_size();
         let mut wake = false;
@@ -1756,7 +1827,7 @@ impl MpvSource {
             wake = true;
         }
         if wake {
-            worker.wake();
+            worker.wake_lane(lane);
         }
         drop(cur);
         changed
@@ -1769,6 +1840,12 @@ impl MpvSource {
         } else {
             "loop"
         }
+    }
+
+    /// The `gpu-hwdec-interop` this source's render context loaded (`None`: copy modes) —
+    /// probe `hwdec_interop`.
+    pub fn hwdec_interop(&self) -> Option<&'static str> {
+        self.hwdec_interop
     }
 
     /// The `sources` probe's per-source `render` object (worker-side timings + adoption
@@ -1807,7 +1884,7 @@ impl MpvSource {
         self.w_front = None;
         self.w_back = None;
         let core = self.handle.take();
-        if let Err(Some(h)) = att.worker.free(att.id, core, fences) {
+        if let Err(Some(h)) = att.free(core, fences) {
             // Worker gone (at exit, or it died): leak the render context and the core, silent.
             let _ = h.command_async(0, &["stop"]);
             std::mem::forget(h);
@@ -2141,8 +2218,9 @@ impl Source for MpvSource {
                     self.set(prop, "start", &t)
                 }
             }
-            // Task 20d: copy modes only (`mpv_hwdec`; the core runs without GL interop).
-            "hwdec" => self.set(prop, "hwdec", &mpv_hwdec(&s)),
+            // Copy modes unless this render context loaded a GL interop (on the render
+            // worker — `mpv_hwdec`, § Sources "Hardware decoding").
+            "hwdec" => self.set(prop, "hwdec", &mpv_hwdec(&s, self.hwdec_interop)),
             "fps_cap" => {
                 let n = num(v);
                 let vf = if n > 0.0 {
@@ -2405,7 +2483,9 @@ mod tests {
             ("vaapi,auto", "vaapi-copy,nvdec-copy,auto-copy"),
             ("nvdec,nvdec-copy", "nvdec-copy"),
         ] {
-            assert_eq!(mpv_hwdec(graph), mpv, "hwdec {graph:?}");
+            assert_eq!(mpv_hwdec(graph, None), mpv, "hwdec {graph:?}");
+            // A render context without a usable interop maps like none at all.
+            assert_eq!(mpv_hwdec(graph, Some("no")), mpv, "hwdec {graph:?}");
         }
         // No value mpv 0.41 accepts may come out as an interop (non-copy) decoder.
         const INTEROP: [&str; 10] = [
@@ -2424,12 +2504,95 @@ mod tests {
             .iter()
             .chain(&["v4l2m2m", "auto-copy", "nvdec,vaapi,vulkan"])
         {
-            let m = mpv_hwdec(v);
+            let m = mpv_hwdec(v, None);
             assert!(
                 m.split(',')
                     .all(|e| !INTEROP.contains(&e) && e != "v4l2m2m"),
                 "hwdec {v:?} → {m:?} keeps an interop decoder"
             );
+        }
+    }
+
+    /// On the render worker with a loaded interop: the decoders it can show are asked for
+    /// zero-copy, each followed by its copy twin (an interop that failed to load or a codec
+    /// the GPU can't do falls back to the copy, never to software); `auto-copy*` stays copy;
+    /// a decoder with no GL interop on our renderer (vulkan, vdpau, amf) or one another
+    /// interop serves stays copy.
+    #[test]
+    fn hwdec_maps_to_the_loaded_interop_on_the_worker() {
+        for (interop, graph, mpv) in [
+            ("cuda", "", "no"),
+            ("cuda", "no", "no"),
+            ("cuda", "auto", "nvdec,nvdec-copy,vaapi-copy,auto-copy"),
+            ("cuda", "yes", "nvdec,nvdec-copy,vaapi-copy,auto-copy-safe"),
+            (
+                "cuda",
+                "auto-safe",
+                "nvdec,nvdec-copy,vaapi-copy,auto-copy-safe",
+            ),
+            (
+                "cuda",
+                "auto-unsafe",
+                "nvdec,nvdec-copy,vaapi-copy,auto-copy-unsafe",
+            ),
+            ("cuda", "auto-copy", "nvdec-copy,vaapi-copy,auto-copy"),
+            (
+                "cuda",
+                "auto-copy-safe",
+                "nvdec-copy,vaapi-copy,auto-copy-safe",
+            ),
+            ("cuda", "nvdec", "nvdec,nvdec-copy"),
+            ("cuda", "cuda", "cuda,cuda-copy"),
+            ("cuda", "nvdec-copy", "nvdec-copy"),
+            ("cuda", "vaapi", "vaapi-copy"),
+            ("cuda", "vulkan", "vulkan-copy"),
+            ("cuda", "vdpau", "vdpau-copy"),
+            ("cuda", "amf", "amf-copy"),
+            ("cuda", "v4l2m2m", "v4l2m2m-copy"),
+            ("cuda", "not_a_decoder", "not_a_decoder"),
+            ("cuda", "vaapi,nvdec", "vaapi-copy,nvdec,nvdec-copy"),
+            (
+                "cuda",
+                "nvdec,auto",
+                "nvdec,nvdec-copy,vaapi-copy,auto-copy",
+            ),
+            ("vaapi", "auto", "vaapi,nvdec-copy,vaapi-copy,auto-copy"),
+            ("vaapi", "vaapi", "vaapi,vaapi-copy"),
+            ("vaapi", "nvdec", "nvdec-copy"),
+            ("drmprime", "v4l2m2m", "v4l2m2m,v4l2m2m-copy"),
+            (
+                "drmprime",
+                "auto",
+                "v4l2m2m,nvdec-copy,vaapi-copy,auto-copy",
+            ),
+            (
+                "all",
+                "auto",
+                "nvdec,vaapi,v4l2m2m,nvdec-copy,vaapi-copy,auto-copy",
+            ),
+        ] {
+            assert_eq!(
+                mpv_hwdec(graph, Some(interop)),
+                mpv,
+                "hwdec {graph:?} with interop {interop}"
+            );
+        }
+        // Every zero-copy decoder asked for is followed by its copy twin.
+        for interop in ["cuda", "vaapi", "drmprime", "all"] {
+            for v in ["auto", "yes", "nvdec", "cuda", "vaapi", "v4l2m2m", "vulkan"] {
+                let m = mpv_hwdec(v, Some(interop));
+                let list: Vec<&str> = m.split(',').collect();
+                for (i, e) in list.iter().enumerate() {
+                    if ["nvdec", "cuda", "vaapi", "v4l2m2m"].contains(e) {
+                        assert!(
+                            list[i..].contains(&format!("{e}-copy").as_str())
+                                || list[i..].iter().any(|x| x.starts_with("auto-copy")),
+                            "{v:?} with {interop}: {m:?} has no copy fallback for {e}"
+                        );
+                    }
+                    assert_ne!(*e, "vulkan", "{v:?} with {interop}: {m:?}");
+                }
+            }
         }
     }
 }

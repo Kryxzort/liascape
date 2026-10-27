@@ -69,6 +69,26 @@ static OPENING: AtomicUsize = AtomicUsize::new(0);
 /// Queued opens whose node went before a worker got to them: skipped, no core made.
 static OPEN_SKIPPED: AtomicUsize = AtomicUsize::new(0);
 
+/// Whether a source opened from `node` gets the render worker's hwdec GL interop (`interop`,
+/// § Sources "Hardware decoding"): only when its `hwdec` (as the node says when the open is
+/// submitted) would decode zero-copy through it — not `no`/unset, not a `-copy` mode or
+/// `auto-copy`, not a decoder this interop can't show — and it isn't an image (mpv decodes
+/// stills in software). The interop's init (a CUDA context per render context on NVIDIA:
+/// 85–220 ms of an `lp-render` lane, ~60 MiB of VRAM) is paid for nothing otherwise. A later
+/// live `hwdec` change keeps working either way: without the interop `mpv_hwdec` asks for the
+/// copy modes.
+fn wants_hwdec_interop(node: &[(String, PropValue)], interop: &str) -> bool {
+    let get = |k: &str| match node.iter().find(|(n, _)| n == k).map(|(_, v)| v) {
+        Some(PropValue::Str(s)) => s.as_str(),
+        _ => "",
+    };
+    if get("kind") == "image" || super::mpv::infer_kind(get("path")) == "image" {
+        return false;
+    }
+    let hw = get("hwdec");
+    super::mpv::mpv_hwdec(hw, Some(interop)) != super::mpv::mpv_hwdec(hw, None)
+}
+
 /// I5: async opens still queued or creating a core.
 pub fn opening_pending() -> usize {
     OPENING.load(Ordering::SeqCst)
@@ -730,10 +750,12 @@ impl SourceHost {
         }
         // A synchronous open still renders on the worker when there is one (the harness; a
         // pool that couldn't start a thread) — every source of a player renders in one place.
+        // Without the hwdec interop: this thread (the loop) waits for the attach, and the
+        // interop's init would be its wait (§ Sources "Hardware decoding").
         let m = match (core, &self.render_worker) {
             (Some(core), _) => MpvSource::open_with_core(gfx, &s("path"), &opts, core),
             (None, Some(w)) => MpvSource::prepare_core(&opts)
-                .and_then(|core| core.attach_render(w))
+                .and_then(|core| core.attach_render(w, false))
                 .and_then(|core| MpvSource::open_with_core(gfx, &s("path"), &opts, core)),
             (None, None) => MpvSource::open(gfx, &s("path"), &opts),
         }
@@ -770,6 +792,10 @@ impl SourceHost {
         let weak = Arc::downgrade(&slot);
         let opts = self.base_opts.clone();
         let worker = self.render_worker.clone();
+        let interop = worker
+            .as_ref()
+            .and_then(|w| w.hwdec_interop())
+            .is_some_and(|i| wants_hwdec_interop(node, i));
         OPENING.fetch_add(1, Ordering::SeqCst);
         let job: PoolJob = Box::new(move || {
             let Some(slot) = weak.upgrade() else {
@@ -777,9 +803,11 @@ impl SourceHost {
                 OPENING.fetch_sub(1, Ordering::SeqCst);
                 return;
             };
-            // Phase 2: the render context is made on the render worker too, not the loop.
+            // Phase 2: the render context is made on the render worker too, not the loop —
+            // with the hwdec GL interop when the source will decode in hardware (its init
+            // waits on this thread and costs the worker, never the loop).
             let r = MpvSource::prepare_core(&opts).and_then(|core| match &worker {
-                Some(w) => core.attach_render(w),
+                Some(w) => core.attach_render(w, interop),
                 None => Ok(core),
             });
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);

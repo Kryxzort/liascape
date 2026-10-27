@@ -82,6 +82,9 @@ pub const STEP_QUEUE_MAX: usize = 64;
 const WARN_EVERY: Duration = Duration::from_secs(5);
 /// Tick durations the `loop` probe keeps.
 const TICK_HISTORY: usize = 64;
+
+/// A synchronous loop stretch at least this long is logged (`loop.long_busy`, debug).
+const LONG_BUSY: Duration = Duration::from_millis(50);
 /// The corr of a restored source's pending fade-in (`Runtime::fade_in`).
 const RESTORE_FADE: &str = "restore-fade";
 
@@ -360,6 +363,17 @@ impl LoopStats {
     /// One synchronous stretch `d`, of which `open` went into source opens.
     pub(crate) fn busy(&mut self, d: Duration, open: Duration) {
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        // A stretch long enough to cost frames: on the log timeline (debug) so a hitch can be
+        // lined up with what else happened then (`render_worker.attach`, `source.open`, …).
+        if d >= LONG_BUSY {
+            log::event(
+                "runtime",
+                Level::Debug,
+                "loop.long_busy",
+                None,
+                json!({ "ms": ms(d), "open_ms": ms(open) }),
+            );
+        }
         self.max_busy_ms = self.max_busy_ms.max(ms(d));
         self.max_busy_excl_open_ms = self.max_busy_excl_open_ms.max(ms(d.saturating_sub(open)));
         self.max_open_ms = self.max_open_ms.max(ms(open));
