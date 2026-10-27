@@ -145,7 +145,7 @@ public static class SteamAuthService
 
             var cookie = await GetWebCookieAsync(settings.SteamRefreshToken, settings.SteamId, ct);
             settings.SteamAccessToken = cookie; // full steamLoginSecure value (steamid||webtoken)
-            SettingsService.Save(settings);
+            SettingsService.Update(s => s.SteamAccessToken = cookie);
             MaybeRenewRefreshTokenInBackground(settings);
             return cookie;
         }
@@ -226,7 +226,7 @@ public static class SteamAuthService
         if (SteamIdFromJwt(newRt) != settings.SteamId) return;
 
         settings.SteamRefreshToken = newRt;
-        SettingsService.Save(settings);
+        SettingsService.Update(s => s.SteamRefreshToken = newRt);
     }
 
     // The token portion of a `steamid||token` (or url-encoded) steamLoginSecure value.

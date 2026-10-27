@@ -99,8 +99,13 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.
 - `SettingsService.Load()` per request (no cached singleton) — daemons may have changed the file.
 - Never bind a whole `AppSettings` from a request body — a partial body resets what it leaves out.
-  Settings go through `SettingsService.Patch` (merge over what's saved). (`/playlist/state` still binds its
-  whole `CustomPlaylist` — `docs/TODO.md`.)
+  Settings go through `SettingsService.Patch` (merge over what's saved); `/playlist/state` through `JsonMerge.Over`.
+- **Every settings write is field-level**: `SettingsService.Update(s => s.Field = …)` (or `Patch`) — `Save` is
+  private. Both run under `PatchLock` + `FileLock` (`settings.json.lock`, an `flock` shared with the CLI and the
+  daemons). `/apply`, random, next/prev and a playlist play used to load the settings, switch, then save that
+  whole copy for its `LastSession` — reverting a `/settings` change made meanwhile; the Steam sign-in did the
+  same. A step (a volume key) is computed INSIDE the mutate from what's saved, never from an earlier load (16
+  concurrent local volume-ups kept one; `scripts/test-cross-process.sh`).
 - **`SettingsService.Save` is atomic** (a per-writer temp file renamed over `settings.json`) and `Load`
   retries a file it can't parse. It used to truncate + write in place: a load mid-write got the C#
   defaults (NoAudio on, volume 100, the legacy engine), applied them live, and the next save wrote them

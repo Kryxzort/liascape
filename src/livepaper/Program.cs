@@ -138,7 +138,7 @@ sealed class Program
                 foreach (var p in newPaths)
                     if (sessExisting.Add(p)) merged.Add(p);
                 session.Paths = merged;
-                SettingsService.Save(settings);
+                SettingsService.Update(s => s.LastSession = session);
             }
         }
         catch { }

@@ -87,7 +87,8 @@ public static class AppOps
         return PlayPlaylist(ordered, play, persist: ps, persistPaths: paths);
     }
 
-    private static void Save(AppSettings s, LastSession sess) { s.LastSession = sess; SettingsService.Save(s); }
+    // only LastSession: `s` was loaded before the switch, and saving it whole reverted any /settings change since
+    private static void Save(AppSettings s, LastSession sess) { s.LastSession = sess; SettingsService.Update(x => x.LastSession = sess); }
 
     // animated preview in an acquired workshop folder (preview.gif/webp), if any
     private static string? ResolveLocalAnimatedPreview(string dir)
