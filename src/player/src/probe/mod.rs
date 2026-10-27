@@ -175,8 +175,10 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 "mpv_hwdec_current".into(),
                 json!(m.mpv_get_string("hwdec-current")),
             );
-            // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes only).
+            // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes unless
+            // the render context loaded a GL interop on the render worker: `hwdec_interop`).
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
+            o.insert("hwdec_interop".into(), json!(m.hwdec_interop()));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             // How often its dropped first frame was asked for again (`REFETCH_AFTER`, sources/mpv.rs).
             o.insert("frame_refetches".into(), json!(m.frame_refetches()));

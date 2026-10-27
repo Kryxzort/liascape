@@ -775,7 +775,8 @@ frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, be
 **`dither=ordered`** (I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
 every new render context's first render — measured ~25–30 ms on the loop per switch; ordered
 dithering of the same 8-bit target is visually equivalent), **`gpu-hwdec-interop=no`** (Task 20d:
-no hwdec GL interop init on the loop — "Hardware decoding" below), and with opt `shader_cache_dir`
+no hwdec GL interop init on the loop; a render-worker attach that wants zero-copy sets the worker's
+interop before its render context exists — "Hardware decoding" below), and with opt `shader_cache_dir`
 (`serve` passes `<state>/shader-cache`) `gpu-shader-cache=yes` + `gpu-shader-cache-dir`.
 **No built-in scripts or bindings (`sources::mpv::SCRIPT_TRIMS`, TODO "mpv's built-in Lua scripts
 per core"):** `load-scripts=no`, `osc=no`, `load-stats-overlay=no`, `load-console=no`,
@@ -859,8 +860,9 @@ reached mpv) is for probes/tests; `mpv_get_string`/`mpv_get_f64` are synchronous
 **Property map** (graph name → mpv): `loop` → `loop-file` `inf`/`no`; `paused` → `pause`
 (observed `pause` changes are mirrored back into `read`); `speed`; `position` → `seek <t>
 absolute exact` (or `start` before the current file has loaded; a `path` change resets
-`start` to `none`); `hwdec` → `sources::mpv::mpv_hwdec(v)` (copy modes only — "Hardware
-decoding" below); `fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
+`start` to `none`); `hwdec` → `sources::mpv::mpv_hwdec(v, interop)` (copy modes unless the
+source's render context loaded the render worker's GL interop — "Hardware decoding" below);
+`fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
 **`auto`** for `true` (mpv's normal policy — what the legacy engine runs with
 DisableCache=false; `yes` would RAM-cache every local wallpaper) and `no` for `false`;
 `demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
@@ -890,8 +892,12 @@ defaults_applied_at_open_match_mpv`.
 within ~1e-6 dB). `volume-gain-min=-96` is what lets mpv accept the −96 dB floor. `open`
 pushes the initial sum too, so mpv never runs at its own default.
 
-**Hardware decoding (Task 20d, R107) — copy modes, never GL interop.** Every core runs
-`gpu-hwdec-interop=no` and `apply("hwdec", v)` sends `mpv_hwdec(v)`: `""`/`no` → `no`;
+**Hardware decoding (Task 20d, R107; zero-copy on the render worker since 2026-10-27).** Two
+cases, by where the source's render context lives: **on the render worker** (the default for
+every real-clock source) it decodes zero-copy through a GL interop — "Zero-copy on the render
+worker" below; **on the loop** (worker off, stepped mode, the harness, any synchronous open) it
+decodes in copy modes, never GL interop — the rest of this paragraph. Such a core runs
+`gpu-hwdec-interop=no` and `apply("hwdec", v)` sends `mpv_hwdec(v, None)`: `""`/`no` → `no`;
 `auto`/`auto-copy` → `nvdec-copy,vaapi-copy,auto-copy` (`auto-safe`/`yes`/`auto-copy-safe` → the
 same with `auto-copy-safe`, `auto-unsafe`/`auto-copy-unsafe` → with `auto-copy-unsafe`); an interop
 name (every mpv 0.41 decoder with a `-copy` twin: `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`,
@@ -931,17 +937,105 @@ per switch, ms):
 | `nvdec-copy` | 21, then 81–115 → 10–33 | 72–83 → 10–33 |
 | `vulkan` / `vulkan-copy` | 72–82 (software) / 261–284 → 273–313 / 267–297 (no X; with X 7–22) | — |
 
-**The trade-off (Phase 1):** copy modes download each frame and mpv uploads it on the loop like
-software decoding. Steady state, one source on both outputs, % of one core: 1080p30 `no` 27.7,
+**The trade-off (Phase 1):** copy modes download each frame and mpv uploads it like software
+decoding (on the loop then; on the worker's lane since Phase 2). Steady state, one source on both
+outputs, % of one core: 1080p30 `no` 27.7,
 `nvdec-copy` 9.8, `vaapi-copy` 26.0 (nvidia-vaapi-driver), `vulkan-copy` 14.4, `nvdec` interop
 7.4; 4K60 `no` 111, `nvdec-copy` 55.6, `vulkan-copy` 80.1, `nvdec` interop 11.3 (loop max busy at
 4K60: `no` 8.1, `nvdec-copy` 12.8, interop 2.8 ms). First frame of a cold source (1080p): `no` 319,
 `nvdec-copy` 438, `vaapi-copy` 642, `vulkan-copy` 698 ms — hence `nvdec-copy` ahead of mpv's
-`vulkan-copy` in `auto`. Zero-copy interop comes back with the Phase 2 render worker (§ Runtime
-"Switch cost"), whose thread owns render-context creation. Guards:
-`tests/api.rs::t20d_hwdec_switch_never_stalls_the_loop` (dev env + libcuda env, `DISPLAY`/
-`WAYLAND_DISPLAY` removed; warm median < 50 ms — fixed medians 16–36 ms, the traps ≥ 65 — and
-never an interop mode; RED before: 286, 91, 85, 88 ms), `tests/sources.rs::property_map_reaches_mpv`, unit `hwdec_maps_to_copy_modes_only`.
+`vulkan-copy` in `auto`. Guards (the loop path): `tests/api.rs::t20d_hwdec_switch_never_stalls_the_loop`
+(dev env + libcuda env, `DISPLAY`/`WAYLAND_DISPLAY` removed, both render modes; warm median < 50
+ms — fixed medians 16–36 ms, the traps ≥ 65 — and never an interop mode on a loop-rendered source;
+RED before: 286, 91, 85, 88 ms), `tests/sources.rs::property_map_reaches_mpv`, unit
+`hwdec_maps_to_copy_modes_only`.
+
+**Zero-copy on the render worker (2026-10-27; TODO "Zero-copy hwdec back").** A render context
+on an `lp-render` lane (§ "Render worker" below) loads the GPU's GL interop, so nvdec/vaapi frames
+go straight into GL textures — the interop's init (a CUDA context per render context on NVIDIA)
+runs in `mpv_render_context_create` on the lane, which the loop never waits for.
+- **Which interop** (`render_worker::hwdec_interop_for`, on lane 0's own context at start, logged
+  `render_worker.hwdec_interop {gl_vendor, interop, libcuda}`): `GL_VENDOR` NVIDIA → `cuda`,
+  AMD/Intel → `vaapi`, anything else (llvmpipe, nouveau) → none (copy modes, one lane). Never mpv's
+  `auto`, which for the render API loads EVERY interop eagerly (no on-demand loading in libmpv) — on
+  NVIDIA also `vaapi` via nvidia-vaapi-driver, a second CUDA context per source. Env
+  `LP_PLAYER_HWDEC_INTEROP`: unset/`on` = that, `off` = Task 20d's copy modes exactly (one lane, no
+  preload — the A/B and escape hatch), `cuda|vaapi|drmprime|all` to force one.
+- **libcuda.** The CUDA interop dlopens `libcuda.so.1` from libmpv, whose nixpkgs RUNPATH lacks
+  `/run/opengl-driver/lib` (above), so lane 0 dlopens it first (by soname, else that path — a
+  loaded soname satisfies every later lookup): the dev/install binary gets the interop from its
+  first source on, like the flake wrapper; then `cuInit(0)` (`render_worker.cuda_init {result,
+  ms}`, 20–32 ms measured) after the loop stopped waiting for the lane. No libcuda → no interop.
+- **Which sources.** Only an attach the loop doesn't wait for: the `lp-open` job
+  (`PreparedCore::attach_render(worker, true)`) of a source whose node `hwdec` (when the open is
+  submitted) would decode zero-copy through that interop and that isn't an image
+  (`host::wants_hwdec_interop` — `""`/`no`, `-copy`, `auto-copy*` and stills skip the 85–220 ms
+  and ~60 MiB VRAM). It sets `gpu-hwdec-interop=<interop>` on the core (an option after
+  `mpv_initialize` = the `options/` property, read when the render context is created) before the
+  attach; an attach that falls back to the loop sets `no` again. A synchronous open (the loop
+  waits for its attach: the harness, a pool that couldn't start a thread) never asks.
+  `MpvSource::hwdec_interop` (probe `hwdec_interop`) then maps `hwdec` with `mpv_hwdec(v,
+  Some(i))`: a decoder the interop can show first, **each followed by its copy twin** (an interop
+  that failed to init, or a codec the GPU can't do zero-copy, falls back to the copy, never to
+  software) — `cuda`: `auto` → `nvdec,nvdec-copy,vaapi-copy,auto-copy`, `nvdec` →
+  `nvdec,nvdec-copy`, `vaapi` → `vaapi-copy`; `vaapi`: `auto` → `vaapi,nvdec-copy,vaapi-copy,
+  auto-copy`; `auto-copy*` stays copy. A live `hwdec` change keeps working either way (a source
+  opened without the interop maps to copy modes). **`vulkan` stays `vulkan-copy`**: mpv's GL
+  renderer has no Vulkan interop (it needs mpv's Vulkan renderer), and the X-less driver lock
+  above (`vkCreateDevice` on mpv's core thread) is process-wide: with the render worker the loop
+  stays free (busy 1–29 ms per switch) but the lanes wait on it — A's longest frame interval
+  270–790 ms per switch, the same on the pre-change binary (driver limit, unchanged; the default
+  `auto` never picks it). In 2 of 11 such runs a `vulkan` B never showed a first frame (10 s;
+  0 of 8 on the pre-change binary, same code path — not investigated). `vdpau` (GLX) and `amf`
+  likewise stay copy.
+- **GL state, fences, teardown.** The CUDA interop registers mpv's own plane textures with the
+  lane's context current (current for the lane's whole life) and copies each decoded frame into
+  them with CUDA — ordering that copy before its own GL sampling is mpv's job, exactly as in its
+  VO; mpv then renders into our RGBA8 target on the lane, and our `glFenceSync` after that render covers
+  every GL command of it — the loop only ever samples our target, adopted once that fence
+  signalled. `reset_gl` touches bindings only (mpv rebinds what it needs). `Slot::free` drops the
+  render context first — interop uninit, texture unregistration and its CUDA context, the lane's
+  context current — then the weak client and textures, and only then hands the core to the reaper.
+  The fence stub stays — zero-copy frames come out whole under it (the guards below) — and so
+  does `opengl-pbo=no`.
+- **Lanes.** One lane would run B's attach (85–220 ms) in front of A's renders: A's longest frame
+  interval while B opened 34 → 66–74 ms at 30 fps (1–2 frames lost before every transition). With
+  an interop the worker runs three (§ "Render worker" → Lanes): measured 34–54 ms again (copy
+  modes 34–66).
+- **Measured** (release, hermetic `serve --headless --clock real --ao null --outputs
+  1920x1080@60`, no `DISPLAY`, synthetic testsrc2 h264 clips, the machine shared with other
+  agents' suites; `LP_PLAYER_HWDEC_INTEROP=off` vs on, alternated per run, 4 rounds at load
+  10–20; `hwdec: auto`; median (range)):
+
+  | | copy (`off`, Task 20d) | zero-copy (`on`) |
+  |---|---|---|
+  | 4K60 CPU, % of one core: process / loop / `lp-render` | 49.4 (33.2–56.3) / 4.8 / 26.5 | **6.8 (5.6–8.9)** / 1.1 / 1.9 |
+  | 4K60 loop max busy, steady (ms) | 9.8 (3.8–16.9) | 1.4 (1.2–1.6) |
+  | 1080p30 CPU, process | 7.8 (5.3–9.6) | **3.2 (2.4–4.1)** |
+  | loop max busy per switch, warm (36) | 0.7 (0.2–6.3) | 0.3 (0.2–6.7) |
+  | first frame (request → B `Ready`, 40) | 329.7 (300.5–500.6) | 326.3 (296.1–410.6) |
+  | A's longest frame interval while B opens (30 fps) | 34.8 (33.9–65.7) | 34.3 (33.9–54.3) |
+  | the attach on its lane | 1.9 (0.3–2.9) | 111.7 (91.9–155.3) |
+
+  The same per switch in ONE server (copy and zero-copy blocks alternating, n = 30 each, load
+  16–28): loop busy 0.3 (0.2–6.8) vs 0.4 (0.2–3.8) ms, first frame 319.5 vs 318.8 ms, A's longest
+  interval 34.4 vs 34.6 ms. Under heavy load (40–48) both modes had loop stretches of 0.1 s to
+  seconds (copy ≤ 0.65 s, zero-copy up to 5.6 s in one run); under `strace -ff` (7 runs, load
+  23–46) the loop thread never waited ≥ 30 ms in a futex or ioctl while a lane attached or freed —
+  CPU starvation, not the driver lock (the Task 20d trap showed the loop in `FUTEX_LOCK_PI`), but
+  not excluded for every load. Memory, 1080p playing: RSS 395 → 370 MiB, VRAM +60 MiB per
+  interop source. `loop.long_busy` (debug) puts such a stretch on the log timeline.
+- **Guards:** `tests/api.rs::t20d_hwdec_switch_never_stalls_the_loop` (worker on: every hardware
+  hwdec decodes `nvdec` with `hwdec_interop: cuda`, warm medians 2.2–3.0 ms against the 50 ms
+  bound; off: copy modes, 7.7–19.1), `tests/sources.rs::hardware_decoding_matches_software_in_both_render_modes`
+  (orientation, colours ±3, a seek's frame marker ±1, frames advancing — zero-copy on the worker,
+  copy on the loop), `tests/api.rs::render_worker_never_composes_a_torn_frame` (its `hwdec: auto`
+  cases, also under `slow-flush`), unit `hwdec_maps_to_the_loaded_interop_on_the_worker`,
+  `hwdec_maps_to_copy_modes_only`, `render_worker::tests::hwdec_interop_follows_the_gpu_and_the_env`.
+- **Costs / risks:** ~60 MiB VRAM per playing interop source (its CUDA context; RSS −25 MiB, no
+  copy buffers), both sides of a transition; AMD/Intel `vaapi` interop is unmeasured here (NVIDIA
+  only); a fourth wallpaper live at once (three outputs with different wallpapers + a switch)
+  shares a lane, and the one sharing B's lane holds its frame for B's attach.
 
 **Load fencing (live `path` changes).** Every `loadfile` is async; its reply carries the
 new playlist entry id (`playlist_entry_id` from the result map), START_FILE/END_FILE carry
@@ -1197,14 +1291,34 @@ with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_
 `open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
 **Render worker (Phase 2, `sources/render_worker.rs`; `serve --render-worker on|off`, env
-`LP_PLAYER_RENDER_WORKER`; **default on** since 2026-10-26 — `off` renders every source on the loop as before).** One `lp-render` thread per process owns
+`LP_PLAYER_RENDER_WORKER`; **default on** since 2026-10-26 — `off` renders every source on the loop as before).** `lp-render` threads (**lanes**, below) own
 every *worker-mode* `MpvSource`'s render context — creation, the first render (shader compile,
 LUTs), every later render, the free — so the loop only adopts finished textures and composes.
-- **Context.** `Gfx::share_context` makes a second context on the **same** `EGLDisplay` (one per
+- **Context.** `Gfx::share_context` makes another context on the **same** `EGLDisplay` (one per
   process, refcounted terminate — § GFX / EGL), same config, `share_context` = the compositor's;
-  the thread makes it current **surfaceless** for its whole life and loads its **own** glow (real
+  each lane makes its own current **surfaceless** for its whole life and loads its **own** glow (real
   `glFenceSync`/`glClientWaitSync`). mpv still gets `get_proc_address` with the fence stub;
   `opengl-pbo=no` stays.
+- **Lanes (2026-10-27, with zero-copy hwdec).** A render context is bound to the context it was
+  created on, and its creation blocks that lane — with the hwdec GL interop that is the interop's
+  init (a CUDA context, 85–220 ms per attach measured). On ONE thread the playing wallpaper froze
+  for it at every switch (A's longest frame interval while B opened: 34 → 66–74 ms at 30 fps).
+  So with an interop the worker runs `render_worker::RENDER_LANES` (3; env
+  `LP_PLAYER_RENDER_LANES` 1–6) lanes, each its own thread + context + eventfd, and
+  `RenderWorker::attach` puts a new source on the lane with the fewest live sources (`Inner::live`,
+  counted by the callers — an attach on its way counts; ties → the first): B's attach and later A's
+  free (`mpv_render_context_free` destroys the CUDA context too) run beside A, never in front of it
+  (A's longest interval back to 34–54 ms, as in copy mode). Two lanes cover one wallpaper on
+  every output (ping-pong), the third a switch while the previous A still fades out or a second
+  wallpaper on another output; a source never moves. Without an interop (`hwdec_interop` null:
+  not NVIDIA/AMD/Intel, or `LP_PLAYER_HWDEC_INTEROP=off`) an attach costs < 1 ms and the worker
+  runs one lane, as before. Cost per extra lane: a thread, ~4.5 MiB RSS, 50–110 ms more at
+  startup (its first `eglMakeCurrent`, before `player.started`). `Attached {id, lane, ex, worker}`
+  frees/wakes on its own lane; `died`/`shutdown`/`stats` cover every lane (`stats` sums counts,
+  maxes timings, and lists `lanes: [{slots, live, attaches, attach_ms_max, renders, frees,
+  free_ms_max, exited}]`). `render_worker.attach` / `.free {lane, ms}` / `.first_render {lane,
+  slot, ms}` (info from 100 ms, else debug); `ATTACH_WAIT` 10 s (was 3: the process's first interop attach once took > 3 s on a
+  heavily loaded machine — the transition waits 10 s for B anyway).
 - **Split.** The loop keeps the core: event pump, async applies, `read`, load fencing, Ready, the
   front/back textures it shows. The `lp-open` job hands its freshly prepared core to the worker
   (`RenderWorker::attach`, the job waits) which creates the render context with the update callback
@@ -1748,7 +1862,10 @@ frame) — so the loop only samples finished textures; the same thread is where 
 from the scene/web workers land. Until then the loop counts the open share apart
 (`max_open_ms`). These numbers hold for every `hwdec` since Task 20d (copy modes, no GL interop
 init in the render context — § Sources "Hardware decoding"; before, `hwdec=auto` cost 230–320 ms
-and a loadable libcuda 65–90 ms per switch).
+and a loadable libcuda 65–90 ms per switch). **Done since (2026-10-26/27):** the render worker
+owns every real-clock source's render context, and its hwdec GL interop init (the CUDA context)
+runs on an `lp-render` lane, never the loop — zero-copy hardware decoding with the loop's busy per
+switch unchanged (§ Sources "Hardware decoding" → "Zero-copy on the render worker").
 
 **Retire = ramp, then destroy (item 10, core invariant).** `Runtime::retire(id)` — used by
 the `destroy` verb, `stop` and output removal: an audible source (not paused, ready,
@@ -1854,7 +1971,10 @@ gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the la
 20e), `input.pointer` (debug), `loop.failed`,
 `anim.start|done|dropped`,
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
-`step.timeout`, `source.frame_refetched`, `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
+`step.timeout`, `source.frame_refetched`, `render_worker.started|unavailable|stopped|died|
+attach_failed|lane_failed|hwdec_interop|cuda_init|attach|free|first_render` (§ Sources "Render
+worker", "Hardware decoding"), `loop.long_busy {ms, open_ms}` (debug: a synchronous loop stretch
+≥ 50 ms, to line a hitch up with what else happened), `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
 `mpv.options_skipped` (a script trim this libmpv doesn't know, once per process), `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
@@ -1935,8 +2055,10 @@ env_unknown_value}, transitions_done_total (monotonic switch counter), live_sour
 dying_sources, opening, reaper_pending (0 only after the batch's trim)}`,
 `args: {"trim": true}` adds `trim {released, ms, proc_after, malloc_after}` — that trim runs on
 the LOOP thread (debug probe; with hundreds of MiB retained it can drop a frame) (§ Memory);
-`sources` also has `mpv_hwdec_current` (what `hwdec: auto` resolved to) and `mpv_hwdec` (what we
-asked for — copy modes, Task 20d); `snapshot` (Task 16,
+`sources` also has `mpv_hwdec_current` (what `hwdec: auto` resolved to), `mpv_hwdec` (what we
+asked for — copy modes, Task 20d, unless the render context loaded the worker's GL interop) and
+`hwdec_interop` (that interop, or null), plus top-level `render_worker` (null with the worker
+off: summed lane counters, `hwdec_interop`, `lanes` — § Sources "Render worker"); `snapshot` (Task 16,
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs). A new probe = a file here +

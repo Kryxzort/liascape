@@ -4329,8 +4329,12 @@ fn i5_open_burst_is_capped_and_none_lost() {
 /// contend; measured). Scenario A = the dev binary's environment, B = the packaged one
 /// (libcuda on the library path); both without `DISPLAY`/`WAYLAND_DISPLAY` (hermetic, and
 /// the X-less case is the one that stalls). Per switch: the loop's longest synchronous
-/// stretch, and what mpv really decodes with (never a GL interop mode: `no` or a `-copy`
-/// mode, `sources::mpv::mpv_hwdec`).
+/// stretch, and what mpv really decodes with: a LOOP-rendered source never a GL interop mode
+/// (`no` or a `-copy` mode, `sources::mpv::mpv_hwdec`); a source on the render worker with the
+/// worker's interop loaded (`hwdec_interop`, § Sources "Hardware decoding") decodes zero-copy
+/// — the interop's init (a CUDA context) runs on an `lp-render` lane, so the same bound must
+/// hold — and still asks for the copy twin as its fallback. Runs in both render modes
+/// (`LP_PLAYER_RENDER_WORKER`).
 #[test]
 fn t20d_hwdec_switch_never_stalls_the_loop() {
     // SKIP (no EGL / no catalogue — e.g. the nix build sandbox, which has no ffmpeg either)
@@ -4373,6 +4377,7 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
         for hwdec in modes {
             let mut busy = Vec::new();
             let mut picked = Vec::new();
+            let mut interop = Vec::new();
             for _ in 0..6 {
                 std::thread::sleep(Duration::from_millis(300));
                 c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
@@ -4415,14 +4420,31 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
                         "{label}, hwdec={hwdec}: mpv was asked for {asked:?}, not a copy mode"
                     ));
                 }
+                // The render context's interop: only ever on the worker, only for a hardware
+                // hwdec (the async open skips it for `no`).
+                let mode = src.map(|s| s["render_mode"].clone()).unwrap_or_default();
+                let io = src.and_then(|s| s["hwdec_interop"].as_str().map(str::to_string));
+                if io.is_some() && (mode != json!("worker") || *hwdec == "no") {
+                    failures.push(format!(
+                        "{label}, hwdec={hwdec}: interop {io:?} loaded on a {mode} source"
+                    ));
+                }
+                // NVIDIA with the CUDA interop loaded: zero-copy really in use (a silent
+                // fallback to the copy would keep the CPU cost this exists to remove).
+                if io.as_deref() == Some("cuda") && cur != "nvdec" {
+                    failures.push(format!(
+                        "{label}, hwdec={hwdec}: CUDA interop loaded but mpv decodes with {cur:?}"
+                    ));
+                }
                 picked.push(cur);
+                interop.push(io);
             }
             let mut warm = busy[1..].to_vec();
             warm.sort_by(|x, y| x.partial_cmp(y).unwrap());
             let median = warm[warm.len() / 2];
             println!(
                 "T20d {label}, hwdec={hwdec}: max_busy_ms {busy:.1?} (warm median {median:.1}), \
-                 mpv decodes with {picked:?}"
+                 mpv decodes with {picked:?}, interop {interop:?}"
             );
             // Fixed, every mode costs what `hwdec=no` does (I5: 8–26 ms per switch; medians
             // 16–36 ms here with the full suite and other GPU work running); the traps this
@@ -4433,10 +4455,15 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
                      (median; bound 50): {busy:.1?}, decoder {picked:?}"
                 ));
             }
-            if let Some(bad) = picked.iter().find(|h| *h != "no" && !h.ends_with("-copy")) {
+            // A zero-copy decoder only where its interop was loaded (the worker).
+            if let Some((bad, _)) = picked
+                .iter()
+                .zip(&interop)
+                .find(|(h, io)| *h != "no" && !h.ends_with("-copy") && io.is_none())
+            {
                 failures.push(format!(
-                    "{label}, hwdec={hwdec}: mpv decodes with GL interop mode {bad:?} — its \
-                     init runs in the render context on the loop"
+                    "{label}, hwdec={hwdec}: mpv decodes with GL interop mode {bad:?} without \
+                     the worker's interop — its init runs in a render context on the loop"
                 ));
             }
         }
@@ -4947,17 +4974,19 @@ fn render_worker_switch_picks_where_sources_render() {
     assert!(p["render_worker"].is_null(), "stepped: {p}");
 }
 
+/// Both Flash clips' length in frames.
+const FLASH_FRAMES: u32 = 56;
 const FLASH_A: ClipSpec = ClipSpec::Flash {
     w: 128,
     h: 72,
     fps: 30,
-    frames: 56,
+    frames: FLASH_FRAMES,
 };
 const FLASH_B: ClipSpec = ClipSpec::Flash {
     w: 192,
     h: 108,
     fps: 24,
-    frames: 56,
+    frames: FLASH_FRAMES,
 };
 
 /// A captured PNG's Flash frame index if the picture is ONE frame (every pixel within ±3 of
@@ -4990,12 +5019,20 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
 /// of sight. RED: `LP_PLAYER_TEST_RENDER_WORKER_FAULT=publish-early` (each target handed to the
 /// loop before the worker renders into it). `no-fence` (frames published unfenced, before
 /// their flush) stays GREEN on NVIDIA 595: the driver serializes shared-texture access itself.
+/// Each case also with `hwdec: auto` — zero-copy through the worker's GL interop (§ Sources
+/// "Hardware decoding": CUDA writes mpv's textures, the lane renders them into ours, the fence
+/// covers both) — the two sources on two lanes.
 #[test]
 fn render_worker_never_composes_a_torn_frame() {
     let a_clip = s(&ensure_clip("flash_128x72_30", FLASH_A)).to_string();
     let b_clip = s(&ensure_clip("flash_192x108_24", FLASH_B)).to_string();
     let inherited = std::env::var("LP_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
-    for extra in ["", "slow-flush"] {
+    for (extra, hw) in [
+        ("", ""),
+        ("slow-flush", ""),
+        ("", "auto"),
+        ("slow-flush", "auto"),
+    ] {
         let fault: Vec<&str> = [inherited.as_str(), extra]
             .into_iter()
             .filter(|f| !f.is_empty())
@@ -5008,8 +5045,8 @@ fn render_worker_never_composes_a_torn_frame() {
             return;
         };
         let mut c = srv.client();
-        let a = create_src(&mut c, json!({"path": a_clip, "paused": true}));
-        let b = create_src(&mut c, json!({"path": b_clip, "paused": true}));
+        let a = create_src(&mut c, json!({"path": a_clip, "paused": true, "hwdec": hw}));
+        let b = create_src(&mut c, json!({"path": b_clip, "paused": true, "hwdec": hw}));
         c.ok(
             "set",
             json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
@@ -5072,7 +5109,7 @@ fn render_worker_never_composes_a_torn_frame() {
         };
         let p = c.ok("probe", json!({"name": "sources"}));
         println!(
-            "torn-frame [{fault}]: {k} rounds; first/last {:?}; distinct {:?}; worker {}; a {}; b {}",
+            "torn-frame [{fault} hwdec={hw}]: {k} rounds; first/last {:?}; distinct {:?}; worker {}; a {}; b {}",
             seen.iter()
                 .map(|v| (v.first().copied(), v.last().copied()))
                 .collect::<Vec<_>>(),
@@ -5081,17 +5118,29 @@ fn render_worker_never_composes_a_torn_frame() {
             source_probe(&mut c, &a)["render"],
             source_probe(&mut c, &b)["render"],
         );
+        let decoders = [&a, &b].map(|id| source_probe(&mut c, id)["mpv_hwdec_current"].clone());
+        println!("torn-frame [{fault} hwdec={hw}]: decoders {decoders:?}");
         assert!(
             bad.is_empty(),
-            "[{fault}] {} bad captures of {}: {:#?}",
+            "[{fault} hwdec={hw}] {} bad captures of {}: {:#?}",
             bad.len(),
             seen.iter().map(Vec::len).sum::<usize>() + bad.len(),
             &bad[..bad.len().min(20)]
         );
-        // The captures followed the playback (not one frame held throughout).
+        // The captures followed the playback (not one frame held throughout): at least half of
+        // the captures taken before the clip's last frame show a frame of their own. Relative
+        // to what was captured — a loaded machine captures fewer times in the window (a
+        // debug-build PNG encode per capture; seen: 25 rounds instead of 37), and a clip that
+        // reached its last frame holds it by design; an absolute count (20, 10) flaked there.
         for (i, v) in seen.iter().enumerate() {
-            let want = if i == 2 { 10 } else { 20 };
-            assert!(distinct(v) >= want, "[{fault}] {}: {v:?}", targets[i]);
+            let last = FLASH_FRAMES - 1;
+            let playing: Vec<u32> = v.iter().copied().filter(|&n| n < last).collect();
+            let want = (playing.len() / 2).max(5);
+            assert!(
+                distinct(&playing) >= want,
+                "[{fault} hwdec={hw}] {}: {v:?}",
+                targets[i]
+            );
         }
     }
 }

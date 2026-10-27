@@ -24,6 +24,7 @@ use common::{ClipSpec, ensure_clip, headless_gl, read_rgba};
 use glow::HasContext;
 use lp_player::gfx::Gfx;
 use lp_player::graph::PropValue;
+use lp_player::sources::mpv::mpv_hwdec;
 use lp_player::sources::{ColorSource, MpvSource, RenderWorker, Source, SourceEvent};
 use serde_json::{Map, Value, json};
 
@@ -48,7 +49,14 @@ fn open_src(
         return MpvSource::open(gfx, path, o);
     }
     let worker = RenderWorker::start(gfx).expect("render worker");
-    let core = MpvSource::prepare_core(o)?.attach_render(&worker)?;
+    // The hwdec GL interop exactly when the runtime's async open asks for it (`sources::host`:
+    // a hardware `hwdec` this interop can show; an image never).
+    let hw = o.get("hwdec").and_then(Value::as_str).unwrap_or("");
+    let interop = worker.hwdec_interop().is_some_and(|i| {
+        mpv_hwdec(hw, Some(i)) != mpv_hwdec(hw, None)
+            && o.get("kind").and_then(Value::as_str) != Some("image")
+    });
+    let core = MpvSource::prepare_core(o)?.attach_render(&worker, interop)?;
     MpvSource::open_with_core(gfx, path, o, core)
 }
 
@@ -284,6 +292,122 @@ fn frame_exact_seek() {
     // The rest of the frame is mid-grey — proves we read the marker, not a flat frame.
     let rest = read_rgba(&gfx, tex, tex.w / 2, tex.h / 2);
     assert_rgb(rest, [128, 128, 128], 2, "mid-grey background");
+}
+
+/// § Sources "Hardware decoding": a hardware `hwdec` on the render worker decodes zero-copy
+/// through the worker's GL interop (nvdec frames written into mpv's textures by CUDA, then
+/// rendered into ours on the lane and fenced) — and the picture is exactly the software
+/// one: orientation (R25), colours within ±3, a frame-exact seek's marker within ±1, frames
+/// advancing while playing. On the loop (worker off) the same `hwdec` stays a copy mode with
+/// no interop in the render context (Task 20d). Torn/stale frames under fence faults with the
+/// interop: `tests/api.rs::render_worker_never_composes_a_torn_frame` (its `hwdec: auto` cases).
+#[test]
+fn hardware_decoding_matches_software_in_both_render_modes() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let split = ensure_clip(
+        "split_red_over_blue",
+        ClipSpec::SplitV {
+            top: [255, 0, 0],
+            bottom: [0, 0, 255],
+            secs: 2.0,
+        },
+    );
+    let src = open_ready(
+        &gfx,
+        path_str(&split),
+        json!({"paused": true, "hwdec": "auto"}),
+    );
+    let interop = src.hwdec_interop();
+    let cur = src.mpv_get_string("hwdec-current").unwrap_or_default();
+    let loaded = src.mpv_get_string("gpu-hwdec-interop").unwrap_or_default();
+    println!(
+        "render {}: interop {interop:?} (mpv {loaded:?}), hwdec {:?} → {cur:?}",
+        src.render_mode(),
+        src.mpv_get_string("hwdec")
+    );
+    if worker_mode() {
+        assert_eq!(src.render_mode(), "worker");
+        assert_eq!(loaded, interop.unwrap_or("no"));
+        if interop == Some("cuda") {
+            assert_eq!(cur, "nvdec", "the CUDA interop is loaded: zero-copy nvdec");
+        }
+    } else {
+        assert_eq!(interop, None);
+        assert_eq!(loaded, "no", "no interop init in a loop render context");
+        assert!(cur == "no" || cur.ends_with("-copy"), "{cur:?}");
+    }
+    let tex = src.texture().expect("texture after Ready");
+    assert_rgb(
+        read_rgba(&gfx, tex, tex.w / 2, tex.h / 8),
+        [255, 0, 0],
+        3,
+        "low y (t≈0) must be the image TOP (red)",
+    );
+    assert_rgb(
+        read_rgba(&gfx, tex, tex.w / 2, tex.h * 7 / 8),
+        [0, 0, 255],
+        3,
+        "high y must be the image BOTTOM (blue)",
+    );
+    drop(src);
+
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let mut src = open_ready(
+        &gfx,
+        path_str(&clip),
+        json!({"paused": true, "hwdec": "auto"}),
+    );
+    let wake = Some(src.wake_fd());
+    src.apply("position", &PropValue::F64(2.0))
+        .expect("seek applies");
+    let (evs, ok) = pump(
+        &gfx,
+        &mut src,
+        wake,
+        Duration::from_secs(3),
+        |_, s| matches!(s.read("time_pos"), Some(PropValue::F64(t)) if (t - 2.0).abs() < 1e-3),
+    );
+    assert!(ok, "time_pos never reached 2.0; events: {evs:?}");
+    pump(&gfx, &mut src, wake, Duration::from_millis(300), |_, _| {
+        false
+    });
+    let tex = src.texture().expect("texture");
+    assert_rgb(
+        read_rgba(&gfx, tex, 32, 32),
+        [60, 60, 60],
+        1,
+        "marker after a seek to 2.0 s (frame 60)",
+    );
+    assert_rgb(
+        read_rgba(&gfx, tex, tex.w / 2, tex.h / 2),
+        [128, 128, 128],
+        2,
+        "mid-grey background",
+    );
+    // Playing: the texture keeps following the decoder (every adopted frame a whole one —
+    // a marker on the ladder, never a blend of two).
+    src.apply("paused", &PropValue::Bool(false)).unwrap();
+    let mut markers = Vec::new();
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_millis(900) {
+        pump(&gfx, &mut src, wake, Duration::from_millis(40), |_, _| {
+            false
+        });
+        if let Some(tex) = src.texture() {
+            let px = read_rgba(&gfx, tex, 32, 32);
+            assert!(
+                (px[0] as i32 - px[1] as i32).abs() <= 1
+                    && (px[1] as i32 - px[2] as i32).abs() <= 1,
+                "marker not grey (torn/garbled frame?): {px:?}"
+            );
+            markers.push(px[0]);
+        }
+    }
+    markers.dedup();
+    assert!(
+        markers.len() >= 10 && markers.windows(2).all(|w| w[1] > w[0]),
+        "frames must advance while playing: {markers:?}"
+    );
 }
 
 /// `loop = true`: never `Ended`; `Position` keeps flowing at ≤ ~10 Hz.
