@@ -386,3 +386,25 @@ the frame times above.
   - +1 597 lines for the public C API and its `frontends/` glue alone
 - Re-creating an embedding API on master would be a patch of that order, about 1.6 k lines of API plus the
   render-target and clock plumbing. The spike shows we do not need to write it.
+
+## 8. Phase 2 follow-up (2026-10-27): assets-free scenes — the D7 probe
+
+Plan Task 1 Step 6 asked to record here whether a scene renders without WE's `assets/` (it
+said §7, which this file already used). **It does, for a clear colour alone:**
+`patches/lwe/tests/fixtures/min-scene` (`project.json` type scene + a `scene.json` with a camera,
+`general.clearcolor` `0.2 0.4 0.6`, a 64×32 orthogonal projection and no objects) builds with no
+assets dir at all (`wp_config_set_assets_dir` refuses an empty dir; Steam auto-detection finds no
+WE in the primary library here): native size 64×32, centre pixel `51 102 153 255` after three
+frames (`host_api_test` `min_scene_renders_without_assets`, the patched core). Anything with an
+image, particle, text or effect needs `assets/shaders/*` (and `general.bloom` pulls in
+`genericimage2` too), so real Workshop scenes stay on-machine (D7); the min-scene is a hermetic
+real-LWE fixture for Tasks 4–9 if one is wanted (the synthetic renderer stays the main one).
+
+A deterministic **broken build** needs no missing assets either: `fail-scene` (one object whose
+`parent` does not exist) loads, then `CScene`'s constructor throws "Cannot find parent" — the
+§4.4 crash reproduced without the owner's library (fixed by `patches/lwe/0004`).
+
+The patched core (`patches/lwe/0001–0006`, `UPSTREAM.md`) rendered real scenes through
+`lp-scene-worker --lwe-smoke` with the host audio driver: 2371103399 (3840×1080, 0 GL errors,
+one sound stream pulled by the host, no SDL device) and 1726902114 (2048×1423) — frames upright
+and matching the previews (`.claude/rules/player-core.md` § Scene worker → "LWE core").

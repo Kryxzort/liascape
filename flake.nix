@@ -88,6 +88,64 @@
         '';
       };
 
+      # 3b') LWE (linux-wallpaperengine) `next-v2` core — the scene worker's renderer (Phase 2).
+      # third_party/lwe/PIN is the single source of truth: the owner's fork at `rev` = upstream's
+      # pinned `next-v2` commit (`base`) + our patches as commits (patches/lwe/*.patch is the same set
+      # as `git format-patch`; `scripts/lwe.sh verify` proves it). Fetched by hash, submodules
+      # included; only the `linux-wallpaperengine-core` target is built (no CEF/webhelper, no GLFW
+      # frontend). Output: lib/liblinux-wallpaperengine-core.so* + include/linux-wallpaperengine/*.h
+      # = what `LP_LWE_CORE_DIR` points at.
+      lwePin = builtins.fromJSON (builtins.readFile ./third_party/lwe/PIN);
+      lwe-src = pkgs.fetchFromGitHub {
+        owner = lwePin.owner;
+        repo = lwePin.name;
+        rev = lwePin.rev;
+        hash = lwePin.nix_hash;
+        fetchSubmodules = true;
+      };
+      lwe-core = pkgs.stdenv.mkDerivation {
+        pname = "lwe-core";
+        version = "${lwePin.version}-${builtins.substring 0 7 lwePin.rev}";
+        src = lwe-src;
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.pkg-config
+        ];
+        buildInputs = [
+          pkgs.SDL2
+          pkgs.freetype
+          pkgs.glm
+          pkgs.lz4
+          pkgs.zlib
+          pkgs.libGL
+          pkgs.ffmpeg
+          pkgs.mpv-unwrapped
+        ];
+        cmakeFlags = [
+          "-DWPBUILD_CORE=ON"
+          "-DWPBUILD_WEBHELPER=OFF"
+          "-DWPBUILD_FRONTEND=OFF"
+          "-DWPBUILD_DEVVIEWER=OFF"
+          "-DWPBUILD_TESTS=OFF"
+          "-DWPBUILD_VERSION_OVERRIDE=${lwePin.version}"
+        ];
+        # the core *target* only: `all` would compile the dev-viewer/webhelper OBJECT libraries,
+        # which are declared before their option gate and need GLFW/CEF headers
+        buildPhase = ''
+          runHook preBuild
+          cmake --build . --target linux-wallpaperengine-core -j$NIX_BUILD_CORES
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out/lib $out/include/linux-wallpaperengine
+          cp -P lib/liblinux-wallpaperengine-core.so* $out/lib/
+          cp ../include/linux-wallpaperengine/*.h generated/version.h $out/include/linux-wallpaperengine/
+          echo ${lwePin.rev} > $out/REV
+          runHook postInstall
+        '';
+      };
+
       # 3c) lp-player (Rust): the "utopia player" compositor that will replace mpvpaper +
       # lp-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
       # .claude/rules/player-core.md. bindgenHook + pkg-config are wired now even though this
@@ -113,6 +171,8 @@
         # The dropout detector's tests decode reference audio with ffmpeg (CPU only — they run
         # in the sandbox; the GPU tests SKIP there without an EGL device).
         nativeCheckInputs = [ pkgs.ffmpeg ];
+        # feature `lwe` (default): lp-scene-worker links LWE's core (build.rs; RUNPATH = this)
+        LP_LWE_CORE_DIR = "${lwe-core}";
         # R86: libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
         # NixOS lives outside the Nix store at /run/opengl-driver/lib (the standard impure
         # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
@@ -197,7 +257,15 @@
     in
     {
       packages.${system} = {
-        inherit ui backend lp-transition lp-audio lp-player livepaper;
+        inherit
+          ui
+          backend
+          lp-transition
+          lp-audio
+          lwe-core
+          lp-player
+          livepaper
+          ;
         default = livepaper;
       };
       apps.${system}.default = {
@@ -219,6 +287,7 @@
           lp-transition
           lp-audio
           lp-player
+          lwe-core # cmake + SDL2/freetype/glm/lz4/zlib/GL: `scripts/lwe.sh build` for patch work
         ];
         packages = [
           pkgs.dotnet-sdk_10
@@ -230,6 +299,10 @@
           pkgs.rust-analyzer
         ] ++ runtimeTools;
         DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
+        # `cargo build` links lp-scene-worker against the pinned core (feature `lwe`, default).
+        # Patch work on LWE: `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build`, then
+        # LP_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).
+        LP_LWE_CORE_DIR = "${lwe-core}";
       };
     };
 }

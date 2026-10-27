@@ -1,0 +1,25 @@
+{
+  "repo": "https://github.com/Kryxzort/linux-wallpaperengine",
+  "owner": "Kryxzort",
+  "name": "linux-wallpaperengine",
+  "branch": "livepaper/next-v2",
+  "rev": "c5c2caddff06964611a7ae08e6406df3c3f3bcd9",
+  "upstream": "https://github.com/Almamu/linux-wallpaperengine",
+  "upstream_branch": "next-v2",
+  "base": "ddea3b493d2f4cca78a2e9547c4e61b92a14e0fc",
+  "date": "2026-08-03",
+  "version": "0.0.1",
+  "nix_hash": "sha256-lNaOPPVD3/eLzdgnW4jlzShl01/p17an5iOK7Gr4irI=",
+  "submodules": {
+    "src/External/Catch2": "b3fb4b9feafcd8d91c5cb510a4775143fdbef02f",
+    "src/External/MimeTypes": "8990d6a796bd9904ec3d41e5c150a1ffb48fe32e",
+    "src/External/SPIRV-Cross-WallpaperEngine": "ad4d02220b01c1800e5a4e6671d6d8ca8ab07783",
+    "src/External/argparse": "d924b84eba1f0f0adf38b20b7b4829f6f65b6570",
+    "src/External/glslang-WallpaperEngine": "b775500a153f5ceb0e4b6f366b79c4c57521bb62",
+    "src/External/json": "4424a0fcc1c7fa640b5c87d26776d99150dacd10",
+    "src/External/kissfft-WallpaperEngine": "dde6f9b19f8e850507c3fadfdb256d50d88d6608",
+    "src/External/quickjs": "d17c3228b21be8bc914809437f6e04519cfa82cc",
+    "src/External/source-parsers": "0bce23e8088a4111535af9bce1b95f3ff381082f",
+    "src/External/stb": "f0569113c93ad095470c54bf34a17b36646bbbb5"
+  }
+}

@@ -21,3 +21,5 @@ src/native/lp-audio/lp-audio
 scripts/gl-transitions/
 # Claude Code agent worktrees (isolated copies, never part of the tree)
 .claude/worktrees/
+# LWE core: scripts/lwe.sh prepare/build output (build/lwe-src-*, build/lwe-build-*, build/lwe-core)
+/build/

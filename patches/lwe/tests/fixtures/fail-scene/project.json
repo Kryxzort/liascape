@@ -1,0 +1,6 @@
+{
+	"title" : "lp-player fail-scene (loads, renderer build throws)",
+	"type" : "scene",
+	"file" : "scene.json",
+	"general" : {}
+}
