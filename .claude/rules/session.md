@@ -38,6 +38,17 @@ paths:
 
 `PlayerHelper.ApplyTimedPlaylist`: `System.Threading.Timer` ticks every 100ms. Decrement uses `DateTime.UtcNow` deltas (no jitter drift). On shuffle, `AdvanceToNext` re-randomizes at end of each cycle with do/while guarantee new cycle's first ≠ old cycle's last. State written to `~/.config/livepaper/timed_state.json` only on significant events (not every tick) — in-memory `_timedRemainingMs` is authoritative.
 
+**Tick lifetime (`EnsureTimedTick`)**: the tick runs the interval AND takes every queued user switch
+(pending-action IPC below), so a timed session with > 1 item always has one — **whatever its interval** (pure
+advance-on-end too; Tick ignores the countdown there) — and gets one when its list GROWS past one item
+(`ReorderPlaylist` — Undo of a trash, a strip add — `AppendToActivePlaylist`, `UpdateTimedSettings`). Every start
+site goes through it (null-guarded: no second tick). A live list edit (`takeBack: false`) never restarts it in a
+process that `ReleaseTimer`ed. Before: started only at a session (re)start with > 1 item AND interval > 0 → a pure
+advance-on-end session never took a next/prev/random (keybind or UI), and a session that started with one item (a
+trash leaving one survivor) stayed tickless after Undo — `pending_action.txt` sat untaken while `/current` said
+timed. A 1-item session still has no tick. `RestartCurrentAndLaunch` relaunches `PlayingHistoryIndex` (not an
+advance-on-end session's pre-fetch). Guard: matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`.
+
 **Tick state sync**: each tick calls `RefreshSignals()` (re-reads only `TimerStopped`/`TimerPaused`). Owner's `_timedRemainingMs` / history untouched.
 
 **`TimedState` record** fields: `TimerStopped`, `TimerPaused`, `AdvanceOnVideoEnd`, `WaitingForVideoEnd`. On restore, `LoadTimedState` restores `_advanceOnVideoEnd`/`_waitingForVideoEnd`, then `RearmAdvanceOnVideoEnd()` re-arms `DoVideoEndWait`. When `_waitingForVideoEnd=true`, `_historyIndex` is pre-fetched one step ahead — `RestoreTimedPlaylist` adjusts back by one before `SwitchToFile`, then calls `RearmAdvanceOnVideoEnd()`.

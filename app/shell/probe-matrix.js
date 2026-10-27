@@ -1791,6 +1791,35 @@ C["seq:random+prev"] = { states: ["playlist", "pending"], switch: true, async ru
     await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
     await cliStep(c, "previous-wallpaper");
   }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.from, c.tries + 1), ...armedCheck(c, c.landed)] }; // history: next after previous = the pick again
+// a playlist that only advances at each video's end (interval 0 — no countdown) played, then next: it's taken. The tick
+// (which takes every queued next / previous / random) only started with an interval, so the keybind and the UI's
+// next queued pending_action.txt for nobody
+C["seq:plPlayAdvanceOnly+next"] = { states: ["pending"], switch: true, async run(c) {
+    await post("/playlist/play", { ...PENDING_PL(), settings: PS({ advanceOnVideoEnd: true, transitionDurationMs: 600, intervalSeconds: 0 }) });
+    await sleep(500); await waitSettled(8000);
+    c.mid = (await http("GET", "/current")).json?.path ?? null; c.want = succ(c.before.ps?.videoPaths, c.mid);
+    await cliStep(c, "next-wallpaper");
+  }, check: (c) => [...expectShownN(c, c.want, 2), ...armedCheck(c)] };
+// remove the other item from the strip (the session plays on with two), trash what plays (it plays on from the one
+// survivor: a one-item session) → Undo (both back) → next: the rotation still takes it. A one-item session started no
+// tick and putting items back never started one — the queued next (pending_action.txt) was never taken while
+// /current said timed (fuzz: playlist → stripRemove:other → trashUndo:shown → cli:next-wallpaper)
+C["seq3:stripRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    c.removed = c.other; if (!c.removed || !(await stripHas(c, c.removed))) return c.skip = "not in strip";
+    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.removed))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
+    c.target = c.shown; c.exp.paused = false;
+    await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(1200); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
+    await sleep(900); await waitSettled(8000);
+    c.mid = (await http("GET", "/current")).json?.path ?? null;
+    c.midPs = (await http("GET", "/playlist/state")).json?.videoPaths || [];
+    c.want = succ(c.midPs, c.mid);
+    await cliStep(c, "next-wallpaper");
+  }, check(c) {
+    const v = [];
+    if (!c.midPs.includes(c.target)) v.push(`${TITLE(c.target)} not back in the playlist after Undo (${JSON.stringify(c.midPs.map(TITLE))})`);
+    if (c.mid === c.target || !c.mid) v.push(`trashing ${TITLE(c.target)} left ${TITLE(c.mid)} on screen`);
+    return [...v, ...expectShownN(c, c.want, 2), ...armedCheck(c)];
+  } };
 
 function expectShown(c, want, { effect }) {
   const v = [];
@@ -2004,6 +2033,7 @@ const FUZZ_RULES = [
   [/^(stripRemove|stripRemoveMenu):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:stripRemove\+next:/, { shrinks: true }],
+  [/^seq3:stripRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
   // Settings → "Mute audio" on disables the Volume slider and "Normalize audio" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
