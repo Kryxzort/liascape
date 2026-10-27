@@ -29,8 +29,23 @@ built: `.claude/rules/player-core.md`, `.claude/rules/player-adapter.md`. Execut
 
 ## Decisions for the owner
 
-The plan below is written for the recommended option of each. The table after the list says what changes if you
-pick the alternative.
+**Decided by the owner, 2026-10-27** (interview):
+- **D1 shared worker** · **D2 Rust** · **D5 30 fps** · **D6 skip unless whitelisted** — as recommended.
+- **D3 a fork on the owner's GitHub** (`Kryxzort/linux-wallpaperengine`): our patches are commits on a branch there,
+  the build fetches the fork by hash. Survives upstream deleting anything; patches stay PR-able upstream. Task 1
+  changes: `third_party/lwe/PIN` names the fork + commit; `patches/lwe/` is generated from the fork branch
+  (`git format-patch`) so `CREDITS.md`/`tests/credits.rs` keep working. Creating the fork is an outward action — ask
+  the owner right before doing it.
+- **D4 exactly like Wallpaper Engine**: WE always listens to all system audio (Windows can't tell programs apart —
+  help.wallpaperengine.io/en/audio/limittomusicplayer.html), which includes a wallpaper's own sound; that's why some
+  wallpapers seemed to react only to themselves. So: the default sink's monitor. Build the visualiser input as a mix
+  of PipeWire streams (not one opaque monitor capture) so a **future per-app white/blacklist** for visualisers can
+  plug in.
+- **D7 both**: the synthetic renderer for exact/repeatable checks (crash on command, timing, every switch combo), AND
+  matrix/IT cells that play real SFW scenes from `~/.local/share/Steam/steamapps/workshop/content/431960` with the
+  owner's installed WE `assets/` whenever WE is installed (skipped, with a printed reason, when it isn't).
+
+The original recommendations follow for reference.
 
 1. **D1 — Same scene on several outputs:** one worker per scene source, shared by every output showing it (like videos). **Recommend this.** Spec §4.3 says one worker per output; that doubles GPU/VRAM and needs per-output plumbing (+1 L task) for little isolation gain.
 2. **D2 — Worker language:** Rust binary `lp-scene-worker` in the lp-player crate, calling LWE's C API. **Recommend this.** Alternative: C++ (spec §13's note).
