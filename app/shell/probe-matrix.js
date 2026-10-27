@@ -1006,6 +1006,19 @@ C["plState:partial"] = { states: ["idle"], async run(c) {
     return v;
   } };
 
+// A switch that FAILS (a file mpv can't play): A stays on screen, but every client was told B when it was requested
+// (wallpaper-changed) — the UI went on marking a wallpaper playing that never showed. The shared checks compare the
+// UI's playing mark and the screen with /current.
+C["apply:broken"] = { states: ["single", "paused"], expectFail: true, exp: { paused: false } /* an apply is a new session */, async run(c) {
+    const dir = path.join(path.dirname(path.dirname(K[0])), "kbroken"), bad = path.join(dir, "kbroken.mp4");
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(bad, Buffer.alloc(256 * 1024, 0x5a)); // not a video
+    const t0 = Date.now();
+    await post("/apply", { path: bad });
+    c.failed = await waitFor(() => events.some((e) => e._t >= t0 && e.event === "transition.failed"), 15000, 100);
+    await sleep(400);
+    try { fs.unlinkSync(bad); fs.rmdirSync(dir); } catch {}
+  }, check: (c) => c.failed ? [] : ["the switch to the broken file never failed (the cell tests a FAILED switch)"] };
+
 // --- the global Settings page's Rotation section + transition method, with an aligned switch armed: a playlist
 // that follows the globals (pendingGlobal) takes the change in its armed switch; one with its own override
 // (pending) keeps its own (a global change never clobbers an override)
@@ -1789,8 +1802,8 @@ async function runCell(stateName, ctlName) {
   c.evs = events.filter((e) => e._t >= t0);
   const v = [...oracle(c.after, c.exp), ...(K_.check ? K_.check(c, c.before, c.after) : [])];
   for (const e of c.evs) {
-    if (e.event === "transition.failed") v.push(`transition.failed ${e.corr}: ${e.reason}`);
-    if (e.event === "source.error") v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
+    if (e.event === "transition.failed" && !K_.expectFail) v.push(`transition.failed ${e.corr}: ${e.reason}`);
+    if (e.event === "source.error" && !K_.expectFail) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
     if (e.event === "source.rejected") v.push(`source.rejected ${e.prop}: ${e.reason}`);
     if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
     if (e.event === "transition.scheduled" && K_.noSwitch) v.push(`a switch was requested (${TITLE(e.path)})`);
@@ -1810,10 +1823,21 @@ async function runCell(stateName, ctlName) {
   // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`--action took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
   lap("post");
+  // a failed switch: the player's own story of it (ctl logs {corr}) + what each source was doing, while the stack lives
+  let player;
+  const failed = v.length && c.evs.find((e) => e.event === "transition.failed");
+  if (failed) player = {
+    logs: ((await ctl.call("logs", { corr: failed.corr, limit: 120 }).catch(() => null))?.events || [])
+      .map((e) => `${e.t_mono_ms?.toFixed(0)} ${e.comp} ${e.kind} ${JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !["t_mono_ms", "t_wall", "comp", "kind", "corr", "level"].includes(k))))}`.slice(0, 400)),
+    warns: ((await ctl.call("logs", { min_level: "warn", limit: 40 }).catch(() => null))?.events || []).map((e) => `${e.t_mono_ms?.toFixed(0)} ${e.kind} ${JSON.stringify(e).slice(0, 300)}`),
+    sources: await ctl.call("probe", { name: "sources" }).catch((e) => String(e)),
+    source: ((await ctl.call("logs", { kind_prefix: "source.", limit: 300 }).catch(() => null))?.events || [])
+      .filter((e) => e.kind !== "source.position").map((e) => `${e.t_mono_ms?.toFixed(0)} ${e.kind} ${JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !["t_mono_ms", "t_wall", "comp", "kind", "level"].includes(k))))}`.slice(0, 300)),
+  };
   const known = v.length ? KNOWN.find(([re]) => re.test(`${stateName} × ${ctlName}`))?.[1] : undefined;
   return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings, phases: ph,
     target: c.target ? TITLE(c.target) : undefined, shown: c.shown ? TITLE(c.shown) : undefined,
-    logs: v.length ? logsSince(logAt) : undefined,
+    logs: v.length ? logsSince(logAt) : undefined, player,
     http: v.length ? httpLog.slice(h0).filter((r) => !asset.test(r.url)).map((r) => `+${r.t - t0}ms ${r.method} ${r.url.replace(U, "")} ${r.status}`) : undefined,
     events: v.length ? c.evs.map((e) => `+${e._t - t0}ms ${e.event} ${e.corr ?? ""} ${e.path ? TITLE(e.path) : ""} ${e.reason ?? ""} ${e.effect_id ?? ""}`.trim()) : undefined };
 }

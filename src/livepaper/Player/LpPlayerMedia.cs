@@ -202,6 +202,11 @@ public static class LpPlayerMedia
         var corr = c.GetString()!;
         Interlocked.Increment(ref _eventOutcomes);
         Record(corr, outcome);
+        // our latest switch FAILED (a file mpv can't play): A stays on screen, but every client was told B when it was
+        // requested (wallpaper-changed) — the UI marked a wallpaper playing that never showed (matrix apply:broken).
+        // Tell them what's really there; off this callback, which must never block on a request.
+        if (kind == "transition.failed" && corr == _lastCorr)
+            _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
     }
 
     private static int _eventOutcomes;

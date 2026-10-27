@@ -306,6 +306,10 @@ asks `logs {corr, kind_prefix:"transition."}` as a safety net (a reconnect gap c
 player pid (`Generation`) ends it as "failed:player restarted". `SwitchAndWait` waits for the event
 subscription ack before requesting, and returns "handoff" | "cancelled:…" | "failed:…" | "unreachable"
 | "caller-cancelled" (→ `cancel {corr}`; `unsupported` = it had already handed off).
+**Our latest switch failing** (`transition.failed` for `LastCorr` — a file mpv can't play, B never
+ready) leaves A on screen, but every client was told B when it was requested (`wallpaper-changed`):
+`OnEvent` re-broadcasts `wallpaper-changed` with `CurrentPath()` (off the event thread). Matrix
+`apply:broken` (a garbage `.mp4`; RED: the UI kept marking the file that never showed).
 
 ## Debugging
 - Adapter log: `~/.cache/livepaper/lp-player-adapter.log` (+ stderr → the serve unit's journal),
