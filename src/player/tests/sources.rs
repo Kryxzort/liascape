@@ -966,6 +966,33 @@ fn builtin_scripts_are_not_loaded() {
     );
 }
 
+/// Crash on rapid superseding switches (2026-10-26, SIGSEGV in the compositor): mpv ≥ 0.40
+/// gives every core a native clipboard at `mpv_initialize` — on X11 (no `WAYLAND_DISPLAY`,
+/// a reachable `DISPLAY`) its own X connection on its own thread, on Wayland its own
+/// `ext-data-control` connection to the compositor. A wallpaper never reads the clipboard,
+/// and when that X connection drops, mpv's clipboard thread `XCloseDisplay`s it → Xlib's
+/// default I/O error handler → `exit(1)` from mpv's thread → the NVIDIA EGL atexit
+/// teardown under the loop's GL → SIGSEGV. No backend at all, in any environment: the
+/// option reads back empty and the core reports no clipboard backend. RED before:
+/// `current-clipboard-backend` = `wayland` (a session's `WAYLAND_DISPLAY`), `x11`, or `vo`.
+#[test]
+fn no_clipboard_backend_per_core() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
+    settle(&gfx, &mut src);
+    assert_eq!(
+        src.mpv_get_string("current-clipboard-backend"),
+        None,
+        "an mpv core runs a clipboard backend"
+    );
+    assert_eq!(
+        src.mpv_get_string("options/clipboard-backends").as_deref(),
+        Some(""),
+        "options/clipboard-backends"
+    );
+}
+
 /// Fix round 1 (#8): a wrong-typed `open` option is `bad_type`; an mpv rejection of a
 /// well-typed value at open is `out_of_range` (not `io`, which is for real I/O).
 #[test]

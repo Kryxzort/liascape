@@ -82,6 +82,18 @@ pub(crate) const SCRIPT_TRIMS: [(&str, &str); 10] = [
     ("input-builtin-bindings", "no"),
 ];
 
+/// No native clipboard per core. mpv ≥ 0.40 starts one at `mpv_initialize` (backends
+/// `wayland`, `x11`, `vo` by default): with `WAYLAND_DISPLAY` its own `ext-data-control`
+/// connection to the compositor (+ a thread, fed every clipboard change of the session),
+/// without it and with a reachable `DISPLAY` its own X connection (+ a thread). A wallpaper
+/// never reads the clipboard — and the X one killed the player: when that connection drops
+/// (the X server goes away), mpv's clipboard thread `XCloseDisplay`s it, Xlib's default I/O
+/// error handler calls `exit(1)` from that thread, and its atexit handlers tear NVIDIA's EGL
+/// down under the loop → SIGSEGV (`tests/api.rs::losing_the_x_server_never_kills_the_player`).
+/// An empty list = no backend at all. Best-effort like [`SCRIPT_TRIMS`]: an mpv that predates
+/// the clipboard has no such option and nothing to turn off.
+pub(crate) const CLIPBOARD_OFF: [(&str, &str); 1] = [("clipboard-backends", "")];
+
 /// Set each of `opts` on a core before `mpv_initialize`, skipping any this libmpv rejects
 /// (an unknown name on an older mpv — they are trims, never needed for correctness).
 /// Returns the skipped ones as `"<name>: <mpv error>"`.
@@ -687,8 +699,10 @@ impl MpvSource {
         for (k, v) in fixed {
             handle.set_option(k, v).map_err(api_err)?;
         }
-        // No built-in scripts/bindings (6 threads per core fewer) — best-effort.
-        let skipped = set_optional(&handle, &SCRIPT_TRIMS);
+        // No built-in scripts/bindings (6 threads per core fewer), no clipboard (its own
+        // X/Wayland connection + thread per core) — best-effort.
+        let mut skipped = set_optional(&handle, &SCRIPT_TRIMS);
+        skipped.extend(set_optional(&handle, &CLIPBOARD_OFF));
         if !skipped.is_empty() {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| {
