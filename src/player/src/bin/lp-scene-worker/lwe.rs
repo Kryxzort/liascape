@@ -3,7 +3,9 @@
 //! (struct tags used as type names) — and a minimal owner for one project in one context.
 //!
 //! Phase 2 Task 1–2 ship this as the link proof and the `--lwe-smoke` diagnostic
-//! ([`smoke`]); Task 7 builds the real renderer (`render.rs`) on [`Scene`].
+//! ([`smoke`]); Task 7 builds the real renderer (`render.rs`) on [`Scene`] and adds the mouse
+//! (`wp_mouse_input`), the visualiser feed (`wp_audio_input_mix`) and the live user-property
+//! setters (`wp_project_property_set_*_by_name`).
 //!
 //! Host rules (docs/player/spikes/lwe-core.md §6): the assets dir is passed explicitly; frame 0
 //! renders into a scratch FBO, then the output is sized to `wp_project_get_width/height`; a NULL
@@ -12,7 +14,7 @@
 //! (row 0 = the image's top, our R25 source layout — no flip); alpha is 0 in every pixel.
 //! Audio goes through the host driver (patch 0003): no SDL device is ever opened.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::path::Path;
 
@@ -34,27 +36,70 @@ struct WpAudioOutput {
     channels: c_int,
 }
 
+#[repr(C)]
+struct WpMouseInput {
+    user_parameter: *mut c_void,
+    get_x: extern "C" fn(*mut c_void) -> f64,
+    get_y: extern "C" fn(*mut c_void) -> f64,
+    is_pressed: extern "C" fn(*mut c_void, c_int) -> c_int,
+}
+
+#[repr(C)]
+struct WpAudioInputMix {
+    user_parameter: *mut c_void,
+    is_frame_ready: extern "C" fn(*mut c_void) -> bool,
+    get_frame: extern "C" fn(*mut c_void) -> *mut u8,
+}
+
+/// `WP_AUDIO_INPUT_FRAME_SIZE`: u8 samples (centre 128) per visualiser frame.
+pub const INPUT_FRAME: usize = 1024;
+
 unsafe extern "C" {
     fn wp_config_create() -> *mut c_void;
     fn wp_config_destroy(config: *mut c_void);
     fn wp_config_set_assets_dir(config: *mut c_void, dir: *const c_char) -> bool;
+    fn wp_config_set_backgrounds_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_audio_output(config: *mut c_void, output: *const WpAudioOutput);
     fn wp_context_create(config: *const c_void) -> *mut c_void;
     fn wp_context_destroy(context: *mut c_void);
     fn wp_context_set_gl_proc_address(context: *mut c_void, address: *mut WpGlProcAddress);
     fn wp_context_set_time_counter(context: *mut c_void, counter: *mut WpTimeCounter);
+    fn wp_context_set_audio_input_mix(context: *mut c_void, mix: *mut WpAudioInputMix);
     fn wp_context_audio_pull(context: *mut c_void, interleaved: *mut f32, frames: usize) -> usize;
     fn wp_context_audio_stream_count(context: *mut c_void) -> c_int;
     fn wp_context_audio_driver_name(context: *mut c_void) -> *const c_char;
     fn wp_project_load_folder(
         context: *mut c_void,
-        mouse_input: *mut c_void,
+        mouse_input: *mut WpMouseInput,
         folder: *const c_char,
     ) -> *mut c_void;
     fn wp_project_destroy(project: *mut c_void);
     fn wp_project_get_width(project: *mut c_void) -> c_int;
     fn wp_project_get_height(project: *mut c_void) -> c_int;
     fn wp_project_set_output_framebuffer(project: *mut c_void, framebuffer: c_uint);
+    fn wp_project_property_set_value_by_name(
+        project: *mut c_void,
+        name: *const c_char,
+        value: *const c_char,
+    ) -> bool;
+    fn wp_project_property_set_boolean_by_name(
+        project: *mut c_void,
+        name: *const c_char,
+        value: bool,
+    ) -> bool;
+    fn wp_project_property_set_slider_by_name(
+        project: *mut c_void,
+        name: *const c_char,
+        value: f32,
+    ) -> bool;
+    fn wp_project_property_set_color_by_name(
+        project: *mut c_void,
+        name: *const c_char,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    ) -> bool;
     fn wp_render_update_time(context: *mut c_void);
     fn wp_render_frame(project: *mut c_void);
 }
@@ -72,6 +117,44 @@ extern "C" fn scene_time(user: *mut c_void) -> f32 {
     unsafe { (*(user as *const Cell<f32>)).get() }
 }
 
+/// The pointer LWE reads (native scene pixels, y down; buttons = `WP_MOUSE_INPUT_BUTTON_*`).
+#[derive(Default)]
+struct Pointer {
+    x: Cell<f64>,
+    y: Cell<f64>,
+    buttons: Cell<u32>,
+}
+
+extern "C" fn mouse_x(user: *mut c_void) -> f64 {
+    unsafe { (*(user as *const Pointer)).x.get() }
+}
+
+extern "C" fn mouse_y(user: *mut c_void) -> f64 {
+    unsafe { (*(user as *const Pointer)).y.get() }
+}
+
+extern "C" fn mouse_pressed(user: *mut c_void, button: c_int) -> c_int {
+    unsafe { ((*(user as *const Pointer)).buttons.get() as c_int) & button }
+}
+
+/// The visualiser frame LWE takes once per `wp_render_update_time` (only when a new one came).
+struct InputMix {
+    ready: Cell<bool>,
+    frame: RefCell<[u8; INPUT_FRAME]>,
+}
+
+extern "C" fn input_ready(user: *mut c_void) -> bool {
+    unsafe { (*(user as *const InputMix)).ready.get() }
+}
+
+extern "C" fn input_frame(user: *mut c_void) -> *mut u8 {
+    unsafe {
+        let m = &*(user as *const InputMix);
+        m.ready.set(false);
+        m.frame.as_ptr() as *mut u8
+    }
+}
+
 /// The host audio format: what Task 6's PipeWire stream plays.
 pub const SAMPLE_RATE: i32 = 48_000;
 pub const CHANNELS: i32 = 2;
@@ -87,15 +170,30 @@ pub struct Scene {
     _proc: Box<WpGlProcAddress>,
     _clock: Box<WpTimeCounter>,
     time: Box<Cell<f32>>,
+    _mouse: Box<WpMouseInput>,
+    pointer: Box<Pointer>,
+    _mix: Box<WpAudioInputMix>,
+    input: Box<InputMix>,
     built: bool,
 }
 
 impl Scene {
     /// Loads `dir` (the item folder: `project.json` + `scene.pkg`/`scene.json`). No GL work.
     pub fn load(dir: &Path, assets: &Path) -> Result<Scene, String> {
+        Scene::load_in(dir, assets, None)
+    }
+
+    /// [`load`](Self::load), with the Workshop folder the item lives in (`backgrounds` =
+    /// `<library>/steamapps/workshop/content/431960`, LWE's `backgrounds_dir` for an id — the
+    /// `next-v2` core resolves no project dependency yet, so this is recorded, not required).
+    pub fn load_in(dir: &Path, assets: &Path, backgrounds: Option<&Path>) -> Result<Scene, String> {
         let cdir = CString::new(dir.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
         let cassets =
             CString::new(assets.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
+        let cbg = backgrounds
+            .map(|b| CString::new(b.as_os_str().as_encoded_bytes()))
+            .transpose()
+            .map_err(|e| e.to_string())?;
         unsafe {
             let config = wp_config_create();
             if config.is_null() {
@@ -104,6 +202,9 @@ impl Scene {
             if !wp_config_set_assets_dir(config, cassets.as_ptr()) {
                 wp_config_destroy(config);
                 return Err(format!("not a WE assets dir: {}", assets.display()));
+            }
+            if let Some(b) = &cbg {
+                wp_config_set_backgrounds_dir(config, b.as_ptr());
             }
             let out = WpAudioOutput {
                 sample_rate: SAMPLE_RATE,
@@ -124,9 +225,26 @@ impl Scene {
                 user_parameter: &*time as *const Cell<f32> as *mut c_void,
                 get_time: scene_time,
             });
+            let pointer = Box::new(Pointer::default());
+            let mut mouse = Box::new(WpMouseInput {
+                user_parameter: &*pointer as *const Pointer as *mut c_void,
+                get_x: mouse_x,
+                get_y: mouse_y,
+                is_pressed: mouse_pressed,
+            });
+            let input = Box::new(InputMix {
+                ready: Cell::new(false),
+                frame: RefCell::new([128u8; INPUT_FRAME]),
+            });
+            let mut mix = Box::new(WpAudioInputMix {
+                user_parameter: &*input as *const InputMix as *mut c_void,
+                is_frame_ready: input_ready,
+                get_frame: input_frame,
+            });
             wp_context_set_gl_proc_address(context, &mut *proc);
             wp_context_set_time_counter(context, &mut *clock);
-            let project = wp_project_load_folder(context, std::ptr::null_mut(), cdir.as_ptr());
+            wp_context_set_audio_input_mix(context, &mut *mix);
+            let project = wp_project_load_folder(context, &mut *mouse, cdir.as_ptr());
             let scene = Scene {
                 config,
                 context,
@@ -134,6 +252,10 @@ impl Scene {
                 _proc: proc,
                 _clock: clock,
                 time,
+                _mouse: mouse,
+                pointer,
+                _mix: mix,
+                input,
                 built: false,
             };
             if project.is_null() {
@@ -172,6 +294,68 @@ impl Scene {
             wp_project_set_output_framebuffer(self.project, fbo);
             wp_render_update_time(self.context);
             wp_render_frame(self.project);
+        }
+    }
+
+    /// The pointer for the next frames: native scene pixels (y down), `buttons` bit 0 left,
+    /// 1 right, 2 middle (= `WP_MOUSE_INPUT_BUTTON_*`).
+    pub fn set_pointer(&self, x: f64, y: f64, buttons: u32) {
+        self.pointer.x.set(x);
+        self.pointer.y.set(y);
+        self.pointer.buttons.set(buttons);
+    }
+
+    /// A new visualiser frame (≤ [`INPUT_FRAME`] u8 samples, centre 128), taken by the next
+    /// `wp_render_update_time` (LWE's FFT runs once per new frame).
+    pub fn set_input(&self, samples: &[u8]) {
+        let mut f = self.input.frame.borrow_mut();
+        let n = samples.len().min(INPUT_FRAME);
+        f[..n].copy_from_slice(&samples[..n]);
+        f[n..].fill(128);
+        self.input.ready.set(true);
+    }
+
+    /// Set one user property (`project.json` `general.properties`): a bool → boolean, a
+    /// number → slider, `[r, g, b(, a)]` → colour (0–1), a string → LWE's parse by the
+    /// property's own type (text, combo key, colour `"r g b"`). `Err` = LWE refused (an unknown
+    /// name — the core's `Property not found` — or a value of another shape).
+    pub fn set_property(&self, name: &str, value: &serde_json::Value) -> Result<(), String> {
+        use serde_json::Value;
+        let cname = CString::new(name).map_err(|e| e.to_string())?;
+        let ok = unsafe {
+            match value {
+                Value::Bool(b) => {
+                    wp_project_property_set_boolean_by_name(self.project, cname.as_ptr(), *b)
+                }
+                Value::Number(n) => wp_project_property_set_slider_by_name(
+                    self.project,
+                    cname.as_ptr(),
+                    n.as_f64().unwrap_or(0.0) as f32,
+                ),
+                Value::Array(a) if (3..=4).contains(&a.len()) && a.iter().all(Value::is_number) => {
+                    let c = |i: usize| a.get(i).and_then(Value::as_f64).unwrap_or(1.0) as f32;
+                    wp_project_property_set_color_by_name(
+                        self.project,
+                        cname.as_ptr(),
+                        c(0),
+                        c(1),
+                        c(2),
+                        c(3),
+                    )
+                }
+                Value::String(v) => {
+                    let cv = CString::new(v.as_str()).map_err(|e| e.to_string())?;
+                    wp_project_property_set_value_by_name(self.project, cname.as_ptr(), cv.as_ptr())
+                }
+                other => return Err(format!("{name}: unsupported value {other}")),
+            }
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(format!(
+                "{name}: refused by the scene (no such property, or a value of another type)"
+            ))
         }
     }
 

@@ -92,6 +92,11 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
         remove_output,
         "remove a virtual output {name}",
     ),
+    (
+        "headless.pointer",
+        headless_pointer,
+        "a virtual pointer {output, x, y, buttons?} over a headless output (surface pixels)",
+    ),
 ];
 
 fn verb_names() -> Vec<&'static str> {
@@ -126,9 +131,9 @@ fn hint(s: &str) -> String {
 
 fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     let mut caps = vec!["video", "image", "color", "transition"];
-    // Phase 2 Task 5: scenes play when the worker binary resolves (Task 7 adds: and WE's
-    // assets dir, unless synthetic scenes are allowed).
-    if crate::paths::scene_worker_bin().is_some() {
+    // Phase 2: scenes play when the worker binary resolves (Task 5) and WE's assets dir does
+    // (Task 7 — `player.scene_assets_resolved`), unless synthetic scenes are allowed.
+    if rt.scenes_available().is_ok() {
         caps.push("scene");
     }
     if rt.backend.kind() == "headless" {
@@ -672,4 +677,18 @@ fn remove_output(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiErr
         .remove(gfx, &name)?;
     rt.apply_output_changes();
     Ok(json!({}))
+}
+
+/// Phase 2 Task 7: a virtual pointer over a headless output (what the Wayland backend's
+/// pointer events do) — `out:<c>.pointer` and every scene shown there get it at once.
+fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    let name = arg_str(args, "output")?.to_string();
+    let (x, y) = (arg_f64(args, "x")?, arg_f64(args, "y")?);
+    let buttons = opt_f64(args, "buttons")?.unwrap_or(0.0).max(0.0) as u32;
+    rt.backend
+        .as_headless_mut()
+        .ok_or_else(headless_err)?
+        .pointer(&name, x, y, buttons)?;
+    let scenes = rt.pointer_events();
+    Ok(json!({ "scenes": scenes }))
 }

@@ -24,9 +24,11 @@ pub enum Pattern {
     Solid,
     /// Top half `rgb`, bottom half `rgb2` (the R25 orientation pin).
     SplitTb,
-    /// `rgb2` background with an `rgb` dot (radius 16 px) at the last `Pointer` position.
+    /// `rgb2` background with an `rgb` dot (radius 16 px) at the last `Pointer` position
+    /// (sent in native pixels, drawn scaled to the ring).
     PointerDot,
-    /// Grey level = the mean of the tick's visualiser `input` (0–255).
+    /// Grey level = [`input_level`] of the tick's visualiser `input` (its RMS around 128, so
+    /// silence is black and a full-scale sine ~180); declares `wants_audio_input`.
     InputLevel,
 }
 
@@ -59,6 +61,9 @@ pub struct SyntheticSpec {
     pub crash_after_ms: Option<u64>,
     pub hang_after_ms: Option<u64>,
     pub fail: Option<Fail>,
+    /// Task 7: the "load + build" takes this long (the worker's renderer thread sleeps, like a
+    /// cold LWE build of up to 2.8 s) — the protocol must stay answered meanwhile.
+    pub load_ms: u64,
 }
 
 impl Default for SyntheticSpec {
@@ -76,7 +81,36 @@ impl Default for SyntheticSpec {
             crash_after_ms: None,
             hang_after_ms: None,
             fail: None,
+            load_ms: 0,
         }
+    }
+}
+
+/// The level an `input_level` scene draws for visualiser samples `v` (u8, centre 128): their
+/// RMS around 128, scaled so ±127 = 1.0 (0 for none).
+pub fn input_level(v: &[u8]) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    let ms = v
+        .iter()
+        .map(|&b| {
+            let x = (b as f32 - 128.0) / 127.0;
+            x * x
+        })
+        .sum::<f32>()
+        / v.len() as f32;
+    ms.sqrt().min(1.0)
+}
+
+/// The RMS of visualiser samples `v` in dBFS (−96 floor): what the `workers` probe reports as
+/// `input_dbfs`.
+pub fn input_dbfs(v: &[u8]) -> f64 {
+    let l = input_level(v) as f64;
+    if l <= 1e-5 {
+        -96.0
+    } else {
+        (20.0 * l.log10()).max(-96.0)
     }
 }
 

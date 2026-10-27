@@ -180,8 +180,13 @@ pub struct SceneOpts {
     pub speed: f64,
     /// Stepped clock: tick only what [`SceneSource::step_to`] asks for.
     pub stepped: bool,
-    /// WE's `assets/` (Task 7; `None` = the worker resolves it).
+    /// WE's `assets/` (Task 7: resolved by the compositor, `scene::assets`; `None` = none —
+    /// a real scene then fails with the hint).
     pub assets_dir: Option<String>,
+    /// The Steam library the item lives in (`scene::assets::steam_root_of_item`).
+    pub steam_dir: Option<String>,
+    /// The scene's user properties (`scene_props`), applied at every (re)start.
+    pub properties: Map<String, Value>,
     pub audio: AudioRoute,
     pub env: Vec<(String, String)>,
     pub budget: RestartBudget,
@@ -208,6 +213,8 @@ impl SceneOpts {
             speed: 1.0,
             stepped: false,
             assets_dir: None,
+            steam_dir: None,
+            properties: Map::new(),
             audio: AudioRoute::Null,
             env: Vec::new(),
             budget: RestartBudget::default(),
@@ -293,6 +300,16 @@ pub struct SceneSource {
     latency_ms: VecDeque<f32>,
     /// Latch instants of the last second (`fps_actual`).
     latch_times: VecDeque<Instant>,
+    /// Task 7: the scene reacts to audio (`Ready.wants_audio_input`) — the runtime feeds it.
+    wants_audio_input: bool,
+    /// The visualiser samples for the next tick (the runtime's latest system-audio frame).
+    pending_input: Option<Vec<u8>>,
+    /// RMS (dBFS) of the last input sent (`workers` probe `input_dbfs`).
+    input_dbfs: Option<f64>,
+    /// The pointer over the scene in native pixels + buttons (re-sent after a restart).
+    pointer: Option<(f64, f64, u32)>,
+    /// `PropertySet` outcomes: name → (ok, reason) (`workers` probe `properties`).
+    prop_results: BTreeMap<String, (bool, Option<String>)>,
 }
 
 fn epoll_new() -> Result<OwnedFd, String> {
@@ -370,6 +387,19 @@ impl SceneSource {
         o.speed = f("speed", 1.0);
         o.stepped = bb("stepped");
         o.assets_dir = bs("scene_assets").filter(|a| !a.is_empty());
+        // Task 7 (Review Focus #2): no WE assets → a real scene can't build (a 1×1 render
+        // loop otherwise): refuse it here, naming how to point the player at them.
+        if !o.synthetic && o.assets_dir.is_none() {
+            return Err(unsupported(format!(
+                "can't play scene {path}: {}",
+                bs("scene_assets_error").unwrap_or_else(|| crate::scene::assets::HINT.into())
+            )));
+        }
+        o.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
+            .map(|p| p.to_string_lossy().into_owned());
+        if let Some(PropValue::Map(m)) = get("scene_props") {
+            o.properties = m.clone();
+        }
         if let Some(d) = bs("scene_crash_dir") {
             o.crash_dir = PathBuf::from(d);
         }
@@ -447,6 +477,11 @@ impl SceneSource {
             sent_at: VecDeque::new(),
             latency_ms: VecDeque::new(),
             latch_times: VecDeque::new(),
+            wants_audio_input: false,
+            pending_input: None,
+            input_dbfs: None,
+            pointer: None,
+            prop_results: BTreeMap::new(),
             opts,
         };
         if !src.opts.defer_spawn {
@@ -459,12 +494,13 @@ impl SceneSource {
         let start = ToWorker::Start {
             path: self.opts.path.to_string_lossy().into_owned(),
             assets_dir: self.opts.assets_dir.clone(),
-            steam_dir: None,
+            steam_dir: self.opts.steam_dir.clone(),
             position: self.clock.now(Instant::now()),
             paused: self.paused,
             audio: self.opts.audio.clone(),
             max_size: self.opts.max_size,
             synthetic: self.opts.synthetic,
+            properties: self.opts.properties.clone(),
         };
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
         spec.env = self.opts.env.clone();
@@ -647,16 +683,33 @@ impl SceneSource {
                 self.latch.push(slot, seq, t, acquire);
             }
             FromWorker::Ready {
-                native, has_audio, ..
+                native,
+                has_audio,
+                wants_audio_input,
             } => {
                 self.native = Some(native);
                 self.has_audio = Some(has_audio);
+                self.wants_audio_input = wants_audio_input;
                 self.worker_ready = true;
                 if self.next_tick.is_none() || !self.paused {
                     self.next_tick = Some(now);
                 }
+                // A (re)started worker gets the pointer it missed.
+                if let (Some((x, y, buttons)), Some(h)) = (self.pointer, self.host.as_mut()) {
+                    let _ = h.send(&ToWorker::Pointer { x, y, buttons }, &[]);
+                }
             }
             FromWorker::HasAudio { on } => self.has_audio = Some(on),
+            FromWorker::PropertySet { name, ok, reason } => {
+                log::event(
+                    "scene",
+                    if ok { Level::Info } else { Level::Warn },
+                    "scene.property",
+                    None,
+                    json!({"id": self.opts.id, "name": name, "ok": ok, "reason": reason}),
+                );
+                self.prop_results.insert(name, (ok, reason));
+            }
             FromWorker::Error { reason, fatal } => {
                 if fatal {
                     self.fail(reason);
@@ -705,13 +758,14 @@ impl SceneSource {
     fn send_tick(&mut self, now: Instant, t: f64) -> Option<u64> {
         let host = self.host.as_mut()?;
         let seq = self.seq;
-        let tick = ToWorker::Tick {
-            seq,
-            t,
-            input: None,
-        };
+        let input = self.pending_input.take().filter(|_| self.wants_audio_input);
+        let dbfs = input.as_deref().map(crate::scene::synthetic::input_dbfs);
+        let tick = ToWorker::Tick { seq, t, input };
         match host.send(&tick, &[]) {
             Ok(()) => {
+                if dbfs.is_some() {
+                    self.input_dbfs = dbfs;
+                }
                 self.seq += 1;
                 self.inflight += 1;
                 self.stats.ticks_sent += 1;
@@ -793,6 +847,12 @@ impl SceneSource {
             .iter()
             .any(|(k, v)| k == "LP_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
             && Path::new(&path).join("lp-synthetic.json").is_file();
+        self.opts.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
+            .map(|p| p.to_string_lossy().into_owned());
+        self.wants_audio_input = false;
+        self.pending_input = None;
+        self.input_dbfs = None;
+        self.prop_results.clear();
         let now = Instant::now();
         self.clock.set_running(false, now);
         self.clock.jump(0.0, now);
@@ -813,6 +873,57 @@ impl SceneSource {
         if let Err(e) = self.spawn() {
             self.fail(e);
         }
+    }
+
+    /// The pointer over this scene (Task 7, mouse on), in the scene's **native pixels** (y
+    /// down from the image's top) — the runtime maps an output's `out:<c>.pointer` through the
+    /// layer's fit (`scene::pointer`). Kept for a restarted worker.
+    pub fn set_pointer(&mut self, x: f64, y: f64, buttons: u32) {
+        if self.pointer == Some((x, y, buttons)) {
+            return;
+        }
+        self.pointer = Some((x, y, buttons));
+        if self.worker_ready
+            && let Some(h) = self.host.as_mut()
+        {
+            let _ = h.send(&ToWorker::Pointer { x, y, buttons }, &[]);
+        }
+    }
+
+    /// The last pointer handed to the worker (native pixels + buttons).
+    pub fn pointer(&self) -> Option<(f64, f64, u32)> {
+        self.pointer
+    }
+
+    /// The scene reacts to audio (its `Ready` said so): the runtime feeds it system audio.
+    pub fn wants_audio_input(&self) -> bool {
+        self.wants_audio_input && self.worker_ready && self.error.is_none()
+    }
+
+    /// The visualiser samples (≤ 1024 u8, centre 128) for the next tick (the latest wins).
+    pub fn set_input(&mut self, samples: Vec<u8>) {
+        self.pending_input = Some(samples);
+    }
+
+    /// `scene_props` changed: each new or changed entry goes to the worker (and into the
+    /// restart's `Start` — `WorkerHost` folds it); a removed entry keeps its value until the
+    /// scene is opened again (LWE has no "reset to default").
+    fn set_properties(&mut self, m: &Map<String, Value>) {
+        for (k, v) in m {
+            if self.opts.properties.get(k) == Some(v) {
+                continue;
+            }
+            self.opts.properties.insert(k.clone(), v.clone());
+            let msg = ToWorker::SetProperty {
+                name: k.clone(),
+                value: v.clone(),
+            };
+            // Not spawned yet: the first `Start` carries it.
+            if let Some(h) = self.host.as_mut() {
+                let _ = h.send(&msg, &[]);
+            }
+        }
+        self.opts.properties.retain(|k, _| m.contains_key(k));
     }
 
     /// The player bus went down (`None`: the default device) or came back: the worker's
@@ -1040,6 +1151,15 @@ impl SceneSource {
             "spawns": st.spawns,
             "rings": st.rings,
             "last_error": self.error.as_ref().or(self.broken.as_ref()),
+            // Task 7
+            "assets_dir": self.opts.assets_dir,
+            "steam_dir": self.opts.steam_dir,
+            "wants_audio_input": self.wants_audio_input,
+            "input_dbfs": self.input_dbfs,
+            "pointer": self.pointer.map(|(x, y, b)| json!([x, y, b])),
+            "properties": self.prop_results.iter().map(|(k, (ok, reason))| {
+                (k.clone(), json!({"ok": ok, "reason": reason}))
+            }).collect::<Map<String, Value>>(),
         })
     }
 }
@@ -1159,6 +1279,12 @@ impl Source for SceneSource {
             }
             // Stepped: the runtime's step advances by `ms × speed` itself.
             "speed" if !self.opts.stepped => self.clock.set_speed(super::num(v), now),
+            // Task 7: the scene's user properties, live (`wp_project_property_set_*`).
+            "scene_props" => {
+                if let PropValue::Map(m) = v {
+                    self.set_properties(m);
+                }
+            }
             // Everything else (loop, hwdec, fps_cap, cache, demuxer_*, af, audio_delay,
             // preview; gain.* and no_audio until Task 6) is stored: a global `set` never
             // fails on a scene, and a scene has nothing for them to do yet.

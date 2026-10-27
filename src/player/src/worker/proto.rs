@@ -28,7 +28,12 @@ pub enum ToWorker {
     /// Load the scene at `path` (the item folder). `position` = scene time to start at;
     /// `max_size` = the largest output showing it (the ring is sized by `scene::cover_size`);
     /// `synthetic` = render `lp-synthetic.json` instead of LWE (tests only — the worker also
-    /// requires `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its environment).
+    /// requires `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its environment). `assets_dir` = WE's
+    /// `assets/` (Task 7: resolved by the compositor, `scene::assets`); `steam_dir` = the
+    /// Steam library the item lives in (`scene::assets::steam_root_of_item`), if any.
+    /// `properties` = the scene's user properties (`project.json` `general.properties` name →
+    /// value) applied right after the load, before the first frame — every live
+    /// `SetProperty` is folded in here too, so a restarted worker comes back with them.
     Start {
         path: String,
         assets_dir: Option<String>,
@@ -38,6 +43,8 @@ pub enum ToWorker {
         audio: AudioRoute,
         max_size: [u32; 2],
         synthetic: bool,
+        #[serde(default)]
+        properties: serde_json::Map<String, serde_json::Value>,
     },
     /// Render one frame at scene time `t` (seconds). `input` = 1024 u8 visualiser samples.
     /// Answered by a `Frame` carrying `seq` (the heartbeat: an unanswered one is a hang).
@@ -62,10 +69,21 @@ pub enum ToWorker {
     Route {
         audio: AudioRoute,
     },
+    /// The pointer over the scene, in the scene's **native pixels** (x right, y down from
+    /// the image's top — what LWE's mouse callbacks hand `CScene`); `buttons` bit 0 left,
+    /// 1 right, 2 middle (= LWE's `WP_MOUSE_INPUT_BUTTON_*`).
     Pointer {
         x: f64,
         y: f64,
         buttons: u32,
+    },
+    /// Set one scene user property live (`wp_project_property_set_*_by_name`): a JSON bool →
+    /// boolean, a number → slider, `[r, g, b(, a)]` (0–1) → colour, a string → LWE's own
+    /// parse by the property's type (text, combo key, colour `"r g b"`, …). Answered by
+    /// `PropertySet`.
+    SetProperty {
+        name: String,
+        value: serde_json::Value,
     },
     Resize {
         max_size: [u32; 2],
@@ -108,10 +126,20 @@ pub enum FromWorker {
         t: f64,
         gpu_ms: Option<f32>,
     },
+    /// The scene loaded and built; its ring is exported. `wants_audio_input` = it reacts to
+    /// audio (`project.json` `general.supportsaudioprocessing`): the compositor then feeds
+    /// `Tick.input`.
     Ready {
         native: [u32; 2],
         has_audio: bool,
         wants_audio_input: bool,
+    },
+    /// The outcome of a `SetProperty` (or of a `Start.properties` entry): `ok` = LWE took it;
+    /// else `reason` (unknown property, a value of the wrong shape).
+    PropertySet {
+        name: String,
+        ok: bool,
+        reason: Option<String>,
     },
     HasAudio {
         on: bool,

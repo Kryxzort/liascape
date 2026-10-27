@@ -862,3 +862,376 @@ fn demand_change_reexports_without_black() {
     let seq = src.latched_seq().unwrap();
     check_frame(&h.gfx, tex, seq).expect("a whole frame at the new size");
 }
+
+// ---------------------------------------------------------------- Task 7: real scenes
+
+use std::path::{Path, PathBuf};
+
+/// `patches/lwe/tests/fixtures/<name>` — real LWE projects that need no WE assets
+/// (`min-scene`: a clear colour; `fail-scene`: its renderer build throws).
+fn lwe_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../patches/lwe/tests/fixtures")
+        .join(name)
+}
+
+/// The worker was built with LWE (`--features` lists `lwe`); else the real-scene tests SKIP.
+fn worker_has_lwe() -> bool {
+    std::process::Command::new(env!("CARGO_BIN_EXE_lp-scene-worker"))
+        .arg("--features")
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice::<Vec<String>>(&o.stdout).ok())
+        .is_some_and(|f| f.iter().any(|x| x == "lwe"))
+}
+
+/// A fresh empty directory (an "assets dir" with nothing in it).
+fn empty_dir(name: &str) -> PathBuf {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let d = std::env::temp_dir().join(format!(
+        "lp-scene-test-{}-{name}-{}",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// A real (non-synthetic) scene source on `dir` with `assets`.
+fn open_real(
+    gfx: &Gfx,
+    name: &str,
+    dir: &Path,
+    assets: Option<&Path>,
+    tweak: impl FnOnce(&mut SceneOpts),
+) -> SceneSource {
+    let mut o = SceneOpts::new(dir, env!("CARGO_BIN_EXE_lp-scene-worker"));
+    o.id = name.into();
+    o.max_size = [640, 360];
+    o.assets_dir = assets.map(|a| a.display().to_string());
+    o.crash_dir = crash_dir(name);
+    tweak(&mut o);
+    SceneSource::open_opts(gfx, o).expect("open the scene source")
+}
+
+/// `update` until `f` stops it or `limit` passes (errors allowed); whether `f` stopped it.
+fn pump(
+    gfx: &Gfx,
+    src: &mut SceneSource,
+    limit: Duration,
+    mut f: impl FnMut(&mut SceneSource) -> bool,
+) -> bool {
+    let end = Instant::now() + limit;
+    while Instant::now() < end {
+        let mut p = libc::pollfd {
+            fd: src.wake_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        unsafe { libc::poll(&mut p, 1, 2) };
+        src.update(gfx);
+        if f(src) {
+            return true;
+        }
+    }
+    false
+}
+
+fn crash_records(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|r| {
+            r.flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// A cold LWE build blocks the worker's renderer for up to seconds: its protocol thread keeps
+/// answering pings meanwhile, so a 1.5 s load against a 300 ms hang timeout readies without
+/// a single restart (RED with the reader not covering the load: `Hung` → restarts).
+#[test]
+fn slow_scene_load_keeps_the_heartbeat() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let s = SyntheticSpec {
+        load_ms: 1500,
+        ..spec(Pattern::Solid)
+    };
+    let mut src = open_with(&gfx, "slow-load", &s, |o| {
+        o.hang_timeout = Duration::from_millis(300);
+    });
+    let t = Instant::now();
+    let ready = pump(&gfx, &mut src, Duration::from_secs(6), |s| s.is_ready());
+    let took = t.elapsed();
+    println!(
+        "slow load: ready {ready} after {took:?}, stats {:?}",
+        src.stats()
+    );
+    assert!(ready, "never ready: {:?} {:?}", src.error(), src.log_tail());
+    assert!(
+        took >= Duration::from_millis(1400),
+        "the load took its time: {took:?}"
+    );
+    assert_eq!(src.stats().restarts, 0, "a slow load is not a hang");
+    assert!(src.error().is_none() && src.broken().is_none());
+}
+
+/// The real LWE path end to end without WE's assets (D7 fixture `min-scene`, a 64×32 clear
+/// colour): load + build in the worker, blit into the ring at the cover size, alpha forced to
+/// 1, Ready.
+#[test]
+fn min_scene_renders_through_the_worker() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: lp-scene-worker built without LWE");
+        return;
+    }
+    let assets = empty_dir("min");
+    let mut src = open_real(
+        &gfx,
+        "min",
+        &lwe_fixture("min-scene"),
+        Some(&assets),
+        |_| {},
+    );
+    assert!(
+        pump(&gfx, &mut src, Duration::from_secs(10), |s| s.is_ready()
+            || s.error().is_some()),
+        "never ready"
+    );
+    assert!(
+        src.error().is_none(),
+        "{:?} {:?}",
+        src.error(),
+        src.log_tail()
+    );
+    assert_eq!(src.native(), Some([64, 32]));
+    assert_eq!(src.size(), Some((64, 32)), "never above native");
+    let tex = src.texture().expect("a frame");
+    for (x, y) in [(32, 16), (1, 1), (62, 30)] {
+        let c = read_block(&gfx, tex, x, y, 1, 1);
+        for (i, want) in [51u8, 102, 153, 255].iter().enumerate() {
+            assert!(
+                (c[i] as i32 - *want as i32).abs() <= 1,
+                "pixel ({x},{y}) = {c:?}, want the clear colour 51 102 153 255"
+            );
+        }
+    }
+}
+
+/// A scene whose renderer build fails (`fail-scene`: an object with a missing parent — the
+/// same outcome as WE's assets missing) is a fatal error: no restart, no crash record, the
+/// worker idles until stopped and then exits on its own (never a SIGSEGV loop, spike §4.4).
+#[test]
+fn renderer_build_failure_is_broken_not_a_segfault() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: lp-scene-worker built without LWE");
+        return;
+    }
+    let assets = empty_dir("failbuild");
+    let mut src = open_real(
+        &gfx,
+        "failbuild",
+        &lwe_fixture("fail-scene"),
+        Some(&assets),
+        |_| {},
+    );
+    let pid = src.pid().expect("spawned");
+    assert!(
+        pump(&gfx, &mut src, Duration::from_secs(10), |s| s
+            .error()
+            .is_some()),
+        "no error"
+    );
+    let e = src.error().unwrap().to_string();
+    assert!(e.contains("renderer build failed"), "{e}");
+    assert!(
+        e.contains(&assets.display().to_string()),
+        "names the assets dir: {e}"
+    );
+    pump(&gfx, &mut src, Duration::from_millis(500), |_| false);
+    assert_eq!(src.stats().restarts, 0);
+    assert!(src.broken().is_none());
+    assert_eq!(crash_records(&crash_dir("failbuild")), 0);
+    drop(src);
+    let t = Instant::now();
+    while unsafe { libc::kill(pid as i32, 0) } == 0 && t.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        t.elapsed() < Duration::from_secs(1),
+        "the worker went on its own after quit"
+    );
+}
+
+/// Review Focus #1 at the worker: a missing folder, one without `project.json` (Steam still
+/// downloading) and a truncated scene all fail cleanly — `load failed`, no restart, no crash
+/// record.
+#[test]
+fn missing_or_half_downloaded_scene_fails_cleanly() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: lp-scene-worker built without LWE");
+        return;
+    }
+    let assets = empty_dir("missing");
+    let half = empty_dir("half-downloaded");
+    std::fs::write(half.join("scene.pkg"), b"PKGV0001").unwrap();
+    let trunc = empty_dir("truncated");
+    std::fs::copy(
+        lwe_fixture("min-scene/project.json"),
+        trunc.join("project.json"),
+    )
+    .unwrap();
+    let full = std::fs::read(lwe_fixture("min-scene/scene.json")).unwrap();
+    std::fs::write(trunc.join("scene.json"), &full[..full.len() / 2]).unwrap();
+    for (name, dir, want) in [
+        (
+            "gone",
+            PathBuf::from("/nonexistent/431960/123"),
+            "does not exist",
+        ),
+        ("half", half, "no project.json"),
+        ("trunc", trunc, "load failed"),
+    ] {
+        let mut src = open_real(&gfx, name, &dir, Some(&assets), |_| {});
+        assert!(
+            pump(&gfx, &mut src, Duration::from_secs(10), |s| s
+                .error()
+                .is_some()),
+            "{name}: no error"
+        );
+        let e = src.error().unwrap().to_string();
+        println!("{name}: {e}");
+        assert!(e.contains("load failed") && e.contains(want), "{name}: {e}");
+        pump(&gfx, &mut src, Duration::from_millis(300), |_| false);
+        assert_eq!(src.stats().restarts, 0, "{name}");
+        assert!(src.broken().is_none(), "{name}");
+        assert_eq!(crash_records(&crash_dir(name)), 0, "{name}");
+    }
+}
+
+/// On-machine (D7): real Workshop scenes with the owner's WE assets, `LP_PLAYER_TEST_SCENES=<the
+/// 431960 folder>` (SFW: `~/.local/share/Steam/steamapps/workshop/content/431960`), else SKIP
+/// (FAIL under `LP_REQUIRE_SCENES=1`). Each: Ready ≤ 3 s (incl. the cold build), frames at 1 s
+/// and 3 s of scene time non-blank, opaque and different, exported at the cover size (never
+/// native), no GL error. Frames go to `LP_PLAYER_TEST_SCENES_OUT` (default
+/// `<tmp>/lp-real-scenes`).
+#[test]
+fn real_scenes_render_and_animate() {
+    let _g = gpu_lock();
+    let require = std::env::var("LP_REQUIRE_SCENES").is_ok_and(|v| v == "1");
+    let skip = |why: &str| {
+        assert!(!require, "LP_REQUIRE_SCENES=1 but: {why}");
+        println!("SKIP: {why}");
+    };
+    let Some(root) = std::env::var_os("LP_PLAYER_TEST_SCENES").map(PathBuf::from) else {
+        return skip("LP_PLAYER_TEST_SCENES is not set");
+    };
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        return skip("lp-scene-worker built without LWE");
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let assets = match lp_player::scene::assets::resolve(None, &home) {
+        Ok(a) => a,
+        Err(e) => return skip(&e),
+    };
+    let out = std::env::var_os("LP_PLAYER_TEST_SCENES_OUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("lp-real-scenes"));
+    std::fs::create_dir_all(&out).unwrap();
+    for id in ["1726902114", "2371103399", "2134765860"] {
+        let dir = root.join(id);
+        if !dir.is_dir() {
+            skip(&format!("{} is not installed", dir.display()));
+            continue;
+        }
+        let mut src = open_real(&gfx, &format!("real-{id}"), &dir, Some(&assets), |o| {
+            o.stepped = true;
+            o.max_size = [1920, 1080];
+        });
+        let t = Instant::now();
+        src.step_to(0.0);
+        let ready = pump(&gfx, &mut src, Duration::from_secs(10), |s| {
+            s.is_ready() || s.error().is_some()
+        });
+        let ready_ms = t.elapsed().as_millis();
+        assert!(
+            ready && src.error().is_none(),
+            "{id}: {:?} {:?}",
+            src.error(),
+            src.log_tail()
+        );
+        // 30 fps of scene time, like playback (particles integrate per frame; three far-apart
+        // ticks barely move them), capturing the frames at 1 s and 3 s.
+        let mut shots = Vec::new();
+        for f in 1..=90u32 {
+            let at = f as f64 / 30.0;
+            src.step_to(at);
+            assert!(
+                pump(&gfx, &mut src, Duration::from_secs(5), |s| {
+                    s.step_status() == lp_player::sources::StepStatus::Done
+                }),
+                "{id}: frame at {at} s"
+            );
+            if f == 30 || f == 90 {
+                let tex = src.texture().unwrap();
+                let px = read_block(&gfx, tex, 0, 0, tex.w, tex.h);
+                let p = out.join(format!("{id}-{}s.png", f / 30));
+                gfx.write_png_source(tex, &p).unwrap();
+                shots.push((p, px));
+            }
+        }
+        let (w, h) = src.size().unwrap();
+        let native = src.native().unwrap();
+        let lit = shots[1]
+            .1
+            .chunks_exact(4)
+            .filter(|c| c[0] as u32 + c[1] as u32 + c[2] as u32 > 24)
+            .count();
+        let opaque = shots[1].1.chunks_exact(4).all(|c| c[3] == 255);
+        let changed = shots[0]
+            .1
+            .chunks_exact(4)
+            .zip(shots[1].1.chunks_exact(4))
+            .filter(|(a, b)| a[..3] != b[..3])
+            .count();
+        let gl_errors: Vec<String> = src
+            .log_tail()
+            .into_iter()
+            .filter(|l| l.contains("GL error"))
+            .collect();
+        println!(
+            "{id}: ready {ready_ms} ms, native {native:?} -> export {w}x{h}, lit {lit}, \
+             changed 1s->3s {changed} px, shots {} {}",
+            shots[0].0.display(),
+            shots[1].0.display()
+        );
+        assert!(ready_ms <= 3000, "{id}: Ready took {ready_ms} ms");
+        assert!(w <= native[0] && h <= native[1], "{id}: never above native");
+        assert!(
+            w >= 1920.min(native[0]) && h >= 1080.min(native[1]),
+            "{id}: covers the demand"
+        );
+        assert!(lit > (w * h / 10) as usize, "{id}: blank frame ({lit} lit)");
+        assert!(opaque, "{id}: alpha forced to 1");
+        assert!(changed > 0, "{id}: not animating");
+        assert!(gl_errors.is_empty(), "{id}: {gl_errors:?}");
+    }
+}

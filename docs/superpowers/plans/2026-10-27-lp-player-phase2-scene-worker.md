@@ -603,7 +603,7 @@ and the supervise test's new-worker checks.
 - Visualiser (D4): `audio::sysmon` captures the default sink's monitor (follows default changes) only while ≥ 1
   live scene has `wants_audio_input`; each such scene's `Tick.input` = the latest 1024 mono u8 samples (centre 128).
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - unit: `vdf_paths_parsed`, `assets_found_in_secondary_library`, `missing_assets_error_names_every_candidate`,
     `steam_root_of_symlinked_local_item`, `pointer_maps_through_fill_and_viewport` (a 2:1 scene filled into 16:9:
     output centre → (0.5, 0.5); left edge → u ≈ 0.0556; a point outside the visible rect → None)
@@ -619,8 +619,24 @@ and the supervise test's new-worker checks.
     `real_scenes_render_and_animate` (1726902114, 2371103399, 2134765860: Ready ≤ 3 s, non-blank, the frames at
     1 s and 3 s differ, 0 GL errors in the worker log), `renderer_build_failure_is_broken_not_a_segfault` (empty
     assets dir → fatal Error, worker exit 0)
-- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS (the opt-in ones with the 431960 folder).
-- [ ] **Step 5:** Commit `Render WE Scenes In The Scene Worker`.
+- [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS (the opt-in ones with the 431960 folder).
+- [x] **Step 5:** Commit `Render WE Scenes In The Scene Worker`.
+
+**Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Real scenes
+(Task 7)"): the load runs on the renderer thread while a second worker thread (`lp-scene-proto`)
+answers pings (LWE's GL objects must be built and rendered on one context — a loader thread with
+its own context can't share VAOs/FBOs), bounded by `LP_SCENE_LOAD_TIMEOUT_MS`; no assets → the
+open fails before any worker is spawned; the visualiser mixes every app playback stream except
+loopback halves (D4's stream mix; streams on non-default sinks count too), `admit()` is the
+white/blacklist plug point; user properties ride a new `scene_props` Source prop (Map) →
+`Start.properties` + `ToWorker::SetProperty` (folded into restarts) → `PropertySet` /
+`scene.property`; `headless.pointer` answers which scenes it reached; the synthetic
+`input_level` draws the input's RMS (was its mean — a sine's mean is 128) and gained `load_ms`.
+Added `slow_scene_load_keeps_the_heartbeat`, `min_scene_renders_through_the_worker` (hermetic
+real LWE), `missing_or_half_downloaded_scene_fails_cleanly`, `scene_props_apply_at_open_and_live`;
+`renderer_build_failure_is_broken_not_a_segfault` uses the `fail-scene` fixture (hermetic) instead
+of real scenes with an empty assets dir; `real_scenes_render_and_animate` steps 30 fps of scene
+time (three far-apart ticks don't move particles).
 
 **Size: L** (≈ 2 days).
 
