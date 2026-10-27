@@ -253,9 +253,24 @@ ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=480x480" -frames:v
 # so an unbounded source grew to 18 GB until earlyoom killed it (an output -t never ends the input)
 timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=240x240:rate=12:duration=2" -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
 
-"$XVFB" -displayfd 3 -nolisten tcp -screen 0 1400x900x24 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
-for _ in $(seq 1 50); do [ -s "$T/xdisplay" ] && break; sleep 0.1; done
-[ -s "$T/xdisplay" ] || { echo "ABORT: Xvfb didn't start"; tail -3 "$T/xvfb.log"; exit 1; }
+# An explicit display from :90 up, never one with a socket, a lock file or an abstract socket: `-displayfd` alone
+# picks the first FREE-LOOKING display, and the session's Xwayland (:1, started with -listenfd) leaves a lock file
+# naming a pid that is long dead — Xvfb took that for stale, took :1 and replaced the session's /tmp/.X11-unix/X1
+# (unlinked again when the shard ended). -displayfd stays as the "ready" signal. Shards racing for one number: the
+# loser exits on the lock, the next number is tried.
+x_taken() { [ -e "/tmp/.X11-unix/X$1" ] || [ -e "/tmp/.X$1-lock" ] || grep -q "@/tmp/.X11-unix/X$1\$" /proc/net/unix; }
+XP=""
+for n in $(seq 90 189); do
+  x_taken "$n" && continue
+  : > "$T/xdisplay"
+  "$XVFB" ":$n" -displayfd 3 -nolisten tcp -screen 0 1400x900x24 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
+  for _ in $(seq 1 50); do { [ -s "$T/xdisplay" ] || ! kill -0 $XP 2>/dev/null; } && break; sleep 0.1; done
+  [ -s "$T/xdisplay" ] && kill -0 $XP 2>/dev/null && break
+  kill $XP 2>/dev/null; wait $XP 2>/dev/null; XP=""
+done
+[ -n "$XP" ] && [ -s "$T/xdisplay" ] || { echo "ABORT: Xvfb didn't start on any of :90–:189"; tail -3 "$T/xvfb.log"; exit 1; }
+case "$(cat "$T/xdisplay")" in 0|1|2|3|4|5|6|7|8|9) echo "ABORT: Xvfb on a low display :$(cat "$T/xdisplay")"; exit 1 ;; esac
+echo "== Xvfb on :$(cat "$T/xdisplay")"
 echo "== matrix"
 (cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LP_URL="$U" LP_PLAYER_SOCKET="$XDG_RUNTIME_DIR/livepaper/lp-player.sock" \
   LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" LP_SHARD="$SHARD" \
