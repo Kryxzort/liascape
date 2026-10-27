@@ -2585,7 +2585,7 @@ impl Runtime {
                 self.snap
                     .last_write
                     .is_none_or(|t| now.duration_since(t) >= snapshot::REFRESH)
-                    && self.video_playing()
+                    && self.media_playing()
             }
         };
         if due {
@@ -2593,9 +2593,11 @@ impl Runtime {
         }
     }
 
-    fn video_playing(&self) -> bool {
+    /// A video or scene is playing: its position moves without graph changes, so the
+    /// snapshot refreshes every `snapshot::REFRESH`.
+    fn media_playing(&self) -> bool {
         self.graph.ids_of(NodeKind::Source).iter().any(|id| {
-            self.str_prop(id, "kind") == "video"
+            onset::kind_has_audio(&self.str_prop(id, "kind"))
                 && self.bool_prop(id, "ready")
                 && !self.bool_prop(id, "paused")
         })
@@ -2832,7 +2834,8 @@ impl Runtime {
         }
         let s = snap.sources.get(saved)?;
         let mut props = s.create_props();
-        let audible = s.kind == "video" && !s.paused;
+        // A video or a scene (its worker's stream, Phase 2) will be heard.
+        let audible = onset::kind_has_audio(&s.kind) && !s.paused;
         if audible {
             props.insert("gain.anticlick".into(), json!(SILENT_DB));
         }
@@ -2908,10 +2911,14 @@ impl Runtime {
         let dt_s = dt.as_secs_f64();
         let mut waits = Vec::new();
         for id in self.host.ids() {
-            let Some(m) = self.host.mpv(&id) else {
-                continue;
+            // Phase 2 Task 5: a scene gets the same virtual time (no duration: never clamped
+            // or wrapped) and ticks exactly it (`SceneSource::step_to`).
+            let scene = self.host.scene(&id).is_some();
+            let video = match self.host.mpv(&id) {
+                Some(m) => crate::sources::Source::kind(m) == "video",
+                None if scene => false,
+                None => continue,
             };
-            let video = crate::sources::Source::kind(m) == "video";
             let num = |prop: &str| match self.graph.get(&p(&format!("{id}.{prop}"))) {
                 Ok(PropValue::F64(f)) => f,
                 Ok(PropValue::I64(i)) => i as f64,
@@ -2949,6 +2956,19 @@ impl Runtime {
             }
             let at_end = video && !looped && dur > 0.0 && lt.t >= dur;
             let t_now = lt.t;
+            if let Some(s) = self.host.scene_mut(&id) {
+                s.step_to(t_now);
+                let opened = !s.is_ready();
+                waits.push(StepWait {
+                    id,
+                    t: t_now,
+                    video: false,
+                    seeked: true,
+                    done: false,
+                    opened,
+                });
+                continue;
+            }
             if let Some(m) = self.host.mpv_mut(&id) {
                 m.step_end(at_end);
             }
@@ -3009,6 +3029,18 @@ impl Runtime {
         self.update_sources();
         let mut opened_now = false;
         for w in st.waits.iter_mut().filter(|w| !w.done) {
+            if let Some(s) = self.host.scene(&w.id) {
+                let status = s.step_status();
+                // Its worker came up during this step: the frame gets a STEP_TIMEOUT of its own.
+                if w.opened && !matches!(status, StepStatus::Pending("ready")) {
+                    w.opened = false;
+                    opened_now = true;
+                }
+                if matches!(status, StepStatus::Done | StepStatus::Broken(_)) {
+                    w.done = true;
+                }
+                continue;
+            }
             let Some(m) = self.host.mpv_mut(&w.id) else {
                 w.done = true; // gone meanwhile
                 continue;
@@ -3081,7 +3113,12 @@ impl Runtime {
                 .iter()
                 .filter(|w| !w.done)
                 .map(|w| {
-                    let what = match self.host.mpv(&w.id).map(|m| m.step_status()) {
+                    let status = self
+                        .host
+                        .mpv(&w.id)
+                        .map(|m| m.step_status())
+                        .or_else(|| self.host.scene(&w.id).map(|s| s.step_status()));
+                    let what = match status {
                         Some(StepStatus::Pending(what)) => what,
                         _ => "?",
                     };
@@ -3444,6 +3481,20 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             "shader_cache_dir".into(),
             json!(shader_cache.display().to_string()),
         );
+    }
+    // Phase 2 Task 5: `kind: scene` sources. The worker binary (none → a scene's open fails
+    // naming it; `hello` has no `scene` capability), crash records under the state dir, and
+    // the synthetic test renderer only when this process runs with
+    // `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (D7; production never sets it).
+    if let Some(bin) = crate::paths::scene_worker_bin() {
+        base.insert("scene_worker".into(), json!(bin));
+    }
+    base.insert(
+        "scene_crash_dir".into(),
+        json!(opts.state_dir.join("crashes")),
+    );
+    if std::env::var("LP_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1") {
+        base.insert("allow_synthetic".into(), json!(true));
     }
     let clock = match opts.clock {
         ClockMode::Real => ClockKind::Real(MonoClock::new()),

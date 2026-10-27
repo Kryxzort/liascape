@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 
+use super::scene::{OutputDemand, SceneSource};
 use super::{
     ColorSource, MpvSource, PreparedCore, RenderWorker, SnapshotSource, Source, SourceEvent,
 };
@@ -296,6 +297,12 @@ impl SourceHost {
         }
         let mut n = Vec::new();
         for (id, h) in &mut self.sources {
+            // A scene's worker stream follows the route too (its `Start` for a restart).
+            if let Some(s) = h.src.as_scene_mut() {
+                s.set_audio_route(device.as_deref());
+                n.push(id.clone());
+                continue;
+            }
             let Some(m) = h.src.as_mpv_mut() else {
                 continue;
             };
@@ -559,7 +566,7 @@ impl SourceHost {
                 continue;
             }
             let t_open = std::time::Instant::now();
-            let opened_src = self.open(gfx, &node, player_paused);
+            let opened_src = self.open(gfx, &id, &node, player_paused);
             self.open_time += t_open.elapsed();
             match opened_src {
                 Ok(h) => {
@@ -659,11 +666,22 @@ impl SourceHost {
             }
         }
         self.player_paused = player_paused;
+
+        // Phase 2 Task 5: every scene's demand — the outputs showing it now (their sizes,
+        // refresh, `scene_fps`). The first one naming an output spawns its worker (here, on
+        // the loop thread: the worker's PDEATHSIG follows the spawning thread); a change of
+        // the largest output re-exports its ring; no output (parked) changes nothing.
+        for (id, h) in &mut self.sources {
+            if let Some(s) = h.src.as_scene_mut() {
+                s.set_demand(&demand_for(graph, id));
+            }
+        }
     }
 
     fn open(
         &self,
         gfx: &Gfx,
+        id: &str,
         node: &[(String, PropValue)],
         player_paused: bool,
     ) -> Result<Hosted, String> {
@@ -699,6 +717,19 @@ impl SourceHost {
                 let of = s("of");
                 let from = self.sources.get(&of).and_then(|h| h.src.texture());
                 Box::new(SnapshotSource::new(gfx, &of, from))
+            }
+            "scene" => {
+                // Opened with the *effective* pause (R75), like every other kind.
+                let mut n = node.to_vec();
+                n.retain(|(k, _)| k != "paused");
+                n.push(("paused".into(), PropValue::Bool(effective_paused)));
+                let src =
+                    SceneSource::open(gfx, id, &n, &self.base_opts).map_err(|e| e.to_string())?;
+                let wake = Some(src.wake_fd());
+                return Ok(Hosted {
+                    src: Box::new(src),
+                    wake,
+                });
             }
             _ => return self.open_mpv(gfx, node, player_paused, None),
         };
@@ -781,7 +812,9 @@ impl SourceHost {
                 _ => None,
             })
             .unwrap_or("");
-        if matches!(kind, "color" | "snapshot") {
+        // A scene opens on the loop (no core to make: its worker is spawned at its first
+        // demand, from this thread — PDEATHSIG follows the spawning thread).
+        if matches!(kind, "color" | "snapshot" | "scene") {
             return false;
         }
         let slot: OpenSlot = Arc::new(Mutex::new(None));
@@ -966,6 +999,23 @@ impl SourceHost {
         self.sources.get_mut(id).and_then(|h| h.src.as_mpv_mut())
     }
 
+    /// The live scene source for node `id`, if it is one (stepped mode, probes, tests).
+    pub fn scene(&self, id: &str) -> Option<&SceneSource> {
+        self.sources.get(id).and_then(|h| h.src.as_scene())
+    }
+
+    pub fn scene_mut(&mut self, id: &str) -> Option<&mut SceneSource> {
+        self.sources.get_mut(id).and_then(|h| h.src.as_scene_mut())
+    }
+
+    /// Every hosted scene's worker (the `workers` probe, `state.workers`).
+    pub fn workers_info(&self) -> Vec<Value> {
+        self.sources
+            .values()
+            .filter_map(|h| h.src.as_scene().map(SceneSource::worker_info))
+            .collect()
+    }
+
     /// Whether node `id`'s source failed to open (not retried until the node goes).
     pub fn open_failed(&self, id: &str) -> bool {
         self.failed.contains(id)
@@ -991,6 +1041,27 @@ impl SourceHost {
     pub fn wake_fds(&self) -> Vec<RawFd> {
         self.sources.values().filter_map(|h| h.wake).collect()
     }
+}
+
+/// What the outputs showing source `id` ask of it (Phase 2 Task 5): each `out:<c>` in
+/// `graph.outputs_of(id)` with its size, refresh and `scene_fps`.
+pub fn demand_for(graph: &Graph, id: &str) -> Vec<OutputDemand> {
+    let num = |o: &str, p: &str| match graph.get(&PropPath(format!("{o}.{p}"))) {
+        Ok(PropValue::I64(i)) => i as f64,
+        Ok(PropValue::F64(f)) => f,
+        _ => 0.0,
+    };
+    graph
+        .outputs_of(id)
+        .into_iter()
+        .map(|o| OutputDemand {
+            width: num(&o, "width").max(0.0) as u32,
+            height: num(&o, "height").max(0.0) as u32,
+            refresh_hz: num(&o, "refresh_hz"),
+            scene_fps: num(&o, "scene_fps"),
+            name: o,
+        })
+        .collect()
 }
 
 #[cfg(test)]

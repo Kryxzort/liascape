@@ -5,6 +5,8 @@
 //! - [`ColorSource`] (`color.rs`) — a solid colour.
 //! - [`SnapshotSource`] (`snapshot.rs`) — a held still copy of another source's frame
 //!   (R34: what reveal/frozen show for an outgoing side that keeps playing elsewhere).
+//! - [`scene::SceneSource`] (`scene.rs`, Phase 2) — a WE scene rendered by an
+//!   `lp-scene-worker` process, its frames imported over dmabuf.
 //! - [`SourceHost`] (`host.rs`) — owns one live source per graph `Source` node: opens/
 //!   drops them as nodes come and go, forwards property changes, mirrors observed values
 //!   back into the graph, and collects events (R32).
@@ -64,7 +66,7 @@ pub enum SourceEvent {
 /// One frame producer. Property names and value types are the graph's `Source` schema
 /// (`graph::props`); `apply` validates through the same gate the graph uses.
 pub trait Source {
-    /// `"video"`, `"image"`, `"color"` or `"snapshot"`.
+    /// `"video"`, `"image"`, `"color"`, `"snapshot"` or `"scene"`.
     fn kind(&self) -> &'static str;
     /// Render a new frame into the texture if one is available. **Never blocks**; returns
     /// whether the texture changed.
@@ -95,6 +97,13 @@ pub trait Source {
         None
     }
     fn as_mpv_mut(&mut self) -> Option<&mut MpvSource> {
+        None
+    }
+    /// The scene source behind this, if it is one (demand, stepped mode, probes).
+    fn as_scene(&self) -> Option<&scene::SceneSource> {
+        None
+    }
+    fn as_scene_mut(&mut self) -> Option<&mut scene::SceneSource> {
         None
     }
 }

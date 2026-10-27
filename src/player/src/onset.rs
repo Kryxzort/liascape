@@ -35,13 +35,20 @@ fn flag(g: &Graph, id: &str, name: &str) -> bool {
     matches!(prop(g, id, name), Some(PropValue::Bool(true)))
 }
 
-/// Does `id` carry audio at all? Only a live `video` source does — not `no_audio` (our
-/// own `aid=no`), and not one mpv found to have no audio track (`has_audio`, R92; unknown
-/// reads `true`, the conservative "don't skip a real wait" default). A `color`/`image`/
-/// `snapshot` source has no `MpvSource` audio behind it and never reports
+/// Can a source of this `kind` carry audio at all? A `video` (mpv) and a `scene` (its
+/// worker's stream, Phase 2) — never a `color`/`image`/`snapshot`.
+pub fn kind_has_audio(kind: &str) -> bool {
+    matches!(kind, "video" | "scene")
+}
+
+/// Does `id` carry audio at all? Only a live source of a kind with audio
+/// ([`kind_has_audio`]: video, scene) — not `no_audio` (our own `aid=no`), and not one
+/// found to have no audio (`has_audio`, R92: mpv's selected track, a scene worker's `Ready`;
+/// unknown reads `true`, the conservative "don't skip a real wait" default). A `color`/
+/// `image`/`snapshot` source has no audio behind it and never reports
 /// [`SourceEvent::AudioFlowing`].
 pub fn has_audio(g: &Graph, id: &str) -> bool {
-    matches!(prop(g, id, "kind"), Some(PropValue::Str(k)) if k == "video")
+    matches!(prop(g, id, "kind"), Some(PropValue::Str(k)) if kind_has_audio(&k))
         && !flag(g, id, "no_audio")
         && !matches!(prop(g, id, "has_audio"), Some(PropValue::Bool(false)))
 }
@@ -334,6 +341,24 @@ mod tests {
             .unwrap();
         assert!(!o.schedule(&g, &mut anim, onset(&id, Duration::ZERO), Duration::ZERO));
         assert!(o.is_empty());
+    }
+
+    #[test]
+    fn kind_has_audio_counts_scenes() {
+        assert!(kind_has_audio("video"));
+        assert!(kind_has_audio("scene"));
+        for k in ["image", "color", "snapshot", ""] {
+            assert!(!kind_has_audio(k), "{k}");
+        }
+        let mut g = Graph::new();
+        let mut p = Map::new();
+        p.insert("kind".into(), json!("scene"));
+        p.insert("path".into(), json!("/w/431960/123"));
+        let id = g.create(NodeKind::Source, None, p).unwrap();
+        assert!(has_audio(&g, &id), "unknown = true until the worker says");
+        g.set_observed(&PropPath(format!("{id}.has_audio")), PropValue::Bool(false))
+            .unwrap();
+        assert!(!has_audio(&g, &id), "a scene without sound");
     }
 
     #[test]

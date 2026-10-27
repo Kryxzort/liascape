@@ -25,6 +25,7 @@ pub mod dropout;
 pub mod frames;
 mod memory;
 mod snapshot;
+mod workers;
 
 use serde_json::{Map, Value, json};
 
@@ -74,6 +75,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         memory::memory,
         "RSS + glibc malloc in-use vs retained bytes, arena count; {trim: true} runs \
          malloc_trim(0) and reports what it gave back",
+    ),
+    (
+        "workers",
+        workers::workers,
+        "per scene source: its lp-scene-worker (pid, state, restarts, sync, format, export \
+         and native size, fps target/actual, latched, stale reuses, queued, last error)",
     ),
     (
         "dropout",
@@ -190,6 +197,20 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 "step_status".into(),
                 json!(format!("{:?}", m.step_status())),
             );
+        }
+        if let Some(s) = rt.host.scene(&id) {
+            // Phase 2 Task 5: a scene's worker side (the `workers` probe has the rest).
+            o.insert("pid".into(), json!(s.pid()));
+            o.insert("scene_time".into(), json!(s.scene_time()));
+            o.insert("latched_t".into(), json!(s.latched_t()));
+            o.insert("fps_target".into(), json!(s.tick_hz()));
+            o.insert("export_size".into(), json!(s.size()));
+            o.insert("native".into(), json!(s.native()));
+            o.insert(
+                "step_status".into(),
+                json!(format!("{:?}", s.step_status())),
+            );
+            o.insert("error".into(), json!(s.error().or(s.broken())));
         }
         if let Some(lt) = rt.local.get(&id) {
             o.insert("virtual_t".into(), json!(lt.t));

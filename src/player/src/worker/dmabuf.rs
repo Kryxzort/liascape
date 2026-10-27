@@ -66,6 +66,12 @@ impl ImportedRing {
         Ok(())
     }
 
+    /// Drop every slot not in `keep` (a re-export's older slots, once a frame of the new
+    /// set latched — the worker never names them again).
+    pub fn retain_slots(&mut self, keep: &[u8]) {
+        self.slots.retain(|(s, _)| keep.contains(s));
+    }
+
     pub fn tex(&self, slot: u8) -> Option<&Tex> {
         self.slots
             .iter()

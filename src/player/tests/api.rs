@@ -5822,3 +5822,312 @@ fn losing_the_x_server_never_kills_the_player() {
     assert!(st.success(), "{st}: {}", srv.stderr());
     assert!(!srv.stderr().contains("X connection"), "{}", srv.stderr());
 }
+
+// ---------------------------------------------------------------- Phase 2 Task 5: scenes
+
+use lp_player::scene::synthetic::{Pattern, SyntheticSpec, marker_rgb};
+
+/// A server whose scene sources may play the synthetic renderer (D7:
+/// `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`, test-only).
+fn scene_serve(extra: &[&str]) -> Option<Serve> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    Some(scene_serve_in(extra, Some(serial)))
+}
+
+fn scene_serve_in(extra: &[&str], serial: Option<MutexGuard<'static, ()>>) -> Serve {
+    Serve::spawn_env(
+        new_root(),
+        extra,
+        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))],
+        serial,
+    )
+}
+
+fn synth(pattern: Pattern) -> SyntheticSpec {
+    SyntheticSpec {
+        pattern,
+        ..SyntheticSpec::default()
+    }
+}
+
+/// A synthetic scene folder as a `kind: scene` source (`extra` props merged).
+fn create_scene(c: &mut Client, name: &str, spec: &SyntheticSpec, extra: Value) -> String {
+    let dir = common::synthetic_scene(name, spec);
+    let mut props = extra.as_object().cloned().unwrap_or_default();
+    props.insert("kind".into(), json!("scene"));
+    props.insert("path".into(), json!(s(&dir)));
+    create_src(c, Value::Object(props))
+}
+
+/// `id`'s entry in the `workers` probe.
+fn worker_of(c: &mut Client, id: &str) -> Value {
+    let p = c.ok("probe", json!({"name": "workers"}));
+    p["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no worker for {id}: {p}"))
+}
+
+fn pid_alive(pid: u64) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// `hello` offers `scene`; a scene source readies on a step; `state.workers`, the `workers`
+/// probe and the `sources` probe all show its worker.
+#[test]
+fn scene_capability_state_and_workers_probe() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let h = c.ok("hello", json!({}));
+    assert!(
+        h["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("scene")),
+        "{h}"
+    );
+    let id = create_scene(&mut c, "api-caps", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    c.step(16);
+    assert_eq!(
+        get(&mut c, &format!("{id}.ready"))["result"]["value"],
+        json!(true)
+    );
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"][&id]["kind"], json!("scene"), "{st}");
+    let w = &st["workers"][0];
+    assert_eq!(w["id"], json!(id), "{st}");
+    let pid = w["pid"].as_u64().expect("a worker pid");
+    assert!(pid_alive(pid));
+    let w = worker_of(&mut c, &id);
+    for (k, v) in [
+        ("state", json!("running")),
+        ("sync", json!("fence")),
+        ("fourcc", json!("AB24")),
+        ("size", json!([640, 360])),
+        ("native", json!([1920, 1080])),
+        ("max_size", json!([640, 360])),
+        ("stepped", json!(true)),
+        ("ready", json!(true)),
+        ("restarts_60s", json!(0)),
+    ] {
+        assert_eq!(w[k], v, "workers.{k}: {w}");
+    }
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let src = probe_source(&p, &id);
+    assert_eq!(src["live_kind"], json!("scene"), "{src}");
+    assert_eq!(src["pid"], json!(pid));
+    assert_eq!(src["step_status"], json!("Done"));
+}
+
+/// R75 for scenes: `player.paused` freezes `time_pos` and the picture (no latch), the
+/// node's own `paused` untouched, `effective_paused` in the probe; resuming continues.
+#[test]
+fn player_pause_freezes_scene() {
+    let Some(mut srv) = scene_serve(&[]) else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = scene_serve_in(&["--clock", "real"], serial);
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-ppause", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    std::thread::sleep(Duration::from_millis(50));
+    let t1 = f64_of(&mut c, &format!("{id}.time_pos")).unwrap();
+    let l1 = worker_of(&mut c, &id)["latched"].as_u64().unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    let t2 = f64_of(&mut c, &format!("{id}.time_pos")).unwrap();
+    let w = worker_of(&mut c, &id);
+    assert_eq!(t2, t1, "time_pos frozen");
+    assert_eq!(w["latched"].as_u64().unwrap(), l1, "no frame latched: {w}");
+    assert_eq!(w["paused"], json!(true), "the worker side is paused: {w}");
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let src = probe_source(&p, &id);
+    assert_eq!(src["paused"], json!(false), "the node's own paused: {src}");
+    assert_eq!(src["effective_paused"], json!(true), "{src}");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    std::thread::sleep(Duration::from_millis(300));
+    let t3 = f64_of(&mut c, &format!("{id}.time_pos")).unwrap();
+    assert!(
+        t3 > t2 + 0.15 && t3 < t2 + 0.6,
+        "continues from where it stopped: {t2} → {t3}"
+    );
+    assert!(worker_of(&mut c, &id)["latched"].as_u64().unwrap() > l1);
+}
+
+/// Stepped mode ticks exactly each step's scene time: two servers, the same script →
+/// byte-identical captures (frame_index: the marker is the tick's seq).
+#[test]
+fn stepped_scene_is_deterministic() {
+    let Some(mut srv1) = scene_serve(&[]) else {
+        return;
+    };
+    let run = |srv: &Serve| -> (Vec<u8>, Value) {
+        let mut c = srv.client();
+        let id = create_scene(&mut c, "api-det", &synth(Pattern::FrameIndex), json!({}));
+        show_all(&mut c, &id);
+        let t = Instant::now();
+        for _ in 0..60 {
+            c.step(16);
+        }
+        // A frame whose fence signals after its `Frame` wakes the loop (no timer in stepped
+        // mode): before, such a step finished only at its 2 s deadline (155 s for this test).
+        let took = t.elapsed();
+        assert!(took < Duration::from_secs(15), "60 steps took {took:?}");
+        let p = srv.path("det.png");
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
+        let w = worker_of(&mut c, &id);
+        (std::fs::read(&p).unwrap(), w)
+    };
+    let (a, wa) = run(&srv1);
+    let serial = srv1._serial.take();
+    drop(srv1);
+    let srv2 = scene_serve_in(&[], serial);
+    let (b, wb) = run(&srv2);
+    // Opened at step 1 (t = 0), then 59 × 16 ms; one tick per step.
+    for w in [&wa, &wb] {
+        let t = w["latched_t"].as_f64().unwrap();
+        assert!((t - 59.0 * 0.016).abs() < 1e-9, "latched_t {t}: {w}");
+        assert_eq!(w["ticks_sent"], json!(60), "{w}");
+    }
+    assert!(a == b, "captures differ between runs");
+}
+
+/// Creating (spawn, imports) and destroying (quit, reap off the loop) a scene never stalls
+/// the loop; the worker is gone soon after the destroy.
+#[test]
+fn scene_create_and_destroy_never_stall_the_loop() {
+    let Some(mut srv) = scene_serve(&[]) else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = scene_serve_in(&["--clock", "real"], serial);
+    let mut c = srv.client();
+    // Warm up (first EGL import paths, the clip cache) so the measurement is the scene's.
+    let warm = create_scene(&mut c, "api-stall-warm", &synth(Pattern::Solid), json!({}));
+    show_all(&mut c, &warm);
+    wait_playing(&mut c, &warm, 0.1);
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    let id = create_scene(&mut c, "api-stall", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.2);
+    let l = c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    let busy_create = l["max_busy_ms"].as_f64().unwrap();
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    c.ok("set", json!({"path": "lay:*:main.content", "value": ""}));
+    c.ok("destroy", json!({"id": id}));
+    let t = Instant::now();
+    while pid_alive(pid) && t.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let gone = t.elapsed();
+    std::thread::sleep(Duration::from_millis(50));
+    let l = c.ok("probe", json!({"name": "loop"}));
+    let busy_destroy = l["max_busy_ms"].as_f64().unwrap();
+    println!(
+        "loop max busy: create {busy_create:.2} ms, destroy {busy_destroy:.2} ms; worker gone after {gone:?}"
+    );
+    assert!(busy_create <= 3.0, "create: max busy {busy_create} ms");
+    assert!(busy_destroy <= 3.0, "destroy: max busy {busy_destroy} ms");
+    assert!(
+        gone <= Duration::from_millis(600),
+        "worker still there after {gone:?}"
+    );
+    assert!(!exists(&mut c, &id));
+}
+
+/// Review Focus #4: every output gone while a scene plays → parked (paused, silent, no
+/// ticks, worker kept); an output back → unparked, ticking again, same worker.
+#[test]
+fn scene_parks_and_resumes_on_hotplug() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-park", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["parked"], json!(id), "{st}");
+    assert_eq!(st["graph"][&id]["paused"], json!(true));
+    assert_eq!(
+        st["graph"][&id]["gain_effective_db"],
+        json!(-96.0),
+        "parked = silent"
+    );
+    let ticks = worker_of(&mut c, &id)["ticks_sent"].clone();
+    for _ in 0..5 {
+        c.step(16);
+    }
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["ticks_sent"], ticks, "no ticks while parked: {w}");
+    assert_eq!(w["pid"], pid, "worker kept");
+    assert!(pid_alive(pid.as_u64().unwrap()));
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    assert_eq!(
+        content(&mut c, "VIRTUAL-3"),
+        id,
+        "the parked scene is shown"
+    );
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"][&id]["paused"], json!(false));
+    assert_eq!(st["parked"], Value::Null);
+    let w = worker_of(&mut c, &id);
+    assert!(
+        w["ticks_sent"].as_u64().unwrap() > ticks.as_u64().unwrap(),
+        "ticking again: {w}"
+    );
+    assert_eq!(w["pid"], pid, "same worker");
+}
+
+/// R25 for scenes: a captured scene source (and the output showing it) is upright — the
+/// scene's top row is the image's top.
+#[test]
+fn capture_scene_source_is_upright() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-upright", &synth(Pattern::SplitTb), json!({}));
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let p = srv.path("scene.png");
+    let r = c.ok("capture", json!({"target": id, "path": s(&p)}));
+    let h = r["height"].as_u64().unwrap() as u32;
+    near(png_pixel(&p, 100, 10), [255, 0, 0], 0, "scene capture top");
+    near(
+        png_pixel(&p, 100, h - 10),
+        [0, 0, 255],
+        0,
+        "scene capture bottom",
+    );
+    let p2 = srv.path("scene_out.png");
+    c.ok(
+        "capture",
+        json!({"target": "out:VIRTUAL-1", "path": s(&p2)}),
+    );
+    near(png_pixel(&p2, 320, 10), [255, 0, 0], 0, "output top");
+    near(png_pixel(&p2, 320, 350), [0, 0, 255], 0, "output bottom");
+    let _ = marker_rgb(0);
+}
