@@ -209,8 +209,10 @@ const PAGE = `window.__mx = {
 }; true`;
 async function loadUi() {
   await win.loadURL(U + "/");
-  // record what the page POSTs to /preview (its bodies — the backend only sees what arrives)
-  await js(`(() => { window.__mxReq = []; const f = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/preview")) window.__mxReq.push(o?.body ?? null); return f(u, o); }; })(); true`);
+  // record what the page POSTs to /preview (its bodies — the backend only sees what arrives), and count its requests
+  // in flight (a fuzz step waits for them: under load a persist was still on its way when the step looked)
+  await js(`(() => { window.__mxReq = []; window.__mxInflight = 0; const f = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/preview")) window.__mxReq.push(o?.body ?? null);
+    window.__mxInflight++; return f(u, o).finally(() => { window.__mxInflight--; }); }; })(); true`);
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
   await js(PAGE);
   await sleep(300);
@@ -454,7 +456,8 @@ setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
 setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable cache"), true, "Disable cache");`);
 setting("demux64", "demuxerMaxBytes", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
 // switches
-C["cardApply"] = { switch: true, async run(c) { c.target = K[2] === c.shown ? K[1] : K[2]; await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".thumb-wrap"), "card");`); },
+// (neither side of a running effect: a fuzz chain's incoming B can be k3)
+C["cardApply"] = { switch: true, async run(c) { c.target = [K[2], K[1], K[3]].find((p) => p !== c.shown && p !== c.before.cur?.path); await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".thumb-wrap"), "card");`); },
   exp: { paused: false }, check: (c) => expectShown(c, c.target, { effect: true }) };
 C["stripClick"] = { switch: true, async run(c) {
     for (const k of [K[2], K[1], K[0]]) if (k !== c.shown && (await ui(`return !!m.strip(${JSON.stringify(TITLE(k))});`))) { c.target = k; break; }
@@ -512,7 +515,7 @@ for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async 
 C["cli:volume-up+uiSave"] = { async run(c) {
     c.cli = await cli("volume-up"); await sleep(400);
     await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop"), false, "Loop");`); await sleep(900); },
-  check: (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up + a UI save, from ${c.before.s.volume}`]) };
+  check: (c) => volKeyAuto(c, "volume-up", " + a UI save") };
 C["plAdvanceOff"] = { async run(c) {
   await ui(`m.click(document.querySelector('button[title="Playlist settings"]'), "pl settings"); await m.sleep(500); m.setCheck(m.plCheck("Switch when video ends"), false, "advance"); await m.sleep(400); m.click(m.byText(".pl-modal button", "Close"), "close");`);
   await sleep(900); },
@@ -523,8 +526,21 @@ C["plAdvanceOff"] = { async run(c) {
 const action = (a, check, extra = {}) => { C[`cli:${a}`] = { async run(c) { c.cli = await cli(a); }, check, ...extra }; };
 action("toggle-pause", () => [], { flipPause: true }); // the oracle checks player.paused against the flipped expectation
 action("toggle-mute", () => [], { flipMute: true });
-action("volume-up", (c) => (c.after.s.volume === Math.min(100, c.before.s.volume + 5) ? [] : [`volume ${c.after.s.volume} after volume-up from ${c.before.s.volume}`]));
-action("volume-down", (c) => (c.after.s.volume === Math.max(0, c.before.s.volume - 5) ? [] : [`volume ${c.after.s.volume} after volume-down from ${c.before.s.volume}`]));
+// VolumeKeyTarget "auto" (the default): the playing wallpaper's own volume moves when it has one, else the global. A
+// matrix cell's playing item never has one here (the `:overridden` cells below cover that); a fuzz chain's may (an
+// earlier step dragged its slider) — `what` names what ran before the check (a UI save after the key)
+function volKeyAuto(c, a, what = "") {
+  const cur = c.before.cur?.path, own = cur ? ((c.before.lib || []).find((i) => i.videoPath === cur)?.volumeOverride ?? null) : null;
+  const want = (b) => (a === "volume-up" ? Math.min(100, b + 5) : Math.max(0, b - 5));
+  if (own == null) return c.after.s.volume === want(c.before.s.volume) ? [] : [`volume ${c.after.s.volume} after ${a}${what} from ${c.before.s.volume}`];
+  const v = [], got = (c.after.lib || []).find((i) => i.videoPath === cur)?.volumeOverride ?? null;
+  const exp = want(own) === c.before.s.volume ? null : want(own); // landing on the global = follows it again (SaveVolumeOverride)
+  if (c.after.s.volume !== c.before.s.volume) v.push(`auto, ${TITLE(cur)} has its own volume ${own}: the global moved ${c.before.s.volume} → ${c.after.s.volume}${what}`);
+  if (got !== exp) v.push(`auto: ${TITLE(cur)}'s own volume ${got} after ${a}${what} from ${own}, expected ${exp}`);
+  return v;
+}
+action("volume-up", (c) => volKeyAuto(c, "volume-up"));
+action("volume-down", (c) => volKeyAuto(c, "volume-down"));
 // the same keybinds by VolumeKeyTarget (Advanced → "Volume keys adjust"): "auto" (default) moves the playing
 // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own (giving it
 // one); "global" always the global (an overridden one keeps its own). Every other item keeps its own, and every
@@ -588,7 +604,7 @@ function pausedSwitch(c) {
   const last = sched[sched.length - 1];
   if (!last) return ["no switch was requested"];
   if (c.keep && last.effect_id != null) return [`a switch while paused that keeps the pause used ${last.effect_id}, not a cut`];
-  if (!c.keep && !c.noOutput && last.effect_id == null) return ["a switch that resumes from a pause was a cut (transitions are on)"];
+  if (!c.keep && !c.noOutput && !c.cutsOk && last.effect_id == null) return ["a switch that resumes from a pause was a cut (transitions are on)"];
   return [];
 }
 // a fresh playlist session at its first item has nothing before it: previous leaves it — and an armed
@@ -1255,7 +1271,7 @@ function expectShownN(c, want, maxNow) {
   const now = c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end");
   const mine = now.filter((e) => e.path === want);
   if (!mine.length) v.push(`no switch to ${TITLE(want)} was requested`);
-  else if (!c.noOutput && mine[mine.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
+  else if (!c.noOutput && !c.cutsOk && mine[mine.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
   if (now.length > maxNow) v.push(`${now.length} switches requested (${now.map((e) => TITLE(e.path))}), expected ≤ ${maxNow}`);
   return v;
 }
@@ -1751,7 +1767,8 @@ function expectShown(c, want, { effect }) {
   const sched = c.evs.filter((e) => e.event === "transition.scheduled");
   const mine = sched.filter((e) => e.path === want);
   if (!mine.length) v.push(`no switch to ${TITLE(want)} was requested`);
-  else if (effect && !c.noOutput && mine[mine.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
+  // (c.cutsOk: a fuzz chain switched a transition off earlier — the switch may be a cut; never set by a matrix cell)
+  else if (effect && !c.noOutput && !c.cutsOk && mine[mine.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
   if (sched.length > 3) v.push(`${sched.length} switches requested (storm?)`);
   return v;
 }
@@ -1781,6 +1798,13 @@ function notTargeted(c, p, { gone } = {}) {
 const KNOWN = [];
 
 // ---------------------------------------------------------------- run
+// a state's entry that didn't get there: what it saw (a SETUP is usually load: the run's timing, not a product bug)
+async function notReached(stateName, logAt) {
+  const st = await ctl.call("state").catch(() => null);
+  return { result: "SETUP", violations: [`state ${stateName} not reached`],
+    seen: st && { transitions: (st.transitions || []).map((t) => `${t.corr} ${t.phase} → ${TITLE(st.graph[t.to]?.path)}`), screen: Object.values(screen(st)).map(TITLE),
+      current: TITLE((await http("GET", "/current")).json?.path) }, logs: logsSince(logAt) };
+}
 async function runCell(stateName, ctlName) {
   const S = STATES[stateName], K_ = C[ctlName];
   const c = { state: stateName, control: ctlName, exp: { ...S.exp } };
@@ -1794,32 +1818,58 @@ async function runCell(stateName, ctlName) {
   await S.enter(c); lap("enter");
   if (c.ok !== false) { await loadUi(); lap("ui"); }
   if (c.ok !== false && S.late) { await S.late(c); lap("enter"); }
-  if (c.ok === false) { // what the state's entry saw (a SETUP is usually load: the run's timing, not a product bug)
-    const st = await ctl.call("state").catch(() => null);
-    return { state: stateName, control: ctlName, result: "SETUP", violations: [`state ${stateName} not reached`],
-      seen: st && { transitions: (st.transitions || []).map((t) => `${t.corr} ${t.phase} → ${TITLE(st.graph[t.to]?.path)}`), screen: Object.values(screen(st)).map(TITLE),
-        current: TITLE((await http("GET", "/current")).json?.path) }, logs: logsSince(logAt) };
-  }
+  if (c.ok === false) return { state: stateName, control: ctlName, ...(await notReached(stateName, logAt)) };
   c.before = await snapshot(); lap("snap");
   const t0 = Date.now(); const h0 = httpLog.length;
   try { await K_.run(c); } catch (e) { return { ...c, result: "ERROR", violations: [`control failed: ${e.message}`] }; }
   lap("run");
   if (c.skip) return { ...c, result: "SKIP" };
+  const a = await afterControl(c, K_, ctlName, { t0, h0, lap, logAt });
+  const v = a.violations;
+  const known = v.length ? KNOWN.find(([re]) => re.test(`${stateName} × ${ctlName}`))?.[1] : undefined;
+  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings: a.warnings, phases: ph,
+    target: c.target ? TITLE(c.target) : undefined, shown: c.shown ? TITLE(c.shown) : undefined,
+    logs: a.logs, player: a.player, http: a.http, events: a.events };
+}
+
+// After a control ran (c.before taken; `t0` / `h0` marked as it started): settle the way the control asks, snapshot, then
+// EVERY check — the oracle against the expectations (the state's, the control's `exp` / flipPause / flipMute, what its
+// `run` set), the control's own `check`, the events (a failed / errored switch, a rejected property, an unexpected cancel,
+// a switch from a noSwitch control), HTTP errors, the CLI's exit, and the UI's playing mark + strip against the backend.
+// Shared by a matrix cell (runCell) and every fuzz step (fuzzStep).
+// `fuzz`: in a chain an armed advance-on-end switch can fire ON ITS OWN mid-step (k4 is 10 s) — `rotated`. What that makes
+// unknowable from outside is skipped: the control's own check (its before/after comparisons) and the "no switch" / "no
+// cancel" event checks; the oracle and every other check still run.
+async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }) {
+  // fuzz: what the page sent is answered, and a keybind's switch the playlist's tick hasn't taken yet (its
+  // pending_action.txt) is taken, before the step settles and before it looks — a cell's fixed waits assume an unloaded
+  // box; a chain runs long enough to meet a loaded one (a debounced persist still in flight, a next that "stayed")
+  const pageQuiet = () => (fuzz ? waitFor(async () => !fs.existsSync(PENDING_ACTION) && (await js("window.__mxInflight || 0")) === 0, 4000, 50) : null);
+  await pageQuiet();
   if (K_.exp) Object.assign(c.exp, K_.exp);
   if (K_.flipPause) c.exp.paused = !c.exp.paused;
   if (K_.flipMute) c.exp.muted = !(c.exp.muted ?? false);
   if (K_.switch && c.noSettle) { await sleep(1500); c.exp.settled = true; } // paused: the cut's ramps wait for the resume
   else if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
+  // fuzz: an armed advance-on-end switch fired ON ITS OWN during the step — let it land, so the checks below see where
+  // it went, not its middle (mid-effect /current is already the incoming side while the screen + UI still show A)
+  if (fuzz && rotatedDuring(c.before, events.filter((e) => e._t >= t0))) await waitSettled();
+  await pageQuiet();
   lap("settle");
   if (!c.mid) c.exp.settled = c.exp.settled ?? !c.pending;
   if (c.mid) c.exp.settled = false;
   c.after = await snapshot(); lap("snap");
   c.evs = events.filter((e) => e._t >= t0);
-  const v = [...oracle(c.after, c.exp), ...(K_.check ? K_.check(c, c.before, c.after) : [])];
+  const rotated = fuzz && rotatedDuring(c.before, c.evs);
+  const v = [...oracle(c.after, c.exp), ...(K_.check && !rotated ? K_.check(c, c.before, c.after) : [])];
+  // a keybind's next/prev/random in a timed playlist is a file the session's 100 ms tick takes — still there after the
+  // waits above: no tick takes it (the keybind did nothing)
+  if (fuzz && fs.existsSync(PENDING_ACTION)) v.push(`the playlist's tick never took a keybind's "${(() => { try { return fs.readFileSync(PENDING_ACTION, "utf8").trim(); } catch { return "?"; } })()}" (pending_action.txt still there > 4 s later; /current timed=${c.after.cur?.timed})`);
   for (const e of c.evs) {
     if (e.event === "transition.failed" && !K_.expectFail) v.push(`transition.failed ${e.corr}: ${e.reason}`);
     if (e.event === "source.error" && !K_.expectFail) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
     if (e.event === "source.rejected") v.push(`source.rejected ${e.prop}: ${e.reason}`);
+    if (rotated) continue;
     if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
     if (e.event === "transition.scheduled" && K_.noSwitch) v.push(`a switch was requested (${TITLE(e.path)})`);
   }
@@ -1849,12 +1899,244 @@ async function runCell(stateName, ctlName) {
     source: ((await ctl.call("logs", { kind_prefix: "source.", limit: 300 }).catch(() => null))?.events || [])
       .filter((e) => e.kind !== "source.position").map((e) => `${e.t_mono_ms?.toFixed(0)} ${e.kind} ${JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !["t_mono_ms", "t_wall", "comp", "kind", "level"].includes(k))))}`.slice(0, 300)),
   };
-  const known = v.length ? KNOWN.find(([re]) => re.test(`${stateName} × ${ctlName}`))?.[1] : undefined;
-  return { state: stateName, control: ctlName, result: !v.length ? "PASS" : known ? "KNOWN" : "FAIL", violations: v, known, warnings, phases: ph,
-    target: c.target ? TITLE(c.target) : undefined, shown: c.shown ? TITLE(c.shown) : undefined,
-    logs: v.length ? logsSince(logAt) : undefined, player,
+  return { violations: v, warnings, player, rotated,
+    logs: v.length ? logsSince(logAt) : undefined,
     http: v.length ? httpLog.slice(h0).filter((r) => !asset.test(r.url)).map((r) => `+${r.t - t0}ms ${r.method} ${r.url.replace(U, "")} ${r.status}`) : undefined,
-    events: v.length ? c.evs.map((e) => `+${e._t - t0}ms ${e.event} ${e.corr ?? ""} ${e.path ? TITLE(e.path) : ""} ${e.reason ?? ""} ${e.effect_id ?? ""}`.trim()) : undefined };
+    events: v.length || rotated ? c.evs.map((e) => `+${e._t - t0}ms ${e.event} ${e.corr ?? ""} ${e.path ? TITLE(e.path) : ""} ${e.reason ?? ""} ${e.effect_id ?? ""}${e.align ? ` align:${e.align}` : ""}`.trim()) : undefined };
+}
+// an armed align:end switch (advance-on-end) fired on its own around this step: in flight when it began, or started /
+// handed off / done during it
+const alignOf = (corr) => events.find((e) => e.event === "transition.scheduled" && e.corr === corr)?.align;
+function rotatedDuring(before, evs) {
+  if ((before.st.transitions || []).some((t) => t.phase !== "waiting_start" && t.phase !== "done" && alignOf(t.corr) === "end")) return true;
+  return evs.some((e) => (e.event === "transition.started" || e.event === "transition.handoff" || e.event === "transition.done") && alignOf(e.corr) === "end");
+}
+
+// ================================================================ fuzz: random chains of controls (test-ui-matrix.sh --fuzz)
+// A cell runs ONE control from a fresh state; bugs keep turning up at combinations nobody listed. A fuzz run enters a
+// random start state (the matrix's own, minus the opt-in ones), then applies LP_FUZZ_STEPS controls picked at random —
+// a seeded PRNG (LP_FUZZ_SEED + the run's index → the same picks) — from the ones eligible in the state the stack is in
+// NOW, and after EACH step runs every check a cell runs (afterControl). A run stops at its first failing step.
+//   - The state a step sees is DERIVED from what runs (fuzzContext): its label (a STATES name, by precedence idle >
+//     noOutput > pausedEffect > effect > paused > muted > pending(Global) > playlist(Global) > single — a control's
+//     `states` must list it; an unrestricted control runs under every label: the matrix leaves its opt-in states to the
+//     controls that list them only to bound its size), the roles (shown = on screen / the outgoing A, other = the
+//     incoming B / the armed B / the strip's next / an off-screen item) and the flags the checks read (playlist, pending
+//     = advance-on-end, fresh = at the session's first history item, mid = mid-effect, cutsOk = a transition is off).
+//   - The EXPECTATIONS carry across steps instead: paused / muted go from the start state's `exp` through every control's
+//     exp / flipPause / flipMute / what its run set, exactly as in a cell — a pause or mute silently lost still fails;
+//     noOutput holds for the whole run.
+//   - A control's `pre` (its fixture — an override, a saved playlist, a setting — written over HTTP BEFORE the UI loads
+//     in a cell) runs right before its step, then the UI reloads: the backend pushes none of those writes to the page.
+//   - Between steps the page goes back to the Library tab with no selection: a cell starts on a fresh page, and a
+//     leftover Ctrl+click selection makes a later card action repeat to every selected card.
+// LP_FUZZ_REPLAY='<state>:<c1>,<c2>,…' reruns exactly that sequence (what a failure prints), eligibility unchecked.
+// The seed reproduces a run's picks while the states it passes through derive the same (a natural advance-on-end switch
+// can land a step earlier or later under load); the replay is exact. Results: <LP_OUT>/fuzz.jsonl, one record per run.
+//
+// Which controls a chain may use, and when — the first matching rule wins; every other control: any step its `states`
+// allow.  exclude: never.  last: only as a run's LAST step — what it leaves behind, the later controls' expectations
+// can't follow.  when(x): only while x (the derived context) holds — the control's drive or check assumes a starting
+// value.  shrinks: takes an item out of the strip — only while it holds ≥ 3 (never below 2: a one-item playlist has
+// nowhere to go next, an empty one isn't specified).  removes(x): the item it takes out — when that's what a running
+// playlist plays, only as the last step (the backend goes on from the removed item's old place, which no later "the
+// strip's next" expectation can know).
+const sameIds = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const ownTr = (x, ids, ms) => x.ps.transitionEnabled !== false && sameIds(x.ps.transitionEffectIds, ids) && (ms === undefined || x.ps.transitionDurationMs === ms);
+const gTrOn = (x) => x.s.globalTransitionEnabled !== false;
+const notInStrip = (x) => K.some((p) => !x.strip.includes(p));
+// an item control's check wants its value saved as the item's own — one equal to the global is saved as "follows the
+// global" instead (LibraryService.SaveVolumeOverride/SaveSpeedOverride), so only while the global is something else
+const offGlobal = (vol, spd) => (x) => (vol === undefined || ![].concat(vol).includes(x.s.volume)) && (spd === undefined || Math.abs(x.s.speed - spd) > 1e-6);
+const FUZZ_RULES = [
+  [/^race:|^plState:partial$/, { exclude: "backend-only HTTP stress (no UI) that rewrites the playlist / index under the run" }],
+  [/^apply:broken$/, { exclude: "a switch that FAILS on purpose (expectFail): its transition.failed would fail every later step" }],
+  [/autoMute/, { exclude: "synthetic streams on the private audio server + Auto-Mute's delays outlive a step" }],
+  [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
+  [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
+  [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
+  [/^plShuffle$/, { last: "a shuffled order makes every later 'the strip's next' expectation (armedCheck, *+next) unknowable" }],
+  [/^(plInterval|plIntervalZero|plWaitEnd|gInterval8s|gWaitEnd|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],
+  [/-keep$/, { last: "KeepPauseOnSwitch stays on — every later switch from a pause expects it to resume" }],
+  [/^cli:volume-(up|down):global$/, { last: "VolumeKeyTarget stays global — the later volume keys expect auto", when: (x) => offGlobal(30)(x) }], // its pre: own 30
+  [/^cli:volume-(up|down):item$/, { last: "VolumeKeyTarget stays item — the later volume keys expect auto",
+    when: (x) => [x.cur, x.shown, x.other].every((p) => !p || x.ownVol(p) == null) }], // its check: nothing live had its own volume
+  [/^(plTrEffect|seq:plTrEffect\+next)$/, { when: (x) => ownTr(x, ["fade"]) }], // the drive toggles Crosswarp on + Fade off
+  [/^(plTrDuration|seq:plTrDuration\+next)$/, { when: (x) => x.ps.transitionEnabled !== false }], // a cut has no duration
+  // in `pending` their check wants the pending fixture's own fade 600 untouched; in `pendingGlobal` the globals on
+  [/^gTrEffect$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x) && sameIds(x.s.globalTransitionEffectIds, ["fade"])) }],
+  [/^(gTrOff|gTrDuration|gMethodFrozen)$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x)) }],
+  [/^seq:plOverrideOn\+advanceOn$/, { when: (x) => ownTr(x, ["fade"], PS().transitionDurationMs) }], // its check: PS()'s own transition
+  [/^plAdvanceOff$/, { when: (x) => x.ps.overrideGlobalSettings !== false }], // the modal's checkbox is disabled while the playlist follows the globals
+  [/^(selToggle:add|cardToggle:add)$/, { when: notInStrip }], // adds an item the strip doesn't hold
+  [/^selToggle:remove$/, { when: notInStrip, shrinks: true, removes: (x) => x.other }],
+  [/^(stripRemove|stripRemoveMenu):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
+  [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
+  [/^seq:stripRemove\+next:/, { shrinks: true }],
+  // Settings → "Mute audio" on disables the Volume slider and "Normalize audio" (and hides the target): their drive
+  // would click a disabled input
+  [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
+  [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^stripVol:/, { when: offGlobal(42) }],
+  [/^itemVolDrag:/, { when: offGlobal(20) }], [/^itemSpdDrag:/, { when: offGlobal(undefined, 2.6) }], [/^itemVolDragEsc:/, { when: offGlobal(30) }],
+  [/^selVol:/, { when: offGlobal(33) }], [/^seq:itemVolDrag\+next:/, { when: offGlobal(25) }], [/^seq:itemSpdDrag\+next:/, { when: offGlobal(undefined, 2.2) }],
+  [/^seq3:pause\+itemVolDrag\+resume$/, { when: offGlobal(25) }], [/^seq:previewDrag\+reopen$/, { when: offGlobal(undefined, 1.8) }],
+  [/^cli:volume-(up|down):overridden$/, { when: offGlobal(30) }], [/^cli:volume-up:modalOpen$/, { when: offGlobal([30, 35]) }], // their pre: own 30
+];
+const fuzzRule = (n) => (FUZZ_RULES.find(([re]) => re.test(n)) || [null, {}])[1];
+function fuzzEligible(n, x, last) {
+  const r = fuzzRule(n), states = C[n].states;
+  if (r.exclude || (r.last && !last)) return false;
+  if (states && !states.includes(x.label)) return false;
+  if (r.when && !r.when(x)) return false;
+  if (r.shrinks && x.strip.length < 3) return false;
+  if (r.removes && !last && x.playlist && r.removes(x, n) === x.cur) return false;
+  return true;
+}
+
+// what runs now, as a control sees it (see above)
+const TIMED = path.join(path.dirname(E.LP_USER_MUTE), "timed_state.json"); // the backend's timed-playlist session (history, mode)
+const PENDING_ACTION = path.join(path.dirname(E.LP_USER_MUTE), "pending_action.txt"); // a next/prev/random the tick hasn't taken
+const readTimed = () => { try { return JSON.parse(fs.readFileSync(TIMED, "utf8")); } catch { return null; } };
+function fuzzContext(snap, fz) {
+  const { st } = snap, trs = st.transitions || [];
+  const pathOf = (id) => st.graph[id]?.path ?? null;
+  const midT = trs.find((t) => (t.phase === "running" || t.phase === "handoff") && (t.from || []).length > 0);
+  const armedT = trs.find((t) => t.phase === "waiting_start");
+  const paused = !!st.graph.player?.paused;
+  // with no output nothing is "shown", so /current is null: what plays is the session's own bookkeeping then
+  const live = !!snap.cur?.path || (fz.noOutput && sourcesOf(st).length > 0);
+  const playlist = live && !!snap.cur?.timed;
+  const ts = playlist ? readTimed() : null;
+  const pending = playlist && !!ts?.AdvanceOnVideoEnd;
+  const hi = ts ? (ts.WaitingForVideoEnd && ts.HistoryIndex > 0 ? ts.HistoryIndex - 1 : ts.HistoryIndex) : -1; // PlayerHelper.PlayingHistoryIndex
+  const cur = snap.cur?.path ?? (live ? (playlist ? ts?.History?.[hi] : snap.s.lastSession?.paths?.[0]) ?? null : null);
+  const strip = snap.ps?.videoPaths || [], ps = snap.ps?.settings || {}, own = ps.overrideGlobalSettings !== false;
+  let shown = cur, other = null;
+  if (midT) { other = pathOf(midT.to) ?? cur; shown = [...midT.from.map(pathOf), ...sourcesOf(st).map(([, n]) => n.path)].find((p) => p && p !== other) ?? cur; }
+  else if (armedT) other = pathOf(armedT.to);
+  else if (playlist) other = succ(strip, cur);
+  if (!live) shown = other = null;
+  else if (!other || other === shown) other = [K[2], K[1], K[3], K[0]].find((p) => p !== shown);
+  const label = !live ? "idle" : fz.noOutput ? "noOutput" : midT ? (paused ? "pausedEffect" : "effect") : paused ? "paused" : snap.muted ? "muted"
+    : pending && armedT ? (own ? "pending" : "pendingGlobal") : playlist ? (own ? "playlist" : "playlistGlobal") : "single";
+  return { label, cur, shown, other, playlist, pending, fresh: playlist && hi === 0, mid: !!midT, strip, ps, s: snap.s, before: snap,
+    ownVol: (p) => (snap.lib || []).find((i) => i.videoPath === p)?.volumeOverride ?? null,
+    cutsOk: snap.s.globalTransitionEnabled === false || ps.transitionEnabled === false };
+}
+// a page (re)load in a chain: the Settings view is a lazy chunk, loaded on its first visit — under load that took past
+// the 500 ms a Settings control waits ("not found: Speed" after a reload). Load it once now, back on the Library tab.
+async function loadUiFuzz() {
+  await loadUi();
+  await ui(`m.tab("Settings"); for (let i = 0; i < 100 && !document.querySelector(".settings .srow"); i++) await m.sleep(50);
+    m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150);`).catch(() => {});
+}
+// between steps: the Library tab, no selection (a click on the grid's background clears it)
+const tidyUi = () => ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); }
+  const g = document.querySelector(".lib-scroll .grid"); if (g) { g.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); await m.sleep(80); }`).catch(() => {});
+
+async function fuzzStep(name, x, fz) {
+  const K_ = C[name];
+  const c = { state: x.label, control: name, exp: { ...fz.exp }, shown: x.shown, other: x.other, playlist: x.playlist, pending: x.pending,
+    fresh: x.fresh, mid: x.mid, noOutput: fz.noOutput, cutsOk: x.cutsOk, before: x.before };
+  let tp = Date.now(); const ph = {}; const lap = (k) => { const n = Date.now(); ph[k] = (ph[k] ?? 0) + n - tp; tp = n; };
+  const base = { control: name, state: x.label, shown: x.shown ? TITLE(x.shown) : undefined, other: x.other ? TITLE(x.other) : undefined, phases: ph };
+  const logAt = logSizes();
+  if (K_.pre) { await K_.pre(c); await loadUiFuzz(); c.before = await snapshot(); lap("pre"); }
+  await tidyUi(); lap("tidy");
+  const t0 = Date.now(), h0 = httpLog.length;
+  try { await K_.run(c); } catch (e) { return { ...base, result: "ERROR", violations: [`control failed: ${e.message}`] }; }
+  lap("run");
+  if (c.skip) return { ...base, result: "SKIP", skip: c.skip };
+  const a = await afterControl(c, K_, name, { t0, h0, lap, logAt, fuzz: true });
+  fz.exp = { paused: c.exp.paused, muted: c.exp.muted };
+  return { ...base, result: a.violations.length ? "FAIL" : "PASS", violations: a.violations.length ? a.violations : undefined, rotated: a.rotated || undefined,
+    warnings: a.warnings, target: c.target ? TITLE(c.target) : undefined, exp: { ...fz.exp },
+    after: { cur: TITLE(c.after.cur?.path ?? null), strip: (c.after.ps?.videoPaths || []).map(TITLE), paused: !!c.after.st.graph.player?.paused, muted: c.after.muted },
+    logs: a.logs, player: a.player, http: a.http, events: a.events };
+}
+
+const FUZZ_STARTS = Object.keys(STATES).filter((s) => !STATES[s].optIn);
+const FUZZ_POOL = Object.keys(C).filter((n) => !fuzzRule(n).exclude);
+// mulberry32 — one stream per (seed, run), so a run's picks don't depend on how the runs are split across shards
+function prng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const runRng = (seed, run) => prng((Math.imul(seed >>> 0, 0x9E3779B1) ^ Math.imul(run + 1, 0x85EBCA77)) >>> 0);
+const pickOf = (rng, list) => list[Math.floor(rng() * list.length)];
+function parseReplay(s) {
+  const i = s.indexOf(":"), state = i < 0 ? s : s.slice(0, i);
+  const controls = i < 0 ? [] : s.slice(i + 1).split(",").map((n) => n.trim()).filter(Boolean);
+  if (!STATES[state]) throw new Error(`--fuzz-replay: no state "${state}" (${Object.keys(STATES).join(", ")})`);
+  for (const n of controls) if (!C[n]) throw new Error(`--fuzz-replay: no control "${n}"`);
+  return { state, controls };
+}
+
+async function fuzzRun({ run, seed, steps, replay }) {
+  const rng = replay ? null : runRng(seed, run);
+  const start = replay ? replay.state : pickOf(rng, FUZZ_STARTS);
+  const S = STATES[start];
+  const rec = { seed, run, shard: E.LP_SHARD || undefined, start, sequence: [], steps: [] };
+  const t0 = Date.now();
+  const c0 = { state: start, exp: { ...S.exp } };
+  [c0.shown, c0.other] = S.roles();
+  const logAt = logSizes();
+  await reset(S.playlist?.());
+  if (S.pre) await S.pre(c0);
+  await S.enter(c0);
+  if (c0.ok !== false) await loadUiFuzz();
+  if (c0.ok !== false && S.late) await S.late(c0);
+  rec.setupMs = Date.now() - t0;
+  if (c0.ok === false) return { ...rec, ...(await notReached(start, logAt)), replay: `${start}:` };
+  const fz = { exp: { paused: S.exp.paused, muted: S.exp.muted }, noOutput: !!c0.noOutput };
+  const n = replay ? replay.controls.length : steps;
+  console.log(`---- run ${run}${replay ? " (replay)" : ` (seed ${seed})`}: ${start}`);
+  for (let k = 0; k < n; k++) {
+    let x, name, r;
+    try {
+      x = fuzzContext(await snapshot(), fz);
+      if (replay) name = replay.controls[k];
+      else {
+        const pool = FUZZ_POOL.filter((m) => fuzzEligible(m, x, k === n - 1));
+        if (!pool.length) { rec.stopped = `no eligible control under ${x.label}`; break; }
+        name = pickOf(rng, pool);
+      }
+      rec.sequence.push(name);
+      r = await fuzzStep(name, x, fz);
+    } catch (e) { r = { control: name, state: x?.label, result: "ERROR", violations: [String((e && e.stack) || e)] }; }
+    rec.steps.push(r);
+    console.log(`  ${String(k + 1).padStart(2)}/${n} ${r.result.padEnd(5)} [${r.state}] ${name}${r.skip ? ` (skip: ${r.skip})` : ""}${r.rotated ? " (an advance-on-end switch fired in the step: its own check skipped)" : ""}`);
+    if (r.result === "FAIL" || r.result === "ERROR") { rec.failedAt = k; break; }
+  }
+  rec.result = rec.failedAt === undefined ? "PASS" : rec.steps[rec.failedAt].result;
+  rec.replay = `${start}:${rec.sequence.join(",")}`;
+  return rec;
+}
+
+async function fuzzMain() {
+  const seed = Number(E.LP_FUZZ_SEED || 0) >>> 0, steps = Number(E.LP_FUZZ_STEPS || 0), runs = Number(E.LP_FUZZ_RUNS || 1);
+  const replay = E.LP_FUZZ_REPLAY ? parseReplay(E.LP_FUZZ_REPLAY) : null;
+  const out = fs.createWriteStream(path.join(OUT, "fuzz.jsonl"));
+  // normalization's controls find every clip measured (their `pre` is then instant)
+  if (!(await measureAll())) console.log("(the clips weren't measured in 30 s — the normalization steps report it)");
+  const plan = replay ? [{ run: 0, replay }] : [...Array(runs).keys()].filter((r) => !SHARD || r % SHARD[1] === SHARD[0]).map((run) => ({ run, seed, steps }));
+  const results = [];
+  for (const p of plan) {
+    let r; const t0 = Date.now();
+    try { r = await fuzzRun(p); } catch (e) { r = { seed: p.seed, run: p.run, result: "ERROR", sequence: [], steps: [], violations: [String((e && e.stack) || e)] }; }
+    r.ms = Date.now() - t0;
+    results.push(r); out.write(JSON.stringify(r) + "\n");
+    const fail = r.failedAt !== undefined ? r.steps[r.failedAt] : null;
+    console.log(`${r.result.padEnd(5)} run ${r.run}${replay ? "" : ` (seed ${r.seed})`}: ${[r.start, ...r.sequence].join(" → ")}${r.stopped ? ` (stopped: ${r.stopped})` : ""}`
+      + (r.result === "PASS" ? "" : (fail ? `\n        at step ${r.failedAt + 1}: [${fail.state}] ${fail.control}` : "")
+        + ((fail?.violations ?? r.violations) || []).map((v) => `\n        - ${v}`).join("")
+        + (r.replay ? `\n        replay: scripts/test-ui-matrix.sh --fuzz-replay '${r.replay}'` : "")));
+  }
+  out.end();
+  const n = (x) => results.filter((r) => r.result === x).length;
+  console.log(`FUZZ runs=${results.length} pass=${n("PASS")} fail=${n("FAIL")} error=${n("ERROR")} setup=${n("SETUP")} steps=${results.reduce((a, r) => a + (r.steps || []).length, 0)}${replay ? " (replay)" : ` seed=${seed}`}`);
+  await reset().catch(() => {});
+  app.exit(n("FAIL") + n("ERROR") + n("SETUP") ? 1 : 0);
 }
 
 app.whenReady().then(async () => {
@@ -1867,6 +2149,7 @@ app.whenReady().then(async () => {
   win.focus();
   subscribe();
   BASE_SETTINGS = await getSettings();
+  if (E.LP_FUZZ_STEPS || E.LP_FUZZ_REPLAY) return fuzzMain();
   const out = fs.createWriteStream(path.join(OUT, "cells.jsonl"));
   const results = [];
   let idx = -1;
