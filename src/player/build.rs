@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    lwe_link();
     let mpv = pkg_config::Config::new()
         .atleast_version("2.0") // client API 2.x (mpv ≥ 0.35): render API + volume-gain
         .probe("mpv")
@@ -38,4 +39,27 @@ fn main() {
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("mpv_bindings.rs");
     bindings.write_to_file(&out).expect("write mpv_bindings.rs");
+}
+
+/// Phase 2 (feature `lwe`): only `lp-scene-worker` links LWE's core — the compositor binary
+/// never does (`rustc-link-arg-bin`). The core comes from `scripts/lwe.sh build`, which
+/// leaves it in `$LP_LWE_CORE_DIR/lib`.
+fn lwe_link() {
+    println!("cargo::rerun-if-env-changed=LP_LWE_CORE_DIR");
+    if env::var_os("CARGO_FEATURE_LWE").is_none() {
+        return;
+    }
+    let dir = env::var("LP_LWE_CORE_DIR").ok().filter(|d| !d.is_empty());
+    let Some(dir) = dir else {
+        panic!(
+            "feature `lwe` needs LWE's core: run `scripts/lwe.sh build` and set \
+             LP_LWE_CORE_DIR to the directory it prints (the one holding lib/), or build \
+             without the feature (`--no-default-features` once it is on by default) — \
+             lp-scene-worker then plays synthetic scenes only"
+        );
+    };
+    let bin = "lp-scene-worker";
+    println!("cargo::rustc-link-arg-bin={bin}=-L{dir}/lib");
+    println!("cargo::rustc-link-arg-bin={bin}=-llinux-wallpaperengine-core");
+    println!("cargo::rustc-link-arg-bin={bin}=-Wl,-rpath,{dir}/lib");
 }

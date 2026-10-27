@@ -56,6 +56,9 @@ happen regardless of timing.
 - `src/onset.rs` — invariant #8's one onset helper (`PendingOnset`/`Onsets`: ramp-ins held
   until the source's audio flows, bounded by `ONSET_TIMEOUT`) and the one "can it be heard"
   predicate (`has_audio`, `audible`). § Runtime "Onsets" (final review I6/M12).
+- `src/worker/` — Phase 2: the compositor side of the scene worker (`proto.rs` wire
+  protocol, `mod.rs` `WorkerHost` lifecycle). `src/bin/lp-scene-worker/` — the worker binary
+  (second `[[bin]]`). § Scene worker.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -2672,3 +2675,125 @@ NVIDIA notes, Task 20e). Guard: `tests/api.rs::t20b_switch_loop_rss_stays_flat` 
 fades between two 1080p clips: RSS growth over the last 16 < 10 % and an on-demand trim
 gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaningful check; with `LP_PLAYER_MALLOC=glibc` 32 % / 13.6 % → fails).
 `docs/player/debugging.md` row "RSS grows per switch".
+
+## Scene worker
+
+Phase 2 (plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`, Tasks
+3–4; spec §4.1, §5.2, §6.3; evidence `docs/player/spikes/dmabuf.md`). A WE scene renders in
+its own `lp-scene-worker` process; the compositor drives it over a socket and samples its
+frames. `src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the worker.
+
+**Protocol (`worker/proto.rs`, `PROTOCOL` 1).** One JSON object per `SOCK_SEQPACKET`
+datagram, ≤ `MAX_MSG` (64 KiB), fds on the same datagram via `SCM_RIGHTS` (≤ `MAX_FDS` 8).
+Internally tagged by **`msg`** (snake_case variant name — not `t`, which `Tick`/`Frame` use
+for scene time): `{"msg":"tick","seq":3,"t":0.02,"input":null}`. `ToWorker`: `start {path,
+assets_dir, steam_dir, position, paused, audio, max_size, synthetic}`, `tick {seq, t,
+input}`, `release {slot}` (+ optional release fence fd), `gain`, `paused`, `no_audio`,
+`route`, `pointer`, `resize {max_size}`, `ping {seq}`, `quit`. `FromWorker`: `hello
+{protocol, pid, features, sync}` (first message; `features` ⊂ `stub|synthetic|lwe`, `sync` =
+`fence|fdpoll|none`), `buffer {slot, w, h, fourcc, modifier, planes}` (+ one fd per plane),
+`frame {slot, seq, t, gpu_ms}` (+ acquire fence fd, none in fdpoll), `ready`, `has_audio`,
+`audio_flowing`, `envelope`, `pong`, `error {reason, fatal}`, `context_lost`, `log`.
+`AudioRoute` = `"null"|"default"|{"device":"…"}`; a `modifier` is a JSON integer (u64, exact).
+`proto::send` refuses > 64 KiB / > 8 fds (`InvalidInput`), sends `MSG_NOSIGNAL` (a gone peer
+is `EPIPE`, never SIGPIPE); `proto::recv` never blocks — `Ok(None)` nothing queued,
+`Err(UnexpectedEof)` peer gone, `Err(InvalidData)` an oversized/garbage/unknown datagram (it
+is consumed and its fds closed; the next one parses). Received fds are `CLOEXEC`.
+
+**`WorkerHost` (`worker/mod.rs`) — one worker process, supervised.**
+`WorkerSpec::new(id, bin, start)` = production defaults (`args` [], `env` [],
+`hang_timeout` `HANG_TIMEOUT` 2 s, `budget` 3 per 60 s, `crash_dir` `paths::crash_dir()` =
+`<state>/crashes/`); tests set `args: ["--stub"]`, a short budget/timeout, a private dir.
+States: `Starting` (spawned, no `Hello`) → `Running` (the host answers `Hello` with the
+spec's `Start`) → on a crash `Restarting {attempt}` → `Running` …, or `Broken {reason}`, or
+`Stopped`. `poll(now)` never blocks: drains output + messages, runs the heartbeat, reaps,
+restarts — call it on every wake **and** regularly (time must pass for a hang to show).
+Events: `Msg(FromWorker, fds)` (everything but `Pong`), `Exited {signal|code}` (every
+process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {record}`.
+- **Spawn = `posix_spawn` on the calling thread** (glibc: `clone(CLONE_VM|CLONE_VFORK)`, no
+  page-table copy of the compositor — measured 0.24–0.35 ms per `spawn()` in the test
+  binary), not `fork` on an `lp-open` pool thread as the plan had it: **`PR_SET_PDEATHSIG`
+  fires when the spawning *thread* exits** (`prctl(2)`), and the pool's threads exit when
+  idle — every worker would die with them. So Task 5 spawns from the loop thread. The worker
+  sets `PR_SET_PDEATHSIG(SIGKILL)` itself, first thing, then exits 3 unless `getppid()` ==
+  `--parent-pid` (the parent died before the prctl). Child fds: socket end at **fd 3**
+  (`--fd 3`), stdout + stderr on one pipe (the log tail), stdin `/dev/null`; the parent's
+  copies are `CLOEXEC` and renumbered ≥ 10 first, so no `dup2` clobbers another and fd 3 never
+  equals its source (an `adddup2(3, 3)` would keep `CLOEXEC`). Empty signal mask + default
+  dispositions for SIGPIPE/INT/TERM/HUP/QUIT/CHLD/USR1/USR2/ALRM (the compositor blocks
+  SIGINT/SIGTERM for its signalfd). Env = the compositor's + `spec.env` (overriding).
+- **`wake_fd()` is an epoll fd** over the current socket + output pipe — stable across
+  restarts (a dup of the old socket would read EOF forever after a restart: a busy loop),
+  readable whenever `poll` has work. The host owns it; register a dup, like mpv wake fds.
+- **Crash = socket EOF or the process gone** (`waitpid(pid, WNOHANG)`; spike §6). A process
+  that closed its socket but lives on is SIGKILLed after 1 s. On reap: output drained to
+  EOF (so a crash's last stderr lines make the record), `Exited`, then the budget:
+  `RestartBudget::admit(history, now)` (sliding window, unit `budget_window_slides`) →
+  respawn with the **last `Start` at `set_resume_position`** → `Restarted {attempt}` (1, 2,
+  3), or `Broken` + a crash record. `restarts(now)` = (in the window, total).
+- **Heartbeat.** `send` records every `Tick` (answered by any `Frame` with `seq` ≥ it) and
+  `Ping`; the oldest unanswered one older than `hang_timeout` → SIGKILL + `Hung` (+ `Exited`
+  once reaped, then the restart policy). No ticks flowing → `Ping` every `PING_INTERVAL`
+  (1 s), **shortened to `hang_timeout / 2`** so a hang is always seen within 1.5 ×
+  `hang_timeout` (the plan's 1 s ping could not meet `hang_after_ms 100, hang_timeout 300 →
+  Hung ≤ 600 ms`). No `Hello` within `HELLO_TIMEOUT` (5 s, or `hang_timeout` if longer) =
+  hung too. **Task 7 note:** the worker must keep answering while LWE loads (a multi-second
+  `wp_project_load` on the protocol thread would read as a hang).
+- **`send` while not connected** (before `Hello`, `Restarting`, `Broken`, `Stopped`):
+  `Start`/`Paused`/`Resize`/`Route` are **folded into the restart's `Start`** and accepted
+  (`Ok`) — a restart never resumes with a stale pause/size/route — everything else is
+  `NotConnected` (the caller re-sends gains/pointer after the new worker's `Ready`).
+  `WouldBlock` = the worker isn't reading (socket buffer full). Unit
+  `restart_start_folds_live_changes`.
+- **Fatal errors are not crashes.** A worker that can't play (`error {fatal: true}`: no GPU,
+  load/build failed, protocol mismatch — a `Hello` with another `protocol` is turned into one
+  by the host) stays up, idle, until `quit`; the caller stops it. No restart loop, no crash
+  record (plan Review Focus #1).
+- **`stop()` / `Drop` never block** (`stop_never_blocks`: < 5 ms): `quit` is sent, the
+  process goes to `worker::reap` — one `lp-worker-reap` thread, started on demand, gone when
+  nothing is dying — which reaps it and SIGKILLs it at `STOP_GRACE` (500 ms) if it's still
+  there. `reap::pending()` for probes.
+- **Log tail:** the last `LOG_TAIL` (50) lines of worker output + `log` messages (as
+  `[level] line`), oldest first, across restarts (a `--- lp-player: worker …; restart N ---`
+  marker between processes); a line is cut at 4 KiB; ≤ 256 KiB read per `poll`. stderr and
+  `log` messages interleave arbitrarily.
+- **Crash record** `<crash_dir>/<scene-id>-<unix_ms>.json` (`-<n>` on a same-ms collision;
+  written via a temp + rename) = `{scene_id (the item folder's name), id (source), path,
+  reason, signal|code, restarts (in the window), total_restarts, uptime_ms, t_wall,
+  log_tail}`; past `MAX_CRASH_RECORDS` (20) the oldest (mtime) go. `worker::write_crash_record`.
+- Events (comp `worker`, one corr `wk-N` per host): `worker.spawned {id, pid, bin, attempt}`,
+  `.ready {pid, protocol, features, sync, ms}`, `.exited {pid, signal, code, hung,
+  uptime_ms}`, `.hung {pid, waited_ms, hello}`, `.restart {attempt, prev_pid, pid, why}`,
+  `.broken {reason, record, restarts}`, `.stopped`, `.bad_message`, `.spawn_failed`,
+  `.record_failed`. `source.broken` is Task 10's (the source's view).
+
+**`lp-scene-worker --fd N --parent-pid P [--stub]`.** `--stub` (tests, no GPU): `hello
+{features: [stub], sync: none}`, answers `ping`/`tick` (a slot-0 `frame` without fd), logs
+each `start`'s position (`stub: start position <p>`), scripted by `LP_SCENE_WORKER_TEST`
+(comma-separated): `crash_after_ms:N` (`stub: crashing` to stderr, `RLIMIT_CORE` 1 —
+no systemd-coredump/DrKonqi —, `abort()`), `hang_after_ms:N` (stops answering), `exit_code:N`
+(exit N at `crash_after_ms`, else right after `hello`), `ignore_quit` (ignores `quit` **and**
+EOF — only SIGKILL ends it), `spam_stderr:N`. The worker sets its socket `CLOEXEC`
+(nothing it starts may hold it: EOF is the crash signal).
+
+**Build feature `lwe` — default OFF for now** (the LWE track flips it to `default =
+["lwe"]` when its build lands). With it: `build.rs` emits `cargo::rustc-link-arg-bin=
+lp-scene-worker=` `-L$LP_LWE_CORE_DIR/lib -llinux-wallpaperengine-core -Wl,-rpath,…` (the
+compositor binary never links LWE); without `LP_LWE_CORE_DIR` the build fails naming
+`scripts/lwe.sh build` and the feature. Without it the worker runs `--stub` and the
+synthetic renderer only. **`paths::scene_worker_bin()`**: `$LP_SCENE_WORKER_BIN` (used only if
+it names a file) → `lp-scene-worker` next to `/proc/self/exe` (dev `target/<profile>/`, the
+flake's `$out/bin` — the wrapper's `.lp-player-wrapped` sits there too) → `PATH`; unit
+`scene_worker_resolution_order`.
+
+**Tests (`tests/worker.rs`, no GPU, stub only):** `proto_roundtrip_with_fds`,
+`proto_rejects_oversized_and_garbage`, `spawn_handshake_hello` (+ spawn cost < 50 ms),
+`worker_exit_is_seen_with_its_signal`, `worker_exit_code_is_seen`,
+`hang_is_detected_by_heartbeat`, `restarts_three_times_then_broken`,
+`restart_resends_start_at_resume_position`, `stop_never_blocks`, `worker_dies_with_its_parent`
+(the test binary re-execs itself as the parent — `helper_spawn_and_wait`, env
+`LP_WORKER_TEST_HELPER` — with an `ignore_quit` stub so only PDEATHSIG can end it; RED with
+the prctl removed: the worker outlived its SIGKILLed parent by 2 s),
+`log_tail_and_crash_records_are_bounded`. **Gotcha:** a sibling test's `posix_spawn` holds a
+copy of every fd for the µs between its clone and exec — `CLOEXEC` fds included — so a test
+that closes one end and reads EOF must `poll` for the hang-up first.

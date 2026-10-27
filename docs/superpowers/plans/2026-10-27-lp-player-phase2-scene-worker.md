@@ -356,7 +356,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   (prints "stub: crashing" to stderr, then `abort()`), `hang_after_ms:N` (stops answering), `exit_code:N`,
   `ignore_quit`, `spam_stderr:N`.
 
-- [ ] **Step 1: Write failing tests** (`tests/worker.rs`, no GPU):
+- [x] **Step 1: Write failing tests** (`tests/worker.rs`, no GPU):
   - `proto_roundtrip_with_fds` (a `Buffer` with 2 memfds → same message, both fds readable with their bytes)
   - `proto_rejects_oversized_and_garbage` (65 KiB → `Err`; a non-JSON datagram → `Err` and the next valid one parses)
   - `spawn_handshake_hello` (`Hello {protocol: 1}` ≤ 1 s; `pid()` = the child)
@@ -368,8 +368,8 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   - `stop_never_blocks` (`ignore_quit` → `stop()` < 5 ms; child gone ≤ STOP_GRACE + 100 ms)
   - `worker_dies_with_its_parent` (parent SIGKILLed → worker gone ≤ 300 ms)
   - `log_tail_and_crash_records_are_bounded` (10 000 stderr lines → 50 kept, newest last; 25 broken → 20 records)
-- [ ] **Step 2:** `cargo test -q --test worker` → FAIL. **Step 3:** implement. **Step 4:** → PASS.
-- [ ] **Step 5:** Commit `Add Scene Worker Protocol And Lifecycle`.
+- [x] **Step 2:** `cargo test -q --test worker` → FAIL. **Step 3:** implement. **Step 4:** → PASS.
+- [x] **Step 5:** Commit `Add Scene Worker Protocol And Lifecycle`.
 
 **Size: L** (≈ 2 days, ~900 lines).
 
