@@ -34,6 +34,21 @@ public static class LibraryService
         LibraryStore.SetMeta(mediaPath, m => m.Volume = volume);
     }
 
+    // A volume key on the item's own volume: the step from what's SAVED, inside the index lock (a value computed from an
+    // earlier read lost every concurrent step but one). Its own volume, else the global; dropped when it lands on the
+    // global. Returns (from, to); from == to = at the clamp, nothing saved.
+    public static (int From, int To) StepVolumeOverride(string mediaPath, int delta)
+    {
+        int global = SettingsService.Load().Volume, from = global, to = global;
+        LibraryStore.SetMeta(mediaPath, m =>
+        {
+            from = m.Volume ?? global;
+            to = Math.Clamp(from + delta, 0, 100);
+            if (to != from) m.Volume = to == global ? null : to;
+        });
+        return (from, to);
+    }
+
     public static void SaveSpeedOverride(string mediaPath, double? speed)
     {
         if (speed.HasValue && Math.Abs(speed.Value - SettingsService.Load().Speed) < 1e-6) speed = null;

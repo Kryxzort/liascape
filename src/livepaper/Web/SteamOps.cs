@@ -42,11 +42,12 @@ public static class SteamOps
                     EventBus.Broadcast("steam-qr", new { png = "data:image/png;base64," + Convert.ToBase64String(png) });
                 }, ct);
 
-                var s = SettingsService.Load();
-                s.SteamRefreshToken = refreshToken;
-                s.SteamId = steamId;
-                s.SteamAccountName = accountName;
-                SettingsService.Save(s);
+                SettingsService.Update(s =>
+                {
+                    s.SteamRefreshToken = refreshToken;
+                    s.SteamId = steamId;
+                    s.SteamAccountName = accountName;
+                });
                 EventBus.Broadcast("steam-signed-in", Status());
             }
             catch (OperationCanceledException) { EventBus.Broadcast("steam-qr-cancelled"); }
@@ -58,10 +59,11 @@ public static class SteamOps
 
     public static void SignOut()
     {
-        var s = SettingsService.Load();
-        s.SteamRefreshToken = ""; s.SteamId = 0; s.SteamAccessToken = "";
-        s.SteamAccountName = ""; s.SteamLoginSecure = "";
-        SettingsService.Save(s);
+        SettingsService.Update(s =>
+        {
+            s.SteamRefreshToken = ""; s.SteamId = 0; s.SteamAccessToken = "";
+            s.SteamAccountName = ""; s.SteamLoginSecure = "";
+        });
     }
 
     // The drain modal is a view onto this; dismissing it doesn't stop the drain. One drain at a time.

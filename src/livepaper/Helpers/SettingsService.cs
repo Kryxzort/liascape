@@ -40,7 +40,8 @@ public static class SettingsService
         }
     }
 
-    public static void Save(AppSettings settings)
+    // private: every write is a field-level Update or Patch (a whole copy loaded earlier reverts what changed since)
+    private static void Save(AppSettings settings)
     {
         var dir = Path.GetDirectoryName(ConfigPath)!;
         Directory.CreateDirectory(dir);
@@ -65,12 +66,15 @@ public static class SettingsService
         .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
     private static readonly object PatchLock = new();
 
-    // A backend-side read-modify-write of the saved settings (a keybind's volume) under the same lock as
-    // POST /settings: a load → save outside it lost whichever of the two landed first.
+    // A read-modify-write of the saved settings (a keybind's volume, a switch's LastSession, the Steam sign-in)
+    // under the same locks as POST /settings: a load → save outside them lost whichever of the two landed first —
+    // /apply saved the whole copy it loaded BEFORE its switch, reverting a /settings change made meanwhile. Set
+    // only the fields you own in `mutate`; never Save a copy loaded earlier.
     public static AppSettings Update(Action<AppSettings> mutate)
     {
         lock (PatchLock)
         {
+            using var _ = FileLock.Hold(ConfigPath); // and every other livepaper process (the CLI, the daemons)
             var s = Load();
             mutate(s);
             Save(s);
@@ -105,6 +109,7 @@ public static class SettingsService
     {
         lock (PatchLock)
         {
+            using var _ = FileLock.Hold(ConfigPath);
             var prev = Load();
             var s = Merge(prev, body);
             s.LastSession = prev.LastSession;

@@ -2593,7 +2593,7 @@ public static class PlayerHelper
         var pickPath = library[pickIdx].VideoPath;
         Apply(pickPath, settings.BuildMpvOptions());
         settings.LastSession = new LastSession { Paths = [pickPath] };
-        SettingsService.Save(settings);
+        SettingsService.Update(s => s.LastSession = new LastSession { Paths = [pickPath] });
         return true;
     }
 
@@ -2771,7 +2771,7 @@ public static class PlayerHelper
         var pick = PickRandomExcluding(pool, current);
         Apply(pick, settings.BuildMpvOptions());
         settings.LastSession = new LastSession { IsRandom = true, Paths = [pick] };
-        SettingsService.Save(settings);
+        SettingsService.Update(s => s.LastSession = new LastSession { IsRandom = true, Paths = [pick] });
     }
 
     // Owns the timed-playlist tick loop in a detached process. Resumes an
@@ -3148,16 +3148,17 @@ public static class PlayerHelper
         var own = cur != null ? ReadVolumeOverride(cur) : null;
         if (cur != null && (settings.VolumeKeyTarget == "item" || (settings.VolumeKeyTarget != "global" && own != null)))
         {
-            int from = own ?? settings.Volume, to = Math.Clamp(from + delta, 0, 100);
+            var (from, to) = LibraryService.StepVolumeOverride(cur, delta);
             if (to == from) return null;
-            LibraryService.SaveVolumeOverride(cur, to);
             ApplyOverrideLive(cur);
             return cur;
         }
-        int newVolume = Math.Clamp(settings.Volume + delta, 0, 100);
-        if (newVolume == settings.Volume) return null;
-        SettingsService.Update(s => s.Volume = newVolume);
-        SetVolume(own ?? newVolume);
+        // the step from what's saved, inside the settings lock: a value computed from the load above lost every
+        // concurrent step but one (16 keybinds at once → +5; scripts/test-cross-process.sh)
+        int prevVolume = 0;
+        var saved = SettingsService.Update(s => { prevVolume = s.Volume; s.Volume = Math.Clamp(s.Volume + delta, 0, 100); });
+        if (saved.Volume == prevVolume) return null;
+        SetVolume(own ?? saved.Volume);
         return null;
     }
 

@@ -83,6 +83,7 @@ public static class LibraryStore
     {
         lock (_lock)
         {
+            using var _ = FileLock.Hold(IndexPath(source)); // and every other livepaper process (--restore's WE sync)
             var idx = LoadIndex(source);
             if (mutate(idx)) SaveIndex(source, idx);
         }
@@ -116,6 +117,7 @@ public static class LibraryStore
         if (loc == null) return;
         lock (_lock)
         {
+            using var _ = FileLock.Hold(IndexPath(loc.Value.Source));
             var idx = LoadIndex(loc.Value.Source);
             if (!idx.TryGetValue(loc.Value.Key, out var m))
             {
@@ -136,6 +138,7 @@ public static class LibraryStore
         if (loc == null) return;
         lock (_lock)
         {
+            using var _ = FileLock.Hold(IndexPath(loc.Value.Source));
             var idx = LoadIndex(loc.Value.Source);
             if (idx.Remove(loc.Value.Key)) SaveIndex(loc.Value.Source, idx);
         }

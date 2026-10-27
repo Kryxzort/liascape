@@ -344,10 +344,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       timer-daemon / restart-daemon / monitor pid files (a torn read = "no owner" → two timers) and
       `serve.port` (Electron reads it at launch). Left: `user_mute.state` (presence-only), the trash
       `.meta.json` (written once, read on undo), logs (append).
-- [ ] **Cross-process writers.** The locks are per process; the CLI (`--restore`'s WE sync, keybinds run locally
+- [x] **Cross-process writers.** The locks are per process; the CLI (`--restore`'s WE sync, keybinds run locally
       when no backend answers) and the daemons can still race the backend on a read-modify-write. Either a
       file lock (`flock` on a sidecar) in `AtomicFile`/`LibraryStore`/`SettingsService`, or route every
       write through the running backend (keybinds already forward). Phase 3 retires the daemons.
+      — done: `FileLock` (`<file>.lock` flock, inside the in-process locks) on settings + every index; every
+      settings write is a field-level `Update`/`Patch` (`Save` private — 10 load→save sites converted). RED
+      `scripts/test-cross-process.sh`: 16 concurrent local volume-ups → 5 (the step was computed from a load
+      outside the lock) → 80, 3/3.
 - [ ] **One effective-settings resolver.** Each path picks its targets itself: `/settings` (`Set` +
       `SetPerItem`), keybinds (`AdjustVolume`), `/preview`, the per-switch reapply, normalization
       (`ApplyNormalizationAll`). Bugs from it: normalization on `cur:*` only, the srcs:* broadcast blip, the

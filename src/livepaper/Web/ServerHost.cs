@@ -456,7 +456,7 @@ public static class ServerHost
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
             var item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl);
             if (r.Apply) { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
-                s.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } }; SettingsService.Save(s); }
+                SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } }); }
             return Results.Json(item);
         });
 
@@ -537,8 +537,8 @@ public static class ServerHost
         {
             var s = SettingsService.Load();
             PlayerHelper.Apply(r.Path, s.BuildMpvOptions());      // apply + save as last session
-            s.LastSession = new LastSession { Paths = new List<string> { r.Path } };
-            SettingsService.Save(s);
+            // only LastSession: `s` was loaded before the switch — saved whole, it reverted a /settings change made meanwhile
+            SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { r.Path } });
             return Results.Ok();
         });
         app.MapPost("/stop", () => { PlayerHelper.Stop(); return Results.Ok(); });
