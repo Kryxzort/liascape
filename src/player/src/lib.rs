@@ -27,6 +27,7 @@ pub mod probe;
 pub mod recipes;
 pub mod redraw;
 pub mod runtime;
+pub mod scene;
 pub mod snapshot;
 pub mod sources;
 pub mod supervise;

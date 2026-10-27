@@ -57,8 +57,11 @@ happen regardless of timing.
   until the source's audio flows, bounded by `ONSET_TIMEOUT`) and the one "can it be heard"
   predicate (`has_audio`, `audible`). § Runtime "Onsets" (final review I6/M12).
 - `src/worker/` — Phase 2: the compositor side of the scene worker (`proto.rs` wire
-  protocol, `mod.rs` `WorkerHost` lifecycle). `src/bin/lp-scene-worker/` — the worker binary
-  (second `[[bin]]`). § Scene worker.
+  protocol, `mod.rs` `WorkerHost` lifecycle, `dmabuf.rs` `ImportedRing`/`Latch`).
+  `src/bin/lp-scene-worker/` — the worker binary (second `[[bin]]`; `ring.rs`,
+  `synthetic.rs`). `src/scene/` — pure scene helpers (`cover_size`, the synthetic spec).
+  `src/sources/scene.rs` — `SceneSource`. `src/gfx/dmabuf.rs` — dmabuf export/import +
+  native fences on `Gfx`. § Scene worker.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
 `mpv/render_gl.h`, found through pkg-config `mpv` (≥ client API 2.0; this machine has
@@ -2797,3 +2800,146 @@ the prctl removed: the worker outlived its SIGKILLed parent by 2 s),
 `log_tail_and_crash_records_are_bounded`. **Gotcha:** a sibling test's `posix_spawn` holds a
 copy of every fd for the µs between its clone and exec — `CLOEXEC` fds included — so a test
 that closes one end and reads EOF must `poll` for the hang-up first.
+
+### Frame transport (Task 4)
+
+The spike's mechanism (`dmabuf.md` §2, §9), reproduced: a worker-owned ring of **3**
+`GL_RGBA8` textures exported once, imported once, `sync_file` fences both ways, and the
+compositor **latches only the newest frame whose acquire fence has already signalled**.
+
+**GPU side (`gfx/dmabuf.rs`, methods on `Gfx` — its own file, not `egl.rs`, which other
+Phase 2 work also extends; `Gfx::egl_parts()` is the crate-private accessor it uses).**
+`export_dmabuf(&Tex) -> Exported {desc, fds, image}` (`eglCreateImage(EGL_GL_TEXTURE_2D)` →
+`eglExportDMABUFImageQueryMESA` + `eglExportDMABUFImageMESA`; one fd per plane even when
+NVIDIA returns the same fd twice; the `EglImage` is kept with the slot, like the spike's
+producer — returning it is a deviation from the plan's `-> DmabufDesc`). `import_dmabuf(&DmabufDesc,
+fds) -> ImportedTex` (`eglCreateImage(EGL_LINUX_DMA_BUF_EXT, EGL_NO_CONTEXT)` with
+`MODIFIER_LO/HI` per plane, then `glEGLImageTargetTexture2DOES` on a fresh texture with the
+`Gfx::tex` defaults — LINEAR, CLAMP_TO_EDGE; the fds are closed after, the image holds its
+own reference; `ImportedTex` deletes its texture on its own context (`GlKeepAlive`) and then
+destroys the image). `dmabuf_modifiers(fourcc) -> [(modifier, external_only)]`
+(`eglQueryDmaBufModifiersEXT`; empty without it). `native_fence()` (`eglCreateSync(
+EGL_SYNC_NATIVE_FENCE_ANDROID)` + **`glFlush` before** `eglDupNativeFenceFDANDROID`; never
+waits). `gpu_wait_fence(fd)` (`eglWaitSync`: the GPU waits, never the CPU; EGL owns the fd,
+closed here on failure). `has_native_fences()`, `has_display_ext(ext)`. Every extension
+entry point is looked up once per process (`OnceLock`). `DRM_FORMAT_ABGR8888` = `AB24`;
+`gfx::dmabuf::Plane` is also `proto::Plane`.
+
+**Context priority (`EGL_IMG_context_priority`).** `Gfx::new_offscreen_with(OffscreenOpts
+{priority: Option<Priority>})`: the scene worker asks for **`Low`** (where the display lists
+the extension; a refusal with the attribute retries without), logged `gfx.context_priority
+{requested, granted, path}` and as `gfx: context priority requested low, granted low` in the
+worker's log tail. **The compositor's contexts (`new_offscreen()`, `new_wayland()`,
+`share_context`) keep the driver default** (`Medium` here), not the plan's `High`: tried, the
+render worker's `render_worker_never_composes_a_torn_frame` read 13–72 capture rounds with
+`High` vs 21–53 without on a machine at load ~21 — indistinguishable from load, and the spike
+saw no effect either, so the Phase 1 contexts stay as they were and only the worker is
+lowered (the ordering the spike wanted). `Gfx::context_priority()` = what was granted
+(`eglQueryContext`). Test `worker_context_is_low_priority`. **That api test is
+load-sensitive** (its distinct-capture bound failed once with the compositor exactly as on the
+base commit) — rerun it on a quiet machine before blaming a change.
+
+**The worker's renderer (`lp-scene-worker` without `--stub`).** `hello {features:
+[synthetic] (+ lwe), sync}` — `sync: fdpoll` when `LP_SCENE_SYNC=fdpoll` or the display
+lacks `EGL_ANDROID_native_fence_sync`, else `fence`; then a log line with the granted
+priority. `start`: not `synthetic` → a **fatal** error (built without LWE / LWE not wired
+yet — Task 7); `synthetic` without `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its env → fatal;
+`<path>/lp-synthetic.json` unreadable or `fail: load` → fatal; `fail: build` → fatal; else
+ring of 3 at `scene::cover_size(native, max_size)` → three `buffer` messages → `ready
+{native, has_audio, wants_audio_input}`. A fatal error leaves it idle until `quit`. `tick`
+→ the newest pending tick is rendered (older ones are answered by its `frame`: the host's
+heartbeat pops every seq ≤ it) into a slot the compositor doesn't hold, after waiting on
+that slot's release fence (`fence`: `eglWaitSync`; `fdpoll`: `poll` ≤ 1 s); no free slot →
+it waits for a `release`. Then **alpha forced to 1** (colour mask alpha-only + clear —
+LWE's core leaves 0 in every pixel) and `frame {slot, seq, t}` + an acquire fence, or in
+`fdpoll` the worker `poll`s its own fence (≤ 2 s) and sends no fd; no native fence at all →
+a bounded `glClientWaitSync` — **never `glFinish`** (spike §5: it spins a core under load).
+No flip (R25: image top at texture row 0). Slot ids are unique per worker lifetime (0, 1,
+2, then 3… for a re-export) so a later ring can't be confused with this one; **`resize` is
+not handled yet** (logged once — the re-export is Task 5's, with its test). `gpu_ms` is
+`None` (Task 8 adds GPU timing). Synthetic and env knobs (`crash_after_ms`,
+`hang_after_ms`) both apply.
+
+**Compositor side: `worker/dmabuf.rs` + `sources/scene.rs`.**
+- `validate_modifier(fourcc, modifier, table)`: refuses a modifier the display can't sample
+  as `GL_TEXTURE_2D` — absent, or **external-only (LINEAR on NVIDIA)** — with an error naming
+  `docs/player/spikes/dmabuf.md §1`; an empty table (no query extension) lets the import
+  decide. Unit `external_only_modifier_is_refused`.
+- `ImportedRing {generation}` — one worker process's slots, imported once each (validated
+  first). `Latch` — `push(slot, seq, t, acquire)` per `frame`; `latch(release_fence)` picks
+  the **newest queued frame whose fd polls readable** (no fd = fdpoll = ready); older queued
+  ones are released **without** a fence (never sampled); the previously latched slot is
+  released with `release_fence()` created right then (it orders after every draw that
+  sampled it); the latched frame's (already signalled) acquire fd comes back for
+  `gpu_wait_fence` — a free safety net. Nothing ready → `stale_reuses` += 1, the previous
+  frame stays (never black, never a wait). `forget_worker()` (a restart): queued frames
+  dropped, the shown frame kept but marked never-to-be-released (the new worker never had
+  that slot), `generation` + 1. Units `latch_takes_newest_signalled_and_releases_the_rest`,
+  `forget_worker_keeps_the_frame_and_never_releases_it` (pipes as fences). **`gen` is a
+  reserved keyword in edition 2024** — the field is `generation`.
+- `SceneSource` (Task 4: the texture path, driven directly; Task 5 makes it a graph
+  `Source`). `SceneOpts::new(path, worker_bin)` (30 ticks/s, 1920×1080 demand, LWE, …;
+  tests: `synthetic`, `tick_hz` 144, the env gate, a private crash dir). `open` **refuses a
+  display without `EGL_EXT_image_dma_buf_import(_modifiers)`, `EGL_ANDROID_native_fence_sync`
+  or `EGL_KHR_wait_sync`** (no CPU-copy path is built — spike §5) and spawns the worker (from
+  a long-lived thread: PDEATHSIG). `update(gfx)` never blocks: `host.poll` → `buffer`s
+  imported into the current generation's ring (an import/validation error is `error()`), `frame`s
+  pushed, `ready` starts ticking, a fatal worker `error` → `error()` + `host.stop()`; then one
+  `latch` (old generations' rings dropped at the first latch of a newer one;
+  `set_resume_position(t)` of every latched frame, so a restart resumes there); releases sent;
+  then at most one `tick {seq, t}` when due at `tick_hz`, **≤ `MAX_INFLIGHT` 2 unanswered**,
+  skip-ahead when behind (never a burst). Scene time = `position` + wall time since open (Task
+  5: the pause-excised clock). `texture()` = the latched slot — **it survives the worker's
+  death** (spike §6) and, after a restart, stays the dead worker's frame until the new
+  worker's first frame latches. `broken()` (budget spent; Task 10 maps it to `Error`) is
+  separate from `error()` (can't play). `stats()` (`latched`, `stale_reuses`, `superseded`,
+  `queued`, `ticks_sent`, `frames_received`, `tick_send_failures`, `restarts`, `rings`,
+  `latched_gen`), `latencies_ms()` (last 1024 tick → latch), `wake_fd()`, `pid()`,
+  `size()` (export size), `native()`, `sync()`, `log_tail()`.
+- `scene::cover_size(native, demand)` — aspect kept, smallest size covering `demand`
+  (rounded; never under it on either axis), never above native, long edge ≤ 4096. Unit
+  `cover_size_examples` (the plan's five + portrait, the cap, degenerate input).
+- `scene::synthetic::SyntheticSpec` (`lp-synthetic.json`, every field defaulted): `pattern`
+  `frame_index` (top-left 64² = `marker_rgb(seq)` = `(seq & 255, seq >> 8 & 255, 0)`, bottom-
+  right 16² = `grad_rgb(x, y, seq)`, rest grey 32) | `solid` | `split_tb` (top `rgb`, bottom
+  `rgb2`) | `pointer_dot` | `input_level`; `native`, `alpha` (drawn with it; the worker forces
+  1), `gpu_work` (a pixel-neutral loop: 2500 ≈ 3 ms, 4000 ≈ 6 ms per 1080p frame here),
+  `tone_*`/`has_audio` (Task 6), `crash_after_ms`, `hang_after_ms`, `fail: load|build`.
+  `tests/common::synthetic_scene(name, &spec)` writes `target/test-media/scenes/<name>/`
+  (`project.json` type scene, 16-byte `scene.pkg`, 1×1 `preview.png`, `lp-synthetic.json`).
+
+**Measured** (`tests/scene.rs::transport_meets_the_spike_budget`, 5 s per config, 1920×1080,
+144 ticks/s, every latched frame read back and checked; RTX 3070 Ti / NVIDIA 595.84, the
+machine shared with other agents' tests; the spike's numbers for comparison):
+
+| config | delivered fps | stale / torn / out-of-order | worker CPU | compositor `update` CPU | tick → latch p50 / p99 |
+|---|---|---|---|---|---|
+| trivial frame | **143.98** (spike 143.98) | **0 / 0 / 0** | **1.60 %** (1.48) | **1.77 %** (transport ≈ 0.54 % of 4.04) | 1.18 / 1.41 ms (incl. the test loop's 1 ms poll) |
+| ~3 ms GPU per frame (`gpu_work` 2500) | **143.98** (144.00 at 3.7 ms) | **0 / 0 / 0** | 1.60 % (1.38) | 1.81 % | 4.21 / 5.25 ms |
+
+Under ~6 ms of GPU per frame (`latch_never_waits_on_an_unsignalled_fence`, 2212 updates in
+2 s): `update` p50 10 µs, p99 78 µs, max 103 µs, 1935 stale reuses — the latch never waits.
+`transport_never_shows_stale_torn_or_out_of_order`: 600 of 600 ticks latched, 0 bad. Four
+workers at once: `update` cost 48 µs per iteration vs 21 µs for one (≤ 4.5× asserted).
+Negative control (mutation: every queued frame treated as ready, no `gpu_wait_fence`): the
+transport test went RED at once — `frame 143: marker [141, 0, 0]`, the slot's previous
+frame, exactly the spike's `nosync` signature.
+
+**Tests (`tests/scene.rs`, GPU; SKIP without EGL; one at a time — a process lock — so their
+rate/timing assertions don't fight each other):** `transport_never_shows_stale_torn_or_out_of_order`,
+`latch_never_waits_on_an_unsignalled_fence` (asserts p99 ≤ 1 ms and max < 4 ms — "every update
+≤ 1 ms" from the plan, robust to scheduler noise on a shared machine; a fence wait would cost a
+frame's GPU time, ~6 ms), `killed_worker_keeps_last_frame` (zero budget: SIGKILL → 20
+readbacks over 2 s identical, same texture), `restart_replaces_ring_after_first_new_frame`
+(same texture + pixels until the new generation latches, then a new texture, one ring, seq
+continues), `fdpoll_fallback_is_equally_correct` (300 frames), `scene_texture_holds_image_top_at_t0`,
+`scene_frame_is_opaque`, `huge_native_scene_exports_at_cover_size` (7467×4200 → 1920×1080),
+`four_workers_latch_independently`, `transport_meets_the_spike_budget`,
+`context_priorities_compositor_high_worker_low`.
+
+**What Task 5 builds on:** `SceneSource::open(gfx, SceneOpts)` → its `open(gfx, node_props,
+base_opts)`; `tick_hz`/`max_size` → demand (`Resize` + the worker's re-export, handling a
+second `buffer` set of the *same* generation — slot ids already unique); the scene clock →
+pause-excised; `Ready`/`texture()` into `SourceHost` (wake fd = `wake_fd()`, stable);
+spawn from the loop thread; `stop()` on a fatal `error`; `stats()`/`latencies_ms()`/`sync()` →
+the `workers` probe.

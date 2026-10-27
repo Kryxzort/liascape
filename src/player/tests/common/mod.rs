@@ -176,6 +176,48 @@ fn hex(rgb: [u8; 3]) -> String {
 #[allow(dead_code)]
 static CLIP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// A synthetic WE scene folder (Phase 2 D7) for `lp-scene-worker`'s synthetic renderer:
+/// `<crate>/target/test-media/scenes/<name>/` with `project.json` (`type: scene`), a 16-byte
+/// placeholder `scene.pkg`, a 1×1 `preview.png` of `spec.rgb` and `lp-synthetic.json`
+/// (`spec`). Rewritten on every call (temp dir + rename), serialised like clips.
+#[allow(dead_code)]
+pub fn synthetic_scene(
+    name: &str,
+    spec: &lp_player::scene::synthetic::SyntheticSpec,
+) -> std::path::PathBuf {
+    let _guard = CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-media/scenes");
+    std::fs::create_dir_all(&root).expect("create target/test-media/scenes");
+    let dir = root.join(name);
+    let tmp = root.join(format!(".{name}.tmp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let project = serde_json::json!({
+        "type": "scene",
+        "title": format!("lp-player synthetic scene {name}"),
+        "file": "scene.json",
+        "preview": "preview.png",
+    });
+    std::fs::write(tmp.join("project.json"), project.to_string()).unwrap();
+    std::fs::write(tmp.join("scene.pkg"), [0u8; 16]).unwrap();
+    std::fs::write(
+        tmp.join("lp-synthetic.json"),
+        serde_json::to_vec_pretty(spec).unwrap(),
+    )
+    .unwrap();
+    {
+        let f = std::fs::File::create(tmp.join("preview.png")).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 1, 1);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&spec.rgb).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::rename(&tmp, &dir).unwrap();
+    dir
+}
+
 /// Generate (once) a synthetic test clip into `<crate>/target/test-media/` with `ffmpeg`
 /// from `PATH` and return its path. A clip is regenerated only when it's missing or its
 /// `<name>.spec` stamp (the `Debug` form of `spec`) differs — so changing a spec under

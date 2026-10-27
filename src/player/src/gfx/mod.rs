@@ -17,11 +17,14 @@
 //! rely on.
 
 pub mod compose;
+pub mod dmabuf;
 pub mod effects;
 pub mod egl;
 pub mod gl;
 
 pub use compose::{Composer, UvRect, fit_rect};
 pub use effects::{Catalogue, EffectProgram};
-pub use egl::{CurrentGuard, Gfx, GlKeepAlive, SharedContext, WindowTarget};
+pub use egl::{
+    CurrentGuard, Gfx, GlKeepAlive, OffscreenOpts, Priority, SharedContext, WindowTarget,
+};
 pub use gl::{Fbo, Tex};
