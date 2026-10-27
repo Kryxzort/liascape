@@ -69,6 +69,13 @@ task text where they differ:
 - **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
   frame / preview, silent).
 
+- **VRAM, round 3** (owner, after checking WE on Windows): WE has an (undocumented) "Pause when VRAM is exhausted";
+  ours, in one Settings group, two parts: (1) **when the GPU's VRAM runs low: Pause / Stop (free memory) / Off,
+  default Stop** — system-wide (a game filled it), measured from free VRAM (NVML / `mem_info_vram_*` sysfs on
+  AMD, fdinfo totals), with hysteresis + a hold time so it never flaps (WE's version false-fires under light load per
+  a Steam report); it applies to every source — videos too — and resumes when VRAM is free again; (2) the
+  **per-scene VRAM limit** above: off by default, ~1.5 GB suggested when enabled. Folds into Task 8 (+M).
+
 Revised size: the original 15 tasks + 4 (speed, properties, VRAM guard/budget setting, loudness learning).
 
 The original recommendations follow for reference.
