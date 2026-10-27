@@ -45,6 +45,32 @@ built: `.claude/rules/player-core.md`, `.claude/rules/player-adapter.md`. Execut
   matrix/IT cells that play real SFW scenes from `~/.local/share/Steam/steamapps/workshop/content/431960` with the
   owner's installed WE `assets/` whenever WE is installed (skipped, with a printed reason, when it isn't).
 
+**Decided, round 2 (scene behaviour)** — each changes or adds to the tasks below; executors apply these over the
+task text where they differ:
+- **Speed: animation AND audio**, pitch-corrected (not 1× like WE). The scene clock (`Tick {t}`) advances at
+  `speed`; the host audio driver (Task 2's patch / Task 6) time-stretches the scene's PCM pitch-preserving (a
+  scaletempo/WSOLA stage in the worker's pull path, bit-exact passthrough at 1×). A live `speed` set retimes both;
+  align:end uses it like a video's. Scenes still never emit `Ended`. **+M task.**
+- **Mouse interaction on** (as planned, Task 7).
+- **Scene properties editor IN Phase 2**: read each scene's `project.json` `general.properties` (types: color,
+  slider, bool, combo, text, …), show them in the item settings modal, apply live (`wp_project_property_set_*`
+  through the worker protocol), persist per item in the library index (`LibMeta`), re-applied at every open. Matrix
+  cells for set → live → persisted → survives a switch/restart. **+L task** (backend + worker + UI).
+- **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
+- **GPU budget = a setting, default auto-throttle**: on missed compositor frames attributable to a scene, lower that
+  scene's fps stepwise, restore when it recovers (logged; `probe`); the setting turns it off (fixed fps).
+  **Plus a VRAM guard** (toggle + limit in MiB): a scene worker whose VRAM use exceeds the limit is stopped —
+  per-process VRAM from NVIDIA's per-process accounting (NVML / `nvidia-smi --query-compute-apps`) or
+  `/proc/<pid>/fdinfo` `drm-memory-vram` on AMD/Intel; then playback behaves like a broken scene (advance / preview)
+  but it is NOT marked crashed — the UI says "stopped: used X MiB > limit Y". **+M task** (folds into Task 8).
+- **Loudness: learn on first play**: measure a scene's integrated loudness over its first ~60 s of play (from the
+  worker's stream on the bus), store it in the index like a video's `loudness*`, apply normalization from then on.
+  **+M task.**
+- **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
+  frame / preview, silent).
+
+Revised size: the original 15 tasks + 4 (speed, properties, VRAM guard/budget setting, loudness learning).
+
 The original recommendations follow for reference.
 
 1. **D1 — Same scene on several outputs:** one worker per scene source, shared by every output showing it (like videos). **Recommend this.** Spec §4.3 says one worker per output; that doubles GPU/VRAM and needs per-output plumbing (+1 L task) for little isolation gain.
