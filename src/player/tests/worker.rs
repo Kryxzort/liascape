@@ -43,6 +43,7 @@ fn start() -> ToWorker {
         audio: AudioRoute::Null,
         max_size: [640, 360],
         synthetic: false,
+        properties: Default::default(),
     }
 }
 

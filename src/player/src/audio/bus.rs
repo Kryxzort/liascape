@@ -80,7 +80,7 @@ const MAX_QUANTUM_FRAMES: usize = 8192;
 /// The meter capture is always stereo (FL/FR, [`RATE`]'s format): one scratch slot per
 /// interleaved sample, sized for [`MAX_QUANTUM_FRAMES`] so `Watch::start_meter`'s scratch
 /// never reallocates inside the RT process callback.
-const METER_SCRATCH_CAP: usize = MAX_QUANTUM_FRAMES * 2;
+pub(crate) const METER_SCRATCH_CAP: usize = MAX_QUANTUM_FRAMES * 2;
 
 /// `Bus::create` gives up after this long without a linked loopback.
 const CREATE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -584,7 +584,7 @@ fn chunk_into(
 /// pieces of at most `scratch`'s capacity ([`chunk_into`]); `channels` must match the
 /// stream's own format (2, here — stereo FL/FR). Returns `false` only when there was no
 /// buffer to dequeue (`on_chunk` is never called then).
-fn read_capture(
+pub(crate) fn read_capture(
     stream: &pw::stream::Stream,
     scratch: &mut Vec<f32>,
     channels: usize,
@@ -638,7 +638,7 @@ fn format_pod() -> Vec<u8> {
     .unwrap_or_default()
 }
 
-fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
+pub(crate) fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
     let bytes = format_pod();
     let pod = spa::pod::Pod::from_bytes(&bytes).ok_or("bad format pod")?;
     stream
@@ -661,7 +661,7 @@ fn latency_str() -> String {
 /// passes `None` (the graph default) — a 10 ms request held for as long as the player runs
 /// would otherwise pin the *whole* PipeWire graph's quantum to it (R68: the meter must not
 /// force the graph quantum).
-fn capture_stream(
+pub(crate) fn capture_stream(
     core: &CoreRc,
     name: &str,
     target: &str,

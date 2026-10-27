@@ -101,6 +101,35 @@ impl Synthetic {
         Ok(Synthetic { spec, prog, loc })
     }
 
+    /// Task 7: the synthetic scene's user properties — `rgb` / `rgb2` (`[r, g, b]`, 0–255)
+    /// recolour the pattern live, anything else is refused like LWE's unknown property.
+    pub fn set_property(&mut self, name: &str, value: &serde_json::Value) -> Result<(), String> {
+        let rgb = || -> Result<[u8; 3], String> {
+            let a = value
+                .as_array()
+                .filter(|a| a.len() == 3)
+                .ok_or_else(|| format!("{name}: expected [r, g, b] (0–255), got {value}"))?;
+            let mut c = [0u8; 3];
+            for (i, v) in a.iter().enumerate() {
+                c[i] = v
+                    .as_f64()
+                    .map(|x| x.round().clamp(0.0, 255.0) as u8)
+                    .ok_or_else(|| format!("{name}: expected [r, g, b] (0–255), got {value}"))?;
+            }
+            Ok(c)
+        };
+        match name {
+            "rgb" => self.spec.rgb = rgb()?,
+            "rgb2" => self.spec.rgb2 = rgb()?,
+            _ => {
+                return Err(format!(
+                    "{name}: refused by the scene (no such property, or a value of another type)"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Draw frame `seq` into `fbo` (`w`×`h`), then force alpha to 1 (LWE's core leaves 0
     /// in every pixel; the compositor composes premultiplied, so the worker must).
     #[allow(clippy::too_many_arguments)]

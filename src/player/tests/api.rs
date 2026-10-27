@@ -6131,3 +6131,421 @@ fn capture_scene_source_is_upright() {
     near(png_pixel(&p2, 320, 350), [0, 0, 255], 0, "output bottom");
     let _ = marker_rgb(0);
 }
+
+// ---------------------------------------------------------------- Phase 2 Task 7: real scenes
+
+/// `patches/lwe/tests/fixtures/<name>` (real LWE projects that need no WE assets).
+fn lwe_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../patches/lwe/tests/fixtures")
+        .join(name)
+}
+
+/// A directory that passes for WE's `assets/` (the probe file the resolver looks for).
+fn fake_assets(root: &Path) -> PathBuf {
+    let a = root.join("we-assets");
+    std::fs::create_dir_all(a.join("shaders")).unwrap();
+    std::fs::write(a.join("shaders/genericimage2.vert"), "// probe").unwrap();
+    a
+}
+
+/// `logs` records of `kind_prefix` (oldest first).
+fn logs_of(c: &mut Client, kind_prefix: &str) -> Vec<Value> {
+    c.ok("logs", json!({"kind_prefix": kind_prefix, "limit": 1000}))["events"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn crash_files(srv: &Serve) -> usize {
+    std::fs::read_dir(srv.path("state/livepaper/lp-player/crashes"))
+        .map(|r| r.flatten().count())
+        .unwrap_or(0)
+}
+
+/// Review Focus #2: no WE assets (no Steam under `$HOME`, no `LP_WE_ASSETS_DIR`) → no `scene`
+/// capability, `scene-check` exits 1 with the reason, and a scene created anyway errors with a
+/// hint naming `LP_WE_ASSETS_DIR` / `player.scene_assets` — no worker, no 1×1 render loop.
+/// Setting `player.scene_assets` brings scenes back live.
+#[test]
+fn no_assets_dir_hides_scenes_and_errors_with_hint() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let unset = ["LP_WE_ASSETS_DIR", "LP_PLAYER_ALLOW_SYNTHETIC_SCENES"];
+    let srv = Serve::spawn_env_without(
+        root.clone(),
+        &[],
+        &[("HOME", home.as_path())],
+        &unset,
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let caps = c.ok("hello", json!({}))["capabilities"].clone();
+    assert!(
+        !caps.as_array().unwrap().contains(&json!("scene")),
+        "{caps}"
+    );
+    assert_eq!(
+        get(&mut c, "player.scene_assets_resolved")["result"]["value"],
+        json!("")
+    );
+    // `lp-player scene-check` says the same, exit 1.
+    let out = Command::new(BIN)
+        .arg("scene-check")
+        .env("HOME", &home)
+        .env_remove("LP_WE_ASSETS_DIR")
+        .env_remove("LP_PLAYER_ALLOW_SYNTHETIC_SCENES")
+        .output()
+        .unwrap();
+    let j: Value = serde_json::from_slice(&out.stdout).expect("one JSON line");
+    assert_eq!(out.status.code(), Some(1), "{j}");
+    assert_eq!(j["ok"], json!(false));
+    assert!(
+        j["reason"].as_str().unwrap().contains("LP_WE_ASSETS_DIR"),
+        "{j}"
+    );
+    // A scene anyway: an error with the hint, no worker.
+    let id = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&lwe_fixture("min-scene"))}),
+    );
+    show_all(&mut c, &id);
+    let _ = c.call("step", json!({"ms": 16}));
+    let errs: Vec<Value> = logs_of(&mut c, "source.error")
+        .into_iter()
+        .filter(|e| e["id"] == json!(id))
+        .collect();
+    let reason = errs
+        .first()
+        .and_then(|e| e["reason"].as_str())
+        .unwrap_or_else(|| panic!("no source.error for {id}"))
+        .to_string();
+    assert!(
+        reason.contains("LP_WE_ASSETS_DIR") && reason.contains("player.scene_assets"),
+        "{reason}"
+    );
+    let st = c.ok("state", json!({}));
+    assert!(
+        st["workers"].as_array().unwrap().is_empty(),
+        "no worker: {}",
+        st["workers"]
+    );
+    // Live: point the player at an assets dir.
+    let assets = fake_assets(&root);
+    c.ok(
+        "set",
+        json!({"path": "player.scene_assets", "value": s(&assets)}),
+    );
+    assert_eq!(
+        get(&mut c, "player.scene_assets_resolved")["result"]["value"],
+        json!(s(&assets))
+    );
+    let caps = c.ok("hello", json!({}))["capabilities"].clone();
+    assert!(caps.as_array().unwrap().contains(&json!("scene")), "{caps}");
+}
+
+/// Review Focus #1: a scene folder that is gone (deleted, a dangling `local/<id>` link, Steam
+/// still syncing) fails cleanly — `source.error` "load failed", no crash record, no worker
+/// restart.
+#[test]
+fn missing_scene_folder_fails_without_crash_record() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let assets = fake_assets(&root);
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &[],
+        &[("LP_WE_ASSETS_DIR", assets.as_path())],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let gone = root.join("library/local/2371103399");
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&gone)}));
+    show_all(&mut c, &id);
+    let reason = wait_for(Duration::from_secs(10), "source.error", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "source.error")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+            .and_then(|e| e["reason"].as_str().map(str::to_string))
+    });
+    assert!(reason.contains("load failed"), "{reason}");
+    for _ in 0..5 {
+        let _ = c.call("step", json!({"ms": 100}));
+    }
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    assert!(logs_of(&mut c, "worker.broken").is_empty());
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+}
+
+/// Mouse on: `headless.pointer` over an output reaches the scene in its own coordinates (the
+/// pointer_dot scene draws its dot there), and during a fade both sides see it.
+#[test]
+fn pointer_reaches_scene_in_source_coords() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let dot = SyntheticSpec {
+        pattern: Pattern::PointerDot,
+        rgb: [255, 0, 0],
+        rgb2: [0, 0, 255],
+        ..SyntheticSpec::default()
+    };
+    let a = create_scene(&mut c, "api-ptr-a", &dot, json!({}));
+    show_all(&mut c, &a);
+    c.step(16);
+    c.step(16);
+    // VIRTUAL-1 is 640×360 showing a 1920×1080 scene (exported 640×360): (160, 90) on the
+    // output = (480, 270) in the scene's native pixels = (160, 90) in the export.
+    let r = c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 160, "y": 90}),
+    );
+    assert_eq!(r["scenes"], json!([a]), "{r}");
+    c.step(16);
+    c.step(16);
+    assert_eq!(worker_of(&mut c, &a)["pointer"], json!([480.0, 270.0, 0]));
+    let p = srv.path("ptr-a.png");
+    c.ok("capture", json!({"target": a, "path": s(&p)}));
+    near(
+        png_pixel(&p, 160, 90),
+        [255, 0, 0],
+        0,
+        "the dot under the pointer",
+    );
+    near(
+        png_pixel(&p, 160 + 14, 90),
+        [255, 0, 0],
+        0,
+        "inside its radius",
+    );
+    near(png_pixel(&p, 480, 270), [0, 0, 255], 0, "elsewhere");
+    // A fade to another scene: both sides get the pointer.
+    let dir_b = common::synthetic_scene("api-ptr-b", &dot);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dir_b)},
+               "effect_id": "fade", "duration_ms": 5000}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    for _ in 0..6 {
+        c.step(16);
+    }
+    let r = c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 480, "y": 270}),
+    );
+    let mut reached: Vec<String> = serde_json::from_value(r["scenes"].clone()).unwrap();
+    reached.sort();
+    let mut want = vec![a.clone(), b.clone()];
+    want.sort();
+    assert_eq!(reached, want, "both sides of the fade");
+    c.step(16);
+    c.step(16);
+    for id in [&a, &b] {
+        let p = srv.path(&format!("ptr-{id}.png"));
+        c.ok("capture", json!({"target": id, "path": s(&p)}));
+        near(
+            png_pixel(&p, 480, 270),
+            [255, 0, 0],
+            0,
+            &format!("{id}: dot"),
+        );
+        near(
+            png_pixel(&p, 160, 90),
+            [0, 0, 255],
+            0,
+            &format!("{id}: moved"),
+        );
+    }
+    // A point outside the output's picture reaches nobody (VIRTUAL-2 is 320×180).
+    let r = c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-2", "x": -5, "y": 10}),
+    );
+    assert_eq!(r["scenes"], json!([]));
+}
+
+/// The scene properties' worker side: `scene_props` (name → value) is applied at open and
+/// live (`wp_project_property_set_*` through the protocol; synthetic: `rgb`), same worker; an
+/// unknown property is reported, not fatal.
+#[test]
+fn scene_props_apply_at_open_and_live() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let id = create_scene(
+        &mut c,
+        "api-props",
+        &synth(Pattern::Solid),
+        json!({"scene_props": {"rgb": [0, 0, 255]}}),
+    );
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let cap = |c: &mut Client, n: &str| {
+        let p = srv.path(n);
+        c.ok("capture", json!({"target": id, "path": s(&p)}));
+        png_pixel(&p, 100, 100)
+    };
+    near(cap(&mut c, "props0.png"), [0, 0, 255], 0, "applied at open");
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.scene_props"), "value": {"rgb": [0, 255, 0]}}),
+    );
+    c.step(16);
+    c.step(16);
+    near(cap(&mut c, "props1.png"), [0, 255, 0], 0, "live");
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["pid"], pid, "same worker");
+    assert_eq!(w["properties"]["rgb"]["ok"], json!(true), "{w}");
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.scene_props"),
+               "value": {"rgb": [0, 255, 0], "no_such": 1}}),
+    );
+    c.step(16);
+    c.step(16);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["properties"]["no_such"]["ok"], json!(false), "{w}");
+    let ev = logs_of(&mut c, "scene.property");
+    assert!(
+        ev.iter()
+            .any(|e| e["name"] == json!("no_such") && e["ok"] == json!(false)),
+        "{ev:?}"
+    );
+    near(cap(&mut c, "props2.png"), [0, 255, 0], 0, "still playing");
+    assert_eq!(
+        get(&mut c, &format!("{id}.ready"))["result"]["value"],
+        json!(true)
+    );
+}
+
+/// A 10 s 440 Hz −6 dBFS stereo s16 WAV.
+fn tone_wav(path: &Path) {
+    let rate = 48_000u32;
+    let n = rate * 10;
+    let mut b = Vec::with_capacity(44 + n as usize * 4);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + n * 4).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 4).to_le_bytes());
+    b.extend_from_slice(&4u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(n * 4).to_le_bytes());
+    for i in 0..n {
+        let v = (0.5
+            * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / rate as f64).sin()
+            * 32767.0) as i16;
+        b.extend_from_slice(&v.to_le_bytes());
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    std::fs::write(path, b).unwrap();
+}
+
+/// The `node.name`s of the private PipeWire's nodes.
+fn pw_nodes(pw: &PrivatePw) -> Vec<String> {
+    let out = Command::new("pw-dump")
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("XDG_RUNTIME_DIR", pw.run_dir())
+        .env("PIPEWIRE_RUNTIME_DIR", pw.run_dir())
+        .output()
+        .expect("pw-dump");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap_or(json!([]));
+    v.as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|o| o["info"]["props"]["node.name"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// D4: the visualiser input is the system's audio (a mix of PipeWire playback streams) — a tone
+/// played by another app reaches a scene that wants audio input (`input_level`), a scene
+/// without the flag gets none, and no capture stream exists while no scene wants one
+/// (private PipeWire; SKIP without the binaries).
+#[test]
+fn visualiser_input_reaches_only_scenes_that_want_it() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    pw.start();
+    let run = pw.run_dir();
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &["--clock", "real"],
+        &[
+            ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
+            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let has_capture = |pw: &PrivatePw| {
+        pw_nodes(pw)
+            .iter()
+            .any(|n| n.starts_with("lp-player-visualiser."))
+    };
+    let b = create_scene(&mut c, "api-vis-b", &synth(Pattern::Solid), json!({}));
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-2:main.content", "value": b}),
+    );
+    wait_playing(&mut c, &b, 0.3);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(worker_of(&mut c, &b)["wants_audio_input"], json!(false));
+    assert!(
+        !has_capture(&pw),
+        "no capture without a scene that wants it"
+    );
+    let wav = root.join("tone.wav");
+    tone_wav(&wav);
+    let mut tone = pw.spawn("pw-cat", &["--playback", wav.to_str().unwrap()]);
+    let a = create_scene(&mut c, "api-vis-a", &synth(Pattern::InputLevel), json!({}));
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
+    );
+    let db = wait_for(Duration::from_secs(8), "the tone at the scene", || {
+        let w = worker_of(&mut c, &a);
+        w["input_dbfs"].as_f64().filter(|d| *d > -30.0)
+    });
+    println!("visualiser input: {db:.1} dBFS");
+    assert!(has_capture(&pw), "a capture stream while A wants input");
+    let wb = worker_of(&mut c, &b);
+    assert_eq!(wb["input_dbfs"], Value::Null, "B gets none: {wb}");
+    let p = srv.path("vis.png");
+    c.ok("capture", json!({"target": a, "path": s(&p)}));
+    let lvl = png_pixel(&p, 10, 10)[0];
+    assert!(lvl > 40, "the input_level scene shows the level: {lvl}");
+    // A goes: the capture stops.
+    c.ok(
+        "set",
+        json!({"path": "lay:VIRTUAL-1:main.content", "value": ""}),
+    );
+    c.ok("destroy", json!({"id": a}));
+    wait_for(Duration::from_secs(5), "the capture to stop", || {
+        (!has_capture(&pw)).then_some(())
+    });
+    let _ = tone.kill();
+    let _ = tone.wait();
+}

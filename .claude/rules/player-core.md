@@ -46,7 +46,8 @@ happen regardless of timing.
   `memory.rs`: `memory`, Task 20b).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `Audio` (what
-  `serve` runs, `mod.rs`). § Audio bus.
+  `serve` runs, `mod.rs`). § Audio bus. `sysmon.rs` — the scene visualiser's system-audio
+  input (Phase 2 Task 7, § Scene worker → "Real scenes").
 - `src/supervise.rs` — the supervisor (`serve` without `--no-supervise`): spawns, waits
   for and restarts the compositor child (Task 16). § Supervisor.
 - `src/snapshot.rs` — the persisted state snapshot (`<state>/snapshot.json`, `--restore`)
@@ -59,9 +60,11 @@ happen regardless of timing.
 - `src/worker/` — Phase 2: the compositor side of the scene worker (`proto.rs` wire
   protocol, `mod.rs` `WorkerHost` lifecycle, `dmabuf.rs` `ImportedRing`/`Latch`).
   `src/bin/lp-scene-worker/` — the worker binary (second `[[bin]]`; `ring.rs`,
-  `synthetic.rs`). `src/scene/` — pure scene helpers (`cover_size`, the synthetic spec).
+  `synthetic.rs`). `src/scene/` — pure scene helpers (`cover_size`, the synthetic spec,
+  `assets.rs` WE's assets dir, `pointer.rs` output → scene coordinates).
   `src/sources/scene.rs` — `SceneSource`. `src/gfx/dmabuf.rs` — dmabuf export/import +
-  native fences on `Gfx`. `src/bin/lp-scene-worker/lwe.rs` — LWE's core (feature `lwe`).
+  native fences on `Gfx`. `src/bin/lp-scene-worker/lwe.rs` — LWE's core (feature `lwe`);
+  `render.rs` — a real scene in the worker (Task 7).
   § Scene worker.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
@@ -1959,7 +1962,7 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5), headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
 | `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
@@ -1978,6 +1981,7 @@ note on stderr and exits 0 (or stdout closes).
 | `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in; the client's later requests wait for it) | `unsupported` (real clock), `timeout`, `busy` (64 queued) | `ctl step '{"ms":16}'` |
 | `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
+| `headless.pointer` | `{output, x, y, buttons? (0)}` — surface px from the top-left (Task 7) | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
 
 **Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
 `cmd` / bad args), `no_such_verb` (hint lists every verb), `no_such_effect`,
@@ -2711,13 +2715,15 @@ frames. `src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the wor
 datagram, ≤ `MAX_MSG` (64 KiB), fds on the same datagram via `SCM_RIGHTS` (≤ `MAX_FDS` 8).
 Internally tagged by **`msg`** (snake_case variant name — not `t`, which `Tick`/`Frame` use
 for scene time): `{"msg":"tick","seq":3,"t":0.02,"input":null}`. `ToWorker`: `start {path,
-assets_dir, steam_dir, position, paused, audio, max_size, synthetic}`, `tick {seq, t,
-input}`, `release {slot}` (+ optional release fence fd), `gain`, `paused`, `no_audio`,
-`route`, `pointer`, `resize {max_size}`, `ping {seq}`, `quit`. `FromWorker`: `hello
+assets_dir, steam_dir, position, paused, audio, max_size, synthetic, properties}`, `tick {seq,
+t, input}`, `release {slot}` (+ optional release fence fd), `gain`, `paused`, `no_audio`,
+`route`, `pointer {x, y, buttons}` (native scene px), `set_property {name, value}` (Task 7),
+`resize {max_size}`, `ping {seq}`, `quit`. `FromWorker`: `hello
 {protocol, pid, features, sync}` (first message; `features` ⊂ `stub|synthetic|lwe`, `sync` =
 `fence|fdpoll|none`), `buffer {slot, w, h, fourcc, modifier, planes}` (+ one fd per plane),
-`frame {slot, seq, t, gpu_ms}` (+ acquire fence fd, none in fdpoll), `ready`, `has_audio`,
-`audio_flowing`, `envelope`, `pong`, `error {reason, fatal}`, `context_lost`, `log`.
+`frame {slot, seq, t, gpu_ms}` (+ acquire fence fd, none in fdpoll), `ready {native,
+has_audio, wants_audio_input}`, `has_audio`, `audio_flowing`, `envelope`, `property_set {name,
+ok, reason}` (Task 7), `pong`, `error {reason, fatal}`, `context_lost`, `log`.
 `AudioRoute` = `"null"|"default"|{"device":"…"}`; a `modifier` is a JSON integer (u64, exact).
 `proto::send` refuses > 64 KiB / > 8 fds (`InvalidInput`), sends `MSG_NOSIGNAL` (a gone peer
 is `EPIPE`, never SIGPIPE); `proto::recv` never blocks — `Ok(None)` nothing queued,
@@ -2761,11 +2767,12 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   (1 s), **shortened to `hang_timeout / 2`** so a hang is always seen within 1.5 ×
   `hang_timeout` (the plan's 1 s ping could not meet `hang_after_ms 100, hang_timeout 300 →
   Hung ≤ 600 ms`). No `Hello` within `HELLO_TIMEOUT` (5 s, or `hang_timeout` if longer) =
-  hung too. **Task 7 note:** the worker must keep answering while LWE loads (a multi-second
-  `wp_project_load` on the protocol thread would read as a hang).
+  hung too. The worker keeps answering while LWE loads + builds (its `lp-scene-proto` thread
+  answers pings during a load, bounded — § "Real scenes (Task 7)").
 - **`send` while not connected** (before `Hello`, `Restarting`, `Broken`, `Stopped`):
-  `Start`/`Paused`/`Resize`/`Route` are **folded into the restart's `Start`** and accepted
-  (`Ok`) — a restart never resumes with a stale pause/size/route — everything else is
+  `Start`/`Paused`/`Resize`/`Route`/`SetProperty` are **folded into the restart's `Start`**
+  and accepted (`Ok`) — a restart never resumes with a stale pause/size/route/property;
+  `SetProperty` is folded while connected too — everything else is
   `NotConnected` (the caller re-sends gains/pointer after the new worker's `Ready`).
   `WouldBlock` = the worker isn't reading (socket buffer full). Unit
   `restart_start_folds_live_changes`.
@@ -2864,8 +2871,8 @@ base commit) — rerun it on a quiet machine before blaming a change.
 **The worker's renderer (`lp-scene-worker` without `--stub`).** `hello {features:
 [synthetic] (+ lwe), sync}` — `sync: fdpoll` when `LP_SCENE_SYNC=fdpoll` or the display
 lacks `EGL_ANDROID_native_fence_sync`, else `fence`; then a log line with the granted
-priority. `start`: not `synthetic` → a **fatal** error (built without LWE / LWE not wired
-yet — Task 7); `synthetic` without `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its env → fatal;
+priority. `start`: not `synthetic` → a real WE scene through LWE (§ "Real scenes (Task 7)";
+built without LWE → a **fatal** error); `synthetic` without `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its env → fatal;
 `<path>/lp-synthetic.json` unreadable or `fail: load` → fatal; `fail: build` → fatal; else
 ring of 3 at `scene::cover_size(native, max_size)` → three `buffer` messages → `ready
 {native, has_audio, wants_audio_input}`. A fatal error leaves it idle until `quit`. `tick`
@@ -3126,7 +3133,7 @@ hard-coded `kind == "video"` learned about `scene`.
   (`kind_has_audio`), refreshed every 2 s while it plays (`Runtime::media_playing`); a restore
   recreates it at that position on a fresh worker (the old one died with its compositor).
 - **Probes / API.** `hello.capabilities` has `scene` when `paths::scene_worker_bin()`
-  resolves (Task 7 adds: and an assets dir unless synthetic scenes are allowed); `state.workers`
+  resolves and (Task 7) an assets dir does, unless synthetic scenes are allowed; `state.workers`
   = the `workers` probe's entries; `workers` (`probe/workers.rs`) — per scene source `{id, path,
   pid, state (not_spawned|starting|running|restarting N|broken|stopped), restarts_60s,
   total_restarts, sync, fourcc (e.g. `AB24`), modifier (hex), size (export), native, max_size
@@ -3170,3 +3177,122 @@ first frame (exactly one tick), un-paused it plays; `is_still` is false for a sc
 `SnapshotSource` blits its latched texture. Task 11: `create {kind: scene, path, position,
 paused, preview}`; `hello.capabilities` `scene`; `state.workers`; `set out:<c>.scene_fps`
 (live, same pid).
+
+### Real scenes (Task 7)
+
+LWE renders a real Workshop scene inside the worker; the compositor resolves WE's assets,
+forwards the pointer, feeds the visualiser and passes user properties through.
+
+- **Assets dir (`scene/assets.rs`).** `resolve(explicit, home)` = the first dir holding
+  `shaders/genericimage2.vert` among: `player.scene_assets` (explicit) → `LP_WE_ASSETS_DIR` →
+  each Steam root (`~/.local/share/Steam`, `~/.steam/{steam,root}`, the two Flatpak paths) and
+  every library its `steamapps/libraryfolders.vdf` (or `config/…`) lists →
+  `<lib>/steamapps/common/wallpaper_engine/assets`. `Err` names every candidate tried + `HINT`
+  (`LP_WE_ASSETS_DIR` / `player.scene_assets`). This machine: workshop in the primary
+  library, WE in `/mnt/Games/Steam/SteamLibrary`. `parse_libraryfolders(&str)` (KeyValues
+  `"path"` values, comments and escapes handled), `steam_root_of_item(dir)` (canonicalized —
+  a `local/<id>` symlink resolves — prefix before `steamapps/workshop/content/431960/<id>`;
+  sent as `Start.steam_dir`, LWE's `backgrounds_dir`; `next-v2` resolves no project
+  dependency yet, so it is recorded only). Units `vdf_paths_parsed`,
+  `assets_found_in_secondary_library`, `missing_assets_error_names_every_candidate`,
+  `steam_root_of_symlinked_local_item`.
+- **Player props.** `player.scene_assets` (Str, "" = auto; live) →
+  `Runtime::update_scene_assets` (from `sync_sources`, a no-op unless it changed; also at
+  startup) re-resolves into the scene base opts `scene_assets` / `scene_assets_error` and the
+  read-only `player.scene_assets_resolved` ("" = none); event `scene.assets {requested,
+  resolved, error}`. `Runtime::scenes_available()` = the worker resolves **and** (assets or
+  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `hello`'s `scene` capability. **`lp-player
+  scene-check [--assets <dir>]`** prints `{worker, features, assets_dir, ok, reason}`, exit
+  0/1 — the same rule plus "the worker was built with LWE" (`lp-scene-worker --features`
+  prints its feature list).
+- **No assets (Review Focus #2).** `SceneSource::open` of a non-synthetic scene without
+  `scene_assets` fails at once (`unsupported`, the resolver's error naming
+  `LP_WE_ASSETS_DIR` / `player.scene_assets`) → `source.error`, **no worker spawned** —
+  never a 1×1 render loop.
+- **The worker's two threads.** The renderer (main thread: GL, ring, LWE) and
+  `lp-scene-proto`, which reads the socket and hands messages over a channel. While the
+  renderer is inside a load + build (`LoadGate`: a cold LWE build took up to 2.8 s) the
+  protocol thread answers `Ping` itself — bounded by `LP_SCENE_LOAD_TIMEOUT_MS` (30 s), after
+  which pings go to the stuck renderer and the host's heartbeat sees a hang; a `Quit`/EOF
+  during a load `_exit(0)`s at once. Nothing is exported, sent or latched before the build
+  finished (`Buffer`s + `Ready` come after it). Messages that arrive meanwhile (`Resize`,
+  `Pointer`, `SetProperty`) queue and apply after. Synthetic knob `load_ms` simulates the slow
+  build. Test `slow_scene_load_keeps_the_heartbeat` (1.5 s load, 300 ms hang timeout → Ready,
+  0 restarts; RED with the cover off: 3 restarts, never ready).
+- **`render.rs` `LweScene`.** `check_folder` first: a missing dir (`does not exist (deleted,
+  a dangling link, or Steam is still downloading it)`) or no `project.json` (`Steam is still
+  downloading it?`) → fatal `load failed: …`; no assets → fatal with the hint. Then
+  `lwe::Scene::load_in` (NULL → `load failed: <dir> (a truncated scene.pkg or an unsupported
+  project)`), the `Start.properties`, `first_render` into a 1×1 scratch FBO (≤ 1 →
+  `renderer build failed … (assets: <dir>)`, never rendered again), a **native-sized** FBO for
+  LWE (its final quad uses `glViewport(0,0,sceneW,sceneH)`), the ring at
+  `cover_size(native, max_size)`, `Ready {native, has_audio: LWE stream count > 0,
+  wants_audio_input: project.json general.supportsaudioprocessing}`. Each frame:
+  `wp_render_update_time` + `wp_render_frame` into the native FBO, then `glBlitFramebuffer`
+  into the slot (LINEAR when scaling; scissor off first — LWE leaves its state), **no flip**,
+  alpha forced to 1; a GL error LWE left is logged (`lwe: GL error …`, first 10). Every
+  failure is a fatal error (no restart, no crash record — Review Focus #1).
+- **Pointer (mouse on).** `out:<c>.pointer` samples (Wayland, or **`headless.pointer
+  {output, x, y, buttons?}`**) → `Runtime::forward_pointer`: for every scene in `srcs:<c>`
+  (both sides mid-transition), `fit_rect(native, output, lay.fit, lay.viewport)` →
+  `scene::pointer::to_source_uv` (the inverse; `None` in a letterbox bar — not forwarded) →
+  `to_native_px` → `SceneSource::set_pointer` → `ToWorker::Pointer` in native px, y down
+  (re-sent after a restart's `Ready`). The worker hands it to LWE's `wp_mouse_input` (`CScene`
+  divides by its size; our button bits = `WP_MOUSE_INPUT_BUTTON_*`); the synthetic
+  `pointer_dot` scales it to the ring. Unit `pointer_maps_through_fill_and_viewport`.
+- **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
+  `SysMon::start()` (thread `lp-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
+  node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but
+  loopback halves (`node.virtual`, which would double-count, e.g. our bus playback) — with a
+  passive capture `lp-player-visualiser.<id>` (`target.object` = its serial,
+  `node.dont-reconnect` + `node.dont-fallback`: never the microphone), keeping its last 1024
+  mono samples; `frame()` sums the streams that delivered within 150 ms → 1024 u8 (centre
+  128). Read-only, no routing changes; a lost connection retries every 1 s. The runtime
+  (`feed_visualisers`, start of `update_sources`) runs it only while ≥ 1 ready scene
+  `wants_audio_input`, puts the frame on each such scene's next `Tick.input` (others get
+  `null`), and drops it on a helper thread when none wants it. The worker hands it to LWE's
+  `wp_audio_input_mix`; the synthetic `input_level` draws the RMS (`input_level()`). Probe
+  `workers` → `wants_audio_input`, `input_dbfs`. Units `admit_takes_app_playback_streams_only`,
+  `mix_frame_sums_streams_at_their_newest_sample`. Deviation from the plan's text: streams
+  playing to a non-default sink are mixed too (WE's "everything that plays").
+- **User properties (the editor's worker side).** Source prop **`scene_props`** (Map name →
+  value; stored on every kind) is sent as `Start.properties` (applied after the load, before
+  the first frame — so re-applied at every open) and, live, each new/changed entry as
+  `ToWorker::SetProperty {name, value}` (`WorkerHost` folds it into the restart's `Start`).
+  The worker: bool → `wp_project_property_set_boolean_by_name`, number → `…slider…`,
+  `[r,g,b(,a)]` 0–1 → `…color…`, string → `…value…` (LWE parses by type: text, combo key,
+  `"r g b"`); answers `PropertySet {name, ok, reason}` → event `scene.property` + probe
+  `workers.properties`. A removed key keeps its value until the scene is opened again (LWE
+  has no reset). Synthetic: `rgb`/`rgb2`. The UI/backend editor (reading `project.json`
+  `general.properties`, persisting per item in `LibMeta`) is a later task: it sets
+  `set <src>.scene_props {…}`.
+- **Probe `workers`** adds `assets_dir`, `steam_dir`, `wants_audio_input`, `input_dbfs`,
+  `pointer`, `properties`.
+- **Measured** (debug worker, release LWE core, RTX 3070 Ti, stepped 30 fps of scene time,
+  `real_scenes_render_and_animate`): 1726902114 2048×1423 → exported 1920×1334, Ready 177 ms;
+  2371103399 3840×1080 (covers 1920×1080 only at native width) Ready 795 ms; 2134765860 (Bunk)
+  1920×1080 Ready 857 ms; all non-blank, opaque, animating, 0 GL errors. Bunk shows LWE
+  fidelity gaps (a pixelated lower block, tiny clock) — Phase 6 corpus items, not embedding.
+- **Tests.** `tests/scene.rs`: `slow_scene_load_keeps_the_heartbeat`,
+  `min_scene_renders_through_the_worker` (real LWE, hermetic: `patches/lwe/tests/fixtures/
+  min-scene`, an empty assets dir → 64×32, clear colour 51 102 153 255),
+  `renderer_build_failure_is_broken_not_a_segfault` (`fail-scene`: fatal, 0 restarts, no
+  record, the worker exits after quit), `missing_or_half_downloaded_scene_fails_cleanly`
+  (gone / no project.json / truncated scene.json), opt-in `real_scenes_render_and_animate`
+  (`LP_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under `LP_REQUIRE_SCENES=1`; frames to
+  `LP_PLAYER_TEST_SCENES_OUT`). `tests/api.rs`: `no_assets_dir_hides_scenes_and_errors_with_hint`
+  (+ `scene-check` exit 1, `set player.scene_assets` live; RED with the open check removed: a
+  worker spawned), `missing_scene_folder_fails_without_crash_record`,
+  `pointer_reaches_scene_in_source_coords` (RED with the forwarding removed),
+  `scene_props_apply_at_open_and_live`, `visualiser_input_reaches_only_scenes_that_want_it`
+  (private PipeWire, a `pw-cat` tone → −9.0 dBFS at the scene; no capture node without a scene
+  that wants it). Unit `restart_start_folds_live_changes` covers `SetProperty`.
+
+**For Tasks 6/9/11 and the properties editor.** Task 6: the worker's `LweScene` has
+`pull_audio`-ready LWE (host driver); `Ready.has_audio` is the LWE stream count — until Task 6
+streams it, a transition onto a scene with sound waits out `ONSET_TIMEOUT`. Task 9: nothing
+scene-specific in the pointer/visualiser paths (both sides of a transition are fed). Task 11:
+`ScenesAvailable` = `hello.capabilities` `scene`, else `lp-player scene-check` (exit + JSON
+`reason`); set `player.scene_assets` from a setting if one is added; scenes `create` may carry
+`scene_props`. Editor: read `general.properties`, persist per item, send `set
+<src>.scene_props` (whole map), subscribe `scene.property` for refusals.

@@ -220,8 +220,9 @@ impl WorkerHost {
 
     /// Send `m` (+ fds). While no worker is connected (`Starting` before `Hello`,
     /// `Restarting`, `Broken`, `Stopped`) only what folds into the next `Start` is accepted
-    /// (`Start` itself, `Paused`, `Resize`, `Route` — recorded for the restart's `Start`, so
-    /// a restart never resumes with stale values); everything else is `NotConnected` (the
+    /// (`Start` itself, `Paused`, `Resize`, `Route`, `SetProperty` — recorded for the
+    /// restart's `Start`, so a restart never resumes with stale values; `SetProperty` is
+    /// recorded while connected too); everything else is `NotConnected` (the
     /// caller re-sends gains/pointer after the new worker's `Ready`). `WouldBlock` = the
     /// worker isn't reading (its socket buffer is full).
     pub fn send(&mut self, m: &ToWorker, fds: &[BorrowedFd]) -> io::Result<()> {
@@ -334,6 +335,7 @@ impl WorkerHost {
             paused: sp,
             max_size: sm,
             audio: sa,
+            properties: props,
             ..
         } = &mut self.spec.start
         else {
@@ -344,6 +346,10 @@ impl WorkerHost {
             ToWorker::Paused { paused } => *sp = *paused,
             ToWorker::Resize { max_size } => *sm = *max_size,
             ToWorker::Route { audio } => *sa = audio.clone(),
+            // Task 7: a scene property set live must survive a restart.
+            ToWorker::SetProperty { name, value } => {
+                props.insert(name.clone(), value.clone());
+            }
             _ => return false,
         }
         true
@@ -1100,6 +1106,7 @@ mod tests {
             audio: proto::AudioRoute::Null,
             max_size: [640, 360],
             synthetic: false,
+            properties: Default::default(),
         };
         let mut spec = WorkerSpec::new("src1", "/nonexistent/lp-scene-worker", start);
         spec.crash_dir = std::env::temp_dir();
@@ -1133,6 +1140,25 @@ mod tests {
             &[],
         )
         .unwrap();
+        // Task 7: a live scene property is part of what a restart must come back with.
+        for (name, value) in [("clock", json!(false)), ("bar_color", json!("1 0 0"))] {
+            host.send(
+                &ToWorker::SetProperty {
+                    name: name.into(),
+                    value,
+                },
+                &[],
+            )
+            .unwrap();
+        }
+        host.send(
+            &ToWorker::SetProperty {
+                name: "clock".into(),
+                value: json!(true),
+            },
+            &[],
+        )
+        .unwrap();
         host.set_resume_position(3.25);
         let e = host.send(&ToWorker::Gain { db: -6.0 }, &[]).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::NotConnected);
@@ -1142,12 +1168,19 @@ mod tests {
                 paused,
                 max_size,
                 audio,
+                properties,
                 ..
             } => {
                 assert_eq!(*position, 3.25);
                 assert!(*paused);
                 assert_eq!(*max_size, [2560, 1440]);
                 assert_eq!(*audio, proto::AudioRoute::Default);
+                assert_eq!(
+                    properties.get("clock"),
+                    Some(&json!(true)),
+                    "the latest wins"
+                );
+                assert_eq!(properties.get("bar_color"), Some(&json!("1 0 0")));
             }
             other => panic!("{other:?}"),
         }

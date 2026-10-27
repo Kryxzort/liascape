@@ -186,12 +186,73 @@ fn main() -> ExitCode {
         }
         Some("serve") => serve_main(&args[1..]),
         Some("ctl") => lp_player::ctl::main(&args[1..]),
+        Some("scene-check") => scene_check(&args[1..]),
         _ => {
             eprintln!(
                 "usage: lp-player --version | lp-player serve [--headless …] | lp-player ctl \
-                 <verb> ['<json args>']"
+                 <verb> ['<json args>'] | lp-player scene-check [--assets <dir>]"
             );
             ExitCode::from(2)
         }
+    }
+}
+
+/// `lp-player scene-check [--assets <dir>]` (Phase 2 Task 7): can scenes play here? One JSON
+/// line `{worker, features, assets_dir, ok, reason}`, exit 0 = yes / 1 = no (the backend's
+/// adapter reads it when no player runs). The same rule as `hello`'s `scene` capability: the
+/// worker resolves and was built with LWE, and WE's assets dir resolves (`--assets`, else
+/// `LP_WE_ASSETS_DIR`, else every Steam library) — with `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`
+/// the assets are optional (hermetic tests).
+fn scene_check(args: &[String]) -> ExitCode {
+    let mut explicit = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--assets" => explicit = it.next().map(std::path::PathBuf::from),
+            other => {
+                eprintln!("lp-player scene-check: unknown option {other:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let worker = lp_player::paths::scene_worker_bin();
+    let features: Vec<String> = worker
+        .as_ref()
+        .and_then(|w| {
+            std::process::Command::new(w)
+                .arg("--features")
+                .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()
+        })
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+        .unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let assets = lp_player::scene::assets::resolve(explicit.as_deref(), &home);
+    let synthetic = std::env::var("LP_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1");
+    let reason = if worker.is_none() {
+        Some("lp-scene-worker not found (LP_SCENE_WORKER_BIN, next to lp-player, PATH)".into())
+    } else if synthetic {
+        None
+    } else if !features.iter().any(|f| f == "lwe") {
+        Some("lp-scene-worker was built without LWE (install.sh --no-scenes)".to_string())
+    } else {
+        assets.as_ref().err().cloned()
+    };
+    let out = serde_json::json!({
+        "worker": worker,
+        "features": features,
+        "assets_dir": assets.as_ref().ok(),
+        "ok": reason.is_none(),
+        "reason": reason,
+    });
+    println!("{out}");
+    if reason.is_none() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
 }

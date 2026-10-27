@@ -520,6 +520,11 @@ pub struct Runtime {
     /// clock (gains there are evaluated at step boundaries exactly like every other
     /// property — nothing "between steps" for a 1 ms timer to drive).
     gain_timer_armed: bool,
+    /// Phase 2 Task 7: the visualiser's system-audio capture (D4), while ≥ 1 live scene wants
+    /// audio input; dropped (off the loop) when none does.
+    pub(crate) sysmon: Option<crate::audio::sysmon::SysMon>,
+    /// Task 7: the `player.scene_assets` value the scene base opts were resolved for.
+    scene_assets_for: Option<String>,
 }
 
 /// Task 16c (R88) — see `pause_gates`' doc and `.claude/rules/player-core.md` § Runtime
@@ -907,6 +912,7 @@ impl Runtime {
         // plain `set` pushes the effective pause to every source at once (a no-op if
         // `tick`/`begin_step` already called this for `now`'s sake this iteration).
         self.update_player_paused();
+        self.update_scene_assets();
         let changes = self.graph.drain_changes();
         if !changes.is_empty() || self.graph.picture_rev() != self.snap.seen_rev {
             self.snap.seen_rev = self.graph.picture_rev();
@@ -1188,6 +1194,7 @@ impl Runtime {
 
     /// Update every source (render pending frames, never blocks), log + collect events.
     pub(crate) fn update_sources(&mut self) {
+        self.feed_visualisers();
         self.host.update(&self.gfx, &mut self.graph);
         let changed = self.host.take_changed();
         self.redraw.mark_shown(&self.graph, &changed);
@@ -1676,14 +1683,164 @@ impl Runtime {
         }
     }
 
-    /// Pointer samples from the backend → `out:<c>.pointer` `[x, y, buttons]` (observed).
-    pub(crate) fn pointer_events(&mut self) {
+    /// Pointer samples from the backend → `out:<c>.pointer` `[x, y, buttons]` (observed), and
+    /// (Phase 2 Task 7, mouse on) every scene on that output — both sides mid-transition (the
+    /// `srcs:<c>` alias) — gets it in its own native pixels, mapped back through the main
+    /// layer's fit/viewport (`scene::pointer`); a point in a letterbox bar reaches nobody.
+    /// Returns the scene ids reached.
+    pub(crate) fn pointer_events(&mut self) -> Vec<String> {
+        let mut reached = Vec::new();
         for s in self.backend.take_pointer() {
             let _ = self.graph.set_observed(
                 &p(&format!("out:{}.pointer", s.output)),
                 PropValue::List(vec![s.x, s.y, s.buttons as f64]),
             );
+            reached.extend(self.forward_pointer(&s.output, s.x, s.y, s.buttons));
         }
+        reached
+    }
+
+    fn forward_pointer(&mut self, output: &str, x: f64, y: f64, buttons: u32) -> Vec<String> {
+        let num = |g: &Graph, path: String| match g.get(&p(&path)) {
+            Ok(PropValue::I64(i)) => i as f64,
+            Ok(PropValue::F64(f)) => f,
+            _ => 0.0,
+        };
+        let (ow, oh) = (
+            num(&self.graph, format!("out:{output}.width")),
+            num(&self.graph, format!("out:{output}.height")),
+        );
+        if ow < 1.0 || oh < 1.0 {
+            return Vec::new();
+        }
+        let lay = format!("lay:{output}:main");
+        let fit = match self.graph.get(&p(&format!("{lay}.fit"))) {
+            Ok(PropValue::Str(s)) => s.parse().unwrap_or(crate::graph::Fit::Fill),
+            _ => crate::graph::Fit::Fill,
+        };
+        let viewport = match self.graph.get(&p(&format!("{lay}.viewport"))) {
+            Ok(PropValue::List(v)) if v.len() == 4 => [v[0], v[1], v[2], v[3]],
+            _ => [0.0, 0.0, 1.0, 1.0],
+        };
+        let mut reached = Vec::new();
+        for id in self.graph.resolve(&format!("srcs:{output}")) {
+            let Some(sc) = self.host.scene_mut(&id) else {
+                continue;
+            };
+            let Some(native) = sc.native() else { continue };
+            let rect = crate::gfx::compose::fit_rect(
+                (native[0], native[1]),
+                (ow as u32, oh as u32),
+                fit,
+                viewport,
+            );
+            if let Some(uv) = crate::scene::pointer::to_source_uv(&rect, x, y) {
+                let (nx, ny) = crate::scene::pointer::to_native_px(uv, native);
+                sc.set_pointer(nx, ny, buttons);
+                reached.push(id);
+            }
+        }
+        reached
+    }
+
+    /// Phase 2 Task 7 (D4): every live scene that wants audio input gets the latest frame of
+    /// the system-audio mix (`audio::sysmon`) on its next tick. The capture runs only while
+    /// at least one does; the last one gone drops it on a helper thread (its PipeWire thread
+    /// is joined there, never on the loop).
+    pub(crate) fn feed_visualisers(&mut self) {
+        let want: Vec<String> = self
+            .host
+            .scene_ids()
+            .into_iter()
+            .filter(|id| {
+                self.host
+                    .scene(id)
+                    .is_some_and(crate::sources::scene::SceneSource::wants_audio_input)
+            })
+            .collect();
+        if want.is_empty() {
+            if let Some(m) = self.sysmon.take() {
+                let _ = std::thread::Builder::new()
+                    .name("lp-sysmon-stop".into())
+                    .spawn(move || drop(m));
+            }
+            return;
+        }
+        let frame = self
+            .sysmon
+            .get_or_insert_with(crate::audio::sysmon::SysMon::start)
+            .frame();
+        for id in want {
+            if let Some(s) = self.host.scene_mut(&id) {
+                s.set_input(frame.clone());
+            }
+        }
+    }
+
+    /// Phase 2 Task 7: `player.scene_assets` → the scenes' base opts. Re-resolved whenever
+    /// the prop changes ("" = auto: `LP_WE_ASSETS_DIR`, then every Steam library); the result
+    /// is `player.scene_assets_resolved` ("" = none — a scene then errors naming
+    /// `LP_WE_ASSETS_DIR` / `player.scene_assets`, and `hello` offers no `scene`).
+    pub(crate) fn update_scene_assets(&mut self) {
+        let want = match self.graph.get(&p("player.scene_assets")) {
+            Ok(PropValue::Str(s)) => s,
+            _ => String::new(),
+        };
+        if self.scene_assets_for.as_ref() == Some(&want) {
+            return;
+        }
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let explicit = (!want.is_empty()).then(|| PathBuf::from(&want));
+        let r = crate::scene::assets::resolve(explicit.as_deref(), &home);
+        let resolved = match &r {
+            Ok(d) => {
+                self.host
+                    .set_base_opt("scene_assets", Some(json!(d.display().to_string())));
+                self.host.set_base_opt("scene_assets_error", None);
+                d.display().to_string()
+            }
+            Err(e) => {
+                self.host.set_base_opt("scene_assets", None);
+                self.host.set_base_opt("scene_assets_error", Some(json!(e)));
+                String::new()
+            }
+        };
+        log::event(
+            "scene",
+            if r.is_ok() { Level::Info } else { Level::Warn },
+            "scene.assets",
+            None,
+            json!({ "requested": want, "resolved": r.as_ref().ok(), "error": r.as_ref().err() }),
+        );
+        let _ = self
+            .graph
+            .set_observed(&p("player.scene_assets_resolved"), PropValue::Str(resolved));
+        self.scene_assets_for = Some(want);
+    }
+
+    /// Whether `kind: scene` sources can play here: the worker binary resolves, and WE's
+    /// assets dir does (unless synthetic test scenes are allowed — D7). `Err` = why not.
+    pub fn scenes_available(&self) -> Result<(), String> {
+        if crate::paths::scene_worker_bin().is_none() {
+            return Err(
+                "lp-scene-worker not found (LP_SCENE_WORKER_BIN, next to lp-player, \
+                        PATH)"
+                    .into(),
+            );
+        }
+        if self.host.base_opt("allow_synthetic").is_some()
+            || self.host.base_opt("scene_assets").is_some()
+        {
+            return Ok(());
+        }
+        Err(self
+            .host
+            .base_opt("scene_assets_error")
+            .and_then(Value::as_str)
+            .unwrap_or(crate::scene::assets::HINT)
+            .to_string())
     }
 
     // ------------------------------------------------------------------ outputs
@@ -3569,7 +3726,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         pause_gate_prev: false,
         pause_gate_corr: BTreeMap::new(),
         gain_timer_armed: false,
+        sysmon: None,
+        scene_assets_for: None,
     };
+    rt.update_scene_assets();
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
     }

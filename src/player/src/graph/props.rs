@@ -132,6 +132,18 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("pid", def(PropType::I64, true, PropValue::I64(0))),
+            // Phase 2 Task 7: WE's `assets/` dir for scenes ("" = auto: `LP_WE_ASSETS_DIR`,
+            // then every Steam library — `scene::assets`); live (the next scene opened uses
+            // it). `scene_assets_resolved` = what is in use ("" = none found: no `scene`
+            // capability, a scene source errors with the hint).
+            (
+                "scene_assets",
+                def(PropType::Str, false, PropValue::Str(String::new())),
+            ),
+            (
+                "scene_assets_resolved",
+                def(PropType::Str, true, PropValue::Str(String::new())),
+            ),
         ],
         NodeKind::Output => vec![
             (
@@ -271,6 +283,14 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "preview",
                 def(PropType::Str, false, PropValue::Str(String::new())),
+            ),
+            // Phase 2 Task 7: a scene's user properties (`project.json` `general.properties`
+            // name → value: bool, number, `[r,g,b]` 0–1, or a string LWE parses by type),
+            // applied at every open and live (each changed entry → `wp_project_property_set_*`
+            // in the worker). Stored on every kind, used by scenes only.
+            (
+                "scene_props",
+                def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
             ),
         ],
         NodeKind::Effect => vec![

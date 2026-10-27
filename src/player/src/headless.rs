@@ -131,6 +131,8 @@ pub struct Headless {
     /// policy (`crate::redraw`) says the picture changed; every output can always take a
     /// frame (there are no frame callbacks). Default: compose every output every tick.
     content_paced: bool,
+    /// `headless.pointer` samples not taken yet (Task 7: a virtual pointer for scenes).
+    pointer: Vec<PointerSample>,
 }
 
 fn bad(msg: String) -> ApiError {
@@ -178,6 +180,7 @@ impl Headless {
             outs: Vec::new(),
             changes: Vec::new(),
             content_paced: false,
+            pointer: Vec::new(),
         };
         for (i, &(w, ht, hz)) in specs.iter().enumerate() {
             let info = OutputInfo {
@@ -220,6 +223,28 @@ impl Headless {
         let fbo = gfx.fbo(&tex);
         self.changes.push(OutputChange::Added(info.clone()));
         self.outs.push(VOut { info, tex, fbo });
+        Ok(())
+    }
+
+    /// A virtual pointer over output `name` (`headless.pointer`, Task 7): surface pixels from
+    /// the top-left, buttons as in `out:<c>.pointer`.
+    pub fn pointer(&mut self, name: &str, x: f64, y: f64, buttons: u32) -> Result<(), ApiError> {
+        if !self.outs.iter().any(|o| o.info.name == name) {
+            return Err(ApiError {
+                code: "no_such_node",
+                message: format!("no headless output {name:?}"),
+                hint: "`lp-player ctl state` lists the outputs (`out:<name>`)".into(),
+            });
+        }
+        if !x.is_finite() || !y.is_finite() {
+            return Err(bad(format!("pointer ({x}, {y}) is not a position")));
+        }
+        self.pointer.push(PointerSample {
+            output: name.to_string(),
+            x,
+            y,
+            buttons,
+        });
         Ok(())
     }
 
@@ -287,6 +312,10 @@ impl OutputBackend for Headless {
                 retry_in_ms: None,
             },
         )
+    }
+
+    fn take_pointer(&mut self) -> Vec<PointerSample> {
+        std::mem::take(&mut self.pointer)
     }
 
     fn as_headless_mut(&mut self) -> Option<&mut Headless> {

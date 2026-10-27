@@ -999,6 +999,32 @@ impl SourceHost {
         self.sources.get_mut(id).and_then(|h| h.src.as_mpv_mut())
     }
 
+    /// Set (`Some`) or remove (`None`) one base opt for sources opened from now on (Task 7:
+    /// `scene_assets` / `scene_assets_error` follow `player.scene_assets` live).
+    pub fn set_base_opt(&mut self, key: &str, v: Option<Value>) {
+        match v {
+            Some(v) => {
+                self.base_opts.insert(key.to_string(), v);
+            }
+            None => {
+                self.base_opts.remove(key);
+            }
+        }
+    }
+
+    pub fn base_opt(&self, key: &str) -> Option<&Value> {
+        self.base_opts.get(key)
+    }
+
+    /// Ids of every hosted scene source.
+    pub fn scene_ids(&self) -> Vec<String> {
+        self.sources
+            .iter()
+            .filter(|(_, h)| h.src.as_scene().is_some())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     /// The live scene source for node `id`, if it is one (stepped mode, probes, tests).
     pub fn scene(&self, id: &str) -> Option<&SceneSource> {
         self.sources.get(id).and_then(|h| h.src.as_scene())

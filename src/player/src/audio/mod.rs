@@ -9,6 +9,7 @@
 
 pub mod bus;
 pub mod meter;
+pub mod sysmon;
 
 use serde_json::json;
 

@@ -880,7 +880,8 @@ impl MpvSource {
                 "ao" | "audio_device" | "audio_delay_bias" | "kind" | "path" | "stepped"
                 | "shader_cache_dir" => {}
                 // `SourceHost`'s base opts for scene sources (Phase 2) — not an mpv's.
-                "scene_worker" | "scene_crash_dir" | "scene_assets" | "allow_synthetic" => {}
+                "scene_worker" | "scene_crash_dir" | "scene_assets" | "scene_assets_error"
+                | "allow_synthetic" => {}
                 "position" => {
                     start =
                         Some(v.as_f64().ok_or_else(|| {
@@ -2289,8 +2290,9 @@ impl Source for MpvSource {
                 self.set(prop, name, &val)
             }
             "af" => self.set(prop, "af", &mpv_af(&s)),
-            // Phase 2: a scene's still image; stored (a global `set` never fails here).
-            "preview" => Ok(()),
+            // Phase 2: a scene's still image and user properties; stored (a global `set`
+            // never fails here).
+            "preview" | "scene_props" => Ok(()),
             // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
             "no_audio" => self.set(prop, "aid", if b { "no" } else { "auto" }),
             // The graph value is the user's offset; the bus compensation is added to it.

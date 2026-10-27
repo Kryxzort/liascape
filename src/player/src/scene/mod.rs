@@ -1,7 +1,10 @@
 //! Pure scene helpers (Phase 2; `.claude/rules/player-core.md` § Scene worker): the export
-//! size of a scene's frame ring ([`cover_size`]) and the synthetic test scene's spec
-//! ([`synthetic`], D7). No GPU, no I/O.
+//! size of a scene's frame ring ([`cover_size`]), the synthetic test scene's spec
+//! ([`synthetic`], D7), WE's assets dir ([`assets`], Task 7) and the pointer → scene mapping
+//! ([`pointer`], Task 7). No GPU.
 
+pub mod assets;
+pub mod pointer;
 pub mod synthetic;
 
 /// Longest edge a scene's ring is ever exported at (same cap as `MpvSource`'s targets).
