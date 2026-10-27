@@ -28,6 +28,11 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static N: AtomicU32 = AtomicU32::new(0);
 /// The brief: the restarted player answers `hello` within this.
 const RESTART_BUDGET: Duration = Duration::from_millis(1500);
+/// How long a test waits for a snapshot it needs on disk (a precondition — `wait_snapshot`
+/// returns the moment it matches). Written 250 ms after a change, but `fsync`ed twice (file +
+/// dir): under IO load (other builds; 4 fsync writers) that took > 1 s — the old 300 ms / 1 s
+/// waits failed 11 of 14 runs there.
+const SNAPSHOT_WAIT: Duration = Duration::from_secs(20);
 /// `lp_player::supervise::TEST_CRASH_ENV` (black-box: spelled out).
 const TEST_CRASH_ENV: &str = "LP_PLAYER_TEST_CRASH";
 /// `lp_player::supervise::EXIT_GAVE_UP`.
@@ -405,9 +410,8 @@ fn crash_restores() {
     assert_eq!(h["restart"], Value::Null);
     let id = c.create(json!({"path": s(&clip), "loop": true, "position": 2.0}));
     c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
-    std::thread::sleep(Duration::from_millis(300));
     // Precondition: the debounced snapshot (250 ms after the first change) is on disk.
-    sup.wait_snapshot(Duration::from_millis(300), |sn| snap_has_path(sn, s(&clip)));
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_has_path(sn, s(&clip)));
     drop(c);
 
     let old = sup.pid;
@@ -469,9 +473,15 @@ fn crash_restores() {
 /// Task 16b leftover: SIGKILLing the supervisor must orphan nothing — its
 /// `PR_SET_PDEATHSIG(SIGTERM)` (set between fork and exec) fires from the kernel's own
 /// notice of the parent's death, not from any cleanup code of ours. Asserted directly
-/// (no fallback kill anywhere in this test masking a regression): the child must be gone
-/// within 300 ms of the SIGKILL, polled, never just "eventually" via `Sup::drop`'s own
-/// (much more generous) teardown fallback.
+/// (no fallback kill anywhere in this test masking a regression), in two parts:
+/// - **the signal, within 300 ms** — the bound that is the point: the child logs
+///   `player.quitting {why: "signal"}` stamped ≤ 300 ms after the SIGKILL (nothing else signals
+///   it: its supervisor is dead and forwarded nothing). Measured 3.6–10.3 ms in 57 runs under
+///   CPU and IO load.
+/// - **the exit, on its own** — no kill of ours. That is the clean quit (stop, teardown, the
+///   final snapshot written + `fsync`ed) and takes real time under IO load: 0.4–9.8 s, twice
+///   > 10 s, with 4 fsync writers on the same disk (the old 300 ms bound on the whole exit failed
+///   there and at load ~25 with other builds running). Bounded by [`ORPHAN_EXIT_WITHIN`].
 #[test]
 fn supervisor_sigkill_reaps_child_fast() {
     let Some(sup) = Sup::start(&[]) else {
@@ -480,22 +490,68 @@ fn supervisor_sigkill_reaps_child_fast() {
     let child = sup.pid;
     assert!(alive(child), "precondition: the compositor is up");
     let sup_pid = sup.supervisor_pid();
+    let kill_wall = wall_s();
     assert_eq!(
         unsafe { libc::kill(sup_pid as i32, libc::SIGKILL) },
         0,
         "kill -9 {sup_pid}"
     );
     let t = Instant::now();
-    while alive(child) && t.elapsed() < Duration::from_millis(300) {
+    let quitting = loop {
+        if let Some(e) = sup
+            .kinds("player.quitting")
+            .into_iter()
+            .find(|e| e["why"] == "signal")
+        {
+            break e;
+        }
+        assert!(
+            t.elapsed() < ORPHAN_EXIT_WITHIN,
+            "compositor pid {child} never logged player.quitting {{why: signal}} after \
+             SIGKILLing the supervisor (pid {sup_pid}) — no PR_SET_PDEATHSIG SIGTERM reached it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let signal_ms = (wall_of(quitting["t_wall"].as_str().unwrap()) - kill_wall) * 1000.0;
+    assert!(
+        signal_ms <= 300.0,
+        "the child's SIGTERM came {signal_ms:.1} ms after SIGKILLing the supervisor (pid \
+         {sup_pid}) — PR_SET_PDEATHSIG should deliver it almost immediately"
+    );
+    while alive(child) && t.elapsed() < ORPHAN_EXIT_WITHIN {
         std::thread::sleep(Duration::from_millis(5));
     }
     let elapsed = t.elapsed();
     assert!(
         !alive(child),
         "compositor pid {child} still alive {elapsed:?} after SIGKILLing the supervisor \
-         (pid {sup_pid}) — PR_SET_PDEATHSIG should have reaped it almost immediately"
+         (pid {sup_pid}), {signal_ms:.1} ms after its PDEATHSIG SIGTERM"
     );
-    println!("child reaped {elapsed:?} after SIGKILLing the supervisor");
+    println!(
+        "child signalled {signal_ms:.1} ms and gone {elapsed:?} after SIGKILLing the supervisor"
+    );
+}
+
+/// How long an orphaned child's clean quit may take (`supervisor_sigkill_reaps_child_fast`):
+/// its final snapshot is `fsync`ed, which took up to > 10 s under IO load.
+const ORPHAN_EXIT_WITHIN: Duration = Duration::from_secs(30);
+
+/// Now, as seconds of the UTC day (to compare with an event's `t_wall`).
+fn wall_s() -> f64 {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    (d.as_secs() % 86_400) as f64 + d.subsec_nanos() as f64 / 1e9
+}
+
+/// An event's `t_wall` (`2026-10-27T10:22:10.875123Z`) as seconds of its UTC day.
+fn wall_of(t: &str) -> f64 {
+    let hms = &t[11..t.len() - 1];
+    let mut it = hms.split(':');
+    let h: f64 = it.next().unwrap().parse().unwrap();
+    let m: f64 = it.next().unwrap().parse().unwrap();
+    let s: f64 = it.next().unwrap().parse().unwrap();
+    h * 3600.0 + m * 60.0 + s
 }
 
 /// A clean exit is never restarted: `quit`, SIGTERM to the supervisor (forwarded), and
@@ -755,7 +811,7 @@ fn corrupt_snapshot_starts_empty() {
         // It keeps working, and the next snapshot is a valid (empty) one.
         let id = c.create(json!({"kind": "color", "color": [0, 255, 0]}));
         c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
-        let sn = sup.wait_snapshot(Duration::from_secs(1), |sn| {
+        let sn = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
             sn["outputs"]["VIRTUAL-1"]["content"].is_string()
         });
         assert_eq!(sn["version"], json!(1));
@@ -790,7 +846,7 @@ fn transition_in_flight_restores_as_b() {
     wait_state(&mut c, Duration::from_secs(5), |st| {
         st["transitions"][0]["phase"] == "running"
     });
-    let sn = sup.wait_snapshot(Duration::from_secs(1), |sn| {
+    let sn = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
         sn["sources"]
             .as_object()
             .is_some_and(|m| m.values().any(|s| s["transition_target"] == json!(true)))
@@ -848,7 +904,7 @@ fn parked_restores_parked() {
     );
     let x = c.create(json!({"kind": "color", "color": [0, 255, 0]}));
     c.show("lay:VIRTUAL-3:main", &x);
-    sup.wait_snapshot(Duration::from_secs(1), |sn| {
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
         let id = sn["outputs"]["VIRTUAL-3"]["content"].as_str().unwrap_or("");
         sn["sources"][id]["kind"] == "color"
     });
@@ -891,7 +947,7 @@ fn parked_restores_parked() {
     }
     let st = c.state();
     assert_eq!(st["parked"], json!(xp), "{st}");
-    sup.wait_snapshot(Duration::from_secs(1), |sn| {
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
         sn["outputs"].as_object().is_some_and(|o| o.is_empty()) && sn["parked"]["id"].is_string()
     });
     drop(c);
@@ -945,7 +1001,7 @@ fn output_props_survive_replug() {
         "a new one: default"
     );
     c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
-    sup.wait_snapshot(Duration::from_secs(1), |sn| {
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
         sn["output_props"]["VIRTUAL-2"]["layer"] == "overlay"
             && sn["outputs"]["VIRTUAL-1"]["props"]["layer"] == "top"
     });

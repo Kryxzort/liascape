@@ -246,6 +246,8 @@ struct StepWait {
     video: bool,
     seeked: bool,
     done: bool,
+    /// This step waited for the source to become ready (a fresh source opening).
+    opened: bool,
 }
 
 /// A `step` in progress (the reply is sent when every wait is done).
@@ -2956,6 +2958,7 @@ impl Runtime {
                 video,
                 seeked: false,
                 done: false,
+                opened: false,
             });
         }
         let hosted: BTreeSet<String> = self.host.ids().into_iter().collect();
@@ -3004,6 +3007,7 @@ impl Runtime {
         };
         let t = Instant::now();
         self.update_sources();
+        let mut opened_now = false;
         for w in st.waits.iter_mut().filter(|w| !w.done) {
             let Some(m) = self.host.mpv_mut(&w.id) else {
                 w.done = true; // gone meanwhile
@@ -3015,10 +3019,14 @@ impl Runtime {
                         w.done = true;
                         continue;
                     }
-                    _ if !m.is_ready() => continue,
+                    _ if !m.is_ready() => {
+                        w.opened = true;
+                        continue;
+                    }
                     _ => {}
                 }
                 w.seeked = true;
+                opened_now |= w.opened;
                 if w.video
                     && m.step_target() != Some(w.t)
                     && let Err(e) = m.step_seek(w.t)
@@ -3040,6 +3048,23 @@ impl Runtime {
             }
         }
         st.work += t.elapsed();
+        // A fresh source's open (core, demux, first decoded frame) is not its frame's wait: once
+        // it is ready, its seek gets a STEP_TIMEOUT of its own. Under load an open alone took
+        // ~2 s, and the seek it then sent timed out at once (`t=0.000s, waiting for seek reply`).
+        // Still bounded: a source not ready at the first deadline times out there (`ready`).
+        if opened_now {
+            st.deadline = Instant::now() + STEP_TIMEOUT;
+            if let Some(tok) = st.timer.take() {
+                self.handle.remove(tok);
+            }
+            st.timer = self
+                .handle
+                .insert_source(
+                    Timer::from_duration(STEP_TIMEOUT),
+                    |_, _, _: &mut Runtime| TimeoutAction::Drop,
+                )
+                .ok();
+        }
         let all_done = st.waits.iter().all(|w| w.done);
         if !all_done && Instant::now() < st.deadline {
             self.step = Some(st);

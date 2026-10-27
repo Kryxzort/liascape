@@ -201,18 +201,55 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       a real bug — a resuming pause gate was dropped on a second clock read after its last `ramp_db`, so
       `gain.pause` stayed a hair under 0 dB for good (−0.0003 measured; −0.04…−0.56 dB with a 2 ms stall
       injected, 4/4 RED). The drop now writes the exact 0 dB.
-      Adapter IT (`scripts/test-lp-player-adapter.sh`), once at load avg ~10 (another lane's 4K decoder tests,
-      2026-10-26 08:0x, merge 48959da): 111/5 — `after SIGCONT` (read a pending B's override), `speed drop: E1
-      was cut early`, `after resume: handoff=1`, `volume-only (global) drag` (A already gone: `null dB`). The
-      rerun minutes later at load ~7: 115/0. Its real-clock fades (300–600 ms) have no slack for a stalled
-      backend; if these recur, stretch the fades the drag/pause sections act inside rather than retrying.
-      **Stepped `step` timeouts** — `step: no frame within 2 s from srcN (t=0.000s, waiting for seek reply |
-      ready)` on a fresh stepped server's first step (`stepped_is_deterministic`, `hotplug_added_before_running_
-      joins_transition`, `remove_output_retires_what_only_it_showed`, `settings_reach_pending_b`): pre-existing —
-      an interleaved A/B of 3 of them (2026-10-26) failed 1/30 on the base 2e4186f, 0/30 with the render worker
-      branch; one full run had 3 within 2 min (a transient system stall). mpv answering a first seek > 2 s late
-      at t=0 — `Client::step` now dumps the sources probe + the last 300 events with the failure: read those
-      next time before raising `STEP_TIMEOUT`.
+      **Adapter IT (`scripts/test-lp-player-adapter.sh`) — fixed (2026-10-27).** Reproduced with the IT and 16
+      CPU burners pinned to 8 cores (`taskset`): 3, 1, 1 and 2 failures in 4 runs (16 unpinned burners at load 26:
+      0). Causes, none a margin: fixed sleeps before reading a state that converges (the first `/apply` not on
+      screen after 1 s; a setting not landed after 0.3 s); the pending B of the R61 section (dee, 10 s at 1.25×)
+      handing off to bee (its own 40 %) before the SIGSTOP section's last read (`after SIGCONT → −23.88 dB`);
+      the speed-drop check looking a fixed 9 s after the drop, past E1's REAL end when the drop landed late;
+      the drag sections' 8 s fades running out (`null dB`); a python spawn per poll missing L1's 0.7 s window
+      (and a stale E2 corr from an earlier section arming it at once); `/playlist/play` once taking its full
+      10 s curl timeout, so "handoffs in 9 s" counted 17 s; reads after a window taking seconds (3.4 s for
+      four), so "what was on screen at t" read a later state; an import past `post`'s 10 s; the WebSocket
+      client not up 0.5 s later. Now: `waitfor` condition waits on a real deadline for every converging state,
+      the pending B cancelled once its part is done, windows measured from the clip's own position (the old
+      backstop bound + 3 s ≤ the check ≤ E1's end − 1 s; the restart windows close 6 s after E1's end), rates
+      and "at t" judged by the events' own `t_mono_ms`/`t_wall`, 60 s fades, a 60 s import timeout. Fixed
+      windows stay only where the window is the check (no switch in N s) and the latency bounds keep theirs
+      (< 500 ms SIGSTOPped, < 100 ms `/preview global`: those two DID fail once at load ~45–50 with other
+      agents' builds on top — load genuinely breaks them there; left alone). After: 115/0 in 2 pinned runs at
+      external load ≤ 22 (+ runs at 33–50 whose remaining failures were the next items). R81's "reapply after
+      the restart" check used to match ANY earlier reapply line; it now needs one after the kill — or the
+      identical line < 10 s before (the adapter log drops repeats: see the stale snapshot below).
+      **Product, seen under IO load, not fixed (reported):** (a) the snapshot lagged a switch by 2.4 s (fsync on
+      a busy disk), so a supervised restart brought back the PREVIOUS wallpaper (dee instead of a) and R81
+      re-applies settings, never the wallpaper; (b) an in-place upgrade failed: the old compositor's clean
+      quit took 3.1–3.3 s (`player.quitting` → `player.exit`), `QuitOrKill` escalated to SIGKILL, the new
+      player didn't answer within `UpgradeInPlace`'s fixed 3 s, and the backend fell back to a plain
+      `serve` (no `--restore`, no `--headless`).
+      **Stepped `step` timeouts — a real bug, fixed (2026-10-27).** With 16 burners pinned to the test's 8
+      cores, `settings_reach_pending_b` + `stepped_align_end_reveal` failed EVERY run (8/8, also once
+      `hotplug_added_before_running_joins_transition`): `no frame within 2 s from src1 (t=2.5–2.8 s, waiting
+      for frame)`. Instrumented: mpv queues each step's NEW frame to the VO in the playloop iteration that then
+      emits PLAYBACK_RESTART, so the loop rendered it before pumping the event (every step under load); the
+      step then only completed on mpv's REDRAW after the restart (`next_frame_is_redraw` = true), which didn't
+      come at 2.8 s of a 3 s clip with its loop off. `StepSeek::target_frame` now counts a non-redraw frame
+      rendered after the seek's reply, before or after the restart (a redraw before the restart is the
+      previous step's frame and never counts); completing on it, the step reads `time-pos` once (stepped
+      only) so it still returns a settled state (`player_pause_freezes_*` saw the frame's `time-pos` arrive a
+      step later otherwise). The `t=0.000s, waiting for seek reply` variant (1 in the 8 before-runs, 1 in 11
+      after): the source's OPEN took the whole 2 s (`source.ready` at the deadline), the seek it then sent
+      timed out at once — a source that had to open now gets a fresh `STEP_TIMEOUT` for its seek once ready
+      (one not ready by the first deadline still times out). After both: 0/10 loaded runs of 7 tests, full
+      `api`/`sources`/`supervise` green.
+      **`tests/supervise.rs` — fixed (2026-10-27).** CPU burners alone: 0/43. With 4 of the 16 writing +
+      fsync-ing 32 MiB files and 4 copying 256 MiB buffers: 11/14 runs failed — `wait_snapshot` (300 ms / 1 s:
+      the snapshot is fsync'ed twice) and `supervisor_sigkill_reaps_child_fast`. Measured there: the child's
+      PDEATHSIG SIGTERM (`player.quitting {why: signal}`) 3.5–10.3 ms after SIGKILLing the supervisor (57 runs),
+      but its clean exit (final snapshot fsync'ed) 0.1–11.8 s. The test now asserts the signal ≤ 300 ms (the
+      point) and the exit on its own within 30 s; snapshot waits are `SNAPSHOT_WAIT` 20 s. After: those 0/19;
+      `crash_restores` still fails 6/19 there on its 1.5 s `RESTART_BUDGET` (hello 1.5–3.6 s after a SIGSEGV
+      under IO load) — a stated latency budget, kept; measured, not fixed.
 - [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
       playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
       align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:

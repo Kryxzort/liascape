@@ -353,7 +353,12 @@ ready) leaves A on screen, but every client was told B when it was requested (`w
 ## Integration test (`scripts/test-lp-player-adapter.sh`)
 `scripts/test-lp-player-adapter.sh [--no-build]` (needs `dotnet` or `DOTNET=…`, ffmpeg, jq, curl,
 python3; builds lp-player via the flake devShell + `dotnet build` unless `--no-build`; ~50 s; last line
-`RESULT pass=N fail=M`, exit 0 = all pass). The REAL `livepaper --serve` (from this tree's
+`RESULT pass=N fail=M`, exit 0 = all pass; `LP_IT_KEEP=1` keeps its temp dir). **Load-proof by construction
+(2026-10-27):** a converging state is polled to a real deadline (`waitfor <ms> <cond>`), never read after a fixed
+sleep; a window is measured from the clip's own position; "what had happened by t" is judged by the events'
+own `t_mono_ms`/`t_wall` (reads after a window took seconds under load); fixed windows remain only where the
+window is the check (no switch in N s) and the latency bounds (< 500 ms SIGSTOPped, < 100 ms) keep theirs —
+docs/TODO.md "Load-sensitive test flakes". The REAL `livepaper --serve` (from this tree's
 `bin/Debug`) against a private `lp-player serve --headless --outputs 640x360@60,320x180@60 --clock real
 --ao null`, all over HTTP, checked with `lp-player ctl`. **Hermetic**: temp HOME + every XDG dir (own
 settings.json with `PlayerEngine=lp-player`, own library, own lp-player socket + event log), its own

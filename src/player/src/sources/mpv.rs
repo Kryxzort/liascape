@@ -370,8 +370,15 @@ struct StepSeek {
     /// PLAYBACK_RESTART seen after the seek's reply (the reply always precedes the seek's
     /// own restart: mpv completes the `seek` command before the playloop executes it).
     restarted: bool,
-    /// A frame rendered after that restart — the one at `target`.
+    /// A frame rendered after that restart (the target frame, or mpv's redraw of it).
     rendered: bool,
+    /// A NEW frame (not a redraw) rendered after the reply — the target frame, whether it came
+    /// before or after the restart. mpv queues it to the VO in the same playloop iteration that
+    /// then emits PLAYBACK_RESTART, so the loop can render it before it pumps the event (under
+    /// load: every step); a frame rendered after the restart was then only mpv's REDRAW of it,
+    /// which doesn't always follow (measured: never at 2.8 s of a 3 s clip with its loop off) —
+    /// the step waited out `STEP_TIMEOUT`.
+    target_frame: bool,
     error: Option<String>,
 }
 
@@ -1115,6 +1122,7 @@ impl MpvSource {
             replied: false,
             restarted: false,
             rendered: false,
+            target_frame: false,
             error: None,
         });
         Ok(())
@@ -1174,7 +1182,12 @@ impl MpvSource {
         match &self.step {
             None if self.ready => StepStatus::Done,
             None => StepStatus::Pending("ready"),
-            Some(s) => match (&s.error, s.replied, s.restarted, s.rendered) {
+            Some(s) => match (
+                &s.error,
+                s.replied,
+                s.restarted,
+                s.rendered || s.target_frame,
+            ) {
                 (Some(e), ..) => StepStatus::Broken(e.clone()),
                 (None, false, ..) => StepStatus::Pending("seek reply"),
                 (None, true, false, _) => StepStatus::Pending("playback restart"),
@@ -1525,10 +1538,27 @@ impl MpvSource {
                             self.restarted_at = Some(Instant::now());
                         }
                         self.restarted = true;
+                        let mut settle = false;
                         if let Some(st) = self.step.as_mut()
                             && st.replied
                         {
                             st.restarted = true;
+                            settle = st.target_frame && !st.rendered;
+                        }
+                        if settle {
+                            // The target frame came before this restart (`StepSeek::target_frame`),
+                            // so the step completes now — before mpv's async `time-pos`
+                            // observation of that frame would arrive (a step must return a settled
+                            // state: `player_pause_freezes_*` read time_pos across steps). Read it:
+                            // stepped mode only, the core is paused and done seeking and its frame
+                            // is rendered, so nothing waits on this thread.
+                            if let Some(t) = self
+                                .handle
+                                .as_ref()
+                                .and_then(|h| h.get_property_f64("time-pos"))
+                            {
+                                self.on_prop(OBS_TIME_POS, PropData::F64(t));
+                            }
                         }
                     }
                 }
@@ -2089,14 +2119,17 @@ impl Source for MpvSource {
         if render.frame_pending()
             && let Some(size) = self.target_size()
         {
+            // Stepped: a redraw re-presents the frame shown before (the previous step's), a new
+            // frame after the seek's reply is the target (`StepSeek::target_frame`).
+            let new_frame =
+                self.step.as_ref().is_some_and(|st| st.replied) && !render.next_frame_is_redraw();
             if self.ready {
                 match render_into(gfx, render, &mut self.front, size) {
                     Ok(()) => {
                         changed = true;
-                        if let Some(st) = self.step.as_mut()
-                            && st.restarted
-                        {
-                            st.rendered = true;
+                        if let Some(st) = self.step.as_mut() {
+                            st.rendered |= st.restarted;
+                            st.target_frame |= new_frame;
                         }
                     }
                     Err(e) => self.last_error_log = Some(e.to_string()),
