@@ -406,7 +406,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
 - In this task `SceneSource` ticks at a fixed `opts.tick_hz` (tests pass 144) with `max_size` from opts; Task 5
   replaces both with the graph's demand.
 
-- [ ] **Step 1: Write failing tests** (`tests/scene.rs`, GPU, SKIP without EGL; synthetic worker):
+- [x] **Step 1: Write failing tests** (`tests/scene.rs`, GPU, SKIP without EGL; synthetic worker):
   - `transport_never_shows_stale_torn_or_out_of_order` (frame_index at 144 Hz ticks, 600 frames: every latched
     texture's corner == its `seq mod 256` (±1) and the gradient probe exact; seqs strictly increase; ≥ 590 latched)
   - `latch_never_waits_on_an_unsignalled_fence` (gpu_work ≈ 6 ms/frame: every `SceneSource::update` ≤ 1 ms while
@@ -422,9 +422,9 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
     cost per iteration ≤ 4.5× one worker's)
   - unit `cover_size_examples`: 3840×2160→1920×1080; 2048×1423→(1920×1334); 3840×1080→3840×1080; 7467×4200→1920×1080;
     1280×720→1280×720 (demand 1920×1080 each)
-- [ ] **Step 2:** `cargo test -q --test scene transport` → FAIL. **Step 3:** implement. **Step 4:** → PASS
+- [x] **Step 2:** `cargo test -q --test scene transport` → FAIL. **Step 3:** implement. **Step 4:** → PASS
   (`cargo test -q --test scene`).
-- [ ] **Step 5:** Commit `Add dmabuf Scene Frame Transport`.
+- [x] **Step 5:** Commit `Add dmabuf Scene Frame Transport`.
 
 **Size: L** (≈ 2 days, ~1000 lines; the spike's `producer.c`/`consumer.c` are the reference).
 

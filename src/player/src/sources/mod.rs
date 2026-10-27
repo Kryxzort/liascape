@@ -20,6 +20,7 @@ pub mod host;
 pub mod mpv;
 pub mod reaper;
 pub mod render_worker;
+pub mod scene;
 pub mod snapshot;
 
 pub use color::ColorSource;

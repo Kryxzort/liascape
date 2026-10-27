@@ -19,6 +19,7 @@
 //! pipe the host keeps the last [`LOG_TAIL`] lines of, stdin `/dev/null`, an empty signal
 //! mask and default dispositions (the compositor blocks SIGINT/SIGTERM for its signalfd).
 
+pub mod dmabuf;
 pub mod proto;
 
 use std::collections::VecDeque;

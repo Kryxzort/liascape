@@ -232,7 +232,10 @@ fn spawn_handshake_hello() {
     // posix_spawn (vfork semantics) on the calling thread: no fork of the test process.
     let spawn_cost = t0.elapsed();
     println!("spawn() took {spawn_cost:?}");
-    assert!(spawn_cost < Duration::from_millis(50), "spawn() took {spawn_cost:?}");
+    assert!(
+        spawn_cost < Duration::from_millis(50),
+        "spawn() took {spawn_cost:?}"
+    );
     let pid = host.pid().expect("a pid right after spawn");
     let evs = pump(&mut host, t0, Duration::from_secs(1), |e| {
         matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))

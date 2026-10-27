@@ -147,12 +147,8 @@ pub enum AudioRoute {
     Device(String),
 }
 
-/// One dmabuf plane's layout (its fd travels alongside).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Plane {
-    pub offset: u32,
-    pub stride: u32,
-}
+/// One dmabuf plane's layout (its fd travels alongside) — the GPU side's own type.
+pub use crate::gfx::dmabuf::Plane;
 
 /// Send `m` as one datagram with `fds` attached (`SCM_RIGHTS`; the kernel dups them, the
 /// caller keeps its own). `InvalidInput` if it serialises past [`MAX_MSG`] or carries more

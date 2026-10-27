@@ -67,7 +67,63 @@ const PLATFORM_WAYLAND_KHR: egl::Enum = 0x31D8;
 /// `pkg-config` — see the module-level note on why `dynamic` was tried first and dropped).
 /// Implements EGL 1.5 unconditionally (`get_platform_display`, `create_image`, …) since
 /// that's compiled in, not probed at runtime.
-type EglInstance = egl::Instance<egl::Static>;
+pub(crate) type EglInstance = egl::Instance<egl::Static>;
+
+/// `EGL_CONTEXT_PRIORITY_LEVEL_IMG` and its levels (`EGL_IMG_context_priority`).
+const CONTEXT_PRIORITY_LEVEL_IMG: egl::Int = 0x3100;
+
+/// GPU scheduling priority asked for a context (`EGL_IMG_context_priority`; Phase 2 Task 4:
+/// scene workers ask for `Low`; compositor contexts keep the driver default — see
+/// [`OffscreenOpts`]). The driver may grant less
+/// (or ignore it); [`Gfx::context_priority`] says what was granted. NVIDIA 595 grants both
+/// unprivileged (spike `dmabuf.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    High,
+    Medium,
+    Low,
+}
+
+impl Priority {
+    fn to_egl(self) -> egl::Int {
+        match self {
+            Priority::High => 0x3101,
+            Priority::Medium => 0x3102,
+            Priority::Low => 0x3103,
+        }
+    }
+
+    fn from_egl(v: egl::Int) -> Option<Priority> {
+        match v {
+            0x3101 => Some(Priority::High),
+            0x3102 => Some(Priority::Medium),
+            0x3103 => Some(Priority::Low),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Priority::High => "high",
+            Priority::Medium => "medium",
+            Priority::Low => "low",
+        }
+    }
+}
+
+/// [`Gfx::new_offscreen_with`]'s options. Default = the compositor's: no priority asked.
+///
+/// **Why not `High` for the compositor (the plan's call):** it was tried. With `High` the
+/// render worker's `tests/api.rs::render_worker_never_composes_a_torn_frame` delivered 13–72
+/// capture rounds (3 of 4 runs under its bound), without the attribute 21–53 (1 of 3) — on a
+/// machine at load average ~21, so not distinguishable from load; the spike saw no effect
+/// either. Raising every compositor context (and so the Phase 1 render worker's neighbour)
+/// for no measured gain wasn't worth the risk: the compositor keeps the driver default
+/// (`Medium` on NVIDIA) and only the scene worker is lowered — the ordering the spike wanted.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OffscreenOpts {
+    pub priority: Option<Priority>,
+}
 
 /// Opaque `EGLDeviceEXT` handle (`EGL_EXT_device_base`). Not a `khronos-egl` type — that
 /// extension predates EGL 1.5 and isn't part of the crate's core API, so this module talks
@@ -203,6 +259,8 @@ pub struct Gfx {
     /// Lazily-created, reused VAO (core profile requires *some* VAO bound even for a
     /// fullscreen-triangle draw built entirely from `gl_VertexID`; see [`Gfx::empty_vao`]).
     pub(crate) empty_vao: Cell<Option<glow::VertexArray>>,
+    /// The context priority the driver granted (`None`: no `EGL_IMG_context_priority`).
+    priority: Option<Priority>,
 }
 
 impl Gfx {
@@ -230,6 +288,12 @@ impl Gfx {
     /// skip, and the case that must not fail `nix build .#lp-player`'s sandboxed check
     /// phase (no `/dev/dri` there).
     pub fn new_offscreen() -> Result<Gfx, String> {
+        Gfx::new_offscreen_with(OffscreenOpts::default())
+    }
+
+    /// [`new_offscreen`](Self::new_offscreen) with options: the context priority (a scene
+    /// worker asks for `Low`; the compositor's default is `High`).
+    pub fn new_offscreen_with(opts: OffscreenOpts) -> Result<Gfx, String> {
         let egl = load_egl()?;
 
         let client_ext = egl
@@ -244,7 +308,8 @@ impl Gfx {
         require_surfaceless_context(&egl, display, &path)?;
 
         let config = choose_config(&egl, display, egl::PBUFFER_BIT)?;
-        let context = create_core_3_3_context(&egl, display, config)?;
+        let (context, priority) =
+            create_prioritized_context(&egl, display, config, opts.priority, &path)?;
 
         egl.make_current(display, None, None, Some(context))
             .map_err(|e| format!("eglMakeCurrent (surfaceless) failed: {e}"))?;
@@ -263,7 +328,29 @@ impl Gfx {
             config,
             path,
             empty_vao: Cell::new(None),
+            priority,
         })
+    }
+
+    /// The context priority the driver granted (`None` without `EGL_IMG_context_priority`).
+    pub fn context_priority(&self) -> Option<Priority> {
+        self.priority
+    }
+
+    /// This context's EGL instance, display and context (Phase 2 `gfx::dmabuf`).
+    pub(crate) fn egl_parts(&self) -> (&EglInstance, egl::Display, egl::Context) {
+        (&self.shared.egl, self.shared.display, self.shared.context)
+    }
+
+    /// Whether this context's display lists `ext`.
+    pub fn has_display_ext(&self, ext: &str) -> bool {
+        let list = self
+            .shared
+            .egl
+            .query_string(Some(self.shared.display), egl::EXTENSIONS)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        has_ext(&list, ext)
     }
 
     /// Desktop-GL 3.3 core context on a real Wayland display, via
@@ -297,7 +384,7 @@ impl Gfx {
         let path = "EGL_PLATFORM_WAYLAND_KHR".to_string();
 
         let config = choose_config(&egl, display, egl::WINDOW_BIT)?;
-        let context = create_core_3_3_context(&egl, display, config)?;
+        let (context, priority) = create_prioritized_context(&egl, display, config, None, &path)?;
 
         egl.make_current(display, None, None, Some(context))
             .map_err(|e| format!("eglMakeCurrent (wayland, no surface yet) failed: {e}"))?;
@@ -316,6 +403,7 @@ impl Gfx {
             config,
             path,
             empty_vao: Cell::new(None),
+            priority,
         })
     }
 
@@ -907,6 +995,64 @@ fn create_core_3_3_context(
     ];
     egl.create_context(display, config, None, &attribs)
         .map_err(|e| format!("eglCreateContext (desktop GL 3.3 core) failed: {e}"))
+}
+
+/// [`create_core_3_3_context`], asking for `want` (if any) when the display has
+/// `EGL_IMG_context_priority` (a refusal with the attribute falls back to none); returns the
+/// granted level (`eglQueryContext`). An explicit request is logged as
+/// `gfx.context_priority {requested, granted, path}`.
+fn create_prioritized_context(
+    egl: &EglInstance,
+    display: egl::Display,
+    config: egl::Config,
+    want: Option<Priority>,
+    path: &str,
+) -> Result<(egl::Context, Option<Priority>), String> {
+    let ext = egl
+        .query_string(Some(display), egl::EXTENSIONS)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !has_ext(&ext, "EGL_IMG_context_priority") {
+        return Ok((create_core_3_3_context(egl, display, config)?, None));
+    }
+    let Some(want) = want else {
+        let context = create_core_3_3_context(egl, display, config)?;
+        let granted = egl
+            .query_context(display, context, CONTEXT_PRIORITY_LEVEL_IMG)
+            .ok()
+            .and_then(Priority::from_egl);
+        return Ok((context, granted));
+    };
+    egl.bind_api(egl::OPENGL_API)
+        .map_err(|e| format!("eglBindAPI(EGL_OPENGL_API) failed: {e}"))?;
+    let attribs = [
+        egl::CONTEXT_MAJOR_VERSION,
+        3,
+        egl::CONTEXT_MINOR_VERSION,
+        3,
+        egl::CONTEXT_OPENGL_PROFILE_MASK,
+        egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        CONTEXT_PRIORITY_LEVEL_IMG,
+        want.to_egl(),
+        egl::NONE,
+    ];
+    let context = match egl.create_context(display, config, None, &attribs) {
+        Ok(c) => c,
+        Err(_) => create_core_3_3_context(egl, display, config)?,
+    };
+    let granted = egl
+        .query_context(display, context, CONTEXT_PRIORITY_LEVEL_IMG)
+        .ok()
+        .and_then(Priority::from_egl);
+    crate::log::event(
+        "gfx",
+        crate::log::Level::Info,
+        "gfx.context_priority",
+        None,
+        serde_json::json!({"requested": want.name(), "granted": granted.map(|p| p.name()),
+                           "path": path}),
+    );
+    Ok((context, granted))
 }
 
 /// Load every GL entry point through `eglGetProcAddress`, using the context that's already
