@@ -360,12 +360,25 @@ Two bug classes kept recurring; fix the class, not the instance:
       settings write is a field-level `Update`/`Patch` (`Save` private — 10 load→save sites converted). RED
       `scripts/test-cross-process.sh`: 16 concurrent local volume-ups → 5 (the step was computed from a load
       outside the lock) → 80, 3/3.
-- [ ] **One effective-settings resolver.** Each path picks its targets itself: `/settings` (`Set` +
+- [x] **One effective-settings resolver.** Each path picks its targets itself: `/settings` (`Set` +
       `SetPerItem`), keybinds (`AdjustVolume`), `/preview`, the per-switch reapply, normalization
       (`ApplyNormalizationAll`). Bugs from it: normalization on `cur:*` only, the srcs:* broadcast blip, the
       keybind override, mute while paused. Make one function: live sources (source map) × (global, item
       override) → each source's desired `gain.user`/`speed`/`af`/…, diffed against what it runs; every path
       calls it. Matrix cells to keep green: `set:*`, `appear:*`, `cli:volume-*`, `globalDrag*`, `itemVol*`.
+      — done: `LpPlayerMedia.ResolveNow` (design note at the top of its code; player-adapter.md § Targeting):
+      the live sources (cached map: source id → item path) × (global, item overrides + loudness, mute, a
+      request's transient values) → each source's `gain.user`/`speed`/`af`/`no_audio`/`hwdec`/`fps_cap`/
+      `cache`/`demuxer_*`/`gain.mute` (+ the layer `fit`), diffed against a fresh `state` (full passes) or the
+      value cache (previews, overrides, mpv literals, mute), only what differs sent, per source. Every path
+      goes through it: `/settings` (one pass for all of it), the volume keys, `/preview` (+ global),
+      `ApplyOverrideLive`, normalization + a loudness landing, R81, mute; `SourceProps` uses the same
+      `Desired`. Removed `SetPerItem`/`FixupPerItem`/`SetForPath`/`PreviewNow`/`PreviewGlobalNow`/
+      `ApplySettingsLive`/`ApplyNormalizationAll`/`SourceMap`/`SourcesFor`/`SetEach` and `Set`'s gain branches.
+      Adapter IT 115/0, settings-merge 53/0, self-test PASS (+ a no-op full pass = 1 request, another client's
+      value put back), matrix targeted 343 pass / 9 fail+error+setup, all in two load clusters (load avg 50+:
+      "UI marks [] as playing", a player `stop` timeout) — each passed alone 2× (one UI-not-found error on the
+      second rerun passed a third time).
 
 ## Next up (handoff 2026-10-26, weekly limit)
 - [x] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing

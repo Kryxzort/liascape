@@ -14,9 +14,10 @@ namespace livepaper.Player;
 
 // The media primitives PlayerHelper dispatches to under PlayerEngine=lp-player
 // (.claude/rules/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
-// a switch is ONE `transition` request (a cut when transitions are off); global settings go to
-// `srcs:*` (on-screen sources + an in-flight transition's pending B, R61); per-item overrides go to
-// the source(s) showing that item; layer settings (fit) go to `lay:*:main`.
+// a switch is ONE `transition` request (a cut when transitions are off); every setting reaches the live
+// sources through ONE resolver (`ResolveNow`, "the effective-settings resolver" below): each live source
+// — on screen, either side of an effect, a pending B — gets ITS OWN item's effective value, diffed
+// against what it runs; layer settings (fit) go to `lay:*:main`.
 public static class LpPlayerMedia
 {
     private static LpPlayerClient? _hooked;
@@ -246,10 +247,10 @@ public static class LpPlayerMedia
     // how many times ReapplyAllNow has actually run — self-test/IT evidence that R81 fired.
     public static int ReapplyCount => Volatile.Read(ref _reapplyCount);
 
-    // R81: push every current effective setting onto the live graph — globals (→ srcs:*, with the
-    // playing item's own override/global split the same way a live /settings change gets it), the
-    // layer fit, and the player-level pause flag — through the SAME ordered queue as every other
-    // mutation (so this can never race or reorder against a concurrent switch/set).
+    // R81: put every current effective setting back onto the live graph — the resolver's full pass
+    // (every live source its own value of every setting, the layer fit; diffed against a fresh `state`)
+    // — through the SAME ordered queue as every other mutation (so this can never race or reorder
+    // against a concurrent switch/set). Not the player-level pause (I3, below).
     // Coalescible: it reads every value when it runs, so one pending reapply covers any number.
     public static void ReapplyAll() => QueueSet("reapply", ReapplyAllNow);
 
@@ -258,23 +259,8 @@ public static class LpPlayerMedia
         var client = C;
         if (!client.SocketExists) return;
         Interlocked.Increment(ref _reapplyCount);
-        var s = SettingsService.Load();
+        ResolveNow(new Req { Fresh = true });
         var cur = CurrentPath();
-        double vol = cur != null ? LibraryService.ReadVolumeOverride(cur) ?? s.Volume : s.Volume;
-        double spd = cur != null ? LibraryService.ReadSpeedOverride(cur) ?? s.Speed : s.Speed;
-        // Set() already fixes up any OTHER source (a pending B) to ITS own effective value for
-        // gain.user/speed — same as a live /settings change (R61).
-        Set("gain.user", MpvPropertyMap.VolumeDb(vol));
-        Set("speed", Math.Clamp(spd, 0.1, 4.0));
-        Set("no_audio", s.NoAudio);
-        Set("hwdec", HwDec(s));
-        Set("fps_cap", (double)Math.Max(0, s.VideoFps));
-        Set("cache", !s.DisableCache);
-        Set("demuxer_max_mib", (double)Math.Max(0, s.DemuxerMaxBytes));
-        Set("demuxer_back_mib", (double)Math.Max(0, s.DemuxerMaxBackBytes));
-        Set("gain.mute", PlayerHelper.IsMuted ? MpvPropertyMap.SilentDb : 0.0);
-        Set("fit", Fit(s));
-        ApplyNormalizationNow(); // every source's own af
         // I3 (final review): pause is NOT re-asserted. Its one authority is the player itself
         // (`player.paused`, persisted in its snapshot and restored with it): a keybind toggle runs
         // in a separate one-shot CLI process, and a restarted backend has no memory of it, so any
@@ -347,7 +333,8 @@ public static class LpPlayerMedia
     // ---- switches --------------------------------------------------------------------------------
     private static readonly string[] ImageExt = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".jxl", ".tif", ".tiff"];
 
-    // B's create props: everything the legacy launch/loadfile carried, as live properties.
+    // B's create props: everything the legacy launch/loadfile carried, as live properties — the
+    // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
     public static Dictionary<string, object?> SourceProps(string path, AppSettings s)
     {
         var props = new Dictionary<string, object?>
@@ -355,51 +342,16 @@ public static class LpPlayerMedia
             ["path"] = path,
             ["kind"] = ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant()) ? "image" : "video",
             ["loop"] = s.Loop,
-            ["speed"] = Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0),
-            ["gain.user"] = MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume),
-            ["gain.mute"] = PlayerHelper.IsMuted ? MpvPropertyMap.SilentDb : 0.0,
-            ["no_audio"] = s.NoAudio,
-            ["hwdec"] = HwDec(s),
-            ["fps_cap"] = (double)Math.Max(0, s.VideoFps),
-            ["cache"] = !s.DisableCache,
-            ["demuxer_max_mib"] = (double)Math.Max(0, s.DemuxerMaxBytes),
-            ["demuxer_back_mib"] = (double)Math.Max(0, s.DemuxerMaxBackBytes),
-            ["af"] = NormalizeAf(path, s) ?? "",
         };
+        foreach (var (k, v) in Desired(path, () => s, PlayerHelper.IsMuted, null, item: false)) props[k] = v;
         return props;
     }
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
 
-    // Loudness normalization, live, on EVERY live media source — each by its own item (loudnorm is per
-    // item): the playing one, the outgoing A of an effect, a pending B (armed for A's end: it would play
-    // its whole clip with the old filter), and any source while no output shows one (no `cur:*`). It used
-    // to reach `cur:*` only (UI matrix `set:normalize*`). Diffed against each source's current `af` (one
-    // `state` read), so an unchanged one gets nothing — every /settings save calls this. Coalescible.
-    public static void ApplyNormalizationAll() => QueueSet("af:*", ApplyNormalizationNow);
-
-    private static void ApplyNormalizationNow()
-    {
-        var client = C;
-        if (Graph(client) is not { ValueKind: JsonValueKind.Object } g) return;
-        var s = SettingsService.Load();
-        foreach (var n in g.EnumerateObject())
-        {
-            var v = n.Value;
-            if (!v.TryGetProperty("gain_effective_db", out _) || Str(v, "kind") is "snapshot" or "color" or "image") continue; // media sources with audio
-            var path = Str(v, "path");
-            if (path.Length == 0) continue;
-            var want = NormalizeAf(path, s) ?? "";
-            if (Str(v, "af") == want) continue;
-            try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{n.Name}.af", ["value"] = want }, LpPlayerClient.QuickMs); }
-            catch (LpPlayerException e) when (e.Code == "no_such_node") { } // gone meanwhile
-            catch (LpPlayerException e) { LpPlayerClient.Log($"set {n.Name}.af failed — {e}"); }
-        }
-    }
-
     // Loudness normalization for `path` under `s` (mirrors PlayerHelper.NormalizeAf): unmeasured →
     // no filter now + a background measure for next time.
-    public static string? NormalizeAf(string path, AppSettings s)
+    private static string? NormalizeAf(string path, AppSettings s)
     {
         if (!s.NormalizeAudio || s.NoAudio || PlayerHelper.IsScenePath(path)) return null;
         var af = LibraryService.LoudnormAf(path, s.NormalizeTargetLufs);
@@ -636,109 +588,91 @@ public static class LpPlayerMedia
         _lastCorr = null;
     }
 
-    // ---- properties --------------------------------------------------------------------------------
-    // A global setting → `srcs:*` (layer props → `lay:*:main`; mute ramps over 30 ms, never a step).
-    // gain.user / speed: `/settings` passes the effective value (override ?? global) of the PLAYING item;
-    // any other source (an in-flight transition's other side, a pending B) gets ITS own effective value —
-    // set per source, never `srcs:*` first and fixed up after: that broadcast handed every other source
-    // the playing item's volume + speed for one round trip on every settings save (a theme change mid-
-    // effect blipped the outgoing wallpaper to the incoming one's volume — UI matrix `appear:*`).
-    // item 6: every call here uses QuickMs — a queued property set, never the 2000 ms default.
-    public static List<string> Set(string prop, object value)
+    // ---- the effective-settings resolver (player-adapter.md § Targeting) ---------------------------
+    // ONE function decides which live source runs which value of every setting; every path that puts a
+    // setting on the player goes through it (`ResolveNow`). Before, each path picked its own targets and
+    // values, and they disagreed: normalization reached `cur:*` only, a `srcs:*` broadcast put the
+    // playing item's volume/speed on the other side of an effect for a round trip, the volume key pushed
+    // the new global over a playing override.
+    //
+    // INPUTS — all read when the pass RUNS (a coalesced pass applies the newest state, never a value
+    // captured when it was queued):
+    //   • the live sources: the source map (full item path → source ids — every live media source: on
+    //     screen, either side of an effect, a pending B, a parked one; no colour/snapshot) + what each runs
+    //     (its graph values) + every main layer's `fit`;
+    //   • the settings (`SettingsService.Load()`), each item's overrides + loudness (its `index.json`
+    //     entry), the mute (`PlayerHelper.IsMuted`, user + auto combined);
+    //   • the request (`Req`): `Items` (+ `PlayingItem` = the item `cur:*` shows, resolved when it runs) —
+    //     the items its transient values belong to, and with `OnlyItems` the only sources it touches;
+    //     transient values (`ItemGainDb`/`ItemSpeed` for those items, `GlobalGainDb`/`GlobalSpeed` for the
+    //     global — a drag preview's or an mpv literal's, never persisted); `Props` (only these; null = all);
+    //     `Fresh` (diff against a new `state` read, else the cached values); `Force` (send even if equal).
+    // OUTPUT per source (`Desired` — the same computation `SourceProps` gives a NEW source):
+    //   gain.user = VolumeDb(transient item ?? its override ?? transient global ?? Volume)
+    //   speed     = clamp(transient item ?? its override ?? transient global ?? Speed, 0.1, 4)
+    //   af        = its OWN item's loudnorm at the target ("" off / NoAudio / unmeasured — kicks a measure)
+    //   no_audio, hwdec, fps_cap, cache, demuxer_max_mib, demuxer_back_mib = the global settings
+    //   gain.mute = −96 when muted, else 0
+    //   + the layer: lay:*:main.fit = VideoScale (Fresh passes only; one `set` if any main layer differs)
+    //   Not resolved: `loop` (the recipe owns A's loop under rotation — `SetLoop`, single wallpaper only)
+    //   and `player.paused` (the player is its authority, I3).
+    // DIFF: each desired value against what the source runs — the graph values of a `state` read (Fresh)
+    //   or the value cache (the last read + every `set` made since, dropped with the map). Numbers within
+    //   1e-4, strings/bools exact; only a differing value is sent: `set <id>.<prop>`, one per source —
+    //   never a broadcast — and gain.mute as `animate` over 30 ms (never a step; a setting slot, so it
+    //   lands while paused too). A gain.mute mid-ramp can read as its old value, so a mute CHANGE always
+    //   sends (`Force`). A source gone meanwhile (`no_such_node`) → the map is re-read once; no answer →
+    //   the pass gives up (R81 re-applies when the player answers again).
+    // CALLERS — queue key → what they pass (every one coalescible: the newest pass per key wins):
+    //   /settings (`PlayerHelper.ApplyEffectiveLive`), the volume key on the global, normalization, a
+    //     loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
+    //   R81 (a restart / the stall breaker closing) → `ReapplyAll()`: "reapply", the same + log + count.
+    //   /library/volume|speed, the volume key on an item's own volume (`ApplyOverrideLive`) →
+    //     `ApplyOverride(path)`: "override:<path>", that item's sources only, gain.user + speed, cached.
+    //   /preview {paths} (the modal's drag) → `Preview`: "preview:<prop>:<paths>", only those items'
+    //     sources, the dragged prop, the dragged value as their transient, cached — ONE `set` per source
+    //     per value, nothing persisted (no paths → the playing item).
+    //   /preview {global} (the Settings page's drag) → `PreviewGlobal`: "preview-global:<prop>", every
+    //     source, the dragged prop, the dragged value as the transient GLOBAL (an overridden item keeps
+    //     its own), cached.
+    //   an mpv volume/speed literal (`/volume {value}`) → `Mpv`: "set:<prop>", every source, that prop,
+    //     the literal as the PLAYING item's transient (every other source its own), cached.
+    //   a mute change (SetMute / SetUserMute → mpv `mute`) → `Mpv`: "set:gain.mute", every source,
+    //     gain.mute, Force, cached map.
+    //   a new source (`Switch`) → `SourceProps(path)` = `Desired(path)` + path, kind, loop.
+    private sealed record Req
     {
-        var client = C;
-        if (!client.SocketExists) return []; // nothing plays → nothing to set (sources take settings at creation)
-        const int q = LpPlayerClient.QuickMs;
-        if (prop is "gain.user" or "speed" && SetPerItem(client, prop, value) is { } done) return done;
-        try
+        public IReadOnlyCollection<string>? Items { get; init; } // item paths the transient values belong to
+        public bool PlayingItem { get; init; }                    // …or the playing item (cur:*), when it runs
+        public bool OnlyItems { get; init; }                      // touch only those items' sources
+        public double? ItemGainDb { get; init; }
+        public double? ItemSpeed { get; init; }
+        public double? GlobalGainDb { get; init; }
+        public double? GlobalSpeed { get; init; }
+        public IReadOnlySet<string>? Props { get; init; }         // null = every resolved prop (+ fit)
+        public bool Fresh { get; init; }                          // diff against a new `state` read
+        public bool Force { get; init; }                          // send even when the source already runs it
+    }
+
+    private static readonly IReadOnlySet<string> GainUser = new HashSet<string> { "gain.user" };
+    private static readonly IReadOnlySet<string> SpeedOnly = new HashSet<string> { "speed" };
+    private static readonly IReadOnlySet<string> PerItem = new HashSet<string> { "gain.user", "speed" };
+    private static readonly IReadOnlySet<string> MuteOnly = new HashSet<string> { "gain.mute" };
+
+    // Every setting the resolver owns, live, from the settings as they are now — /settings, the volume key
+    // on the global, normalization, a loudness measurement landing.
+    public static void ApplyEffective() => QueueSet("resolve", () => ResolveNow(new Req { Fresh = true }));
+
+    // `path`'s own volume/speed (its override ?? the global) onto its source(s) — wherever they are (on
+    // screen, either side of an effect, a pending B). `onPlayingSpeed` gets its effective speed when it is
+    // what `cur:*` shows (the timed tick's speed factor). Coalescible per item: it re-reads the override.
+    public static void ApplyOverride(string path, Action<double>? onPlayingSpeed = null) =>
+        QueueSet("override:" + FullPath(path), () =>
         {
-            if (prop is "fit" or "viewport" or "opacity")
-                return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"lay:*:main.{prop}", ["value"] = value }, q));
-            // M7: mpv `pause` → the player-level pause (R75), never a node's own `paused`
-            if (prop == "player.paused")
-                return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = value }, q));
-            if (prop.StartsWith("gain.", StringComparison.Ordinal) && prop != "gain.user")
-            {
-                try
-                {
-                    return Targets(client.Call("animate", new Dictionary<string, object?>
-                    { ["path"] = $"srcs:*.{prop}", ["to"] = value, ["duration_ms"] = 30 }, q));
-                }
-                catch (LpPlayerException e) when (e.Code == "no_such_node") { return []; } // no source right now
-            }
-            var t = Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = $"srcs:*.{prop}", ["value"] = value }, q));
-            if (prop is "gain.user" or "speed" && t.Count > 0) FixupPerItem(client, prop, t);
-            return t;
-        }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"set {prop}={value} failed — {e}"); return []; }
-    }
-
-    // gain.user / speed on every live media source, each with its own value: `value` for the playing item's
-    // source(s), `override ?? global` for any other item's. From the cached source map; null = no map (no
-    // answer) → the caller falls back to `srcs:*` + FixupPerItem. A source gone meanwhile → re-read once.
-    private static List<string>? SetPerItem(LpPlayerClient client, string prop, object value)
-    {
-        for (int attempt = 0; attempt < 2; attempt++)
-        {
-            if (SourceMap(client) is not { } map) return null;
-            var cur = CurrentPath(); // null (no output shows one): every source takes its own
-            var s = SettingsService.Load();
-            var done = new List<string>();
-            bool stale = false;
-            foreach (var (path, ids) in map)
-            {
-                object v = SamePath(path, cur) ? value
-                    : prop == "gain.user" ? MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume)
-                    : Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
-                foreach (var id in ids)
-                {
-                    try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs); done.Add(id); }
-                    catch (LpPlayerException e) when (e.Code == "no_such_node") { stale = true; }
-                    catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop} failed — {e}"); }
-                }
-            }
-            if (!stale) return done;
-            InvalidateSources();
-        }
-        return null;
-    }
-
-    private static void FixupPerItem(LpPlayerClient client, string prop, List<string> targets)
-    {
-        var cur = CurrentPath();
-        if (targets.Count == 1 && cur != null) return; // the only source is the one on screen → already right
-        if (SourceMap(client) is not { } map) return;
-        var pathOf = new Dictionary<string, string>();
-        foreach (var (p, ids) in map) foreach (var id in ids) pathOf[id] = p;
-        var s = SettingsService.Load();
-        foreach (var id in targets)
-        {
-            if (!pathOf.TryGetValue(id, out var path) || SamePath(path, cur)) continue; // no path: colour/snapshot
-            object v = prop == "gain.user"
-                ? MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume)
-                : Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
-            client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
-        }
-    }
-
-    // A per-item value → the source(s) showing that item (found by path in `state`; may be a pending B).
-    public static List<string> SetForPath(string path, string prop, object value)
-    {
-        var client = C;
-        return client.SocketExists ? SetEach(client, [path], prop, value) : [];
-    }
-
-    // ApplyOverrideLive: re-apply `path`'s effective volume/speed to its source(s). Returns the speed
-    // when `path` is what's on screen (the timed tick's speed factor), else null.
-    public static double? ApplyOverride(string path)
-    {
-        var s = SettingsService.Load();
-        double spd = Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? s.Speed, 0.1, 4.0);
-        var ids = SetForPath(path, "gain.user", MpvPropertyMap.VolumeDb(LibraryService.ReadVolumeOverride(path) ?? s.Volume));
-        if (ids.Count == 0) return null;
-        SetForPath(path, "speed", spd);
-        return SamePath(CurrentPath(), path) ? spd : null;
-    }
+            if (ResolveNow(new Req { Items = [path], OnlyItems = true, Props = PerItem }) == 0 || onPlayingSpeed == null) return;
+            if (SamePath(CurrentPath(), path))
+                onPlayingSpeed(Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? SettingsService.Load().Speed, 0.1, 4.0));
+        });
 
     // /preview (drag twin, no persist), literal values → the source(s) of `paths` — the item(s) the modal
     // edits, wherever they are: on screen, the outgoing A or incoming B of an effect, a pending B. No
@@ -747,32 +681,31 @@ public static class LpPlayerMedia
     // Coalescible per edited selection + property: a drag's newest value replaces a still-pending one.
     public static void Preview(int? volume, double? speed, IReadOnlyCollection<string>? paths = null)
     {
-        string who = paths is { Count: > 0 }
-            ? string.Join("\n", paths.Select(FullPath).Order(StringComparer.Ordinal))
-            : "<playing>"; // resolved when it runs (a switch in between is a barrier)
-        if (volume is int v) QueueSet("preview:gain.user:" + who, () => PreviewNow(v, null, paths));
-        if (speed is double sp) QueueSet("preview:speed:" + who, () => PreviewNow(null, sp, paths));
+        bool playing = paths is not { Count: > 0 };
+        string who = playing ? "<playing>" // resolved when it runs (a switch in between is a barrier)
+            : string.Join("\n", paths!.Select(FullPath).Order(StringComparer.Ordinal));
+        if (volume is int v)
+            QueueSet("preview:gain.user:" + who, () => ResolveNow(new Req
+            { Items = paths, PlayingItem = playing, OnlyItems = true, Props = GainUser, ItemGainDb = MpvPropertyMap.VolumeDb(v) }));
+        if (speed is double sp)
+            QueueSet("preview:speed:" + who, () => ResolveNow(new Req
+            { Items = paths, PlayingItem = playing, OnlyItems = true, Props = SpeedOnly, ItemSpeed = sp }));
     }
 
-    // The Settings page's global Volume/Speed drag (`/preview {global:true}`): each live media source
-    // whose item has NO override for that field takes the dragged value (override ?? global, R61); an
-    // overridden one keeps its own. Coalescible per property; one `set` per following source from the
-    // cached map — no `state`, no `cur:*` read, no settings write (the UI's debounced /settings persists).
+    // The Settings page's global Volume/Speed drag (`/preview {global:true}`): the dragged value is the
+    // transient GLOBAL — each live source whose item has no override for that field takes it, an
+    // overridden one keeps its own (override ?? global, R61). Only the dragged prop (a volume drag keeps
+    // a speed the previous drag left). Coalescible per property; no `state` read while the map is cached,
+    // no settings write (the UI's debounced /settings persists).
     public static void PreviewGlobal(int? volume, double? speed)
     {
-        if (volume is int v) QueueSet("preview-global:gain.user", () => PreviewGlobalNow("gain.user", MpvPropertyMap.VolumeDb(v)));
-        if (speed is double sp) QueueSet("preview-global:speed", () => PreviewGlobalNow("speed", Math.Clamp(sp, 0.1, 4.0)));
+        if (volume is int v) QueueSet("preview-global:gain.user", () => ResolveNow(new Req { Props = GainUser, GlobalGainDb = MpvPropertyMap.VolumeDb(v) }));
+        if (speed is double sp) QueueSet("preview-global:speed", () => ResolveNow(new Req { Props = SpeedOnly, GlobalSpeed = sp }));
     }
 
-    private static void PreviewGlobalNow(string prop, object value)
-    {
-        var client = C;
-        if (!client.SocketExists || SourceMap(client) is not { } map) return;
-        var follow = map.Keys.Where(p => prop == "gain.user"
-            ? LibraryService.ReadVolumeOverride(p) == null
-            : LibraryService.ReadSpeedOverride(p) == null).ToList();
-        if (follow.Count > 0) SetEach(client, follow, prop, value);
-    }
+    // ApplyPlaybackSettingsLive's Loop (the legacy guard — a single, non-timed video only: during rotation
+    // the recipe owns A's loop, align:end turns it off until the switch; new sources take Loop at creation).
+    public static void SetLoop(bool loop) => QueueSet("set:loop", () => Set("loop", loop));
 
     // The coalescing key of a per-item command on `path` (same file → same key, like SamePath).
     public static string FullPath(string path)
@@ -780,36 +713,127 @@ public static class LpPlayerMedia
         try { return Path.GetFullPath(path); } catch { return path; }
     }
 
-    private static void PreviewNow(int? volume, double? speed, IReadOnlyCollection<string>? paths)
+    // ONE source's desired values (`r` = the pass's request, null for a new source; `item` = the source
+    // belongs to one of the request's items, so their transient values apply). Only the request's props,
+    // and only what they need (`settings` is loaded once, on first use): a drag preview reads neither the
+    // settings nor the index, nor kicks a loudness measure.
+    private static Dictionary<string, object> Desired(string path, Func<AppSettings> settings, bool muted, Req? r, bool item)
     {
-        if (paths is not { Count: > 0 })
-            paths = CurrentPath() is string cur ? [cur] : [];
-        if (paths.Count == 0) return;
-        var client = C;
-        if (!client.SocketExists) return;
-        if (volume is int v) SetEach(client, paths, "gain.user", MpvPropertyMap.VolumeDb(v));
-        if (speed is double sp) SetEach(client, paths, "speed", Math.Clamp(sp, 0.1, 4.0));
+        var props = r?.Props;
+        bool Want(string p) => props == null || props.Contains(p);
+        LibMeta? meta = null; bool metaRead = false;
+        LibMeta? Meta() { if (!metaRead) { meta = LibraryStore.GetMeta(path); metaRead = true; } return meta; }
+        var d = new Dictionary<string, object>();
+        if (Want("gain.user"))
+            d["gain.user"] = (item ? r!.ItemGainDb : null)
+                ?? (Meta()?.Volume is int ov ? MpvPropertyMap.VolumeDb(ov) : (double?)null)
+                ?? r?.GlobalGainDb ?? MpvPropertyMap.VolumeDb(settings().Volume);
+        if (Want("speed"))
+            d["speed"] = Math.Clamp((item ? r!.ItemSpeed : null) ?? Meta()?.Speed ?? r?.GlobalSpeed ?? settings().Speed, 0.1, 4.0);
+        if (Want("af")) d["af"] = NormalizeAf(path, settings()) ?? "";
+        if (Want("no_audio")) d["no_audio"] = settings().NoAudio;
+        if (Want("hwdec")) d["hwdec"] = HwDec(settings());
+        if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFps);
+        if (Want("cache")) d["cache"] = !settings().DisableCache;
+        if (Want("demuxer_max_mib")) d["demuxer_max_mib"] = (double)Math.Max(0, settings().DemuxerMaxBytes);
+        if (Want("demuxer_back_mib")) d["demuxer_back_mib"] = (double)Math.Max(0, settings().DemuxerMaxBackBytes);
+        if (Want("gain.mute")) d["gain.mute"] = muted ? MpvPropertyMap.SilentDb : 0.0;
+        return d;
     }
 
-    // ApplyPlaybackSettingsLive's lp-player twin: every changed decode/buffer/audio setting, live.
-    // Loop keeps the legacy guard (single, non-timed video only): during rotation the recipe owns A's
-    // loop (align:end turns it off until the switch) and new sources take settings.Loop at creation.
-    // One coalescible set per CHANGED property (the same `set:<prop>` keys as Mpv()'s, so the newest
-    // value of a property wins whichever path queued it); nothing changed → nothing queued.
-    public static void ApplySettingsLive(AppSettings prev, AppSettings cur, bool loopAllowed)
+    private enum Sent { Ok, Gone, Failed, Stalled }
+
+    // One pass (on the queue's worker — every pass and every map reader runs there). Returns how many
+    // sources it covered (0 = none of the request's items is live, or no answer).
+    private static int ResolveNow(Req r)
     {
-        static void S(string prop, object v) => QueueSet("set:" + prop, () => Set(prop, v));
-        if (prev.NoAudio != cur.NoAudio) S("no_audio", cur.NoAudio);
-        if (loopAllowed && prev.Loop != cur.Loop) S("loop", cur.Loop);
-        if (prev.VideoFps != cur.VideoFps) S("fps_cap", (double)Math.Max(0, cur.VideoFps));
-        if (prev.DisableCache != cur.DisableCache) S("cache", !cur.DisableCache);
-        if (prev.DemuxerMaxBytes != cur.DemuxerMaxBytes) S("demuxer_max_mib", (double)Math.Max(0, cur.DemuxerMaxBytes));
-        if (prev.DemuxerMaxBackBytes != cur.DemuxerMaxBackBytes) S("demuxer_back_mib", (double)Math.Max(0, cur.DemuxerMaxBackBytes));
-        if (prev.HwDec != cur.HwDec) S("hwdec", HwDec(cur));
+        var client = C;
+        if (!client.SocketExists) return 0; // nothing plays → nothing to set (sources take settings at creation)
+        var items = r.Items?.Select(FullPath).ToHashSet();
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            if ((r.Fresh ? ReadLive(client) : CachedLive(client)) is not { } live) return 0;
+            AppSettings? loaded = null;
+            AppSettings S() => loaded ??= SettingsService.Load(); // only when a value needs it (not a drag preview)
+            bool muted = PlayerHelper.IsMuted;
+            string? playing = r.PlayingItem && CurrentPath() is string cp ? FullPath(cp) : null; // null (no output shows one): no item
+            int covered = 0;
+            bool stale = false;
+            foreach (var (path, ids) in live.Map)
+            {
+                bool item = (items?.Contains(path) ?? false) || (playing != null && path == playing);
+                if (r.OnlyItems && !item) continue;
+                covered += ids.Count;
+                var want = Desired(path, S, muted, r, item);
+                foreach (var id in ids)
+                {
+                    if (!live.Values.TryGetValue(id, out var have)) live.Values[id] = have = [];
+                    foreach (var (prop, v) in want)
+                    {
+                        if (!r.Force && have.TryGetValue(prop, out var h) && Same(h, v)) continue;
+                        var sent = Send(client, id, prop, v);
+                        if (sent == Sent.Ok) have[prop] = v;
+                        else if (sent == Sent.Stalled) return covered; // the rest would fail fast too; R81 catches up
+                        else if (sent == Sent.Gone) { stale = true; break; } // retired meanwhile: its other props too
+                    }
+                }
+            }
+            if (r.Fresh && (r.Props == null || r.Props.Contains("fit")) && live.LayerFit.Any(f => f != Fit(S())))
+                client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(S()) }, LpPlayerClient.QuickMs);
+            if (!stale) return covered;
+            InvalidateSources(); // a source went (a switch meanwhile): new ones may have come — once more, re-read
+        }
+        return 0;
+    }
+
+    // `set <id>.<prop>` (gain.mute: `animate` over 30 ms — never a step). item 6: QuickMs, never the
+    // 2000 ms default — a queued property set.
+    private static Sent Send(LpPlayerClient client, string id, string prop, object v)
+    {
+        try
+        {
+            if (prop == "gain.mute")
+                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = 30 }, LpPlayerClient.QuickMs);
+            else
+                client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
+            return Sent.Ok;
+        }
+        catch (LpPlayerException e) when (e.Code == "no_such_node") { return Sent.Gone; }
+        catch (LpPlayerException e) when (e.Code is "timeout" or "io")
+        {
+            LpPlayerClient.Log($"set {id}.{prop} failed — {e} (rest of this pass skipped; R81 re-applies)");
+            return Sent.Stalled;
+        }
+        catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop}={v} failed — {e}"); return Sent.Failed; }
+    }
+
+    private static bool Same(object? have, object want) => (have, want) switch
+    {
+        (double a, double b) => Math.Abs(a - b) <= 1e-4,
+        (null, _) => false,
+        _ => have.Equals(want),
+    };
+
+    // A property OUTSIDE the resolver: a layer prop → `lay:*:main`; mpv's `pause` → the player-level
+    // pause (M7, R75 — never a node's own `paused`); anything else (`loop`, a decode/buffer literal no path
+    // sends any more) → `srcs:*` (on-screen sources + an in-flight transition's pending B, R61).
+    // item 6: QuickMs — a queued property set, never the 2000 ms default.
+    private static List<string> Set(string prop, object value)
+    {
+        var client = C;
+        if (!client.SocketExists) return []; // nothing plays → nothing to set (sources take settings at creation)
+        string path = prop is "fit" or "viewport" or "opacity" ? $"lay:*:main.{prop}"
+            : prop == "player.paused" ? "player.paused"
+            : $"srcs:*.{prop}";
+        try { return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = path, ["value"] = value }, LpPlayerClient.QuickMs)); }
+        catch (LpPlayerException e) { LpPlayerClient.Log($"set {prop}={value} failed — {e}"); return []; }
     }
 
     // The mpv IPC args PlayerHelper.SendCommand/TrySendCommand still build. Property sets go through
-    // MpvPropertyMap; `cycle pause` toggles; mpv-playlist plumbing (loadfile/playlist-*/loop-file/
+    // MpvPropertyMap: a volume/speed literal (`/volume {value}`) is the PLAYING item's transient value in
+    // a resolver pass (every other source keeps its own — never a `srcs:*` broadcast); a mute change is a
+    // forced resolver pass from PlayerHelper.IsMuted (SetMute / SetUserMute send exactly that); anything
+    // else → `Set`. `cycle pause` toggles; mpv-playlist plumbing (loadfile/playlist-*/loop-file/
     // loop-playlist) has no lp-player meaning — livepaper's timed machinery owns rotation and the
     // transition recipe owns A's loop — so it's acknowledged and dropped.
     public static bool Mpv(object[] args)
@@ -827,8 +851,15 @@ public static class LpPlayerMedia
         }
         if (MpvPropertyMap.Translate(args) is not { } t) return false;
         // ordered, never on the caller's thread (it may hold PlayerHelper's _lock); the newest value of a
-        // property wins over a still-pending one (Set targets the same alias for a given prop)
-        QueueSet("set:" + t.prop, () => Set(t.prop, t.value));
+        // property wins over a still-pending one
+        Action run = t.prop switch
+        {
+            "gain.user" => () => ResolveNow(new Req { PlayingItem = true, Props = GainUser, ItemGainDb = (double)t.value }),
+            "speed" => () => ResolveNow(new Req { PlayingItem = true, Props = SpeedOnly, ItemSpeed = (double)t.value }),
+            "gain.mute" => () => ResolveNow(new Req { Props = MuteOnly, Force = true }),
+            _ => () => Set(t.prop, t.value),
+        };
+        QueueSet("set:" + t.prop, run);
         return true;
     }
 
@@ -959,33 +990,31 @@ public static class LpPlayerMedia
         return paths;
     }
 
-    // live media sources (not snapshots) whose path is `path`
-    private static List<string> SourcesFor(LpPlayerClient client, string path) => SourcesFor(client, [path]);
-
-    // …whose path is any of `paths` (from the cached map below — one `state` read per graph change)
-    private static List<string> SourcesFor(LpPlayerClient client, IReadOnlyCollection<string> paths)
+    // ---- the live sources, cached (speed storm: a /preview cost `state` + the `set`s every time) -----
+    // One `state` read → `Live`: full item path → source ids for every live media source (no
+    // snapshot/colour), what each source runs (its graph values, `gain.<slot>` flattened), and every main
+    // layer's `fit`. A source's id and path never change while it lives, and the player never reuses an
+    // id (`src<N>`, monotonic per process), so the map changes only when sources come or go: a switch
+    // (ours or another client's — `transition.scheduled` creates the B), a handoff (A goes), a
+    // cancel/failure (B goes), a stop, an output's sources retired, a new player process (Generation).
+    // Every one of those invalidates it: our own Switch/Stop/cancel/upgrade synchronously (they run on the
+    // queue's worker, like every reader), the player's own changes through the subscribed events
+    // (LpPlayerClient.Topics), a restart through Generation + OnRestarted. It is only trusted while the
+    // event connection is live (a reconnect gap loses events → `Subscribed` invalidates), a read while an
+    // invalidation happened is never stored (epoch), and a pass that finds a cached id gone
+    // (`no_such_node`) invalidates and re-reads once. The VALUES are the resolver's diff for a cached pass
+    // (a preview): the read's, then every value a pass `set` since (only on success). So a drag costs one
+    // `set` per source; a Fresh pass reads `state` again anyway and refreshes the whole cache.
+    private sealed class Live
     {
-        var ids = new List<string>();
-        if (SourceMap(client) is not { } map) return ids;
-        foreach (var p in paths)
-            if (map.TryGetValue(FullPath(p), out var l)) foreach (var id in l) if (!ids.Contains(id)) ids.Add(id);
-        return ids;
+        public Dictionary<string, List<string>> Map { get; } = new();                  // full path → ids
+        public Dictionary<string, Dictionary<string, object?>> Values { get; } = new(); // id → prop → value
+        public List<string> LayerFit { get; } = [];                                     // every main layer's fit
     }
 
-    // ---- path → source ids, cached (speed storm: a /preview cost `state` + the `set`s every time) ----
-    // A source's id and path never change while it lives, and the player never reuses an id (`src<N>`,
-    // monotonic per process), so the map changes only when sources come or go: a switch (ours or
-    // another client's — `transition.scheduled` creates the B), a handoff (A goes), a cancel/failure
-    // (B goes), a stop, an output's sources retired, a new player process (Generation). Every one of
-    // those invalidates it: our own Switch/Stop/cancel/upgrade synchronously (they run on the queue's
-    // worker, like every reader), the player's own changes through the subscribed events
-    // (LpPlayerClient.Topics), a restart through Generation + OnRestarted. The map is only trusted
-    // while the event connection is live (a reconnect gap loses events → `Subscribed` invalidates), a
-    // map read while an invalidation happened is never stored (epoch), and a set that finds its cached
-    // id gone (`no_such_node`) invalidates and re-reads once. So a drag costs one `set` per source.
     private static readonly object _srcLock = new();
-    private static Dictionary<string, List<string>>? _srcMap;
-    private static int _srcMapGen = -1;
+    private static Live? _live;
+    private static int _liveGen = -1;
     private static int _srcEpoch;
     private static int _srcMapReads;
     // `state` reads made to (re)build the map — self-test evidence of the cache
@@ -995,56 +1024,68 @@ public static class LpPlayerMedia
 
     public static void InvalidateSources()
     {
-        lock (_srcLock) { _srcEpoch++; _srcMap = null; }
+        lock (_srcLock) { _srcEpoch++; _live = null; }
     }
 
-    private static Dictionary<string, List<string>>? SourceMap(LpPlayerClient client)
+    // the cached live sources, else one `state` read
+    private static Live? CachedLive(LpPlayerClient client)
     {
         client.StartEvents(); // idempotent; the map is cached only once events flow
-        int epoch;
         lock (_srcLock)
-        {
-            if (_srcMap != null && _srcMapGen == client.Generation && client.EventsLive) return _srcMap;
-            epoch = _srcEpoch;
-        }
+            if (_live != null && _liveGen == client.Generation && client.EventsLive) return _live;
+        return ReadLive(client);
+    }
+
+    // one `state` read (null = no answer); stored as the cache unless something invalidated it meanwhile
+    private static Live? ReadLive(LpPlayerClient client)
+    {
+        client.StartEvents();
+        int epoch;
+        lock (_srcLock) epoch = _srcEpoch;
         int gen = client.Generation;
         Interlocked.Increment(ref _srcMapReads);
         if (Graph(client) is not { ValueKind: JsonValueKind.Object } g) return null;
-        var map = new Dictionary<string, List<string>>();
+        var live = new Live();
         foreach (var n in g.EnumerateObject())
         {
             var v = n.Value;
+            if (n.Name.StartsWith("lay:", StringComparison.Ordinal) && n.Name.EndsWith(":main", StringComparison.Ordinal))
+            { live.LayerFit.Add(Str(v, "fit")); continue; }
             if (!v.TryGetProperty("gain_effective_db", out _) || Str(v, "kind") is "snapshot" or "color") continue; // sources only
             var sp = Str(v, "path");
             if (sp.Length == 0) continue;
             var key = FullPath(sp);
-            if (!map.TryGetValue(key, out var l)) map[key] = l = [];
+            if (!live.Map.TryGetValue(key, out var l)) live.Map[key] = l = [];
             l.Add(n.Name);
+            live.Values[n.Name] = ValuesOf(v);
         }
         lock (_srcLock)
-            if (epoch == _srcEpoch && gen == client.Generation && client.EventsLive) { _srcMap = map; _srcMapGen = gen; }
-        return map;
+            if (epoch == _srcEpoch && gen == client.Generation && client.EventsLive) { _live = live; _liveGen = gen; }
+        return live;
     }
 
-    // `set <id>.<prop>` on each of `ids` (cached); a vanished id → re-read the map once and set the
-    // fresh ids for `paths`. Returns the ids it set.
-    private static List<string> SetEach(LpPlayerClient client, IReadOnlyCollection<string> paths, string prop, object value)
+    // a source node's graph values: numbers as double, strings, bools; `gain: {slot: dB}` → `gain.<slot>`
+    private static Dictionary<string, object?> ValuesOf(JsonElement node)
     {
-        var ids = SourcesFor(client, paths);
-        for (int attempt = 0; attempt < 2; attempt++)
+        var d = new Dictionary<string, object?>();
+        foreach (var p in node.EnumerateObject())
         {
-            bool stale = false;
-            foreach (var id in ids)
+            if (p.Name == "gain" && p.Value.ValueKind == JsonValueKind.Object)
             {
-                try { client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = value }, LpPlayerClient.QuickMs); }
-                catch (LpPlayerException e) when (e.Code == "no_such_node") { stale = true; }
-                catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop} failed — {e}"); }
+                foreach (var slot in p.Value.EnumerateObject())
+                    if (slot.Value.ValueKind == JsonValueKind.Number) d["gain." + slot.Name] = slot.Value.GetDouble();
+                continue;
             }
-            if (!stale) break;
-            InvalidateSources();
-            ids = SourcesFor(client, paths);
+            d[p.Name] = p.Value.ValueKind switch
+            {
+                JsonValueKind.Number => p.Value.GetDouble(),
+                JsonValueKind.String => p.Value.GetString(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null,
+            };
         }
-        return ids;
+        return d;
     }
 
     private static bool SamePath(string? a, string? b)
