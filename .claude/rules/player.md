@@ -200,7 +200,7 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. If `_advanceOnVideoEnd && !IsScenePath(path)`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Else: resets `_timedRemainingMs` to full interval. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
 
-**`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed.
+**`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed. Under lp-player an aligned switch's B counts as playing from its `transition.started` (its effect runs, `cur:*` = B) — `DoVideoEndWait` commits it then, not at the handoff, like legacy at its overlay's start (player-adapter.md, `DoVideoEndWait` row); a next/prev/random mid-effect steps from B.
 
 **`EnsureTimedTick(takeBack = true)`** — the only way to start the tick (`StartTimedTimer`): any timed session with
 > 1 item has one, whatever its interval (it takes the queued next/prev/random/restart — a pure advance-on-end session

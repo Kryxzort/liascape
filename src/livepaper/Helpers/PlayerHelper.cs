@@ -2065,7 +2065,40 @@ public static class PlayerHelper
             await LpPlayerMedia.WaitLastHandoff(ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested) return;
             var lpCfg = TransitionService.CurrentConfig();
-            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: true, ct).ConfigureAwait(false);
+            // B is the session's current item from the moment its effect RUNS, not from its handoff: the
+            // player shows it (`cur:*` = B) and a new request commits it. Counted only at the handoff, a
+            // next/prev/random in that window (the effect's duration) read the pre-fetched B as "what
+            // comes next" — the next cancelled the running switch (snap back to A) and switched now to the
+            // same B (the user's next did nothing), a prev went to the item before A. Legacy commits there
+            // too (SwitchToFile + PostSwitch at its overlay's start). From here a next cancels only the
+            // FOLLOWING switch (still in WaitLastHandoff, nothing requested) and its now-switch commits B.
+            bool committed = false;
+            bool Commit()
+            {
+                // under _lock; the started callback and the handoff below race — whoever comes first
+                if (committed || !_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased
+                    || _waitCts == null || _waitCts.Token != ct) return false; // not (still) THIS wait's switch
+                committed = true;
+                _waitingForVideoEnd = false;
+                _waitCts = null;
+                _currentSpeed = ReadSpeedOverride(next) ?? SettingsService.Load().Speed;
+                OnWallpaperChanged?.Invoke(next);
+                PostSwitch(next);
+                return true;
+            }
+            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: true, ct,
+                onStarted: () => { lock (_lock) Commit(); }).ConfigureAwait(false);
+            lock (_lock)
+            {
+                if (committed)
+                {
+                    // committed at its start: the player resolves a Running switch itself (handoff, or one
+                    // committed by the next request) — only a B failing mid-effect snaps back to A
+                    if (outcome == "handoff") LpPlayerMedia.ResetFailureBackoff();
+                    else LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)} ended {outcome} after its effect started (already counted as current then)");
+                    return;
+                }
+            }
             if (ct.IsCancellationRequested) return;
             // superseded by another backend's switch (it took the playlist over): leave it to that one
             if (outcome != "handoff" && !_daemonMode && OtherTimerOwner() is int owner)
@@ -2103,15 +2136,13 @@ public static class PlayerHelper
             else LpPlayerMedia.ResetFailureBackoff();
             lock (_lock)
             {
-                if (!_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
+                // `committed`: a started callback queued just before a fast terminal outcome ran meanwhile
+                if (committed || !_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
+                if (outcome == "handoff") { Commit(); return; } // no `transition.started` seen (a reconnect gap)
+                committed = true; // a started callback still queued must not commit it again
                 _waitingForVideoEnd = false;
                 _waitCts = null;
-                if (outcome == "handoff")
-                {
-                    _currentSpeed = ReadSpeedOverride(next) ?? SettingsService.Load().Speed;
-                    OnWallpaperChanged?.Invoke(next);
-                }
-                else SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
+                SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
                 PostSwitch(next);
             }
             return;
