@@ -33,6 +33,24 @@
 #   Memory guard: N is capped so each stack has ~1 GiB above LP_MATRIX_MIN_FREE_MB (default 3072) of
 #   MemAvailable, and the run is stopped (exit 3) if MemAvailable falls under that floor — a test run must
 #   never be what makes earlyoom kill the desktop's apps.
+#
+# Fuzz: scripts/test-ui-matrix.sh --fuzz <steps> [--seed <n>] [--fuzz-runs <k>] [--jobs N]
+#        scripts/test-ui-matrix.sh --fuzz-replay '<state>:<c1>,<c2>,…'
+#   Random CHAINS of controls instead of one per cell (bugs keep turning up at combinations nobody listed): each of the
+#   k runs (default 4) enters a random start state, applies <steps> controls picked at random from the ones eligible in
+#   the state the stack is in NOW, and after every step runs the same checks a cell runs; a run stops at its first
+#   failing step. Eligibility: the control's `states` must list the state DERIVED from what runs (its label — an
+#   unrestricted control runs anywhere), minus probe-matrix.js's FUZZ_RULES: excluded (race:*, plState:partial,
+#   apply:broken, autoMute*, shuffle:*, set:normalizeFresh — backend-only stress, a failure on purpose, special setup),
+#   last-step-only (trash without undo, plShuffle, the 4–8 s interval changers, the -keep / volume-key-mode variants —
+#   what they leave, the later controls' expectations can't follow), or gated on the starting value their drive/check
+#   assumes. Expectations (paused / muted) carry across steps through every control's exp / flipPause / flipMute.
+#   A step also waits for the page's requests and a queued keybind (pending_action.txt) — one never taken FAILs — and
+#   lets an advance-on-end switch that fired on its own land (its control's own check is then skipped: "rotated").
+#   --seed: the PRNG seed (default: random, printed); a run's picks depend only on (seed, run index), not on --jobs.
+#   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that
+#   reruns exactly that sequence on one stack. --jobs defaults to 2 here (LP_FUZZ_JOBS), capped at the run count.
+#   Results: <out>/fuzz.jsonl, one record per run (seed, run, start, sequence, replay, per-step phases + violations).
 # LP_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
@@ -42,12 +60,28 @@ set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 if [ "${LP_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LP_MATRIX_JOBS:-6}; SHARD=""; PROBE=""; CHANGED=""
+FUZZ=""; FSEED=""; FRUNS=""; FREPLAY=""; JOBS_SET=""
 while [ $# -gt 0 ]; do
   case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
-    --jobs) JOBS=$2; shift ;; --shard) SHARD=$2; shift ;;
+    --jobs) JOBS=$2; JOBS_SET=1; shift ;; --shard) SHARD=$2; shift ;;
     --changed) CHANGED=HEAD; if [ $# -gt 1 ] && [ "${2#--}" = "$2" ]; then CHANGED=$2; shift; fi ;;
+    --fuzz) FUZZ=$2; shift ;; --seed) FSEED=$2; shift ;; --fuzz-runs) FRUNS=$2; shift ;; --fuzz-replay) FREPLAY=$2; shift ;;
     *) echo "unknown arg $1"; exit 2 ;; esac; shift
 done
+num() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+if [ -n "$FUZZ$FREPLAY" ]; then
+  [ -n "$ONLY$CHANGED$PROBE" ] && { echo "--fuzz / --fuzz-replay don't combine with --only / --changed / --probe"; exit 2; }
+  [ -n "$FUZZ" ] && [ -n "$FREPLAY" ] && { echo "--fuzz and --fuzz-replay don't combine"; exit 2; }
+  if [ -n "$FUZZ" ]; then
+    num "$FUZZ" && [ "$FUZZ" -gt 0 ] || { echo "--fuzz wants a positive number of steps"; exit 2; }
+    FRUNS=${FRUNS:-4}; num "$FRUNS" && [ "$FRUNS" -gt 0 ] || { echo "--fuzz-runs wants a positive number"; exit 2; }
+    FSEED=${FSEED:-$(( (RANDOM << 15) | RANDOM ))}; num "$FSEED" || { echo "--seed wants a non-negative integer"; exit 2; }
+    [ -z "$JOBS_SET" ] && JOBS=${LP_FUZZ_JOBS:-2}
+    num "$JOBS" && [ "$JOBS" -gt "$FRUNS" ] && JOBS=$FRUNS
+  else JOBS=1; fi # a replay is one run on one stack
+elif [ -n "$FSEED$FRUNS" ]; then echo "--seed / --fuzz-runs go with --fuzz"; exit 2; fi
+FARGS=(); [ -n "$FUZZ" ] && FARGS=(--fuzz "$FUZZ" --seed "$FSEED" --fuzz-runs "$FRUNS")
+MODE=MATRIX; [ -n "$FUZZ$FREPLAY" ] && MODE=FUZZ
 # --changed [<rev>]: only the cells the change can affect (scripts/matrix-cells-for.sh — the uncommitted change,
 # or everything since <rev>); FULL when it touches something central, nothing when the matrix covers none of it
 if [ -n "$CHANGED" ] && [ -z "$SHARD" ]; then
@@ -134,9 +168,9 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   memavail() { awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo; }
   fit=$(( ($(memavail) - MINFREE) / 1024 )); [ "$fit" -lt 1 ] && fit=1
   [ "$JOBS" -gt "$fit" ] && { echo "== only $(memavail) MiB available: $fit shard(s), not $JOBS"; JOBS=$fit; }
-  echo "== matrix: $JOBS shards"
+  if [ $MODE = FUZZ ]; then echo "== fuzz: $FRUNS runs × $FUZZ steps, seed $FSEED, $JOBS shards"; else echo "== matrix: $JOBS shards"; fi
   for i in $(seq 0 $((JOBS - 1))); do
-    LP_MATRIX_OUT=$OUTROOT/shard-$i setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} \
+    LP_MATRIX_OUT=$OUTROOT/shard-$i setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} "${FARGS[@]}" \
       </dev/null >"$OUTROOT/shard-$i.log" 2>&1 &
     PIDS+=($!)
     sleep 2 # stagger the start-up spikes (ffmpeg clips, the backend's JIT, Electron)
@@ -156,6 +190,26 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
     flush; [ $alive = 0 ] && break; sleep 3
   done
   rcs=""; for i in $(seq 0 $((JOBS - 1))); do wait "${PIDS[$i]}"; rcs="$rcs $?"; done
+  if [ $MODE = FUZZ ]; then
+    cat "$OUTROOT"/shard-*/fuzz.jsonl >"$OUTROOT/fuzz.jsonl" 2>/dev/null
+    echo "== fuzz failures (all shards; seed $FSEED)"
+    jq -r --arg q "'" 'select(.result != "PASS") | (if .failedAt != null then .steps[.failedAt] else null end) as $f
+      | "\(.result) run \(.run) (seed \(.seed)): \([.start] + .sequence | join(" → "))"
+        + (if $f then "\n        at step \(.failedAt + 1): [\($f.state)] \($f.control)" else "" end)
+        + ((($f.violations // .violations) // []) | map("\n        - " + .) | join(""))
+        + (if .replay then "\n        replay: scripts/test-ui-matrix.sh --fuzz-replay \($q)\(.replay)\($q)" else "" end)' "$OUTROOT/fuzz.jsonl"
+    crashed=0
+    for i in $(seq 0 $((JOBS - 1))); do
+      grep -q '^FUZZ ' "$OUTROOT/shard-$i.log" || { crashed=$((crashed + 1)); echo "shard $i/$JOBS ended without a summary:"; tail -n 8 "$OUTROOT/shard-$i.log" | sed 's/^/     /'; }
+    done
+    n() { jq -s --arg r "$1" 'map(select(.result == $r)) | length' "$OUTROOT/fuzz.jsonl"; }
+    echo "== done in $(( ($(date +%s) - T0) / 60 ))m$(( ($(date +%s) - T0) % 60 ))s ($JOBS shards, exit codes:$rcs)"
+    pass=$(n PASS); fail=$(n FAIL); err=$(n ERROR); setup=$(n SETUP)
+    steps=$(jq -s 'map(.steps | length) | add // 0' "$OUTROOT/fuzz.jsonl")
+    echo "FUZZ runs=$((pass + fail + err + setup)) pass=$pass fail=$fail error=$((err + crashed)) setup=$setup steps=$steps seed=$FSEED"
+    [ $((fail + err + setup + crashed)) = 0 ] && [ -z "$(echo $rcs | tr -d ' 0')" ]
+    exit $?
+  fi
   cat "$OUTROOT"/shard-*/cells.jsonl >"$OUTROOT/cells.jsonl" 2>/dev/null
   echo "== failures (all shards)"
   jq -r 'select(.result != "PASS" and .result != "SKIP") | "\(.result) \(.state) × \(.control)" + ((.violations // []) | map("\n        - " + .) | join(""))' "$OUTROOT/cells.jsonl"
@@ -197,6 +251,15 @@ cleanup() {
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
   [ -n "$PA" ] && kill "$PA" 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
+  # a stopping backend hands a running timed playlist / restart timer / auto-mute to detached daemons (setsid: out of
+  # this stack's process group) — one outlived its stack for 35 min, its HOME gone, writing timed_state.json relative
+  # to the cwd. Stop them by their pid files, and only a pid whose HOME is this stack's.
+  for f in timer restart monitor; do
+    pf=$XDG_CONFIG_HOME/livepaper/$f.pid; [ -s "$pf" ] || continue
+    for dp in $(tr -c '0-9\n' ' ' < "$pf"); do
+      tr '\0' '\n' < "/proc/$dp/environ" 2>/dev/null | grep -qx "HOME=$T/home" && kill "$dp" 2>/dev/null
+    done
+  done
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
   if [ -z "${LP_MATRIX_OUT:-}" ] && [ -d "$OUT" ]; then
@@ -271,9 +334,10 @@ done
 [ -n "$XP" ] && [ -s "$T/xdisplay" ] || { echo "ABORT: Xvfb didn't start on any of :90–:189"; tail -3 "$T/xvfb.log"; exit 1; }
 case "$(cat "$T/xdisplay")" in 0|1|2|3|4|5|6|7|8|9) echo "ABORT: Xvfb on a low display :$(cat "$T/xdisplay")"; exit 1 ;; esac
 echo "== Xvfb on :$(cat "$T/xdisplay")"
-echo "== matrix"
+if [ $MODE = FUZZ ]; then echo "== fuzz${FREPLAY:+ (replay)}"; else echo "== matrix"; fi
 (cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LP_URL="$U" LP_PLAYER_SOCKET="$XDG_RUNTIME_DIR/livepaper/lp-player.sock" \
   LP_CLIPS="$CLIPS" LP_OUT="$OUT" LP_DOTNET="$DOTNET" LP_DLL="$DLL" LP_ONLY="$ONLY" LP_SHARD="$SHARD" \
+  LP_FUZZ_STEPS="$FUZZ" LP_FUZZ_SEED="$FSEED" LP_FUZZ_RUNS="$FRUNS" LP_FUZZ_REPLAY="$FREPLAY" \
   LP_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" LP_BACKEND_LOG="$T/backend.log" \
   LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" LP_PULSE="$LP_PULSE" \
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
