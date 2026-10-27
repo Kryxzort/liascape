@@ -973,8 +973,8 @@ frame is still on screen; the visible boundary (frame 0) follows one frame later
 **A dropped first frame is asked for again (`REFETCH_AFTER`).** mpv's VO waits 200 ms for the API
 user to render a frame (vo_libmpv `flip_page`), then drops it — `mpv_render_context_update` stops
 reporting `UPDATE_FRAME`, so the "level-triggered" pending frame is gone. A playing source sends its next
-frame anyway; a **paused** one (a transition's pending B, held paused until Ready) or an **image** has no
-next frame: if its only frame went unrendered — the loop busy past 200 ms (a burst of switches and
+frame anyway; a **paused** one (a transition's pending B, held paused until Ready), an **image**, or a clip
+already **at its end** (keep-open holds it — a short clip that played out unrendered) has no next frame: if its only frame went unrendered — the loop busy past 200 ms (a burst of switches and
 teardowns with every `/settings`'s live sets landing on the opening B's, the debug build, a loaded
 machine; the render worker can't render either until the loop has passed it the size) — it never became
 Ready and the transition failed after 10 s (`no first frame within 10 s`). Measured: UI matrix
@@ -987,7 +987,10 @@ FILE_LOADED (the worker's frame tag still matches) — backing off ×2 up to 2.4
 {path, pos, since_restart_ms, dsize}` (info, comp `mpv`), `sources` probe `frame_refetches`. After: repro
 0/10 (6 of them needed one refetch, size already known — the loop simply hadn't rendered in time), the
 matrix cell GREEN. Guard: `tests/sources.rs::dropped_first_frame_of_a_paused_source_or_image_still_readies`
-(open, no `update` for 800 ms, then Ready with that frame; RED in both render modes: only `Position(0.0)`).
+(open, no `update` for 800 ms, then Ready with that frame; RED in both render modes: only `Position(0.0)`) and
+`clip_ended_before_any_render_readies_then_ends` (a 1 s clip, no `update` for 1.8 s). **`Ended` waits for
+`Ready` in both renderers** (`ended_held`, pushed right after Ready): the loop renderer used to report the end
+of a source that never showed a frame first (`ended_holds_last_frame` failed once in a loaded run).
 
 **`AudioFlowing` (Task 16c, R85, invariant #8) — real audio output confirmed, not just
 un-paused.** `apply("paused", false)` on a source that was paused arms a wait

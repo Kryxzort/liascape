@@ -489,6 +489,44 @@ fn dropped_first_frame_of_a_paused_source_or_image_still_readies() {
     }
 }
 
+/// A short clip that plays to its end before anything rendered it (the loop or the render worker
+/// stalled): it still becomes Ready with its last frame, and `Ended` comes after `Ready` in either
+/// renderer — the loop renderer used to report Ended first (a loaded full run failed
+/// `ended_holds_last_frame`), and an ended clip, like a paused one, has no next frame to render.
+#[test]
+fn clip_ended_before_any_render_readies_then_ends() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let clip = ensure_clip(
+        "solid_blue_1s",
+        ClipSpec::Solid {
+            rgb: [0, 0, 255],
+            secs: 1.0,
+            tone_hz: 440.0,
+            tone_dbfs: -20.0,
+        },
+    );
+    let mut src = open_src(&gfx, path_str(&clip), &opts(json!({"loop": false}))).expect("open");
+    std::thread::sleep(Duration::from_millis(1800)); // the whole clip plays out unrendered
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ended(e)
+    });
+    assert!(ok, "no Ended within 3 s; events: {evs:?}");
+    let ready_at = evs.iter().position(|e| *e == SourceEvent::Ready);
+    let ended_at = evs.iter().position(|e| *e == SourceEvent::Ended);
+    assert!(
+        ready_at.is_some() && ready_at < ended_at,
+        "Ready must precede Ended: {evs:?}"
+    );
+    let tex = src.texture().expect("texture after Ready");
+    assert_rgb(
+        read_rgba(&gfx, tex, tex.w / 2, tex.h / 2),
+        [0, 0, 255],
+        3,
+        "its last frame",
+    );
+}
+
 #[test]
 fn no_audio_live() {
     let Some((_serial, gfx)) = gpu() else { return };
