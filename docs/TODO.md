@@ -378,7 +378,8 @@ Two bug classes kept recurring; fix the class, not the instance:
       Adapter IT 115/0, settings-merge 53/0, self-test PASS (+ a no-op full pass = 1 request, another client's
       value put back), matrix targeted 343 pass / 9 fail+error+setup, all in two load clusters (load avg 50+:
       "UI marks [] as playing", a player `stop` timeout) — each passed alone 2× (one UI-not-found error on the
-      second rerun passed a third time).
+      second rerun passed a third time). Full matrix (`--jobs 2`, 30 min): pass=705 fail=2 (`single × itemVol:off`
+      override not saved, `pending × seq:next+next` landed one item short) — both passed alone 2×.
 
 ## Next up (handoff 2026-10-26, weekly limit)
 - [x] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing
