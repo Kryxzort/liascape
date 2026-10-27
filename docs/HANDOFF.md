@@ -61,3 +61,12 @@ scene advances).
    https://github.com/Kryxzort/livepaper-pro.git lp-player`). **Merge into `main` only after a quiet full-matrix
    gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/livepaper.nix` re-pin to
    GitHub (never commit in /etc/nixos; the owner runs `nixos-rebuild`).
+
+## Night run 2026-10-27 (owner asleep, "don't stop for questions"; cap 2 big agents)
+Merged into `lp-player` since the handoff: zero-copy hwdec on the render worker (`bafb818`; 4K60 49 → 7 % of a core),
+the effective-settings resolver (`9835f8b`, `a43fb81`), Phase 2 Tasks 3–4 (`a5fbc30`, `5936046`: worker protocol +
+lifecycle, dmabuf transport, synthetic renderer; `lwe` feature default off), test-flake hardening incl. a real
+stepped-mode fix (`eb2b251`), the two fuzz playlist bugs (`8c83331` random re-seats the rotation, `90caefe`
+`EnsureTimedTick`). Worktrees of finished agents can be removed. Running: Phase 2 Track A (LWE fork build + patches,
+pushes a branch to `Kryxzort/linux-wallpaperengine`). Gate for `main`: full matrix + adapter + settings-merge on the
+merged tree (then merge `lp-player` → `main`, push, re-pin instructions below).
