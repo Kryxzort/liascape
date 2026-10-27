@@ -5,6 +5,21 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 description = "lp-player — Wayland live-wallpaper compositor"
 
+[features]
+# The scene worker links LWE's core (`scripts/lwe.sh build`, `LP_LWE_CORE_DIR`). OFF by default
+# until the LWE build track lands (it flips this to `default = ["lwe"]`); without it
+# `lp-scene-worker` runs `--stub` and the synthetic renderer only.
+default = []
+lwe = []
+
+[[bin]]
+name = "lp-player"
+path = "src/main.rs"
+
+[[bin]]
+name = "lp-scene-worker"
+path = "src/bin/lp-scene-worker/main.rs"
+
 [dependencies]
 calloop = "0.14.5"
 glow = "0.18.0"
