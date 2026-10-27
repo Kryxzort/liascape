@@ -1760,6 +1760,37 @@ C["seq3:pause+trash:shown+undo"] = { states: ["playlist", "pending"], switch: tr
     if (!(c.after.lib || []).some((i) => i.videoPath === c.target)) v.push(`${TITLE(c.target)} not back in the library`);
     return [...v, ...expectShownN(c, c.want, 1), ...armedCheck(c)];
   } };
+// random (keybind), then next / previous: the rotation goes on from the random pick's place in the strip — next =
+// the item after it (it used to keep the rotation's old position: next replayed the pick itself, or the item after
+// what played before), and an advance-on-end session re-arms to that item; previous = back to what played before
+// (the pick replaced the pre-fetched, never-played next — previous went to that instead) and the next after that
+// is the pick again (history forward, like next after any previous). Random excludes what plays, so it's repeated
+// until it lands on the item two after the starting one (the pick where the old position's successor isn't the
+// pick's: the fuzz found it 2 of 3 times in `pending`); an advance-on-end session must re-arm to the strip's next
+// after every pick (`c.midV`).
+async function randomTo(c) {
+  const s = c.before.ps?.videoPaths || [], i = s.indexOf(c.before.cur?.path);
+  c.target = s[(i + 2) % s.length]; c.tries = 0; c.midV = [];
+  for (let cur = c.before.cur?.path; cur !== c.target && c.tries < 10; c.tries++) {
+    c.from = cur; await cliStep(c, "random"); await sleep(300); await waitSettled(8000);
+    cur = (await http("GET", "/current")).json?.path ?? null;
+    if (c.pending) {
+      await waitFor(async () => armedTo(await ctl.call("state")).length > 0, 3000, 50);
+      const a = armedTo(await ctl.call("state")), want = succ(s, cur);
+      if (a.length !== 1 || a[0] !== want) c.midV.push(`random → ${TITLE(cur)}: armed to ${JSON.stringify(a.map(TITLE))}, expected ${TITLE(want)}`);
+    }
+  }
+}
+const randomLanded = (c) => [...(c.midV || []), ...(c.landed === c.target ? [] : [`random never landed on ${TITLE(c.target)} in ${c.tries} tries (on ${TITLE(c.landed)})`])];
+C["seq:random+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
+    c.want = succ(c.before.ps?.videoPaths, c.target);
+    await cliStep(c, "next-wallpaper");
+  }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.want, c.tries + 1), ...armedCheck(c)] };
+C["seq:random+prev"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
+    await cliStep(c, "previous-wallpaper");
+  }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.from, c.tries + 1), ...armedCheck(c, c.landed)] }; // history: next after previous = the pick again
 
 function expectShown(c, want, { effect }) {
   const v = [];

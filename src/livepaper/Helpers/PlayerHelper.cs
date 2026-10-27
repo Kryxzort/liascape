@@ -2451,10 +2451,20 @@ public static class PlayerHelper
         var pick = PickRandomExcluding(pool, current);
         if (_history != null)
         {
+            // The pick replaces everything after what plays: an advance-on-end session's pre-fetched next
+            // (never played) and a forward stack left by previous — kept, previous after a random went to
+            // that never-played pre-fetch instead of back to what played before the pick.
+            if (playingIdx >= 0 && playingIdx < _history.Count - 1)
+                _history.RemoveRange(playingIdx + 1, _history.Count - playingIdx - 1);
             _history.Add(pick);
             if (_history.Count > 100) _history.RemoveAt(0);
             _historyIndex = _history.Count - 1;
         }
+        // The rotation goes on from the pick's place: AdvanceToNext steps _timedIndex, which still pointed at
+        // the item before the random (or at the pre-fetched next) — next / the re-armed aligned switch went to
+        // the pick ITSELF (random onto the old position's successor) or to the old successor.
+        int at = _timedPaths.IndexOf(pick);
+        if (at >= 0) _timedIndex = at;
         LaunchAndReset(pick);
     }
 

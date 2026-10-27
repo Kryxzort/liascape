@@ -202,6 +202,15 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed.
 
+**`RandomAndLaunch`** (a timed session's `random`) — a switch OUTSIDE the rotation's order, so it re-seats both
+cursors: `_timedIndex` = the pick's index in `_timedPaths` (the rotation goes on from the pick: next / the re-armed
+aligned switch = the item after it), and the history after the playing item is dropped before the pick is appended
+(an advance-on-end session's pre-fetched, never-played next + any forward stack left by previous). Before, the pick
+only went into the history: `AdvanceToNext` stepped the OLD `_timedIndex` (still at the pre-random item, or at the
+pre-fetch) → random onto that position's successor re-armed / nexted to the pick itself (stuck), and previous went
+to the never-played pre-fetch. Next after a previous still walks the history forward (= the pick again). Shared by
+both engines. Guard: matrix `seq:random+next` / `seq:random+prev` (`playlist`, `pending`).
+
 ## Mode Switches (mid-session, no mpvpaper restart)
 
 **`SwitchFromTimedToAdvanceOnEnd`**: cancels `_waitCts`, un-advances `_historyIndex` if pre-fetch was in flight, sets `_advanceOnVideoEnd = true` / `_timedInterval = Zero`, preserves `_timedRemainingMs`, re-arms `DoVideoEndWait`. Does NOT restart mpvpaper.
