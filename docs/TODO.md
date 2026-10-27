@@ -42,7 +42,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       It captures the sink, rebuilds the expected mix from the source files at the logged positions, aligns latency,
       and flags dropouts and 1 ms micro-gaps. Make the ffmpeg path come from PATH.
       — done in Task 15 (`scripts/lp_audiowatch.py`, lane B); not yet merged into this branch's history.
-- [ ] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
+- [x] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`. Also (2026-10-26):
       - **`dotnet watch --no-hot-reload`** — a hot-reload delta never runs a NEW static field's initializer: the
         merge that added `SettingsService`'s static `Fields`/`WebJson` maps was "applied" in place, leaving
@@ -61,7 +61,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `{"Theme":"Nord"}` reset 26 other fields incl. `PlayerEngine` (→ the engine switched to legacy).
       `scripts/test-settings-merge.sh` (hermetic): partial / full / null / unknown key / 400 / parallel bodies, and a
       partial body applying live (Volume, Speed, NoAudio, VideoScale, override ?? global, rotation interval, engine).
-- [ ] `POST /playlist/state` binds its whole `CustomPlaylist` (`videoPaths` + `settings` + `name`), same hazard as
+- [x] `POST /playlist/state` binds its whole `CustomPlaylist` (`videoPaths` + `settings` + `name`), same hazard as
       `/settings` had: a body without `videoPaths` saves an empty strip (a running rotation keeps its own list — the
       live reorder skips an empty one), a partial `settings` resets the rest to their defaults (override off →
       the rotation follows the globals live, transitions off). The UI always posts the whole strip; decide merge vs
