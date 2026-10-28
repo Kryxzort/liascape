@@ -8,8 +8,9 @@ packaging), and code names match the UI labels at the same time (one combined re
 
 ## Decisions
 
-- **Name:** Lumilia (lumi + Emilia). Checked 2026-10-28: free on AUR, GitHub, Flathub; `lumilia.dev` unregistered;
-  `lumilia.app` is an unrelated iOS wellness app (different category — owner accepted).
+- **Name: NOT DECIDED.** "Lumilia" was dropped (2026-10-28): it is the full name of Lumi, the protagonist of the desktop
+  game *Outcore* — too close to a desktop app. Candidates (free on AUR + GitHub): Emilight, Silvamilia, Frostmilia,
+  Emiluna. Every "lumilia" below stands for the final name.
 - **Command style: one command + subcommands** (git/cargo/podman style). Users only ever type `lumilia`:
   - `lumilia` — opens the app (GUI); `lumilia <action>` replaces `--action=…` (e.g. `lumilia next`, `lumilia volume up`);
     `lumilia restore`, `lumilia kill`, `lumilia random`; `lumilia ctl …` = the player's ctl (state/logs/probe).
