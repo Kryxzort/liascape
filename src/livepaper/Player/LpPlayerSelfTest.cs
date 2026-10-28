@@ -84,6 +84,8 @@ public static class LpPlayerSelfTest
                  (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
                  (-7L, 10_000L, false, 10_000L, 0L) })
             if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
+    }
+
     // ---- /health/features (FeatureHealth.Build): every missing piece → its feature not ok, with a reason ----------
     private static void FeatureHealthAssertions(List<string> fails)
     {
