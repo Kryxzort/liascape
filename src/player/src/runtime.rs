@@ -825,7 +825,9 @@ impl Runtime {
     // ------------------------------------------------------------ Task 8: GPU budget, VRAM
 
     /// Every `budget::OBSERVE_EVERY`: each scene's GPU budget gets the worst miss rate (paced
-    /// presents over the `frames` probe's 2 s window) of the outputs showing it, and
+    /// presents over the `frames` probe's 2 s window) of **every** output — the GPU is shared,
+    /// so a heavy worker on one output starves another's presents (Phase 2 Task 14,
+    /// `frames::worst_missed_pct`) — and
     /// `player.scene_throttle` (off = fixed fps, any cap lifted). Real clock only.
     fn feed_scene_budgets(&mut self) {
         let now = Instant::now();
@@ -838,22 +840,8 @@ impl Runtime {
             Ok(PropValue::Bool(false))
         );
         let at = now.saturating_duration_since(self.started);
+        let missed = crate::probe::frames::worst_missed_pct(self.frames.values(), now);
         for id in self.host.scene_ids() {
-            let missed = self
-                .graph
-                .outputs_of(&id)
-                .iter()
-                .filter_map(|o| o.strip_prefix("out:"))
-                .filter_map(|n| self.frames.get(n))
-                .map(|st| {
-                    let s = st.paced(now);
-                    if s.count == 0 {
-                        0.0
-                    } else {
-                        s.missed as f64 * 100.0 / s.count as f64
-                    }
-                })
-                .fold(0.0, f64::max);
             if let Some(sc) = self.host.scene_mut(&id) {
                 sc.observe_budget(at, missed, auto);
             }
