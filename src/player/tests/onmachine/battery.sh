@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # liascape-player Phase 1 on-machine battery (Task 20, docs/superpowers/sdd/2026-10-20-liascape-player-phase0-1/
-# task-20-brief.md). Drives the REAL C# backend (`livepaper --serve`, PlayerEngine=liascape-player) over
+# task-20-brief.md). Drives the REAL C# backend (`liascape --serve`, PlayerEngine=liascape-player) over
 # HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
 # same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
 # `src/player/tests/onmachine/bus.sh`, whose patterns this reuses (temp dirs for --hermetic, a
@@ -641,8 +641,8 @@ setup_live_backend() {
   ORIG_DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null || true)
   log "default sink before: ${ORIG_DEFAULT_SINK:-unknown}"
   stop_legacy_wallpaper
-  local portfile="$HOME/.config/livepaper/serve.port"
-  [ -s "$portfile" ] || { err "no $portfile -- is the owner's backend (livepaper-watch) running?"; exit 1; }
+  local portfile="$HOME/.config/liascape/serve.port"
+  [ -s "$portfile" ] || { err "no $portfile -- is the owner's backend (liascape-watch) running?"; exit 1; }
   API="http://127.0.0.1:$(cat "$portfile")"
   curl -sf -m 5 "$API/health" >/dev/null || { err "backend at $API not responding"; exit 1; }
   snapshot_owner_settings
@@ -668,14 +668,14 @@ setup_hermetic_backend() {
     "$DOTNET" build "$REPO/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   fi
   HERMETIC_T=$(mktemp -d /tmp/liascape-battery-XXXXXX)   # short: a unix socket path must be < 108 bytes
-  mkdir -p "$HERMETIC_T/home/.config/livepaper" "$HERMETIC_T/home/.cache" "$HERMETIC_T/home/.local/share" "$HERMETIC_T/rt" "$HERMETIC_T/st"
+  mkdir -p "$HERMETIC_T/home/.config/liascape" "$HERMETIC_T/home/.cache" "$HERMETIC_T/home/.local/share" "$HERMETIC_T/rt" "$HERMETIC_T/st"
   export HOME=$HERMETIC_T/home XDG_CONFIG_HOME=$HERMETIC_T/home/.config XDG_CACHE_HOME=$HERMETIC_T/home/.cache
   export XDG_DATA_HOME=$HERMETIC_T/home/.local/share XDG_RUNTIME_DIR=$HERMETIC_T/rt XDG_STATE_HOME=$HERMETIC_T/st
   export LIASCAPE_PLAYER_BIN=$BIN LIASCAPE_TRANSITIONS_DIR=$REPO/transitions
   export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
   unset LIASCAPE_PLAYER_SOCKET WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 
-  cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
+  cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["$EFFECT_ID"],"GlobalTransitionDurationMs":$EFFECT_DURATION_MS,"TransitionMethod":"full-live",
  "GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,"GlobalIntervalSeconds":1800,"RestartIntervalSeconds":600,"AutoMute":false}
@@ -689,9 +689,9 @@ EOF
   PLAYER_SP=$(sup_pid)
 
   "$DOTNET" "$DLL" --serve > "$HERMETIC_T/backend.log" 2>&1 & BP=$!
-  for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
-  [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { err "hermetic backend did not start, see $HERMETIC_T/backend.log"; tail -5 "$HERMETIC_T/backend.log" >&2; exit 1; }
-  API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")"
+  for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
+  [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { err "hermetic backend did not start, see $HERMETIC_T/backend.log"; tail -5 "$HERMETIC_T/backend.log" >&2; exit 1; }
+  API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")"
   for _ in $(seq 1 50); do curl -sf -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
   [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "liascape-player" ] || { err "hermetic backend not on liascape-player"; exit 1; }
   log "hermetic: player pid $(comp_pid) (supervisor $PLAYER_SP), backend $API"
@@ -838,15 +838,15 @@ restore_cli_invoke() {
   else
     # battery-script fix (task20-final-run: restore-replay failed its FIRST switch in all 3
     # methods, "no new transition corr observed", every time). Root cause confirmed live, in two
-    # steps: first, `strace`'d the owner's INSTALLED `livepaper` (what `command -v livepaper`
-    # resolves to, what this used to invoke) running `LIASCAPE_PLAYER_BIN=<repo liascape-player> livepaper
+    # steps: first, `strace`'d the owner's INSTALLED `liascape` (what `command -v liascape`
+    # resolves to, what this used to invoke) running `LIASCAPE_PLAYER_BIN=<repo liascape-player> liascape
     # --restore` -- the env var DID reach the final managed process (verified: present in that
     # exact execve's own environ via `strace -v`), yet it still ran the legacy path (`Apply()` ->
     # `SwitchToFile` -> `setsid mpvpaper ...`). That ruled out a missing-env-var/PATH problem, so
     # second: `strings -el` (UTF-16, .NET string literals) on the installed package's
     # `liascape-backend.dll` for "LIASCAPE_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
-    # on this worktree's own dev build (`$DLL`, what `livepaper-watch`/dotnet watch actually runs)
-    # finds both -- the NixOS-packaged `livepaper` is a STALE BUILD that predates liascape-player/
+    # on this worktree's own dev build (`$DLL`, what `liascape-watch`/dotnet watch actually runs)
+    # finds both -- the NixOS-packaged `liascape` is a STALE BUILD that predates liascape-player/
     # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LIASCAPE_PLAYER_BIN`
     # could ever have fixed. Confirmed the actual fix: priming the SAME session then invoking
     # `$DOTNET $DLL --restore` (the current dev build, what --serve itself runs) produces a real

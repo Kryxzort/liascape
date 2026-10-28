@@ -25,7 +25,7 @@ pub fn effects_json(dir: Option<&Path>, count: usize) -> Value {
         Some(d) => json!({ "ok": false, "dir": d, "count": 0,
             "reason": format!("the transitions catalogue at {} has no effects — every switch is a cut", d.display()) }),
         None => json!({ "ok": false, "dir": null, "count": 0,
-            "reason": "no transitions catalogue found (LIASCAPE_TRANSITIONS_DIR, ~/.local/share/livepaper-web/transitions, \
+            "reason": "no transitions catalogue found (LIASCAPE_TRANSITIONS_DIR, ~/.local/share/liascape-web/transitions, \
                        the repo) — every switch is a cut" }),
     }
 }

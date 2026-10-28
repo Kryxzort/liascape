@@ -3,12 +3,12 @@
 # NOT the old single-binary app. It delegates the whole build to scripts/install.sh so packaging
 # never drifts from the canonical build. Regenerate .SRCINFO with `makepkg --printsrcinfo > .SRCINFO`
 # after editing.
-pkgname=livepaper-git
+pkgname=liascape-git
 pkgver=r1.0000000
 pkgrel=1
 pkgdesc="Live wallpaper manager for Wayland (video + Wallpaper Engine scenes) — Electron/React + C# backend"
 arch=('x86_64')
-url="https://github.com/Kryxzort/livepaper-pro"
+url="https://github.com/Kryxzort/liascape"
 license=('GPL-3.0-only' 'MIT')
 # Runtime: backend is published --self-contained (bundles .NET) so no dotnet-runtime needed.
 depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron')
@@ -16,10 +16,10 @@ depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron')
 makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'base-devel' 'wayland' 'wayland-protocols' 'libglvnd')
 optdepends=('linux-wallpaperengine: Wallpaper Engine scene support'
             'playerctl: MPRIS-aware Auto-Mute')
-provides=('livepaper')
-conflicts=('livepaper')
+provides=('liascape')
+conflicts=('liascape')
 options=('!strip' '!debug')
-source=("$pkgname::git+https://github.com/Kryxzort/livepaper-pro.git")
+source=("$pkgname::git+https://github.com/Kryxzort/liascape.git")
 sha256sums=('SKIP')
 
 pkgver() {

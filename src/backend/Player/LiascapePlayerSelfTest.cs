@@ -11,7 +11,7 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// Hidden `livepaper --liascape-player-selftest`: MpvPropertyMap + stream-ownership assertions, then a
+// Hidden `liascape --liascape-player-selftest`: MpvPropertyMap + stream-ownership assertions, then a
 // protocol round-trip against a PRIVATE `liascape-player serve --headless --clock stepped --ao null`
 // (temp XDG_RUNTIME_DIR/XDG_STATE_HOME + its own socket, killed at the end). It never touches a
 // real running player: the shared client is pointed at the temp socket and never auto-spawns.
@@ -925,7 +925,7 @@ public static class LiascapePlayerSelfTest
                 else Phase($"R81: stall recovery triggered a reapply ({LiascapePlayerMedia.ReapplyCount}x so far)");
 
                 // I3 (final review): the pause is toggled by ANOTHER process (a keybind's one-shot
-                // `livepaper --action=toggle-pause` — here a second, independent client): this
+                // `liascape --action=toggle-pause` — here a second, independent client): this
                 // backend has no memory of it, and must never re-assert one. After the supervised
                 // restart below (whose snapshot restores `player.paused`) and its R81 reapply, the
                 // pause must still be on — not flipped.

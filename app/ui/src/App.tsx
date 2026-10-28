@@ -15,7 +15,7 @@ import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { Select } from "./components/Select";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
-// rarely-shown overlays; DebugHud only matters under LIVEPAPER_DEBUG_IPC). Keeps the initial parse
+// rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The morph modals
 // (Preview/LibrarySettings) stay eager — a lazy Suspense gap would break the first card→modal morph.
 const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings })));
@@ -35,7 +35,7 @@ export default function App() {
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
-  useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/livepaper/freeze.log (catches the wedge)
+  useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)
 
   // backend push events → targeted store updates
   const onEvent = useCallback((e: LiascapeEvent) => {

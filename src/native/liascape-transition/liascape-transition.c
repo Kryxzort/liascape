@@ -1,11 +1,11 @@
-// liascape-transition — livepaper's wallpaper-transition renderer.
+// liascape-transition — liascape's wallpaper-transition renderer.
 //
 // Draws a gl-transitions effect from one frame (`from`) to another (`to`) on a
 // per-output wlr-layer-shell surface on the BOTTOM layer (above the wallpaper,
 // below app windows), then exits. Fully opaque + input-transparent: it covers
 // only the wallpaper region (real windows stay on top, interactive).
 //
-// The caller (livepaper's TransitionService) hands it everything it needs:
+// The caller (liascape's TransitionService) hands it everything it needs:
 //   - the composed vertex + fragment shader (transitions/wrap.* + the effect body)
 //   - the effect's uniform defaults (kept as GLSL uniforms, set here)
 //   - raw RGBA8 frame buffers per output (ffmpeg normalizes every source to raw)
@@ -1213,7 +1213,7 @@ int main(int argc, char **argv) {
         wl_surface_set_input_region(s->wl_surface, empty);
         wl_region_destroy(empty);
         s->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-            layer_shell, s->wl_surface, o, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "livepaper-transition");
+            layer_shell, s->wl_surface, o, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "liascape-transition");
         zwlr_layer_surface_v1_add_listener(s->layer_surface, &ls_listener, s);
         zwlr_layer_surface_v1_set_anchor(s->layer_surface,
             ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |

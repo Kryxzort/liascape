@@ -19,7 +19,7 @@
 #   LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test   # patch work: build a working tree in place
 #
 # Commands chain: `bash scripts/lwe.sh fetch prepare build check`.
-# Knobs (env): LWE_SRC_CACHE (default ~/.cache/livepaper/src), LWE_REPO (clone this instead of
+# Knobs (env): LWE_SRC_CACHE (default ~/.cache/liascape/src), LWE_REPO (clone this instead of
 # PIN.repo — e.g. a local clone of the fork while developing a patch), LWE_JOBS (default 8),
 # LIASCAPE_LWE_CORE_DIR (install dir of `build`; default <repo>/build/lwe-core).
 #
@@ -50,7 +50,7 @@ VERSION="$(pin version)"
 REPO="${LWE_REPO:-$(pin repo)}"
 BRANCH="$(pin branch)"
 UPSTREAM="$(pin upstream)"
-CACHE="${LWE_SRC_CACHE:-$HOME/.cache/livepaper/src}"
+CACHE="${LWE_SRC_CACHE:-$HOME/.cache/liascape/src}"
 SRC="$CACHE/lwe-$REV"
 PREP="$ROOT/build/lwe-src-$REV"
 BUILD="$ROOT/build/lwe-build-$REV"
@@ -94,7 +94,7 @@ ERROR: missing build dependencies for Wallpaper Engine scenes (LWE core):$missin
     Arch:   sudo pacman -S cmake git sdl2 freetype2 glm lz4 zlib ffmpeg mpv libglvnd
     Debian: sudo apt install cmake git libsdl2-dev libfreetype-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libmpv-dev libgl-dev
     Fedora: sudo dnf install cmake git SDL2-devel freetype-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel mpv-libs-devel libglvnd-devel
-    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
+    NixOS:  use the flake instead — 'nix run github:Kryxzort/liascape' (all deps handled)
 MSG
         return 1
     fi

@@ -30,8 +30,8 @@
 #   (its bus, mpv's AO, every scene worker's stream, the visualiser tap) at it. The visualiser's
 #   test tone is played INTO that private PipeWire too.
 # - warps the cursor over DP-1 (step 1's pointer check) and puts it back, also from the trap.
-# - the backend (`livepaper-watch`) must not drive a player meanwhile: stop it first
-#   (`systemctl --user stop livepaper-watch`); this script refuses to start while any other
+# - the backend (`liascape-watch`) must not drive a player meanwhile: stop it first
+#   (`systemctl --user stop liascape-watch`); this script refuses to start while any other
 #   liascape-player surface is mapped. It never touches settings.json, the library or the default sink.
 # - kills only pids it started (its serve, the private PipeWire) and, for step 3, its own scene
 #   workers (looked up through its own player's `workers` probe).
@@ -194,7 +194,7 @@ serve_up() {
     local args=(serve --log-level debug) wl=(WAYLAND_DISPLAY="$WL")
     if [[ $mode == wayland ]]; then
         hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "liascape-player")] | length == 0' >/dev/null ||
-            die "another liascape-player surface is mapped (stop the backend: systemctl --user stop livepaper-watch)"
+            die "another liascape-player surface is mapped (stop the backend: systemctl --user stop liascape-watch)"
     else
         args+=(--headless --outputs "${mode#headless:}" --debug)
         wl=(-u WAYLAND_DISPLAY)
@@ -206,7 +206,7 @@ serve_up() {
         "$BIN" "${args[@]}" >>"$RESULTS/serve-$STEP.log" 2>&1 &
     SERVE_PID=$!
     for _ in $(seq 150); do
-        [[ -S $RT/livepaper/liascape-player.sock ]] && break
+        [[ -S $RT/liascape/liascape-player.sock ]] && break
         kill -0 "$SERVE_PID" 2>/dev/null || die "serve exited early (log $RESULTS/serve-$STEP.log)"
         sleep 0.1
     done

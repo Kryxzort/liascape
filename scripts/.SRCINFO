@@ -1,4 +1,4 @@
-pkgbase = livepaper-git
+pkgbase = liascape-git
 	pkgdesc = Live wallpaper manager for Wayland using mpvpaper
 	pkgver = r6.a0907c1
 	pkgrel = 1
@@ -11,11 +11,11 @@ pkgbase = livepaper-git
 	depends = ffmpeg
 	depends = libpulse
 	depends = wl-clipboard
-	provides = livepaper
-	conflicts = livepaper
+	provides = liascape
+	conflicts = liascape
 	options = !strip
 	options = !debug
-	source = livepaper-git::git+https://github.com/sunwoo101/livepaper.git
+	source = liascape-git::git+https://github.com/sunwoo101/livepaper.git
 	sha256sums = SKIP
 
-pkgname = livepaper-git
+pkgname = liascape-git

@@ -84,9 +84,9 @@ overlay leaving mpvpaper parked — see the design spec §1 for the measured inc
 │        `lia-sysmon` (system-audio tap for scene visualisers, src/audio/sysmon.rs)           │
 └────▲─────────────▲──────────────────────────────────────────────▲─────────────────────────┘
      │             │ JSON Lines, one unix socket                   │ EGL + Wayland (src/wl.rs),
-     │             │ $XDG_RUNTIME_DIR/livepaper/liascape-player.sock      │ or --headless virtual
+     │             │ $XDG_RUNTIME_DIR/liascape/liascape-player.sock      │ or --headless virtual
      │             │                                               │ outputs (src/headless.rs)
-     │  livepaper backend (C#, src/backend/Player/) ─────────▶  wlr-layer-shell outputs
+     │  liascape backend (C#, src/backend/Player/) ─────────▶  wlr-layer-shell outputs
      │  AppSettings.PlayerEngine = legacy | liascape-player             (one surface per wl_output)
      │
      │ SOCK_SEQPACKET (JSON datagrams + fds) · dmabuf frames + sync_file fences
@@ -165,7 +165,7 @@ Command API.
 
 ```
 C# backend (PlayerHelper → LiascapePlayerMedia.Switch, player-adapter.md § Dispatch points)
-  │ "transition" request, JSON Lines over $XDG_RUNTIME_DIR/livepaper/liascape-player.sock
+  │ "transition" request, JSON Lines over $XDG_RUNTIME_DIR/liascape/liascape-player.sock
   ▼
 src/api/handlers.rs — validates into a TransitionReq, calls
 recipes::transition::Transitions::start(req, graph, anim, now)
@@ -378,6 +378,6 @@ audio bus, crash recovery, and the backend adapter; Phase 2 added WE scenes — 
   management, and the backend code that drove them) and this doc's "legacy" framing along with it.
 - **Phase 6** (ongoing after switch-over): the scene-compatibility programme — import worthwhile
   upstream LWE pull requests as labelled patches (`patches/lwe/*.patch`, see `UPSTREAM.md`), fix
-  scenes from the owner's corpus, and track per-scene status. This is livepaper's stated
+  scenes from the owner's corpus, and track per-scene status. This is liascape's stated
   differentiator beyond upstream LWE (design spec §2 goal 10) and is corpus-driven, never a
   switch-over blocker beyond "no worse than today."

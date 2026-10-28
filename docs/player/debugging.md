@@ -126,7 +126,7 @@ each worker's last 50 output lines — LWE's own stderr (missing assets, shader 
 read for any "this scene looks or behaves wrong" report; `ctl logs '{"kind_prefix":"worker."}'`,
 `'{"kind_prefix":"scene."}'` and `'{"kind_prefix":"source."}'` give the process-lifecycle story. A broken or
 crashed scene also leaves a record: `<state>/crashes/<scene-id>-<unix_ms>.json` (`$XDG_STATE_HOME`, default
-`~/.local/state/livepaper/liascape-player/crashes/`; the newest 20 are kept) with the signal or exit code, the restart
+`~/.local/state/liascape/liascape-player/crashes/`; the newest 20 are kept) with the signal or exit code, the restart
 count and the log tail. `liascape-player scene-check` answers "can scenes play here at all" (worker binary, LWE built in,
 WE's assets dir).
 

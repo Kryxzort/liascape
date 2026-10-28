@@ -579,7 +579,7 @@ small compatibility prelude), never in `transitions/` itself.
 **Directory resolution** (`Catalogue::resolve_dir`), in order:
 
 1. `LIASCAPE_TRANSITIONS_DIR` env var.
-2. `~/.local/share/livepaper-web/transitions` (the Electron UI's installed copy).
+2. `~/.local/share/liascape-web/transitions` (the Electron UI's installed copy).
 3. The repo's own `transitions/`, found by walking up from the current exe's path and,
    failing that, from `CARGO_MANIFEST_DIR` (a build-time constant — this is what makes
    `cargo test` find it even before any exe-relative candidate would resolve).
@@ -1734,11 +1734,11 @@ Without `--headless` it draws on the compositor's outputs (§ Wayland); `--outpu
 then refused (exit 2).
 
 **Paths (`src/paths.rs`).** Socket `$LIASCAPE_PLAYER_SOCKET`, else
-`$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (else `/run/user/<uid>/…`); the socket is
+`$XDG_RUNTIME_DIR/liascape/liascape-player.sock` (else `/run/user/<uid>/…`); the socket is
 made `0600`, its dir `0700` — **only** if we created that dir or it's the default
-`…/livepaper` (a `--socket`/`LIASCAPE_PLAYER_SOCKET` in someone else's directory is never
-chmod-ed). State/event log `$XDG_STATE_HOME/livepaper/liascape-player/` (default
-`~/.local/state/livepaper/liascape-player/`). **Single instance = a lock file:** `<socket>.lock`
+`…/liascape` (a `--socket`/`LIASCAPE_PLAYER_SOCKET` in someone else's directory is never
+chmod-ed). State/event log `$XDG_STATE_HOME/liascape/liascape-player/` (default
+`~/.local/state/liascape/liascape-player/`). **Single instance = a lock file:** `<socket>.lock`
 (`liascape-player.lock`, `0600`) is `flock(LOCK_EX|LOCK_NB)`-ed for the process lifetime and
 holds the owner's pid; the loser exits 1 with `liascape-player is already running (pid N) on
 <socket>; stop it with ctl quit, or give this one another --socket` and never touches the
@@ -3134,10 +3134,10 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   webhelper objects; ~50 s at 8 jobs) = `lib/liblinux-wallpaperengine-core.so*` +
   `include/linux-wallpaperengine/*.h` + `REV`. The `liascape-player` package and the **devShell** set
   `LIASCAPE_LWE_CORE_DIR` to it (first entry into the devShell after a pin bump builds it). Outside
-  Nix: `scripts/lwe.sh fetch prepare build` (clone into `~/.cache/livepaper/src/lwe-<rev>`,
+  Nix: `scripts/lwe.sh fetch prepare build` (clone into `~/.cache/liascape/src/lwe-<rev>`,
   every submodule verified against the PIN; a copy without VCS dirs in `build/lwe-src-<rev>`;
   built in `build/lwe-build-<rev>`; installed to `build/lwe-core`, `-j${LWE_JOBS:-8}`).
-  `install.sh` does that, copies the `.so*` into `~/.local/share/livepaper-web/lib/` and builds
+  `install.sh` does that, copies the `.so*` into `~/.local/share/liascape-web/lib/` and builds
   the worker with `LIASCAPE_LWE_RPATH='$ORIGIN/../lib'`.
 - **Patch work.** `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test` builds a working
   tree in place (`build/lwe-build-dev`, incremental; `REV` = `dev:<dir>`, which
@@ -4123,7 +4123,7 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
 
 `src/player/tests/onmachine/scene_corpus.sh` (+ `scene_corpus_report.py`, hand-written diagnoses in
 `scene_corpus_notes.json`) plays every `type: scene` item of a Workshop folder (default the 431960
-library; **refuses `~/.cache/livepaper/steamcmd_workshop`**, also after resolving each item's
+library; **refuses `~/.cache/liascape/steamcmd_workshop`**, also after resolving each item's
 symlinks) on a **private** `serve --no-supervise --headless --outputs 1920x1080@60 --clock real
 --ao null` (own runtime/state/cache/config dirs + socket under the results dir, no Wayland/X,
 PipeWire/Pulse/D-Bus pointed at nothing, `LIASCAPE_PLAYER_VRAM_PROBE=none`, `prlimit --core=1:1`), one

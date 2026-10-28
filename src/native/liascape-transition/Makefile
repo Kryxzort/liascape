@@ -1,4 +1,4 @@
-# liascape-transition — wlr-layer-shell + EGL/GLES3 transition renderer for livepaper.
+# liascape-transition — wlr-layer-shell + EGL/GLES3 transition renderer for liascape.
 CC      ?= cc
 # mpv = libmpv render API → both transition sides decode live (full-live transitions)
 PKGS     = wayland-client wayland-egl egl glesv2 mpv

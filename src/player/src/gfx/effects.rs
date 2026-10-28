@@ -141,7 +141,7 @@ impl Catalogue {
     /// Resolve the `transitions/` directory to load, in order (brief's exact order):
     ///
     /// 1. `LIASCAPE_TRANSITIONS_DIR` env var.
-    /// 2. `~/.local/share/livepaper-web/transitions` (the Electron UI's installed copy).
+    /// 2. `~/.local/share/liascape-web/transitions` (the Electron UI's installed copy).
     /// 3. The repo's own `transitions/`, found by walking up from the current exe's path
     ///    and, failing that, from `CARGO_MANIFEST_DIR` (a build-time constant, so this
     ///    works at `cargo test` time even before any exe-relative candidate would).
@@ -163,7 +163,7 @@ impl Catalogue {
         }
 
         if let Some(home) = std::env::var_os("HOME") {
-            let p = PathBuf::from(home).join(".local/share/livepaper-web/transitions");
+            let p = PathBuf::from(home).join(".local/share/liascape-web/transitions");
             if p.join("manifest.json").is_file() {
                 return Some(p);
             }

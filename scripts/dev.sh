@@ -19,13 +19,13 @@ echo "==> building liascape-player"
 cargo build --release --manifest-path "$ROOT/src/player/Cargo.toml" >/dev/null
 
 systemctl --user daemon-reload
-systemctl --user enable --now livepaper-vite.service livepaper-watch.service
+systemctl --user enable --now liascape-vite.service liascape-watch.service
 
 echo "==> dev services:"
-systemctl --user --no-pager --plain is-active livepaper-vite.service livepaper-watch.service || true
+systemctl --user --no-pager --plain is-active liascape-vite.service liascape-watch.service || true
 echo "    Vite HMR : http://localhost:5173"
 echo "    backend  : 127.0.0.1:5174  (dotnet watch)"
 echo ""
-echo "Now launch the app (livepaper-ui / your launcher) — it auto-uses HMR while these run."
-echo "Logs : journalctl --user -fu livepaper-vite   |   journalctl --user -fu livepaper-watch"
-echo "Stop : systemctl --user stop livepaper-vite livepaper-watch   (or: scripts/dev-stop.sh)"
+echo "Now launch the app (liascape-ui / your launcher) — it auto-uses HMR while these run."
+echo "Logs : journalctl --user -fu liascape-vite   |   journalctl --user -fu liascape-watch"
+echo "Stop : systemctl --user stop liascape-vite liascape-watch   (or: scripts/dev-stop.sh)"

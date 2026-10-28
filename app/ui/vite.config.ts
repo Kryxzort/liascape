@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "./",
   plugins: [react()],
-  // dev HMR server (systemd livepaper-vite). strictPort so Electron's auto-detect URL is stable.
+  // dev HMR server (systemd liascape-vite). strictPort so Electron's auto-detect URL is stable.
   server: { port: 5173, strictPort: true },
   build: {
     // PERF: split the stable, rarely-changing vendor libs into their own chunks. Electron's V8 code

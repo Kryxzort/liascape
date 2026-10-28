@@ -13,7 +13,7 @@ services, models, CLI flags and daemons are unchanged** — `Web/` only wraps th
 `Program.cs` `--serve` branch → `Web/ServerHost.Run`. Kestrel binds **127.0.0.1:0** (random free
 port; `LIASCAPE_PORT` pins it — the Electron shell passes the previous launch's port while it's free, since the
 UI's origin IS that port and a new origin per launch reset every localStorage pref; dev pins 5174), writes
-it to `~/.config/livepaper/serve.port` (Electron reads it). Loopback-only.
+it to `~/.config/liascape/serve.port` (Electron reads it). Loopback-only.
 All other CLI flags (`--restore/--random/--kill/--monitor/--timer-daemon/--restart-daemon/--action=*`)
 and the daemons keep their behavior. **`--action=<name>` is handed to a running backend**
 (`Web/ActionForward`: `serve.port` → `GET /health` must answer `{ok:true}` → `POST /action {name}`), which

@@ -43,7 +43,7 @@ public static class ServerHost
     private static readonly FileExtensionContentTypeProvider Mime = new();
 
     private static string ConfigDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "livepaper");
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape");
 
     public static void Run(string[] args)
     {
@@ -76,7 +76,7 @@ public static class ServerHost
         var port = new Uri(app.Urls.First()).Port;
         Directory.CreateDirectory(ConfigDir);
         AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
-        Console.WriteLine($"livepaper --serve listening on 127.0.0.1:{port}");
+        Console.WriteLine($"liascape --serve listening on 127.0.0.1:{port}");
 
         // The serve backend owns the AudioMonitor in-process while running: take over from any detached
         // `--monitor` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand
@@ -295,7 +295,7 @@ public static class ServerHost
         // DIAGNOSTIC: the renderer posts a heartbeat (+ long-task events) here; appended to a capped log
         // in a SEPARATE process so it survives a renderer main-thread wedge. When the UI freezes the
         // heartbeat stops — the gap timestamps the wedge and the last line before it = the trigger context
-        // (tab, scrolling, gif/anim count, JS heap, fps). Read ~/.cache/livepaper/freeze.log after a freeze.
+        // (tab, scrolling, gif/anim count, JS heap, fps). Read ~/.cache/liascape/freeze.log after a freeze.
         app.MapPost("/debug/log", async (HttpContext ctx) =>
         {
             string body;
@@ -304,7 +304,7 @@ public static class ServerHost
                 try
                 {
                     var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".cache", "livepaper", "freeze.log");
+                        ".cache", "liascape", "freeze.log");
                     lock (_logLock)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -318,7 +318,7 @@ public static class ServerHost
         // clear the re-downloadable preview caches only (NOT steamcmd downloads or state files)
         app.MapPost("/cache/clear", () =>
         {
-            var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper");
+            var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
             long freed = 0; int count = 0;
             foreach (var sub in new[] { "workshop_previews", "we_thumbs" })
             {
@@ -670,7 +670,7 @@ public static class ServerHost
             try
             {
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".cache", "livepaper", "workshop_previews");
+                    ".cache", "liascape", "workshop_previews");
                 Directory.CreateDirectory(dir);
                 bool remote = Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "http" || uri.Scheme == "https");
 
@@ -738,7 +738,7 @@ public static class ServerHost
                 // → native still. Bucket to 64px so a handful of cache entries cover all card sizes.
                 int width = w is > 0 ? Math.Min(2048, ((w.Value + 63) / 64) * 64) : 0;
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".cache", "livepaper", "workshop_previews");
+                    ".cache", "liascape", "workshop_previews");
                 Directory.CreateDirectory(dir);
                 bool remote = Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "http" || uri.Scheme == "https");
                 // local: key the cache on path+mtime so a replaced file re-extracts; remote URLs are immutable

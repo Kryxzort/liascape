@@ -27,8 +27,8 @@ fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 N=${N:-300}
 T=$(mktemp -d /tmp/liascape-lat-XXXXXX)   # short: a unix socket path must be < 108 bytes
-LIB=$T/home/.local/share/livepaper/library/imported
-mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$LIB" "$T/rt" "$T/st"
+LIB=$T/home/.local/share/liascape/library/imported
+mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$LIB" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_PROFILE_SETTINGS=1
@@ -68,16 +68,16 @@ for i in range(n):
 json.dump(idx, open(f"{lib}/index.json", "w"), indent=2)
 EOF
 echo "library: $N items, index.json $(stat -c %s "$LIB/index.json") bytes"
-cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
+cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
  "GlobalTransitionEnabled":false,"RestartIntervalSeconds":600}
 EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
-for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
-[ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
-U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
+[ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = liascape-player ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
 post_ms() { curl -s -m 10 -o /dev/null -w '%{time_total}' -X POST -H 'Content-Type: application/json' -d "$2" "$U$1" | python3 -c "import sys; print(int(float(sys.stdin.read())*1000))"; }

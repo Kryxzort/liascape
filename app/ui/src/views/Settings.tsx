@@ -450,12 +450,12 @@ export const Settings = memo(function Settings() {
       <Section title="Keybind reference" icon={<Keyboard size={15} />}>
         {actions.map((a) => (
           <Row key={a} label={a}>
-            <code className="kb">livepaper --action={a}</code>
-            <button className="mini" onClick={() => navigator.clipboard?.writeText(`livepaper --action=${a}`)}>copy</button>
+            <code className="kb">liascape --action={a}</code>
+            <button className="mini" onClick={() => navigator.clipboard?.writeText(`liascape --action=${a}`)}>copy</button>
           </Row>
         ))}
-        <Row label="Autostart"><code className="kb">livepaper --restore</code>
-          <button className="mini" onClick={() => navigator.clipboard?.writeText("livepaper --restore")}>copy</button></Row>
+        <Row label="Autostart"><code className="kb">liascape --restore</code>
+          <button className="mini" onClick={() => navigator.clipboard?.writeText("liascape --restore")}>copy</button></Row>
       </Section>
 
       <Section title="Library" icon={<LibraryIcon size={15} />}>

@@ -301,11 +301,11 @@ prlimit --core=1:1 env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="
     WAYLAND_DISPLAY="$WL" "$BIN" serve --ao null --log-level debug >"$SCRATCH/serve.log" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 100); do
-    [[ -S $RT/livepaper/liascape-player.sock ]] && break
+    [[ -S $RT/liascape/liascape-player.sock ]] && break
     kill -0 "$SERVE_PID" 2>/dev/null || fail "liascape-player serve exited early"
     sleep 0.1
 done
-[[ -S $RT/livepaper/liascape-player.sock ]] || fail "no liascape-player socket after 10 s"
+[[ -S $RT/liascape/liascape-player.sock ]] || fail "no liascape-player socket after 10 s"
 HELLO=$(ctl hello) || fail "ctl hello: $HELLO"
 [[ $(jq -r .backend <<<"$HELLO") == wayland ]] || fail "backend is $(jq -r .backend <<<"$HELLO"), want wayland"
 PLAYER_PID=$(jq -r .pid <<<"$HELLO")
@@ -499,7 +499,7 @@ NOW=$(layout_now)
 [[ $NOW == "$(jq -c "$NORM" "$LAYOUT")" ]] || fail "layout after replug differs: $NOW"
 say "layout after replug identical to the record"
 jq -r 'select(.kind == "output.added" or .kind == "output.removed") | "  \(.kind) \(.output) content=\(.content // "-")"' \
-    "$STATE"/livepaper/liascape-player/events.jsonl 2>/dev/null
+    "$STATE"/liascape/liascape-player/events.jsonl 2>/dev/null
 
 # ------------------------------------------------------------------ 7. crash → restart → restore
 # Both outputs show BLUE now. SIGSEGV the compositor: the supervisor restarts it with
@@ -535,7 +535,7 @@ say "restored centre pixels: $OUT_A = $PA, $OUT_B = $PB"
 ctl set '{"path":"out:*.layer","value":"background"}' >/dev/null
 for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 0 || fail "$o not back on background"; done
 jq -r 'select(.kind | startswith("supervisor.") or startswith("snapshot.restored")) | "  \(.kind) \(del(.t_wall, .t_mono_ms, .comp, .level, .kind, .corr) | tostring)"' \
-    "$STATE"/livepaper/liascape-player/events.jsonl 2>/dev/null
+    "$STATE"/liascape/liascape-player/events.jsonl 2>/dev/null
 
 # ------------------------------------------------------------------ 8. quit
 ctl quit >/dev/null || fail "ctl quit"

@@ -11,11 +11,11 @@ public static class PlaylistService
 {
     public static readonly string PlaylistsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "livepaper", "playlists");
+        "liascape", "playlists");
 
     public static string CurrentStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "playlist_state.json");
+        ".config", "liascape", "playlist_state.json");
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 

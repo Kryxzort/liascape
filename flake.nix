@@ -1,5 +1,5 @@
 {
-  description = "livepaper-pro — live wallpaper manager for Wayland (video + Wallpaper Engine scenes)";
+  description = "liascape — live wallpaper manager for Wayland (video + Wallpaper Engine scenes)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -13,7 +13,7 @@
       version = "0.1.0";
 
       # Runtime tools the backend shells out to. On NixOS these have no global FHS path, so we bake
-      # them onto the wrapper's PATH — this is what makes livepaper "just work" without the user
+      # them onto the wrapper's PATH — this is what makes liascape "just work" without the user
       # installing ffmpeg/mpvpaper/etc. themselves.
       runtimeTools = with pkgs; [
         ffmpeg # /still thumbnail decode + frozen-frame grabs
@@ -24,7 +24,7 @@
 
       # 1) React UI → static dist/.
       ui = pkgs.buildNpmPackage {
-        pname = "livepaper-ui";
+        pname = "liascape-ui";
         inherit version;
         src = ./app/ui;
         npmDepsHash = "sha256-CrYaDAHFfkcwSkwCWmApEtRufKyxB8Qh8UL6aK92q0k=";
@@ -39,7 +39,7 @@
 
       # 2) C# .NET 10 backend (headless web API + CLI). Self-contained so it carries its own runtime.
       backend = pkgs.buildDotnetModule {
-        pname = "livepaper-backend";
+        pname = "liascape-backend";
         inherit version;
         src = ./src/backend;
         projectFile = "liascape-backend.csproj";
@@ -187,58 +187,58 @@
       # 4) Electron shell sources (plain JS; electron comes from nixpkgs, not the bundled prebuilt
       # which can't dlopen its libs on NixOS). Keep the 42.x pin — older crash-loops the GPU on
       # NVIDIA + kernel ≥6.12 (see .claude/rules/distribution.md).
-      shellSrc = pkgs.runCommand "livepaper-shell-src" { } ''
+      shellSrc = pkgs.runCommand "liascape-shell-src" { } ''
         mkdir -p $out
         cp -r ${./app/shell}/. $out/
         rm -rf $out/node_modules
       '';
 
-      livepaper = pkgs.stdenvNoCC.mkDerivation {
-        pname = "livepaper";
+      liascape = pkgs.stdenvNoCC.mkDerivation {
+        pname = "liascape";
         inherit version;
         dontUnpack = true;
         nativeBuildInputs = [ pkgs.makeWrapper ];
 
         installPhase = ''
           runHook preInstall
-          mkdir -p $out/bin $out/share/livepaper $out/share/applications
+          mkdir -p $out/bin $out/share/liascape $out/share/applications
 
           # transitions assets (shaders + manifest + preview frames)
-          cp -r ${./transitions} $out/share/livepaper/transitions
+          cp -r ${./transitions} $out/share/liascape/transitions
 
           # GUI launcher: electron shell → spawns the backend (--serve) + loads the UI.
-          makeWrapper ${pkgs.electron_42}/bin/electron $out/bin/livepaper-ui \
+          makeWrapper ${pkgs.electron_42}/bin/electron $out/bin/liascape-ui \
             --add-flags ${shellSrc} \
             --set LIASCAPE_BACKEND ${backend}/bin/liascape-backend \
             --set LIASCAPE_UI_DIR ${ui} \
-            --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
+            --set LIASCAPE_TRANSITIONS_DIR $out/share/liascape/transitions \
             --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
             --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
             --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
-          # Headless CLI (--restore/--action/daemons/--serve). Bare `livepaper` opens the GUI.
-          makeWrapper ${backend}/bin/liascape-backend $out/bin/livepaper-cli \
+          # Headless CLI (--restore/--action/daemons/--serve). Bare `liascape` opens the GUI.
+          makeWrapper ${backend}/bin/liascape-backend $out/bin/liascape-cli \
             --set LIASCAPE_UI_DIR ${ui} \
-            --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
+            --set LIASCAPE_TRANSITIONS_DIR $out/share/liascape/transitions \
             --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
             --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
             --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
-          cat > $out/bin/livepaper <<EOF
+          cat > $out/bin/liascape <<EOF
           #!${pkgs.runtimeShell}
           # bare invocation → GUI; any flag → headless backend
-          if [ \$# -eq 0 ]; then exec $out/bin/livepaper-ui; fi
-          exec $out/bin/livepaper-cli "\$@"
+          if [ \$# -eq 0 ]; then exec $out/bin/liascape-ui; fi
+          exec $out/bin/liascape-cli "\$@"
           EOF
-          chmod +x $out/bin/livepaper
+          chmod +x $out/bin/liascape
 
-          cat > $out/share/applications/livepaper.desktop <<EOF
+          cat > $out/share/applications/liascape.desktop <<EOF
           [Desktop Entry]
-          Name=Livepaper
+          Name=Liascape
           Comment=Live wallpaper manager (Wayland)
-          Exec=$out/bin/livepaper-ui
+          Exec=$out/bin/liascape-ui
           Type=Application
           Categories=Utility;
           Keywords=wallpaper;live;wayland;video;
@@ -249,9 +249,9 @@
 
         meta = {
           description = "Live wallpaper manager for Wayland (video + Wallpaper Engine scenes)";
-          homepage = "https://github.com/kryxzort/livepaper-pro";
+          homepage = "https://github.com/Kryxzort/liascape";
           platforms = [ "x86_64-linux" ];
-          mainProgram = "livepaper";
+          mainProgram = "liascape";
         };
       };
     in
@@ -264,13 +264,13 @@
           liascape-audio
           lwe-core
           liascape-player
-          livepaper
+          liascape
           ;
-        default = livepaper;
+        default = liascape;
       };
       apps.${system}.default = {
         type = "app";
-        program = "${livepaper}/bin/livepaper";
+        program = "${liascape}/bin/liascape";
       };
 
       # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make +

@@ -459,7 +459,7 @@ step_crash() {
 # The `loop` probe keeps the last 8 tick durations + the tick counter, so polling it every
 # ~25 ms over the socket gives every tick exactly once (deduplicated by tick number).
 tick_stats() { # <seconds> → JSON {ticks, p50, p99, max}
-    python3 - "$RT/livepaper/liascape-player.sock" "$1" <<'PY'
+    python3 - "$RT/liascape/liascape-player.sock" "$1" <<'PY'
 import json, socket, sys, time
 path, secs = sys.argv[1], float(sys.argv[2])
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(path)

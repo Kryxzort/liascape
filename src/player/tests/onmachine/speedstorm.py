@@ -20,7 +20,7 @@ Never prints /settings (it holds SteamRefreshToken); writes it nowhere either.
 import json, os, random, socket, subprocess, sys, threading, time, urllib.request
 
 U = "http://127.0.0.1:5174"
-SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "livepaper", "liascape-player.sock")
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "liascape", "liascape-player.sock")
 args = sys.argv[1:]
 OUT = args[0]
 def opt(name, default):
@@ -87,7 +87,7 @@ items = st.get("videoPaths") or [cur["path"]]
 lib = json.loads(http("GET", "/library")[1])
 orig_over = {i["videoPath"]: i.get("speedOverride") for i in lib if i["videoPath"] in items}
 orig_speed = settings().get("speed", 1.0)
-orig_user_muted = os.path.exists(os.path.expanduser("~/.config/livepaper/user_mute.state"))
+orig_user_muted = os.path.exists(os.path.expanduser("~/.config/liascape/user_mute.state"))
 json.dump({"items": items, "orig_over": orig_over, "orig_speed": orig_speed, "orig_user_muted": orig_user_muted},
           open(os.path.join(OUT, "originals.json"), "w"), indent=1)
 print(f"[storm] {len(items)} playlist items, global speed {orig_speed}, user muted {orig_user_muted}", flush=True)

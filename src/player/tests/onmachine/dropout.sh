@@ -173,7 +173,7 @@ cleanup() {
         rm -rf "$TMP"
         echo PASS
     else
-        echo "kept $TMP (serve.err, state/livepaper/liascape-player/events.jsonl)"
+        echo "kept $TMP (serve.err, state/liascape/liascape-player/events.jsonl)"
     fi
     exit "$rc"
 }
@@ -199,7 +199,7 @@ done
 "$BIN" serve --headless --outputs "640x360@${OUTPUT_HZ}" --debug --log-level debug \
     >"$TMP/serve.out" 2>"$TMP/serve.err" &
 SERVE_PID=$!
-SOCK=$XDG_RUNTIME_DIR/livepaper/liascape-player.sock
+SOCK=$XDG_RUNTIME_DIR/liascape/liascape-player.sock
 for _ in $(seq 150); do [[ -S $SOCK ]] && break; sleep 0.1; done
 [[ -S $SOCK ]] || fail "serve never bound $SOCK: $(cat "$TMP/serve.err")"
 ctl hello >/dev/null || fail "hello"

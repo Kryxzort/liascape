@@ -58,7 +58,7 @@ pub fn catalogue_dir() -> Option<std::path::PathBuf> {
     if dir.is_none() {
         skip_gpu(
             "no transitions/ directory resolved (LIASCAPE_TRANSITIONS_DIR unset, no \
-             ~/.local/share/livepaper-web/transitions, no repo transitions/ found above the exe \
+             ~/.local/share/liascape-web/transitions, no repo transitions/ found above the exe \
              or CARGO_MANIFEST_DIR)",
         );
     }

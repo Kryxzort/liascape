@@ -1,4 +1,4 @@
-// liascape-audio — libpulse helper for gapless scene-audio crossfades in livepaper.
+// liascape-audio — libpulse helper for gapless scene-audio crossfades in liascape.
 //
 // Shelling `pactl` per stream is too slow (~10-40ms list/spawn latency) to beat PulseAudio's
 // default-volume-on-stream-create and the connect/disconnect volume resets that LWE triggers when a

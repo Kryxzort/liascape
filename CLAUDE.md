@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**livepaper** — Linux live-wallpaper manager for Wayland. An **Electron + React** UI over a **headless C# backend**: the same `livepaper` binary runs the CLI, the background daemons, and a loopback web API (`--serve`) that the UI talks to. Wallpapers are applied via [mpvpaper](https://github.com/GhostNaN/mpvpaper) (videos) and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (WE scenes).
+**liascape** — Linux live-wallpaper manager for Wayland. An **Electron + React** UI over a **headless C# backend**: the same `liascape` binary runs the CLI, the background daemons, and a loopback web API (`--serve`) that the UI talks to. Wallpapers are applied via [mpvpaper](https://github.com/GhostNaN/mpvpaper) (videos) and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (WE scenes).
 
 ## System Dependencies
 
@@ -21,13 +21,13 @@
 
 ```bash
 bash scripts/dev.sh                              # dev: Vite HMR (:5173) + dotnet watch --serve (:5174) as systemd user units
-livepaper                                        # open the app (GUI) — bare command launches the Electron shell
-livepaper-ui                                     # explicit GUI launcher (Electron)
+liascape                                        # open the app (GUI) — bare command launches the Electron shell
+liascape-ui                                     # explicit GUI launcher (Electron)
 dotnet run --project src/backend -- --serve    # backend only (headless loopback API)
 cd app/ui && npm run dev                          # React UI only, in a browser (append ?api=<backend-port>)
 dotnet build src/backend                        # build backend (no solution file at root)
 cd app/ui && npm run build                        # build the UI bundle (dist/)
-bash scripts/install.sh                           # build UI + publish backend, install livepaper + livepaper-ui
+bash scripts/install.sh                           # build UI + publish backend, install liascape + liascape-ui
 electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (offscreen, counts rendered elements)
 ```
 
@@ -35,9 +35,9 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
 
 ## CLI Flags
 
-`livepaper` with **no args opens the GUI**; any flag runs headless:
+`liascape` with **no args opens the GUI**; any flag runs headless:
 
-- `--serve` *(internal default for the backend)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/livepaper/serve.port`. The Electron shell spawns this with an explicit `--serve`.
+- `--serve` *(internal default for the backend)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`. The Electron shell spawns this with an explicit `--serve`.
 - `--restore` — re-applies last session without a UI. Timed playlists: `setsid`-spawns `--timer-daemon` and returns.
 - `--random` — picks a random library wallpaper, applies, exits. Saves the pick so `--restore` replays it.
 - `--kill` — stops playback, exits.
@@ -72,7 +72,7 @@ transitions/             # shared GLSL effect catalog (glsl/ + manifest.json + w
 docs/player/              # AI-facing liascape-player docs: architecture.md, invariants.md, spikes/
 app/
 ├── ui/                   # Vite + React 19 + TS + zustand + framer-motion (the renderer)
-└── shell/                # Electron main/preload + probes; spawns `livepaper --serve`, loads the UI same-origin
+└── shell/                # Electron main/preload + probes; spawns `liascape --serve`, loads the UI same-origin
 ```
 
 WE-style **transitions** animate every wallpaper switch (gl-transitions GLSL) — see `.claude/rules/player.md`. v1: video→video, **full-live** (both sides keep playing through the effect — libmpv decodes A+B in the renderer; frozen stills are the warmup/scene fallback).

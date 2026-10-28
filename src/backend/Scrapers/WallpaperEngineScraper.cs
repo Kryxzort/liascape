@@ -116,7 +116,7 @@ public static class WallpaperEngineScraper
 
     private static string GifThumbCacheDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".cache", "livepaper", "we_thumbs");
+        ".cache", "liascape", "we_thumbs");
 
     // Returns (staticPath, animatedGifPath). animatedGifPath is non-null when a GIF
     // exists in the directory. Checks for GIF before preview.jpg so videos with both

@@ -13,7 +13,7 @@ public static class WorkshopDownloader
 {
     public static string SteamCmdWorkshopContentDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".cache", "livepaper", "steamcmd_workshop",
+        ".cache", "liascape", "steamcmd_workshop",
         "steamapps", "workshop", "content", "431960");
 
     public static async Task<string> AcquireAsync(
@@ -252,7 +252,7 @@ public static class WorkshopDownloader
 
         string installDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".cache", "livepaper", "steamcmd_workshop");
+            ".cache", "liascape", "steamcmd_workshop");
         Directory.CreateDirectory(installDir);
 
         progress?.Report((0, "Starting steamcmd…"));
@@ -437,7 +437,7 @@ public static class WorkshopDownloader
     {
         string installDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".cache", "livepaper", "steamcmd_workshop");
+            ".cache", "liascape", "steamcmd_workshop");
         Directory.CreateDirectory(installDir);
 
         // Wrap in a shell command so the terminal stays open after steamcmd exits

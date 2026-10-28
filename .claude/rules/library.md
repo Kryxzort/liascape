@@ -10,7 +10,7 @@ paths:
 
 ## Library layout (per-item folders + per-source `index.json`)
 
-Library root: `~/.local/share/livepaper/library/`. Config: `~/.config/livepaper/settings.json` — Cache: `~/.cache/livepaper/`.
+Library root: `~/.local/share/liascape/library/`. Config: `~/.config/liascape/settings.json` — Cache: `~/.cache/liascape/`.
 
 **Every item is its own folder, named after the item.** All metadata, per-item overrides, and dedup keys live in a per-source `index.json`.
 
@@ -43,7 +43,7 @@ FileSizeBytes?, Subscriptions?, Favorites?, Views?, Tags[]
 - Serialized `WhenWritingNull` → **absent `volume`/`speed` means "use global."**
 - `Locate(mediaPath) → (source, key)`: splits the path relative to the library root — `parts[0]` = source, `parts[1]` = key. Works for a media file (`…/<source>/<key>/<file>`) **and** a scene folder (`…/<source>/<key>`).
 - `GetMeta` / `SetMeta(path, mutate)` (lock-guarded read-modify-write, creates entry) / `Remove`. `LoadIndex` re-reads the file each call (no cache) — daemons/other writers may have changed it.
-- **Every index write is a read-modify-write under that one lock**: `SetMeta`, `Remove`, or `UpdateIndex(source, idx => … return save?)` (reentrant — a writer moving entries between two indexes nests them). `SaveIndex` is private. Trash, undo (`RestoreBatch`), the WE sync and the direct-download reconcile used to `LoadIndex`, do their work, and save that copy outside the lock — over an override saved meanwhile (matrix `race:indexLostUpdate`: 2–3 of 40 slider saves reverted by trash/undo cycles of another item; 0 since). Every one of those also holds `FileLock` on `index.json.lock` (an `flock` shared with every livepaper process — the CLI's `--restore` sync, a keybind run locally, the daemons), taken inside `_lock`.
+- **Every index write is a read-modify-write under that one lock**: `SetMeta`, `Remove`, or `UpdateIndex(source, idx => … return save?)` (reentrant — a writer moving entries between two indexes nests them). `SaveIndex` is private. Trash, undo (`RestoreBatch`), the WE sync and the direct-download reconcile used to `LoadIndex`, do their work, and save that copy outside the lock — over an override saved meanwhile (matrix `race:indexLostUpdate`: 2–3 of 40 slider saves reverted by trash/undo cycles of another item; 0 since). Every one of those also holds `FileLock` on `index.json.lock` (an `flock` shared with every liascape process — the CLI's `--restore` sync, a keybind run locally, the daemons), taken inside `_lock`.
 
 ## Scenes are **folders**, not marker files
 
@@ -112,12 +112,12 @@ The web UI animates library/strip cards from the source's **preview gif/webp** (
 
 ## File paths beyond library
 
-- `~/.config/livepaper/lwe.pid` — PIDs of running LWE processes
-- `~/.config/livepaper/user_mute.state` — presence = user muted (guards auto-unmute)
-- `~/.cache/livepaper/playlist_observer_paths.json` — shuffled order for playlist observer reconnection
-- `~/.cache/livepaper/we_thumbs/<workshopId>.jpg` — static frame extracted from GIF thumbnails
-- `~/.config/livepaper/serve.port` — the `--serve` backend's chosen port (Electron reads it)
-- `~/.config/livepaper/workshop_unsub.json` — durable "Delete from Source" unsubscribe queue (below)
+- `~/.config/liascape/lwe.pid` — PIDs of running LWE processes
+- `~/.config/liascape/user_mute.state` — presence = user muted (guards auto-unmute)
+- `~/.cache/liascape/playlist_observer_paths.json` — shuffled order for playlist observer reconnection
+- `~/.cache/liascape/we_thumbs/<workshopId>.jpg` — static frame extracted from GIF thumbnails
+- `~/.config/liascape/serve.port` — the `--serve` backend's chosen port (Electron reads it)
+- `~/.config/liascape/workshop_unsub.json` — durable "Delete from Source" unsubscribe queue (below)
 
 ## Delete vs Delete from Source (workshop items)
 
@@ -129,7 +129,7 @@ Orchestrated in **`Web/AppOps.cs`**:
 **We never delete the workshop folder ourselves.** Unsubscribing makes Steam remove the folder + its `appworkshop_431960.acf` entry together on its next sync. A `blocked` set keeps AutoImport from resurrecting the lingering folder until Steam cleans it.
 
 ### `WorkshopUnsubQueue` (`Helpers/WorkshopUnsubQueue.cs`)
-- Persisted JSON `~/.config/livepaper/workshop_unsub.json`: `{ Pending[], Blocked[] }`. `pending` = awaiting the unsubscribe POST; `blocked` = unsubscribed, AutoImport skips while Steam's cleanup lags.
+- Persisted JSON `~/.config/liascape/workshop_unsub.json`: `{ Pending[], Blocked[] }`. `pending` = awaiting the unsubscribe POST; `blocked` = unsubscribed, AutoImport skips while Steam's cleanup lags.
 - API: `AddPending`, `RemovePending` (undo), `MarkBlocked` (pending→blocked), `Unblock` (re-subscribe / WE-Local re-add: drop from both), `SnapshotPending`, `HasPending`, `SnapshotBlockedSet` (one read per pass), `PruneBlocked(folderExists)`. Thread-safe (re-reads under a lock per call).
 - **AutoImport** (`SyncWallpaperEngine`) snapshots `pending ∪ blocked` once into a `HashSet` and skips matches (never `IsBlocked` per folder).
 

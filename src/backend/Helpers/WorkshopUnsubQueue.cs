@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Liascape.Helpers;
 
 /// Durable state for "Delete from Source" unsubscribes, persisted at
-/// ~/.config/livepaper/workshop_unsub.json.
+/// ~/.config/liascape/workshop_unsub.json.
 ///
 /// Two lists:
 /// - `pending` — ids enqueued by delete-from-source, awaiting the unsubscribe POST. Undo pulls them
@@ -24,7 +24,7 @@ public static class WorkshopUnsubQueue
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "livepaper", "workshop_unsub.json");
+        "liascape", "workshop_unsub.json");
 
     private sealed class State
     {

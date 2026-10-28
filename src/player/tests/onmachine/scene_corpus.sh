@@ -13,7 +13,7 @@
 # Options:
 #   --dir DIR            Workshop content folder (default
 #                        ~/.local/share/Steam/steamapps/workshop/content/431960). REFUSED when it
-#                        is (or resolves into) ~/.cache/livepaper/steamcmd_workshop — that cache is
+#                        is (or resolves into) ~/.cache/liascape/steamcmd_workshop — that cache is
 #                        never test media. Every item is checked again after resolving symlinks.
 #   --only ID[,ID…]      only these workshop ids
 #   --limit N            only the first N scenes (sorted by id)
@@ -31,7 +31,7 @@
 #                        it (`--screenshot`), then list the scenes that start there but not here.
 #                        THIS DRAWS ON THE REAL OUTPUT NAMED BY --legacy-output (it takes over the
 #                        desktop session for ~20 s per scene): owner-run only, never in a test lane.
-#                        Stop the app's own wallpaper first (`livepaper --kill`); the runner kills
+#                        Stop the app's own wallpaper first (`liascape --kill`); the runner kills
 #                        each LWE it started and nothing else.
 #   --legacy-output NAME the output LWE draws on (required with --ab-legacy, e.g. DP-1)
 #   --legacy-delay N     LWE's --screenshot-delay in frames (default 120 = 4 s at 30 fps)
@@ -101,7 +101,7 @@ while (($#)); do
 done
 
 # ---------------------------------------------------------------- the steamcmd cache guard
-FORBIDDEN=$HOME/.cache/livepaper/steamcmd_workshop
+FORBIDDEN=$HOME/.cache/liascape/steamcmd_workshop
 forbidden_path() { # $1 = a path; true if it is, or lies inside, the steamcmd cache
     local p r f
     p=$1
@@ -113,7 +113,7 @@ forbidden_path() { # $1 = a path; true if it is, or lies inside, the steamcmd ca
     return 1
 }
 if forbidden_path "$DIR"; then
-    die "refusing $DIR: the steamcmd cache (~/.cache/livepaper/steamcmd_workshop) is never test media"
+    die "refusing $DIR: the steamcmd cache (~/.cache/liascape/steamcmd_workshop) is never test media"
 fi
 [[ -d $DIR ]] || die "no such folder: $DIR"
 DIR=$(realpath -- "$DIR")

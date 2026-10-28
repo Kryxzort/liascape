@@ -42,7 +42,7 @@ soak's RSS growth (§ 4, two causes: glibc arena retention, Task 20b; an NVIDIA 
 event-queue leak, Task 20e), `/next`/`/prev`/`/random` crashing on a scene under `liascape-player`
 (§ 1.3, Task 20c), and a 65–320 ms loop stall per switch from hwdec interop/`vulkan-copy` init
 (Task 20d). **Final soak: PASS (0.31 MiB/min).** One deployment item for the owner: the
-installed `livepaper` NixOS package predates liascape-player entirely (§ 1.4) — rebuild with
+installed `liascape` NixOS package predates liascape-player entirely (§ 1.4) — rebuild with
 `sudo nixos-rebuild switch --impure`.
 
 ## 1. Method × mode matrix
@@ -106,7 +106,7 @@ read as "not meaningful" rather than as 43 real pacing failures.
 
 All three methods' `wait-for-end` cell failed their very first switch: `tr-136`/`tr-324`/
 `tr-515`, "transition did not reach a terminal state". `events.jsonl` (state dir
-`~/.local/state/livepaper/liascape-player/events.jsonl`, which survives past the run since it isn't
+`~/.local/state/liascape/liascape-player/events.jsonl`, which survives past the run since it isn't
 rotated) shows what actually happened to all three:
 
 ```
@@ -217,9 +217,9 @@ All 3 methods failed idx 1, "no new transition corr observed", every time — in
 first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out incomplete.
 **Two-step live investigation, both via `strace -f -e trace=execve,...`:**
 
-1. `restore_cli_invoke()` always used `command -v livepaper` (`/usr/bin/livepaper`, the owner's
+1. `restore_cli_invoke()` always used `command -v liascape` (`/usr/bin/liascape`, the owner's
    installed NixOS package). `strace`'d it directly: it execs through 4 wrapper layers down to
-   `.../livepaper-backend-0.1.0/lib/livepaper-backend/livepaper`, which then runs `setsid
+   `.../liascape-backend-0.1.0/lib/liascape-backend/liascape`, which then runs `setsid
    mpvpaper ...` — the **legacy** path — even though the already-running `--serve` backend's own
    `PlayerEngine` is `liascape-player`. First hypothesis: a binary-resolution gap (the wrapper exports
    `LIASCAPE_TRANSITION_BIN`/`LIASCAPE_AUDIO_BIN` but not `LIASCAPE_PLAYER_BIN`, and doesn't bundle `liascape-player`
@@ -229,20 +229,20 @@ first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out 
 2. That ruled out binary resolution, so: `strings -el` (UTF-16, how .NET stores string literals)
    on the installed package's `liascape-backend.dll` for `"LIASCAPE_PLAYER_BIN"` / `"PlayerEngine"` —
    **zero matches, anywhere in the derivation.** The same search on this worktree's own dev build
-   (`src/backend/bin/Debug/net10.0/liascape-backend.dll`, what `livepaper-watch`/`dotnet watch`
-   actually runs) finds both immediately. **The owner's installed `livepaper` package is a stale
+   (`src/backend/bin/Debug/net10.0/liascape-backend.dll`, what `liascape-watch`/`dotnet watch`
+   actually runs) finds both immediately. **The owner's installed `liascape` package is a stale
    build that predates `PlayerEngine`/liascape-player existing in the C# source at all** — not a
    resolvable-binary gap `LIASCAPE_PLAYER_BIN` could ever have fixed; the feature simply isn't compiled
    into that binary.
 
 **Confirmed fix, live:** priming the session (`POST /apply`) then running
-`$DOTNET $DLL --restore` (the current dev build — the exact DLL `livepaper-watch` already runs)
+`$DOTNET $DLL --restore` (the current dev build — the exact DLL `liascape-watch` already runs)
 instead of the installed CLI produced a real `transition.scheduled`/`.handoff` immediately.
 
 **Fix applied** (`battery.sh`, `restore_cli_invoke()`, live branch): use `"$DOTNET" "$DLL"
 --restore` (the dev build already resolved at the top of the script) instead of `command -v
-livepaper`. This is a battery-script workaround for testing purposes only — it does **not** fix
-the underlying gap, which is that the owner's actually-installed `livepaper` (what runs for
+liascape`. This is a battery-script workaround for testing purposes only — it does **not** fix
+the underlying gap, which is that the owner's actually-installed `liascape` (what runs for
 real, outside this test harness, for every one-shot CLI flag) has no liascape-player code in it at
 all.
 
@@ -258,12 +258,12 @@ all.
 (frame_violations after both §1.1 fixes: 0, 0, 3/8 — the last is real low-fps-content pacing,
 §1.1's "what's left is not a bug".)
 
-**Severity note for the owner:** while `liascape-player` is selected, the installed `livepaper`
+**Severity note for the owner:** while `liascape-player` is selected, the installed `liascape`
 binary's one-shot flags (`--restore`, `--random`, `--kill`, `--action=*`) all silently run
 legacy instead — including `--restore` itself, used on every boot/session-resume. The
 long-running `--serve` backend (what the Electron UI actually talks to) is unaffected (it
 resolves `liascape-player` fine via its own dev-tree path walk) — but the owner should rebuild/
-reinstall the NixOS `livepaper` package from this branch before relying on `liascape-player` day to
+reinstall the NixOS `liascape` package from this branch before relying on `liascape-player` day to
 day, tracked in `docs/TODO.md`.
 
 ## 2. Per-monitor isolation (`permonitor`)
@@ -383,7 +383,7 @@ until egl-wayland2 > 1.0.2 ships. Both are in `docs/TODO.md`.
 
 ## Concerns / follow-ups
 
-- **§1.4's packaging gap** means every one-shot CLI flag run via the *installed* `livepaper`
+- **§1.4's packaging gap** means every one-shot CLI flag run via the *installed* `liascape`
   silently falls back to legacy whenever `liascape-player` is configured, because that package
   predates liascape-player's existence in the source entirely — not merely a missing env var. Needs a
   real rebuild/reinstall of the NixOS package from this branch (`docs/TODO.md`), not a flake

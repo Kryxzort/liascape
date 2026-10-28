@@ -1,5 +1,5 @@
 // API: typed client for the C# --serve backend. The Electron shell launches the window with
-// ?api=<port> (read from ~/.config/livepaper/serve.port); browser dev: append ?api=PORT.
+// ?api=<port> (read from ~/.config/liascape/serve.port); browser dev: append ?api=PORT.
 const params = new URLSearchParams(location.search);
 const port = params.get("api") || localStorage.getItem("liascape_api_port") || "";
 if (port) localStorage.setItem("liascape_api_port", port);
