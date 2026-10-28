@@ -54,3 +54,18 @@ Read this when the owner asks "anything I should know". Append during unattended
   matrix hangs). It fires whenever `livepaper-watch` is inactive and the source changed. Worth narrowing it to your
   installed app's path, or skipping it while a test runs. After the rename it also needs the new names
   (`liascape-watch.service`, `~/.cache/liascape`, `liascape`, the backend now runs as `liascape-backend serve`).
+
+## 2026-10-29 night — Phase 2 Task 14 (scene-worker on-machine battery)
+- **Report: `docs/player/reports/phase2.md`.** Crash isolation, pause on a scripted scene and the 1 h soak PASS
+  (soak 0.17 MiB/min, VRAM per worker flat, 116 switches all done); dropout matrix 720 switches, **0 drops**, one 3 ms
+  micro-gap left (frozen scene→scene at 240 Hz, open); pacing 6.94 / 4.17 ms on DP-1 / DP-2 with scenes at the refresh.
+- **Five fixes, each with a test:** scenes at `scene_fps 0` used to miss every few vblanks (now paced by frame
+  callbacks); the dropout detector's false drops on late ramp edges + meter gaps; the bus meter on the real-time
+  thread; the GPU budget now sees every monitor's missed frames; the compositor no longer rewrites unchanged source
+  values every frame (CPU per scene worker 2.9 % → 0.1 %).
+- **Open (docs/TODO.md → "Phase 2 battery findings"):** heavy real scenes cost 7–26 % CPU in their worker (same as
+  LWE itself per frame), a very GPU-heavy scene can still cost your 240 Hz monitor frames, CPU mid-transition.
+- **Scene corpus vs legacy:** nothing that plays under legacy fails under lp-player; 37 scenes play only under
+  lp-player (legacy crashes or shows black on them).
+- **For you:** the VT-switch / suspend check (`phase2.md` § 8) — listed under "Waiting on owner".
+- Your wallpaper was taken over for the runs (blank between them); `livepaper-watch` is started again at the end.

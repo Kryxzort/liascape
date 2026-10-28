@@ -10,6 +10,7 @@
 #   battery.sh run        [options]   -- the method x mode switch matrix (this file's main job)
 #   battery.sh permonitor [options]   -- brief step 3: per-output isolation, via `ctl` only
 #   battery.sh soak       [options]   -- brief step 4: 1 h RSS/VRAM soak on the owner's playlist
+#   battery.sh scenes <step…> [opts]  -- Phase 2 Task 14, the scene-worker battery (scenes.sh)
 #
 # Options (run):
 #   --hermetic            private backend + private headless lp-player (own HOME/XDG/port, --ao null,
@@ -148,6 +149,8 @@ EFFECT_MS_OVERRIDE=""   # --effect-ms: fixes the MAIN MATRIX's effect duration i
 SUBCMD="run"
 case "${1:-}" in
   run|permonitor|soak) SUBCMD=$1; shift ;;
+  # Phase 2 (Task 14): the scene-worker battery lives in scenes.sh (its own player, no backend).
+  scenes) shift; exec bash "$(dirname "${BASH_SOURCE[0]}")/scenes.sh" "$@" ;;
 esac
 
 HERMETIC=0

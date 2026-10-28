@@ -1031,32 +1031,40 @@ desktop crash notification; 0 coredumps since), `write_png*` with fdeflate `Fast
 **Files:** `src/player/tests/onmachine/{outputs.sh,dropout.sh,battery.sh}` (scene sections),
 `docs/player/reports/phase2.md`
 
-- [ ] **Step 1 — outputs:** synthetic + the three spike scenes on DP-1 (143.98 Hz) and DP-2 (239.76 Hz): grim pixels
+- [x] **Step 1 — outputs:** synthetic + the three spike scenes on DP-1 (143.98 Hz) and DP-2 (239.76 Hz): grim pixels
   non-blank at the overlay layer; paced mean 6.9 ± 0.5 / 4.2 ± 0.5 ms with `scene_fps 0`; worker CPU < 5 %,
   compositor CPU ≤ +1 % per worker vs the video baseline; a cursor warp moves the synthetic pointer_dot; Bunk's
   bars move with a `pw-play` tone on the default sink.
-- [ ] **Step 2 — dropout:** V→S, S→V, S→S × {full-live, reveal, frozen} × align now, + V→S align end; synthetic tone
+- [x] **Step 2 — dropout:** V→S, S→V, S→S × {full-live, reveal, frozen} × align now, + V→S align end; synthetic tone
   scenes and one SFW scene with audio; 20 switches per cell at 60 Hz and 240 Hz: drops 0, micro_gaps 0, onset check
   (first 10 ms ≤ settled + 6 dB).
-- [ ] **Step 3 — crash isolation (§11.3):** per-monitor via `ctl` (DP-1 video, DP-2 scene): 5 SIGKILLs, 2 hangs,
+- [x] **Step 3 — crash isolation (§11.3):** per-monitor via `ctl` (DP-1 video, DP-2 scene): 5 SIGKILLs, 2 hangs,
   1 crash loop to broken → DP-1 paced p95 within +10 % of baseline and missed ≤ baseline + 1, DP-1 dropout windows
   0 drops; DP-2 holds its frame (grim identical) and recovers ≤ 2 s (real) / ≤ 0.5 s (synthetic).
-- [ ] **Step 4 — GPU budget:** synthetic gpu_work 3.7 ms/frame at 144 fps on DP-1 → DP-2 paced p95 ≤ 4.6 ms, no
+- [x] **Step 4 — GPU budget:** synthetic gpu_work 3.7 ms/frame at 144 fps on DP-1 → DP-2 paced p95 ≤ 4.6 ms, no
   throttle; 6.2 ms/frame → `scene.throttled` ≤ 4 s and DP-2 paced p95 ≤ 5.0 ms after; record loop tick p99 under
   the heavy worker with explicit sync off (Task 20e's default) — Risk 2's evidence.
-- [ ] **Step 5 — several workers:** distinct scenes per output + S→S on both: transport ≤ 0.6 % compositor CPU per
+- [x] **Step 5 — several workers:** distinct scenes per output + S→S on both: transport ≤ 0.6 % compositor CPU per
   worker (spike: 0.54 %).
-- [ ] **Step 6 — pause on a scripted scene:** a 431960 scene whose `scene.json` has scripts, paused 10 s → the first
+- [x] **Step 6 — pause on a scripted scene:** a 431960 scene whose `scene.json` has scripts, paused 10 s → the first
   frame after resume equals the last before (patch 0005).
-- [ ] **Step 7 — soak:** 1 h mixed playlist (2 videos, 2 synthetic, 2 SFW scenes, 30 s interval, methods rotating):
+- [x] **Step 7 — soak:** 1 h mixed playlist (2 videos, 2 synthetic, 2 SFW scenes, 30 s interval, methods rotating):
   compositor RSS slope ≤ 0.5 MiB/min (Phase 1: 0.31), live workers ≤ 2 + dying at every sample, per-worker VRAM
   (`nvidia-smi -q -d PIDS`) flat ± 10 %, no worker after `ctl stop`.
-- [ ] **Step 8 — owner-run checklist** (documented in the report, not automated): VT switch and suspend/resume with
+- [x] **Step 8 — owner-run checklist** (documented in the report, not automated): VT switch and suspend/resume with
   a scene playing → it recovers (context lost → restart), the compositor survives.
-- [ ] **Step 9:** Write `docs/player/reports/phase2.md` (every number above, RED→GREEN for anything fixed); file
+- [x] **Step 9:** Write `docs/player/reports/phase2.md` (every number above, RED→GREEN for anything fixed); file
   each product finding as its own follow-up task (Task 20 produced 20b–20e). Commit `Report Phase 2 On-Machine Battery`.
 
 **Size: L** (≈ 2 days, plus whatever follow-ups it finds).
+
+**Done (2026-10-29) — `docs/player/reports/phase2.md`.** Battery `src/player/tests/onmachine/scenes.sh` (+
+`scenes_steps.sh`, `battery.sh scenes`) rather than sections in `outputs.sh`/`dropout.sh` (its own player, private
+real-time PipeWire — no sound reaches the speakers; the visualiser noise goes into that graph, not the default sink).
+Steps 1–7 run on the owner's machine, step 8 documented for the owner. Five fixes with tests (scene pacing at the
+refresh, the dropout detector's edges, the RT bus meter, the GPU budget over every output, the source mirror), a
+corpus-runner fix; open findings in `docs/TODO.md` → "Phase 2 battery findings".
+
 
 ### Task 15: Docs sweep
 
