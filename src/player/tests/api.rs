@@ -7105,6 +7105,26 @@ fn scene_audio_on_bus_with_identity() {
     assert!((w["audio"]["envelope_dbfs"].as_f64().unwrap() + 23.0).abs() < 3.0);
 }
 
+/// Phase 2 Task 14: the bus meter's capture callback runs on PipeWire's real-time data
+/// thread (`RT_PROCESS`), never the non-RT `lp-bus` main loop. On `lp-bus` it missed whole
+/// graph cycles under load — a timestamp jump, then silent blocks — at exactly the instants
+/// a switch loads the machine (a worker spawning, a source torn down): the on-machine matrix
+/// saw it in 245 of 301 switches, every one an unmeasured stretch for the dropout detector.
+#[test]
+fn meter_capture_runs_on_the_rt_data_thread() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let meter = wait_for(Duration::from_secs(5), "the meter's first callback", || {
+        let m = c.ok("probe", json!({"name": "bus"}))["meter"].clone();
+        m["callback_thread"].is_string().then_some(m)
+    });
+    println!("meter: {meter}");
+    assert_ne!(meter["callback_thread"], json!("lp-bus"), "{meter}");
+}
+
 /// A gain ramp (`animate gain.user` 0 → −20 dB over 300 ms) reaches the bus smoothly:
 /// monotonic, no step, ending at −43. (Flaked ~2/10 until the worker's stream got
 /// `RT_PROCESS`: its non-RT callback missed 64-frame cycles under load — a quantum of silence

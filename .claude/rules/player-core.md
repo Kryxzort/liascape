@@ -2522,13 +2522,20 @@ cancels anti-phase content and reads a one-sided channel 6 dB low, a fake dip fo
 detector), `20·log10`, floored at `units::SILENT_DB` (−96); a full-scale sine reads −3.01.
 Ring: 4 min (240 000 entries) of `(t_mono, dbfs_1ms)`; `t_mono` is the **`t_mono_ms` clock**
 (`log::mono_start()`; block time = its cycle's `pw_buffer.time` + its first frame's offset).
-The callback never blocks (staging buffer + `try_lock`). `Meter::window(from, to)`,
+The callback never blocks or allocates (staging buffer + `try_lock`) and runs on PipeWire's
+**real-time data thread** (`RT_PROCESS`, Phase 2 Task 14 — `data-loop.0`, `SCHED_RR` via
+rtkit): on the non-RT `lp-bus` main loop it missed whole graph cycles whenever a switch loaded
+the machine (a worker spawning, a source torn down) — measured in 245 of 301 on-machine
+switches, each a timestamp jump of 1–5 quanta plus silent blocks the dropout detector has to
+call `unmeasured`. Guard `tests/api.rs::meter_capture_runs_on_the_rt_data_thread` (RED:
+`lp-bus`, `other`). `Meter::window(from, to)`,
 `Meter::available()` (streaming, newest sample ≤ 500 ms old, no error), `Meter::status()`.
 
 **Probes.** `bus` → `{state, device, latency_ms, latency_samples, quantum_ms, target,
 default_sink, requested, overridden, playback_node, sink_node, retargets, reason, now_ms,
 meter {available,
-streaming, samples, last_ms, quantum_frames, dropped, error}}` (`now_ms` on the `t_mono_ms`
+streaming, samples, last_ms, quantum_frames, dropped, error, callback_thread, callback_policy
+(other|fifo|rr)}}` (`now_ms` on the `t_mono_ms`
 clock). `meter.window {last_ms} | {from_ms, to_ms} [, samples: false]` → `{from_ms, to_ms,
 count, median_db, min_db, max_db, max_gap_ms, first_ms, last_ms, samples: [[t_ms, db]…]}`;
 an unavailable meter is an **`unsupported` error saying why** (never an empty "all quiet").
@@ -3573,7 +3580,7 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   same build with the flag toggled): without RT 7 xruns, 3 failing dips; with RT **0 xruns, 0
   dips**; the test 20/20 after. The Task 10 commit's base had the same code (`audio.rs` unchanged
   since Task 6). **A second, measurement-side hazard found with it:** the bus meter's own capture
-  (on the non-RT `lp-bus` thread, by design) once missed a cycle — a 2.3 ms timestamp gap whose
+  (then on the non-RT `lp-bus` thread — RT since Phase 2 Task 14, § Audio bus → Meter) once missed a cycle — a 2.3 ms timestamp gap whose
   block joins two non-adjacent sine pieces (~1 dB off); the test now leaves out a 10 ms bin that
   isn't time-contiguous (≤ 2 allowed) — a dropout on the bus is contiguous −96 blocks and still
   fails.
