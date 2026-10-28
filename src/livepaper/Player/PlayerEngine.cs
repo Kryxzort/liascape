@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using livepaper.Helpers;
 using livepaper.Models;
@@ -82,7 +83,21 @@ public static class PlayerEngine
         };
     }
 
-    public const string SceneSupportOff = "scene support is off (Settings → Wallpaper Engine → Allow scene support)";
+    // `/player-engine.vram` (lp-player only, else null): is the player's low-VRAM rule holding the wallpaper now
+    // (`player.vram_low_active` — paused, and in `stop` mode its GPU memory freed; NOT a user pause: `player.paused`
+    // stays as the user left it), under which mode. `low_active` null = no player answering.
+    public static object? VramStatus(AppSettings s)
+    {
+        if (!IsLpPlayer) return null;
+        bool? low = null;
+        var c = LpPlayerClient.Shared;
+        if (c.SocketExists)
+            try { low = c.Call("get", new Dictionary<string, object?> { ["path"] = "player.vram_low_active" }, LpPlayerClient.QuickMs).GetProperty("value").ValueKind == System.Text.Json.JsonValueKind.True; }
+            catch (LpPlayerException) { }
+        return new { low_active = low, mode = s.VramLowMode };
+    }
+
+    public const string SceneSupportOff ="scene support is off (Settings → Wallpaper Engine → Allow scene support)";
 
     // Why a scene can't be applied right now (Apply's error) — null when it can.
     public static string? SceneUnavailableReason(AppSettings s)
@@ -152,6 +167,7 @@ public static class PlayerEngine
             binary = bin,
             running = LpPlayerClient.Shared.RunningInfo(),
             scenes = SceneStatus(s),
+            vram = VramStatus(s),
             reason = bin == null ? UnavailableReason
                 : Wants(s) && !IsLpPlayer ? "lp-player was not found when it was selected — select it again to switch now"
                 : LpPlayerClient.Shared.LastError,

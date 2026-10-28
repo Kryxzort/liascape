@@ -97,7 +97,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
-    done; 9 in progress; 10, 12–15, the Task 8 backend wiring, properties editor, loudness learning left.
+    done (+ 9, and the Task 8 backend wiring); 10, 12–15, properties editor, loudness learning left.
   - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
         runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
         a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
@@ -109,11 +109,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
         Settings hides the scene delay + primary radio under lp-player. The player emits `source.broken` now
         (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
-        scene in the snapshot); Task 12 (matrix scene cells); the Task 8 settings (GPU budget toggle, VRAM limit,
-        low-VRAM rule) need their backend wiring once their player props exist; `player.scene_assets` has no
+        scene in the snapshot); Task 12 (matrix scene cells); ~~the Task 8 settings' backend wiring~~ (done
+        2026-10-28, below); `player.scene_assets` has no
         setting yet (auto-resolve only); the scene properties editor (`scene_props`) is its own task; a
         hotplugged output that's in `LweMonitors` gets its fps only at the next player process or `/settings`
         change (the player remembers connectors it saw).
+  - [x] **Phase 2 Task 8's settings wired in the backend** (2026-10-28, player-adapter.md § Scenes → "GPU / VRAM
+        settings"): `SceneThrottle`, `SceneVramLimitEnabled` + `SceneVramLimitMib`, `VramLowMode` → the player
+        props, live and re-asserted per player process; `scene.vram_exceeded` → WS `scene-vram-stopped` + the
+        rotation advances, never marked crashed; `/player-engine.vram`; Settings → "GPU / VRAM". **Open:** a scene
+        pending B (armed for A's end) stopped by the guard fails that switch and the fallback switches to it now —
+        it plays ~2 s before it's stopped again (bounded, but visible); decide whether a VRAM-stopped scene should be
+        skipped for a while (it isn't broken). The low-VRAM hold has only a Settings status line (no tray/toast).
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
       `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).

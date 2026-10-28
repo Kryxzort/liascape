@@ -360,6 +360,8 @@ public static class ServerHost
                 Mark("resolve");
                 // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
                 if (!SameMonitors(prev.LweMonitors, s.LweMonitors)) livepaper.Player.LpPlayerMedia.ApplySceneFps(prev.LweMonitors, s.LweMonitors);
+                // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
+                livepaper.Player.LpPlayerMedia.ApplyGpuSettings(prev, s);
             }
             else
             {

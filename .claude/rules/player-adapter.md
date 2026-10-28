@@ -23,8 +23,8 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
   connection on a background thread — **only the kinds it consumes** (final review M11):
   `transition.` (a switch's terminal outcome — handoff/cancelled/failed — and, for the source
-  map's invalidation, every other transition kind), `player.stopped`, `source.retire`, `source.broken`
-  (Phase 2, § Scenes) — a handful
+  map's invalidation, every other transition kind), `player.stopped`, `source.retire`, `source.broken`,
+  `scene.vram_exceeded` (Phase 2, § Scenes) — a handful
   per switch; `source.` as a whole used to stream every debug `source.position` (~10 Hz per source)
   only to be discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
   250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now).
@@ -264,12 +264,31 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   DoVideoEndWait fallback then skips it (row above). From then on `IsSkippedPath` skips it — unless
   whitelisted (`/library/whitelist`) — and `Apply` refuses it. A missing / half-downloaded folder is a load
   error (`transition.failed`), never marked.
+- **GPU / VRAM settings (Phase 2 Task 8, wired 2026-10-28; player side: player-core.md § Scene worker → "GPU budget
+  and VRAM").** Three `AppSettings` → three player props, all live: `SceneThrottle` (bool, default true) →
+  `player.scene_throttle`; `SceneVramLimitEnabled` (default false) + `SceneVramLimitMib` (default 1536, clamped
+  64–1048576, kept while the toggle is off) → `player.scene_vram_limit_mib` = the MiB while enabled, else **0 = off**;
+  `VramLowMode` `stop` (default) | `pause` | `off` (an unknown value reads as `stop`) → `player.vram_low_mode`.
+  `LpPlayerMedia.GpuProps(s)` is the mapping (self-test table), `ApplyGpuSettings(prev, cur)` the `/settings` diff
+  (coalescible per prop, `player:<prop>`), and `AssertSceneFps` — once per player process (`Switch` when
+  `Generation` moved, R81's `ReapplyAllNow`) — asserts them with the scene fps, so a fresh or restarted player (its own
+  defaults) gets them back. **`scene.vram_exceeded {id, path, pid, used_mib, limit_mib}`** (subscribed, `Topics`) →
+  `PlayerHelper.OnSceneVramStopped(path, used, limit)` off the event thread: WS `scene-vram-stopped {path, usedMib,
+  limitMib, message: "stopped: used X MiB > limit Y MiB of VRAM"}` (the UI's status bar) and the same advance as a broken
+  scene (`AdvanceIfPlaying`: the playing item of a running timed playlist → advance now; a single wallpaper keeps the
+  player's last frame) — but **never `MarkCrashed`**: it stays playable (next / a later rotation pass plays it again,
+  and is stopped again 2 s later while it still uses too much). The low-VRAM hold is the player's own pause composition
+  (`player.paused` stays false — nothing here mirrors it into the UI's pause state, nothing re-asserts anything when it
+  ends); `GET /player-engine` → `vram {low_active, mode}` (`player.vram_low_active`, null = no player) for a status
+  line. Settings → "GPU / VRAM" (lp-player only). Known edge: a scene **pending B** (armed for A's end) stopped by the
+  guard is that switch's `transition.failed`; the `DoVideoEndWait` fallback then switches to it now (it isn't
+  skipped), it plays ~2 s and is stopped again → the rotation advances (bounded by the guard's hold, never a loop).
 - **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
-  Volume —, the ownership filter on a `lp-player-scene.src4` block) + the round trip (its private player runs
-  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip → synthetic
-  scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30; scene → clip cut);
-  the IT's § "Phase 2: scenes" (Integration test, below).
+  Volume —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
+  private player runs `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
+  synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
+  `ApplyGpuSettings` there and back; scene → clip cut); the IT's § "Phase 2: scenes" (Integration test, below).
 
 ## Targeting (R61): ONE effective-settings resolver
 Every setting reaches the live sources through **`LpPlayerMedia.ResolveNow`** (design note at the top of
@@ -504,8 +523,15 @@ every 400 ms in a timed playlist → one `source.broken`, WS `scene-crashed`, in
 advanced ≤ 2 s after the break (event clocks), `/next` ×3 skips it, whitelisted → `/next` plays it again; a
 missing scene folder → `transition.failed`, not marked crashed; `AllowScenes=false` → 8 × `/next` never a
 scene; a player restarted with `LP_SCENE_WORKER_BIN=/nonexistent` → no `scene` capability,
-`/player-engine.scenes` unavailable with a reason, 8 × `/next` never a scene. `LP_IT_DLL=<livepaper.dll>` runs
-another backend build against it (a RED run of new checks on an older commit).
+`/player-engine.scenes` unavailable with a reason, 8 × `/next` never a scene. **Task 8 settings** (a player with
+`LP_PLAYER_VRAM_PROBE=fake:$T/vram.json` + short `LP_PLAYER_VRAM_TIMING` — the probe file the test writes, never this
+machine's GPU): a fresh player's defaults; `SceneThrottle` / the VRAM limit toggle + MiB / `VramLowMode` each →
+`get player.<prop>` live, the playing scene on the same worker, `player.paused` untouched; set, then a fresh player
+(not restored) → all re-applied; a scene whose worker the fake reports at 2000 MiB > 1536 in a timed playlist →
+`scene.vram_exceeded`, the rotation advanced ≤ 2 s after it (event clocks), WS `scene-vram-stopped` with the text,
+not marked crashed (no `source.broken`), `/next` plays it again; a single scene over the limit → no switch in 2 s, still
+shown, not marked (RED on the base backend: 12 checks failing — every prop at its default, no stop, no WS event).
+`LP_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
 `LP_PLAYER_BIN=<repo>/src/player/target/debug/lp-player dotnet run --project src/livepaper --

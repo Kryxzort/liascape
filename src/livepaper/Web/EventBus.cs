@@ -42,6 +42,7 @@ public static class EventBus
     {
         PlayerHelper.OnWallpaperChanged = p => Broadcast("wallpaper-changed", new { path = p });
         PlayerHelper.OnSceneCrashed = p => Broadcast("scene-crashed", new { path = p });
+        PlayerHelper.OnSceneVramStoppedCb = (p, used, limit, msg) => Broadcast("scene-vram-stopped", new { path = p, usedMib = used, limitMib = limit, message = msg });
         PlayerHelper.OnTimedPlaylistStopped = () => Broadcast("timed-stopped");
     }
 }

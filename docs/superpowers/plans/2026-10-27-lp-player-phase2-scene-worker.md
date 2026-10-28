@@ -859,6 +859,17 @@ pause (`player.paused` stays false — don't mirror it into the UI's pause state
 setting → `get player.<prop>` live; with `LP_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
 advances the rotation without a crash mark.
 
+- [x] **Done (2026-10-28), commit `Wire Scene GPU Budget And VRAM Settings`** (`.claude/rules/player-adapter.md` §
+  Scenes → "GPU / VRAM settings"): `AppSettings.SceneThrottle` (true), `SceneVramLimitEnabled` (false) +
+  `SceneVramLimitMib` (1536, 64–1048576, kept while off), `VramLowMode` (`stop`); `/settings` diff →
+  `LpPlayerMedia.ApplyGpuSettings` (coalescible `player:<prop>`), re-asserted per player process with the scene fps;
+  `scene.vram_exceeded` subscribed → `PlayerHelper.OnSceneVramStopped` (WS `scene-vram-stopped`, the shared
+  `AdvanceIfPlaying`, no `MarkCrashed`); `/player-engine.vram {low_active, mode}`; Settings "GPU / VRAM" (lp-player
+  only) + a status-bar line for the WS event. Deviations: the VRAM limit is two settings (a toggle + the MiB value,
+  so the toggle keeps the number) rather than one MiB field with 0 = off; the optional `vram.low`/`vram.resumed`
+  events are not subscribed — the Settings group polls `/player-engine` (`player.vram_low_active`) every 5 s while
+  open instead. RED (adapter IT on the base backend): 12 checks failing; GREEN: all pass.
+
 - [x] **Step 1: Write failing checks:**
   - self-test: `SourceProps` of a scene folder (kind, preview, no af); `OwnStreamFilter` excludes a synthetic
     `pactl` block with `node.name = lp-player-scene.src4`; the `ScenesPlayable` truth table (AllowScenes ×

@@ -5,6 +5,7 @@ export type LpEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
   | { type: "settings-changed"; payload: Record<string, unknown> }
   | { type: "scene-crashed"; payload: { path: string } }
+  | { type: "scene-vram-stopped"; payload: { path: string; usedMib: number; limitMib: number; message: string } }
   | { type: "timed-stopped"; payload: null }
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }

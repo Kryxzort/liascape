@@ -595,8 +595,9 @@ post /playlist/play "{\"paths\":[\"$A\",\"$S1\"],\"settings\":{\"Order\":0}}" >/
 waitfor 15000 switched_to "$S1" "$ns" end && waitfor $WAIT scene_ready "$S1" && ok "an aligned V→S at the video's end ($sc): $(method_of "$sc"), the scene shows" || bad "aligned V→S: corr ${sc:-none}, cur $(basename "$(cur path)") kind $(cur kind)"
 stop_now
 
-# a scene that keeps crashing (3 restarts in 60 s → broken) while it plays in a timed playlist
-python3 - "${U##*:}" > "$T/ws-scene.log" 2>&1 <<'PY' & WSP=$!
+# a WebSocket client of the backend's /events (one text message per line) → $1; its pid in $WSP
+ws_listen() {
+python3 - "${U##*:}" > "$1" 2>&1 <<'PY' & WSP=$!
 import socket, sys, base64, os
 s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
 s.send(("GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -619,6 +620,9 @@ while True:   # server frames are unmasked: one text message per line
     need(o + n); msg = buf[o:o + n]; op = buf[0] & 0x0f; buf = buf[o + n:]
     if op == 1: print(msg.decode(errors="replace"), flush=True)
 PY
+}
+# a scene that keeps crashing (3 restarts in 60 s → broken) while it plays in a timed playlist
+ws_listen "$T/ws-scene.log"
 waitfor $WAIT eval 'grep -q " 101 " "$T/ws-scene.log"' || bad "WebSocket: $(head -c 300 "$T/ws-scene.log")"
 ns=$(nsch)
 post /playlist/play "{\"paths\":[\"$S3\",\"$S1\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -660,6 +664,85 @@ lib_steps_no_scene() {   # $1 = label: /apply a video, then 8 × /next through a
 setting '.AllowScenes = false'
 lib_steps_no_scene "AllowScenes=false"
 setting '.AllowScenes = true'
+
+echo "== Phase 2 Task 8: scene GPU budget + VRAM settings (live, re-applied onto a fresh player; a fake VRAM probe)"
+# The player measures VRAM through LP_PLAYER_VRAM_PROBE=fake:<file> (read at every sample: {total_mib, free_mib,
+# procs: {"<pid>": MiB}}) with short holds (interval 200, enter 600, resume 2000, settle 300, scene hold 600 ms) —
+# deterministic, never this machine's GPU. 6000 of 8192 MiB free: the low-VRAM rule never engages here.
+VR=$T/vram.json
+vram_fake() { printf '{"total_mib":8192,"free_mib":6000,"procs":{%s}}' "$1" > "$VR.tmp" && mv "$VR.tmp" "$VR"; }
+vram_fake ""
+VRAM_ENV=(LP_PLAYER_VRAM_PROBE=fake:$VR LP_PLAYER_VRAM_TIMING=200,600,2000,300,600)
+restart_player 8 "${VRAM_ENV[@]}"
+pget() { ctl get "{\"path\":\"player.$1\"}" | jq -r '.value | if type == "number" then (. * 1000 | round / 1000) else . end'; }   # 0.0 → 0
+p_is() { [ "$(pget "$1")" = "$2" ]; }
+p_near() { near "$(pget "$1")" "$2" 0.001; }
+gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_limit_mib), low $(pget vram_low_mode)"; }
+[ "$(gpu_props)" = "throttle true, limit 0, low stop" ] && ok "a fresh player: the defaults ($(gpu_props))" || bad "a fresh player: $(gpu_props)"
+post /apply "{\"path\":\"$S1\"}" >/dev/null
+waitfor 5000 scene_ready "$S1" || bad "/apply s1 on the fake-VRAM player → $(basename "$(cur path)") ready $(cur ready)"
+SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
+setting '.SceneThrottle = false'
+waitfor $WAIT p_is scene_throttle false && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneThrottle off → player.scene_throttle false live, same worker $WP" || bad "SceneThrottle off → $(gpu_props), pid $WP → $(wpid "$SID")"
+setting '.SceneThrottle = true'
+waitfor $WAIT p_is scene_throttle true && ok "SceneThrottle on → true" || bad "SceneThrottle on → $(gpu_props)"
+setting '.SceneVramLimitEnabled = true | .SceneVramLimitMib = 1536'
+waitfor $WAIT p_near scene_vram_limit_mib 1536 && [ "$(wpid "$SID")" = "$WP" ] && ok "the VRAM limit on at 1536 MiB → player.scene_vram_limit_mib 1536 live, same worker" || bad "VRAM limit on → $(gpu_props)"
+setting '.SceneVramLimitMib = 2048'
+waitfor $WAIT p_near scene_vram_limit_mib 2048 && ok "…2048 MiB → 2048" || bad "VRAM limit 2048 → $(gpu_props)"
+setting '.SceneVramLimitEnabled = false'
+waitfor $WAIT p_near scene_vram_limit_mib 0 && [ "$(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')" = 2048 ] && ok "the limit off → 0 (off), the MiB value kept for the toggle" || bad "VRAM limit off → $(gpu_props), saved MiB $(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')"
+for m in pause off stop; do
+  setting ".VramLowMode = \"$m\""
+  waitfor $WAIT p_is vram_low_mode "$m" && ok "VramLowMode $m → player.vram_low_mode $m live" || bad "VramLowMode $m → $(gpu_props)"
+done
+[ "$(pget paused)" = false ] && ok "none of it touched player.paused" || bad "player.paused $(pget paused) after the GPU settings"
+# a fresh player process (not restored: the defaults) gets the backend's values back (R81's re-apply)
+setting '.SceneThrottle = false | .SceneVramLimitEnabled = true | .SceneVramLimitMib = 1536 | .VramLowMode = "pause"'
+waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' || bad "set before the restart: $(gpu_props)"
+stop_now
+restart_player 8b "${VRAM_ENV[@]}"
+waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, low pause)"
+setting '.SceneThrottle = true | .VramLowMode = "stop"'
+
+# a scene over the limit in a timed playlist: stopped by the player (never a crash) → the rotation advances at once,
+# the UI is told why (WS scene-vram-stopped), the item is NOT marked crashed and stays playable
+ws_listen "$T/ws-vram.log"
+waitfor $WAIT eval 'grep -q " 101 " "$T/ws-vram.log"' || bad "WebSocket: $(head -c 300 "$T/ws-vram.log")"
+ns=$(nsch)
+post /playlist/play "{\"paths\":[\"$S1\",\"$S2\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$S1" || bad "play [s1, s2] → cur $(basename "$(cur path)")"
+WP=$(wpid "$(srcIdForPath "$S1")")
+vram_fake "\"$WP\":2000"
+vram_ev() { ctl logs '{"kind_prefix":"scene.vram_exceeded","limit":1000}' | jq -c --arg p "$S1" --argjson n "${1:-0}" '[.events[$n:][] | select(.path==$p)][-1] // empty'; }
+waitfor 10000 eval 'vev=$(vram_ev); [ -n "$vev" ]' && ok "scene 1 over the limit (2000 > 1536 MiB) → scene.vram_exceeded $(echo "$vev" | jq -c '{used_mib, limit_mib}')" || bad "no scene.vram_exceeded for scene 1 (worker $WP)"
+t_v=0; [ -n "${vev:-}" ] && t_v=$(printf '%s' "$vev" | jq -r "$EV_MS")
+adv2_ms() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$S2" --argjson n "$ns" --argjson t "$t_v" "[.events[\$n:][] | select(.path==\$p) | $EV_MS - \$t | select(. >= -50)][0] // empty"; }
+waitfor $WAIT eval 'am=$(adv2_ms); [ -n "$am" ]'
+[ -n "${am:-}" ] && python3 -c "import sys; sys.exit(0 if float('$am') <= 2000 else 1)" && ok "the rotation advanced to scene 2 $(printf %.0f "$am") ms after the stop" || bad "advance after the VRAM stop: ${am:-none} ms (cur $(basename "$(cur path)"))"
+waitfor $WAIT scene_ready "$S2" || bad "after the VRAM stop: cur $(basename "$(cur path)")"
+waitfor $WAIT eval 'grep "scene-vram-stopped" "$T/ws-vram.log" | jq -r "select(.payload.path | endswith(\"900000001\")) | .payload.message" | grep -q "used 2000 MiB > limit 1536"' && ok "WS scene-vram-stopped: $(grep -m1 scene-vram-stopped "$T/ws-vram.log" | jq -r .payload.message)" || bad "no WS scene-vram-stopped: $(grep -c . "$T/ws-vram.log") lines"
+jq -e '."900000001".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S1" '.events[] | select(.path==$p) | .id')" ] \
+  && ok "…never marked crashed (no source.broken, index crashed false)" || bad "a VRAM stop marked the scene crashed: $(jq -c '."900000001"' "$IDX")"
+vram_fake ""
+ns=$(nsch); post /next '{}' >/dev/null
+waitfor $WAIT eval '[ -n "$(corr_to "$S1" "$ns" now)" ]' && waitfor $WAIT scene_ready "$S1" && ok "/next plays the stopped scene again (not skipped)" || bad "/next after a VRAM stop: cur $(basename "$(cur path)")"
+stop_now
+# a single wallpaper over the limit keeps what the player shows (its last frame) — no switch, no crash mark
+n0=$(ctl logs '{"kind_prefix":"scene.vram_exceeded","limit":1000}' | jq '.events|length')
+post /apply "{\"path\":\"$S1\"}" >/dev/null
+waitfor $WAIT scene_ready "$S1" || bad "/apply s1 → $(basename "$(cur path)")"
+WP=$(wpid "$(srcIdForPath "$S1")"); ns=$(nsch)
+vram_fake "\"$WP\":2000"
+waitfor 10000 eval '[ -n "$(vram_ev "$n0")" ]' || bad "no scene.vram_exceeded for the single scene"
+sleep 2   # the window is the check: nothing may switch after the stop
+[ "$(nsch)" = "$ns" ] && [ "$(cur path)" = "$S1" ] && jq -e '."900000001".crashed // false | not' "$IDX" >/dev/null \
+  && ok "a single scene over the limit: stays on screen (its last frame), no switch, not marked crashed" || bad "single scene VRAM stop: switches $ns → $(nsch), cur $(basename "$(cur path)"), index $(jq -c '."900000001"' "$IDX")"
+vram_fake ""
+stop_now
+kill "$WSP" 2>/dev/null; WSP=""
+setting '.SceneVramLimitEnabled = false'
+
 restart_player 9 LP_SCENE_WORKER_BIN=/nonexistent
 ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose lp-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
 pe_off() { curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false and (.scenes.reason | type == "string" and length > 0)' >/dev/null; }

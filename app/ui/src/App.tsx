@@ -48,6 +48,11 @@ export default function App() {
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
     else if (e.type === "library-synced") s.loadLibrary();
     else if (e.type === "library-item-changed") s.itemChangedByBackend(e.payload.path, { volumeOverride: e.payload.volumeOverride });
+    // lp-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
+    else if (e.type === "scene-vram-stopped") {
+      const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();
+      s.setStatus(`${t}: ${e.payload.message}`);
+    }
     // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
     else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
   }, []); // eslint-disable-line

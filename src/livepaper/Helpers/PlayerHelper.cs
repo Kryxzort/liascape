@@ -626,6 +626,8 @@ public static class PlayerHelper
 
     public static Action? OnTimedPlaylistStopped;
     public static Action<string>? OnSceneCrashed;
+    // lp-player Task 8: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
+    public static Action<string, double, double, string>? OnSceneVramStoppedCb;
     public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
@@ -3618,12 +3620,34 @@ public static class PlayerHelper
         if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
         LibraryService.MarkCrashed(path);
         OnSceneCrashed?.Invoke(path);
+        AdvanceIfPlaying(path, "scene broken while playing");
+    }
+
+    // lp-player Task 8: `scene.vram_exceeded` — the player's VRAM guard stopped this scene's worker (it used more
+    // than `player.scene_vram_limit_mib`). For playback exactly like a broken scene — a rotation playing it
+    // advances at once, a single wallpaper keeps what the player shows (its last frame) — but it is NOT marked
+    // crashed (it isn't broken; with a higher limit or less on the GPU it plays): the UI is told why instead
+    // (WS `scene-vram-stopped {path, usedMib, limitMib, message}`).
+    public static string VramStoppedMessage(double usedMib, double limitMib) =>
+        $"stopped: used {usedMib:0} MiB > limit {limitMib:0} MiB of VRAM";
+
+    public static void OnSceneVramStopped(string path, double usedMib, double limitMib)
+    {
+        if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
+        OnSceneVramStoppedCb?.Invoke(path, usedMib, limitMib, VramStoppedMessage(usedMib, limitMib));
+        AdvanceIfPlaying(path, $"scene over the VRAM limit ({usedMib:0} > {limitMib:0} MiB)");
+    }
+
+    // the playing item of a running timed playlist is `path` → advance now (the tick's own advance: its owner,
+    // pause and mode rules apply); anything else (a single wallpaper, a pending B, another item) → nothing
+    private static void AdvanceIfPlaying(string path, string why)
+    {
         lock (_lock)
         {
             if (_timedPaths == null || _timedTimerStopped || _timerReleased || _history == null || _waitingForVideoEnd) return;
             int i = PlayingHistoryIndex;
             if (i < 0 || i >= _history.Count || !SamePath(_history[i], path)) return;
-            TransitionService.TransLog($"scene broken while playing: {System.IO.Path.GetFileName(path)} → advance");
+            TransitionService.TransLog($"{why}: {System.IO.Path.GetFileName(path)} → advance");
             if (_timedInterval > TimeSpan.Zero)
             {
                 _timedRemainingMs = 0;
