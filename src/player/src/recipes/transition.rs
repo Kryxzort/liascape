@@ -115,7 +115,8 @@ pub enum Phase {
 }
 
 impl Phase {
-    fn pre_running(self) -> bool {
+    /// Before the effect runs (A still shows; a cancel restores A exactly).
+    pub fn pre_running(self) -> bool {
         matches!(
             self,
             Phase::Scheduled | Phase::WaitingReady | Phase::WaitingStart
@@ -217,6 +218,8 @@ pub struct TransitionStatus {
     pub corr: CorrId,
     pub phase: Phase,
     pub method: Method,
+    /// `end`: waits for A's end — before Running, A is what shows (the snapshot saves A).
+    pub align: Align,
     pub outputs: Vec<String>,
     /// B.
     pub to: String,
@@ -1118,6 +1121,7 @@ impl Transitions {
                     corr: t.corr.clone(),
                     phase: t.phase,
                     method: t.method,
+                    align: t.align,
                     outputs: t.outputs.clone(),
                     to: t.b.clone(),
                     from: t.sides.iter().filter_map(|s| s.a.clone()).collect(),

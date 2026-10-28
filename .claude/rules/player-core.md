@@ -2621,8 +2621,13 @@ same place.
 - **Excluded:** effects, `snapshot`-kind sources, sources no output shows (graves, held A's,
   anything created but not shown), every in-flight transition's scaffolding. **A transition
   in flight is saved as its target B** on the outputs it covers (`transition_target: true`,
-  `paused: false`, no xfade/anticlick, its position = its requested start until it plays);
-  an effect shown without a transition is saved as its `to` side.
+  `paused: false`, no xfade/anticlick, its position = its requested start until it plays) —
+  **except an `align: end` one before Running** (2026-10-28), saved as **A where it plays**: B
+  restored at once cut A's remaining play short, and the backend re-arms the switch on the
+  restarted player (player-adapter.md § Reconnection; A keeps the `loop: false` its wait set —
+  without a backend it holds its last frame). `TransitionStatus.align` (also in `state`'s
+  `transitions`) carries it. Unit `aligned_pending_transition_is_saved_as_a` (RED: `bnew`).
+  An effect shown without a transition is saved as its `to` side.
 - **Values:** an animating number (gain, opacity, speed) is saved at the animation's target
   while it is **live** (`Animator::live_target_of`), else the value itself — a finished
   animation's target is stale once something `set` the prop (outputs.sh caught 0.97
@@ -2639,7 +2644,14 @@ same place.
 - **Writing:** on the `lp-snapshot` thread (latest queued wins): `snapshot.json.tmp` +
   `fsync`, rename, `fsync` the dir — a crash mid-write leaves the previous file. Failures:
   `snapshot.write_failed` once per streak (+ hint), `write_recovered`; `snapshot.saved
-  {bytes, write_ms}` at debug. The writer is joined in `shutdown`.
+  {bytes, write_ms}` at debug. The writer is joined in `shutdown`. **The window is the
+  backend's to close:** a write lags a switch by the debounce + its fsync (2.4 s once under
+  I/O load), so a crash in it restores the wallpaper before the switch; a switch's reply can't
+  wait for an fsync, so the adapter compares what a restarted player shows with what it last
+  switched to and switches back (player-adapter.md § Reconnection, `ReconcileShown`).
+  **Test knob** `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=N`: every write takes N ms more (counted in
+  `write_ms` / the probe's `last_write_ms`) — a snapshot that lags and a slow clean quit,
+  deterministically (the adapter IT).
 - **`--restore`:** missing file → `snapshot.none`; unreadable/corrupt JSON/unknown
   `version`/dangling reference → `snapshot.invalid {reason, moved_to}`, the file moved to
   `snapshot.invalid.json`, the player starts empty (never a crash loop over a bad file).

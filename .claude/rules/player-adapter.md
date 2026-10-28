@@ -321,6 +321,22 @@ crash/stall when the toggle came from a keybind's CLI process or a restarted bac
 logs the player's value (`… (player.paused = true, kept)`). `LpPlayerMedia.ReapplyCount` counts how many times it's
 actually run (self-test/IT evidence).
 
+**The wallpaper too (`ReconcileShown`, 2026-10-28).** A restarted player shows what its snapshot holds, and every
+write is fsync'ed — 2.4 s behind a switch once under I/O load: the crash restored the wallpaper BEFORE it and the
+screen kept it while the backend and every UI said the new one (a switch's reply can't wait for an fsync, so the
+player can't close that window itself). `OnRestarted` queues `ReconcileShown` (essential, **before** it fails the
+pending waits — so a re-armed aligned switch is requested after it): if the screen (every layer's content, an
+effect's `to`, a requested non-waiting switch's B, the parked wallpaper) lacks `_intent`'s path → a **cut** to it
+(`Reconciles` counts them); after our own `stop` and something shows → `stop`. `_intent` = what this backend last
+put on screen: an align:now switch's B from its request's reply, an aligned switch's B from its
+`transition.started`/`.handoff` (until then A shows and the switch is only armed — `_alignedCorrs`), nothing after
+`Stop()`. **Unknown (no reconcile)** before our first switch, after `StopAndQuit`, when our switch failed or was
+cancelled, and when a `transition.scheduled` names a path we didn't request (another client switched — a second
+backend, `ctl`; `_requesting` covers our own event beating its reply). **An armed aligned switch** dies with the
+process: the player's snapshot saves it as A where it plays (player-core.md § Snapshot), and `DoVideoEndWait` on
+`failed:player restarted` **re-arms** it for A's end (it used to back off 1 s and switch NOW — A cut short; with the
+old snapshot rule B showed at once, then again).
+
 ## Event flow
 `Switch` → `transition` reply `{corr, to}` → `LastCorr`. The event thread records each corr's terminal
 outcome — `transition.handoff` → "handoff", `.cancelled {reason}` → "cancelled:<reason>", `.failed
@@ -382,7 +398,12 @@ and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cu
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
 a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
 owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend
-started while the first runs → the first yields ("stops ticking"); a rebuilt binary → an idle paused
+started while the first runs → the first yields ("stops ticking"); **a crash while an aligned switch is
+armed** (E1 → E2): E1 comes back at its position (not E2), the switch is re-armed `align:end`, no `align:now`,
+one handoff at E1's end (RED before: E2 restored at once + an `align:now` switch after the 1 s back-off); **a crash
+whose snapshot lags the last switch** (a player restarted with `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000` — every
+write takes 4 s, an fsync under I/O load; precondition: the snapshot still shows a after the switch to c) → c on
+screen again, `/current` c (RED before: a stayed); a rebuilt binary → an idle paused
 player is upgraded within ~12 s (new compositor + supervisor, the new build, same wallpaper, still
 paused, `snapshot.restored`, `/player-engine` current), and an advance-on-end playlist is **not**
 upgraded while its switch is armed (stale > 15 s) but at its next switch, the following switch armed

@@ -2119,6 +2119,21 @@ public static class PlayerHelper
                 ReleaseTimer();
                 return;
             }
+            if (outcome == "failed:player restarted")
+            {
+                // The player crashed (or was restarted) while this switch was armed: the request died with it. Its
+                // snapshot brings A back where it played (an armed align:end switch is saved as A), and the adapter
+                // puts back what the backend last showed (LpPlayerMedia.ReconcileShown, queued ahead of this) — so
+                // arm it again for A's end on the new player. Switching now (the failure path below) cut A short
+                // and, with a snapshot saved as B, showed B twice.
+                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: the player restarted → re-arming it for A's end");
+                lock (_lock)
+                {
+                    if (!_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
+                    ArmVideoEndWait(next, prevIsVideo);
+                }
+                return;
+            }
             if (outcome == "cancelled:superseded")
             {
                 // another requester replaced it — never this process (its own switches cancel the wait
