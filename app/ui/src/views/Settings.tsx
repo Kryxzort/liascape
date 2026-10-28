@@ -9,6 +9,7 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
+import { PlayTimeInput } from "../components/PlayTimeInput";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
 const lp = (window as unknown as { lp?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).lp;
@@ -147,6 +148,7 @@ export const Settings = memo(function Settings() {
 
   // interval H/M/S
   const iv = g("globalIntervalSeconds", 1800);
+  const aoe = g("globalAdvanceOnVideoEnd", true); // the play-time limits apply only under advance-on-end
   const setIv = (h: number, m: number, sec: number) => set("globalIntervalSeconds", h * 3600 + m * 60 + sec);
   const H = Math.floor(iv / 3600), M = Math.floor((iv % 3600) / 60), S = iv % 60;
 
@@ -213,6 +215,11 @@ export const Settings = memo(function Settings() {
 
       <Section title="Rotation (global)" icon={<Repeat size={15} />}>
         <Row label="Switch when video ends" rk="globalAdvanceOnVideoEnd"><input type="checkbox" checked={g("globalAdvanceOnVideoEnd", true)} onChange={(e) => set("globalAdvanceOnVideoEnd", e.target.checked)} /></Row>
+        {/* the advance-on-end play-time limits: only under "Switch when video ends" (greyed otherwise) */}
+        <Row label="Minimum play time" hint="a shorter video loops until it, then switches at the end of that loop · a still image shows this long · 0 = off" disabled={!aoe} rk="globalMinPlaySeconds">
+          <PlayTimeInput label="minimum play time (s)" value={g("globalMinPlaySeconds", 0)} disabled={!aoe} onChange={(v) => set("globalMinPlaySeconds", v)} /></Row>
+        <Row label="Maximum play time" hint="a longer video — and a scene, which never ends — switches once it played this long · wall-clock (speed doesn't stretch it), a pause stops it · the interval still applies too, whichever comes first · 0 = off" disabled={!aoe} rk="globalMaxPlaySeconds">
+          <PlayTimeInput label="maximum play time (s)" value={g("globalMaxPlaySeconds", 0)} disabled={!aoe} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
         <Row label="Wait for video to end after interval" rk="globalWaitForVideoEnd"><input type="checkbox" checked={g("globalWaitForVideoEnd", false)} onChange={(e) => set("globalWaitForVideoEnd", e.target.checked)} /></Row>
         <Row label="Interval" rk="globalIntervalSeconds">
           <div className="hms">

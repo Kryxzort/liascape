@@ -27,6 +27,7 @@ function applyThemeVars(t: Theme) {
 
 const DEFAULT_PS: PlaylistSettings = {
   order: 0, overrideGlobalSettings: false, intervalSeconds: 1800, advanceOnVideoEnd: true, waitForVideoEnd: false,
+  minPlaySeconds: 0, maxPlaySeconds: 0,
   transitionEnabled: false, transitionEffectIds: [], transitionDurationMs: 600, transitionDurationMaxMs: 0, transitionShuffle: true,
 };
 
@@ -114,7 +115,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFps: 0, wallpaperBgAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnSwitchOnly: false, keepPauseOnSwitch: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartIntervalSeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
-  globalAdvanceOnVideoEnd: true, globalWaitForVideoEnd: false, globalIntervalSeconds: 1800, autoAddLibraryToPlaylist: false,
+  globalAdvanceOnVideoEnd: true, globalWaitForVideoEnd: false, globalIntervalSeconds: 1800, globalMinPlaySeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", transitionLagOffsetMs: -30,
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 200, autoUnmuteDelayMs: 2000, autoMuteThresholdDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxBytes: 20, demuxerMaxBackBytes: 5, playerEngine: "legacy",

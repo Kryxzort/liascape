@@ -251,7 +251,7 @@ let BASE_SETTINGS;
 // Fades: 1200 ms (global too — test-ui-matrix.sh's settings); the mid-effect states' playlist keeps EFFECT_MS so a
 // control still lands inside the running effect. Was 2500 everywhere: every switch a cell made waited it out.
 const EFFECT_MS = 2500;
-const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, waitForVideoEnd: false,
+const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, waitForVideoEnd: false, minPlaySeconds: 0, maxPlaySeconds: 0,
   transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
 // Getting INTO a state isn't what a cell tests: its entry switches run as ENTRY_MS fades BEFORE the UI loads (the
 // app opened onto a playing wallpaper, as in real use), then the configured durations go back — so the UI reads
@@ -2140,6 +2140,73 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
     return v;
   } };
 
+// --- advance-on-end play-time limits (wall-clock seconds, 0 = off), live on the `pending` rotation: k4 (10 s) plays
+// with its switch to k1 armed for its end. A limit field commits on blur (the owner's number-input rule), so the drive
+// fires focusout after typing. `where`: the playlist modal (its own rotation) or the Settings page (the globals).
+const limitDrive = (where, which, secs) => where === "playlist"
+  ? `${plOpen} const el = document.querySelector('.pl-modal input[aria-label="${which} play time (s)"]'); m.setValue(el, ${secs}, "${which}");
+     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); ${plClose}`
+  : settingsTab(`const el = m.input("${which === "minimum" ? "Minimum" : "Maximum"} play time"); m.setValue(el, ${secs}, "${which}");
+     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await m.sleep(300);`);
+// k4's position now → when (wall ms) its current loop ends; skips the cell when too little of it is left to act in
+async function k4LoopEnd(c, needMs) {
+  const pos = Number(await pget("cur:*.time_pos")), t = Date.now();
+  if (!Number.isFinite(pos) || (await http("GET", "/current")).json?.path !== K[3]) return (c.skip = "k4 not playing"), null;
+  const end = t + (10 - pos) * 1000;
+  if (end - t < needMs) return (c.skip = `k4 at ${pos.toFixed(1)} s: its loop ends too soon to act`), null;
+  return { pos, t, end };
+}
+const limitSaved = (c, where, key, want) => {
+  const got = where === "playlist" ? c.after.ps?.settings?.[key] : c.after.s?.[where === "global" ? `global${key[0].toUpperCase()}${key.slice(1)}` : key];
+  return got === want ? [] : [`${where} ${key} ${got} after the UI change, expected ${want}`];
+};
+// minimum 15 s: the switch armed for k4's first loop end is re-requested — k4 loops once more and advances at the end of
+// its 2nd loop (align:end, never mid-loop)
+for (const where of ["playlist", "global"]) C[`${where}:minPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], async run(c) {
+    c.k4 = await k4LoopEnd(c, 4000); if (!c.k4) return;
+    await ui(limitDrive(where, "minimum", 15)); c.tChange = Date.now();
+    c.tSwitched = await waitFor(async () => (await http("GET", "/current")).json?.path === K[0] && Date.now(), 26000, 100);
+    await waitSettled(8000);
+  }, check(c) {
+    const v = limitSaved(c, where, "minPlaySeconds", 15);
+    if (c.tChange > c.k4.end - 800) v.push(`precondition: the limit landed ${c.tChange - c.k4.end} ms after k4's loop end`);
+    const sw = c.evs.filter((e) => e.event === "transition.scheduled" && e.path === K[0]);
+    if (!c.tSwitched) v.push("k4 never advanced to k1 within 26 s of a 15 s minimum");
+    else if (c.tSwitched < c.k4.end + 8000) v.push(`k4 advanced ${c.tSwitched - c.k4.end} ms after its 1st loop's end — the 15 s minimum wasn't held (its 2nd loop ends +10 s)`);
+    if (sw.some((e) => e.align !== "end")) v.push(`a switch to k1 with align ${sw.map((e) => e.align)} — the minimum must end on a loop's end`);
+    return v;
+  } };
+// maximum 4 s: k4 advances once it played 4 s — now (align:now, a transition), long before its end
+for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], async run(c) {
+    c.k4 = await k4LoopEnd(c, 3000); if (!c.k4) return;
+    await ui(limitDrive(where, "maximum", 4)); c.tChange = Date.now();
+    c.sw = await waitFor(async () => events.find((e) => e._t >= c.tChange - 2000 && e.event === "transition.scheduled" && e.path === K[0] && e.align !== "end"), 7000, 100);
+    await waitSettled(8000);
+  }, check(c) {
+    const v = limitSaved(c, where, "maxPlaySeconds", 4);
+    if (!c.sw) return [...v, "no switch now (align:now) to k1 within 7 s of a 4 s maximum"];
+    const played = c.k4.pos + (c.sw._t - c.k4.t) / 1000;
+    if (played < 3.6) v.push(`k4 advanced after ${played.toFixed(1)} s of play, before the 4 s maximum`);
+    if (c.sw._t > c.k4.end - 200) v.push("the maximum's switch came only at k4's end");
+    if (c.sw.effect_id == null) v.push("the maximum's switch was a cut (transitions are on)");
+    if (c.after.cur?.path !== K[0]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected k1`);
+    return v;
+  } };
+// a global maximum on a playlist with its OWN rotation (no limits): nothing switches now
+C["global:maxPlay:own"] = { states: ["pending"],
+  // (the global limits' rows are enabled with the global advance-on-end; the playlist's own rotation doesn't read it)
+  async pre() { const s = await getSettings(); await post("/settings", { ...s, globalAdvanceOnVideoEnd: true }); },
+  async run(c) {
+    c.k4 = await k4LoopEnd(c, 4500); if (!c.k4) return;
+    await ui(limitDrive("global", "maximum", 2)); c.tChange = Date.now();
+    await sleep(Math.min(3500, c.k4.end - Date.now() - 300));
+    c.now = events.filter((e) => e._t >= c.tChange && e.event === "transition.scheduled" && e.align !== "end");
+  }, check(c) {
+    const v = limitSaved(c, "global", "maxPlaySeconds", 2);
+    if (c.now.length) v.push(`a global 2 s maximum switched a playlist with its own rotation now (to ${c.now.map((e) => TITLE(e.path))})`);
+    return v;
+  } };
+
 // a short playlist interval set while a scene plays (it never ends): the rotation advances off it to the next item
 C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
     await ui(`${plOpen} m.setValue(${hms(2)}, 4, "s"); await m.sleep(300); m.setValue(${hms(1)}, 0, "m"); ${plClose}`);
@@ -2540,6 +2607,7 @@ const FUZZ_RULES = [
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
+  [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
   [/^plShuffle$/, { last: "a shuffled order makes every later 'the strip's next' expectation (armedCheck, *+next) unknowable" }],
   [/^(plInterval|plIntervalZero|plWaitEnd|gInterval8s|gWaitEnd|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],

@@ -77,6 +77,16 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       owner's call.
 
 ## lp-player (after design approval)
+- [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
+      (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
+      for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),
+      wall-clock seconds, 0 = off by default, global + per-playlist override, live, kept across a backend restart.
+      `player-adapter.md` § Play-time limits (every mode combo), UI `PlayTimeInput` (blur-commit). Guards: IT §
+      "advance-on-end play-time limits" (RED on the base backend), self-test `PlayLimitAssertions`, settings-merge,
+      matrix `playlist|global:minPlay|maxPlay`, `global:maxPlay:own`.
+  - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
+        polling path untouched — owner: lp-player only).
+  - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
 - [x] **Auto-mute muted the wallpaper on our own switches** (owner, 2026-10-28: "auto mute is muting itself when
       transition is playing audio" — with both delays 0 a hitch, with a non-zero "unmute after" muted that long).
       Not a missing identity: every own stream (each switch's incoming mpv `lp-player` / scene worker

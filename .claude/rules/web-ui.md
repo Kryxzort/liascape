@@ -249,6 +249,15 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
   worker / `scene/` / `worker/` / `vram.rs` / their probes → the scene family. Fuzz excludes them (their fixtures).
 
+## Advance-on-end play-time limits (2026-10-28)
+Settings → Rotation: "Minimum play time" / "Maximum play time" rows right under "Switch when video ends" (greyed while
+it is off), and the same pair in the playlist-settings modal (`.pl-playtime`, inside the override block, greyed unless
+override + advance-on-end). Both are `components/PlayTimeInput.tsx`: a seconds field (0 = off) with its h/m/s reading;
+**free typing (emptiable); only a complete in-range number commits live; clamped 0…359999 and saved on blur /
+Enter** (the owner's number-input rule; Escape drops the draft) — the props of the shared `NumInput` (min / max / step
+/ value / onChange, another lane's, not on lp-player yet): swap its inner `<input>` for it at the merge. Semantics: `player-adapter.md` §
+Play-time limits. Matrix cells drive them with `setValue` + a `focusout`.
+
 ## Settings page under lp-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;
 while `active === "lp-player"` (`lpActive`): "Scene transition delay" is hidden (the player switches once the

@@ -575,6 +575,13 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 .ovr { display: flex; flex-direction: column; gap: 2px; }
 .ovr.dim { opacity: .45; }
 .pl-modal .hms input[type=number] { accent-color: var(--accent); }
+/* advance-on-end play-time limits (PlayTimeInput): seconds + their h/m/s reading */
+.playtime { display: inline-flex; align-items: center; gap: 6px; }
+.playtime > span { color: var(--muted); font-size: 12px; }
+.playtime .playtime-fmt { min-width: 64px; }
+.pl-playtime { display: flex; gap: 18px; flex-wrap: wrap; margin: 2px 0 6px 26px; }
+.pl-playtime label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.pl-playtime.dim { opacity: .45; }
 
 /* context menus are portal'd to <body> → fixed at the cursor (escape card/strip containment) */
 .lib-ctx, .pl-ctx { position: fixed; top: auto; right: auto; }

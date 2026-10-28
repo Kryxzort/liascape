@@ -74,6 +74,14 @@ public class AppSettings
     }
     public bool GlobalWaitForVideoEnd { get; set; } = false;
     public bool PlaylistWaitForVideoEnd { get; set; } = false;
+    // Advance-on-end play-time limits (wall-clock seconds, 0 = off; PlayerHelper § play-time limits): a clip shorter
+    // than the minimum loops until it, then advances at the end of the loop that reaches it; one longer than the
+    // maximum (and a scene, which never ends) advances once it played that long. Only under advance-on-end.
+    private int _globalMinPlaySeconds, _globalMaxPlaySeconds;
+    public int GlobalMinPlaySeconds { get => _globalMinPlaySeconds; set => _globalMinPlaySeconds = PlayLimit(value); }
+    public int GlobalMaxPlaySeconds { get => _globalMaxPlaySeconds; set => _globalMaxPlaySeconds = PlayLimit(value); }
+    public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
+    public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields
 
     // Global transition fallbacks (used when a playlist's OverrideGlobalSettings is off). See
     // PlaylistSettings.Transition* + TransitionService. Empty/!Enabled => instant cut.
