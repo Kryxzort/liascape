@@ -6178,6 +6178,25 @@ fn missing_scene_folder_fails_without_crash_record() {
     assert!(logs_of(&mut c, "worker.restart").is_empty());
     assert!(logs_of(&mut c, "worker.broken").is_empty());
     assert_eq!(crash_files(&srv), 0, "no crash record");
+    // Task 13: `probe workers {"log_tail": true}` keeps the stopped worker's output — its
+    // fatal line, written to stderr just before the `Error` that stopped it (drained at the
+    // stop, not lost with the pipe). Without the flag the entry has no tail.
+    let w = worker_of(&mut c, &id);
+    assert!(w.get("log_tail").is_none(), "{w}");
+    let p = c.ok("probe", json!({"name": "workers", "args": {"log_tail": true}}));
+    let w = p["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no worker for {id}: {p}"));
+    let tail = w["log_tail"].as_array().expect("log_tail");
+    assert!(
+        tail.iter()
+            .any(|l| l.as_str().is_some_and(|l| l.contains("load failed"))),
+        "{w}"
+    );
 }
 
 /// Phase 2 Task 11 (the minimal half of Task 10's event): a scene whose worker crashes past its

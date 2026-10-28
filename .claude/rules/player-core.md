@@ -2106,7 +2106,8 @@ off: summed lane counters, `hwdec_interop`, `lanes` — § Sources "Render worke
 `probe/snapshot.rs`) — `{path, writes, failures, last_write_ms, since_last_write_ms,
 due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `mpv_audio_device` / `mpv_audio_delay` (what mpv really runs); `workers` (Phase 2 Task 5,
-`probe/workers.rs`) — one entry per scene source's worker (§ Scene worker); `vram` (Phase 2
+`probe/workers.rs`) — one entry per scene source's worker (§ Scene worker; `args: {"log_tail":
+true}` adds each one's `log_tail`, Task 13); `vram` (Phase 2
 Task 8, `probe/vram.rs`) — the VRAM sampler, the low-VRAM rule and its hold, each scene worker
 against the per-scene limit (§ Scene worker → "GPU budget and VRAM (Task 8)"). A new probe = a
 file here + one `PROBES` entry.
@@ -2820,7 +2821,13 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
 - **Log tail:** the last `LOG_TAIL` (50) lines of worker output + `log` messages (as
   `[level] line`), oldest first, across restarts (a `--- lp-player: worker …; restart N ---`
   marker between processes); a line is cut at 4 KiB; ≤ 256 KiB read per `poll`. stderr and
-  `log` messages interleave arbitrarily.
+  `log` messages interleave arbitrarily. `stop()` drains the pipe first (non-blocking), so a fatal
+  error's own stderr line — written just before the `error` that made the host stop it — stays in
+  the tail (Task 13: it was lost before, 3/3 runs). **`ctl probe '{"name":"workers","args":
+  {"log_tail":true}}'`** shows every scene's tail (kept after a fatal stop, across restarts) — LWE's
+  own output (missing assets, shader warnings, `Replaced … with compat …`) for a scene that loads
+  but renders wrong, not only for one that crashed (Task 13; guard: the tail half of
+  `tests/api.rs::missing_scene_folder_fails_without_crash_record`).
 - **Crash record** `<crash_dir>/<scene-id>-<unix_ms>.json` (`-<n>` on a same-ms collision;
   written via a temp + rename) = `{scene_id (the item folder's name), id (source), path,
   reason, signal|code, restarts (in the window), total_restarts, uptime_ms, t_wall,

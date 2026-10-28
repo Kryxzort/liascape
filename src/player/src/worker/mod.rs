@@ -300,6 +300,9 @@ impl WorkerHost {
     /// `Quit`, then the process is handed to the reaper (SIGKILL after [`STOP_GRACE`]).
     /// Never blocks; `Stopped` afterwards, no more events.
     pub fn stop(&mut self) {
+        // What the worker wrote before the message that made us stop (a fatal error's own
+        // stderr line) is still in the pipe: keep it in the tail (non-blocking).
+        self.drain_output(false);
         if let Some(p) = self.proc_.take() {
             if let Some(s) = &p.sock {
                 let _ = proto::send(s.as_fd(), &ToWorker::Quit, &[]);
