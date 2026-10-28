@@ -144,7 +144,7 @@ fn take_lock(socket: &Path) -> Result<std::fs::File, String> {
 /// touches the socket; the winner (holding the lock, so any socket file is a dead one's)
 /// unlinks a stale **socket** and binds, but refuses a path that isn't a socket. The
 /// directory is created `0700` — and only chmod-ed if we created it or `own_dir` (the
-/// default `$XDG_RUNTIME_DIR/livepaper`); a `--socket` in someone else's directory is left
+/// default `$XDG_RUNTIME_DIR/liascape`); a `--socket` in someone else's directory is left
 /// alone. The socket is made `0600`.
 pub fn bind(path: &Path, own_dir: bool) -> Result<(UnixListener, SocketFile), String> {
     use std::os::unix::fs::FileTypeExt;

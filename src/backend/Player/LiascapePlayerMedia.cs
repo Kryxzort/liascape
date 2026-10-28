@@ -1171,7 +1171,7 @@ public static class LiascapePlayerMedia
     // a resolver pass (every other source keeps its own — never a `srcs:*` broadcast); a mute change is a
     // forced resolver pass from PlayerHelper.IsMuted (SetMute / SetUserMute send exactly that); anything
     // else → `Set`. `cycle pause` toggles; mpv-playlist plumbing (loadfile/playlist-*/loop-file/
-    // loop-playlist) has no liascape-player meaning — livepaper's timed machinery owns rotation and the
+    // loop-playlist) has no liascape-player meaning — liascape's timed machinery owns rotation and the
     // transition recipe owns A's loop — so it's acknowledged and dropped.
     public static bool Mpv(object[] args)
     {

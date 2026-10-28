@@ -232,7 +232,7 @@ if [ -z "${LIASCAPE_MATRIX_SNAPPED:-}" ]; then
   DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
 fi
 OUT=${LIASCAPE_MATRIX_OUT:-$T/out}
-mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$OUT"
+mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$OUT"
 if [ -n "$UIDIR" ]; then
   [ -f "$UIDIR/index.html" ] || { echo "no index.html in $UIDIR"; exit 2; }
   cp -r "$UIDIR" "$T/ui"
@@ -270,7 +270,7 @@ cleanup() {
   # this stack's process group) — one outlived its stack for 35 min, its HOME gone, writing timed_state.json relative
   # to the cwd. Stop them by their pid files, and only a pid whose HOME is this stack's.
   for f in timer restart monitor; do
-    pf=$XDG_CONFIG_HOME/livepaper/$f.pid; [ -s "$pf" ] || continue
+    pf=$XDG_CONFIG_HOME/liascape/$f.pid; [ -s "$pf" ] || continue
     for dp in $(tr -c '0-9\n' ' ' < "$pf"); do
       tr '\0' '\n' < "/proc/$dp/environ" 2>/dev/null | grep -qx "HOME=$T/home" && kill "$dp" 2>/dev/null
     done
@@ -290,7 +290,7 @@ clip() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "$2=size=320x180:rate=30
            -t "$4" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$1"; }
 clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3.mp4" rgbtestsrc 550 30; clip "$T/k4.mp4" testsrc 660 10
 
-cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
+cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalAdvanceOnVideoEnd":false,"GlobalMaxPlaySeconds":0,
@@ -326,7 +326,7 @@ mk_scene() {   # $1 = item folder, $2 = liascape-synthetic.json, $3 = its previe
   ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=$3:s=320x180" -frames:v 1 "$1/preview.png"
   SCENES+=("$1")
 }
-SLIB=$XDG_DATA_HOME/livepaper/library/workshop
+SLIB=$XDG_DATA_HOME/liascape/library/workshop
 # s1's user properties (the sceneProp cells): `color` is the synthetic renderer's WE-encoded colour (red by default,
 # like its rgb), `clock` a bool that `bars` depends on (`condition`)
 S1_PROPS='{"color":{"order":0,"text":"ui_browse_properties_scheme_color","type":"color","value":"1 0 0"},"clock":{"order":1,"text":"Show clock","type":"bool","value":true},"bars":{"order":2,"text":"Bars","type":"slider","value":32,"min":16,"max":64,"fraction":false,"condition":"clock.value"}}'
@@ -339,9 +339,9 @@ SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
-for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
-[ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
-U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
+[ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = liascape-player ] || { echo "ABORT: backend not on liascape-player"; exit 1; }
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
@@ -374,13 +374,13 @@ done
 case "$(cat "$T/xdisplay")" in 0|1|2|3|4|5|6|7|8|9) echo "ABORT: Xvfb on a low display :$(cat "$T/xdisplay")"; exit 1 ;; esac
 echo "== Xvfb on :$(cat "$T/xdisplay")"
 if [ $MODE = FUZZ ]; then echo "== fuzz${FREPLAY:+ (replay)}"; else echo "== matrix"; fi
-(cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LIASCAPE_URL="$U" LIASCAPE_PLAYER_SOCKET="$XDG_RUNTIME_DIR/livepaper/liascape-player.sock" \
+(cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LIASCAPE_URL="$U" LIASCAPE_PLAYER_SOCKET="$XDG_RUNTIME_DIR/liascape/liascape-player.sock" \
   LIASCAPE_CLIPS="$CLIPS" LIASCAPE_OUT="$OUT" LIASCAPE_DOTNET="$DOTNET" LIASCAPE_DLL="$DLL" LIASCAPE_ONLY="$ONLY" LIASCAPE_SHARD="$SHARD" \
   LIASCAPE_FUZZ_STEPS="$FUZZ" LIASCAPE_FUZZ_SEED="$FSEED" LIASCAPE_FUZZ_RUNS="$FRUNS" LIASCAPE_FUZZ_REPLAY="$FREPLAY" \
-  LIASCAPE_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" LIASCAPE_BACKEND_LOG="$T/backend.log" \
-  LIASCAPE_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" LIASCAPE_PULSE="$LIASCAPE_PULSE" \
+  LIASCAPE_ADAPTER_LOG="$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" LIASCAPE_BACKEND_LOG="$T/backend.log" \
+  LIASCAPE_USER_MUTE="$XDG_CONFIG_HOME/liascape/user_mute.state" LIASCAPE_PULSE="$LIASCAPE_PULSE" \
   LIASCAPE_SCENES="$SCENES_JSON" LIASCAPE_VRAM_FAKE="$T/vram.json" LIASCAPE_BACKEND_PID="$BP" LIASCAPE_BACKEND_PID_FILE="$T/backend2.pid" \
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
 rc=$?
-echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
 exit $rc

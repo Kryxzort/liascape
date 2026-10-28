@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace Liascape.Web;
 
-// `livepaper --action=<name>` (a keybind) is a one-shot process. While the app runs, its `--serve`
+// `liascape --action=<name>` (a keybind) is a one-shot process. While the app runs, its `--serve`
 // backend owns the session — the single-wallpaper history, the in-process timer, the mute state, the
 // UI's event socket — so the action is handed to it (`POST /action`) instead of being run here against
 // a stale copy of that state (a keybind next/previous/random switched the wallpaper behind the UI's
@@ -21,7 +21,7 @@ public static class ActionForward
         var sw = System.Diagnostics.Stopwatch.StartNew();
         long healthMs = -1;
         var url = $"http://127.0.0.1:{port}";
-        // the port file outlives a crashed backend and the port can be reused: only a livepaper backend
+        // the port file outlives a crashed backend and the port can be reused: only a liascape backend
         // answering /health counts
         try
         {
@@ -40,7 +40,7 @@ public static class ActionForward
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             var r = http.PostAsJsonAsync($"{url}/action", new { name = action }).GetAwaiter().GetResult();
             if (sw.ElapsedMilliseconds > 1000) // a keybind should feel instant — say where the time went
-                Console.Error.WriteLine($"livepaper --action={action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
+                Console.Error.WriteLine($"liascape --action={action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
             if (r.IsSuccessStatusCode) return true;
             code = 1;
             try
@@ -64,7 +64,7 @@ public static class ActionForward
     {
         try
         {
-            var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "livepaper", "serve.port");
+            var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape", "serve.port");
             return int.TryParse(File.ReadAllText(f).Trim(), out var p) && p is > 0 and < 65536 ? p : null;
         }
         catch { return null; }

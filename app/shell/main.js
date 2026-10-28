@@ -1,5 +1,5 @@
 // Electron shell. Two modes, auto-detected:
-//  • DEV (HMR): if a Vite dev server is up on :5173 (systemd livepaper-vite), load the UI from Vite
+//  • DEV (HMR): if a Vite dev server is up on :5173 (systemd liascape-vite), load the UI from Vite
 //    (hot-reload) and talk to the systemd `dotnet watch -- --serve` backend (port via serve.port).
 //  • PROD: no Vite → spawn our own backend (LIASCAPE_BACKEND or `dotnet run`) and load the built dist
 //    same-origin. Packaging spawns the published binary.
@@ -13,7 +13,7 @@ const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
-const portFile = path.join(os.homedir(), ".config", "livepaper", "serve.port");
+const portFile = path.join(os.homedir(), ".config", "liascape", "serve.port");
 const VITE = "http://localhost:5173";
 
 // ── GPU / ozone platform selection (the load-bearing bit on Linux) ─────────────────────────────
@@ -102,7 +102,7 @@ ipcMain.handle("liascape:pick", async (_e, opts) => {
 
 function openWindow(loadUrl) {
   const win = new BrowserWindow({
-    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "livepaper",
+    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "liascape",
     webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, "preload.js") },
   });
   win.setMenuBarVisibility(false);

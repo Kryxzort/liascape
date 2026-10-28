@@ -2,7 +2,7 @@
 # Hermetic integration test of the backend's liascape-player adapter (PlayerEngine=liascape-player).
 # See .claude/rules/player-adapter.md § Integration test.
 #
-# It runs the REAL `livepaper --serve` backend against a PRIVATE `liascape-player serve --headless --clock
+# It runs the REAL `liascape --serve` backend against a PRIVATE `liascape-player serve --headless --clock
 # real --ao null` (SUPERVISED — `$SP` is the supervisor, `$CP`/`comp_pid` is its compositor child, see
 # player-core.md § Supervisor) and drives everything over HTTP, checking the result with `liascape-player ctl`:
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
@@ -70,7 +70,7 @@ snapshot_backend() {   # $1 = destination dir → prints the copied DLL's path
 }
 T=$(mktemp -d /tmp/liascape-it-XXXXXX)   # short: a unix socket path must be < 108 bytes
 DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
-mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$T/bin"
+mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$T/bin"
 # the backend's player binary: a link to this build, replaced by a copy to stand in for a rebuild (upgrade test)
 ln -s "$B" "$T/bin/liascape-player"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
@@ -98,7 +98,7 @@ cleanup() {
   [ -n "${WSP:-}" ] && kill "$WSP" 2>/dev/null
   for bp in "$BP" ${BP_OLD:-}; do [ -n "$bp" ] && { kill "$bp" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$bp" 2>/dev/null || break; sleep 0.1; done; kill -9 "$bp" 2>/dev/null; }; done
   # a `--timer-daemon` a stopping backend handed the playlist to (the restart test below)
-  [ -s "$XDG_CONFIG_HOME/livepaper/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/livepaper/timer.pid")" 2>/dev/null
+  [ -s "$XDG_CONFIG_HOME/liascape/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/liascape/timer.pid")" 2>/dev/null
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
@@ -127,7 +127,7 @@ E1=$T/e1.mp4; E2=$T/e2.mp4; P1=$T/p1.mp4; P2=$T/p2.mp4
 clip "$E1" testsrc2 330 12; clip "$E2" smptebars 770 12; clip "$P1" rgbtestsrc 880 4; clip "$P2" testsrc 990 4
 L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while an end-of-video switch is armed
 
-cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
+cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
  "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
@@ -152,9 +152,9 @@ CP=$(comp_pid)   # the compositor — `$SP` (spawned by `start_player`) is its S
 [ -n "$CP" ] && [ "$CP" != "$SP" ] && ok "hello.pid ($CP) is the compositor, != the spawned supervisor $SP" || bad "hello.pid = $CP, spawned supervisor = $SP"
 [ "$(sup_pid)" = "$SP" ] && ok "hello.supervisor_pid == spawned supervisor $SP" || bad "hello.supervisor_pid $(sup_pid) != spawned $SP"
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
-for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
-[ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
-U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
+[ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
 # an import copies the clip + ffmpeg-extracts its thumbnail: seconds under load, past `post`'s 10 s
@@ -190,7 +190,7 @@ stop_now() { post /stop '{}' >/dev/null; waitfor $WAIT nothing_shown || bad "/st
 nows() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.align=="now")] | length'; }
 handed_more() { [ "$(handoffs)" -gt "$1" ]; }
 corr_has() { ctl logs "{\"corr\":\"$1\",\"kind_prefix\":\"transition.$2\"}" | jq '.events|length'; }
-reapplies() { grep -c "re-applied effective settings" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
+reapplies() { grep -c "re-applied effective settings" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
 reapplied_since() { [ "$(reapplies)" -gt "$1" ]; }
 # A reapply after a restart: its own log line (count > $1) — or, since the adapter log drops a line
 # identical to one written < 10 s earlier, that identical line. It happens when the restarted player
@@ -199,8 +199,8 @@ reapplied_since() { [ "$(reapplies)" -gt "$1" ]; }
 # line ("… for dee.mp4 (player.paused = false, kept)") repeats the stall-recovery one 2.7 s before.
 reapply_seen() {
   reapplied_since "$1" && return 0
-  grep -q "liascape-player restarted (new pid)" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || return 1
-  python3 - "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" \
+  grep -q "liascape-player restarted (new pid)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || return 1
+  python3 - "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
     "liascape-player: re-applied effective settings for $(basename "$(cur path)") (player.paused = $(playerPaused), kept)" <<'PY'
 import re, sys
 log, want = sys.argv[1], sys.argv[2]
@@ -225,7 +225,7 @@ handed_to_before() {
   local to; to=$(ctl logs '{"kind_prefix":"transition.handoff","limit":10000}' | jq -r --argjson n "$1" --argjson t "$2" "[.events[\$n:][] | select($EV_MS < \$t)][-1].to // empty")
   [ -n "$to" ] && ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg to "$to" '[.events[] | select(.to == $to)][-1].path // empty'
 }
-SNAP=$XDG_STATE_HOME/livepaper/liascape-player/snapshot.json
+SNAP=$XDG_STATE_HOME/liascape/liascape-player/snapshot.json
 snap_paused() { jq -e --argjson v "$1" '.player.paused == $v' "$SNAP" >/dev/null 2>&1; }
 
 PE=$(curl -sf -m 5 "$U/player-engine"); echo "player-engine: $PE"
@@ -646,7 +646,7 @@ echo "== Task 20c: /next /prev /random skip scenes under liascape-player (never 
 # what IsSceneFolder checks, and exactly what makes PlayerHelper.IsScenePath (no media extension) true
 # for that folder's path. No linux-wallpaperengine / scene.pkg needed to be *recognized* as a scene —
 # only to actually render one, which these never attempt (they must be SKIPPED, not launched).
-LIB=$XDG_DATA_HOME/livepaper/library
+LIB=$XDG_DATA_HOME/liascape/library
 postcode() { curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d "${2:-{}}" "$U$1"; }
 postbody() { curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "${2:-{}}" "$U$1"; }
 
@@ -1160,7 +1160,7 @@ waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000
   && ok "the index refined: $(idx_loud 900000005) — loudnessI kept at $I5 (moved < 0.5 LU)" || bad "second play: index $(idx_loud 900000005) (was $I5 over ${S5s} s)"
 A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
 [ "$A5b" = 0 ] && near "$(cur gain.normalize)" "$W5" 0.01 && ok "…gain.normalize untouched ($(cur gain.normalize), no ramp)" || bad "a sub-0.5 refinement moved gain.normalize: $(cur gain.normalize), ramps $A5b"
-grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
+grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
 # a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU →
 # gain.normalize ramps to it — same source, same worker
 stop_now
@@ -1236,7 +1236,7 @@ stop_now
 aligned_corr() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" '[.events[] | select(.align=="end" and .path==$p)][-1].corr // empty'; }
 armed_for() { ac=$(aligned_corr "$1"); [ -n "$ac" ]; }
 nsched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
-backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
+backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
 # `ac` handed off; to what — from its handoff event (B is a short clip whose own aligned switch starts
 # ~0.3 s before ITS end, so reading `cur:*` after a slow poll could already show the next one)
 handed_off() {
@@ -1273,7 +1273,7 @@ nst_=$(n_before transition.started "$ac" "$t_check"); nn_=$(n_before transition.
   || bad "speed drop: corr=$ac cancelled=$nc_ handoff=$nh_ new switches=$nn_ by +$(( t_check - t_arm )) ms"
 # E1 on screen then = no effect had started from it (mid-effect `cur:*` is the incoming side) and nothing replaced it
 [ "$nst_" = 0 ] && [ "$nn_" = 0 ] && ok "E1 still on screen (not cut before its end)" || bad "speed drop: $ac started=$nst_, new switches=$nn_ by +$(( t_check - t_arm )) ms — E1 was cut early"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -1)"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)"
 setting '.Speed = 4'
 cp=""; waitfor 20000 handed_off   # E1's rest at 4×: ≤ 3 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$E2" ] && ok "back at 4x: the same aligned switch handed off to E2 at E1's end" || bad "after 4x: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -1291,7 +1291,7 @@ pp=$(playerPaused); nc_=$(corr_has "$ac" cancelled); nn_=$(( $(nsched) - ns0 ));
 [ "$pp" = true ] && [ -n "$ac" ] && [ "$nc_" = 0 ] && [ "$nn_" = 0 ] && [ "$cp" = "$P1" ] \
   && ok "8 s paused: aligned switch $ac still waiting, P1 on screen, no new switch" \
   || bad "long pause: paused=$pp corr=$ac cancelled=$nc_ new switches=$nn_ cur $(basename "$cp") (paused at P1 ${p_pause} s)"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -1)"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)"
 post /pause '{}' >/dev/null
 cp=""; waitfor 20000 handed_off   # P1's rest: < 4 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$P2" ] && ok "resumed: the same aligned switch handed off to P2 at P1's end" || bad "after resume: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -1360,12 +1360,12 @@ time.sleep(120)
 PY
 ws_up() { grep -q " 101 " "$T/ws.log"; }
 waitfor $WAIT ws_up && ok "a WebSocket client holds the backend open (like the UI)" || bad "WebSocket upgrade: $(cat "$T/ws.log")"
-storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
-port_moved() { [ "$(cat "$XDG_CONFIG_HOME/livepaper/serve.port" 2>/dev/null)" != "$1" ]; }
+storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
+port_moved() { [ "$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)" != "$1" ]; }
 healthy() { curl -sf -m 2 "$U/health" >/dev/null; }
 new_backend_up() {   # $1 = the old port; sets U
   waitfor 60000 port_moved "$1" || bad "the new backend never wrote its port"
-  U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+  U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
   waitfor 30000 healthy || bad "the new backend never answered /health"
 }
 # The window that must hold exactly ONE advance (E1's end) is anchored on E1's own position, read with
@@ -1385,17 +1385,17 @@ one_advance() {   # exactly one handoff (after index h0) before tw, and it hande
   [ "$dh" = 1 ] && [ "$dto" = "$E2" ]
 }
 # the play's own switch has handed off and only the next aligned one is armed (a baseline to count from)
-st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); pe=$(tpos 0); te=$(ms_now)
+st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); pe=$(tpos 0); te=$(ms_now)
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; OLD1=$BP; sleep 1.5
 "$DOTNET" "$DLL" --serve > "$T/backend2.log" 2>&1 & BP=$!
 new_backend_up "$port0"
 kill -0 "$OLD1" 2>/dev/null && ok "the old backend is still shutting down (WebSocket open) while the new one runs" || echo "  note the old backend already exited — the overlap this tests didn't happen"
 e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one aligned advance
-[ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
+[ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
-[ "$(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null) (new backend $BP)"
-tp=$(cat "$XDG_CONFIG_HOME/livepaper/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no --timer-daemon left running" || bad "a --timer-daemon (pid $tp) runs next to the new backend"
+[ "$(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
+tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no --timer-daemon left running" || bad "a --timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
 for _ in $(seq 1 50); do kill -0 "$OLD1" 2>/dev/null || break; sleep 0.1; done
 stop_now
@@ -1407,7 +1407,7 @@ setting '.GlobalMaxPlaySeconds = 7'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor $WAIT cur_is path "$E1"; sleep 1.5
-port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); old=$BP
+port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 2
 BLOG=$T/backend-limits.log   # the running backend's log (the next section greps it)
@@ -1423,7 +1423,7 @@ setting '.GlobalIntervalSeconds = 6'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$P1\",\"$P2\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor $WAIT cur_is path "$P1"; sleep 1.5
-port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); old=$BP
+port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 1
 BLOG=$T/backend-limits2.log
@@ -1441,7 +1441,7 @@ setting '.AllowScenes = true | .GlobalSeparateSceneTiming = true | .GlobalSwitch
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$S1\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor $WAIT scene_ready "$S1"; sleep 1.5
-port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); old=$BP
+port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 1
 BLOG=$T/backend-limits3.log
@@ -1456,7 +1456,7 @@ setting '.GlobalSeparateSceneTiming = false | .GlobalSwitchScenesAfterSeconds = 
 echo "== a second backend started while the first runs takes the playlist over (the first stops ticking)"
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 armed_only
-st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); first=$BP; pe=$(tpos 0); te=$(ms_now)
+st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); first=$BP; pe=$(tpos 0); te=$(ms_now)
 "$DOTNET" "$DLL" --serve > "$T/backend3.log" 2>&1 & BP=$!; BP_OLD="$BP_OLD $first"
 new_backend_up "$port0"
 e1_window "$te" "$pe"
@@ -1509,7 +1509,7 @@ echo "== a rebuilt player binary: the backend restarts the player onto it, keepi
 # still in flight, then the final snapshot — takes seconds. The upgrade waited 1.5 s, SIGTERMed, SIGKILLed at 3 s
 # (killing the final snapshot: the new player restored an older one) and then gave up on the new one after 3 s.
 restart_player 5 LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
-kills() { grep -cE "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
+kills() { grep -cE "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
 rebuild() { cp "$B" "$T/bin/liascape-player.new" && mv -f "$T/bin/liascape-player.new" "$T/bin/liascape-player"; }
 post /apply "{\"path\":\"$D\"}" >/dev/null; waitfor $WAIT shows "$D" || bad "/apply d → cur $(cur path)"
 post /pause '{}' >/dev/null; waitfor $WAIT paused_is true || bad "/pause → player.paused $(playerPaused)"
@@ -1522,7 +1522,7 @@ CP=$(comp_pid); SP=$(sup_pid)
 [ "$(readlink "/proc/$CP/exe")" = "$T/bin/liascape-player" ] && ok "it runs the new build" || bad "it runs $(readlink "/proc/$CP/exe")"
 [ "$(cur path)" = "$D" ] && [ "$(playerPaused)" = true ] && ok "same wallpaper, still paused" || bad "after the upgrade: cur $(basename "$(cur path)") paused=$(playerPaused)"
 [ "$(ctl logs '{"kind_prefix":"snapshot.restored"}' | jq '.events|length')" -ge 1 ] && ok "restored from its snapshot" || bad "no snapshot.restored on the new player"
-[ "$(kills)" = "$k0" ] && ok "the old player's slow clean quit was waited for (never signalled)" || bad "the upgrade signalled the quitting player: $(grep -E "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -2 | tr '\n' ' ')"
+[ "$(kills)" = "$k0" ] && ok "the old player's slow clean quit was waited for (never signalled)" || bad "the upgrade signalled the quitting player: $(grep -E "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -2 | tr '\n' ' ')"
 sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
 case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "the new player got the old one's arguments + --restore" ;; *) bad "the new supervisor runs: $sa" ;; esac
 curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: current again" || bad "still stale: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
@@ -1672,9 +1672,9 @@ mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 kill -0 "$SP" 2>/dev/null && bad "liascape-player supervisor still running after the switch away" || ok "liascape-player supervisor quit on switch away"
 kill -0 "$CP" 2>/dev/null && bad "liascape-player compositor still running after the switch away" || ok "liascape-player compositor quit on switch away"
 [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "no mpvpaper started/killed" || bad "mpvpaper count changed"
-grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
+grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 
 echo "== adapter log (tail)"
-tail -n 8 "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+tail -n 8 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

@@ -100,7 +100,7 @@ public static class LibraryStore
     {
         lock (_lock)
         {
-            using var _ = FileLock.Hold(IndexPath(source)); // and every other livepaper process (--restore's WE sync)
+            using var _ = FileLock.Hold(IndexPath(source)); // and every other liascape process (--restore's WE sync)
             var idx = LoadIndex(source);
             if (mutate(idx)) SaveIndex(source, idx);
         }

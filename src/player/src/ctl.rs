@@ -12,7 +12,7 @@
 //! stderr) when the player goes away.
 //!
 //! The socket is `paths::socket()` (`$LIASCAPE_PLAYER_SOCKET` or
-//! `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock`).
+//! `$XDG_RUNTIME_DIR/liascape/liascape-player.sock`).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;

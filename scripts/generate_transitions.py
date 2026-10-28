@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bundle gl-transitions GLSL into livepaper's transitions/ dir.
+"""Bundle gl-transitions GLSL into liascape's transitions/ dir.
 
 For each transition: strip Author/License header (-> manifest), turn each
 `uniform <type> <name>; // = <default>` into `const <type> <name> = <coerced>;`

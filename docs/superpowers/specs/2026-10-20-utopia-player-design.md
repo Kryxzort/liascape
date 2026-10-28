@@ -1,6 +1,6 @@
 # liascape-player — the "utopia player" — design
 
-Status: **approved by owner 2026-10-20** (with TransitionMethod kept) — next: implementation plan · Date: 2026-10-20 · Repo: livepaper-pro (branch `transitions-reveal`)
+Status: **approved by owner 2026-10-20** (with TransitionMethod kept) — next: implementation plan · Date: 2026-10-20 · Repo: liascape (branch `transitions-reveal`)
 
 Items marked **(my call)** were decided by the designer, not the owner; the owner can override any of them.
 Everything else was stated or confirmed by the owner.
@@ -9,7 +9,7 @@ Everything else was stated or confirmed by the owner.
 
 ## 1. Intent — what this is and why
 
-livepaper plays live wallpapers today by orchestrating **four separate programs**: `mpvpaper` (videos),
+liascape plays live wallpapers today by orchestrating **four separate programs**: `mpvpaper` (videos),
 `liascape-transition` (the transition overlay), one `linux-wallpaperengine` (LWE) process **per monitor** (scenes), and
 `liascape-audio` (scene-audio volume control), all driven by the C# backend over sockets, files and process signals.
 
@@ -63,7 +63,7 @@ and visual seams cannot happen regardless of timing.
 8. **AI-optimised docs and debug mode** (owner) (§8, §9).
 9. Absorb mpvpaper's strengths: per-output layer-shell surfaces, choice of layer, auto-pause/auto-stop when hidden,
    pause when a window is fullscreen/maximized/active (wlr-foreign-toplevel), no leaks.
-10. Improve WE scene compatibility beyond upstream LWE as a distinguishing feature of livepaper (owner) — last phase.
+10. Improve WE scene compatibility beyond upstream LWE as a distinguishing feature of liascape (owner) — last phase.
 
 ### Non-goals
 - Rewriting LWE's scene engine. It is vendored and patched, not reimplemented (§6).
@@ -96,7 +96,7 @@ and visual seams cannot happen regardless of timing.
     `--no-scenes`. That flag hides scenes in the UI, as `AllowScenes=false` does today.
   - The **web worker** (CEF, hundreds of MB) is **opt-in** (`--with-web`). Without it, web items stay hidden as today.
 - **Licence**: mpvpaper and linux-wallpaperengine are both **GPL-3.0** (verified in their `LICENSE` files). `liascape-player`
-  is therefore GPL-3.0. The C# backend talks to it over a socket and stays a separate program. *The livepaper repo
+  is therefore GPL-3.0. The C# backend talks to it over a socket and stays a separate program. *The liascape repo
   currently has no LICENSE file at all — owner's decision, outside this design.*
 - **Project rules** (CLAUDE.md, apply to all of this): features must compose; settings apply live to the playing
   wallpaper; self-test everything; test with the Steam workshop folder `431960` (SFW) or synthetic ffmpeg clips —
@@ -121,7 +121,7 @@ and visual seams cannot happen regardless of timing.
 ┌──────────────────────────── liascape-player (compositor, never runs risky code) ─────────────────────────────┐
 │ Outputs (one layer-shell surface per monitor) · Layers · Effects · Animator · Clocks · Gains · Probes   │
 │ In-process sources: Video/Image (libmpv render API), Colour                                            │
-│ Command API (unix socket) ◀───────────── livepaper backend (C#)                                        │
+│ Command API (unix socket) ◀───────────── liascape backend (C#)                                        │
 └──────────▲──────────────────────────────▲─────────────────────────────────────────────────────────────┘
            │ GPU frames (dmabuf) + audio  │
    ┌───────┴────────┐            ┌────────┴───────┐
@@ -327,7 +327,7 @@ UPSTREAM.md                 per vendored repo: URL, pinned commit, patch list, h
     and message, plus trailers:
     - `Upstream-PR: <url>` or `Upstream-Commit: <sha>`
     - `Origin: upstream-PR | upstream-commit | ours`
-    - `Adapted-by: livepaper` when modified
+    - `Adapted-by: liascape` when modified
   - `CREDITS.md` at the repo root is **generated** from those headers and from `UPSTREAM.md` by
     `scripts/gen-credits.py`, and a test fails when it is stale. It lists, per upstream project: each imported
     change, its author (name + GitHub handle), link, a one-line summary, our patch file and the licence. A second
@@ -539,7 +539,7 @@ The project is several sub-projects, in this order. Each ships behind a backend 
   never crash, and strong compile-time checks for AI-written code. Workers are C++ around LWE.
 - Choice of crates/libraries (Wayland client, EGL/GL loader, libmpv bindings).
 - Exact wire format and schemas of the Command API, events and logs (JSON lines over a unix socket under
-  `$XDG_RUNTIME_DIR/livepaper/` is **(my call)** as the starting point).
+  `$XDG_RUNTIME_DIR/liascape/` is **(my call)** as the starting point).
 - Supervision mechanism details, heartbeat intervals, restart back-off.
 - Internal threading model, frame pacing implementation, and sync mechanism details post-spike.
 - Test framework and how the scene corpus runner reports.
@@ -549,7 +549,7 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 
 ## Calls made by the designer (please check)
 
-1. Name `liascape-player`; source under `src/player/` + `src/player-workers/`; stays in the livepaper repo.
+1. Name `liascape-player`; source under `src/player/` + `src/player-workers/`; stays in the liascape repo.
 2. Compositor in Rust; workers in C++. (Owner explicitly delegated the language choice to the designer.)
 3. Desktop OpenGL core profile (to host LWE core) instead of GLES.
 4. Videos/images in-process; scenes and web in isolated workers.

@@ -1,4 +1,4 @@
-# livepaper — TODO
+# liascape — TODO
 
 Running list of things found while working that aren't done yet. Newest context first within each section.
 Tick items off in the commit that does them. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
@@ -45,13 +45,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       It captures the sink, rebuilds the expected mix from the source files at the logged positions, aligns latency,
       and flags dropouts and 1 ms micro-gaps. Make the ffmpeg path come from PATH.
       — done in Task 15 (`scripts/liascape_audiowatch.py`, lane B); not yet merged into this branch's history.
-- [x] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
+- [x] Dev unit `~/.config/systemd/user/liascape-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`. Also (2026-10-26):
       - **`dotnet watch --no-hot-reload`** — a hot-reload delta never runs a NEW static field's initializer: the
         merge that added `SettingsService`'s static `Fields`/`WebJson` maps was "applied" in place, leaving
         `POST /settings` on a null map until a full restart (and a 2026-09 delta with a new static crashed the
         process). Every .cs change becoming a restart is the owner's stated preference anyway.
-      - **The player must not die with the unit**: `systemctl --user restart livepaper-watch` kills the whole
+      - **The player must not die with the unit**: `systemctl --user restart liascape-watch` kills the whole
         cgroup — the backend-spawned liascape-player with it (`setsid` doesn't leave the cgroup) → no wallpaper for
         ~17 s until the new backend built and replayed. `dotnet watch`'s own restarts don't (same cgroup lives
         on). Either spawn the player out of the unit's cgroup when `INVOCATION_ID` is set
@@ -107,7 +107,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       self-switches. `player-adapter.md` § Rotation (`ItemPlayRule`). One-off migration v2
       (`/tmp/rot-kryxzort/migrate-once.sh` + `test-migrate.sh`, 109 checks; RED on v1: 26): adv+wait → exactly the old
       behaviour (min = old min, max = old max, toggle on, scenes after = the old interval). **Owner action:** run it on
-      a copy of `~/.config/livepaper` + `~/.local/share/livepaper/playlists` (the app stopped), check the printed
+      a copy of `~/.config/liascape` + `~/.local/share/liascape/playlists` (the app stopped), check the printed
       rotations, copy `out/` over the originals.
   - [x] **An fps cap stalls a still image** (found 2026-10-28 by `test-settings-merge.sh`; fixed 2026-10-28): with
         `VideoFps` > 0 (`fps_cap` 98) a `kind: image` source stayed `ready: false` (width 0) and its switch sat in
@@ -305,7 +305,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=liascape-player`** (Task 20 battery,
       `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
       `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
-- [x] **The owner's installed `livepaper` (NixOS package) predates liascape-player entirely** — done 2026-10-25: `/etc/nixos/livepaper.nix` re-pinned to the local `liascape-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
+- [x] **The owner's installed `liascape` (NixOS package) predates liascape-player entirely** — done 2026-10-25: `/etc/nixos/liascape.nix` re-pinned to the local `liascape-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
       `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `liascape-backend.dll` —
       zero occurrences of `PlayerEngine`/`LIASCAPE_PLAYER_BIN` anywhere, while the current dev build has both. So
       every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
@@ -699,7 +699,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
   - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
-        --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `livepaper --kill`). Lists the
+        --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape --kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
         = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
   - [x] **LWE: catch exceptions at the wp_* C API** (2026-10-28, fork patch 0015) — the C entry points already

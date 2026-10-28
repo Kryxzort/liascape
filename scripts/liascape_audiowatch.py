@@ -22,7 +22,7 @@ be told apart from quiet passages in the music.
 import array, collections, datetime, json, math, operator, os, re, shutil, subprocess, sys, threading, time
 
 SR, MS = 48000, 48
-LOG = os.path.expanduser('~/.cache/livepaper/liascape-transition.log')
+LOG = os.path.expanduser('~/.cache/liascape/liascape-transition.log')
 DEV = sys.argv[1] if len(sys.argv) > 1 else 'easyeffects_sink.monitor'
 OUTDIR = sys.argv[2] if len(sys.argv) > 2 else '/tmp'
 os.makedirs(OUTDIR, exist_ok=True)
@@ -148,7 +148,7 @@ def analyse(tr, n):
 FF = shutil.which('ffmpeg') or 'ffmpeg'  # resolved from PATH — never a hard-coded store path
 def resolve(base):
     try:
-        st = json.load(open(os.path.expanduser('~/.config/livepaper/playlist_state.json')))
+        st = json.load(open(os.path.expanduser('~/.config/liascape/playlist_state.json')))
         for p in st.get('VideoPaths', []):
             if os.path.basename(p) == base: return p
     except Exception: pass

@@ -54,7 +54,7 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
   - `type == "scene"` or `scene.pkg` present → scene (included only when `AllowScenes` is true)
   - `type == "web"` / `"application"` → skipped always
   - `title` field becomes the wallpaper title
-- Thumbnail: `preview.jpg` preferred; GIF thumbnails → static frame via ffmpeg cached to `~/.cache/livepaper/we_thumbs/<workshopId>.jpg`; fallback to any `.png`/`.jpg`/`.jpeg`
+- Thumbnail: `preview.jpg` preferred; GIF thumbnails → static frame via ffmpeg cached to `~/.cache/liascape/we_thumbs/<workshopId>.jpg`; fallback to any `.png`/`.jpg`/`.jpeg`
 - `SupportsSorting` returns true only for this source; sort UI visible only when WE local is selected
 
 ### Wallpaper Engine Workshop (online) — `SteamWorkshopScraper` + `SteamWorkshopService`
@@ -91,8 +91,8 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
 
 **Download — `WorkshopDownloader.AcquireAsync`:**
 Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopAcquireMode`):
-- `"subscribe"` (default): `xdg-open steam://url/CommunityFilePage/<id>` → poll `workshop/content/431960/<id>/project.json` (3 s intervals, 10 min timeout). Checks both WE workshop dir and `~/.cache/livepaper/steamcmd_workshop/…`.
-- `"steamcmd"`: runs `steamcmd +force_install_dir ~/.cache/livepaper/steamcmd_workshop +login <SteamUsername> +workshop_download_item 431960 <id> +quit`. Password is **never stored** — one-time sign-in via `LaunchSteamCmdSignIn` opens an interactive terminal to cache Steam sentry file. Subsequent runs are non-interactive.
+- `"subscribe"` (default): `xdg-open steam://url/CommunityFilePage/<id>` → poll `workshop/content/431960/<id>/project.json` (3 s intervals, 10 min timeout). Checks both WE workshop dir and `~/.cache/liascape/steamcmd_workshop/…`.
+- `"steamcmd"`: runs `steamcmd +force_install_dir ~/.cache/liascape/steamcmd_workshop +login <SteamUsername> +workshop_download_item 431960 <id> +quit`. Password is **never stored** — one-time sign-in via `LaunchSteamCmdSignIn` opens an interactive terminal to cache Steam sentry file. Subsequent runs are non-interactive.
 
 After acquire: `DownloadHelper.DownloadAsync` with the workshop dir as `DownloadUrl` (local file path), identical to WE Local import. `WallpaperDetail.IsWorkshopAcquire = true` signals the acquire branch in `DownloadCardsAsync`.
 

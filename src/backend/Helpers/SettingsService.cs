@@ -12,7 +12,7 @@ public static class SettingsService
 {
     private static readonly string ConfigPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "livepaper", "settings.json");
+        "liascape", "settings.json");
 
     // Every request, the tick, the adapter and the daemons load + save this file concurrently. A save used to
     // truncate it and write in place, so a load that landed mid-write parsed nothing and got the C# defaults
@@ -74,7 +74,7 @@ public static class SettingsService
     {
         lock (PatchLock)
         {
-            using var _ = FileLock.Hold(ConfigPath); // and every other livepaper process (the CLI, the daemons)
+            using var _ = FileLock.Hold(ConfigPath); // and every other liascape process (the CLI, the daemons)
             var s = Load();
             mutate(s);
             Save(s);

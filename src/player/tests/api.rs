@@ -143,7 +143,7 @@ impl Serve {
             cmd.env_remove(k);
         }
         let child = cmd.spawn().expect("spawn liascape-player serve");
-        let sock = root.join("run/livepaper/liascape-player.sock");
+        let sock = root.join("run/liascape/liascape-player.sock");
         let mut s = Serve {
             child: Some(child),
             root,
@@ -2908,7 +2908,7 @@ fn concurrent_starts_one_serves() {
             .read_to_string(&mut err)
             .unwrap();
         assert!(!lst.success(), "round {round}: loser exit {lst}");
-        let sock = root.join("run/livepaper/liascape-player.sock");
+        let sock = root.join("run/liascape/liascape-player.sock");
         let t = Instant::now();
         let mut c = loop {
             if let Ok(s) = UnixStream::connect(&sock) {
@@ -3247,7 +3247,7 @@ fn wayland_serve_args_and_missing_compositor() {
         "the hint names the alternative: {err}"
     );
     assert!(t.elapsed() < Duration::from_secs(10), "no hang");
-    let sock = root.join("run/livepaper/liascape-player.sock");
+    let sock = root.join("run/liascape/liascape-player.sock");
     assert!(!sock.exists(), "socket left behind");
     assert!(!sock.with_extension("lock").exists(), "lock left behind");
 }
@@ -4395,7 +4395,7 @@ fn i5_open_burst_is_capped_and_none_lost() {
         .expect("quit with opens queued must exit");
     println!("I5 quit with a burst queued: exit after {:?}", t.elapsed());
     assert!(st.success(), "{st}");
-    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl")).unwrap();
     assert!(
         !log.contains("mpv.reaper_stragglers"),
         "straggler at quit: {}",
@@ -4688,7 +4688,7 @@ fn t20e_wayland_present_heap_stays_flat() {
         ));
     let mut srv = Serve {
         child: Some(cmd.spawn().expect("spawn liascape-player serve (wayland)")),
-        sock: root.join("run/livepaper/liascape-player.sock"),
+        sock: root.join("run/liascape/liascape-player.sock"),
         root,
         _serial: Some(serial),
     };
@@ -5194,7 +5194,7 @@ fn render_worker_quit_is_bounded() {
     println!("render worker quit: exit after {took:?}");
     assert!(st.success(), "{st}");
     assert!(took < Duration::from_secs(3), "quit took {took:?}");
-    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl")).unwrap();
     let stopped: Vec<&str> = log
         .lines()
         .filter(|l| l.contains("render_worker.stopped"))
@@ -5274,7 +5274,7 @@ fn render_worker_death_fails_the_player() {
         .wait_exit(Duration::from_secs(8))
         .expect("a dead render worker must fail the player");
     assert_eq!(st.code(), Some(3), "{st}: {}", srv.stderr());
-    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl")).unwrap();
     let died: Vec<&str> = log
         .lines()
         .filter(|l| l.contains("\"render_worker.died\""))
@@ -5291,7 +5291,7 @@ fn render_worker_death_fails_the_player() {
         "the leaked core isn't a straggler: {log}"
     );
     assert!(
-        !srv.path("run/livepaper/liascape-player.sock").exists(),
+        !srv.path("run/liascape/liascape-player.sock").exists(),
         "socket left behind"
     );
 }
@@ -5566,7 +5566,7 @@ fn wayland_render_worker_plays_video() {
             ));
         let mut srv = Serve {
             child: Some(cmd.spawn().expect("spawn liascape-player serve (wayland)")),
-            sock: root.join("run/livepaper/liascape-player.sock"),
+            sock: root.join("run/liascape/liascape-player.sock"),
             root,
             _serial: serial.take(),
         };
@@ -5627,7 +5627,7 @@ fn wayland_render_worker_plays_video() {
         let st = srv.wait_exit(Duration::from_secs(5)).expect("quit exits");
         assert!(st.success(), "{st}: {}", srv.stderr());
         let log =
-            std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
+            std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl")).unwrap();
         assert!(log.contains("\"wl.connected\""), "not on Wayland?");
         if mode == "on" {
             assert!(
@@ -6202,7 +6202,7 @@ fn logs_of(c: &mut Client, kind_prefix: &str) -> Vec<Value> {
 }
 
 fn crash_files(srv: &Serve) -> usize {
-    std::fs::read_dir(srv.path("state/livepaper/liascape-player/crashes"))
+    std::fs::read_dir(srv.path("state/liascape/liascape-player/crashes"))
         .map(|r| r.flatten().count())
         .unwrap_or(0)
 }

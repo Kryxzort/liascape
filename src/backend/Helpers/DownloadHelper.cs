@@ -13,7 +13,7 @@ public static class DownloadHelper
 {
     public static readonly string LibraryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "livepaper", "library");
+        "liascape", "library");
 
     public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false, CancellationToken ct = default, string? animatedUrl = null)
     {

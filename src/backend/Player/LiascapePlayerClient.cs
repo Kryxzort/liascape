@@ -38,15 +38,15 @@ public sealed class LiascapePlayerClient
 
     [DllImport("libc")] private static extern uint getuid();
 
-    // Mirrors src/player/src/paths.rs: $LIASCAPE_PLAYER_SOCKET, else $XDG_RUNTIME_DIR/livepaper/liascape-player.sock
-    // (else /run/user/<uid>/livepaper/liascape-player.sock).
+    // Mirrors src/player/src/paths.rs: $LIASCAPE_PLAYER_SOCKET, else $XDG_RUNTIME_DIR/liascape/liascape-player.sock
+    // (else /run/user/<uid>/liascape/liascape-player.sock).
     public static string DefaultSocketPath()
     {
         var env = Environment.GetEnvironmentVariable("LIASCAPE_PLAYER_SOCKET");
         if (!string.IsNullOrEmpty(env)) return env;
         var rt = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         if (string.IsNullOrEmpty(rt)) { try { rt = $"/run/user/{getuid()}"; } catch { rt = Path.GetTempPath(); } }
-        return Path.Combine(rt, "livepaper", "liascape-player.sock");
+        return Path.Combine(rt, "liascape", "liascape-player.sock");
     }
 
     public LiascapePlayerClient(string socketPath) { SocketPath = socketPath; }
@@ -190,7 +190,7 @@ public sealed class LiascapePlayerClient
     // ---- logging (rate-limited: an identical line at most once per 10 s) ------------------------
     private static readonly Dictionary<string, long> _logSeen = new();
     private static readonly string _logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-player-adapter.log");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-player-adapter.log");
     public static void Log(string msg)
     {
         long now = Environment.TickCount64;
@@ -278,7 +278,7 @@ public sealed class LiascapePlayerClient
                     "is it stopped or stalled? `liascape-player ctl probe '{\"name\":\"loop\"}'` — requests resume on their own once it answers");
             if (!EnsureConnected())
                 throw new LiascapePlayerException("io", $"no liascape-player answering on {SocketPath}",
-                    "select Player engine = liascape-player (livepaper starts it) or run `liascape-player serve`");
+                    "select Player engine = liascape-player (liascape starts it) or run `liascape-player serve`");
             if (_helloPending && cmd != "hello")
             {
                 _helloPending = false;
@@ -385,7 +385,7 @@ public sealed class LiascapePlayerClient
                     throw new LiascapePlayerException("timeout", $"no reply to `{cmd}` within {timeoutMs} ms",
                         "pass a longer timeout; is the loop stalled? `liascape-player ctl probe '{\"name\":\"loop\"}'`");
                 }
-                throw new LiascapePlayerException("io", $"`{cmd}`: {ex.Message}", "the player went away — `liascape-player ctl hello` to check, livepaper restarts it on the next switch");
+                throw new LiascapePlayerException("io", $"`{cmd}`: {ex.Message}", "the player went away — `liascape-player ctl hello` to check, liascape restarts it on the next switch");
             }
         }
         finally { Monitor.Exit(_cmdLock); }
@@ -610,7 +610,7 @@ public sealed class LiascapePlayerClient
             if (ok) { StartEvents(); WaitSubscribed(1000); }
             string failure = p is { HasExited: true } ? $"exited {p.ExitCode}{ExitHint(p.ExitCode)}" : $"didn't answer within {StartWaitMs / 1000} s";
             Log(ok ? $"liascape-player upgraded in place: pid {old} → {PlayerPid} ({sw.ElapsedMilliseconds} ms to answer)"
-                   : $"liascape-player upgrade: the new player {failure} (see ~/.cache/livepaper/liascape-player-serve.log) — the next switch starts `{string.Join(" ", _serveArgs)} --restore`");
+                   : $"liascape-player upgrade: the new player {failure} (see ~/.cache/liascape/liascape-player-serve.log) — the next switch starts `{string.Join(" ", _serveArgs)} --restore`");
             if (!ok) Fail($"liascape-player did not come back after an in-place upgrade: it {failure}");
             return ok;
         }
@@ -667,7 +667,7 @@ public sealed class LiascapePlayerClient
     // a dead pipe would turn its next stderr write into an error).
     private static Process? Spawn(string bin, List<string> args)
     {
-        var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-player-serve.log");
+        var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-player-serve.log");
         Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
         var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
         psi.ArgumentList.Add("sh");
@@ -732,7 +732,7 @@ public sealed class LiascapePlayerClient
             string why = p is { HasExited: true }
                 ? $"`liascape-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
                 : "`liascape-player serve` did not open its socket within 3 s";
-            Fail($"{why} — see ~/.cache/livepaper/liascape-player-serve.log, or run `{bin} serve` in a terminal");
+            Fail($"{why} — see ~/.cache/liascape/liascape-player-serve.log, or run `{bin} serve` in a terminal");
             return false;
         }
     }

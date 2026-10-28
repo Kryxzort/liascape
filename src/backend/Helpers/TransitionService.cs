@@ -254,7 +254,7 @@ public static class TransitionService
                                           "--method", method, "--ready-file", readyFile, "--scale", _captureScale };
             // diagnostic timing log (decoder warm-up, first-frame latency, decode fps) → easy to share
             try {
-                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-transition.log");
+                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-transition.log");
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
                 args.Add("--log"); args.Add(logPath);
             } catch { }
@@ -626,7 +626,7 @@ public static class TransitionService
     {
         yield return env;
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".local", "share", "livepaper-web", installed);
+            ".local", "share", "liascape-web", installed);
         yield return RepoPath(repoTail);
     }
 
@@ -651,7 +651,7 @@ public static class TransitionService
     }
 
     private static string RuntimeDir() => Path.Combine(
-        Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(), "livepaper");
+        Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(), "liascape");
     private static string IpcSocket() => Path.Combine(RuntimeDir(), "mpv.sock");
 
     // ---- mpv IPC (for the frozen/reveal exact-frame grab) --------------------------------------
@@ -679,7 +679,7 @@ public static class TransitionService
     // ---- misc ------------------------------------------------------------------------------------
     // append to the same diagnostic log the renderer writes (liascape-transition.log), tagged [backend]
     private static readonly string _logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-transition.log");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-transition.log");
     public static void TransLog(string msg) { try { File.AppendAllText(_logPath, $"[backend {DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { } }
 
     private static bool FileNonEmpty(string p) { try { return new FileInfo(p).Length > 0; } catch { return false; } }

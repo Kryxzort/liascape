@@ -51,7 +51,7 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   player older than this build has no `health` and falls back to the CLI of the new binary.
 - **`LiascapePlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
 - **`MpvPropertyMap.cs`** — mpv IPC property sets → liascape-player properties.
-- **`LiascapePlayerSelfTest.cs`** — `livepaper --liascape-player-selftest`.
+- **`LiascapePlayerSelfTest.cs`** — `liascape --liascape-player-selftest`.
 - **`scripts/test-liascape-player-adapter.sh`** — the hermetic HTTP integration test (§ Integration test).
 
 ## Threading: nothing waits on the player under PlayerHelper's `_lock`
@@ -116,7 +116,7 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   so legacy and liascape-player are never both on screen.
 
 ## Binary resolution (`PlayerEngine.ResolveBinary`)
-env `LIASCAPE_PLAYER_BIN` → next to the running livepaper executable (`Environment.ProcessPath` dir, then
+env `LIASCAPE_PLAYER_BIN` → next to the running liascape executable (`Environment.ProcessPath` dir, then
 `AppContext.BaseDirectory`) → the repo dev tree `src/player/target/{release,debug}/liascape-player` (walk up
 from the assembly; **release first** — debug is `opt-level 0` and the player mixes audio itself, so a
 player change reaches the dev session only once `cargo build --release` ran) → `PATH`. **Missing → `IsLiascapePlayer` is false** (legacy keeps working), one log line,
@@ -126,7 +126,7 @@ back to Legacy always stays possible).
 ## Lifecycle
 - `EnsureRunning()` (only a **switch** calls it — queries/sets never spawn): connect, else
   `setsid sh -c 'exec liascape-player serve …'` (no `--headless`; session env inherited — `WAYLAND_DISPLAY`
-  etc.; stdio → `~/.cache/livepaper/liascape-player-serve.log`, never a pipe: the player outlives the
+  etc.; stdio → `~/.cache/liascape/liascape-player-serve.log`, never a pipe: the player outlives the
   backend) and wait ≤ 3 s for the socket. **Arguments:** the first start runs `serve` (`--socket` when not
   the default); once this client has talked to a player, it runs **that player's own arguments + `--restore`**
   (`_serveArgs`, read from its supervisor's cmdline when a new player pid answers `hello`, minus
@@ -171,7 +171,7 @@ back to Legacy always stays possible).
   armed align:end switch would be dropped by the restart and the rotation would switch early (failure
   path), so an advance-on-end playlist upgrades at its next switch. `AutoSpawn=false` (self-test) never
   upgrades. `/player-engine` → `running {pid, supervisor, exe, started, stale}`.
-- Socket: `$LIASCAPE_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (mirrors `paths.rs`).
+- Socket: `$LIASCAPE_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/liascape/liascape-player.sock` (mirrors `paths.rs`).
 - `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from liascape-player =
   `StopAndQuit` (stop → quit → TERM → KILL, synchronous, outside `_lock`).
 - **`LiascapePlayerClient.QuitOrKill` targets the SUPERVISOR, never the compositor alone.** Order: `quit`
@@ -617,10 +617,10 @@ ready) leaves A on screen, but every client was told B when it was requested (`w
 `apply:broken` (a garbage `.mp4`; RED: the UI kept marking the file that never showed).
 
 ## Debugging
-- Adapter log: `~/.cache/livepaper/liascape-player-adapter.log` (+ stderr → the serve unit's journal),
+- Adapter log: `~/.cache/liascape/liascape-player-adapter.log` (+ stderr → the serve unit's journal),
   rate-limited (an identical line ≤ once / 10 s): every refused request with its **hint**, start
   failures, untranslated mpv commands, engine switches, in-place upgrades (`out of date (…)` → `upgraded
-  in place: pid A → B`). Player stdout/stderr: `~/.cache/livepaper/liascape-player-serve.log`.
+  in place: pid A → B`). Player stdout/stderr: `~/.cache/liascape/liascape-player-serve.log`.
   `GET /player-engine` = `{engine, active, available, binary, reason, running}` — `running.stale` names
   why the running player is out of date (null = current).
 - `liascape-player ctl state` — what each output shows (`lay:<c>:main.content`, `cur:`), every source's
@@ -639,7 +639,7 @@ python3; builds liascape-player via the flake devShell + `dotnet build` unless `
 sleep; a window is measured from the clip's own position; "what had happened by t" is judged by the events'
 own `t_mono_ms`/`t_wall` (reads after a window took seconds under load); fixed windows remain only where the
 window is the check (no switch in N s) and the latency bounds (< 500 ms SIGSTOPped, < 100 ms) keep theirs —
-docs/TODO.md "Load-sensitive test flakes". The REAL `livepaper --serve` (from this tree's
+docs/TODO.md "Load-sensitive test flakes". The REAL `liascape --serve` (from this tree's
 `bin/Debug`) against a private `liascape-player serve --headless --outputs 640x360@60,320x180@60 --clock real
 --ao null`, all over HTTP, checked with `liascape-player ctl`. **Hermetic**: temp HOME + every XDG dir (own
 settings.json with `PlayerEngine=liascape-player`, own library, own liascape-player socket + event log), its own

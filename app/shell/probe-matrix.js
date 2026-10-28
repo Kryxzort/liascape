@@ -466,7 +466,7 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6
     }
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.[field];
     if (ov !== to) v.push(`${TITLE(c.target)} ${field} ${ov}, expected ${to}`);
-    if (v.length) v.push(`preview bodies: ${JSON.stringify((c.previewBodies || []).slice(0, 3).map((b) => String(b).replace(/\/tmp\/liascape-mx-[^/]+\/home\/.local\/share\/livepaper\/library\/imported\/[^/]+\//g, "")))}`);
+    if (v.length) v.push(`preview bodies: ${JSON.stringify((c.previewBodies || []).slice(0, 3).map((b) => String(b).replace(/\/tmp\/liascape-mx-[^/]+\/home\/.local\/share\/liascape\/library\/imported\/[^/]+\//g, "")))}`);
     return [...new Set(v)].slice(0, 4).concat(v.slice(-1));
   } };
 }
@@ -2426,7 +2426,7 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
 // the Library tab said "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
 // up everything it mirrors from the backend by itself — no reload: the library (cards), the strip, the settings
 // (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
-const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/livepaper (settings.json, playlist_state.json)
+const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/liascape (settings.json, playlist_state.json)
 const K5 = () => path.join(path.dirname(path.dirname(K[0])), "k5", "k5.mp4");
 const ASPECT_CSS = { "1:1": "1 / 1", "16:9": "16 / 9" };
 function editJson(file, fn) {

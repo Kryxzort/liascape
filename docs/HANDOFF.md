@@ -56,10 +56,10 @@ scene advances).
 1. Fork: OK — done.
 2. Model/effort: "whatever you think is best balance" → hard work (Phase 2 tracks, hunts) Opus high effort;
    chores (flakes, docs, merges, gate runs) Sonnet.
-3. Push/merge + re-pin: OK. `liascape-player` is PUSHED to `Kryxzort/livepaper-pro` (remote `origin` since 2026-10-28 — upstream is `upstream`, push disabled; SSH has no key in the
+3. Push/merge + re-pin: OK. `liascape-player` is PUSHED to `Kryxzort/liascape` (remote `origin` since 2026-10-28 — upstream is `upstream`, push disabled; SSH has no key in the
    agent shell → push with `git -c credential.helper= -c credential.helper='!gh auth git-credential' push
-   https://github.com/Kryxzort/livepaper-pro.git liascape-player`). **Merge into `main` only after a quiet full-matrix
-   gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/livepaper.nix` re-pin to
+   https://github.com/Kryxzort/liascape.git liascape-player`). **Merge into `main` only after a quiet full-matrix
+   gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/liascape.nix` re-pin to
    GitHub (never commit in /etc/nixos; the owner runs `nixos-rebuild`).
 
 ## Night run 2026-10-27 (owner asleep, "don't stop for questions"; cap 2 big agents)
@@ -72,11 +72,11 @@ pushes a branch to `Kryxzort/linux-wallpaperengine`). Gate for `main`: full matr
 merged tree (then merge `liascape-player` → `main`, push, re-pin instructions below).
 
 ## `main` merged (2026-10-27 night)
-`main` fast-forwarded to `b33eec9` and pushed to `Kryxzort/livepaper-pro` after a quiet gate on that exact tip:
+`main` fast-forwarded to `b33eec9` and pushed to `Kryxzort/liascape` after a quiet gate on that exact tip:
 matrix 716/0 (load 2), adapter IT 118/0 ×2, settings-merge 53/0, player crate suites green in both render modes.
-**Owner: re-pin NixOS** — in `/etc/nixos/livepaper.nix` replace the `git+file…ref=liascape-player&rev=3ae0937…` line with
+**Owner: re-pin NixOS** — in `/etc/nixos/liascape.nix` replace the `git+file…ref=liascape-player&rev=3ae0937…` line with
 ```nix
-  livepaperFlake = builtins.getFlake "github:Kryxzort/livepaper-pro/b33eec9d772682285287914020cb8be9158a6b89";
+  liascapeFlake = builtins.getFlake "github:Kryxzort/liascape/b33eec9d772682285287914020cb8be9158a6b89";
 ```
 then `sudo nixos-rebuild switch` (no `--impure` needed for a github: pin). The first build also builds the LWE core
 from `Kryxzort/linux-wallpaperengine` (pinned by hash in `third_party/lwe/PIN`). Phase 2 work after `b33eec9`

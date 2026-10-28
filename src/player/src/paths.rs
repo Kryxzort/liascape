@@ -1,13 +1,13 @@
 //! Where the player lives on disk (plan Global Constraints): the command socket
-//! `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (dir `0700`, socket `0600`) and the state
-//! dir (event log) `$XDG_STATE_HOME/livepaper/liascape-player/` (default
-//! `~/.local/state/livepaper/liascape-player/`). `LIASCAPE_PLAYER_SOCKET` / `--socket` override the
+//! `$XDG_RUNTIME_DIR/liascape/liascape-player.sock` (dir `0700`, socket `0600`) and the state
+//! dir (event log) `$XDG_STATE_HOME/liascape/liascape-player/` (default
+//! `~/.local/state/liascape/liascape-player/`). `LIASCAPE_PLAYER_SOCKET` / `--socket` override the
 //! socket path (both `serve` and `ctl`).
 
 use std::path::PathBuf;
 
-/// The command socket path: `$LIASCAPE_PLAYER_SOCKET`, else `$XDG_RUNTIME_DIR/livepaper/
-/// liascape-player.sock`, else `/run/user/<uid>/livepaper/liascape-player.sock`.
+/// The command socket path: `$LIASCAPE_PLAYER_SOCKET`, else `$XDG_RUNTIME_DIR/liascape/
+/// liascape-player.sock`, else `/run/user/<uid>/liascape/liascape-player.sock`.
 pub fn socket() -> PathBuf {
     if let Some(p) = std::env::var_os("LIASCAPE_PLAYER_SOCKET").filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
@@ -16,24 +16,24 @@ pub fn socket() -> PathBuf {
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
-    run.join("livepaper/liascape-player.sock")
+    run.join("liascape/liascape-player.sock")
 }
 
 /// Whether [`socket`] is the default path (no `LIASCAPE_PLAYER_SOCKET` override) — then its
-/// directory (`…/livepaper`) is the player's own and may be `chmod 0700`-ed.
+/// directory (`…/liascape`) is the player's own and may be `chmod 0700`-ed.
 pub fn socket_is_default() -> bool {
     std::env::var_os("LIASCAPE_PLAYER_SOCKET").is_none_or(|p| p.is_empty())
 }
 
-/// The state dir: `$XDG_STATE_HOME/livepaper/liascape-player`, else
-/// `$HOME/.local/state/livepaper/liascape-player`.
+/// The state dir: `$XDG_STATE_HOME/liascape/liascape-player`, else
+/// `$HOME/.local/state/liascape/liascape-player`.
 pub fn state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("livepaper/liascape-player")
+    base.join("liascape/liascape-player")
 }
 
 /// Crash records of scene workers (Phase 2 Task 3): `<state>/crashes/`.
@@ -123,6 +123,6 @@ mod tests {
         );
         // Nothing anywhere.
         assert_eq!(resolve_scene_worker(None, None, None), None);
-        assert!(crash_dir().ends_with("livepaper/liascape-player/crashes"));
+        assert!(crash_dir().ends_with("liascape/liascape-player/crashes"));
     }
 }

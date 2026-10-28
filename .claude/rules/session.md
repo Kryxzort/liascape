@@ -7,7 +7,7 @@ paths:
 
 ## Settings & Session Persistence
 
-`AppSettings` (JSON at `~/.config/livepaper/settings.json`):
+`AppSettings` (JSON at `~/.config/liascape/settings.json`):
 - Playback: `Loop`, `NoAudio`, `DisableCache` (default **false**), `Volume` (0–100), `Speed` (0.1–4.0, default 1.0). Per-item volume/speed overrides live in the library `index.json`, not here (see `library.md`). `VolumeKeyTarget` (`auto` default | `item` | `global`): what the volume keybinds move (`web-backend.md` Live-apply).
 - Memory: `DemuxerMaxBytes`, `DemuxerMaxBackBytes` (int, MiB)
 - `HwDec`: `"auto"` | `"nvdec"` | `"vaapi"` | `"no"`
@@ -23,7 +23,7 @@ paths:
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `liascapeDbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
 - `LastSession`: tracks last applied mode for `--restore`
 
-`CustomPlaylist` (JSON at `~/.config/livepaper/playlist_state.json` for in-progress; named files in `~/.local/share/livepaper/playlists/`):
+`CustomPlaylist` (JSON at `~/.config/liascape/playlist_state.json` for in-progress; named files in `~/.local/share/liascape/playlists/`):
 - `VideoPaths`, `Name` (nullable; only set after Save or Load)
 - `Settings.Order` (Sequential/Shuffle), `Settings.OverrideGlobalSettings`, `Settings.IntervalSeconds` (0; the timer, or the minimum play time under advance-on-end), `Settings.AdvanceOnVideoEnd` (true), `Settings.MaxPlaySeconds` (0 = off), `Settings.SeparateSceneTiming` (true) + `Settings.SwitchScenesAfterSeconds` (1800) — "Separate timing for scenes" / "Switch scenes after" (player-adapter.md § Rotation)
 - `IntervalSeconds`/`AdvanceOnVideoEnd`/`MaxPlaySeconds`/`SeparateSceneTiming`/`SwitchScenesAfterSeconds` only used when `OverrideGlobalSettings` is true. The maximum and the scene timing are NOT in `LastSession`: a session reads it from the current playlist state + settings at its start / restore / resume (like the transitions); the minimum is the session's own interval.
@@ -37,7 +37,7 @@ paths:
 
 ## Timed Playlist
 
-`PlayerHelper.ApplyTimedPlaylist`: `System.Threading.Timer` ticks every 100ms. Decrement uses `DateTime.UtcNow` deltas (no jitter drift). On shuffle, `AdvanceToNext` re-randomizes at end of each cycle with do/while guarantee new cycle's first ≠ old cycle's last. State written to `~/.config/livepaper/timed_state.json` only on significant events (not every tick) — in-memory `_timedRemainingMs` is authoritative.
+`PlayerHelper.ApplyTimedPlaylist`: `System.Threading.Timer` ticks every 100ms. Decrement uses `DateTime.UtcNow` deltas (no jitter drift). On shuffle, `AdvanceToNext` re-randomizes at end of each cycle with do/while guarantee new cycle's first ≠ old cycle's last. State written to `~/.config/liascape/timed_state.json` only on significant events (not every tick) — in-memory `_timedRemainingMs` is authoritative.
 
 **Tick lifetime (`EnsureTimedTick`)**: the tick runs the interval AND takes every queued user switch
 (pending-action IPC below), so EVERY timed session has one — **whatever its interval** (pure advance-on-end too;
@@ -60,7 +60,7 @@ matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`, `seq:plP
 
 **`TimedState` record** fields: `TimerStopped`, `TimerPaused`, `AdvanceOnVideoEnd`, `WaitingForVideoEnd`. Also `IntervalSeconds` (the timer / the minimum), `ItemPlayedMs` + `PlayedSavedAtMs` (the playing item's play time for the minimum / maximum; loaded + the time since the save unless paused). An older file's `WaitForVideoEnd` is ignored. On restore, `LoadTimedState` restores `_advanceOnVideoEnd`/`_waitingForVideoEnd`, then `RearmAdvanceOnVideoEnd()` re-arms `DoVideoEndWait`. When `_waitingForVideoEnd=true`, `_historyIndex` is pre-fetched one step ahead — `RestoreTimedPlaylist` adjusts back by one before `SwitchToFile`, then calls `RearmAdvanceOnVideoEnd()`.
 
-**Pending-action IPC** (`~/.config/livepaper/pending_action.txt`): atomic write+rename. Content: `next` / `prev` / `random` / `restart`. Timer owner's tick consumes (read+delete) → `AdvanceAndLaunch` / `StepBackAndLaunch` / `RandomAndLaunch` / `RestartCurrentAndLaunch`. `restart` cold-restarts current wallpaper without advancing and without resetting the countdown. All others call `LaunchAndReset` → kills mpvpaper, launches new, resets `_timedRemainingMs` to full interval.
+**Pending-action IPC** (`~/.config/liascape/pending_action.txt`): atomic write+rename. Content: `next` / `prev` / `random` / `restart`. Timer owner's tick consumes (read+delete) → `AdvanceAndLaunch` / `StepBackAndLaunch` / `RandomAndLaunch` / `RestartCurrentAndLaunch`. `restart` cold-restarts current wallpaper without advancing and without resetting the countdown. All others call `LaunchAndReset` → kills mpvpaper, launches new, resets `_timedRemainingMs` to full interval.
 
 **Stop/pause signals**:
 - `Stop()` → `KillAll()` + `SignalTimerStop()`; daemon's stopped-branch also calls `KillCurrentProcess()` (covers kill→launch race)

@@ -43,7 +43,7 @@ T=$(mktemp -d /tmp/liascape-sm-XXXXXX)   # short: a unix socket path must be < 1
 # mid-test — see test-liascape-player-adapter.sh's snapshot_backend)
 mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
 DLL=$T/backend/liascape-backend.dll
-mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
+mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -72,7 +72,7 @@ clip "$C1" testsrc2 440 6; clip "$C2" smptebars 550 6
 
 # Non-default values everywhere, so a reset to a C# default shows; LweSilent = the removed setting, still
 # in older files; the Steam fields are dummies (still never printed — the real file holds a real token).
-SJ=$XDG_CONFIG_HOME/livepaper/settings.json
+SJ=$XDG_CONFIG_HOME/liascape/settings.json
 cat > "$SJ" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
  "DemuxerMaxBytes":32,"DemuxerMaxBackBytes":8,"LweSilent":true,"LweVolume":55,
@@ -88,9 +88,9 @@ EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
-for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && break; sleep 0.1; done
-[ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
-U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
+for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
+[ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 engine() { curl -sf -m 5 "$U/player-engine" | jq -r .active; }
 [ "$(engine)" = liascape-player ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
@@ -315,6 +315,6 @@ snap e0; post /settings '{"PlayerEngine":"legacy"}' >/dev/null; sleep 1; snap e1
 same e0 e1 '["playerEngine"]' "{PlayerEngine:legacy}"
 kill -0 "$SP" 2>/dev/null && bad "liascape-player still running after the switch away" || ok "liascape-player quit on the switch away"
 [ "$(pgrep -c -x mpvpaper)" = "$mp0" ] && ok "no mpvpaper started or killed" || bad "the mpvpaper count changed"
-grep -q "test-refresh-token" "$T/backend.log" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
+grep -q "test-refresh-token" "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

@@ -157,13 +157,13 @@ public static class PlayerHelper
 
     private static string IpcSocket => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(),
-        "livepaper", "mpv.sock");
+        "liascape", "mpv.sock");
 
     // Control socket for a running full-live transition overlay (liascape-transition binds it). Lets a keybind
     // during the effect reach the overlay's OWN audio (it decodes A/B itself; mpvpaper isn't audible then).
     private static string OverlayCtlSocket => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(),
-        "livepaper", "liascape-transition.ctl");
+        "liascape", "liascape-transition.ctl");
 
     // Best-effort live command (mute/volume) to a transition overlay if one is listening (DGRAM, no-op
     // otherwise). So toggle-mute / volume± mid-effect take hold immediately instead of post-teardown.
@@ -247,35 +247,35 @@ public static class PlayerHelper
 
     private static string TimedStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "timed_state.json");
+        ".config", "liascape", "timed_state.json");
 
     private static string PlaylistObserverPathsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".cache", "livepaper", "playlist_observer_paths.json");
+        ".cache", "liascape", "playlist_observer_paths.json");
 
     private static string TimerDaemonPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "timer.pid");
+        ".config", "liascape", "timer.pid");
 
     private static string RestartDaemonPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "restart.pid");
+        ".config", "liascape", "restart.pid");
 
     private static string LwePidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "lwe.pid");
+        ".config", "liascape", "lwe.pid");
 
     private static string GuiTimerPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "gui_timer.pid");
+        ".config", "liascape", "gui_timer.pid");
 
     private static string UserMuteStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "user_mute.state");
+        ".config", "liascape", "user_mute.state");
 
     private static string PendingActionPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "pending_action.txt");
+        ".config", "liascape", "pending_action.txt");
 
     public static void KillTimerDaemon()
     {
@@ -318,7 +318,7 @@ public static class PlayerHelper
         {
             if (!int.TryParse(File.ReadAllText(GuiTimerPidPath).Trim(), out int pid) || pid == Environment.ProcessId) return null;
             var argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0');
-            return argv.Contains("--serve") && argv.Any(a => a.Contains("livepaper")) ? pid : null;
+            return argv.Contains("--serve") && argv.Any(a => a.Contains("liascape")) ? pid : null;
         }
         catch { return null; }
     }
@@ -389,10 +389,10 @@ public static class PlayerHelper
         catch { }
     }
 
-    // Build the argv prefix needed to re-invoke this same livepaper process
+    // Build the argv prefix needed to re-invoke this same liascape process
     // (without args).
     //   - Self-contained (AppImage, install.sh): the apphost binary and
-    //     entry assembly share a name (livepaper / liascape-backend.dll). The
+    //     entry assembly share a name (liascape / liascape-backend.dll). The
     //     apphost runs its bundled dll automatically; we just spawn it.
     //   - Framework-dependent (AUR PKGBUILD): the process executable is the
     //     dotnet host. We need to pass the entry assembly path so the
@@ -410,7 +410,7 @@ public static class PlayerHelper
             return args;
 
         // Apphost vs dotnet host: in a self-contained build the apphost is
-        // named after the assembly (livepaper ↔ liascape-backend.dll), so the names
+        // named after the assembly (liascape ↔ liascape-backend.dll), so the names
         // match and we don't need a separate dll arg. Framework-dependent
         // builds run under `dotnet` whose name differs.
         var procStem = Path.GetFileNameWithoutExtension(processPath);
@@ -577,7 +577,7 @@ public static class PlayerHelper
         {
             var cacheDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".cache", "livepaper");
+                ".cache", "liascape");
             Directory.CreateDirectory(cacheDir);
             var playlistPath = Path.Combine(cacheDir, "playlist.txt");
             File.WriteAllLines(playlistPath, session.Paths.Take(session.Paths.Count - 1));
@@ -835,7 +835,7 @@ public static class PlayerHelper
             }
             else
             {
-                // Livepaper-owned: full playlist control, mid-session injection, no mpv playlist file
+                // Liascape-owned: full playlist control, mid-session injection, no mpv playlist file
                 ApplyTimedPlaylist(paths, mpvOptions, shuffle, intervalSeconds, advanceOnVideoEnd: true);
                 return;
             }
@@ -3764,7 +3764,7 @@ public static class PlayerHelper
     internal static string SceneShotPath(string output) => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache"),
-        "livepaper", $"liascape-scene-{output.Replace('/', '_').Replace(' ', '_')}.png");
+        "liascape", $"liascape-scene-{output.Replace('/', '_').Replace(' ', '_')}.png");
 
     private static string[] SpawnLweProcesses(string workshopId, AppSettings settings, int audioVolumePercent = 100, string? scenePath = null)
     {

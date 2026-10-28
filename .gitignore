@@ -10,7 +10,7 @@ scripts/*.pkg.tar.zst
 scripts/*.pkg.tar.zst.sig
 scripts/src/
 scripts/pkg/
-scripts/livepaper-git/
+scripts/liascape-git/
 *.AppImage
 # liascape-transition: built binary + wayland-scanner-generated protocol glue
 src/native/liascape-transition/liascape-transition

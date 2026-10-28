@@ -58,7 +58,7 @@ fn new_root() -> PathBuf {
 }
 
 fn state_dir(root: &Path) -> PathBuf {
-    root.join("state/livepaper/liascape-player")
+    root.join("state/liascape/liascape-player")
 }
 
 /// `PR_SET_PDEATHSIG(SIGKILL)` (no stray supervisor outlives an aborted test run) and no
@@ -138,7 +138,7 @@ impl Sup {
             c.env(k, v);
         }
         let child = c.spawn().expect("spawn liascape-player serve");
-        let sock = root.join("run/livepaper/liascape-player.sock");
+        let sock = root.join("run/liascape/liascape-player.sock");
         let mut s = Sup {
             child: Some(child),
             root,

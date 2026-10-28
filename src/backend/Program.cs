@@ -38,14 +38,14 @@ sealed class Program
             {
                 var start = System.Diagnostics.Process.GetCurrentProcess().StartTime;
                 if ((DateTime.Now - start).TotalMilliseconds > 1500) // a keybind should feel instant
-                    Console.Error.WriteLine($"livepaper --action={action}: slow — runtime start {(tMain - start).TotalMilliseconds:F0} ms, init {(tFwd - tMain).TotalMilliseconds:F0} ms, forward {(DateTime.Now - tFwd).TotalMilliseconds:F0} ms");
-                if (message != null) Console.Error.WriteLine($"livepaper --action={action}: {message}");
+                    Console.Error.WriteLine($"liascape --action={action}: slow — runtime start {(tMain - start).TotalMilliseconds:F0} ms, init {(tFwd - tMain).TotalMilliseconds:F0} ms, forward {(DateTime.Now - tFwd).TotalMilliseconds:F0} ms");
+                if (message != null) Console.Error.WriteLine($"liascape --action={action}: {message}");
                 Environment.ExitCode = code;
                 return;
             }
             if (Liascape.Web.AppOps.RunAction(action) is string err)
             {
-                Console.Error.WriteLine($"livepaper --action={action}: {err}");
+                Console.Error.WriteLine($"liascape --action={action}: {err}");
                 Environment.ExitCode = 1;
             }
             DrainLiascapePlayerBeforeExit();
@@ -57,7 +57,7 @@ sealed class Program
             try { PlayerHelper.ApplyRandom(); }
             catch (InvalidOperationException e)
             {
-                Console.Error.WriteLine($"livepaper --random: {e.Message}");
+                Console.Error.WriteLine($"liascape --random: {e.Message}");
                 Environment.ExitCode = 1;
             }
             DrainLiascapePlayerBeforeExit();
@@ -82,7 +82,7 @@ sealed class Program
             try { PlayerHelper.Restore(); }
             catch (InvalidOperationException e)
             {
-                Console.Error.WriteLine($"livepaper --restore: {e.Message}");
+                Console.Error.WriteLine($"liascape --restore: {e.Message}");
                 Environment.ExitCode = 1;
             }
             DrainLiascapePlayerBeforeExit();
@@ -90,7 +90,7 @@ sealed class Program
         }
 
         // Default + `--serve`: headless web backend for the Electron/React UI. Blocks. The Electron
-        // shell spawns this and reads the chosen port from ~/.config/livepaper/serve.port.
+        // shell spawns this and reads the chosen port from ~/.config/liascape/serve.port.
         Liascape.Web.ServerHost.Run(args);
     }
 

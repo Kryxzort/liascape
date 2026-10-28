@@ -40,8 +40,8 @@ written after this one lands and informed by the Task 1–2 findings.
 - **Every setting is a live property** (project rule "settings apply live").
 - `PlayerEngine` setting: `"legacy"` (default) | `"liascape-player"`. Legacy behaviour must not change.
 - Under `liascape-player` in Phase 1, **scene items are skipped** exactly like `AllowScenes=false` (scenes arrive in Phase 2).
-- Socket: `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock`. State: `$XDG_STATE_HOME/livepaper/liascape-player/`
-  (default `~/.local/state/livepaper/liascape-player/`).
+- Socket: `$XDG_RUNTIME_DIR/liascape/liascape-player.sock`. State: `$XDG_STATE_HOME/liascape/liascape-player/`
+  (default `~/.local/state/liascape/liascape-player/`).
 - Binary resolution: env `LIASCAPE_PLAYER_BIN` → `PATH` (`liascape-player`) → repo `src/player/target/release/liascape-player`.
 - Event log: JSON Lines, `events.jsonl` in the state dir, rotated at 20 MiB × 3 files.
 - Crate licence: `GPL-3.0-or-later` (liascape-player inherits GPL-3.0 from mpvpaper/LWE; the repo-wide LICENSE is still the owner's open item).
@@ -333,7 +333,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Produces:
   - `pub struct Catalogue { … }`
   - `Catalogue::load(dir: &Path) -> Result<Catalogue, String>`
-    - dir = `LIASCAPE_TRANSITIONS_DIR` → `~/.local/share/livepaper-web/transitions` → repo `transitions/`
+    - dir = `LIASCAPE_TRANSITIONS_DIR` → `~/.local/share/liascape-web/transitions` → repo `transitions/`
   - `Catalogue::ids() -> Vec<String>`
   - `Catalogue::program(&Gfx, id) -> Result<&EffectProgram, String>` (lazy compile + cache)
   - `EffectProgram::draw(&Gfx, from: &Tex, to: &Tex, progress: f64, ratio: f64, params: &serde_json::Map)`
@@ -734,19 +734,19 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Modify: `scripts/install.sh`:
   - preflight requires `cargo`/`rustc` (per-distro install hint, hard fail)
   - `cargo build --release --locked --manifest-path src/player/Cargo.toml`
-  - install `liascape-player` to `~/.local/share/livepaper-web/bin/` and export `LIASCAPE_PLAYER_BIN` in both wrappers
-- Modify: `flake.nix`: `--set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player` in the `livepaper-ui` and `livepaper-cli` wrappers
+  - install `liascape-player` to `~/.local/share/liascape-web/bin/` and export `LIASCAPE_PLAYER_BIN` in both wrappers
+- Modify: `flake.nix`: `--set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player` in the `liascape-ui` and `liascape-cli` wrappers
 - Modify: `.claude/rules/distribution.md` (liascape-player build + resolution order)
 
 **Interfaces:**
 - Consumes: Task 3 package.
 
-- [ ] **Step 1: Write the failing check:** `nix build .#default` then `grep LIASCAPE_PLAYER_BIN result/bin/livepaper-ui` → no match (FAIL).
+- [ ] **Step 1: Write the failing check:** `nix build .#default` then `grep LIASCAPE_PLAYER_BIN result/bin/liascape-ui` → no match (FAIL).
 - [ ] **Step 2:** Implement both files.
 - [ ] **Step 3:** Verify:
   - `env -u LD_LIBRARY_PATH nix build .#default` succeeds
   - the grep finds `LIASCAPE_PLAYER_BIN` in both wrappers
-  - `result/bin/livepaper-cli --liascape-player-selftest` prints `PASS`
+  - `result/bin/liascape-cli --liascape-player-selftest` prints `PASS`
   - `bash -n scripts/install.sh` passes
   - with `PATH` lacking cargo, `install.sh` exits non-zero with the hint
 - [ ] **Step 4:** Commit: `git commit -m "Packaging: Build and Wire liascape-player"`.

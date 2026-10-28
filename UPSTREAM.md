@@ -111,7 +111,7 @@ memory), `14f5b9b` / `38a5d60` (formatting: the second reverts the first except 
 ### How to resync
 
 `scripts/lwe.sh` does the mechanics (`bash scripts/lwe.sh` prints its commands; `--nix` first runs
-it inside this repo's devShell). The source cache is `~/.cache/livepaper/src/lwe-<rev>`
+it inside this repo's devShell). The source cache is `~/.cache/liascape/src/lwe-<rev>`
 (`LWE_SRC_CACHE`).
 
 1. `bash scripts/lwe.sh fetch` (the cache clone at the current pin), then
@@ -140,7 +140,7 @@ it inside this repo's devShell). The source cache is `~/.cache/livepaper/src/lwe
    binary parsers against malformed Workshop assets), #694 (PulseAudio capture-stream leak) — #692 and
    #677 are in (0014, 0010). An imported one becomes a fork commit (`git cherry-pick -x`: git's rename
    detection maps main's `src/WallpaperEngine/…` onto next-v2's `src/core/WallpaperEngine/…`) keeping the
-   original author, with `Origin: upstream-PR`, `Upstream-PR: <url>`, `Adapted-by: livepaper`, appended
+   original author, with `Origin: upstream-PR`, `Upstream-PR: <url>`, `Adapted-by: liascape`, appended
    after the existing patches (the branch fast-forwards).
 7. Record the new pin and date here.
 

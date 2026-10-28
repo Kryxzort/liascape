@@ -1,5 +1,5 @@
 #!/bin/bash
-# Single build+install engine for livepaper (the Electron+React UI over the headless C# backend).
+# Single build+install engine for liascape (the Electron+React UI over the headless C# backend).
 # Used directly for a user install AND reused by packaging (PKGBUILD, build-appimage.sh) so the build
 # lives in ONE place — a code change (new file/dep/helper) only needs updating here, and every
 # package inherits it. (The Nix flake is the one exception: it's declarative and builds separately.)
@@ -30,13 +30,13 @@ done
 
 PREFIX="${PREFIX:-$HOME/.local}"
 DESTDIR="${DESTDIR:-}"
-LIBDIR="$PREFIX/lib/livepaper"           # runtime location of backend + ui + shell + helpers
+LIBDIR="$PREFIX/lib/liascape"           # runtime location of backend + ui + shell + helpers
 BINDIR="$PREFIX/bin"
 APPSDIR="$PREFIX/share/applications"
 # Fixed (NOT $PREFIX-relative) shared-assets location — matches the hardcoded candidate dir
 # TransitionService.cs and liascape-player's Catalogue::resolve_dir already fall back to for
 # transitions/binaries installed outside the main $PREFIX tree.
-WEBDIR="$HOME/.local/share/livepaper-web"
+WEBDIR="$HOME/.local/share/liascape-web"
 # staging (where we write now) = $DESTDIR + runtime path
 S_LIB="$DESTDIR$LIBDIR"
 S_BIN="$DESTDIR$BINDIR"
@@ -57,7 +57,7 @@ ERROR: missing Rust toolchain:$missing_rust
     Arch:   sudo pacman -S rust
     Debian: sudo apt install cargo rustc
     Fedora: sudo dnf install cargo rust
-    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
+    NixOS:  use the flake instead — 'nix run github:Kryxzort/liascape' (all deps handled)
 MSG
   exit 1
 fi
@@ -89,7 +89,7 @@ ERROR: missing native build dependencies:$missing
     Arch:   sudo pacman -S base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang
     Debian: sudo apt install build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev
     Fedora: sudo dnf install gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel
-    NixOS:  use the flake instead — 'nix run github:Kryxzort/livepaper-pro' (all deps handled)
+    NixOS:  use the flake instead — 'nix run github:Kryxzort/liascape' (all deps handled)
 MSG
   exit 1
 fi
@@ -133,7 +133,7 @@ for d in "$ROOT"/src/native/*/; do
 done
 
 if [ "$NO_SCENES" = 0 ]; then
-  # fetched into ~/.cache/livepaper/src (git clone, once per pin), built in $ROOT/build/
+  # fetched into ~/.cache/liascape/src (git clone, once per pin), built in $ROOT/build/
   echo "==> building LWE core (Wallpaper Engine scenes) → $WEBDIR/lib"
   LWE_CORE="$ROOT/build/lwe-core"
   LIASCAPE_LWE_CORE_DIR="$LWE_CORE" bash "$ROOT/scripts/lwe.sh" fetch prepare build check
@@ -161,21 +161,21 @@ if [ -z "$LIASCAPE_ELECTRON" ] && ! command -v electron >/dev/null 2>&1; then
 fi
 
 mkdir -p "$S_BIN"
-echo "==> installing 'livepaper' (bare = GUI; flags = headless CLI)"
-cat > "$S_BIN/livepaper" <<WRAP
+echo "==> installing 'liascape' (bare = GUI; flags = headless CLI)"
+cat > "$S_BIN/liascape" <<WRAP
 #!/bin/bash
 export LIASCAPE_UI_DIR="$LIBDIR/ui"
 export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$LIBDIR/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIBDIR/liascape-transition"
 [ -x "$LIBDIR/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIBDIR/liascape-audio"
 [ -x "$WEBDIR/bin/liascape-player" ] && export LIASCAPE_PLAYER_BIN="$WEBDIR/bin/liascape-player"
-[ \$# -eq 0 ] && exec "$BINDIR/livepaper-ui"
+[ \$# -eq 0 ] && exec "$BINDIR/liascape-ui"
 exec "$LIBDIR/backend/liascape-backend" "\$@"
 WRAP
-chmod 755 "$S_BIN/livepaper"
+chmod 755 "$S_BIN/liascape"
 
-echo "==> installing 'livepaper-ui' (GUI)"
-cat > "$S_BIN/livepaper-ui" <<WRAP
+echo "==> installing 'liascape-ui' (GUI)"
+cat > "$S_BIN/liascape-ui" <<WRAP
 #!/bin/bash
 export LIASCAPE_BACKEND="$LIBDIR/backend/liascape-backend"
 export LIASCAPE_UI_DIR="$LIBDIR/ui"
@@ -185,14 +185,14 @@ export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$WEBDIR/bin/liascape-player" ] && export LIASCAPE_PLAYER_BIN="$WEBDIR/bin/liascape-player"
 exec "\${LIASCAPE_ELECTRON:-electron}" "$LIBDIR/shell"
 WRAP
-chmod 755 "$S_BIN/livepaper-ui"
+chmod 755 "$S_BIN/liascape-ui"
 
 mkdir -p "$S_APPS"
-cat > "$S_APPS/livepaper.desktop" <<EOF
+cat > "$S_APPS/liascape.desktop" <<EOF
 [Desktop Entry]
-Name=Livepaper
+Name=Liascape
 Comment=Live wallpaper manager (Wayland)
-Exec=$BINDIR/livepaper-ui
+Exec=$BINDIR/liascape-ui
 Type=Application
 Categories=Utility;
 Keywords=wallpaper;live;wayland;video;
@@ -201,6 +201,6 @@ update-desktop-database "$S_APPS" 2>/dev/null || true
 
 echo ""
 echo "Done. Installed to $LIBDIR (runtime prefix $PREFIX)."
-echo "  GUI:  livepaper            (bare = open the app; livepaper-ui also works)"
-echo "  CLI:  livepaper --restore | --action=next-wallpaper | --kill | --serve | …"
+echo "  GUI:  liascape            (bare = open the app; liascape-ui also works)"
+echo "  CLI:  liascape --restore | --action=next-wallpaper | --kill | --serve | …"
 if [ -z "$DESTDIR" ]; then echo "  Ensure $BINDIR is on PATH."; fi  # (a bare `[ ] &&` made a DESTDIR install exit 1)

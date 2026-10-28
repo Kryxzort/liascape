@@ -1,7 +1,7 @@
 import { API } from "../api/client";
 
 // DIAGNOSTIC: catch the recurring main-thread wedge. Every ~2s (and on any long task >200ms) we POST a
-// compact snapshot to the backend, which appends it to ~/.cache/livepaper/freeze.log. When the main
+// compact snapshot to the backend, which appends it to ~/.cache/liascape/freeze.log. When the main
 // thread wedges, these stop firing — the GAP in the log timestamps the freeze, and the last line before
 // it captures the trigger context (tab, scrolling, gif/anim count, JS heap, DOM size, fps, worst stall).
 // Cheap + always-on so a freeze during normal use is diagnosable after the fact (no live attach needed).

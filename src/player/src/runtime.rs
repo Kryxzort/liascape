@@ -108,7 +108,7 @@ pub struct ServeOpts {
     pub ao: Option<String>,
     pub socket: PathBuf,
     /// The socket's directory is ours to `chmod 0700` even if it exists (the default
-    /// `$XDG_RUNTIME_DIR/livepaper`); `false` for `--socket`/`LIASCAPE_PLAYER_SOCKET`.
+    /// `$XDG_RUNTIME_DIR/liascape`); `false` for `--socket`/`LIASCAPE_PLAYER_SOCKET`.
     pub own_socket_dir: bool,
     pub state_dir: PathBuf,
     pub log_level: Level,
@@ -4101,7 +4101,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
                 "effects.missing",
                 None,
                 json!({ "hint": "no transitions/ directory resolved (LIASCAPE_TRANSITIONS_DIR, \
-                                 ~/.local/share/livepaper-web/transitions, the repo); \
+                                 ~/.local/share/liascape-web/transitions, the repo); \
                                  only cuts are available" }),
             );
             Catalogue::empty()

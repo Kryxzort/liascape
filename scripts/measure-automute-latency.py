@@ -6,7 +6,7 @@ Usage: scripts/measure-automute-latency.py [trials]   (default 6; needs pactl, p
 
 It touches no real stream: it loads a private module-null-sink (`liascape_lat_test`, unloaded at the end),
 plays 60 s of digital SILENCE into it with paplay (inaudible, below every auto-mute threshold, and
-named `mpv` so a running livepaper auto-mute ignores it), times parec's first byte / first 20 ms
+named `mpv` so a running liascape auto-mute ignores it), times parec's first byte / first 20 ms
 chunk on that stream, then stops it. Measured 2026-10-25: default 2023 ms → 65 ms (first chunk 76 ms)."""
 import os, subprocess, sys, time, signal, statistics, tempfile, math, struct, wave
 

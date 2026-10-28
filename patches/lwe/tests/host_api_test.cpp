@@ -1,4 +1,4 @@
-// Tests of livepaper's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016), run by
+// Tests of liascape's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016), run by
 // `bash scripts/lwe.sh test` against the built core. C++ only because LWE's public headers are:
 // they use `struct` tags as type names (`wp_mute_check*`), which C rejects.
 //
@@ -519,7 +519,7 @@ int main (int argc, char** argv) {
     g_emptyDir = argv[2];
     g_assets = argc > 3 ? argv[3] : "";
     setvbuf (stdout, nullptr, _IOLBF, 0);
-    printf ("host_api_test: LWE core with livepaper patches\n");
+    printf ("host_api_test: LWE core with liascape patches\n");
     // order matters: nothing before the SDL tests may initialise SDL audio
     run ("host_output_replaces_sdl", host_output_replaces_sdl);
     run ("pull_without_streams_is_silence", pull_without_streams_is_silence);

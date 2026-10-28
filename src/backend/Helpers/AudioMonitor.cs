@@ -12,7 +12,7 @@ public static class AudioMonitor
 {
     private static string MonitorPidPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "livepaper", "monitor.pid");
+        ".config", "liascape", "monitor.pid");
 
     public static void KillDetachedMonitor()
     {
@@ -51,7 +51,7 @@ public static class AudioMonitor
                 proc.BeginErrorReadLine();
                 // Daemon writes its own PID from RunDaemon — proc.Id here is
                 // the setsid wrapper, which may exec or fork depending on
-                // whether livepaper is a process group leader.
+                // whether liascape is a process group leader.
             }
         }
         catch { }
@@ -69,7 +69,7 @@ public static class AudioMonitor
     private static int _aboveThresholdCount;
     private static volatile bool _onlyIfMprisActive;
 
-    // Entry point for the detached `livepaper --monitor` daemon process.
+    // Entry point for the detached `liascape --monitor` daemon process.
     public static void RunDaemon()
     {
         WriteMonitorPid();

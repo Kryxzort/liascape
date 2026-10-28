@@ -285,7 +285,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
    unaffected by the scene's restart (`ctl probe '{"name":"frames"}'` on DP-1 normal right after).
 5. If anything breaks: `ctl probe '{"name":"workers","args":{"log_tail":true}}'` (the worker's
    `gfx: robust context granted|not available` line and its last stderr) and
-   `~/.local/state/livepaper/liascape-player/crashes/*.json` — file it in `docs/TODO.md` → liascape-player.
+   `~/.local/state/liascape/liascape-player/crashes/*.json` — file it in `docs/TODO.md` → liascape-player.
 
 ## 9. Scene corpus — fresh run + A/B against the legacy engine
 

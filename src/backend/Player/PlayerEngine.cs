@@ -49,7 +49,7 @@ public static class PlayerEngine
     }
 
     public static string UnavailableReason =>
-        "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to livepaper, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
+        "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
 
     // Can a scene item play right now? Scene support on, and the engine that runs can play one: liascape-player
     // (Phase 2) when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
@@ -108,7 +108,7 @@ public static class PlayerEngine
         return ok ? null : $"liascape-player can't play scenes here: {why}";
     }
 
-    // env LIASCAPE_PLAYER_BIN → next to the running livepaper executable → the repo dev tree
+    // env LIASCAPE_PLAYER_BIN → next to the running liascape executable → the repo dev tree
     // src/player/target/{release,debug}/liascape-player → PATH (release first: debug is opt-level 0 and the
     // player mixes audio itself). Cached until the next Refresh, or `fresh` (the upgrade check).
     public static string? ResolveBinary(bool fresh = false)
