@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change; `Hello.protocol` must equal it.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 /// Largest datagram either side sends or accepts.
 pub const MAX_MSG: usize = 64 * 1024;
 /// Most fds one datagram may carry (a 4-plane buffer + a fence, with room to spare).
@@ -179,6 +179,12 @@ pub enum FromWorker {
     Envelope {
         t0_ms: f64,
         dbfs_1ms: Vec<f32>,
+    },
+    /// Scene loudness learning (Phase 2, `audio::loudness`): the K-weighted 100 ms segments of
+    /// the sound the scene really played (pre-gain; paused, `no_audio` and fade-outs add
+    /// none), oldest first — sent as they complete.
+    Loudness {
+        segments: Vec<crate::audio::loudness::Segment>,
     },
     Pong {
         seq: u64,

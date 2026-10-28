@@ -45,6 +45,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lp_player::audio::bus::{APP_NAME, MEDIA_ROLE, SINK_NAME};
+use lp_player::audio::loudness::{Segment, SegmentMeter};
 use lp_player::audio::meter::{BlockMeter, mono_ns};
 use lp_player::units::SILENT_DB;
 use lp_player::worker::proto::{self, AudioRoute, FromWorker, ToWorker};
@@ -283,6 +284,10 @@ pub struct Dsp {
     meter: BlockMeter,
     /// Envelope blocks not sent yet: `(ns on CLOCK_MONOTONIC, dBFS)`.
     pub env: Vec<(i64, f32)>,
+    /// Scene loudness learning: K-weights what the scene really plays (pre-gate, pre-gain).
+    loud: SegmentMeter,
+    /// Its 100 ms segments not sent yet.
+    pub segs: Vec<Segment>,
     armed_seen: u64,
     /// The pulled/stretched buffer (pre-gain).
     scratch: Vec<f32>,
@@ -302,6 +307,8 @@ impl Dsp {
             stretch: Stretch::new(),
             meter: BlockMeter::new(RATE, CH as u32),
             env: Vec::new(),
+            loud: SegmentMeter::new(CH),
+            segs: Vec::new(),
             armed_seen: 0,
             scratch: Vec::new(),
         }
@@ -340,6 +347,12 @@ impl Dsp {
         if !pulled {
             self.scratch.clear();
             self.scratch.resize(out.len(), 0.0);
+        }
+        // Loudness counts only the scene's sound really played into a stream: not paused, not
+        // `no_audio`, not a fade-out (`plays`), not the PipeWire-down fallback (`real`) — and
+        // before the gate and the gain, so neither a user volume nor the normalization biases it.
+        if plays && pulled && real {
+            self.loud.feed(&self.scratch, &mut self.segs);
         }
         // The gate in whole frames (exact 0 and 1 at its ends).
         let mut gn = (self.gate * ANTICLICK_FRAMES as f32).round() as usize;
@@ -417,6 +430,11 @@ fn fill(
     {
         e.append(&mut dsp.env);
     }
+    if !dsp.segs.is_empty()
+        && let Ok(mut l) = outbox.loud.try_lock()
+    {
+        l.append(&mut dsp.segs);
+    }
 }
 
 /// What the stream's callback hands the main loop (which sends it): `AudioFlowing` and the
@@ -425,6 +443,8 @@ fn fill(
 struct Outbox {
     flowed: AtomicBool,
     env: Mutex<Vec<(i64, f32)>>,
+    /// Loudness segments (`FromWorker::Loudness`).
+    loud: Mutex<Vec<Segment>>,
 }
 
 fn lock(dsp: &Mutex<Dsp>) -> MutexGuard<'_, Dsp> {
@@ -449,6 +469,10 @@ fn flush(sock: &OwnedFd, outbox: &Outbox) {
             dbfs_1ms: batch.iter().map(|b| b.1).collect(),
         };
         let _ = proto::send(sock.as_fd(), &m, &[]);
+    }
+    let segments = std::mem::take(&mut *outbox.loud.lock().unwrap_or_else(|e| e.into_inner()));
+    if !segments.is_empty() {
+        let _ = proto::send(sock.as_fd(), &FromWorker::Loudness { segments }, &[]);
     }
 }
 
@@ -793,6 +817,32 @@ mod tests {
         assert!(levels.windows(2).all(|w| w[1] <= w[0]), "{levels:?}");
         assert_eq!(levels[5], 0.0, "{levels:?}");
         assert_eq!(d.level(), 0.0);
+    }
+
+    /// Scene loudness learning: a 100 ms K-weighted segment per 100 ms the scene really played
+    /// — pre-gain (a −40 dB gain reads the same), none while paused / `no_audio` (no `plays`)
+    /// or on the PipeWire-down fallback timer (`real` false).
+    #[test]
+    fn loudness_segments_count_only_played_sound() {
+        let mut d = Dsp::new();
+        let mut tone = Tone::new(1000.0, -20.0);
+        let mut out = vec![0.0; 480 * CH];
+        for _ in 0..20 {
+            d.process(&mut out, st(-40.0), Some(&mut tone), 0, true);
+        }
+        assert_eq!(d.segs.len(), 2, "{:?}", d.segs);
+        let l = lp_player::audio::loudness::lufs_of(d.segs[1].power);
+        assert!((l + 20.0).abs() < 0.2, "pre-gain: {l}");
+        d.segs.clear();
+        let mut paused = st(-40.0);
+        paused.plays = false;
+        for _ in 0..40 {
+            d.process(&mut out, paused, Some(&mut tone), 0, true);
+        }
+        for _ in 0..40 {
+            d.process(&mut out, st(-40.0), Some(&mut tone), 0, false);
+        }
+        assert!(d.segs.is_empty(), "paused / fallback: {:?}", d.segs);
     }
 
     /// `AudioFlowing` once per arming, from the first buffer that pulled the scene's sound
