@@ -85,6 +85,28 @@ task text where they differ:
 - **Loudness: learn on first play**: measure a scene's integrated loudness over its first ~60 s of play (from the
   worker's stream on the bus), store it in the index like a video's `loudness*`, apply normalization from then on.
   **+M task.**
+  **Done (2026-10-28)** (`.claude/rules/player-core.md` § Scene worker → "Scene loudness", `player-adapter.md` §
+  Scenes → "Loudness", `library.md` § Loudness). The player measures, the backend stores + applies (the video path's
+  split). Worker: `audio::loudness::SegmentMeter` K-weights the scene's sound after the stretch, **before the gate
+  and the gain**, only for buffers that really played it (not paused / `no_audio` / a fade-out / the PipeWire-down
+  fallback) → `FromWorker::Loudness {segments}` per 100 ms (`PROTOCOL` 3). Compositor: a `Learner` per
+  `SceneSource` (kept across worker restarts) — BS.1770-4 400 ms blocks, absolute −70 / relative −10 gates —
+  emits `scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}` once 60 s of AUDIBLE
+  play are in (`LP_PLAYER_LOUDNESS_WINDOW_S`), or at the source's end with ≥ a third of the window (`complete:
+  false`). Backend: subscribed; `LibraryService.MergeSceneLoudness` → `loudnessI`/`loudnessTP` (sample peak)/
+  `loudnessSeconds`/`loudnessPartial`, learned once (a partial until a complete one or a longer partial); the
+  resolver's per-source `gain.normalize` = `NormalizeTargetLufs − I`, the sample peak kept ≤ −1.5 dBFS, clamped
+  −60…+24 dB — set at create, live as a 500 ms `animate` (the moment it's learned, a target change, on/off).
+  **Deviations / judgement calls:** not "from the worker's stream on the bus" literally (the bus mixes every source)
+  nor from the `SceneEnvelopes` track (1 ms max-channel RMS, no K-weighting): from the worker's own pre-gain samples
+  — the same stream, K-weighted; the window is *audible* play (silence, pauses and mutes don't count — a mostly
+  silent scene takes longer); a partial needs a third of the window (else the next play starts afresh — no
+  cross-play accumulation of blocks); the peak is the sample peak (no true-peak oversampling); NoAudio doesn't
+  zero `gain.normalize`; every play re-measures (cheap: two biquads per channel) and the backend keeps the first
+  complete result; legacy LWE scenes stay unnormalized; no matrix cell (the IT covers it — the matrix player has
+  no short-window knob). Tests: units `audio::loudness` ×6 (RED by mutation: no K-weighting + no gates → 5 fail),
+  worker `loudness_segments_count_only_played_sound`, api ×5 (RED: 5/5 fail before), self-test
+  `SceneLoudnessAssertions`, adapter IT § scene loudness (RED on the base backend).
 - **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
   frame / preview, silent).
 

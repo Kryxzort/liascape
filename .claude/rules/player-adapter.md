@@ -24,7 +24,8 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   connection on a background thread — **only the kinds it consumes** (final review M11):
   `transition.` (a switch's terminal outcome — handoff/cancelled/failed — and, for the source
   map's invalidation, every other transition kind), `player.stopped`, `source.retire`, `source.broken`,
-  `scene.vram_exceeded` (Phase 2, § Scenes) — a handful
+  `scene.vram_exceeded`, `scene.loudness` (Phase 2, § Scenes — the last one never invalidates the source
+  map: no source changed) — a handful
   per switch; `source.` as a whole used to stream every debug `source.position` (~10 Hz per source)
   only to be discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
   250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now).
@@ -228,7 +229,8 @@ A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-pl
 Everything kind-agnostic stays so: the resolver (§ Targeting) gives a scene the same per-source values as a
 video — `gain.user`/`gain.mute`/`no_audio`/`speed` drive its worker's stream and clock live (`speed` scales a
 scene's animation AND its pitch-kept sound, owner decision), the video-only props (`hwdec`, `fps_cap`,
-`cache`, `demuxer_*`, `loop`) are stored, no effect, and `af` is always "" (no loudnorm on a scene). Pause,
+`cache`, `demuxer_*`, `loop`) are stored, no effect, and `af` is always "" (no loudnorm on a scene — a scene
+normalizes through `gain.normalize`, "Loudness" below). Pause,
 transitions (every method, every switch combo), the snapshot/restore and R81 need nothing scene-specific.
 - **Can a scene play?** `ScenesPlayable(s)` = `AllowScenes` && `LpPlayerClient.ScenesAvailable`: the running
   player's `scene` capability (its worker AND WE's assets dir resolve — or synthetic scenes are allowed) from
@@ -297,9 +299,31 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   line. Settings → "GPU / VRAM" (lp-player only). Known edge: a scene **pending B** (armed for A's end) stopped by the
   guard is that switch's `transition.failed`; the `DoVideoEndWait` fallback then switches to it now (it isn't
   skipped), it plays ~2 s and is stopped again → the rotation advances (bounded by the guard's hold, never a loop).
+- **Loudness (learned on first play; owner decision, plan "Loudness: learn on first play").** The player measures
+  (player-core.md § Scene worker → "Scene loudness": BS.1770 over the first ~60 s of AUDIBLE play, pre-gain) and
+  logs **`scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}`** (subscribed,
+  `Topics`) → `LpPlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
+  `MergeSceneLoudness` (pure): the index's `loudnessI` (LUFS), `loudnessTP` (the SAMPLE peak, dBFS),
+  `loudnessSeconds`, `loudnessPartial` (library.md); **learned once** — a complete measurement is never replaced, a
+  partial one (`complete: false`: the scene was switched away after ≥ a third of the window) is replaced by a
+  complete one or a longer partial; a scene outside the library or trashed meanwhile stores nothing. Stored →
+  `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver pass). **Applied as
+  the scene source's `gain.normalize`** (`LpPlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
+  resolver for scene paths only): `NormalizeTargetLufs − loudnessI`, never boosting the sample peak past
+  `NormalizePeakCeilingDb` −1.5 dBFS (a plain gain has no limiter — the video loudnorm's TP −1.5), clamped −60…+24
+  dB, rounded to 0.001; **0** while normalization is off or nothing is learned. NoAudio doesn't zero it (silent
+  anyway; un-muting comes back at the right level). At **create** (`SourceProps`) the value is set directly — a
+  reopened scene plays normalized from its first frame; **live** it goes as `animate` over `NormalizeRampMs` (500
+  ms; a setting slot, so it lands while paused too) — the moment it's learned, a target change, normalization on/off:
+  a ramp on the same source and worker, never a step. It stacks with `gain.user` (the per-item / global volume) and
+  `gain.mute` like the video `af` + `volume-gain`. A silent scene (no sound, or digital silence) never reports
+  → never stored, never normalized. **Legacy engine:** unchanged — LWE scenes aren't normalized (the stored value
+  is unused there; `OnLoudnessMeasured` returns for a scene path), and nothing learns under legacy.
 - **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
-  Volume —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
+  Volume —, gain.normalize 0 unlearned / absent on a video, `SceneLoudnessAssertions`: the `MergeSceneLoudness`
+  rules — learned once, partial → longer / complete — and the `SceneNormalizeDb` table — peak cap, clamps, off,
+  unlearned, NoAudio —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
   private player runs `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
   `ApplyGpuSettings` there and back; scene → clip cut); the IT's § "Phase 2: scenes" (Integration test, below); the UI matrix's scene cells (`scripts/test-ui-matrix.sh`, web-ui.md).
@@ -318,7 +342,8 @@ values (matrix `appear:*`); the volume key pushed the new global over a playing 
 computed for the playing item at request time landed on whatever played when it ran.
 - **Per source**: `gain.user` = VolumeDb(transient item ?? its override ?? transient global ?? `Volume`),
   `speed` = clamp(the same chain over `Speed`, 0.1, 4), `af` = its OWN item's loudnorm at the target (""
-  off / NoAudio / unmeasured — that kicks a measure), `no_audio`/`hwdec`/`fps_cap`/`cache`/
+  off / NoAudio / unmeasured — that kicks a measure), a scene's `gain.normalize` = `SceneNormalizeDb` (its
+  learned loudness; § Scenes → "Loudness"; sent as `animate` over 500 ms), `no_audio`/`hwdec`/`fps_cap`/`cache`/
   `demuxer_max_mib`/`demuxer_back_mib` = the global settings, `gain.mute` = −96 when `PlayerHelper.IsMuted`
   (user + auto) else 0; and the layer: `lay:*:main.fit` = VideoScale (Fresh passes, one `set` when any
   main layer differs). Every input is read when the pass RUNS (a coalesced pass applies the newest state).
@@ -533,7 +558,14 @@ scene items `library/workshop/90000000{1..4}`): `/player-engine.scenes.available
 `cur:*.kind == scene`, ready ≤ 3 s, its preview; Volume 50 → the scene's `gain.user` −18.06 and the worker's
 stream gain; NoAudio on/off live on the source and the worker, same worker pid; `LweMonitors` fps 45 →
 `out:VIRTUAL-1.scene_fps` 45 + the worker's `fps_target`, same pid, `[]` → 30; `/library/volume` on scene 1
-during a 6 s fade to scene 2 moves scene 1's source only; `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
+during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a player with
+`LP_PLAYER_LOUDNESS_WINDOW_S=3`, NormalizeAudio on, target −14; synthetic 1 kHz scenes at −20 / −26 dBFS + one
+without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play the index gains `loudnessI` −20 ± 1
+(complete, ≥ 3 s) and `gain.normalize` ramps (`anim.start` ≥ 300 ms) to +6 live — same source, same worker — and
+reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
+on it; reopened → +6 from the first frame, and the second play's measurement keeps the learned one; the
+soundless scene → no event, nothing stored, 0; switched away after ~1.2 s → a partial (`loudnessPartial`) stored,
+the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
 S→V in a playlist — each `fade full-live` handed off — and an aligned V→S at a 2 s clip's end; a scene crashing
 every 400 ms in a timed playlist → one `source.broken`, WS `scene-crashed`, index `crashed: true`, the rotation
 advanced ≤ 2 s after the break (event clocks), `/next` ×3 skips it, whitelisted → `/next` plays it again; a
