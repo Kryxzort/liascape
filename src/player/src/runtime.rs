@@ -639,6 +639,7 @@ fn scene_gate_period(
     graph: &Graph,
     src: &str,
     out: &str,
+    frame_callbacks: bool,
 ) -> Option<Duration> {
     host.scene(src)?;
     let num = |prop: &str| match graph.get(&p(&format!("out:{out}.{prop}"))) {
@@ -646,8 +647,41 @@ fn scene_gate_period(
         Ok(PropValue::I64(i)) => i as f64,
         _ => 0.0,
     };
-    let hz = crate::sources::scene::eff_fps(num("scene_fps"), num("refresh_hz"));
-    Some(Duration::from_secs_f64(1.0 / hz.clamp(1.0, 1000.0)))
+    crate::redraw::scene_gate_period(num("scene_fps"), num("refresh_hz"), frame_callbacks)
+}
+
+/// Phase 2 Task 14: output `out` (with frame callbacks) shows a playing scene that renders at
+/// its refresh (`scene_fps` 0 or ≥ the refresh, not throttled below it) — so it presents on
+/// every frame callback, like an animation. The worker's frames come on the loop's own clock
+/// (1 / the rounded refresh), never in phase with the vblank: presenting only when a new frame
+/// had latched left the output idle at every callback that came just before one, and the next
+/// frame then presented off the callback (measured on DP-2 at 240 Hz: ~100 idle gaps/s, paced
+/// intervals 3.4 ms on a 4.17 ms display — two presents inside one refresh, one of them never
+/// shown). At the refresh every callback has a frame to show anyway (a repeat only when the
+/// two clocks slip, ~once per 4 s).
+fn scene_paces_output(
+    host: &crate::sources::SourceHost,
+    graph: &Graph,
+    out: &str,
+    frame_callbacks: bool,
+) -> bool {
+    if !frame_callbacks {
+        return false;
+    }
+    let refresh = match graph.get(&p(&format!("out:{out}.refresh_hz"))) {
+        Ok(PropValue::F64(f)) => f,
+        Ok(PropValue::I64(i)) => i as f64,
+        _ => return false,
+    };
+    crate::redraw::shown_by(graph, &format!("lay:{out}:main"))
+        .iter()
+        .any(|s| {
+            host.scene(s).is_some_and(|sc| {
+                sc.clock_running()
+                    && sc.tick_hz() + 0.5 >= refresh
+                    && scene_gate_period(host, graph, s, out, true).is_none()
+            })
+        })
 }
 
 impl Runtime {
@@ -1599,9 +1633,10 @@ impl Runtime {
         // Phase 2 Task 8: a scene's new frame wakes each output at most at that output's
         // `eff(scene_fps, refresh)` (one worker serves every output showing it, D1).
         let (host, graph) = (&self.host, &self.graph);
+        let callbacks = self.backend.kind() == "wayland";
         self.redraw
             .mark_shown_gated(graph, &changed, Instant::now(), |src, out| {
-                scene_gate_period(host, graph, src, out)
+                scene_gate_period(host, graph, src, out, callbacks)
             });
         let mut errored = false;
         for (id, ev) in self.host.events() {
@@ -2036,11 +2071,13 @@ impl Runtime {
         let now = self.now();
         self.redraw.promote_due(Instant::now());
         let rev = self.graph.picture_rev();
+        let callbacks = self.backend.kind() == "wayland";
         for o in self.backend.outputs() {
             if !self.backend.frame_state(&o.name).is_some_and(|f| f.ready) {
                 continue;
             }
-            let animating = redraw::animating_on(&self.anim, now, &self.graph, &o.name);
+            let animating = redraw::animating_on(&self.anim, now, &self.graph, &o.name)
+                || scene_paces_output(&self.host, &self.graph, &o.name, callbacks);
             let stats = self
                 .frames
                 .entry(o.name.clone())
