@@ -101,7 +101,11 @@ export const Settings = memo(function Settings() {
   // auto-detected outputs (hyprctl/sway): name + current refresh rate + which is focused/primary
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
   // lp-player availability for the "Player engine" row (binary found? last start error?)
-  const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null } | null>(null);
+  const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null;
+    scenes?: { available: boolean; reason: string | null; assets_dir: string | null } } | null>(null);
+  // lp-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
+  // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
+  const lpActive = engine?.active === "lp-player";
 
   useEffect(() => {
     let alive = true;
@@ -132,7 +136,7 @@ export const Settings = memo(function Settings() {
       .catch(() => setEngine({ active: "legacy", available: false, reason: "couldn't read the engine status from the backend" })),
       engine === null ? 0 : 600);
     return () => clearTimeout(t);
-  }, [g("playerEngine", "legacy")]); // eslint-disable-line
+  }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
 
   // interval H/M/S
   const iv = g("globalIntervalSeconds", 1800);
@@ -267,7 +271,9 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Replace direct downloads with Workshop copies" hint="when a directly-downloaded wallpaper appears in the WE folder, swap to the WE symlink/copy & reclaim the duplicate's disk" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>}
         <Row label="Allow scene support" rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
         <Row label="Auto-add new WE wallpapers to library" rk="autoImportWallpaperEngine"><input type="checkbox" checked={g("autoImportWallpaperEngine", false)} onChange={(e) => set("autoImportWallpaperEngine", e.target.checked)} /></Row>
-        <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><input className="num" type="number" min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(e) => set("sceneTransitionDelayMs", +e.target.value)} /></Row>
+        {!lpActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><input className="num" type="number" min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(e) => set("sceneTransitionDelayMs", +e.target.value)} /></Row>}
+        {lpActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
+          <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
       </Section>
 
       {g("allowScenes", false) && (
@@ -282,10 +288,11 @@ export const Settings = memo(function Settings() {
                 <input className="text mon-name" list="lp-monitors" placeholder="e.g. DP-1" value={m.name}
                   onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <input className="num" type="number" min={1} max={480} value={m.fps}
-                  onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: +e.target.value } : x))} /><span>fps</span>
-                {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section */}
-                <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
-                  onChange={() => setMonitors(monitors.map((x, j) => ({ ...x, isPrimary: j === i })))} /> primary</label>
+                  onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: +e.target.value } : x))} /><span>{lpActive ? "fps (live)" : "fps"}</span>
+                {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section;
+                    legacy only (LWE's audio-owning instance) — lp-player runs one worker for every output */}
+                {!lpActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
+                  onChange={() => setMonitors(monitors.map((x, j) => ({ ...x, isPrimary: j === i })))} /> primary</label>}
                 <button className="mini ico" title="Remove monitor" onClick={() => setMonitors(monitors.filter((_, j) => j !== i))}><X size={14} /></button>
               </div>
             </Row>
@@ -334,7 +341,7 @@ export const Settings = memo(function Settings() {
             : unavailable ? engine.reason ?? "lp-player is not available"
             : wantLp && engine.active !== "lp-player" ? "lp-player selected but not running — " + (engine.reason ?? "starting…")
             : wantLp && engine.reason ? engine.reason
-            : "which player draws the wallpaper. lp-player is the new all-in-one player (experimental: videos & images only for now — scenes are skipped). Switches live.";
+            : "which player draws the wallpaper. lp-player is the new all-in-one player (experimental — scenes need Wallpaper Engine installed for its assets). Switches live.";
           return <Row label="Player engine" hint={hint} disabled={off} rk="playerEngine">
             <Select value={g("playerEngine", "legacy")} disabled={off} onChange={(v) => set("playerEngine", v)}
               options={[{ value: "legacy", label: "Legacy" }, { value: "lp-player", label: "lp-player (experimental)" }]} />

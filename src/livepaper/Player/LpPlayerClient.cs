@@ -68,6 +68,80 @@ public sealed class LpPlayerClient
     public int Generation { get; private set; }
     // Last start/request failure, for /player-engine (null = fine).
     public string? LastError { get; private set; }
+    // `hello.capabilities` of the player this client last greeted (empty before the first hello) —
+    // `scene` when its lp-scene-worker AND WE's assets dir resolve (player-core.md § Scene worker).
+    public IReadOnlySet<string> Capabilities { get; private set; } = new HashSet<string>();
+    // the capabilities are from the CURRENT request connection's `hello` (a dropped connection — the player
+    // quit, crashed, was restarted with another environment — may lead to another process: greet it first)
+    private volatile bool _capsKnown, _capsEver;
+
+    // Phase 2 Task 11: can lp-player play a scene here? The running player's own word (its `scene`
+    // capability) when one answers; else `lp-player scene-check` (the same rule, run with this backend's
+    // environment), cached 30 s. Hot path (every next/prev/random's skip check, sometimes under
+    // PlayerHelper's lock): at most one quick `hello` per connection; a stalled player → its last word.
+    public bool ScenesAvailable => FromPlayer() ?? SceneCheck().Available;
+
+    private bool? FromPlayer()
+    {
+        if (!SocketExists) return null;
+        // twice: the first request after the player went away fails on the dead connection (EPIPE), the
+        // second greets whatever answers on the socket now
+        for (int i = 0; i < 2 && !_capsKnown && !IsStalled; i++) { try { Call("hello", null, QuickMs); } catch (LpPlayerException) { } }
+        return _capsKnown || (IsStalled && _capsEver) ? Capabilities.Contains("scene") : null;
+    }
+
+    // (available, why not, WE's assets dir) — `/player-engine.scenes`. `withAssets` reads the running
+    // player's resolved assets dir too (one more quick `get`; the status endpoint only).
+    public (bool Available, string? Reason, string? AssetsDir) SceneStatus(bool withAssets)
+    {
+        if (FromPlayer() is not bool can) return SceneCheck();
+        string? assets = null;
+        if (withAssets)
+            try { assets = Call("get", new Dictionary<string, object?> { ["path"] = "player.scene_assets_resolved" }, QuickMs).GetProperty("value").GetString() is { Length: > 0 } a ? a : null; }
+            catch (LpPlayerException) { }
+        if (can) return (true, null, assets);
+        var chk = SceneCheck(); // the same rule in this backend's environment — usually the same reason
+        return (false, "the running lp-player can't play scenes" + (chk.Reason != null ? $": {chk.Reason}"
+            : " (its lp-scene-worker or WE's assets dir didn't resolve in its environment — `lp-player ctl get '{\"path\":\"player.scene_assets_resolved\"}'`)"),
+            assets ?? chk.AssetsDir);
+    }
+
+    private (long At, bool Available, string? Reason, string? AssetsDir)? _sceneCheck;
+    private readonly object _sceneCheckLock = new();
+
+    // `lp-player scene-check` → `{worker, features, assets_dir, ok, reason}`, exit 0/1; cached 30 s.
+    private (bool Available, string? Reason, string? AssetsDir) SceneCheck()
+    {
+        lock (_sceneCheckLock)
+        {
+            if (_sceneCheck is { } c && Environment.TickCount64 - c.At < 30_000) return (c.Available, c.Reason, c.AssetsDir);
+            (bool, string?, string?) r;
+            var bin = PlayerEngine.ResolveBinary();
+            if (bin == null) r = (false, PlayerEngine.UnavailableReason, null);
+            else
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo(bin) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                    psi.ArgumentList.Add("scene-check");
+                    using var p = Process.Start(psi)!;
+                    var outTask = p.StandardOutput.ReadToEndAsync();
+                    _ = p.StandardError.ReadToEndAsync();
+                    if (!p.WaitForExit(5000)) { try { p.Kill(true); } catch { } r = (false, "`lp-player scene-check` did not answer within 5 s", null); }
+                    else
+                    {
+                        using var doc = JsonDocument.Parse(outTask.Result);
+                        var root = doc.RootElement;
+                        bool ok = root.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True;
+                        r = (ok, ok ? null : Prop(root, "reason") ?? $"`lp-player scene-check` exited {p.ExitCode}", Prop(root, "assets_dir"));
+                    }
+                }
+                catch (Exception e) { r = (false, $"`lp-player scene-check` failed: {e.Message}", null); }
+            }
+            _sceneCheck = (Environment.TickCount64, r.Item1, r.Item2, r.Item3);
+            return r;
+        }
+    }
 
     // ---- logging (rate-limited: an identical line at most once per 10 s) ------------------------
     private static readonly Dictionary<string, long> _logSeen = new();
@@ -119,6 +193,7 @@ public sealed class LpPlayerClient
         try { _rd?.Dispose(); } catch { }
         try { _sock?.Dispose(); } catch { }
         _rd = null; _sock = null;
+        _capsKnown = false; // the next connection may reach another player process
     }
 
     // Synchronous queries (PlayerHelper may ask while holding its _lock) never wait longer than this.
@@ -207,6 +282,11 @@ public sealed class LpPlayerClient
                             int p = pid.GetInt32();
                             int? sup = result.TryGetProperty("supervisor_pid", out var supEl) && supEl.ValueKind == JsonValueKind.Number
                                 ? supEl.GetInt32() : (int?)null;
+                            if (result.TryGetProperty("capabilities", out var capEl) && capEl.ValueKind == JsonValueKind.Array)
+                            {
+                                Capabilities = capEl.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToHashSet();
+                                _capsKnown = _capsEver = true;
+                            }
                             if (PlayerPid != p)
                             {
                                 bool restarted = PlayerPid != null;
@@ -635,8 +715,9 @@ public sealed class LpPlayerClient
     // source-id cache: a transition scheduled/started/handed off/done/cancelled/failed/adopting an
     // output, a stop, an output's sources retired) — a handful per switch. `source.` as a whole
     // would stream every debug-level `source.position` (~10 Hz per source) to be discarded;
-    // restarts are detected by `hello.pid`, not events.
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire"];
+    // restarts are detected by `hello.pid`, not events. Phase 2: `source.broken` — a scene whose worker
+    // crashed past its restart budget (LpPlayerMedia.OnEvent → PlayerHelper.OnSceneBroken).
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken"];
     public event Action<string, JsonElement>? Event;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;
@@ -711,6 +792,7 @@ public sealed class LpPlayerClient
             catch { }
             _subscribed.Reset();
             _evSock = null;
+            _capsKnown = false; // the player went away (the request connection learns it only at its next call)
             if (_evStop) break;
             Thread.Sleep(backoff);
             backoff = Math.Min(backoff * 2, 5000);

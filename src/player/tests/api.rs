@@ -6180,6 +6180,45 @@ fn missing_scene_folder_fails_without_crash_record() {
     assert_eq!(crash_files(&srv), 0, "no crash record");
 }
 
+/// Phase 2 Task 11 (the minimal half of Task 10's event): a scene whose worker crashes past its
+/// restart budget logs ONE `source.broken {id, path, scene_id, reason, restarts, record, signal}`
+/// — the backend adapter marks the item crashed from it and advances a rotation (D6).
+#[test]
+fn source_broken_event_names_the_scene() {
+    let Some(mut srv) = scene_serve(&[]) else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = scene_serve_in(&["--clock", "real"], serial);
+    let mut c = srv.client();
+    let spec = SyntheticSpec {
+        crash_after_ms: Some(100),
+        ..synth(Pattern::Solid)
+    };
+    let dir = common::synthetic_scene("api-broken-900000003", &spec);
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    let ev = wait_for(Duration::from_secs(20), "source.broken", || {
+        logs_of(&mut c, "source.broken")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    assert_eq!(ev["path"], json!(s(&dir)), "{ev}");
+    assert_eq!(ev["scene_id"], json!("api-broken-900000003"), "{ev}");
+    assert_eq!(ev["restarts"], json!(3), "{ev}");
+    assert_eq!(ev["signal"], json!(libc::SIGABRT), "{ev}");
+    assert!(ev["reason"].as_str().is_some_and(|r| !r.is_empty()), "{ev}");
+    let record = ev["record"].as_str().expect("record path");
+    assert!(Path::new(record).is_file(), "the crash record exists: {ev}");
+    std::thread::sleep(Duration::from_millis(300));
+    let n = logs_of(&mut c, "source.broken")
+        .into_iter()
+        .filter(|e| e["id"] == json!(id))
+        .count();
+    assert_eq!(n, 1, "one source.broken per break");
+}
+
 /// Mouse on: `headless.pointer` over an output reaches the scene in its own coordinates (the
 /// pointer_dot scene draws its dot there), and during a fade both sides see it.
 #[test]

@@ -7,21 +7,24 @@ paths:
 
 `src/livepaper/Player/` lets the C# backend drive the Rust `lp-player` (`.claude/rules/player-core.md`)
 instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy"` (default) |
-`"lp-player"` (experimental; Phase 1 = videos/images, **scenes are skipped exactly like
-`AllowScenes=false`**). Settings → Advanced → "Player engine". The switch is live.
+`"lp-player"` (experimental; videos/images/colours, and since Phase 2 Task 11 **WE scenes** when the
+player can play them — § Scenes). Settings → Advanced → "Player engine". The switch is live.
 
 ## Files
 - **`PlayerEngine.cs`** — `IsLpPlayer` (cached; lazy from settings.json, refreshed by `/settings`
   via `PlayerHelper.SwitchEngineLive`, loaded at `--serve` start so a change compares against what
-  actually runs), `WouldBeLpPlayer(s)`, `ScenesPlayable(s) = AllowScenes && IsLweAvailable() &&
-  !IsLpPlayer`, `ResolveBinary()`, `Status()` (→ `GET /player-engine`).
+  actually runs), `WouldBeLpPlayer(s)`, `ScenesPlayable(s) = AllowScenes && (IsLpPlayer ?
+  LpPlayerClient.Shared.ScenesAvailable : IsLweAvailable())` (the pure rule `ScenesPlayableFor`, lazy —
+  only the running engine is asked), `SceneStatus(s)` / `SceneUnavailableReason(s)` (§ Scenes),
+  `ResolveBinary()`, `Status()` (→ `GET /player-engine`, + `scenes`).
 - **`LpPlayerClient.cs`** — the Command API client (JSON Lines on the unix socket): `Call(cmd, args,
   timeoutMs=2000)` throws `LpPlayerException {Code, Message, Hint}` (the player's error object, or
   `io`/`timeout` with a hint); `TryCall` logs instead. One persistent request connection (serialized,
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
   connection on a background thread — **only the kinds it consumes** (final review M11):
   `transition.` (a switch's terminal outcome — handoff/cancelled/failed — and, for the source
-  map's invalidation, every other transition kind), `player.stopped`, `source.retire` — a handful
+  map's invalidation, every other transition kind), `player.stopped`, `source.retire`, `source.broken`
+  (Phase 2, § Scenes) — a handful
   per switch; `source.` as a whole used to stream every debug `source.position` (~10 Hz per source)
   only to be discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
   250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now).
@@ -41,6 +44,7 @@ instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy
   (22nd), captured once per pid at `hello` time and re-checked (`StillIs`) before every signal in
   `QuitOrKill` — a recycled pid (the process died and the kernel handed its number to something
   unrelated) is never signalled as if it were still ours.
+  **`Capabilities`** = the last `hello.capabilities` (§ Scenes: `ScenesAvailable`, `SceneStatus`).
 - **`LpPlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
 - **`MpvPropertyMap.cs`** — mpv IPC property sets → lp-player properties.
 - **`LpPlayerSelfTest.cs`** — `livepaper --lp-player-selftest`.
@@ -185,9 +189,9 @@ code below it is unchanged)
 
 | method | under lp-player |
 |---|---|
-| `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}`; scene path → `KillCurrentProcess` (AllowScenes=false parity) |
+| `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}` — a scene folder too (`kind: scene`, § Scenes); a scene when `!ScenesPlayable` → `KillCurrentProcess` (AllowScenes=false parity; the pickers never hand one over) |
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
-| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
+| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append; since Phase 2 any switch incl. a scene side — a scene A never ends, so with A a scene (wait-for-video-end after the interval) it is `align:"now"`, legacy's "prevIsScene → switch now"; the failure fallback switches to the item AFTER a B that is skipped by then, e.g. a scene that broke before its handoff) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `RearmAlignedSwitch` (from `/playlist/state` when the playlist's transitions change, `/settings` when the global ones or `TransitionMethod` do) | the armed aligned switch was **requested at arm time** with the effect + duration of then (the player times it for A's end — legacy picks its effect when the overlay starts, near A's end), so a transition change while one is armed (advance-on-end: for the whole clip) ran the OLD effect at A's end: cancel the wait and re-arm it to the same `next` (`CancelVideoEndWait` + `ArmVideoEndWait`) → a fresh request with the new config. No-op under legacy / with nothing armed. Guard: matrix `pending × plTrOff/plTrDuration/plTrEffect` |
 | `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → a volume/speed literal (`/volume {value}`) = a resolver pass with it as the PLAYING item's transient value (every other source keeps its own), `mute` (SetMute / SetUserMute) = a forced resolver pass of `gain.mute` from `PlayerHelper.IsMuted`, the rest → `Set` (layer props → `lay:*:main`, `pause` → `player.paused`, else `srcs:*`); `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
@@ -199,8 +203,10 @@ code below it is unchanged)
 | `ApplyOverrideLive` | `ApplyOverride(path)`: a resolver pass on that item's own source(s) (may be a pending B) — `gain.user` + `speed`, diffed against the cached values; reports the effective speed back when it's what `cur:*` shows (`_currentSpeed`) |
 | `ApplyNormalizationLive` / `PlayerHelper.OnLoudnessMeasured` (from `LibraryService.EnsureLoudnessAsync`, once a measurement is stored) | `ApplyEffective` → **every** live media source gets ITS OWN item's `af` (`NormalizeAf(its path)`: loudnorm at the target, "" when off / NoAudio / unmeasured — that one kicks a measure), diffed. It used to set `cur:*`'s item only: an effect's outgoing A, a pending B (armed for A's end — it then played its whole clip with the old filter) and every source while no output shows one (no `cur:*`) kept the old `af`; and an item that started unmeasured (or was playing when normalization was switched on) played un-normalized until its next switch — now it gets its loudnorm the moment it's measured (normalization on). Legacy: `set af` when it's mpv's current file. Guard: matrix `set:normalizeOn/Off/Target/Fresh` × effect / pending / pausedEffect / noOutput |
 | `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → a resolver pass on the source(s) of `paths` only (the modal's edited item(s) — on screen, either side of an effect, a pending B), the dragged value as their transient (nothing persisted), the dragged prop only, diffed against the cached values: ONE `set` per source per value, no `state` read while the map is cached; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: a pass over every source with the dragged value as the transient GLOBAL — an item with its own override for that field keeps it (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
-| scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)`; the V→S lead in `Tick` gets `!IsLpPlayer` |
-| `Apply(scene)` | **throws "Scenes need the Legacy player engine…" directly** — the one scene check NOT routed through `ScenesPlayable` (it keeps legacy's own AllowScenes / LWE-missing messages for legacy, and tells an lp-player user what to do instead of "enable scene support") |
+| scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)` (§ Scenes); `IsSkippedPath` = scene && (!playable \|\| (crashed && !whitelisted)) — D6, `PlayerHelper.SkipScene`; the V→S lead in `Tick` and the tick's LWE crash branch (`!IsLweRunning`) get `!IsLpPlayer`; `UpdateTimedSettings`'s "a scene plays" = `ScenePlaying` (lp-player: the playing history item is a scene folder) |
+| `Apply(scene)` | lp-player: `SceneUnavailableReason(s)` → its message (scene support off / the player can't: no worker, built `--no-scenes`, no WE assets — `scene-check`'s reason), a crashed non-whitelisted scene → "This scene crashed and won't be played — tick Whitelist…"; legacy's own AllowScenes / LWE-missing messages unchanged |
+| `ApplyTimedPlaylist` (lp-player) | starts at the first item that isn't skipped (a crashed scene first in the list used to stop playback in `SwitchToFile`); `AdvanceToNext`'s history walk (a next after a previous) steps past a skipped one too |
+| `OnSceneBroken(path)` (from `source.broken`) | § Scenes |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
 | `ApplyTimedPlaylist` (Play / play-from / a timed restore) | `QueueNewSession` before its first switch (I1 — it was missing: Play and play-from while paused stayed paused; Apply/Launch already had it) |
 | `StepBackAndLaunch` (timed `prev`) | the item before `PlayingHistoryIndex`; none (a fresh session's first item) → nothing at all. With an advance-on-end pre-fetch it used to undo only the pre-fetch and relaunch the playing item — restarted, its armed switch cancelled |
@@ -211,9 +217,59 @@ code below it is unchanged)
 `LpPlayerMedia.OwnStreamFilter()` excludes the player's own streams **by ownership (R69)** —
 `application.process.id` == `PlayerPid`, the **compositor's** pid (from `hello.pid` — libmpv runs
 in-process inside the compositor, never the supervisor, so this is the right pid unchanged by Task 16),
-`node.name` starting `lp-player-bus`,
+`node.name` starting `lp-player-` (the bus `lp-player-bus*`, and Phase 2's scene worker streams
+`lp-player-scene.<source id>` — their own process, so the pid check misses them),
 `target.object`/`Sink:` = the `lp-player-bus` sink (index via `pactl list short sinks`), or
 `application.name == "lp-player"` (an extra match, not the only one). Legacy: unchanged.
+
+## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
+A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:
+"scene"` source (player-core.md § Scene worker — one `lp-scene-worker` per scene, shared by every output).
+Everything kind-agnostic stays so: the resolver (§ Targeting) gives a scene the same per-source values as a
+video — `gain.user`/`gain.mute`/`no_audio`/`speed` drive its worker's stream and clock live (`speed` scales a
+scene's animation AND its pitch-kept sound, owner decision), the video-only props (`hwdec`, `fps_cap`,
+`cache`, `demuxer_*`, `loop`) are stored, no effect, and `af` is always "" (no loudnorm on a scene). Pause,
+transitions (every method, every switch combo), the snapshot/restore and R81 need nothing scene-specific.
+- **Can a scene play?** `ScenesPlayable(s)` = `AllowScenes` && `LpPlayerClient.ScenesAvailable`: the running
+  player's `scene` capability (its worker AND WE's assets dir resolve — or synthetic scenes are allowed) from
+  the current request connection's `hello` (a dropped connection forgets it: the next ask greets whatever
+  answers — twice, the first request after a quit fails on the dead connection; a stalled player → its last
+  word); no player on the socket → `lp-player scene-check` in the backend's environment (`{worker, features,
+  assets_dir, ok, reason}`), cached 30 s. Hot path: `IsSkippedPath` per next/prev/random (once per pass in a
+  library scan). `GET /player-engine` → `scenes {available, reason, assets_dir}` (`SceneStatus`: scene support
+  off → that; the player without the capability → `scene-check`'s reason, else a hint at `ctl get
+  player.scene_assets_resolved`; `assets_dir` from the running player's `player.scene_assets_resolved`).
+- **Create props** (`SourceProps`): `kind: "scene"`, `preview` = the item's preview image
+  (`LibraryService.PreviewImageOf`: `preview.jpg|png|jpeg`, else `preview.gif|webp`) — what the player shows
+  while no worker frame exists (Task 10). `scene_props` (the properties editor) is a later task.
+- **Per-monitor scene fps — live** (`LpPlayerMedia.ApplySceneFps(prev, cur)`): `LweMonitors[].Fps` →
+  `set out:<name>.scene_fps` (name mapped like the player's `output_name`: `.`/`:`/`*`/whitespace → `-`;
+  0–480, 0 = the output's refresh), queued coalescible per output (`scene_fps:<name>`); `/settings` diffs prev
+  → cur (a removed entry → back to the default 30, D5). Every entry is re-asserted once per player process
+  (`Switch` when `Generation` moved, and R81's `ReapplyAllNow`). An entry naming no output is a logged
+  `no_such_node`. `IsPrimary` has no lp-player meaning (one worker, its sound one stream on the bus), and the
+  V→S lead / `SceneTransitionDelayMs` stay legacy-only (the player switches once B's first frame is in) —
+  Settings hides both under lp-player and labels the fps "fps (live)". Under lp-player `LweMonitors` is no
+  longer the launch-only exception.
+- **Broken scenes (D6 + the owner's call).** The player logs `source.broken {id, path, scene_id, reason,
+  signal|code, restarts, record}` once when a scene's worker crashed past its budget (3 restarts in 60 s;
+  player-core.md § Scene worker → Errors). `LpPlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
+  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the item modal's "Scene
+  crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
+  (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
+  flight) the rotation **advances at once**: `_timedRemainingMs = 0` + the tick fired now (its owner/pause/
+  mode rules apply; a wait-for-video-end session arms a switch that, A being a scene, goes `align:"now"`), or
+  `AdvanceAndLaunch` without an interval. A single wallpaper keeps what the player shows (its last frame /
+  the preview, silent). A scene that breaks as a pending B is that switch's `transition.failed`; the
+  DoVideoEndWait fallback then skips it (row above). From then on `IsSkippedPath` skips it — unless
+  whitelisted (`/library/whitelist`) — and `Apply` refuses it. A missing / half-downloaded folder is a load
+  error (`transition.failed`), never marked.
+- **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
+  capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
+  Volume —, the ownership filter on a `lp-player-scene.src4` block) + the round trip (its private player runs
+  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip → synthetic
+  scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30; scene → clip cut);
+  the IT's § "Phase 2: scenes" (Integration test, below).
 
 ## Targeting (R61): ONE effective-settings resolver
 Every setting reaches the live sources through **`LpPlayerMedia.ResolveNow`** (design note at the top of
@@ -299,8 +355,8 @@ computed for the playing item at request time landed on whatever played when it 
   from `get player.paused` (not `cur:*.paused` any more — the node's raw value is never touched by the
   override, so it wouldn't reflect the current pause state). The interim R75a ruling (write every
   `srcs:*.paused` directly) is gone.
-- New sources (`SourceProps`) carry every setting at creation: path, kind (image by extension, else
-  video), loop + the resolver's own per-source values (`Desired`: speed, `gain.user`, `gain.mute`,
+- New sources (`SourceProps`) carry every setting at creation: path, kind (a folder → scene + its `preview`,
+  § Scenes; image by extension, else video), loop + the resolver's own per-source values (`Desired`: speed, `gain.user`, `gain.mute`,
   no_audio, hwdec, fps_cap, cache, demuxer_*, af) — never a second copy of that computation.
 
 ## Property map (`MpvPropertyMap.Translate(object[] mpvArgs) → (prop, value)?`)
@@ -436,6 +492,20 @@ resumes, no switch storm) — **R81**: a distinctive Volume set just before the 
 after the restart, and the adapter log shows a reapply; lp-player → legacy with nothing playing (the
 player quits — **cleanup kills the supervisor `SP` / uses `ctl quit`, never just the old compositor
 pid**, so nothing restarts after the test — no mpvpaper started/killed); no settings dump in the logs.
+**Phase 2 scenes** (every player it runs or the backend starts has `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` +
+`LP_SCENE_WORKER_BIN` = this build's worker — the upgrade test's copied binary has none next to it; synthetic
+scene items `library/workshop/90000000{1..4}`): `/player-engine.scenes.available`; `/apply` a scene →
+`cur:*.kind == scene`, ready ≤ 3 s, its preview; Volume 50 → the scene's `gain.user` −18.06 and the worker's
+stream gain; NoAudio on/off live on the source and the worker, same worker pid; `LweMonitors` fps 45 →
+`out:VIRTUAL-1.scene_fps` 45 + the worker's `fps_target`, same pid, `[]` → 30; `/library/volume` on scene 1
+during a 6 s fade to scene 2 moves scene 1's source only; `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
+S→V in a playlist — each `fade full-live` handed off — and an aligned V→S at a 2 s clip's end; a scene crashing
+every 400 ms in a timed playlist → one `source.broken`, WS `scene-crashed`, index `crashed: true`, the rotation
+advanced ≤ 2 s after the break (event clocks), `/next` ×3 skips it, whitelisted → `/next` plays it again; a
+missing scene folder → `transition.failed`, not marked crashed; `AllowScenes=false` → 8 × `/next` never a
+scene; a player restarted with `LP_SCENE_WORKER_BIN=/nonexistent` → no `scene` capability,
+`/player-engine.scenes` unavailable with a reason, 8 × `/next` never a scene. `LP_IT_DLL=<livepaper.dll>` runs
+another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
 `LP_PLAYER_BIN=<repo>/src/player/target/debug/lp-player dotnet run --project src/livepaper --

@@ -874,7 +874,9 @@ impl SceneSource {
             WorkerEvent::Broken { record } => {
                 let reason = format!("scene worker broken (crash record {})", record.display());
                 if self.broken.is_none() {
-                    // Task 10 adds `source.broken`; the source is broken until its path changes.
+                    // The source is broken until its path changes. `source.broken` (Phase 2 Task 11,
+                    // the event half of Task 10): the backend marks the item crashed from it.
+                    self.log_broken(&record);
                     self.events.push(SourceEvent::Error {
                         reason: reason.clone(),
                     });
@@ -1019,6 +1021,29 @@ impl SceneSource {
             }
             _ => {}
         }
+    }
+
+    /// `source.broken {id, path, scene_id, reason, signal|code, restarts, record}` — the fields
+    /// from the crash record the host just wrote (a small file; read once, at the break).
+    fn log_broken(&self, record: &std::path::Path) {
+        let rec: Value = std::fs::read(record)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or(Value::Null);
+        let mut ev = json!({
+            "id": self.opts.id,
+            "path": self.opts.path,
+            "scene_id": rec.get("scene_id").cloned().unwrap_or(Value::Null),
+            "reason": rec.get("reason").cloned().unwrap_or(Value::Null),
+            "restarts": rec.get("restarts").cloned().unwrap_or(Value::Null),
+            "record": record,
+        });
+        for k in ["signal", "code"] {
+            if let Some(v) = rec.get(k) {
+                ev[k] = v.clone();
+            }
+        }
+        log::event("source", Level::Error, "source.broken", None, ev);
     }
 
     fn modifier_table(&mut self, gfx: &Gfx, fourcc: u32) -> Vec<(u64, bool)> {

@@ -9,7 +9,8 @@
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
-#   engine lp-player → legacy with nothing playing.
+#   engine lp-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
+#   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker).
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
 # XDG_STATE_HOME (so its own settings.json, library, lp-player socket + event log) and its own random
@@ -33,7 +34,8 @@ DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 for t in ffmpeg jq curl python3; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
 B=$ROOT/src/player/target/debug/lp-player
-DLL=$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll
+# LP_IT_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks)
+DLL=${LP_IT_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll}
 
 if [ $BUILD = 1 ]; then
   echo "== build"
@@ -46,6 +48,7 @@ if [ $BUILD = 1 ]; then
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
+[ -x "${B%/*}/lp-scene-worker" ] || { echo "not built: ${B%/*}/lp-scene-worker (drop --no-build)"; exit 2; }
 
 # Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
 # bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
@@ -72,6 +75,9 @@ ln -s "$B" "$T/bin/lp-player"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$T/bin/lp-player LP_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# Phase 2 scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
+# finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/lp-player)
+export LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LP_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/lp-scene-worker
 # The adapter's aligned-switch backstop slack (LpPlayerMedia.AlignBackstopSlackSec, 15 s in production),
 # shortened so the speed-drop / long-pause scenarios below reach it in seconds.
 export LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
@@ -500,6 +506,168 @@ mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
 # and switching the live engine to legacy here while something is playing would try to launch a real
 # mpvpaper/LWE, which this hermetic sandbox explicitly never does.
 stop_now
+
+echo "== Phase 2: scenes under lp-player (synthetic scenes — the player runs with LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1)"
+# Synthetic scene items the way lp-player's tests write them (tests/common::synthetic_scene): a workshop item
+# folder with project.json type scene + scene.pkg + preview.png + lp-synthetic.json (the worker's synthetic
+# renderer; only with the env gate — WE's assets are proprietary, no real scene renders hermetically).
+mk_scene() {   # $1 = item folder, $2 = lp-synthetic.json
+  mkdir -p "$1"
+  printf '{"type":"scene","title":"%s","file":"scene.json","preview":"preview.png"}' "$(basename "$1")" > "$1/project.json"
+  head -c 16 /dev/zero > "$1/scene.pkg"
+  printf '%s' "$2" > "$1/lp-synthetic.json"
+  echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC | base64 -d > "$1/preview.png"
+}
+# Task 20c's fake scenes have no lp-synthetic.json (they'd need WE's assets): out of the library meanwhile
+mv "$LIB/imported/ss1" "$T/removed-ss1"; mv "$LIB/imported/ss2" "$T/removed-ss2"
+S1=$LIB/workshop/900000001; S2=$LIB/workshop/900000002; S3=$LIB/workshop/900000003; S4=$LIB/workshop/900000004
+mk_scene "$S1" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}'
+mk_scene "$S2" '{"pattern":"solid","rgb":[0,0,255],"native":[640,360],"has_audio":true,"tone_hz":660}'
+mk_scene "$S3" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":400}'
+mk_scene "$S4" '{"pattern":"solid","native":[640,360]}'
+IDX=$LIB/workshop/index.json
+setting '.AllowScenes = true | .Volume = 100 | .Speed = 1 | .NoAudio = false | .LweMonitors = []'
+pe_scenes() { curl -sf -m 5 "$U/player-engine" | jq -c .scenes; }
+curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == true' >/dev/null && ok "/player-engine.scenes: $(pe_scenes)" || bad "/player-engine.scenes: $(pe_scenes)"
+nsch() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
+wpid() { ctl state | jq -r --arg id "$1" '.workers[]? | select(.id==$id) | .pid // empty'; }
+waudio() { ctl probe '{"name":"workers"}' | jq -r --arg id "$1" ".workers[] | select(.id==\$id) | .audio.$2"; }
+pid_gone() { ! kill -0 "$1" 2>/dev/null; }
+scene_ready() { [ "$(cur path)" = "$1" ] && [ "$(cur kind)" = scene ] && [ "$(cur ready)" = true ]; }
+# the newest switch to $1 (after scheduled event $2, of align $3) and its outcome
+corr_to() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" --argjson n "$2" --arg a "$3" '[.events[$n:][] | select(.path==$p and .align==$a)][-1].corr // empty'; }
+switched_to() { sc=$(corr_to "$1" "$2" "${3:-now}"); [ -n "$sc" ] && [ "$(corr_has "$sc" handoff)" -ge 1 ]; }
+method_of() { ctl logs "{\"corr\":\"$1\",\"kind_prefix\":\"transition.started\"}" | jq -r '.events[-1] | "\(.effect_id) \(.method)"'; }
+
+t_ap=$(ms_now); post /apply "{\"path\":\"$S1\"}" >/dev/null
+waitfor 3000 scene_ready "$S1" && ok "/apply a scene → cur kind scene, ready in $(( $(ms_now) - t_ap )) ms" || bad "/apply a scene → path $(basename "$(cur path)") kind $(cur kind) ready $(cur ready)"
+[ "$(cur preview)" = "$S1/preview.png" ] && ok "the scene source carries the item's preview" || bad "preview → $(cur preview)"
+SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
+[ -n "$WP" ] && kill -0 "$WP" 2>/dev/null && ok "its worker runs (pid $WP)" || bad "no worker for $SID: $(ctl state | jq -c .workers)"
+setting '.Volume = 50'; waitfor $WAIT cur_near gain.user -18.0618 && ok "Volume 50 → the scene's gain.user $(cur gain.user)" || bad "Volume 50 → scene gain.user $(cur gain.user)"
+waitfor $WAIT eval '[ "$(waudio "$SID" gain_db)" != null ] && near "$(waudio "$SID" gain_db)" -18.0618 0.05' && ok "…reaches the worker's stream ($(waudio "$SID" gain_db) dB)" || bad "worker audio gain_db $(waudio "$SID" gain_db)"
+setting '.Volume = 100'
+setting '.NoAudio = true'
+waitfor $WAIT eval 'cur_is no_audio true && [ "$(waudio "$SID" no_audio)" = true ]' && [ "$(wpid "$SID")" = "$WP" ] && ok "NoAudio → the scene's no_audio live (worker too), same worker $WP" || bad "NoAudio → no_audio $(cur no_audio), worker $(waudio "$SID" no_audio), pid $WP → $(wpid "$SID")"
+setting '.NoAudio = false'
+waitfor $WAIT eval 'cur_is no_audio false && [ "$(waudio "$SID" no_audio)" = false ]' && [ "$(wpid "$SID")" = "$WP" ] && ok "NoAudio off → live, same worker" || bad "NoAudio off → $(cur no_audio) / $(waudio "$SID" no_audio), pid $(wpid "$SID")"
+out_fps() { ctl get "{\"path\":\"out:$1.scene_fps\"}" | jq -r .value; }
+# the outputs there are now (the I4 section above replugs them as VIRTUAL-3 + VIRTUAL-2), every one in LweMonitors
+OUTS=$(ctl state | jq -c '[.outputs[].name]'); O1=$(echo "$OUTS" | jq -r '.[0]')
+all_fps() { echo "$OUTS" | jq -r '.[]' | while read -r o; do near "$(out_fps "$o")" "$1" || return 1; done; }
+fps_now() { all_fps "$1" && near "$(ctl probe '{"name":"workers"}' | jq -r --arg id "$SID" '.workers[] | select(.id==$id) | .fps_target')" "$1"; }
+setting ".LweMonitors = ($OUTS | to_entries | map({Name: .value, Fps: 45, IsPrimary: (.key == 0)}))"
+waitfor $WAIT fps_now 45 && [ "$(wpid "$SID")" = "$WP" ] && ok "LweMonitors fps 45 on $OUTS → each out:<c>.scene_fps 45 live, the worker ticks at 45, same pid" || bad "LweMonitors fps → out:$O1 $(out_fps "$O1"), worker $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | {fps_target, pid}')"
+setting '.LweMonitors = []'
+waitfor $WAIT fps_now 30 && ok "LweMonitors emptied → back to the default 30" || bad "LweMonitors [] → out:$O1 $(out_fps "$O1")"
+
+# /library/volume on the playing scene moves that source only — mid-fade (6 s) to another scene, both live
+setting '.GlobalTransitionDurationMs = 6000'
+post /apply "{\"path\":\"$S2\"}" >/dev/null
+fade_running() { ctl state | jq -e '[.transitions[] | select(.phase=="running")] | length > 0' >/dev/null; }
+waitfor $WAIT fade_running || bad "no S1 → S2 fade running"
+ID1=$SID; ID2=$(srcIdForPath "$S2")
+gain_of() { ctl get "{\"path\":\"$1.gain.user\"}" | jq -r .value; }
+g2a=$(gain_of "$ID2"); g30=$(dB 30)
+post /library/volume "{\"path\":\"$S1\",\"intValue\":30}" >/dev/null
+waitfor $WAIT eval 'near "$(gain_of "$ID1")" "$g30"' && near "$(gain_of "$ID2")" "$g2a" && ok "/library/volume 30 on scene 1 mid-fade → its source only (gain $(gain_of "$ID1"); scene 2 stays $(gain_of "$ID2"))" || bad "/library/volume mid-fade: $ID1 $(gain_of "$ID1") (want $g30), $ID2 $(gain_of "$ID2") (was $g2a)"
+post /library/volume "{\"path\":\"$S1\",\"intValue\":100}" >/dev/null   # == global → the override is dropped
+setting '.GlobalTransitionDurationMs = 300'
+waitfor 15000 shows "$S2" || bad "the 6 s fade never handed off: cur $(basename "$(cur path)")"
+WP2=$(wpid "$ID2"); t_stop=$(ms_now); post /stop '{}' >/dev/null
+[ -n "$WP2" ] && waitfor 1000 pid_gone "$WP2" && ok "/stop → the scene's worker ($WP2) gone in $(( $(ms_now) - t_stop )) ms" || bad "/stop: worker $WP2 still alive after 1 s"
+waitfor $WAIT nothing_shown || bad "/stop left $(cur path)"
+
+# switches with scenes: V→S, S→S, S→V through /next (full-live fades), and an aligned V→S at A's end
+ns=$(nsch)
+post /playlist/play "{\"paths\":[\"$D\",\"$S1\",\"$S2\"],\"settings\":{\"Order\":0}}" >/dev/null
+# (a video's aligned switch to the next item is armed at once, so "settled" never holds while D plays)
+waitfor $WAIT cur_is path "$D" || bad "play [d, s1, s2] → cur $(basename "$(cur path)")"
+for step in "V→S:$S1" "S→S:$S2" "S→V:$D"; do
+  what=${step%%:*}; to=${step#*:}; ns=$(nsch); post /next '{}' >/dev/null
+  if waitfor $WAIT switched_to "$to" "$ns"; then
+    m=$(method_of "$sc"); [ "$m" = "fade full-live" ] && waitfor $WAIT cur_is path "$to" && ok "/next $what ($(basename "$to")): $m, handed off ($sc)" || bad "/next $what: $m, cur $(basename "$(cur path)")"
+  else bad "/next $what: no handoff to $(basename "$to") (corr ${sc:-none}), cur $(basename "$(cur path)")"; fi
+done
+stop_now
+ns=$(nsch)
+post /playlist/play "{\"paths\":[\"$A\",\"$S1\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor 15000 switched_to "$S1" "$ns" end && waitfor $WAIT scene_ready "$S1" && ok "an aligned V→S at the video's end ($sc): $(method_of "$sc"), the scene shows" || bad "aligned V→S: corr ${sc:-none}, cur $(basename "$(cur path)") kind $(cur kind)"
+stop_now
+
+# a scene that keeps crashing (3 restarts in 60 s → broken) while it plays in a timed playlist
+python3 - "${U##*:}" > "$T/ws-scene.log" 2>&1 <<'PY' & WSP=$!
+import socket, sys, base64, os
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
+s.send(("GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % base64.b64encode(os.urandom(16)).decode()).encode())
+buf = b""
+def need(n):
+    global buf
+    while len(buf) < n:
+        d = s.recv(65536)
+        if not d: sys.exit(0)
+        buf += d
+need(4)
+while b"\r\n\r\n" not in buf: need(len(buf) + 1)
+head, buf = buf.split(b"\r\n\r\n", 1)
+print(head.split(b"\r\n")[0].decode(), flush=True)
+while True:   # server frames are unmasked: one text message per line
+    need(2); n = buf[1] & 0x7f; o = 2
+    if n == 126: need(4); n = int.from_bytes(buf[2:4], "big"); o = 4
+    elif n == 127: need(10); n = int.from_bytes(buf[2:10], "big"); o = 10
+    need(o + n); msg = buf[o:o + n]; op = buf[0] & 0x0f; buf = buf[o + n:]
+    if op == 1: print(msg.decode(errors="replace"), flush=True)
+PY
+waitfor $WAIT eval 'grep -q " 101 " "$T/ws-scene.log"' || bad "WebSocket: $(head -c 300 "$T/ws-scene.log")"
+ns=$(nsch)
+post /playlist/play "{\"paths\":[\"$S3\",\"$S1\"],\"settings\":{\"Order\":0}}" >/dev/null
+broken_ev() { ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -c --arg p "$S3" '[.events[] | select(.path==$p)][-1] // empty'; }
+waitfor 30000 eval 'bev=$(broken_ev); [ -n "$bev" ]' && ok "the crashing scene broke: $(echo "$bev" | jq -c '{scene_id, restarts, signal}')" || bad "no source.broken for the crashing scene"
+t_b=0; [ -n "${bev:-}" ] && t_b=$(printf '%s' "$bev" | jq -r "$EV_MS")
+waitfor $WAIT eval 'grep -q "scene-crashed" "$T/ws-scene.log" && grep "scene-crashed" "$T/ws-scene.log" | grep -qF "900000003"' && ok "WS scene-crashed for it" || bad "no WS scene-crashed: $(grep -c . "$T/ws-scene.log") lines"
+waitfor $WAIT eval 'jq -e ".\"900000003\".crashed == true" "$IDX" >/dev/null' && ok "its index entry: crashed true" || bad "index: $(jq -c '."900000003"' "$IDX" 2>/dev/null)"
+adv_ms() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$S1" --argjson n "$ns" --argjson t "$t_b" "[.events[\$n:][] | select(.path==\$p) | $EV_MS - \$t | select(. >= -50)][0] // empty"; }
+waitfor $WAIT eval 'am=$(adv_ms); [ -n "$am" ]'
+[ -n "${am:-}" ] && python3 -c "import sys; sys.exit(0 if float('$am') <= 2000 else 1)" && ok "the rotation advanced to the next item $(printf %.0f "$am") ms after the break" || bad "advance after the break: ${am:-none} ms (cur $(basename "$(cur path)"))"
+waitfor $WAIT scene_ready "$S1" || bad "after the break: cur $(basename "$(cur path)")"
+ns=$(nsch); hit=0
+for _ in 1 2 3; do post /next '{}' >/dev/null; waitfor $WAIT settled; [ "$(cur path)" = "$S3" ] && hit=1; done
+[ -n "${bev:-}" ] && [ "$(corr_to "$S3" "$ns" now)" = "" ] && [ $hit = 0 ] && ok "/next ×3 skips the crashed scene" || bad "/next landed on the crashed scene"
+post /library/whitelist "{\"path\":\"$S3\",\"value\":true}" >/dev/null
+ns=$(nsch); post /next '{}' >/dev/null
+waitfor $WAIT eval '[ -n "$(corr_to "$S3" "$ns" now)" ]' && ok "whitelisted → /next plays it again" || bad "whitelisted crashed scene still skipped (cur $(basename "$(cur path)"))"
+post /library/whitelist "{\"path\":\"$S3\",\"value\":false}" >/dev/null
+stop_now
+kill "$WSP" 2>/dev/null; WSP=""
+
+# a scene folder that's gone (deleted, Steam still downloading): the switch fails cleanly, no crash mark
+mv "$S4" "$T/removed-s4"
+ns=$(nsch); post /apply "{\"path\":\"$S4\"}" >/dev/null
+s4_failed() { sc=$(corr_to "$S4" "$ns" now); [ -n "$sc" ] && [ "$(corr_has "$sc" failed)" -ge 1 ]; }
+waitfor $WAIT s4_failed && ok "a missing scene folder → transition.failed ($sc)" || bad "missing folder: corr ${sc:-none}, cur $(basename "$(cur path)")"
+jq -e '."900000004".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S4" '.events[] | select(.path==$p) | .id')" ] \
+  && ok "…not marked crashed (no source.broken)" || bad "a missing folder was marked crashed: $(jq -c '."900000004"' "$IDX")"
+stop_now
+
+lib_steps_no_scene() {   # $1 = label: /apply a video, then 8 × /next through a library of videos + scenes
+  local hit=0 i
+  post /apply "{\"path\":\"$SV1\"}" >/dev/null; waitfor $WAIT shows "$SV1" || bad "$1: /apply sv1 → $(basename "$(cur path)")"
+  for i in $(seq 1 8); do post /next '{}' >/dev/null; waitfor $WAIT settled; [ "$(cur kind)" = scene ] && hit=1; done
+  [ $hit = 0 ] && ok "$1: 8 × /next never landed on a scene" || bad "$1: /next landed on a scene ($(basename "$(cur path)"))"
+  stop_now
+}
+setting '.AllowScenes = false'
+lib_steps_no_scene "AllowScenes=false"
+setting '.AllowScenes = true'
+restart_player 9 LP_SCENE_WORKER_BIN=/nonexistent
+ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose lp-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
+pe_off() { curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false and (.scenes.reason | type == "string" and length > 0)' >/dev/null; }
+waitfor $WAIT pe_off && ok "/player-engine.scenes: unavailable, with a reason: $(curl -sf -m 5 "$U/player-engine" | jq -r .scenes.reason)" || bad "/player-engine.scenes: $(pe_scenes)"
+lib_steps_no_scene "no lp-scene-worker"
+restart_player 10
+setting '.AllowScenes = false'
+mv "$T/removed-ss1" "$LIB/imported/ss1"; mv "$T/removed-ss2" "$LIB/imported/ss2"
 
 echo "== play-from keeps the playlist's transition settings (it used to rebuild them from rotation fields only)"
 pf=$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$b], startIndex:1, settings:{order:1, overrideGlobalSettings:true,

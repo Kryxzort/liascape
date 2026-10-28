@@ -96,12 +96,24 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process incl. auto-mute ≤ 100 ms; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
-  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 done
-    (`fcf9424`); 9 + 11 in progress; 10, 12–15, properties editor, loudness learning left.
+  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
+    done; 9 in progress; 10, 12–15, the Task 8 backend wiring, properties editor, loudness learning left.
   - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
         runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
         a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
         (cycles, or serialise the binary). Never just loosen it.
+  - [x] **Phase 2 Task 11 — scenes playable under lp-player in the backend** (2026-10-28,
+        `.claude/rules/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
+        capability (else `lp-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;
+        `LweMonitors` fps live (`out:<c>.scene_fps`); `source.broken` → marked crashed (D6: skipped unless
+        whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
+        Settings hides the scene delay + primary radio under lp-player. The player emits `source.broken` now
+        (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
+        scene in the snapshot); Task 12 (matrix scene cells); the Task 8 settings (GPU budget toggle, VRAM limit,
+        low-VRAM rule) need their backend wiring once their player props exist; `player.scene_assets` has no
+        setting yet (auto-resolve only); the scene properties editor (`scene_props`) is its own task; a
+        hotplugged output that's in `LweMonitors` gets its fps only at the next player process or `/settings`
+        change (the player remembers connectors it saw).
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
       `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
@@ -325,8 +337,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       outside `LibraryStore`'s lock — over an override saved meanwhile. `race:indexLostUpdate` (40 k1 volume saves
       while k4 is trashed + undone ×15): RED 3/40 and 2/40 lost; every index write now goes through
       `SetMeta`/`Remove`/`UpdateIndex` under the one lock (`SaveIndex` private) — GREEN 3/3 runs.
-      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player skips
-      them), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
+      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player plays
+      them since Phase 2 Task 11 — the matrix cells are Task 12), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
       private dbus-daemon + a fake player would make it hermetic; not built), Settings → Player engine (to
       legacy) / Clear settings / Autostart / Resume from last / Debug mode, a shuffle with advance-on-end (the

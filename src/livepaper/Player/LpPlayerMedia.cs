@@ -187,6 +187,54 @@ public static class LpPlayerMedia
 
     public static void QueueStop() => QueueEssential(Stop);
 
+    // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
+    // `LweMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
+    // under lp-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
+    // changed entry sets its fps, a removed one goes back to the player's default (30, D5). Coalescible
+    // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
+    // fresh or restarted player runs them too. `IsPrimary` has no lp-player meaning (one worker per scene,
+    // every output shows it; its audio is one stream on the bus) — the UI hides it there.
+    public const double DefaultSceneFps = 30;
+
+    public static void ApplySceneFps(IReadOnlyList<LweMonitorSettings>? prev, IReadOnlyList<LweMonitorSettings> cur)
+    {
+        var want = SceneFpsMap(cur);
+        var had = prev == null ? null : SceneFpsMap(prev);
+        foreach (var (name, fps) in want)
+            if (had == null || !had.TryGetValue(name, out var f) || f != fps) QueueSceneFps(name, fps);
+        if (had != null)
+            foreach (var name in had.Keys)
+                if (!want.ContainsKey(name)) QueueSceneFps(name, DefaultSceneFps);
+    }
+
+    // `LweMonitors` names are compositor connector names; lp-player names its outputs the same, with
+    // `.`/`:`/`*`/whitespace → `-` (wl.rs `output_name`).
+    private static Dictionary<string, double> SceneFpsMap(IEnumerable<LweMonitorSettings> monitors) =>
+        monitors.Where(m => !string.IsNullOrWhiteSpace(m.Name))
+            .GroupBy(m => OutputName(m.Name))
+            .ToDictionary(g => g.Key, g => Math.Clamp((double)g.Last().Fps, 0, 480));
+
+    private static string OutputName(string n) =>
+        new(n.Trim().Select(c => c is '.' or ':' or '*' || char.IsWhiteSpace(c) ? '-' : c).ToArray());
+
+    private static void QueueSceneFps(string output, double fps) =>
+        QueueSet("scene_fps:" + output, () => SetSceneFps(C, output, fps));
+
+    private static void SetSceneFps(LpPlayerClient client, string output, double fps)
+    {
+        if (!client.SocketExists) return; // a new player gets them at its first switch
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"out:{output}.scene_fps", ["value"] = fps }, LpPlayerClient.QuickMs);
+    }
+
+    private static int _sceneFpsGen = -1;
+
+    // every LweMonitors entry onto this player process (a monitor not plugged in: logged, harmless)
+    private static void AssertSceneFps(LpPlayerClient client, AppSettings s)
+    {
+        foreach (var (name, fps) in SceneFpsMap(s.LweMonitors)) SetSceneFps(client, name, fps);
+        _sceneFpsGen = client.Generation;
+    }
+
     // ---- transition outcomes, by corr (events + a log-poll safety net) ------------------------
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _waiters = new();
     private static readonly ConcurrentDictionary<string, (string outcome, long at)> _recent = new();
@@ -198,6 +246,15 @@ public static class LpPlayerMedia
     {
         // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
         InvalidateSources();
+        if (kind == "source.broken")
+        {
+            // a scene's worker crashed past its restart budget: mark it crashed (skipped unless
+            // whitelisted, D6), tell the UI, advance a rotation playing it — off this callback
+            var broken = Str(e, "path");
+            LpPlayerClient.Log($"scene {Path.GetFileName(broken)} is broken ({Str(e, "reason")}; record {Str(e, "record")})");
+            if (broken.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneBroken(broken); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneBroken threw: {ex.Message}"); } });
+            return;
+        }
         TrackIntent(kind, e);
         var outcome = OutcomeOf(kind, e);
         if ((outcome == null && kind != "transition.started") || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
@@ -336,6 +393,7 @@ public static class LpPlayerMedia
         if (!client.SocketExists) return;
         Interlocked.Increment(ref _reapplyCount);
         ResolveNow(new Req { Fresh = true });
+        AssertSceneFps(client, SettingsService.Load());
         var cur = CurrentPath();
         // I3 (final review): pause is NOT re-asserted. Its one authority is the player itself
         // (`player.paused`, persisted in its snapshot and restored with it): a keybind toggle runs
@@ -435,12 +493,16 @@ public static class LpPlayerMedia
     // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
     public static Dictionary<string, object?> SourceProps(string path, AppSettings s)
     {
+        bool scene = PlayerHelper.IsScenePath(path); // a scene's play path is its item folder (library.md)
         var props = new Dictionary<string, object?>
         {
             ["path"] = path,
-            ["kind"] = ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant()) ? "image" : "video",
+            ["kind"] = scene ? "scene" : ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant()) ? "image" : "video",
             ["loop"] = s.Loop,
         };
+        // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,
+        // a broken scene — player-core.md § Scene worker); the video-only props are stored, no effect
+        if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
         foreach (var (k, v) in Desired(path, () => s, PlayerHelper.IsMuted, null, item: false)) props[k] = v;
         return props;
     }
@@ -509,6 +571,7 @@ public static class LpPlayerMedia
         // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
         client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LpPlayerClient.QuickMs);
+        if (_sceneFpsGen != client.Generation) AssertSceneFps(client, s); // once per player process
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
@@ -1230,15 +1293,18 @@ public static class LpPlayerMedia
 
     // ---- auto-mute ownership (R69) ----------------------------------------------------------------
     // A `pactl list sink-inputs` block belongs to lp-player when its process is the player (pid from
-    // `hello`), its node is the bus (`lp-player-bus*`), it targets the `lp-player-bus` sink, or its
-    // application.name is `lp-player` (the player's own mpv streams carry that too).
+    // `hello`), its node is one of the player's (`lp-player-bus*`, a scene worker's `lp-player-scene.<id>`),
+    // it targets the `lp-player-bus` sink, or its application.name is `lp-player` (the player's own mpv
+    // streams and its scene workers' carry that too).
     public static bool IsOwnStream(string block, int? playerPid, string? busSinkIndex)
     {
         foreach (var raw in block.Split('\n'))
         {
             var t = raw.Trim();
             if (playerPid is int pid && Quoted(t, "application.process.id") == pid.ToString()) return true;
-            if (Quoted(t, "node.name") is { } node && node.StartsWith("lp-player-bus", StringComparison.Ordinal)) return true;
+            // the bus (`lp-player-bus*`) and, Phase 2, every scene worker's stream (`lp-player-scene.<id>` —
+            // its own process, so the pid check above misses it)
+            if (Quoted(t, "node.name") is { } node && node.StartsWith("lp-player-", StringComparison.Ordinal)) return true;
             if (Quoted(t, "target.object") == "lp-player-bus") return true;
             if (Quoted(t, "application.name") == "lp-player") return true;
             if (busSinkIndex != null && t.StartsWith("Sink: ", StringComparison.Ordinal) && t[6..].Trim() == busSinkIndex) return true;

@@ -330,6 +330,15 @@ public static class LibraryService
         };
     }
 
+    // A scene item's preview image (its folder IS its play path) — lp-player shows it while no frame exists.
+    // Many WE scenes ship only a preview.gif (mpv shows that too).
+    public static string? PreviewImageOf(string sceneDir)
+    {
+        if (string.IsNullOrEmpty(sceneDir)) return null;
+        var key = Path.GetFileName(sceneDir.TrimEnd('/'));
+        return FindThumb(sceneDir, key) ?? FindAnimated(sceneDir, key);
+    }
+
     // thumbnail in an item folder: <key>.jpg (web/imported) or preview.* (workshop/local Steam folder)
     private static string? FindThumb(string folder, string key)
     {
