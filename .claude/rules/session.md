@@ -18,6 +18,7 @@ paths:
 - Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false), `ReplaceDirectWithWorkshop` (false) — swap a direct-DL `workshop/` copy for a `local/` WE-dir symlink when it appears
 - Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
 - LWE: `LweVolume` (100), `LweMonitors` (`{Name, Fps, IsPrimary}[]`), `SceneTransitionDelayMs` (1000)
+- lp-player GPU / VRAM (live; `player-adapter.md` § Scenes): `SceneThrottle` (true), `SceneVramLimitEnabled` (false) + `SceneVramLimitMib` (1536, 64–1048576), `VramLowMode` (`stop` | `pause` | `off`)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `lpdbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
 - `LastSession`: tracks last applied mode for `--restore`

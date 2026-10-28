@@ -716,8 +716,9 @@ public sealed class LpPlayerClient
     // output, a stop, an output's sources retired) — a handful per switch. `source.` as a whole
     // would stream every debug-level `source.position` (~10 Hz per source) to be discarded;
     // restarts are detected by `hello.pid`, not events. Phase 2: `source.broken` — a scene whose worker
-    // crashed past its restart budget (LpPlayerMedia.OnEvent → PlayerHelper.OnSceneBroken).
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken"];
+    // crashed past its restart budget (LpPlayerMedia.OnEvent → PlayerHelper.OnSceneBroken); Task 8:
+    // `scene.vram_exceeded` — the VRAM guard stopped a scene (→ PlayerHelper.OnSceneVramStopped).
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded"];
     public event Action<string, JsonElement>? Event;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;

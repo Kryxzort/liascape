@@ -99,6 +99,28 @@ public class AppSettings
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own
     // volume doesn't move). PlayerHelper.AdjustVolume.
     public string VolumeKeyTarget { get; set; } = "auto";
+    // lp-player GPU / VRAM (Phase 2 Task 8 — all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
+    // SceneThrottle: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
+    // scene at its fixed fps) → `player.scene_throttle`.
+    public bool SceneThrottle { get; set; } = true;
+    // The per-scene VRAM guard: a scene worker using more than SceneVramLimitMib of VRAM is stopped (a rotation
+    // advances, a single wallpaper keeps its last frame; never marked crashed) → `player.scene_vram_limit_mib`
+    // (the MiB while enabled, else 0 = off). The MiB value is kept while off (the toggle restores it).
+    public bool SceneVramLimitEnabled { get; set; } = false;
+    private int _sceneVramLimitMib = 1536;
+    public int SceneVramLimitMib
+    {
+        get => _sceneVramLimitMib;
+        set => _sceneVramLimitMib = Math.Clamp(value, 64, 1_048_576);
+    }
+    // When the GPU's VRAM runs low (system-wide, every source kind): "stop" (pause + free the sources' GPU memory),
+    // "pause", or "off" → `player.vram_low_mode`. An unknown value reads as the default.
+    private string _vramLowMode = "stop";
+    public string VramLowMode
+    {
+        get => _vramLowMode;
+        set => _vramLowMode = value is "stop" or "pause" or "off" ? value : "stop";
+    }
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoImportWallpaperEngine { get; set; } = false;
     public bool IsPlaylistCollapsed { get; set; } = false;

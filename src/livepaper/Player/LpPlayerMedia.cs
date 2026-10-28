@@ -228,11 +228,41 @@ public static class LpPlayerMedia
 
     private static int _sceneFpsGen = -1;
 
-    // every LweMonitors entry onto this player process (a monitor not plugged in: logged, harmless)
+    // every LweMonitors entry onto this player process (a monitor not plugged in: logged, harmless), and the
+    // player-level GPU / VRAM settings (a fresh player starts at its own defaults)
     private static void AssertSceneFps(LpPlayerClient client, AppSettings s)
     {
         foreach (var (name, fps) in SceneFpsMap(s.LweMonitors)) SetSceneFps(client, name, fps);
+        foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
         _sceneFpsGen = client.Generation;
+    }
+
+    // ---- scene GPU budget + VRAM (Phase 2 Task 8) ---------------------------------------------------
+    // Three player-level props, all live (player-core.md § Scene worker → "GPU budget and VRAM"):
+    // `player.scene_throttle` ← SceneThrottle, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
+    // SceneVramLimitEnabled (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
+    // (coalescible per prop, `player:<prop>`); a new player process gets every one (`AssertSceneFps`).
+    public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s) =>
+    [
+        ("scene_throttle", s.SceneThrottle),
+        ("scene_vram_limit_mib", s.SceneVramLimitEnabled ? (double)s.SceneVramLimitMib : 0.0),
+        ("vram_low_mode", s.VramLowMode),
+    ];
+
+    public static void ApplyGpuSettings(AppSettings prev, AppSettings cur)
+    {
+        var had = GpuProps(prev);
+        foreach (var (prop, v) in GpuProps(cur))
+            if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
+    }
+
+    private static void QueuePlayerProp(string prop, object v) =>
+        QueueSet("player:" + prop, () => SetPlayerProp(C, prop, v));
+
+    private static void SetPlayerProp(LpPlayerClient client, string prop, object v)
+    {
+        if (!client.SocketExists) return; // a new player gets them at its first switch / reapply
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"player.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
     }
 
     // ---- transition outcomes, by corr (events + a log-poll safety net) ------------------------
@@ -253,6 +283,17 @@ public static class LpPlayerMedia
             var broken = Str(e, "path");
             LpPlayerClient.Log($"scene {Path.GetFileName(broken)} is broken ({Str(e, "reason")}; record {Str(e, "record")})");
             if (broken.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneBroken(broken); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneBroken threw: {ex.Message}"); } });
+            return;
+        }
+        if (kind == "scene.vram_exceeded")
+        {
+            // the VRAM guard stopped a scene's worker (Task 8): like a broken scene for playback (a rotation
+            // advances), but never marked crashed — the UI says why
+            var stopped = Str(e, "path");
+            double used = e.TryGetProperty("used_mib", out var u) && u.ValueKind == JsonValueKind.Number ? u.GetDouble() : 0;
+            double limit = e.TryGetProperty("limit_mib", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : 0;
+            LpPlayerClient.Log($"scene {Path.GetFileName(stopped)} stopped by the VRAM guard ({used:0} MiB > {limit:0} MiB)");
+            if (stopped.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneVramStopped(stopped, used, limit); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneVramStopped threw: {ex.Message}"); } });
             return;
         }
         TrackIntent(kind, e);

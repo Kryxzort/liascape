@@ -111,6 +111,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", transitionLagOffsetMs: -30,
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 200, autoUnmuteDelayMs: 2000, autoMuteThresholdDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxBytes: 20, demuxerMaxBackBytes: 5, playerEngine: "legacy",
+  sceneThrottle: true, sceneVramLimitEnabled: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false,
   weCopyFiles: false, allowScenes: false, autoImportWallpaperEngine: false, sceneTransitionDelayMs: 1000, lweMonitors: [],
   workshopAcquireMode: "subscribe", steamCmdPath: "", steamUsername: "",

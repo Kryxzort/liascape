@@ -104,6 +104,14 @@ public static class LpPlayerSelfTest
     // ---- Phase 2 Task 11: scenes under lp-player (pure decisions + a scene's create props) ------
     private static void SceneAdapterAssertions(List<string> fails)
     {
+        // Task 8: AppSettings → the player's GPU / VRAM props (the limit is 0 = off while its toggle is off)
+        string G(AppSettings s) => string.Join(" ", LpPlayerMedia.GpuProps(s).Select(p => $"{p.prop}={p.value}"));
+        foreach (var (s, want) in new (AppSettings, string)[] {
+            (new AppSettings(), "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
+            (new AppSettings { SceneThrottle = false, SceneVramLimitEnabled = true, SceneVramLimitMib = 1536, VramLowMode = "pause" }, "scene_throttle=False scene_vram_limit_mib=1536 vram_low_mode=pause"),
+            (new AppSettings { SceneVramLimitMib = 2048, VramLowMode = "bogus" }, "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
+            (new AppSettings { SceneVramLimitEnabled = true, SceneVramLimitMib = 1, VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 vram_low_mode=off") })
+            if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
         // ScenesPlayable: AllowScenes × engine × (lp-player: the player's `scene` capability | legacy: LWE)
         foreach (var allow in new[] { false, true })
         foreach (var lp in new[] { false, true })
@@ -470,6 +478,16 @@ public static class LpPlayerSelfTest
                 LpPlayerMedia.Drain().Wait(2000);
                 if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from LweMonitors → scene_fps {Fps()}, want the default 30");
                 else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 30 when removed");
+                // Task 8: the GPU / VRAM settings → the player props, live, diffed
+                string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
+                var g0 = new AppSettings();
+                var g1 = new AppSettings { SceneThrottle = false, SceneVramLimitEnabled = true, SceneVramLimitMib = 1536, VramLowMode = "pause" };
+                LpPlayerMedia.ApplyGpuSettings(g0, g1); LpPlayerMedia.Drain().Wait(2000);
+                string Gpu() => $"{PlayerProp("scene_throttle")} {PlayerProp("scene_vram_limit_mib")} {PlayerProp("vram_low_mode")}";
+                if (Gpu() != "false 1536.0 pause" && Gpu() != "false 1536 pause") fails.Add($"ApplyGpuSettings → {Gpu()}, want false 1536 pause");
+                LpPlayerMedia.ApplyGpuSettings(g1, g0); LpPlayerMedia.Drain().Wait(2000);
+                if (Gpu() != "true 0.0 stop" && Gpu() != "true 0 stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 stop");
+                else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / vram_low_mode live and back");
                 using (var to = new CancellationTokenSource(20000))
                 {
                     bool ok = LpPlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: false, to.Token).GetAwaiter().GetResult();

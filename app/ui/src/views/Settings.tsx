@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette,
-  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles,
+  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
 import { api } from "../api/client";
@@ -102,7 +102,8 @@ export const Settings = memo(function Settings() {
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
   // lp-player availability for the "Player engine" row (binary found? last start error?)
   const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null;
-    scenes?: { available: boolean; reason: string | null; assets_dir: string | null } } | null>(null);
+    scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
+    vram?: { low_active: boolean | null; mode: string } | null } | null>(null);
   // lp-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
   // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
   const lpActive = engine?.active === "lp-player";
@@ -137,6 +138,12 @@ export const Settings = memo(function Settings() {
       engine === null ? 0 : 600);
     return () => clearTimeout(t);
   }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
+  // under lp-player: the low-VRAM status (GPU / VRAM section) follows the player while Settings is open
+  useEffect(() => {
+    if (!lpActive) return;
+    const t = setInterval(() => api.playerEngine().then(setEngine).catch(() => {}), 5000);
+    return () => clearInterval(t);
+  }, [lpActive]);
 
   // interval H/M/S
   const iv = g("globalIntervalSeconds", 1800);
@@ -245,6 +252,23 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Demuxer max (MiB)" rk="demuxerMaxBytes"><input className="num" type="number" min={1} max={10000} value={g("demuxerMaxBytes", 20)} onChange={(e) => set("demuxerMaxBytes", +e.target.value)} /></Row>}
         {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackBytes"><input className="num" type="number" min={1} max={10000} value={g("demuxerMaxBackBytes", 5)} onChange={(e) => set("demuxerMaxBackBytes", +e.target.value)} /></Row>}
       </Section>
+
+      {/* lp-player only (the player owns the GPU budget + both VRAM rules); every row applies live
+          (API: /settings → player.scene_throttle / scene_vram_limit_mib / vram_low_mode) */}
+      {lpActive && (
+        <Section title="GPU / VRAM" icon={<Gauge size={15} />}>
+          <Row label="Auto-throttle scenes" hint="lower a scene's frame rate while it makes the GPU miss frames, and restore it when it recovers — off: every scene renders at its fixed fps" rk="sceneThrottle">
+            <input type="checkbox" checked={g("sceneThrottle", true)} onChange={(e) => set("sceneThrottle", e.target.checked)} /></Row>
+          <Row label="Limit VRAM per scene" hint="stop a scene that uses more video memory than the limit (a playlist moves on; a single wallpaper keeps its last frame) — it isn't marked crashed" rk="sceneVramLimitEnabled">
+            <input type="checkbox" checked={g("sceneVramLimitEnabled", false)} onChange={(e) => set("sceneVramLimitEnabled", e.target.checked)} /></Row>
+          {g("sceneVramLimitEnabled", false) && <Row label="VRAM limit (MiB)" hint="per scene · ~1536 suits most scenes" rk="sceneVramLimitMib">
+            <input className="num" type="number" min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 1536)} onChange={(e) => set("sceneVramLimitMib", Math.max(64, +e.target.value || 64))} /><span>MiB</span></Row>}
+          <Row label="When VRAM runs low" hint="when the GPU's free video memory runs out (a game took it): Stop frees the wallpaper's GPU memory and shows its last frame, Pause only pauses — either resumes once memory is free again" rk="vramLowMode">
+            <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
+              options={[{ value: "stop", label: "Stop (free memory)" }, { value: "pause", label: "Pause" }, { value: "off", label: "Off" }]} /></Row>
+          {engine?.vram?.low_active && <Help>VRAM is low right now — the wallpaper is {engine.vram.mode === "stop" ? "stopped (its memory freed)" : "paused"} until it frees up.</Help>}
+        </Section>
+      )}
 
       <Section title="Appearance" icon={<Palette size={15} />}>
         <Row label="Theme" onReset={() => applyTheme(SETTINGS_DEFAULTS.theme as string)} deviated={themeName !== SETTINGS_DEFAULTS.theme}>

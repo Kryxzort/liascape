@@ -200,7 +200,12 @@ while `active === "lp-player"` (`lpActive`): "Scene transition delay" is hidden 
 scene's first frame is in — no lead), the Monitors (scenes) rows drop the **primary** radio (one scene worker
 for every output; its sound is one stream) and label the fps **"fps (live)"** (the backend sets
 `out:<name>.scene_fps` on save), and a scene that can't play shows `scenes.reason` under the toggle. Legacy:
-unchanged.
+unchanged. **GPU / VRAM** (a section shown only under lp-player; every row live — `player-adapter.md` § Scenes):
+"Auto-throttle scenes" (`sceneThrottle`), "Limit VRAM per scene" (`sceneVramLimitEnabled`) + "VRAM limit (MiB)"
+(`sceneVramLimitMib`, shown while it's on), "When VRAM runs low" Stop (free memory) / Pause / Off (`vramLowMode`); while
+Settings is open under lp-player it re-reads `/player-engine` every 5 s and says so when `vram.low_active` (the player's
+low-VRAM hold — not a user pause). WS `scene-vram-stopped` → the status bar: "<title>: stopped: used X MiB > limit Y
+MiB of VRAM" (`App.tsx`).
 
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
