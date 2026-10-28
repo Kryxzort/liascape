@@ -377,7 +377,7 @@ between "$(sw_field 2)" 3200 4400 && [ "$(sw_field 3)" = end ] && ok "the playli
   || bad "playlist override min 3 s on a 2 s clip: $swr (want a handoff at +3.2…4.4 s, align end)"
 stop_now
 
-# max: e1.mp4 is 12 s → advances 3 s in (align:now, like a timed switch). Minimum 0: the pure advance-on-end path (ApplyPlaylist)
+# max: e1.mp4 is 12 s → advances 3 s in (align:now, like a timed switch). Minimum 0 (switch at every end otherwise)
 setting '.GlobalMaxPlaySeconds = 3 | .GlobalIntervalSeconds = 0'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
