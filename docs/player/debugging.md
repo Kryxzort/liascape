@@ -43,7 +43,11 @@ native to lp-player as `probe dropout` (below) instead of an external sink monit
   overlap, not necessarily a bug), `offset_db` (a level mismatch, e.g. a miscalibrated
   bus gain — not itself a dropout), `drops` (10 ms-bin-granularity real gaps),
   `micro_gaps` (finer, sub-bin gaps too short to move a whole bin's average — see the
-  speed-step row above for what a *legitimate* one looks like). When debug mode is on
+  speed-step row above for what a *legitimate* one looks like), `unmeasured` (Phase 2
+  Task 14: stretches the bus meter itself missed — a timestamp jump, then −96 blocks from
+  its non-real-time capture — left out of the analysis; a few per hundred switches under
+  load is the meter, not the audio; a drop bin also needs audible expected neighbours, so a
+  ramp edge a few ms late is never one). When debug mode is on
   (`serve --debug`, or `set player.debug true` live) this also runs **automatically**
   after every `transition.done` — once the window's 500 ms post-roll has really been
   captured (Task 16d: `done + 500 ms + CAPTURE_MARGIN`, so ≈ 0.6–0.8 s after `done`) — (a

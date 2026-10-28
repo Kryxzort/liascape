@@ -152,6 +152,22 @@
 //! is_flagged`; an injected 4 ms hole still flags exactly once,
 //! `refined_lag_still_flags_an_injected_4ms_gap`). `probe dropout {corr, dump}` writes
 //! every input + the report for offline replay ([`write_dump`]).
+//!
+//! **Phase 2 Task 14 (on-machine, 720 switches with scenes) — two more detector edges.**
+//! 1. **A ramp edge's own bin.** One lag serves the whole window; a scene's stream reached
+//!    the bus ~3 ms later than its schedule while A's video pinned the lag, so B's ramp-in
+//!    started 7 ms into a 10 ms bin whose expected power mean was just audible (> −55 dB)
+//!    while the observed bin was still silent: a 10 ms "drop" ~40 dB under at the very
+//!    start of a correctly shaped ramp (4 of 20 frozen V→S switches at 60 Hz). A drop bin
+//!    now needs both neighbouring expected bins audible too — the 10 ms analogue of the
+//!    micro-gap pass's steady neighbourhood. A late onset or a hole spans steady bins and
+//!    is still flagged (`ramp_in_that_never_comes_is_still_a_drop`; RED before:
+//!    `ramp_in_a_few_ms_late_is_not_a_drop`, a drop at 1560 len 10).
+//! 2. **The meter's missed cycles** ([`drop_meter_discontinuities`]): the bus meter's
+//!    capture (non-real-time `lp-bus` thread, by design) sometimes skips graph cycles — a
+//!    timestamp jump followed by −96 blocks. Those samples are left out and reported as
+//!    `unmeasured`, never as a gap (`meter_discontinuity_is_unmeasured_not_a_gap`; RED
+//!    before: a 2 ms micro-gap at 132). A contiguous hole is still a micro-gap.
 
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::process::CommandExt;
@@ -250,6 +266,11 @@ pub struct DropoutReport {
     /// expected bin while that bin is audible (> −45 dB) — catches a dropout too short to
     /// move a whole 10 ms bin's power average.
     pub micro_gaps: Vec<Drop>,
+    /// Stretches the meter itself didn't capture: its timestamps jump (a missed graph
+    /// cycle of the non-real-time capture) — from the sample before the jump through
+    /// [`UNMEASURED_TAIL_MS`] after it. Excluded from `drops`/`micro_gaps` and the fit;
+    /// `under_db` is 0. A real hole on the bus is contiguous in time and never lands here.
+    pub unmeasured: Vec<Drop>,
 }
 
 /// Power-domain mean of dB values, back to dB (`10·log10(mean(10^(d/10)))`) — never a
@@ -296,6 +317,54 @@ pub fn analyse_with_fine(
     analyse_inner(observed, expected, Some(fine_expected))
 }
 
+/// A meter timestamp step longer than this is a missed capture cycle (blocks are 1 ms).
+const METER_STEP_MAX: Duration = Duration::from_micros(1500);
+/// How long after a meter discontinuity its samples are still left out: the capture hands
+/// back silence for the cycles right after the ones it missed (measured: 2 blocks).
+pub const UNMEASURED_TAIL_MS: u64 = 4;
+
+/// Phase 2 Task 14: splits `observed` into the samples the meter really captured in
+/// sequence and the stretches it didn't. The bus meter's capture runs on the non-real-time
+/// `lp-bus` thread (by design): under load it misses graph cycles — its timestamps jump
+/// (measured 2.3–22 ms) and the blocks right after read −96 (what PipeWire hands a stream
+/// that missed its cycles), and the block before the jump joins two non-adjacent pieces.
+/// None of that is the bus: from the sample before a jump through `UNMEASURED_TAIL_MS`
+/// after it is left out, and reported as one `unmeasured` entry (`under_db` 0). A real
+/// hole on the bus is contiguous −96 blocks with contiguous timestamps — never here.
+fn drop_meter_discontinuities(
+    observed: &[(Duration, f64)],
+    origin: Duration,
+) -> (Vec<(Duration, f64)>, Vec<Drop>) {
+    let mut cut: Vec<(Duration, Duration)> = Vec::new();
+    for w in observed.windows(2) {
+        if w[1].0.saturating_sub(w[0].0) > METER_STEP_MAX {
+            let (from, to) = (w[0].0, w[1].0 + Duration::from_millis(UNMEASURED_TAIL_MS));
+            match cut.last_mut() {
+                Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                _ => cut.push((from, to)),
+            }
+        }
+    }
+    if cut.is_empty() {
+        return (observed.to_vec(), Vec::new());
+    }
+    let kept = observed
+        .iter()
+        .filter(|(t, _)| !cut.iter().any(|(a, b)| t >= a && t < b))
+        .copied()
+        .collect();
+    let ms = |t: Duration| t.as_secs_f64() * 1000.0;
+    let unmeasured = cut
+        .iter()
+        .map(|(a, b)| Drop {
+            at_ms: (ms(*a) - ms(origin)).floor() as i64,
+            len_ms: (ms(*b) - ms(*a)).round() as u32,
+            under_db: 0.0,
+        })
+        .collect();
+    (kept, unmeasured)
+}
+
 fn analyse_inner(
     observed: &[(Duration, f64)],
     expected: &[(Duration, f64)],
@@ -308,11 +377,15 @@ fn analyse_inner(
         fit: FitStatus::Insufficient,
         drops: Vec::new(),
         micro_gaps: Vec::new(),
+        unmeasured: Vec::new(),
     };
     if expected.is_empty() {
         return insufficient();
     }
     let origin = expected[0].0;
+    // Phase 2 Task 14: the meter's own missed cycles are unmeasured, never a hole.
+    let (kept, unmeasured) = drop_meter_discontinuities(observed, origin);
+    let observed: &[(Duration, f64)] = &kept;
     let fine_expected = fine_expected.filter(|f| !f.is_empty());
     let n = expected.len() as i64;
     // Task 16d: with a fine envelope, each coarse bin is the power mean of its own 1 ms
@@ -391,24 +464,34 @@ fn analyse_inner(
     };
 
     // Drops: runs of 10 ms bins at least 15 dB under an audible expected level.
+    // Phase 2 Task 14: a bin counts only when its neighbours are expected audible too — the
+    // first/last bin of a sound (a ramp-in starting late in its bin, a ramp-out's tail) is
+    // the edge one stream's few ms of latency against another's lag moves across; a
+    // genuine gap or a late onset spans steady bins and is still flagged
+    // (`ramp_in_that_never_comes_is_still_a_drop`, `an_unramped_cut_…`).
     let capb = |k: i64| cap.get(&k).copied();
+    let audible = |k: i64| -> bool {
+        k >= 0 && (k as usize) < exp.len() && exp[k as usize] + offset_db > -55.0
+    };
+    let is_drop = |k: i64| -> Option<f64> {
+        let e = exp[k as usize] + offset_db;
+        let c = capb(k + drop_lag)?;
+        (audible(k) && audible(k - 1) && audible(k + 1) && c < e - 15.0).then_some(e - c)
+    };
     let mut drops = Vec::new();
     let mut k = 0i64;
     while k < n - drop_lag {
-        let e = exp[k as usize] + offset_db;
-        let c = capb(k + drop_lag);
-        if e > -55.0 && c.is_some_and(|c| c < e - 15.0) {
+        if is_drop(k).is_some() {
             let start = k;
             let mut worst = 0.0f64;
             let mut j = k;
             while j < n - drop_lag {
-                let ej = exp[j as usize] + offset_db;
-                match capb(j + drop_lag) {
-                    Some(cj) if ej > -55.0 && cj < ej - 15.0 => {
-                        worst = worst.max(ej - cj);
+                match is_drop(j) {
+                    Some(under) => {
+                        worst = worst.max(under);
                         j += 1;
                     }
-                    _ => break,
+                    None => break,
                 }
             }
             drops.push(Drop {
@@ -505,6 +588,7 @@ fn analyse_inner(
         fit: FitStatus::Ok,
         drops,
         micro_gaps,
+        unmeasured,
     }
 }
 
