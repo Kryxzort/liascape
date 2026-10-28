@@ -322,7 +322,7 @@ at once. Don't add a raw `<input type=number>` for a setting — use it (and its
 `TransitionService.Pick` → null, legacy `TryStart` → false), 1–49 ms run the effect that fast (the player accepts any
 `duration_ms`; its gains still ramp ≥ 30 ms, R42); the UI preview clamps its own loop to ≥ 100 ms. Guards: matrix
 `num:clearToMin` (Demuxer max: emptied → stays empty and unsaved while focused → blur → 1 saved),
-`num:overToMax` (fps cap 999 → unsaved while focused → blur → 480), `plTrShort` / `plTrZero` (+ `seq:…+next`: a
+`num:overToMax` (fps cap 999 → unsaved while focused → blur → 480), `plTrShort` / `plTrZero` / `gTrShort` / `gTrZero` (+ `seq:…+next`: a
 20 ms effect / 0 ms = a cut on the armed and the next switch); RED on the base UI: 12/12 (saved 0 / 999 at once; the
 duration clamped to 50).
 

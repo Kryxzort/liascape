@@ -1144,7 +1144,8 @@ const gTrDrive = (k) => `m.tab("Settings"); await m.sleep(600); m.click(m.row("T
   await m.sleep(600); for (let i = 0; i < 30 && !document.querySelector(".tr-modal .tr-chip"); i++) await m.sleep(100);
   ${TR[k].drive} await m.sleep(300); m.click(document.querySelector(".tr-modal .tr-done"), "Done");`;
 const G_SAVED = { Off: (s) => s.globalTransitionEnabled === false, Duration: (s) => s.globalTransitionDurationMs === 1200,
-  Effect: (s) => JSON.stringify(s.globalTransitionEffectIds) === JSON.stringify(["crosswarp"]) };
+  Effect: (s) => JSON.stringify(s.globalTransitionEffectIds) === JSON.stringify(["crosswarp"]),
+  Short: (s) => s.globalTransitionDurationMs === 20, Zero: (s) => s.globalTransitionDurationMs === 0 };
 for (const k of Object.keys(TR)) C[`gTr${k}`] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(gTrDrive(k)); await sleep(1200); },
   check(c) {
     const v = [...armedCheck(c)];
@@ -2678,10 +2679,10 @@ const FUZZ_RULES = [
   [/^cli:volume-(up|down):item$/, { last: "VolumeKeyTarget stays item — the later volume keys expect auto",
     when: (x) => [x.cur, x.shown, x.other].every((p) => !p || x.ownVol(p) == null) }], // its check: nothing live had its own volume
   [/^(plTrEffect|seq:plTrEffect\+next)$/, { when: (x) => ownTr(x, ["fade"]) }], // the drive toggles Crosswarp on + Fade off
-  [/^(plTrDuration|seq:plTrDuration\+next)$/, { when: (x) => x.ps.transitionEnabled !== false }], // a cut has no duration
+  [/^(plTr(Duration|Short|Zero)|seq:plTr(Duration|Short|Zero)\+next)$/, { when: (x) => x.ps.transitionEnabled !== false }], // a cut has no duration
   // in `pending` their check wants the pending fixture's own fade 600 untouched; in `pendingGlobal` the globals on
   [/^gTrEffect$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x) && sameIds(x.s.globalTransitionEffectIds, ["fade"])) }],
-  [/^(gTrOff|gTrDuration|gMethodFrozen)$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x)) }],
+  [/^(gTrOff|gTrDuration|gTrShort|gTrZero|gMethodFrozen)$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x)) }],
   [/^seq:plOverrideOn\+advanceOn$/, { when: (x) => ownTr(x, ["fade"], PS().transitionDurationMs) }], // its check: PS()'s own transition
   [/^plAdvanceOff$/, { when: (x) => x.ps.overrideGlobalSettings !== false }], // the modal's checkbox is disabled while the playlist follows the globals
   [/^(selToggle:add|cardToggle:add)$/, { when: notInStrip }], // adds an item the strip doesn't hold
