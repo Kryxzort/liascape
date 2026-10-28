@@ -3760,8 +3760,15 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   (vram_exceeded)"}` → `source.error` (so the backend advances a rotation / a single wallpaper
   keeps its last frame), but **never a crash**: no restart, no crash record, no `worker.broken`,
   `workers` probe `state` not `broken` and `vram_stopped {used_mib, limit_mib}`. The last frame
-  stays shown. A `path` change starts a new worker (clears it); raising the limit doesn't restart
-  a stopped one. Guard-relevant pids: workers not stopped.
+  stays shown — **from one imported slot** (2026-10-28, `release_ring_but_shown`): a dmabuf lives
+  while anyone holds it, so the stopped worker's whole ring (~3 × the export size of GPU memory)
+  stayed alive through our imports; now every slot but the shown one is dropped, the frames still
+  queued from it are forgotten (`Latch::forget_worker` — a queued frame of a dropped slot must never
+  latch) and the shown one is never released (`tests/scene.rs::vram_stopped_scene_keeps_only_its_shown_slot`:
+  slots 3 → 1, the held frame pixel-identical for 1 s, a `path` change then brings a new ring; RED
+  before: 3 slots). Not a copy into a plain texture: same memory, and `stop_for_vram` needs no GL. A
+  `path` change starts a new worker (clears it; its first latched frame drops the kept slot); raising
+  the limit doesn't restart a stopped one. Guard-relevant pids: workers not stopped.
 - **Measuring (`vram.rs`).** `vram::Probe` — `sample(pids) -> Sample {total_mib, free_mib, procs:
   Option<{pid: MiB}>}` — chosen by **`LP_PLAYER_VRAM_PROBE`**: `auto` (default: the first that
   works of) **NVML** (`libnvidia-ml.so.1` **dlopened** — tried by soname, then

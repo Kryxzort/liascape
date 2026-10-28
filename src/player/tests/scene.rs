@@ -262,6 +262,60 @@ fn killed_worker_keeps_last_frame() {
     assert!(src.pid().is_none(), "no restart with a zero budget");
 }
 
+/// A scene the VRAM guard stops (Task 8, `stop_for_vram`) gives its ring back — the worker's
+/// exported slots stay alive while the compositor holds their imports (~3 × the export size
+/// of GPU memory, for a scene stopped *because* it used too much) — keeping exactly the slot
+/// on screen: the last frame stays shown, unchanged, from one imported slot.
+#[test]
+fn vram_stopped_scene_keeps_only_its_shown_slot() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let mut src = open(&gfx, "vram-slots", &spec(Pattern::FrameIndex));
+    assert!(run(&gfx, &mut src, Duration::from_secs(10), |s, _| s
+        .stats()
+        .latched
+        >= 20));
+    assert_eq!(src.stats().slots, 3, "a playing scene holds its ring of 3");
+    src.stop_for_vram(1800.0, 1536.0);
+    let tex_id = src.texture().expect("the shown frame").id;
+    let seq = src.latched_seq().unwrap();
+    let held = read_block(&gfx, src.texture().unwrap(), 0, 0, 64, 64);
+    check_frame(&gfx, src.texture().unwrap(), seq).unwrap();
+    let end = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(5));
+        src.update(&gfx);
+        let tex = src.texture().expect("the stopped scene's frame never goes away");
+        assert_eq!(tex.id, tex_id, "the same imported texture");
+    }
+    let tex = src.texture().unwrap();
+    assert_eq!(read_block(&gfx, tex, 0, 0, 64, 64), held, "the held frame changed");
+    check_frame(&gfx, tex, seq).unwrap();
+    let st = src.stats();
+    assert_eq!(
+        (st.slots, st.rings, st.queued),
+        (1, 1, 0),
+        "after a VRAM stop only the shown slot stays imported: {st:?}"
+    );
+    assert!(src.vram_stopped().is_some());
+    assert!(src.error().is_some(), "a VRAM stop is reported as the source's error");
+    // A path change still brings a new worker, whose first frame replaces the kept slot.
+    let other = common::synthetic_scene("vram-slots-next", &spec(Pattern::FrameIndex));
+    src.apply("path", &PropValue::Str(other.display().to_string()))
+        .unwrap();
+    assert!(
+        run(&gfx, &mut src, Duration::from_secs(10), |s, _| s
+            .texture()
+            .is_some_and(|t| t.id != tex_id)
+            && s.stats().slots == 3),
+        "a new worker's ring after the path change: {:?}",
+        src.stats()
+    );
+    assert!(src.vram_stopped().is_none());
+}
+
 #[test]
 fn restart_replaces_ring_after_first_new_frame() {
     let _g = gpu_lock();
