@@ -20,13 +20,13 @@ app.whenReady().then(async () => {
   }))()`).catch((e) => ({ error: String(e) }));
   console.log("PROBE_BROWSE " + JSON.stringify(browse));
 
-  // switch to Library tab + verify grid + playlist strip
+  // switch to Library tab + verify grid + playlist bar
   await win.webContents.executeJavaScript(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Library')?.click()`);
   await new Promise((r) => setTimeout(r, 2000));
   const lib = await win.webContents.executeJavaScript(`(() => ({
     libCards: document.querySelectorAll('.card.lib').length,
     libTitle: document.querySelector('.card.lib .title')?.textContent || null,
-    strip: !!document.querySelector('.strip'),
+    playlistBar: !!document.querySelector('.playlist-bar'),
     plItems: document.querySelectorAll('.pl-item').length,
     sortOptions: document.querySelectorAll('.topbar select')[0]?.options.length || 0,
   }))()`).catch((e) => ({ error: String(e) }));

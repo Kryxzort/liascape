@@ -4,7 +4,7 @@ import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
 import { SETTINGS_MORPH } from "./morph";
 
-// "Scene properties" in the item settings modal: a WE scene's own options (project.json general.properties —
+// "Scene properties" in the card settings modal: a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
 // Same drag contract as the volume/speed sliders (web-ui.md): every change → the local value at once +
 // a throttled live preview (~90 ms, /library/scene-props/preview — nothing saved) + a debounced persist

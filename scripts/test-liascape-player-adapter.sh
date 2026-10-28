@@ -130,8 +130,8 @@ L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
- "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
- "RestartIntervalSeconds":600}
+ "GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
+ "RestartMpvpaperEverySeconds":600}
 EOF
 
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
@@ -244,14 +244,14 @@ fit1() { [ "$(ctl get '{"path":"lay:VIRTUAL-1:main.fit"}' | jq -r .value)" = fit
 setting '.Volume = 50'; waitfor $WAIT cur_near gain.user -18.0618 && ok "Volume 50 → gain.user $(cur gain.user)" || bad "Volume 50 → $(cur gain.user)"
 setting '.Speed = 1.5'; waitfor $WAIT cur_near speed 1.5 && ok "Speed 1.5" || bad "Speed → $(cur speed)"
 setting '.VideoScale = "fit"'; waitfor $WAIT fit1 && ok "VideoScale fit → layer fit" || bad "VideoScale"
-setting '.VideoFps = 30'; waitfor $WAIT cur_near fps_cap 30 && ok "VideoFps 30 → fps_cap" || bad "VideoFps → $(cur fps_cap)"
+setting '.VideoFpsCap = 30'; waitfor $WAIT cur_near fps_cap 30 && ok "VideoFpsCap 30 → fps_cap" || bad "VideoFpsCap → $(cur fps_cap)"
 setting '.HwDec = "no"'; waitfor $WAIT cur_is hwdec no && ok "HwDec no" || bad "HwDec → $(cur hwdec)"
 setting '.DisableCache = true'; waitfor $WAIT cur_is cache false && ok "DisableCache → cache false" || bad "cache → $(cur cache)"
-setting '.DemuxerMaxBytes = 64'; waitfor $WAIT cur_near demuxer_max_mib 64 && ok "DemuxerMaxBytes 64" || bad "demuxer → $(cur demuxer_max_mib)"
+setting '.DemuxerMaxMib = 64'; waitfor $WAIT cur_near demuxer_max_mib 64 && ok "DemuxerMaxMib 64" || bad "demuxer → $(cur demuxer_max_mib)"
 setting '.NoAudio = true'; waitfor $WAIT cur_is no_audio true && ok "NoAudio → no_audio true" || bad "NoAudio → $(cur no_audio)"
 setting '.NoAudio = false'; waitfor $WAIT cur_is no_audio false && ok "NoAudio off" || bad "NoAudio off → $(cur no_audio)"
 setting '.Loop = false'; waitfor $WAIT cur_is loop false && ok "Loop off (single video)" || bad "Loop → $(cur loop)"
-setting '.Loop = true | .Speed = 1 | .VideoFps = 0'; waitfor $WAIT cur_near speed 1 || bad "Loop/Speed/VideoFps reset → speed $(cur speed)"
+setting '.Loop = true | .Speed = 1 | .VideoFpsCap = 0'; waitfor $WAIT cur_near speed 1 || bad "Loop/Speed/VideoFpsCap reset → speed $(cur speed)"
 post /mute '{"value":true,"user":true}' >/dev/null; waitfor $WAIT cur_near gain.mute -96 && ok "user mute → gain.mute -96" || bad "mute → $(cur gain.mute)"
 post /mute '{"value":false,"user":true}' >/dev/null; waitfor $WAIT cur_near gain.mute 0 && ok "unmute → 0" || bad "unmute → $(cur gain.mute)"
 post /pause '{}' >/dev/null; waitfor $WAIT paused_is true && ok "/pause → player.paused" || bad "pause → $(playerPaused)"
@@ -372,7 +372,7 @@ setting '.GlobalIntervalSeconds = 0'; stop_now
 
 # a playlist's own minimum (override): a.mp4 (2 s) with 3 s → advances at its 2nd loop's end (+3.7 s), never at its 1st
 m0=$(tev_n)
-post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":3,\"AdvanceOnVideoEnd\":true}}" >/dev/null
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":3,\"SwitchWhenVideoEnds\":true}}" >/dev/null
 swr=none; waitfor 15000 sw_seen "$m0" "$Bc"
 between "$(sw_field 2)" 3200 4400 && [ "$(sw_field 3)" = end ] && ok "the playlist's own min 3 s: a 2 s clip advanced at its 2nd loop's end (handoff +$(sw_field 2) ms, align $(sw_field 3))" \
   || bad "playlist override min 3 s on a 2 s clip: $swr (want a handoff at +3.2…4.4 s, align end)"
@@ -431,17 +431,17 @@ stop_now
 # pure timed (advance-on-end off): a plain timer — the 3 s interval switches MID-video (align:now; e1 is 12 s), the
 # maximum (2 s) doesn't apply. The removed "wait for video to end" toggle's key, still in an old settings.json, changes
 # nothing (it used to hold the switch for e1's end).
-setting '.GlobalAdvanceOnVideoEnd = false | .GlobalIntervalSeconds = 3 | .GlobalWaitForVideoEnd = true'
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3 | .GlobalWaitForVideoEnd = true'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 swr=none; waitfor 15000 sw_seen "$m0" "$E2" any
 between "$(sw_field 1)" 2200 3900 && [ "$(sw_field 3)" = now ] && ok "advance-on-end off: the 3 s timer switched mid-video (+$(sw_field 1) ms, align $(sw_field 3)); max 2 s and the old wait key ignored" \
   || bad "pure timed 3 s (max 2 s, an old wait key): $swr (want align now at +2.2…3.9 s — counted from the handoff of the play's own switch, the timer from its request; the 2 s max would land ≤ +2.0 s)"
-setting '.GlobalAdvanceOnVideoEnd = true | .GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0 | .GlobalWaitForVideoEnd = false'; stop_now
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0 | .GlobalWaitForVideoEnd = false'; stop_now
 
 # a per-playlist override (its own rotation): the playlist's max wins over the globals' (2 s here, global 0)
 m0=$(tev_n)
-post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":20,\"AdvanceOnVideoEnd\":true,\"MaxPlaySeconds\":2}}" >/dev/null
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":20,\"SwitchWhenVideoEnds\":true,\"MaxPlaySeconds\":2}}" >/dev/null
 swr=none; waitfor 15000 sw_seen "$m0" "$E2"
 between "$(sw_field 1)" 1300 2900 && [ "$(sw_field 3)" = now ] && ok "the playlist's own max 2 s (override, min 20 s — a cap beats the minimum): advanced at +$(sw_field 1) ms" || bad "playlist override max 2 s: $swr"
 # …and a /playlist/state edit of its max applies live (2 → 0: e2 then plays on — 4 s watched, no align:now switch)
@@ -459,15 +459,15 @@ between "$(sw_field 2)" 2400 4300 && ok "min 3 s: an image showed for it (handof
 setting '.GlobalIntervalSeconds = 0'
 stop_now
 
-# an fps cap never stalls a still: VideoFps 30 → an image item plays (it used to sit in waiting_ready,
+# an fps cap never stalls a still: VideoFpsCap 30 → an image item plays (it used to sit in waiting_ready,
 # ready:false — docs/TODO.md "An fps cap stalls a still image"); the cap still reaches the node
-setting '.VideoFps = 30'
+setting '.VideoFpsCap = 30'
 post /apply "{\"path\":\"$I1\"}" >/dev/null
-waitfor $WAIT shows "$I1" && cur_is ready true && cur_near fps_cap 30 && ok "VideoFps 30 × an image: it plays (ready, fps_cap 30 kept)" \
-  || bad "VideoFps 30 × image: cur $(basename "$(cur path)") ready $(cur ready) fps_cap $(cur fps_cap), transitions $(ctl state | jq -c '[.transitions[].phase]')"
+waitfor $WAIT shows "$I1" && cur_is ready true && cur_near fps_cap 30 && ok "VideoFpsCap 30 × an image: it plays (ready, fps_cap 30 kept)" \
+  || bad "VideoFpsCap 30 × image: cur $(basename "$(cur path)") ready $(cur ready) fps_cap $(cur fps_cap), transitions $(ctl state | jq -c '[.transitions[].phase]')"
 post /apply "{\"path\":\"$E1\"}" >/dev/null
-waitfor $WAIT shows "$E1" && cur_is ready true && ok "…and a video after it plays capped" || bad "VideoFps 30 × video after the image: cur $(basename "$(cur path)") ready $(cur ready)"
-setting '.VideoFps = 0'
+waitfor $WAIT shows "$E1" && cur_is ready true && ok "…and a video after it plays capped" || bad "VideoFpsCap 30 × video after the image: cur $(basename "$(cur path)") ready $(cur ready)"
+setting '.VideoFpsCap = 0'
 stop_now
 
 echo "== 0 = off for both limits (minimum 0, maximum 0): a short clip switches at its end, a long one plays to its end"
@@ -721,7 +721,7 @@ mk_scene "$S2" '{"pattern":"solid","rgb":[0,0,255],"native":[640,360],"has_audio
 mk_scene "$S3" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":400}'
 mk_scene "$S4" '{"pattern":"solid","native":[640,360]}'
 IDX=$LIB/workshop/index.json
-setting '.AllowScenes = true | .Volume = 100 | .Speed = 1 | .NoAudio = false | .LweMonitors = []'
+setting '.AllowScenes = true | .Volume = 100 | .Speed = 1 | .NoAudio = false | .SceneMonitors = []'
 pe_scenes() { curl -sf -m 5 "$U/player-engine" | jq -c .scenes; }
 curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == true' >/dev/null && ok "/player-engine.scenes: $(pe_scenes)" || bad "/player-engine.scenes: $(pe_scenes)"
 nsch() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
@@ -747,14 +747,14 @@ waitfor $WAIT eval 'cur_is no_audio true && [ "$(waudio "$SID" no_audio)" = true
 setting '.NoAudio = false'
 waitfor $WAIT eval 'cur_is no_audio false && [ "$(waudio "$SID" no_audio)" = false ]' && [ "$(wpid "$SID")" = "$WP" ] && ok "NoAudio off → live, same worker" || bad "NoAudio off → $(cur no_audio) / $(waudio "$SID" no_audio), pid $(wpid "$SID")"
 out_fps() { ctl get "{\"path\":\"out:$1.scene_fps\"}" | jq -r .value; }
-# the outputs there are now (the I4 section above replugs them as VIRTUAL-3 + VIRTUAL-2), every one in LweMonitors
+# the outputs there are now (the I4 section above replugs them as VIRTUAL-3 + VIRTUAL-2), every one in SceneMonitors
 OUTS=$(ctl state | jq -c '[.outputs[].name]'); O1=$(echo "$OUTS" | jq -r '.[0]')
 all_fps() { echo "$OUTS" | jq -r '.[]' | while read -r o; do near "$(out_fps "$o")" "$1" || return 1; done; }
 fps_now() { all_fps "$1" && near "$(ctl probe '{"name":"workers"}' | jq -r --arg id "$SID" '.workers[] | select(.id==$id) | .fps_target')" "$1"; }
-setting ".LweMonitors = ($OUTS | to_entries | map({Name: .value, Fps: 45, IsPrimary: (.key == 0)}))"
-waitfor $WAIT fps_now 45 && [ "$(wpid "$SID")" = "$WP" ] && ok "LweMonitors fps 45 on $OUTS → each out:<c>.scene_fps 45 live, the worker ticks at 45, same pid" || bad "LweMonitors fps → out:$O1 $(out_fps "$O1"), worker $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | {fps_target, pid}')"
-setting '.LweMonitors = []'
-waitfor $WAIT fps_now 30 && ok "LweMonitors emptied → back to the default 30" || bad "LweMonitors [] → out:$O1 $(out_fps "$O1")"
+setting ".SceneMonitors = ($OUTS | to_entries | map({Name: .value, Fps: 45, IsPrimary: (.key == 0)}))"
+waitfor $WAIT fps_now 45 && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneMonitors fps 45 on $OUTS → each out:<c>.scene_fps 45 live, the worker ticks at 45, same pid" || bad "SceneMonitors fps → out:$O1 $(out_fps "$O1"), worker $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | {fps_target, pid}')"
+setting '.SceneMonitors = []'
+waitfor $WAIT fps_now 30 && ok "SceneMonitors emptied → back to the default 30" || bad "SceneMonitors [] → out:$O1 $(out_fps "$O1")"
 
 # /library/volume on the playing scene moves that source only — mid-fade (6 s) to another scene, both live
 setting '.GlobalTransitionDurationMs = 6000'
@@ -864,7 +864,7 @@ setting '.Volume = 100'; stop_now
 # unrelated transition edit after it) → it advances 4 s after s1 showed
 setting '.GlobalSwitchScenesAfterSeconds = 2'
 m0=$(tev_n)
-post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"AdvanceOnVideoEnd\":true,\"IntervalSeconds\":0,\"MaxPlaySeconds\":0,\"SeparateSceneTiming\":true,\"SwitchScenesAfterSeconds\":0,\"TransitionEnabled\":true,\"TransitionEffectIds\":[\"fade\"],\"TransitionDurationMs\":300}}" >/dev/null
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"SwitchWhenVideoEnds\":true,\"IntervalSeconds\":0,\"MaxPlaySeconds\":0,\"SeparateSceneTiming\":true,\"SwitchScenesAfterSeconds\":0,\"TransitionEnabled\":true,\"TransitionEffectIds\":[\"fade\"],\"TransitionDurationMs\":300}}" >/dev/null
 waitfor $WAIT scene_ready "$S1"; sleep 1
 post /playlist/state '{"settings":{"switchScenesAfterSeconds":4}}' >/dev/null; t_set=$(ms_now); sleep 1
 post /playlist/state '{"settings":{"transitionDurationMs":350}}' >/dev/null
@@ -1037,15 +1037,15 @@ gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_lim
 post /apply "{\"path\":\"$S1\"}" >/dev/null
 waitfor 5000 scene_ready "$S1" || bad "/apply s1 on the fake-VRAM player → $(basename "$(cur path)") ready $(cur ready)"
 SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
-setting '.SceneThrottle = false'
-waitfor $WAIT p_is scene_throttle false && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneThrottle off → player.scene_throttle false live, same worker $WP" || bad "SceneThrottle off → $(gpu_props), pid $WP → $(wpid "$SID")"
-setting '.SceneThrottle = true'
-waitfor $WAIT p_is scene_throttle true && ok "SceneThrottle on → true" || bad "SceneThrottle on → $(gpu_props)"
-setting '.SceneVramLimitEnabled = true | .SceneVramLimitMib = 1536'
+setting '.AutoThrottleScenes = false'
+waitfor $WAIT p_is scene_throttle false && [ "$(wpid "$SID")" = "$WP" ] && ok "AutoThrottleScenes off → player.scene_throttle false live, same worker $WP" || bad "AutoThrottleScenes off → $(gpu_props), pid $WP → $(wpid "$SID")"
+setting '.AutoThrottleScenes = true'
+waitfor $WAIT p_is scene_throttle true && ok "AutoThrottleScenes on → true" || bad "AutoThrottleScenes on → $(gpu_props)"
+setting '.LimitVramPerScene = true | .SceneVramLimitMib = 1536'
 waitfor $WAIT p_near scene_vram_limit_mib 1536 && [ "$(wpid "$SID")" = "$WP" ] && ok "the VRAM limit on at 1536 MiB → player.scene_vram_limit_mib 1536 live, same worker" || bad "VRAM limit on → $(gpu_props)"
 setting '.SceneVramLimitMib = 2048'
 waitfor $WAIT p_near scene_vram_limit_mib 2048 && ok "…2048 MiB → 2048" || bad "VRAM limit 2048 → $(gpu_props)"
-setting '.SceneVramLimitEnabled = false'
+setting '.LimitVramPerScene = false'
 waitfor $WAIT p_near scene_vram_limit_mib 0 && [ "$(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')" = 2048 ] && ok "the limit off → 0 (off), the MiB value kept for the toggle" || bad "VRAM limit off → $(gpu_props), saved MiB $(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')"
 for m in pause off stop; do
   setting ".VramLowMode = \"$m\""
@@ -1053,12 +1053,12 @@ for m in pause off stop; do
 done
 [ "$(pget paused)" = false ] && ok "none of it touched player.paused" || bad "player.paused $(pget paused) after the GPU settings"
 # a fresh player process (not restored: the defaults) gets the backend's values back (R81's re-apply)
-setting '.SceneThrottle = false | .SceneVramLimitEnabled = true | .SceneVramLimitMib = 1536 | .VramLowMode = "pause"'
+setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .VramLowMode = "pause"'
 waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' || bad "set before the restart: $(gpu_props)"
 stop_now
 restart_player 8b "${VRAM_ENV[@]}"
 waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, low pause)"
-setting '.SceneThrottle = true | .VramLowMode = "stop"'
+setting '.AutoThrottleScenes = true | .VramLowMode = "stop"'
 
 # a scene over the limit in a timed playlist: stopped by the player (never a crash) → the rotation advances at once,
 # the UI is told why (WS scene-vram-stopped), the item is NOT marked crashed and stays playable
@@ -1096,7 +1096,7 @@ sleep 2   # the window is the check: nothing may switch after the stop
 vram_fake ""
 stop_now
 kill "$WSP" 2>/dev/null; WSP=""
-setting '.SceneVramLimitEnabled = false'
+setting '.LimitVramPerScene = false'
 
 echo "== Phase 2: scene loudness learned on first play (scene.loudness → the index → gain.normalize, live)"
 # A player whose learning window is 3 s of audible play (LIASCAPE_PLAYER_LOUDNESS_WINDOW_S; 60 in production, a partial
@@ -1217,7 +1217,7 @@ mv "$T/removed-ss1" "$LIB/imported/ss1"; mv "$T/removed-ss2" "$LIB/imported/ss2"
 
 echo "== play-from keeps the playlist's transition settings (it used to rebuild them from rotation fields only)"
 pf=$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$b], startIndex:1, settings:{order:1, overrideGlobalSettings:true,
-  intervalSeconds:20, advanceOnVideoEnd:true, transitionEnabled:true,
+  intervalSeconds:20, switchWhenVideoEnds:true, transitionEnabled:true,
   transitionEffectIds:["fade","wipeLeft"], transitionDurationMs:1234, transitionDurationMaxMs:0, transitionShuffle:false}}')
 post /playlist/play-from "$pf" >/dev/null
 pf_playing() { st=$(curl -sf -m 5 "$U/playlist/state") && { cur_is path "$SV1" || cur_is path "$SV2"; }; }   # the play-from is on screen
@@ -1616,7 +1616,7 @@ EOF
   bus_up() { [ "$(ctl probe '{"name":"bus"}' | jq -r .state)" = up ]; }
   waitfor $WAIT bus_up && ok "the player's audio bus is up on the private PipeWire ($(ctl probe '{"name":"bus"}' | jq -r .target))" \
     || bad "bus: $(ctl probe '{"name":"bus"}' | jq -c '{state, reason}')"
-  setting '.AutoMute = true | .AutoMuteDelayMs = 0 | .AutoUnmuteDelayMs = 0 | .AutoMuteThresholdDb = -70 | .AutoMuteOnlyIfMprisActive = false
+  setting '.AutoMute = true | .AutoMuteDelayMs = 0 | .AutoUnmuteDelayMs = 0 | .AutoMuteMinLevelDb = -70 | .AutoMuteOnlyIfMprisActive = false
            | .AllowScenes = true | .NoAudio = false | .Volume = 100 | .Speed = 1 | .NormalizeAudio = false
            | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 600'
   # the backend's stream watch (`pactl subscribe`) is a client of the private server

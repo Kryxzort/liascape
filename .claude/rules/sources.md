@@ -90,7 +90,7 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
 - Not exposed (niche / scene-element or asset/preset subtypes): `Background`/`Character`/`Clock`/`Fire`/`Interactive`/`Magic`/`Post Processing`/`Smoke`/`Space`/`Audio Visualizer` (Category), `Particle`/`Image`/`Sound`/`Model`/`Text`/`Sprite`/`Fullscreen`/`Composite`/`Script`/`Effect`/`Scripted Layer` (Asset), `Boolean`/`Number`/`Vec2..4`/`String` (Preset).
 
 **Download — `WorkshopDownloader.AcquireAsync`:**
-Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopAcquireMode`):
+Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopDownloadMode`):
 - `"subscribe"` (default): `xdg-open steam://url/CommunityFilePage/<id>` → poll `workshop/content/431960/<id>/project.json` (3 s intervals, 10 min timeout). Checks both WE workshop dir and `~/.cache/liascape/steamcmd_workshop/…`.
 - `"steamcmd"`: runs `steamcmd +force_install_dir ~/.cache/liascape/steamcmd_workshop +login <SteamUsername> +workshop_download_item 431960 <id> +quit`. Password is **never stored** — one-time sign-in via `LaunchSteamCmdSignIn` opens an interactive terminal to cache Steam sentry file. Subsequent runs are non-interactive.
 

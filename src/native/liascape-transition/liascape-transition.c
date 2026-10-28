@@ -72,7 +72,7 @@ static double from_speed = 1.0, to_speed = 1.0; // per-side playback speed (matc
 static int from_loop = 1, to_loop = 1;          // per-side DESKTOP loop semantic (mpvpaper's loop-file):
                                                 // loop ctx → a too-short side wraps through the effect
                                                 // like the wallpaper would; off → freeze on last frame
-static int g_fps = 0;              // cap decode fps (0 = native) — mirrors VideoFps
+static int g_fps = 0;              // cap decode fps (0 = native) — mirrors VideoFpsCap
 static char *g_hwdec = NULL;       // hwdec mode (mirrors HwDec); NULL → auto-safe
 static char *ctl_sock = NULL; static int ctl_fd = -1; // control socket: live mute/volume during the effect
 // Full-live: decode the actual videos with libmpv so BOTH sides keep PLAYING during the effect
@@ -424,7 +424,7 @@ static bool vidsrc_init(struct vid_src *v, const char *path, double start, int w
     { char sp[16]; snprintf(sp, sizeof sp, "%.4f", speed > 0.01 ? speed : 1.0);
       mpv_set_option_string(v->mpv, "speed", sp); }                                        // mirror per-item/global Speed
     if (g_fps > 0) { char vf[24]; snprintf(vf, sizeof vf, "fps=%d", g_fps);
-      mpv_set_option_string(v->mpv, "vf", vf); }                                           // mirror VideoFps cap
+      mpv_set_option_string(v->mpv, "vf", vf); }                                           // mirror VideoFpsCap cap
     // Loop mirrors this side's DESKTOP semantic (--from-loop/--to-loop = mpvpaper's loop-file):
     // Loop-on / timed / wait-for-video-end contexts wrap through the effect like the wallpaper
     // would; Loop-off holds the LAST frame at EOF (keep-open=yes) — freeze, never rewind/black.

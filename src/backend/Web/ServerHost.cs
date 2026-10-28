@@ -32,7 +32,7 @@ public static class ServerHost
         "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0";
 
     // Order matches the UI's source pills. WE-local (index 3) is hidden when
-    // AutoImportWallpaperEngine is on (the trash button does delete-from-source instead).
+    // AutoAddWeWallpapersToLibrary is on (the trash button does delete-from-source instead).
     private static readonly IBgsProvider[] Providers =
     {
         new MotionBgsService(), new MoewallsService(), new DesktophutService(),
@@ -99,7 +99,7 @@ public static class ServerHost
         if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
         var startup = SettingsService.Load();
         if (startup.AutoMute)
-            AudioMonitor.Start(startup.AutoMuteDelayMs, startup.AutoUnmuteDelayMs, startup.AutoMuteThresholdDb, startup.AutoMuteOnlyIfMprisActive);
+            AudioMonitor.Start(startup.AutoMuteDelayMs, startup.AutoUnmuteDelayMs, startup.AutoMuteMinLevelDb, startup.AutoMuteOnlyIfMprisActive);
         app.Lifetime.ApplicationStopping.Register(() =>
         {
             var s = SettingsService.Load();
@@ -134,8 +134,8 @@ public static class ServerHost
     // Push live settings onto the (startup-built, reused) provider instances per request. Without this
     // the workshop/WE services keep their startup defaults (e.g. AllowScenes=false), so toggling scene
     // support has no effect and scene-only results (Puppet Warp etc.) are silently filtered to 0.
-    // LweMonitors equal entry by entry (name, fps, primary) — /settings' scene-fps diff
-    private static bool SameMonitors(IReadOnlyList<LweMonitorSettings> a, IReadOnlyList<LweMonitorSettings> b) =>
+    // SceneMonitors equal entry by entry (name, fps, primary) — /settings' scene-fps diff
+    private static bool SameMonitors(IReadOnlyList<SceneMonitor> a, IReadOnlyList<SceneMonitor> b) =>
         a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps && p.First.IsPrimary == p.Second.IsPrimary);
 
     private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter)
@@ -143,12 +143,12 @@ public static class ServerHost
         if (p is SteamWorkshopService ws)
         {
             ws.AllowScenes = s.AllowScenes;
-            ws.WorkshopBasePath = s.WallpaperEnginePath;
+            ws.WorkshopBasePath = s.WorkshopFolder;
             if (filter != null) ws.Filter = filter;
         }
         else if (p is WallpaperEngineService we)
         {
-            we.WorkshopPath = s.WallpaperEnginePath;
+            we.WorkshopPath = s.WorkshopFolder;
             we.AllowScenes = s.AllowScenes;
         }
     }
@@ -258,7 +258,7 @@ public static class ServerHost
         // ---- sources / browse / detail ----------------------------------------------------
         app.MapGet("/sources", () =>
         {
-            bool autoImport = SettingsService.Load().AutoImportWallpaperEngine;
+            bool autoImport = SettingsService.Load().AutoAddWeWallpapersToLibrary;
             return Results.Json(Providers.Select((p, i) => new
             {
                 index = i, name = p.Name,
@@ -359,7 +359,7 @@ public static class ServerHost
                 PlayerHelper.ApplyEffectiveLive(prev, s, curPlaying);
                 Mark("resolve");
                 // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
-                if (!SameMonitors(prev.LweMonitors, s.LweMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.LweMonitors, s.LweMonitors);
+                if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
                 // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
                 Liascape.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
             }
@@ -378,11 +378,11 @@ public static class ServerHost
             if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
             Mark("backfill");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
-            // VideoFps, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
+            // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
             // restart-daemon interval/mode changed → re-arm the in-process leak-restart timer now
             // (0 → off) instead of only on the next play.
-            if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
+            if (prev.RestartMpvpaperEverySeconds != s.RestartMpvpaperEverySeconds || prev.RestartOnlyAtPlaylistChangeover != s.RestartOnlyAtPlaylistChangeover)
                 PlayerHelper.UpdateRestartTimer();
             // the maximum play time / the scene timing ("Separate timing for scenes" + "Switch scenes after") → the
             // running rotation, live (the effective one: a playlist with its own override keeps its own —
@@ -399,10 +399,10 @@ public static class ServerHost
             // override is updated by /playlist/state instead). No replay needed.
             if (PlayerHelper.IsTimedPlaylistActive()
                 && (prev.GlobalIntervalSeconds != s.GlobalIntervalSeconds
-                    || prev.GlobalAdvanceOnVideoEnd != s.GlobalAdvanceOnVideoEnd)
+                    || prev.GlobalSwitchWhenVideoEnds != s.GlobalSwitchWhenVideoEnds)
                 && !(PlaylistService.LoadCurrentState()?.Settings.OverrideGlobalSettings ?? false))
             {
-                PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd);
+                PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalSwitchWhenVideoEnds);
             }
             // the effective transition (the globals, when the playlist follows them) or the method changed → an
             // aligned switch already armed for A's end takes it (liascape-player requested it with the old one)
@@ -415,12 +415,12 @@ public static class ServerHost
             bool amChanged = prev.AutoMute != s.AutoMute
                 || prev.AutoMuteDelayMs != s.AutoMuteDelayMs
                 || prev.AutoUnmuteDelayMs != s.AutoUnmuteDelayMs
-                || prev.AutoMuteThresholdDb != s.AutoMuteThresholdDb
+                || prev.AutoMuteMinLevelDb != s.AutoMuteMinLevelDb
                 || prev.AutoMuteOnlyIfMprisActive != s.AutoMuteOnlyIfMprisActive;
             if (amChanged)
             {
                 if (s.AutoMute)
-                    AudioMonitor.Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteThresholdDb, s.AutoMuteOnlyIfMprisActive);
+                    AudioMonitor.Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteMinLevelDb, s.AutoMuteOnlyIfMprisActive);
                 else
                     AudioMonitor.Stop();
             }
@@ -476,7 +476,7 @@ public static class ServerHost
         app.MapPost("/library/sync", () =>
         {
             var s = SettingsService.Load();
-            var added = LibraryService.SyncWallpaperEngine(s.WallpaperEnginePath, s.AllowScenes, s.WeCopyFiles);
+            var added = LibraryService.SyncWallpaperEngine(s.WorkshopFolder, s.AllowScenes, s.CopyFilesInsteadOfSymlinking);
             EventBus.Broadcast("library-synced", new { count = added.Count });
             return Results.Json(new { added });
         });
@@ -512,14 +512,14 @@ public static class ServerHost
 
         // ---- playlist ---------------------------------------------------------------------
         app.MapGet("/playlist/state", () => Results.Json(PlaylistService.LoadCurrentState()));
-        // PATCH semantics like /settings (JsonMerge): the UI posts the whole strip; a partial body keeps the rest
+        // PATCH semantics like /settings (JsonMerge): the UI posts the whole playlist bar; a partial body keeps the rest
         app.MapPost("/playlist/state", (JsonElement body, HttpRequest req) =>
         {
             CustomPlaylist p;
             try { p = JsonMerge.Over(PlaylistService.LoadCurrentState(), body); }
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             AppOps.SavePlaylistState(p);
-            // the saving page's id (X-Liascape-Client): it skips its own echo, every other page re-reads the strip
+            // the saving page's id (X-Liascape-Client): it skips its own echo, every other page re-reads the playlist bar
             EventBus.Broadcast("playlist-changed", new { client = req.Headers["X-Liascape-Client"].FirstOrDefault() });
             return Results.Ok();
         });

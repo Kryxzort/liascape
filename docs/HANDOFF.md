@@ -33,13 +33,13 @@ Both reproduce through the real UI on a hermetic stack via `scripts/test-ui-matr
 1. `pending:cli:random,cli:next` — advance-on-end playlist [k4,k1,k2] with an aligned switch armed; when
    random lands on k2, every re-arm targets k2 itself, so next stays on k2 (2/3 replays; passes when random
    picks k1). Expected: next = the item after k2 in playlist order.
-2. `playlist:stripRemove:other,trashUndo:shown,cli:next` — 2-item timed playlist; trash the playing item
+2. `playlist:playlistBarRemove:other,trashUndo:shown,cli:next` — 2-item timed playlist; trash the playing item
    (plays on with 1 item), Undo puts it back → the tick is dead: `pending_action.txt` ("next") never consumed while
    `/current` says `timed=true`. Every time; without trash+undo next works. Suspect (unverified): a 1-item session
    starts no tick and Undo never restarts it.
 Process: systematic-debugging → root cause in PlayerHelper timed machinery / AppOps.Trash/Undo / SavePlaylistState /
 RunAction random (history, pre-fetch index, `PlayingHistoryIndex`, `ArmVideoEndWait`) → turn each replay into a
-permanent matrix cell (RED first) → fix → GREEN → `--changed` + `--only '× (cli:|trash|strip|pl[A-Z]|shuffle|seq)'`
+permanent matrix cell (RED first) → fix → GREEN → `--changed` + `--only '× (cli:|trash|playlist bar|pl[A-Z]|shuffle|seq)'`
 + adapter IT → a short hunt `--fuzz 12 --fuzz-runs 6 --seed 4242 --jobs 2`. Check whether legacy shares the bug.
 
 ## Phase 2 (scenes) — plan `docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`

@@ -2,7 +2,7 @@
 # Hermetic test of POST /settings's merge (PATCH) semantics under PlayerEngine=liascape-player: the body's keys
 # overwrite the saved settings, every key it leaves out keeps its saved value. It used to replace the whole
 # AppSettings — a partial body (an agent's {"Volume": 50}) reset every other field to its C# default (~15
-# fields incl. LweMonitors and the engine, which then switched the player away). Checks: a partial body
+# fields incl. SceneMonitors and the engine, which then switched the player away). Checks: a partial body
 # changes only its own fields (camelCase and PascalCase keys), a provided array replaces the whole array,
 # an explicit null sets null, unknown keys (incl. the removed LweSilent) are ignored, a bad value is a 400
 # that saves nothing, parallel partial bodies all land, a full body (the UI's whole copy) behaves as
@@ -75,13 +75,13 @@ clip "$C1" testsrc2 440 6; clip "$C2" smptebars 550 6
 SJ=$XDG_CONFIG_HOME/liascape/settings.json
 cat > "$SJ" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
- "DemuxerMaxBytes":32,"DemuxerMaxBackBytes":8,"LweSilent":true,"LweVolume":55,
- "LweMonitors":[{"Name":"DP-1","Fps":144,"IsPrimary":true},{"Name":"HDMI-A-1","Fps":30,"IsPrimary":false}],
+ "DemuxerMaxMib":32,"DemuxerMaxBackMib":8,"LweSilent":true,"LweVolume":55,
+ "SceneMonitors":[{"Name":"DP-1","Fps":144,"IsPrimary":true},{"Name":"HDMI-A-1","Fps":30,"IsPrimary":false}],
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,
- "GlobalIntervalSeconds":600,"GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
+ "GlobalIntervalSeconds":600,"GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
- "TransitionMethod":"full-live","AdvancedSettings":true,"KeepPauseOnSwitch":true,"RestartIntervalSeconds":0,"AutoMute":false,
- "AllowScenes":true,"WorkshopAcquireMode":"steamcmd","SteamRefreshToken":"test-refresh-token","SteamAccessToken":"test-access-token",
+ "TransitionMethod":"full-live","AdvancedSettings":true,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
+ "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","SteamRefreshToken":"test-refresh-token","SteamAccessToken":"test-access-token",
  "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd"}
 EOF
 
@@ -111,17 +111,17 @@ same() {   # $1 before, $2 after, $3 = JSON array of the fields that should chan
 
 echo "== a settings.json that still carries the removed LweSilent loads"
 snap s0
-[ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.lweMonitors|length' s0)" = 2 ] \
-  && ok "loaded the file, not the defaults (volume 80, theme, 2 LweMonitors)" || bad "loaded volume $(f .volume s0) theme $(f .theme s0)"
+[ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.sceneMonitors|length' s0)" = 2 ] \
+  && ok "loaded the file, not the defaults (volume 80, theme, 2 SceneMonitors)" || bad "loaded volume $(f .volume s0) theme $(f .theme s0)"
 [ "$(f 'has("lweSilent")' s0)" = false ] && ok "GET /settings has no lweSilent" || bad "GET /settings still has lweSilent"
 # the rotation redesign (2026-10-28): "Wait for video to end after interval" is gone and the separate minimum merged
 # into the interval field (= the minimum under advance-on-end) — an old file's keys load as unknown ones, no migration
 [ "$(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")] | any' s0)" = false ] \
   && ok "GET /settings has no globalWaitForVideoEnd / playlistWaitForVideoEnd / globalMinPlaySeconds (removed)" \
   || bad "GET /settings still has a removed rotation key: $(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")]' s0)"
-[ "$(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)" = '[600,false,0]' ] \
+[ "$(f '[.globalIntervalSeconds, .globalSwitchWhenVideoEnds, .globalMaxPlaySeconds]' s0)" = '[600,false,0]' ] \
   && ok "the rotation fields that stay loaded from the old file as they were (interval 600, advance off, max 0)" \
-  || bad "rotation fields after loading an old file: $(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)"
+  || bad "rotation fields after loading an old file: $(f '[.globalIntervalSeconds, .globalSwitchWhenVideoEnds, .globalMaxPlaySeconds]' s0)"
 # "Separate timing for scenes" (2026-10-28): a file written before it loads its defaults — on, 30 min (the one-off
 # migration script writes both keys into the owner's files, so this default never decides an existing rotation)
 [ "$(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)" = '[true,1800]' ] \
@@ -149,9 +149,9 @@ echo "== key spelling, arrays, null, unknown keys"
 post /settings '{"volume":70,"Speed":1.25}' >/dev/null; snap s2
 [ "$(f .volume s2)" = 70 ] && [ "$(f .speed s2)" = 1.25 ] && ok "camelCase + PascalCase keys both bind (volume 70, speed 1.25)" || bad "volume $(f .volume s2) speed $(f .speed s2)"
 same s1 s2 '["volume","speed"]' "{volume, Speed}"
-post /settings '{"LweMonitors":[{"Name":"DP-9","Fps":15,"IsPrimary":true}]}' >/dev/null; snap s3
-[ "$(f .lweMonitors s3)" = '[{"name":"DP-9","fps":15,"isPrimary":true}]' ] && ok "LweMonitors: the array is replaced whole (1 entry)" || bad "lweMonitors → $(f .lweMonitors s3)"
-same s2 s3 '["lweMonitors"]' "{LweMonitors}"
+post /settings '{"SceneMonitors":[{"Name":"DP-9","Fps":15,"IsPrimary":true}]}' >/dev/null; snap s3
+[ "$(f .sceneMonitors s3)" = '[{"name":"DP-9","fps":15,"isPrimary":true}]' ] && ok "SceneMonitors: the array is replaced whole (1 entry)" || bad "sceneMonitors → $(f .sceneMonitors s3)"
+same s2 s3 '["sceneMonitors"]' "{SceneMonitors}"
 post /settings '{"globalTransitionEffectIds":["wipeLeft"]}' >/dev/null; snap s4
 [ "$(f .globalTransitionEffectIds s4)" = '["wipeLeft"]' ] && ok "globalTransitionEffectIds replaced whole" || bad "effect ids → $(f .globalTransitionEffectIds s4)"
 same s3 s4 '["globalTransitionEffectIds"]' "{globalTransitionEffectIds}"
@@ -165,7 +165,7 @@ snap s6
 same s5 s6 '["volume"]' "{NoSuchSetting, LweSilent, Volume}"
 
 echo "== a bad value is a 400 and saves nothing"
-for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"LweMonitors":5}' '[1,2]' '"x"'; do
+for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"SceneMonitors":5}' '[1,2]' '"x"'; do
   cd_=$(code /settings "$body"); [ "$cd_" = 400 ] && ok "$body → 400" || bad "$body → $cd_"
 done
 snap s7; same s6 s7 '[]' "the rejected bodies"
@@ -195,8 +195,8 @@ same l4 l8 '[]' "the scene timing back to on, 1800 s"
 echo "== parallel partial bodies all land"
 # 8 rounds × 10 bodies released at once, each setting a different field: without one poster at a time, two
 # that load the same file each save it with only their own field changed → the other's change is lost
-PF='["librarySortIndex","lweVolume","sceneTransitionDelayMs","transitionLagOffsetMs","globalTransitionDurationMaxMs",
-     "autoMuteDelayMs","autoUnmuteDelayMs","demuxerMaxBackBytes","globalTransitionDurationMs","videoFps"]'
+PF='["librarySortIndex","lweVolume","sceneTransitionDelayMs","fullLiveSyncOffsetMs","globalTransitionDurationMaxMs",
+     "autoMuteDelayMs","autoUnmuteDelayMs","demuxerMaxBackMib","globalTransitionDurationMs","videoFpsCap"]'
 lost=$(python3 - "$U" "$PF" <<'PY'
 import http.client, json, sys, threading
 host, port = sys.argv[1].split("//")[1].split(":"); fields = json.loads(sys.argv[2]); lost = 0
@@ -276,7 +276,7 @@ for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body sets a maximum play time on a running advance-on-end rotation (live)"
-post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0}' >/dev/null   # minimum 0: c1 advances at its end
+post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0}' >/dev/null   # minimum 0: c1 advances at its end
 post /playlist/play "{\"paths\":[\"$C1\",\"$C2\"],\"settings\":{\"Order\":0}}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
 sleep 1; t_mx=$(date +%s%3N); p_mx=$(cur time_pos)
@@ -286,7 +286,7 @@ post /settings '{"GlobalMaxPlaySeconds":2}' >/dev/null
 for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 d_mx=$(( $(date +%s%3N) - t_mx ))
 [ "$(cur path)" = "$C2" ] && [ "$d_mx" -lt "$lim_mx" ] && ok "{GlobalMaxPlaySeconds:2} → c1 (at ${p_mx} s of 6) left for c2 $d_mx ms after (< $lim_mx; no replay)" || bad "max 2 s live: cur $(cur path) $d_mx ms after (c1 was at ${p_mx} s; want < $lim_mx ms)"
-post /settings '{"GlobalMaxPlaySeconds":0,"GlobalAdvanceOnVideoEnd":false,"GlobalIntervalSeconds":600}' >/dev/null
+post /settings '{"GlobalMaxPlaySeconds":0,"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body sets \"Switch scenes after\" on a running advance-on-end rotation holding a still image (live)"
@@ -294,8 +294,8 @@ echo "== a partial body sets \"Switch scenes after\" on a running advance-on-end
 I1=$T/i1.png; timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=320x180" -frames:v 1 "$I1"
 # an fps cap on (the parallel section left 98; 30 here explicitly): the player ignores it on a still image
 # (it once stalled the image unready — docs/TODO.md "An fps cap stalls a still image", fixed)
-post /settings '{"VideoFps":30}' >/dev/null
-post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":0}' >/dev/null
+post /settings '{"VideoFpsCap":30}' >/dev/null
+post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":0}' >/dev/null
 post /playlist/play "{\"paths\":[\"$I1\",\"$C1\"],\"settings\":{\"Order\":0}}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$I1" ] && break; sleep 0.1; done
 sleep 2
@@ -305,7 +305,7 @@ for _ in $(seq 1 50); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
 d_sc=$(( $(date +%s%3N) - t_sc ))
 [ "$(cur path)" = "$C1" ] && [ "$d_sc" -lt 2500 ] && ok "{GlobalSwitchScenesAfterSeconds:3} → the image (2 s in) left for c1 $d_sc ms after (no replay, the play time kept)" \
   || bad "scenes after 3 s live × image: cur $(cur path) $d_sc ms after"
-post /settings '{"GlobalSwitchScenesAfterSeconds":1800,"GlobalAdvanceOnVideoEnd":false,"GlobalIntervalSeconds":600}' >/dev/null
+post /settings '{"GlobalSwitchScenesAfterSeconds":1800,"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body switches the engine (nothing playing → nothing starts)"

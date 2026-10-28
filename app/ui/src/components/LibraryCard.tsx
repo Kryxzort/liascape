@@ -22,9 +22,9 @@ export const LibraryCard = memo(function LibraryCard({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState(false);
   // its settings modal plays the preview meanwhile (this card's own animated layer would be hidden anyway)
-  const settingsOpen = useStore((s) => s.settingsItem?.videoPath === item.videoPath);
+  const settingsOpen = useStore((s) => s.cardSettingsItem?.videoPath === item.videoPath);
   // COOL: the modal morphed out of THIS card → it's lifted out (hidden) until the modal morphs back in
-  const lifted = useStore((s) => s.settingsMorphId === `lib-${item.videoPath}`);
+  const lifted = useStore((s) => s.cardSettingsMorphId === `lib-${item.videoPath}`);
   const active = !settingsOpen && (hover || (autoPlayGifs && hasGifAsset(item)));
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (

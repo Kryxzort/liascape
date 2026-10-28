@@ -28,7 +28,7 @@ Read this when the owner asks "anything I should know". Append during unattended
   advance+wait (`dp`, `Full?`, the active one) → min off, max off, scenes after 20 s = exactly today's behaviour;
   `gg` keeps 3660 s as the maximum; the globals and `ds` stay plain timers. I stopped/started the dev backend unit for
   it (your wallpaper may have gone blank for a moment). Press Ctrl+R in the app before changing settings.
-- Found by the rotation agent: an fps cap (VideoFps > 0) stopped still images from ever showing — an agent is fixing it.
+- Found by the rotation agent: an fps cap (VideoFpsCap > 0) stopped still images from ever showing — an agent is fixing it.
 - **LWE fixes ported: scene corpus 86/96 → 92/96 ok** (`61b4d4c`, fork `livepaper/next-v2` fast-forwarded to
   `40eacc9`). 8 of upstream main's 13 new commits ported (text `padding` as a string, the `"particle": null` crash on
   clock text — that was the "leaf particle" segfault —, a script leak, effect sizing, …), plus 3 small patches of our own

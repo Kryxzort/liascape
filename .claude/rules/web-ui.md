@@ -36,21 +36,21 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `store.applyThemeVars` from `/themes` (32 themes, ThemeService color keys).
 - Glow = **static `box-shadow`/`drop-shadow` toggled by state** (hover/playing/selected), never
   animated blur radius (paint storms). Pulsing glow animates opacity/box-shadow on a composited layer.
-- Card → modal morphs (Browse preview, library/strip settings): `components/useMorph.ts` (WAAPI, see
+- Card → modal morphs (Browse preview, library/playlist bar settings): `components/useMorph.ts` (WAAPI, see
   "Settings-modal morph" below) — not framer's `layoutId` any more. framer-motion: `AnimatePresence`
-  enter/exit on other modals/toasts, spring drag (dnd-kit) on the playlist strip.
+  enter/exit on other modals/toasts, spring drag (dnd-kit) on the playlist bar.
 - Re-bench Browse/Library at ≥120 visible after glow/motion changes (the `demos/` harness still works).
 
 ## Icons + component patterns (parity-polish pass)
 - **Icons = `lucide-react`**, never emoji. Size 14–16px, `fill/stroke=currentColor` so theme
   accent/danger + glow flow through. Helper class `.ico` (inline-flex, gap) for icon+label buttons;
   `.mini` already centers an icon-only button. Probe asserts `svg.lucide` count + `emojiInBody==false`.
-- **Per-wallpaper settings modal is lifted to the store** (`settingsItem`/`settingsSiblings`,
-  `openItemSettings(item, siblings?)`, `closeItemSettings()`), rendered ONCE in `App.tsx`. Both
-  `LibraryCard` and the playlist-strip context menu open it. Don't re-add local modal state.
+- **Per-wallpaper settings modal is lifted to the store** (`cardSettingsItem`/`cardSettingsSiblings`,
+  `openCardSettings(item, siblings?)`, `closeCardSettings()`), rendered ONCE in `App.tsx`. Both
+  `LibraryCard` and the playlist-bar context menu open it. Don't re-add local modal state.
 - **Strip context menu = `position:fixed` at cursor coords** (`{x,y}` from the `contextmenu` event):
   the `.pl-item` clips overflow, so an absolutely-positioned menu would be hidden. `.pl-ctx` opens
-  upward (`translateY(-100%)`) since the strip sits at the bottom.
+  upward (`translateY(-100%)`) since the playlist bar sits at the bottom.
 - **`PlaylistToggle.tsx`** = inline SVG of `PlaylistToggleGeometry` (unchecked = accent ring;
   checked = accent fill with checkmark cut out via `fillRule=evenodd`). currentColor → hover brightens.
 - **Library card = compact title-overlay fork** (`.lib-title`, no below-thumb `.title`); trash + toggle
@@ -63,7 +63,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Native pickers:** `app/shell/preload.js` exposes `window.liascape.pickFolder()/pickFile()` →
   `ipcMain "liascape:pick"` → `dialog.showOpenDialog`. Settings "Browse" buttons use it; `window.liascape` is
   undefined in a plain browser → falls back to the text input.
-- **Animated library/strip previews (`MotionThumb.tsx`):** library items expose
+- **Animated library/playlist bar previews (`MotionThumb.tsx`):** library items expose
   `animatedThumbnailPath` (the source preview **gif/webp**, persisted by the backend — see
   `library.md`). `MotionThumb` layers, over the static thumb: a gif/webp `<img>` (autoplays in-browser,
   off-thread — **no extra gif-decode machinery needed**) when the asset exists,
@@ -75,18 +75,18 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 
 ## Round-2 patterns (regression fixes)
 - **Context menus must portal to `document.body`** (`createPortal`) + `position:fixed` at the cursor
-  `{x,y}`. A grid card has `contain:content` (paint containment) and the strip has `backdrop-filter` —
+  `{x,y}`. A grid card has `contain:content` (paint containment) and the playlist bar has `backdrop-filter` —
   both create containing blocks that otherwise trap `position:fixed` inside them. Same reason the
-  playlist Save/Load/Settings modals are portal'd out of `.strip` (they were landing off-screen).
+  playlist Save/Load/Settings modals are portal'd out of `.playlist-bar` (they were landing off-screen).
   **A portal still bubbles through the React tree:** a menu declared inside a clickable element
   (the `.pl-item`, whose `onClick` is `playFrom`) receives every menu click too — opening
-  "Settings (volume / speed)" from the strip restarted playback from that item. Wrap the portal
+  "Settings (volume / speed)" from the playlist bar restarted playback from that item. Wrap the portal
   content in a `display: contents` element that `stopPropagation`s click/contextmenu/pointerdown/
   keydown, or declare the portal outside the clickable element (`LibraryCard` does). Guard:
   `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback +
   `/open`, so it never touches the live wallpaper or opens a window).
 - **`useSmoothScroll(ref, axis)`** (`hooks/`) — smooth wheel scrolling (wheel→velocity, rAF ease,
-  friction 0.85). Wire on every `.scroll` container + the horizontal `.strip-row` (`"x"`).
+  friction 0.85). Wire on every `.scroll` container + the horizontal `.playlist-bar-row` (`"x"`).
 - **Never set `scrollbar-width`/`scrollbar-color`** — Chromium ≥121 then ignores `::-webkit-scrollbar`
   and you lose the rounded thumb. webkit-only.
 - **`thumb(u)`** (`api/client.ts`): local file path → `/media`, `http(s)` → `/img` proxy. Use for
@@ -105,7 +105,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
-  `WallpaperBgAllTabs` advanced setting. A **single persistent `<video>`** (no crossfade — `src` swap is
+  `LiveWallpaperBehindAllTabs` advanced setting. A **single persistent `<video>`** (no crossfade — `src` swap is
   instant, like the desktop). Shows the playing video; on a scene (no playable video) keeps the last shown;
   nothing ever played → a random library video. `muted` (desktop owns audio). Synced to the live mpv
   position (`/current` `position`, ~2s) and **paused when backgrounded** (`appActive`), re-synced on refocus.
@@ -123,7 +123,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **`Select.tsx`** — app-controlled dropdown, **not native `<select>`**: a `.sel` button + a portal'd
   `.sel-pop` popover (smooth-scroll via `useSmoothScroll`, `--tr-strong` bg). Native selects can't be
   themed/translucent/smooth-scrolled on Chromium/Linux, so all dropdowns use this.
-- **`LibrarySettingsModal`** (lifted to the store, rendered once in `App.tsx`): the volume/speed sliders
+- **`CardSettingsModal`** (lifted to the store, rendered once in `App.tsx`): the volume/speed sliders
   **drag-preview live, persist on release**. Each `onChange` → optimistic `patchLibraryItem` (instant
   bg/cards) + **throttled** `api.preview({volume|speed, paths: targets})` (~90ms) + **debounced** persist
   `api.libraryVolume|Speed` (250ms after the last tick → one index write; **one timer per field** — a
@@ -135,7 +135,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes
   under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` liascape-player it shows (a scene's speed scales its
   animation and its pitch-kept sound — matrix `itemSpd:scene`; it was hidden for every engine).
-- **"Scene properties" in the item modal (`components/ScenePropsEditor.tsx`, `key={path}`; a scene item, not a
+- **"Scene properties" in the card settings modal (`components/ScenePropsEditor.tsx`, `key={path}`; a scene item, not a
   multi-selection).** `api.sceneProps(path)` after the open-morph (`SETTINGS_MORPH.open` + 40 ms, like the duration row); one row per
   visible property (`data-scene-prop=<name>`): bool → checkbox, slider → range (+ value, `precision`), colour →
   `<input type=color>` (sent as `#rrggbb`), combo → the app's `Select`, textinput → text field; `group` → a heading,
@@ -152,7 +152,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   (a real 40-step drag, every source sampled every 40 ms).
 - **Settings-modal morph (`components/morph.ts` + the `useMorph` hook, not framer — also the Browse
   preview's).** The surface that opened the modal (card
-  `.thumb-wrap` / strip `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `settingsMorphId`) and is
+  `.thumb-wrap` / playlist bar `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `cardSettingsMorphId`) and is
   `.lifted` (hidden) while the modal is out. WAAPI flights, both ways, **on `transform` (+ the body's opacity) ONLY**
   (2026-10-28, owner "why is morph so laggy" — see the perf note below). Every flight lerps one screen-space pose
   `{V, C, G, R}` between the source pose (`sourcePose(S, aspect)`: V = G = R = the source box, C = its cover box) and
@@ -166,8 +166,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `.modal-body`, scaled onto R (`overflow: hidden` only in flight, `[data-morph]`) with the body counter-scaled to stay
   put; the body fades in late / out early (opacity on the clip box). Nested scales interpolate per factor, not per
   product, so `flightFrames` SAMPLES the keyframes (the easing baked in, one per ~12 ms, `easing: "linear"`) — exact to a
-  fraction of a pixel; `bezier()` evaluates the CSS cubic-bezier. Close re-measures the source (the strip may have
-  scrolled) and lands on it, then `closeItemSettings` (source shown in the same render); off-screen/missing source →
+  fraction of a pixel; `bezier()` evaluates the CSS cubic-bezier. Close re-measures the source (the playlist bar may have
+  scrolled) and lands on it, then `closeCardSettings` (source shown in the same render); off-screen/missing source →
   fade. Escape closes; a close while the open still flies starts from the pose it's in (`lerpPose` at the open's eased
   progress) and decelerates into the source (reversing replayed the ease-out backwards). The flight waits (panel
   hidden, ≤ 300 ms) until the picture's aspect is known — from the source's loaded still/gif/video at the click, else
@@ -177,11 +177,11 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   The media box layers the card's own `still()` (cached → frame 1 IS the card) and the card's gif URL (same image →
   same animation) from the first frame; **the sharp native image and the video preview mount at the click** (owner: "keep the time they loaded like it
   was" — fine since the UI is GPU-composited on NVIDIA too, below; the video starts where the card's hover video was,
-  fades in on `playing`; `settingsSource`, read at the click), and a playing video is paused for the close.
+  fades in on `playing`; `cardSettingsSource`, read at the click), and a playing video is paused for the close.
   framer's `layoutId` used to scale one `<img>` between aspects (stretched mid-flight), flew a low-res
-  still, and the strip's close vanished (the id was dropped at once, and the row clips). Guard:
+  still, and the playlist bar's close vanished (the id was dropped at once, and the row clips). Guard:
   `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a library
-  card, a strip item and a Browse card — a local WE item, offline: starts/ends on the source's crop,
+  card, a playlist bar item and a Browse card — a local WE item, offline: starts/ends on the source's crop,
   uniform aspect — the `[data-morph-pic]` box —, smooth, lands; the flight times; ≤ 30 % of the travel in the first
   quarter; rAF pacing vs the page's idle frame (median ≤ 1.25×, ≤ 15 % of frames > 2×); the preview animates; a close
   mid-open lands on the card).
@@ -228,24 +228,24 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
 - **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend
   changed itself: WS `settings-changed {fields}` → `mergeSettings` (a keybind volume-up was reverted by the
   next UI save). `setSetting`'s debounced save posts `get().settings` at fire time, not its own snapshot.
-- **Playlist strip**: trash/undo change the backend's playlist → `trashItems` drops the items first (a
-  pending strip save can't put them back), both re-read it via `syncPlaylist()`. Another client's
+- **Playlist bar**: trash/undo change the backend's playlist → `trashItems` drops the items first (a
+  pending playlist bar save can't put them back), both re-read it via `syncPlaylist()`. Another client's
   `POST /playlist/state` (a script, an agent) → WS `playlist-changed {client}` → `syncPlaylist()`; every POST
   carries the page's `X-Liascape-Client` id (`api/client.ts` `CLIENT_ID`) so a page skips the echo of its own save.
 - **Backend restart under an open page → `store.resync()`** (2026-10-28: "Library is empty" while a wallpaper played).
-  Everything the store mirrors — sources, themes, settings (+ theme vars), `/current`, library, strip (paths +
+  Everything the store mirrors — sources, themes, settings (+ theme vars), `/current`, library, playlist bar (paths +
   settings + name), playlist names, undo depth, Steam status — is read by ONE `resync()` (`readBackend`): at start
   (`init` retries it — 250 ms doubling to 2 s — while a CORE read — sources, themes, settings, current, library,
-  strip — fails for want of a backend: a `TypeError`, not an HTTP error; names / undo depth / Steam never hold it up) and on every WS reopen after the first (`useEvents(onEvent, onReconnect)` → `App.tsx` `onReconnect`; also
+  playlist bar — fails for want of a backend: a `TypeError`, not an HTTP error; names / undo depth / Steam never hold it up) and on every WS reopen after the first (`useEvents(onEvent, onReconnect)` → `App.tsx` `onReconnect`; also
   reloads a Browse list the outage left empty). Each piece is applied only when ITS read succeeded — never `[]` for a
-  failed read (init used to `.catch(() => [])` the library) — and a strip / settings edit still waiting for its debounced
-  save keeps the local copy (`stripSavePending` / `settingsSavePending`). Overlapping calls coalesce into one more pass.
+  failed read (init used to `.catch(() => [])` the library) — and a playlist bar / settings edit still waiting for its debounced
+  save keeps the local copy (`playlistBarSavePending` / `settingsSavePending`). Overlapping calls coalesce into one more pass.
   The incident: `dotnet watch` restarted the dev backend on a cherry-pick that also changed `api/client.ts`; Vite's HMR
   re-created the store (empty) and re-ran `init` into the outage (journal: `hmr update /src/App.tsx …` 13:11:21, backend
   `Exited` 13:11:26, listening 13:11:29) — `init` failed and nothing ever re-read; the backend's startup
   `library-synced` broadcast fires before any page has reconnected, so it never helped. The backend serves the whole
   library from its first request (`LoadAll` scans the folders per call — there's no lazy index load). Guard: matrix
-  `restart:backend` (idle/playlist: backend down 3 s under the open page — an item added, the strip and
+  `restart:backend` (idle/playlist: backend down 3 s under the open page — an item added, the playlist bar and
   `thumbnailAspect` changed on disk meanwhile → the page shows all three, and the new backend's first `/library` is
   whole), `restart:midLibrary` (the page's first `/library` held, the backend SIGKILLed under it, then back),
   `restart:initDown` (the built UI from `file://…?api=<port>` — the dev topology — started while the backend is down).
@@ -267,7 +267,7 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   Its window is **shown** (on a private Xvfb) and focused: a
   hidden BrowserWindow renders no frames — rAF never fires, so framer-motion / WAAPI exits never finish,
   dnd-kit's rAF-aligned pointermoves coalesce (a drop lands on a stale target) and `appActive` stays false.
-  Drags that need real hit-testing go through `webContents.sendInputEvent` (the strip's dnd-kit reorder).
+  Drags that need real hit-testing go through `webContents.sendInputEvent` (the playlist bar's dnd-kit reorder).
   **Scene cells (Phase 2 Task 12).** `test-ui-matrix.sh` seeds three synthetic WE scenes into the private library
   (`library/workshop/90000000{1,2,3}`, titled s1–s3 in that source's `index.json`, 320×180 previews; the worker's
   synthetic renderer: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashing 1.5 s after every start), runs its player with
@@ -281,9 +281,9 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   `next:v→s|s→s|s→v:<full-live|reveal|frozen>` (the started switch's `method`, its handoff, the outgoing scene's
   worker reaped), `pause:scene` (no frame latched, the scene clock still, captures 500 ms apart identical, `gain.pause`
   −96), `mute:scene` / `volume:scene` / `itemVol:scene` / `itemSpd:scene` / `noAudio:scene` (the worker's stream, same
-  pid), `trash:playingScene` (scene / sceneS), `crash:scene` (s3 from the strip → `source.broken`, index `crashed`, its
-  card marked, the strip's next plays), `noOutput:scene` (parked with the worker kept, shown again on replug),
-  `settings:sceneFps` (Monitors → `out:VIRTUAL-1.scene_fps` 45 + `fps_target`), `settings:sceneThrottle|vramLimit|
+  pid), `trash:playingScene` (scene / sceneS), `crash:scene` (s3 from the playlist bar → `source.broken`, index `crashed`, its
+  card marked, the playlist bar's next plays), `noOutput:scene` (parked with the worker kept, shown again on replug),
+  `settings:sceneFps` (Monitors → `out:VIRTUAL-1.scene_fps` 45 + `fps_target`), `settings:autoThrottleScenes|vramLimit|
   vramLowMode` (the GPU / VRAM group → `player.*`, same pid), `vram:exceeded` (the fake reports s1's worker at 2000 MiB
   > 1536 → the rotation advances, not marked crashed, the status bar's text), `playlist:sceneInterval` (a 4 s interval
   advances off a scene), `restore:scene` (the backend restarted on the same port — `LIASCAPE_PORT` — the scene stays, same
@@ -320,7 +320,7 @@ scene's first frame is in — no lead), the Monitors (scenes) rows drop the **pr
 for every output; its sound is one stream) and label the fps **"fps (live)"** (the backend sets
 `out:<name>.scene_fps` on save), and a scene that can't play shows `scenes.reason` under the toggle. Legacy:
 unchanged. **GPU / VRAM** (a section shown only under liascape-player; every row live — `player-adapter.md` § Scenes):
-"Auto-throttle scenes" (`sceneThrottle`), "Limit VRAM per scene" (`sceneVramLimitEnabled`) + "VRAM limit (MiB)"
+"Auto-throttle scenes" (`autoThrottleScenes`), "Limit VRAM per scene" (`limitVramPerScene`) + "VRAM limit (MiB)"
 (`sceneVramLimitMib`, shown while it's on), "When VRAM runs low" Stop (free memory) / Pause / Off (`vramLowMode`); while
 Settings is open under liascape-player it re-reads `/player-engine` every 5 s and says so when `vram.low_active` (the player's
 low-VRAM hold — not a user pause). WS `scene-vram-stopped` → the status bar: "<title>: stopped: used X MiB > limit Y
@@ -339,7 +339,7 @@ slider that got a key during its drag is `blur()`ed on release so it doesn't kee
 CSS: `input[type=range]:focus-visible { outline: none }` everywhere; keyboard focus gets the hover's accent glow
 instead (`:root:not(.range-dragging)`), so tabbing to a slider still shows where focus is. `shortcutsBlocked()`
 (= typing in a field OR holding a slider) replaced Library/Browse's local `typing()`. Guard: matrix
-`keys:sliderHeld` (idle, single — a real mouse press on the item modal's volume slider via `sendInputEvent`, two
+`keys:sliderHeld` (idle, single — a real mouse press on the card settings modal's volume slider via `sendInputEvent`, two
 cards selected, then f/F/Delete/Escape/Right: no outline/glow on the held slider, the modal stays open, the value
 doesn't step, nothing trashed, no keyboard ring after the release; RED on the base UI: the outline `auto` + Escape
 closed the modal).

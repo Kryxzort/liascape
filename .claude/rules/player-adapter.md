@@ -248,7 +248,7 @@ Owner-approved model (the play-time limits added the same day were folded into i
 off everywhere added the same evening — owner: "minimum and maximum should both support '0' which then just turns them
 off … a toggle which … lets you configure differently for scenes"). Per rotation (the globals, or a playlist's own when
 `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation` → `(Interval, Advance, Max, SeparateScenes, ScenesAfter)`):
-- **"Switch when video ends" OFF** (`AdvanceOnVideoEnd` false): `IntervalSeconds` is **"Switch every"** — a plain timer
+- **"Switch when video ends" OFF** (`SwitchWhenVideoEnds` false): `IntervalSeconds` is **"Switch every"** — a plain timer
   (the tick's countdown, speed-scaled as before, switches `align:now`, mid-video). Unchanged; the maximum doesn't apply.
 - **ON**: the SAME field is the **"Minimum play time"** (`IntervalSeconds`, relabelled in the UI — one value: toggling
   shows it under the other label), and **"Maximum play time"** (`MaxPlaySeconds`, clamped 0…359999 in the setters) sits
@@ -272,7 +272,7 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone, and a playlist play under
     advance-on-end (`AppOps.PlayPlaylist`) always goes through `ApplyTimedPlaylist`, minimum 0 included (it used to
     take `ApplyPlaylist` there, where ONE item — a trash leaving one survivor — became a plain non-timed launch an Undo
-    could never re-arm; matrix `pending × selTrashUndo:shown+other`, `seq:trash×2+undo×2`, `seq3:stripRemove+…`).
+    could never re-arm; matrix `pending × selTrashUndo:shown+other`, `seq:trash×2+undo×2`, `seq3:playlistBarRemove+…`).
   - **Maximum**: once the playing item played that long the rotation advances **now** with its transition, even
     mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
     the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
@@ -370,7 +370,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Create props** (`SourceProps`): `kind: "scene"`, `preview` = the item's preview image
   (`LibraryService.PreviewImageOf`: `preview.jpg|png|jpeg`, else `preview.gif|webp`) — what the player shows
   while no worker frame exists (Task 10), and `scene_props` (below).
-- **Scene user properties (the item modal's editor; library.md § "Scene properties").** `scene_props` is one more
+- **Scene user properties (the card settings modal's editor; library.md § "Scene properties").** `scene_props` is one more
   per-source value of the resolver (`Desired`, scene paths only): `SceneProperties.PlayerMap(path, its index
   overrides, a drag's transient values)` — so a new source opens with them (`SourceProps`; the worker applies them
   after the load, before the first frame) and every Fresh pass (`/settings`, R81's reapply after a player restart)
@@ -384,19 +384,19 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   (`PropertySet`) is the player's `scene.property` event / `workers.properties` (not subscribed — a refused name only
   logs there). Legacy: launch-only (`--set-property`). Live on the same worker, every switch combo, across a
   switch-away-and-back and a player restart (IT + matrix `sceneProp:*`).
-- **Per-monitor scene fps — live** (`LiascapePlayerMedia.ApplySceneFps(prev, cur)`): `LweMonitors[].Fps` →
+- **Per-monitor scene fps — live** (`LiascapePlayerMedia.ApplySceneFps(prev, cur)`): `SceneMonitors[].Fps` →
   `set out:<name>.scene_fps` (name mapped like the player's `output_name`: `.`/`:`/`*`/whitespace → `-`;
   0–480, 0 = the output's refresh), queued coalescible per output (`scene_fps:<name>`); `/settings` diffs prev
   → cur (a removed entry → back to the default 30, D5). Every entry is re-asserted once per player process
   (`Switch` when `Generation` moved, and R81's `ReapplyAllNow`). An entry naming no output is a logged
   `no_such_node`. `IsPrimary` has no liascape-player meaning (one worker, its sound one stream on the bus), and the
   V→S lead / `SceneTransitionDelayMs` stay legacy-only (the player switches once B's first frame is in) —
-  Settings hides both under liascape-player and labels the fps "fps (live)". Under liascape-player `LweMonitors` is no
+  Settings hides both under liascape-player and labels the fps "fps (live)". Under liascape-player `SceneMonitors` is no
   longer the launch-only exception.
 - **Broken scenes (D6 + the owner's call).** The player logs `source.broken {id, path, scene_id, reason,
   signal|code, restarts, record}` once when a scene's worker crashed past its budget (3 restarts in 60 s;
   player-core.md § Scene worker → Errors). `LiascapePlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
-  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the item modal's "Scene
+  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the card settings modal's "Scene
   crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
   (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
   flight) the rotation **advances at once**: a timer rotation (advance-on-end off) → `_timedRemainingMs = 0` + the
@@ -406,8 +406,8 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   whitelisted (`/library/whitelist`) — and `Apply` refuses it. A missing / half-downloaded folder is a load
   error (`transition.failed`), never marked.
 - **GPU / VRAM settings (Phase 2 Task 8, wired 2026-10-28; player side: player-core.md § Scene worker → "GPU budget
-  and VRAM").** Three `AppSettings` → three player props, all live: `SceneThrottle` (bool, default true) →
-  `player.scene_throttle`; `SceneVramLimitEnabled` (default false) + `SceneVramLimitMib` (default 1536, clamped
+  and VRAM").** Three `AppSettings` → three player props, all live: `AutoThrottleScenes` (bool, default true) →
+  `player.scene_throttle`; `LimitVramPerScene` (default false) + `SceneVramLimitMib` (default 1536, clamped
   64–1048576, kept while the toggle is off) → `player.scene_vram_limit_mib` = the MiB while enabled, else **0 = off**;
   `VramLowMode` `stop` (default) | `pause` | `off` (an unknown value reads as `stop`) → `player.vram_low_mode`.
   `LiascapePlayerMedia.GpuProps(s)` is the mapping (self-test table), `ApplyGpuSettings(prev, cur)` the `/settings` diff
@@ -533,7 +533,7 @@ computed for the playing item at request time landed on whatever played when it 
   on the player side, and a new session — `Apply`, `ApplyPlaylist`, a cold `Launch` — queues `set
   player.paused false` (`LiascapePlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
   fresh, playing mpvpaper; a rotation keeps it. **A user switch while paused** (next / previous /
-  random — keybind, CLI, `/next` `/prev` `/random`; owner's call 2026-10-25): `KeepPauseOnSwitch` off
+  random — keybind, CLI, `/next` `/prev` `/random`; owner's call 2026-10-25): `StayPausedWhenSwitching` off
   (default) → `BeforeUserSwitch` resumes first (`QueueNewSession` + the timed countdown via
   `SetTimerPaused`), so it switches with its transition and plays — a paused playlist's tick used to
   hold the action until the resume, a single one already unpaused (`Apply`); on → the pause stays, the
@@ -646,8 +646,8 @@ settings.json with `PlayerEngine=liascape-player`, own library, own liascape-pla
 random backend port, display/compositor env unset; it aborts before any playback call unless
 `/player-engine` says `active: liascape-player`, so it can't start or kill mpvpaper; an EXIT/INT/TERM/HUP trap
 SIGCONTs + stops the player and the backend and removes the temp dir. Covers: `/apply` + fade
-full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps
-(+ VideoFps 30 × an image item: it plays — the player never caps a still, player-core.md § Sources), HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
+full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFpsCap
+(+ VideoFpsCap 30 × an image item: it plays — the player never caps a still, player-core.md § Sources), HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
 (interval 20 s + Wait + Advance, 2 s clips → align:end advances); `/next` mid-wait; `/next` during an aligned switch's running effect (1.5 s fade on a 4 s clip: → the item AFTER its B, the running one committed — handoff, not cancelled; RED before: → the same B, cancelled); `/stop`;
 `/library/volume|speed` on the playing item; **final review**: a CLI `liascape toggle-pause` (a
 separate process) surviving a compositor kill -9 + the backend's reapply (I3), pause → `/stop` →
@@ -692,7 +692,7 @@ pid**, so nothing restarts after the test — no mpvpaper started/killed); no se
 `LIASCAPE_SCENE_WORKER_BIN` = this build's worker — the upgrade test's copied binary has none next to it; synthetic
 scene items `library/workshop/90000000{1..4}`): `/player-engine.scenes.available`; `/apply` a scene →
 `cur:*.kind == scene`, ready ≤ 3 s, its preview; Volume 50 → the scene's `gain.user` −18.06 and the worker's
-stream gain; NoAudio on/off live on the source and the worker, same worker pid; `LweMonitors` fps 45 →
+stream gain; NoAudio on/off live on the source and the worker, same worker pid; `SceneMonitors` fps 45 →
 `out:VIRTUAL-1.scene_fps` 45 + the worker's `fps_target`, same pid, `[]` → 30; `/library/volume` on scene 1
 during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a player with
 `LIASCAPE_PLAYER_LOUDNESS_WINDOW_S=3`, NormalizeAudio on, target −14; synthetic 1 kHz scenes at −20 / −26 dBFS + one
@@ -709,7 +709,7 @@ missing scene folder → `transition.failed`, not marked crashed; `AllowScenes=f
 scene; a player restarted with `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → no `scene` capability,
 `/player-engine.scenes` unavailable with a reason, 8 × `/next` never a scene. **Task 8 settings** (a player with
 `LIASCAPE_PLAYER_VRAM_PROBE=fake:$T/vram.json` + short `LIASCAPE_PLAYER_VRAM_TIMING` — the probe file the test writes, never this
-machine's GPU): a fresh player's defaults; `SceneThrottle` / the VRAM limit toggle + MiB / `VramLowMode` each →
+machine's GPU): a fresh player's defaults; `AutoThrottleScenes` / the VRAM limit toggle + MiB / `VramLowMode` each →
 `get player.<prop>` live, the playing scene on the same worker, `player.paused` untouched; set, then a fresh player
 (not restored) → all re-applied; a scene whose worker the fake reports at 2000 MiB > 1536 in a timed playlist →
 `scene.vram_exceeded`, the rotation advanced ≤ 2 s after it (event clocks), WS `scene-vram-stopped` with the text,

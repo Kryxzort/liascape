@@ -293,8 +293,8 @@ clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
- "TransitionMethod":"full-live","GlobalAdvanceOnVideoEnd":false,"GlobalMaxPlaySeconds":0,
- "GlobalIntervalSeconds":600,"AutoMute":false,"AdvancedSettings":true,"RestartIntervalSeconds":0}
+ "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
+ "GlobalIntervalSeconds":600,"AutoMute":false,"AdvancedSettings":true,"RestartMpvpaperEverySeconds":0}
 EOF
 
 # A private PulseAudio for the auto-mute cells: its own socket under $XDG_RUNTIME_DIR/pulse, ONE null sink (mx_null),

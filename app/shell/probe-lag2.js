@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
 
   // open playlist-settings (empty modal)
   await reset();
-  await js(`document.querySelector('.strip-head .mini[title="Playlist settings"]')?.click()`);
+  await js(`document.querySelector('.playlist-bar-head .mini[title="Playlist settings"]')?.click()`);
   await wait(1200); out.openPlaylistSettings = await read();
   await js(`document.querySelector('.modal-backdrop')?.click()`); await wait(500);
 

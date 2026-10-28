@@ -188,7 +188,7 @@ public static class LiascapePlayerMedia
     public static void QueueStop() => QueueEssential(Stop);
 
     // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
-    // `LweMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
+    // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
     // under liascape-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
     // changed entry sets its fps, a removed one goes back to the player's default (30, D5). Coalescible
     // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
@@ -196,7 +196,7 @@ public static class LiascapePlayerMedia
     // every output shows it; its audio is one stream on the bus) — the UI hides it there.
     public const double DefaultSceneFps = 30;
 
-    public static void ApplySceneFps(IReadOnlyList<LweMonitorSettings>? prev, IReadOnlyList<LweMonitorSettings> cur)
+    public static void ApplySceneFps(IReadOnlyList<SceneMonitor>? prev, IReadOnlyList<SceneMonitor> cur)
     {
         var want = SceneFpsMap(cur);
         var had = prev == null ? null : SceneFpsMap(prev);
@@ -207,9 +207,9 @@ public static class LiascapePlayerMedia
                 if (!want.ContainsKey(name)) QueueSceneFps(name, DefaultSceneFps);
     }
 
-    // `LweMonitors` names are compositor connector names; liascape-player names its outputs the same, with
+    // `SceneMonitors` names are compositor connector names; liascape-player names its outputs the same, with
     // `.`/`:`/`*`/whitespace → `-` (wl.rs `output_name`).
-    private static Dictionary<string, double> SceneFpsMap(IEnumerable<LweMonitorSettings> monitors) =>
+    private static Dictionary<string, double> SceneFpsMap(IEnumerable<SceneMonitor> monitors) =>
         monitors.Where(m => !string.IsNullOrWhiteSpace(m.Name))
             .GroupBy(m => OutputName(m.Name))
             .ToDictionary(g => g.Key, g => Math.Clamp((double)g.Last().Fps, 0, 480));
@@ -228,24 +228,24 @@ public static class LiascapePlayerMedia
 
     private static int _sceneFpsGen = -1;
 
-    // every LweMonitors entry onto this player process (a monitor not plugged in: logged, harmless), and the
+    // every SceneMonitors entry onto this player process (a monitor not plugged in: logged, harmless), and the
     // player-level GPU / VRAM settings (a fresh player starts at its own defaults)
     private static void AssertSceneFps(LiascapePlayerClient client, AppSettings s)
     {
-        foreach (var (name, fps) in SceneFpsMap(s.LweMonitors)) SetSceneFps(client, name, fps);
+        foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
         _sceneFpsGen = client.Generation;
     }
 
     // ---- scene GPU budget + VRAM (Phase 2 Task 8) ---------------------------------------------------
     // Three player-level props, all live (player-core.md § Scene worker → "GPU budget and VRAM"):
-    // `player.scene_throttle` ← SceneThrottle, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
-    // SceneVramLimitEnabled (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
+    // `player.scene_throttle` ← AutoThrottleScenes, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
+    // LimitVramPerScene (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
     // (coalescible per prop, `player:<prop>`); a new player process gets every one (`AssertSceneFps`).
     public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s) =>
     [
-        ("scene_throttle", s.SceneThrottle),
-        ("scene_vram_limit_mib", s.SceneVramLimitEnabled ? (double)s.SceneVramLimitMib : 0.0),
+        ("scene_throttle", s.AutoThrottleScenes),
+        ("scene_vram_limit_mib", s.LimitVramPerScene ? (double)s.SceneVramLimitMib : 0.0),
         ("vram_low_mode", s.VramLowMode),
     ];
 
@@ -1023,10 +1023,10 @@ public static class LiascapePlayerMedia
         if (Want("gain.normalize") && PlayerHelper.IsScenePath(path)) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
         if (Want("no_audio")) d["no_audio"] = settings().NoAudio;
         if (Want("hwdec")) d["hwdec"] = HwDec(settings());
-        if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFps);
+        if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFpsCap);
         if (Want("cache")) d["cache"] = !settings().DisableCache;
-        if (Want("demuxer_max_mib")) d["demuxer_max_mib"] = (double)Math.Max(0, settings().DemuxerMaxBytes);
-        if (Want("demuxer_back_mib")) d["demuxer_back_mib"] = (double)Math.Max(0, settings().DemuxerMaxBackBytes);
+        if (Want("demuxer_max_mib")) d["demuxer_max_mib"] = (double)Math.Max(0, settings().DemuxerMaxMib);
+        if (Want("demuxer_back_mib")) d["demuxer_back_mib"] = (double)Math.Max(0, settings().DemuxerMaxBackMib);
         if (Want("gain.mute")) d["gain.mute"] = muted ? MpvPropertyMap.SilentDb : 0.0;
         // a scene's user properties: its overrides (+ a drag's transient values) — defaults aren't sent, LWE
         // loads them itself; `WithResets` adds the default of one the source still runs from an earlier override

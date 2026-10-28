@@ -3,7 +3,7 @@
 // a path moved the other side of the effect (owner report: changing A's volume/speed mid-transition
 // changed B). Loads the UI offscreen, stubs every write (/preview, /library/volume|speed, playback,
 // /open — nothing reaches the backend: the live wallpaper and the library are never touched), opens
-// the modal from the playlist strip's right-click menu, drags the volume and speed sliders, and checks
+// the modal from the playlist bar's right-click menu, drags the volume and speed sliders, and checks
 // what the UI tried to send.
 // Usage: electron app/shell/probe-preview.js "http://localhost:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");

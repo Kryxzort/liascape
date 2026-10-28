@@ -321,7 +321,7 @@ issues:
 - On Bunk at frame 60 we called:
   - `wp_project_property_set_value_by_name("visualizer_color", "1 0 0")`, which returned true
   - `wp_project_property_set_value_by_name("clock", "0")`
-- At frame 90 the bars had changed from black (frame 59) to **white**: mean RGB in the bar strip went from 71/64/72
+- At frame 90 the bars had changed from black (frame 59) to **white**: mean RGB in the bar playlist bar went from 71/64/72
   to 188/183/190, and 160 k pixels are pure white. Frames 61–89 were not captured, so the exact latency is unmeasured.
 - So the live-property path works. The colour semantics for this scene are off: we asked for red. This is a
   scene-compatibility item.
@@ -340,7 +340,7 @@ Left to right: no audio input (bars at rest), our noise input (bars up), and aft
 | fps, pause | yes | Owned by the host loop and clock. |
 | Output size | n/a | The scene renders at native size. The worker or compositor scales, so a resize never needs a reload. |
 
-`LweMonitors` per-monitor fps and primary, launch-only today, become host-loop properties.
+`SceneMonitors` per-monitor fps and primary, launch-only today, become host-loop properties.
 
 ## 6. What Phase 2 must do (GO conditions)
 

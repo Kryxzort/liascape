@@ -719,8 +719,8 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - [ ] **Step 3:** Implement the four classes + dispatch + UI row. Legacy branches stay byte-for-byte when `!IsLiascapePlayer`.
 - [ ] **Step 4:** Self-test → PASS. Then on-machine with `PlayerEngine=liascape-player` via `curl -X POST /settings`:
   - `/apply` a clip; `/next` in the owner's `dp` playlist
-  - timed interval 20 s with `WaitForVideoEnd` + `AdvanceOnVideoEnd` (the owner's settings)
-  - live `/settings` changes of Volume, Speed, Loop, VideoScale, VideoFps, HwDec, NoAudio, NormalizeAudio; mute toggle; pause toggle; `liascape volume-up`
+  - timed interval 20 s with `WaitForVideoEnd` + `SwitchWhenVideoEnds` (the owner's settings)
+  - live `/settings` changes of Volume, Speed, Loop, VideoScale, VideoFpsCap, HwDec, NoAudio, NormalizeAudio; mute toggle; pause toggle; `liascape volume-up`
   - each takes effect on the playing wallpaper without a restart (`ctl state` confirms)
   - switching back to `legacy` restores today's behaviour
   - `automute_ignores_own_bus`: `AutoMute=true`, delay 0, a clip playing for 30 s → no `SetMute(true)`, and the

@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
   out.idle = await fps();                                   // gifs animating, no modal
 
   // open the playlist-settings modal (empty content → isolates the backdrop)
-  await js(`document.querySelector('.strip-head .mini[title="Playlist settings"]')?.click()`); await wait(800);
+  await js(`document.querySelector('.playlist-bar-head .mini[title="Playlist settings"]')?.click()`); await wait(800);
   out.modalOpen = await js(`!!document.querySelector('.pl-modal')`);
   out.modal_noblur = await fps();                           // current fix: solid overlay
 

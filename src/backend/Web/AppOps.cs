@@ -24,12 +24,12 @@ public static class AppOps
     private static int EffInterval(AppSettings s, PlaylistSettings p) =>
         p.OverrideGlobalSettings ? p.IntervalSeconds : s.GlobalIntervalSeconds;
     private static bool EffAdvance(AppSettings s, PlaylistSettings p) =>
-        p.OverrideGlobalSettings ? p.AdvanceOnVideoEnd : s.GlobalAdvanceOnVideoEnd;
+        p.OverrideGlobalSettings ? p.SwitchWhenVideoEnds : s.GlobalSwitchWhenVideoEnds;
 
-    // `paths` are already in the desired order (the UI sends the current strip order).
+    // `paths` are already in the desired order (the UI sends the current playlist bar order).
     // `persist` / `persistPaths` = what to save as the current playlist state when it differs from what
     // plays (play-from plays a pre-arranged order but keeps the playlist's own Order setting and the
-    // strip's own order — saving the play order reordered the strip on the next launch).
+    // playlistBar's own order — saving the play order reordered the playlist bar on the next launch).
     public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, PlaylistSettings? persist = null, List<string>? persistPaths = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
@@ -52,15 +52,15 @@ public static class AppOps
             // minimum of 0 used to go through ApplyPlaylist, where one item (a trash leaving one survivor, a one-item
             // playlist) became a plain non-timed launch — an Undo growing it back then had no rotation to re-arm
             var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-            PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, advanceOnVideoEnd: true);
-            Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+            PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, switchWhenVideoEnds: true);
+            Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
             return "";
         }
 
         if (interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
         var timed = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
         PlayerHelper.ApplyTimedPlaylist(timed, s.BuildMpvOptions(), shuffle, interval);
-        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = false, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = false, OverrideGlobalSettings = ps.OverrideGlobalSettings });
         return "";
     }
 
@@ -103,7 +103,7 @@ public static class AppOps
             if (!string.IsNullOrEmpty(copiedSceneDir) && Directory.Exists(copiedSceneDir)) dir = copiedSceneDir;
             else if (!string.IsNullOrEmpty(workshopId))
             {
-                var wePath = SettingsService.Load().WallpaperEnginePath;
+                var wePath = SettingsService.Load().WorkshopFolder;
                 if (!string.IsNullOrEmpty(wePath)) dir = Path.Combine(wePath, workshopId);
             }
         }
@@ -137,7 +137,7 @@ public static class AppOps
     }
 
     // ffprobe the video length in seconds.
-    // ---- scene user properties (the item settings modal's "Scene properties"; library.md) ----
+    // ---- scene user properties (the card settings modal's "Scene properties"; library.md) ----
     private static bool IsSceneItem(string path) =>
         !string.IsNullOrEmpty(path) && PlayerHelper.IsScenePath(path) && Directory.Exists(path);
 
@@ -226,7 +226,7 @@ public static class AppOps
                 Favorites = detail.Favorites, Views = detail.Views, Tags = detail.Tags };
         }
 
-        var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.WeCopyFiles, ct, animatedUrl: anim);
+        var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
         if (item.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
         EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
         return item;
@@ -303,7 +303,7 @@ public static class AppOps
         return null;
     }
 
-    // The current playlist (the strip) changed — `/playlist/state`, and a trash / undo that took items
+    // The current playlist (the playlist bar) changed — `/playlist/state`, and a trash / undo that took items
     // out of it or put them back. Saved, then applied live to a running rotation.
     public static void SavePlaylistState(CustomPlaylist p)
     {
@@ -316,7 +316,7 @@ public static class AppOps
         // playlist follows globals, /settings owns the live-apply (this stays a no-op then).
         if (PlayerHelper.IsTimedPlaylistActive())
         {
-            // Order (Sequential↔Shuffle) or the strip contents (drag-reorder / add / remove) changed →
+            // Order (Sequential↔Shuffle) or the playlist bar contents (drag-reorder / add / remove) changed →
             // reflect it on the RUNNING playlist live (keeps the current item playing + the countdown).
             // Diffed so a rotation/transition-only save doesn't needlessly re-shuffle. Reorder FIRST so
             // it rebuilds _timedPaths before the rotation re-chains the video-end wait.
@@ -391,8 +391,8 @@ public static class AppOps
         var s = SettingsService.Load();
         var sess = s.LastSession;
         bool isPlaylist = sess != null && (sess.IsPlaylist || sess.IsTimedPlaylist);
-        var strip = pl?.VideoPaths ?? [];
-        var survivors = strip.Where(p => !del.Contains(p)).ToList();
+        var playlistBar = pl?.VideoPaths ?? [];
+        var survivors = playlistBar.Where(p => !del.Contains(p)).ToList();
         if (isPlaylist && sess != null)
         {
             // Start from the current playlist's settings (transitions etc.) and take the
@@ -401,15 +401,15 @@ public static class AppOps
             ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
             ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
             ps.IntervalSeconds = sess.TimedIntervalSeconds;
-            ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd;
-            int at = strip.IndexOf(playing);
+            ps.SwitchWhenVideoEnds = sess.SwitchWhenVideoEnds;
+            int at = playlistBar.IndexOf(playing);
             if (at >= 0 && survivors.Count > 0)
             {
-                string next = Enumerable.Range(1, strip.Count).Select(k => strip[(at + k) % strip.Count]).First(p => !del.Contains(p));
-                PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the strip's survivors as the playlist
+                string next = Enumerable.Range(1, playlistBar.Count).Select(k => playlistBar[(at + k) % playlistBar.Count]).First(p => !del.Contains(p));
+                PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the playlist bar's survivors as the playlist
                 return;
             }
-            // the session plays something the strip doesn't hold — play on from its own survivors
+            // the session plays something the playlist bar doesn't hold — play on from its own survivors
             var rest = sess.Paths.Where(p => !del.Contains(p)).ToList();
             if (rest.Count > 0)
             {
@@ -417,7 +417,7 @@ public static class AppOps
                 return;
             }
         }
-        if (pl != null && survivors.Count != strip.Count)
+        if (pl != null && survivors.Count != playlistBar.Count)
             SavePlaylistState(new CustomPlaylist { VideoPaths = survivors, Settings = pl.Settings, Name = pl.Name });
         PlayerHelper.Stop();
         EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });

@@ -1,4 +1,4 @@
-// Regression probe: the playlist strip's right-click menu must never start playback.
+// Regression probe: the playlist bar's right-click menu must never start playback.
 // The menu is portal'd to document.body, but React bubbles a portal's events through the
 // React tree — up to the .pl-item's onClick (playFrom). Loads the UI offscreen, stubs the
 // playback endpoints (nothing reaches the backend, so the live wallpaper is never touched),

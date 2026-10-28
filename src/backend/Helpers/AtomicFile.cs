@@ -7,7 +7,7 @@ namespace Liascape.Helpers;
 
 // Shared state files (playlist_state.json, the library's index.json, …) are read by every request, the tick,
 // the adapter and the daemons while someone saves them. A save that truncates and writes in place lets a read
-// land mid-write: it parses nothing — a null playlist (the UI then showed an empty strip with the DEFAULT
+// land mid-write: it parses nothing — a null playlist (the UI then showed an empty playlist bar with the DEFAULT
 // playlist settings and saved those back), an empty index (every override read as "follows the global";
 // SetMeta wrote that empty index + one entry back over everything). UI matrix race:playlistSaveLoad /
 // race:indexSaveLoad. Same fix as SettingsService: write a temp file and rename it over (atomic — a reader

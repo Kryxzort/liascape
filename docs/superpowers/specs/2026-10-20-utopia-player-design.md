@@ -174,7 +174,7 @@ and visual seams cannot happen regardless of timing.
     mpvpaper `*` does today.
   - **scenes**: **one worker per output**. This keeps today's per-monitor fps and keeps crash isolation per monitor.
 - **Audibility rule — (my call):** a wallpaper shown on several outputs is **heard once**. For a scene, the audible
-  instance is the one on the primary output (today's `LweMonitors.IsPrimary`); the others run at gain −96 dB.
+  instance is the one on the primary output (today's `SceneMonitors.IsPrimary`); the others run at gain −96 dB.
   Distinct wallpapers on distinct outputs (the follow-up project) are all audible by default. Which ones should be
   heard is decided in that project.
 - **Auto-mute** = Signal("other audio") → gain contribution. **Pause when fullscreen** = Signal("fullscreen on X") →
@@ -286,7 +286,7 @@ Windows; this is the Linux equivalent.
   - live property setters `wp_project_property_set_*` and mouse input
   - media playback-state and album-art notifications
 - The scene worker hosts one project, renders into the exported buffer, runs the scene's audio, and obeys the same
-  Source controls and gain. The worker's per-output fps is a property; today's launch-only `LweMonitors` fps/primary
+  Source controls and gain. The worker's per-output fps is a property; today's launch-only `SceneMonitors` fps/primary
   limitation disappears.
 - Scene properties become live-settable from the UI later (a natural recipe; not required for parity).
 - **Today's scene machinery becomes obsolete**: per-monitor LWE processes, `--screenshot`/grim captures, the reveal-only
@@ -410,7 +410,7 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
 - **Keybind actions**: `toggle-mute`, `toggle-pause`, `stop`, `play`, `toggle-play`, `next`,
   `previous`, `random`, `volume-up`/`volume-down` (±5, persisted).
 - **Playback settings, all live**: Loop; NoAudio; Volume; Speed; per-item volume/speed overrides (effective =
-  override ?? global); VideoScale fill/fit; VideoFps cap; HwDec; DisableCache; demuxer max/back bytes; loudness
+  override ?? global); VideoScale fill/fit; VideoFpsCap cap; HwDec; DisableCache; demuxer max/back bytes; loudness
   normalisation and target LUFS; AutoMute (+ delays, threshold, MPRIS-only); user mute vs auto-mute semantics.
 - **Transitions**: effect list, duration and duration range, shuffle/sequential, per-playlist override vs global,
   enable/disable, and **`TransitionMethod` stays, with all three modes** (owner: some people prefer seeing the very
@@ -447,10 +447,10 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
   skip/advance.
 - **Images** (incl. imported images, zoom-to-fill) as sources.
 - **UI integration**: `/current` (path, position, playing), the in-app wallpaper preview synced to the live position
-  (`WallpaperBgAllTabs`), events to the UI over the existing WebSocket.
+  (`LiveWallpaperBehindAllTabs`), events to the UI over the existing WebSocket.
 - **Retired with evidence** (not ported):
-  - restart daemon / `RestartIntervalSeconds` / `RestartOnSwitchOnly` — after a soak test shows flat RSS and VRAM
-  - `TransitionLagOffsetMs`, `SceneTransitionDelayMs`, `LweSilent` (already dead)
+  - restart daemon / `RestartMpvpaperEverySeconds` / `RestartOnlyAtPlaylistChangeover` — after a soak test shows flat RSS and VRAM
+  - `FullLiveSyncOffsetMs`, `SceneTransitionDelayMs`, `LweSilent` (already dead)
 - **Compose matrix to verify**:
   - transition × {pure-timed, advance-on-end, wait-for-end, manual next/prev, random, restore, next pressed
     mid-transition}

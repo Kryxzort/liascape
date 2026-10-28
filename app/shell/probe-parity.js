@@ -23,13 +23,13 @@ app.whenReady().then(async () => {
   await js(`document.querySelector('.ctx-backdrop')?.click()`);
   // playlist settings popup
   await wait(200);
-  await js(`[...document.querySelectorAll('.strip-head .mini')].find(b=>b.title==='Settings')?.click()`);
+  await js(`[...document.querySelectorAll('.playlist-bar-head .mini')].find(b=>b.title==='Settings')?.click()`);
   await wait(300);
   r.plSettings = await js(`!!document.querySelector('.pl-settings')`);
   // collapse toggle
-  await js(`[...document.querySelectorAll('.strip-head .mini')].find(b=>/Collapse|Expand/.test(b.title))?.click()`);
+  await js(`[...document.querySelectorAll('.playlist-bar-head .mini')].find(b=>/Collapse|Expand/.test(b.title))?.click()`);
   await wait(300);
-  r.collapsedRowGone = await js(`!document.querySelector('.strip-row')`);
+  r.collapsedRowGone = await js(`!document.querySelector('.playlist-bar-row')`);
   console.log("PROBE_PARITY " + JSON.stringify(r));
   app.quit();
 });

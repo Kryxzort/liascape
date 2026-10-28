@@ -145,7 +145,7 @@ sized for the wrong quantity (effect duration instead of clip duration).
 
 #### 1.2a Why `advance-on-end` (same code path) didn't show this
 
-`advance-on-end` (`AdvanceOnVideoEnd=true`, `WaitForVideoEnd=false`, interval 8 s) arms the
+`advance-on-end` (`SwitchWhenVideoEnds=true`, `WaitForVideoEnd=false`, interval 8 s) arms the
 *same* liascape-player `DoVideoEndWait`/`SwitchAndWait(alignEnd:true)` path — there's no
 `liascape-player`-side branch on `WaitForVideoEnd` at all (`PlayerHelper.cs` ~line 1961). The
 difference is `PlayerHelper.cs`'s playlist tick (~line 1032): with `_waitingForVideoEnd &&
