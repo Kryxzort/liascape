@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change; `Hello.protocol` must equal it.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 /// Largest datagram either side sends or accepts.
 pub const MAX_MSG: usize = 64 * 1024;
 /// Most fds one datagram may carry (a 4-plane buffer + a fence, with room to spare).
@@ -34,6 +34,12 @@ pub enum ToWorker {
     /// `properties` = the scene's user properties (`project.json` `general.properties` name →
     /// value) applied right after the load, before the first frame — every live
     /// `SetProperty` is folded in here too, so a restarted worker comes back with them.
+    ///
+    /// Task 6 (audio): `paused` = play no audio (the scene's own pause, or a stepped clock);
+    /// `gain_db` / `no_audio` / `speed` = the stream's starting state — every live `Gain`,
+    /// `NoAudio` and `Speed` is folded in here too, so a restarted worker resumes at the same
+    /// level (faded in by its own 30 ms gate) and speed. `id` = the source id (the stream's
+    /// `node.name` is `lp-player-scene.<id>`).
     Start {
         path: String,
         assets_dir: Option<String>,
@@ -45,6 +51,14 @@ pub enum ToWorker {
         synthetic: bool,
         #[serde(default)]
         properties: serde_json::Map<String, serde_json::Value>,
+        #[serde(default)]
+        id: String,
+        #[serde(default = "silent_db")]
+        gain_db: f64,
+        #[serde(default)]
+        no_audio: bool,
+        #[serde(default = "unit_speed")]
+        speed: f64,
     },
     /// Render one frame at scene time `t` (seconds). `input` = 1024 u8 visualiser samples.
     /// Answered by a `Frame` carrying `seq` (the heartbeat: an unanswered one is a hang).
@@ -57,9 +71,14 @@ pub enum ToWorker {
     Release {
         slot: u8,
     },
+    /// The stream's effective gain (dB, the sum of the source's `gain.*` slots; ≤ −96 =
+    /// exact silence). The worker ramps to it linearly in amplitude across one buffer.
     Gain {
         db: f64,
     },
+    /// Play no audio (the scene's effective pause, or a stepped clock): nothing is pulled from
+    /// the scene — its sound doesn't advance — and silence is written (the compositor ramps
+    /// first; an audible stream still gets the worker's own 30 ms fade).
     Paused {
         paused: bool,
     },
@@ -68,6 +87,11 @@ pub enum ToWorker {
     },
     Route {
         audio: AudioRoute,
+    },
+    /// The scene clock's rate (Task 6): the audio is time-stretched to it, pitch kept
+    /// (bit-exact passthrough at exactly 1×).
+    Speed {
+        speed: f64,
     },
     /// The pointer over the scene, in the scene's **native pixels** (x right, y down from
     /// the image's top — what LWE's mouse callbacks hand `CScene`); `buttons` bit 0 left,
@@ -144,7 +168,14 @@ pub enum FromWorker {
     HasAudio {
         on: bool,
     },
+    /// Task 6: the scene's sound reaches its stream again after an arming change (a start
+    /// that plays, an un-pause, `no_audio` off, a route change) — sent from the first stream
+    /// callback after it that pulled the scene's samples.
     AudioFlowing,
+    /// Task 6: the scene's sound before the gain (after the worker's own fade gate), as 1 ms
+    /// max-channel RMS dBFS blocks (floor −96), `t0_ms` = the first block's time on
+    /// `CLOCK_MONOTONIC` (ms) — the dropout detector's reference for a scene. Batched (~50
+    /// blocks per message).
     Envelope {
         t0_ms: f64,
         dbfs_1ms: Vec<f32>,
@@ -164,6 +195,14 @@ pub enum FromWorker {
         level: String,
         line: String,
     },
+}
+
+fn silent_db() -> f64 {
+    crate::units::SILENT_DB
+}
+
+fn unit_speed() -> f64 {
+    1.0
 }
 
 /// Where a scene's audio goes.

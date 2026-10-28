@@ -493,6 +493,9 @@ pub struct Runtime {
     /// the paused-adjusted animation/transition clock (R75) and would disagree with the
     /// meter during a player-level pause.
     pub(crate) gain_history: GainHistory,
+    /// Phase 2 Task 6: each scene's own pre-gain envelope (its worker's `Envelope`) — a
+    /// scene's dropout reference (it has no file to decode). Same clock and bounds rules.
+    pub(crate) scene_envelopes: dropout::SceneEnvelopes,
     /// Recent transitions' audio windows (`transition.started`/`.done`), for the
     /// dropout probe's auto-trigger and its on-demand `probe dropout` verb.
     pub(crate) dropout_windows: PendingWindows,
@@ -600,11 +603,14 @@ impl Runtime {
     /// C1 / long-run bounds: the size of every per-source collection (`loop` probe).
     pub(crate) fn bounds(&self) -> Value {
         let (gh_tracks, gh_samples) = self.gain_history.stats();
+        let (se_tracks, se_samples) = self.scene_envelopes.stats();
         let (active, graves, ended, restore_onsets) = self.tr.bounds();
         json!({
             "graph_nodes": self.graph.node_count(),
             "gain_history_tracks": gh_tracks,
             "gain_history_samples": gh_samples,
+            "scene_envelope_tracks": se_tracks,
+            "scene_envelope_samples": se_samples,
             "anim_entries": self.anim.len(),
             "teardown_anim_entries": self.teardown_anim.len(),
             "setting_anim_entries": self.setting_anim.len(),
@@ -770,6 +776,22 @@ impl Runtime {
             json!({ "device": dev.unwrap_or_else(|| "auto".into()), "sources": ids.len(),
                     "onsets_held": held, "generation": route.1 }),
         );
+    }
+
+    /// Task 6: every scene's new envelope entries into [`dropout::SceneEnvelopes`] (dead
+    /// scenes linger for their post-roll analysis, then go).
+    fn record_scene_envelopes(&mut self) {
+        let Some(now) = log::mono_now() else { return };
+        let ids = self.host.scene_ids();
+        for id in &ids {
+            if let Some(sc) = self.host.scene_mut(id) {
+                let env = sc.take_envelope();
+                if !env.is_empty() {
+                    self.scene_envelopes.record(id, env, now);
+                }
+            }
+        }
+        self.scene_envelopes.retain_live(&ids, now);
     }
 
     /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
@@ -1196,6 +1218,7 @@ impl Runtime {
     pub(crate) fn update_sources(&mut self) {
         self.feed_visualisers();
         self.host.update(&self.gfx, &mut self.graph);
+        self.record_scene_envelopes();
         let changed = self.host.take_changed();
         self.redraw.mark_shown(&self.graph, &changed);
         for (id, ev) in self.host.events() {
@@ -3720,6 +3743,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         paused_at: None,
         pause_offset: Duration::ZERO,
         gain_history: GainHistory::new(),
+        scene_envelopes: dropout::SceneEnvelopes::new(),
         dropout_windows: PendingWindows::new(),
         dropout_due: Vec::new(),
         pause_gates: BTreeMap::new(),

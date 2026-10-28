@@ -44,6 +44,10 @@ fn start() -> ToWorker {
         max_size: [640, 360],
         synthetic: false,
         properties: Default::default(),
+        id: "stub".into(),
+        gain_db: -96.0,
+        no_audio: false,
+        speed: 1.0,
     }
 }
 

@@ -25,15 +25,23 @@
 //! seconds for a cold LWE build) the protocol thread answers `Ping`s itself, so a slow load is
 //! never read as a hang (bounded: `LP_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
 //!
-//! `--lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]` (feature `lwe`): a
-//! diagnostic outside the protocol — renders a real scene through LWE's core offscreen, writes
-//! two PNGs, prints one JSON line (`lwe.rs`).
+//! Task 6 adds a third, `lp-scene-audio` (`audio.rs`): the scene's sound as a PipeWire stream
+//! on the player bus — pulled from LWE (or the synthetic tone), time-stretched to the scene's
+//! speed (`stretch.rs`), gated and gained in dB. The protocol thread applies `Gain`, `Paused`,
+//! `NoAudio`, `Route` and `Speed` to it directly; a quit waits until the stream is silent.
+//!
+//! `--lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S]`
+//! (feature `lwe`): a diagnostic outside the protocol — renders a real scene through LWE's core
+//! offscreen, writes two PNGs, prints one JSON line (`lwe.rs`); `--audio-dump` also writes its
+//! sound and the time stretch's 0.5×/1.5× output as raw F32.
 
+mod audio;
 #[cfg(feature = "lwe")]
 mod lwe;
 #[cfg(feature = "lwe")]
 mod render;
 mod ring;
+mod stretch;
 mod synthetic;
 
 use std::io::Write;
@@ -271,6 +279,10 @@ const RING_SLOTS: u8 = 3;
 /// pings go to the (stuck) renderer, so the compositor's heartbeat sees a hang.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The longest a quit waits for an audible stream to fade out (its gate takes 30 ms; a stalled
+/// graph never holds the exit for longer).
+const QUIT_FADE_MAX: Duration = Duration::from_millis(200);
+
 /// What the protocol (reader) thread knows about the renderer: whether it is inside a load.
 struct LoadGate {
     t0: Instant,
@@ -319,7 +331,18 @@ type Inbox = mpsc::Receiver<(ToWorker, Vec<OwnedFd>)>;
 /// itself — so the compositor's heartbeat never reads a slow load as a hang, and nothing
 /// latches before the first real frame. A `Quit` or EOF during a load ends the process at
 /// once (`_exit`: no destructor may run under the half-built scene).
-fn reader(sock: OwnedFd, tx: mpsc::Sender<(ToWorker, Vec<OwnedFd>)>, gate: Arc<LoadGate>) {
+fn reader(
+    sock: OwnedFd,
+    tx: mpsc::Sender<(ToWorker, Vec<OwnedFd>)>,
+    gate: Arc<LoadGate>,
+    audio: Arc<audio::Control>,
+) {
+    // Task 6: the stream's controls apply here, the moment they arrive — never behind a
+    // frame being rendered or a load. A quit fades an audible stream out first.
+    let quit_now = |audio: &audio::Control| -> ! {
+        audio.quit(QUIT_FADE_MAX);
+        unsafe { libc::_exit(0) }
+    };
     loop {
         wait_readable(sock.as_raw_fd(), None);
         loop {
@@ -327,16 +350,18 @@ fn reader(sock: OwnedFd, tx: mpsc::Sender<(ToWorker, Vec<OwnedFd>)>, gate: Arc<L
                 Ok(Some((ToWorker::Ping { seq }, _))) if gate.covers_ping() => {
                     send(&sock, &FromWorker::Pong { seq })
                 }
-                Ok(Some((ToWorker::Quit, _))) if gate.loading() => unsafe { libc::_exit(0) },
+                Ok(Some((ToWorker::Quit, _))) if gate.loading() => quit_now(&audio),
+                Ok(Some((m, _))) if audio.apply(&m) => {}
                 Ok(Some(m)) => {
+                    audio.start(&m.0);
                     if tx.send(m).is_err() {
-                        unsafe { libc::_exit(0) }
+                        quit_now(&audio)
                     }
                 }
                 Ok(None) => break,
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     if gate.loading() || tx.send((ToWorker::Quit, Vec::new())).is_err() {
-                        unsafe { libc::_exit(0) }
+                        quit_now(&audio)
                     }
                     return;
                 }
@@ -358,6 +383,9 @@ struct Renderer {
     sock: OwnedFd,
     inbox: Inbox,
     gate: Arc<LoadGate>,
+    /// Task 6: the scene's audio stream (its thread starts at `Start`).
+    audio: Arc<audio::Control>,
+    audio_started: bool,
     gfx: Gfx,
     /// `sync: fdpoll` — wait on our own fence before `Frame`, send no fd.
     fdpoll: bool,
@@ -413,6 +441,7 @@ impl Renderer {
         });
         self.dead = true;
         self.ring = None;
+        self.audio.remove(); // stop pulling before the scene goes
         self.scene = None;
         self.pending = None;
     }
@@ -490,6 +519,9 @@ impl Renderer {
         };
         let (x, y, b) = self.pointer;
         scene.set_pointer(x, y, b);
+        if scene.has_audio {
+            self.audio.install(Box::new(scene.audio_puller()));
+        }
         self.scene = Some(SceneImpl::Lwe(scene));
         self.send(&ready);
     }
@@ -534,6 +566,7 @@ impl Renderer {
             has_audio: spec.has_audio,
             wants_audio_input: spec.pattern == Pattern::InputLevel,
         };
+        let spec_audio = (spec.has_audio, spec.tone_hz, spec.tone_dbfs);
         let mut scene = match synthetic::Synthetic::new(&self.gfx, spec) {
             Ok(s) => s,
             Err(e) => return self.fatal(e),
@@ -544,6 +577,11 @@ impl Renderer {
         }
         if let Err(e) = self.export(w, h) {
             return self.fatal(format!("export the frame ring: {e}"));
+        }
+        if spec_audio.0 {
+            // D7: the synthetic scene's sound is a tone (Task 6).
+            self.audio
+                .install(Box::new(audio::Tone::new(spec_audio.1, spec_audio.2)));
         }
         self.scene = Some(SceneImpl::Synthetic(scene));
         self.send(&ready);
@@ -605,6 +643,18 @@ impl Renderer {
                 properties,
                 ..
             } => {
+                if !self.audio_started {
+                    // The audio thread waits for a sound to play (its stream opens then).
+                    self.audio_started = true;
+                    match self.sock.try_clone() {
+                        Ok(s) => {
+                            if let Err(e) = audio::spawn(self.audio.clone(), s) {
+                                warn(&format!("start the audio thread: {e}"));
+                            }
+                        }
+                        Err(e) => warn(&format!("dup the socket for audio: {e}")),
+                    }
+                }
                 if self.ring.is_none() && !self.dead {
                     self.start(StartArgs {
                         path,
@@ -637,9 +687,15 @@ impl Renderer {
             ToWorker::SetProperty { name, value } if !self.dead => self.set_property(&name, &value),
             ToWorker::Ping { seq } => self.send(&FromWorker::Pong { seq }),
             ToWorker::Resize { max_size } if !self.dead => self.resize(max_size),
-            ToWorker::Quit => std::process::exit(0),
+            ToWorker::Quit => self.quit(),
             _ => {}
         }
+    }
+
+    /// Fade an audible stream out (≤ 30 ms, bounded), then exit.
+    fn quit(&self) -> ! {
+        self.audio.quit(QUIT_FADE_MAX);
+        std::process::exit(0)
     }
 
     /// Render the pending tick into a free slot and hand it over.
@@ -752,7 +808,7 @@ impl Renderer {
             match first {
                 Ok((m, fds)) => self.on_message(m, fds),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => std::process::exit(0),
+                Err(mpsc::RecvTimeoutError::Disconnected) => self.quit(),
             }
             while let Ok((m, fds)) = self.inbox.try_recv() {
                 self.on_message(m, fds);
@@ -802,6 +858,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         std::env::var("LP_SCENE_SYNC").as_deref() == Ok("fdpoll") || !gfx.has_native_fences();
     hello(&sock, &features, if fdpoll { "fdpoll" } else { "fence" });
     let gate = Arc::new(LoadGate::new());
+    let audio = Arc::new(audio::Control::default());
     let (tx, inbox) = mpsc::channel();
     let rsock = match sock.try_clone() {
         Ok(s) => s,
@@ -811,10 +868,10 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         }
     };
     {
-        let gate = gate.clone();
+        let (gate, audio) = (gate.clone(), audio.clone());
         if let Err(e) = std::thread::Builder::new()
             .name("lp-scene-proto".into())
-            .spawn(move || reader(rsock, tx, gate))
+            .spawn(move || reader(rsock, tx, gate, audio))
         {
             warn(&format!("start the protocol thread: {e}"));
             std::process::exit(1)
@@ -825,6 +882,8 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         sock,
         inbox,
         gate,
+        audio,
+        audio_started: false,
         gfx,
         fdpoll,
         ring: None,

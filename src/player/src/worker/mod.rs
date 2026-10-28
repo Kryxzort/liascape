@@ -336,6 +336,9 @@ impl WorkerHost {
             max_size: sm,
             audio: sa,
             properties: props,
+            gain_db: sg,
+            no_audio: sn,
+            speed: ss,
             ..
         } = &mut self.spec.start
         else {
@@ -350,6 +353,12 @@ impl WorkerHost {
             ToWorker::SetProperty { name, value } => {
                 props.insert(name.clone(), value.clone());
             }
+            // Task 6: the stream's state is recorded while connected too (like
+            // `SetProperty`): a restart starts at the latest gain (faded in by the worker's
+            // own gate), mute and speed.
+            ToWorker::Gain { db } => *sg = *db,
+            ToWorker::NoAudio { on } => *sn = *on,
+            ToWorker::Speed { speed } => *ss = *speed,
             _ => return false,
         }
         true
@@ -1107,6 +1116,10 @@ mod tests {
             max_size: [640, 360],
             synthetic: false,
             properties: Default::default(),
+            id: "src1".into(),
+            gain_db: crate::units::SILENT_DB,
+            no_audio: false,
+            speed: 1.0,
         };
         let mut spec = WorkerSpec::new("src1", "/nonexistent/lp-scene-worker", start);
         spec.crash_dir = std::env::temp_dir();
@@ -1160,7 +1173,20 @@ mod tests {
         )
         .unwrap();
         host.set_resume_position(3.25);
-        let e = host.send(&ToWorker::Gain { db: -6.0 }, &[]).unwrap_err();
+        // Task 6: the stream's level, mute and speed come back with a restart too.
+        host.send(&ToWorker::Gain { db: -6.0 }, &[]).unwrap();
+        host.send(&ToWorker::NoAudio { on: true }, &[]).unwrap();
+        host.send(&ToWorker::Speed { speed: 1.5 }, &[]).unwrap();
+        let e = host
+            .send(
+                &ToWorker::Pointer {
+                    x: 1.0,
+                    y: 1.0,
+                    buttons: 0,
+                },
+                &[],
+            )
+            .unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::NotConnected);
         match &host.spec().start {
             ToWorker::Start {
@@ -1169,8 +1195,14 @@ mod tests {
                 max_size,
                 audio,
                 properties,
+                gain_db,
+                no_audio,
+                speed,
                 ..
             } => {
+                assert_eq!(*gain_db, -6.0);
+                assert!(*no_audio);
+                assert_eq!(*speed, 1.5);
                 assert_eq!(*position, 3.25);
                 assert!(*paused);
                 assert_eq!(*max_size, [2560, 1440]);

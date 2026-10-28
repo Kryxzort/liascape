@@ -391,6 +391,7 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
         speed: 1.0,
         looped: false,
         duration: None,
+        envelope: None,
     };
     let mut schedule: GainSchedule = GainSchedule::new();
     schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]); // 0 dB: no suppression
@@ -479,6 +480,7 @@ fn expected_envelope_maps_window_time_to_file_time_at_speed() {
         speed: 2.0,
         looped: false,
         duration: None,
+        envelope: None,
     };
     let mut schedule: GainSchedule = GainSchedule::new();
     schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]);
@@ -520,6 +522,7 @@ fn expected_envelope_wraps_a_looping_source_across_its_duration() {
         speed: 1.0,
         looped: true,
         duration: Some(0.3),
+        envelope: None,
     };
     let mut schedule: GainSchedule = GainSchedule::new();
     schedule.insert("a".into(), vec![(Duration::ZERO, 0.0)]);

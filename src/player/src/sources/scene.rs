@@ -34,6 +34,7 @@ use crate::gfx::{Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
 use crate::graph::{ApiError, NodeKind};
 use crate::log::{self, Level};
+use crate::units::{GainSlot, Gains};
 use crate::worker::dmabuf::{ImportedRing, Latch};
 use crate::worker::proto::{AudioRoute, FromWorker, ToWorker};
 use crate::worker::{
@@ -53,6 +54,10 @@ pub const DEFAULT_SCENE_FPS: f64 = 30.0;
 
 /// `Position` events at most this often (like `MpvSource`).
 const POSITION_EVERY: Duration = Duration::from_millis(100);
+
+/// Envelope entries (1 ms each) kept for the runtime between drains (10 s: a caller that never
+/// drains — a harness — holds a bounded amount).
+const ENVELOPE_KEEP: usize = 10_000;
 
 /// One output showing a scene ([`SceneSource::set_demand`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +315,21 @@ pub struct SceneSource {
     pointer: Option<(f64, f64, u32)>,
     /// `PropertySet` outcomes: name → (ok, reason) (`workers` probe `properties`).
     prop_results: BTreeMap<String, (bool, Option<String>)>,
+    /// Task 6: the source's `gain.*` slots; their sum goes to the worker's stream as `Gain`.
+    gains: Gains,
+    /// The last `Gain` sent (a change resends; a restart's `Ready` resends).
+    gain_sent: Option<f64>,
+    no_audio: bool,
+    /// The worker said its stream carries the scene's sound again since `flow_armed`.
+    flow_seen: bool,
+    /// `AudioFlowing` messages from the worker (probe).
+    flows: u64,
+    /// The worker's envelope (pre-gain 1 ms dBFS) on the log clock, for the runtime's
+    /// dropout reference ([`take_envelope`](Self::take_envelope)).
+    envelope: VecDeque<(Duration, f32)>,
+    /// The newest envelope block (probe) and how many arrived.
+    envelope_last: Option<f32>,
+    envelope_blocks: u64,
 }
 
 fn epoll_new() -> Result<OwnedFd, String> {
@@ -410,6 +430,17 @@ impl SceneSource {
         };
         o.defer_spawn = true;
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
+        // Task 6: the stream starts at the node's gain and mute (the worker is spawned later,
+        // at the first demand, with them in its `Start`).
+        for (k, v) in node {
+            if let Some(slot) = k
+                .strip_prefix("gain.")
+                .and_then(|s| s.parse::<GainSlot>().ok())
+            {
+                src.gains.set(slot, super::num(v));
+            }
+        }
+        src.no_audio = matches!(get("no_audio"), Some(PropValue::Bool(true)));
         for (k, v) in node {
             if k.starts_with("gain.")
                 || props::schema_for(NodeKind::Source, k).is_some_and(|d| !d.readonly)
@@ -482,6 +513,14 @@ impl SceneSource {
             input_dbfs: None,
             pointer: None,
             prop_results: BTreeMap::new(),
+            gains: Gains::new(),
+            gain_sent: None,
+            no_audio: false,
+            flow_seen: false,
+            flows: 0,
+            envelope: VecDeque::new(),
+            envelope_last: None,
+            envelope_blocks: 0,
             opts,
         };
         if !src.opts.defer_spawn {
@@ -496,12 +535,22 @@ impl SceneSource {
             assets_dir: self.opts.assets_dir.clone(),
             steam_dir: self.opts.steam_dir.clone(),
             position: self.clock.now(Instant::now()),
-            paused: self.paused,
+            // The worker's `paused` = play no audio: a stepped clock never plays any.
+            paused: self.paused || self.opts.stepped,
             audio: self.opts.audio.clone(),
             max_size: self.opts.max_size,
             synthetic: self.opts.synthetic,
             properties: self.opts.properties.clone(),
+            id: self.opts.id.clone(),
+            gain_db: self.gains.effective_db(),
+            no_audio: self.no_audio,
+            speed: if self.opts.stepped {
+                1.0
+            } else {
+                self.clock.speed()
+            },
         };
+        self.gain_sent = Some(self.gains.effective_db());
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
         spec.env = self.opts.env.clone();
         spec.budget = self.opts.budget;
@@ -698,8 +747,19 @@ impl SceneSource {
                 if let (Some((x, y, buttons)), Some(h)) = (self.pointer, self.host.as_mut()) {
                     let _ = h.send(&ToWorker::Pointer { x, y, buttons }, &[]);
                 }
+                // …and the stream's gain (its `Start` carried the folded one; resent in case
+                // a push was refused while it wasn't connected).
+                self.gain_sent = None;
+                self.send_gain();
             }
             FromWorker::HasAudio { on } => self.has_audio = Some(on),
+            FromWorker::AudioFlowing => {
+                self.flows += 1;
+                if self.flow_armed {
+                    self.flow_seen = true;
+                }
+            }
+            FromWorker::Envelope { t0_ms, dbfs_1ms } => self.on_envelope(t0_ms, &dbfs_1ms),
             FromWorker::PropertySet { name, ok, reason } => {
                 log::event(
                     "scene",
@@ -869,6 +929,7 @@ impl SceneSource {
         self.broken = None;
         self.sync = None;
         self.flow_armed = !self.paused;
+        self.flow_seen = false;
         self.next_tick = None;
         if let Err(e) = self.spawn() {
             self.fail(e);
@@ -940,6 +1001,58 @@ impl SceneSource {
         if let Some(h) = self.host.as_mut() {
             let _ = h.send(&ToWorker::Route { audio: route }, &[]);
         }
+        // Invariant #8: the rebuilt stream reports when the scene's sound is on it again.
+        self.arm_flowing();
+    }
+
+    /// Wait for the worker's `AudioFlowing` before reporting `SourceEvent::AudioFlowing`
+    /// (an un-pause, `no_audio` off, a route change, a load that plays).
+    fn arm_flowing(&mut self) {
+        if !self.paused {
+            self.flow_armed = true;
+            self.flow_seen = false;
+        }
+    }
+
+    /// Send the effective gain (the sum of the `gain.*` slots) if it changed.
+    fn send_gain(&mut self) {
+        let db = self.gains.effective_db();
+        if self.gain_sent == Some(db) {
+            return;
+        }
+        self.gain_sent = Some(db);
+        if let Some(h) = self.host.as_mut() {
+            // Not connected: folded into the restart's `Start` (resent at its `Ready`).
+            let _ = h.send(&ToWorker::Gain { db }, &[]);
+        }
+    }
+
+    /// The worker's envelope batch: `t0_ms` on `CLOCK_MONOTONIC` → the log's `t_mono_ms`
+    /// clock (the meter's), one entry per 1 ms block.
+    fn on_envelope(&mut self, t0_ms: f64, dbfs: &[f32]) {
+        self.envelope_blocks += dbfs.len() as u64;
+        self.envelope_last = dbfs.last().copied().or(self.envelope_last);
+        let Some(log_now) = log::mono_now() else {
+            return; // no event log (a harness): nothing to align it with
+        };
+        let offset_ms = crate::audio::meter::mono_ns() as f64 / 1e6 - log_now.as_secs_f64() * 1e3;
+        let t0 = t0_ms - offset_ms;
+        for (i, db) in dbfs.iter().enumerate() {
+            let t = t0 + i as f64;
+            if t >= 0.0 {
+                self.envelope
+                    .push_back((Duration::from_secs_f64(t / 1e3), *db));
+            }
+        }
+        while self.envelope.len() > ENVELOPE_KEEP {
+            self.envelope.pop_front();
+        }
+    }
+
+    /// Envelope entries since the last call (`(t on the log clock, dBFS)`, oldest first):
+    /// the runtime keeps them as this scene's dropout reference.
+    pub fn take_envelope(&mut self) -> Vec<(Duration, f32)> {
+        self.envelope.drain(..).collect()
     }
 
     fn set_paused(&mut self, paused: bool) {
@@ -949,15 +1062,19 @@ impl SceneSource {
         let now = Instant::now();
         self.paused = paused;
         self.clock.set_running(self.clock_should_run(), now);
-        if let Some(h) = self.host.as_mut() {
+        // The worker's `paused` = play no audio (a stepped clock never plays any).
+        if let Some(h) = self.host.as_mut()
+            && !self.opts.stepped
+        {
             let _ = h.send(&ToWorker::Paused { paused }, &[]);
         }
         if paused {
             self.exact_pending = false;
             self.exact_seq = None;
+            self.flow_seen = false;
         } else {
             self.next_tick = Some(now);
-            self.flow_armed = true;
+            self.arm_flowing();
         }
     }
 
@@ -1102,6 +1219,17 @@ impl SceneSource {
     pub fn worker_info(&self) -> Value {
         let now = Instant::now();
         let st = self.stats();
+        let audio = json!({
+            "route": self.opts.audio,
+            "gain_db": self.gains.effective_db(),
+            "no_audio": self.no_audio,
+            "has_audio": self.has_audio,
+            "speed": self.clock.speed(),
+            "flow_armed": self.flow_armed,
+            "flows": self.flows,
+            "envelope_dbfs": self.envelope_last,
+            "envelope_blocks": self.envelope_blocks,
+        });
         let (state, restarts_60s, total_restarts) = match &self.host {
             Some(h) => {
                 let (w, t) = h.restarts(now);
@@ -1160,6 +1288,8 @@ impl SceneSource {
             "properties": self.prop_results.iter().map(|(k, (ok, reason))| {
                 (k.clone(), json!({"ok": ok, "reason": reason}))
             }).collect::<Map<String, Value>>(),
+            // Task 6
+            "audio": audio,
         })
     }
 }
@@ -1214,11 +1344,15 @@ impl Source for SceneSource {
         if self.flow_armed
             && self.loaded
             && !self.paused
-            && (self.opts.stepped || self.has_audio == Some(false))
+            && (self.opts.stepped
+                || self.has_audio == Some(false)
+                || self.no_audio
+                || self.flow_seen)
         {
-            // Nothing to hear (or stepped: never real audio) — nothing to wait for. A scene
-            // with audio reports it from its stream (Task 6).
+            // Nothing to hear (stepped: never real audio; no sound; muted) — nothing to wait
+            // for; else the worker said the scene's sound is on its stream (Task 6).
             self.flow_armed = false;
+            self.flow_seen = false;
             self.events.push(SourceEvent::AudioFlowing);
         }
         if self.loaded
@@ -1277,8 +1411,34 @@ impl Source for SceneSource {
                     }
                 }
             }
-            // Stepped: the runtime's step advances by `ms × speed` itself.
-            "speed" if !self.opts.stepped => self.clock.set_speed(super::num(v), now),
+            // Stepped: the runtime's step advances by `ms × speed` itself (and plays no
+            // audio). Else the clock re-rates, and the worker time-stretches the sound to it,
+            // pitch kept (owner decision; Task 6).
+            "speed" if !self.opts.stepped => {
+                let sp = super::num(v);
+                self.clock.set_speed(sp, now);
+                if let Some(h) = self.host.as_mut() {
+                    let _ = h.send(&ToWorker::Speed { speed: sp }, &[]);
+                }
+            }
+            // Task 6: the effective dB on every slot change (the 1 kHz `push_gain` path too).
+            p if p.starts_with("gain.") => {
+                if let Ok(slot) = p["gain.".len()..].parse::<GainSlot>() {
+                    self.gains.set(slot, super::num(v));
+                    self.send_gain();
+                }
+            }
+            "no_audio" => {
+                if b != self.no_audio {
+                    self.no_audio = b;
+                    if let Some(h) = self.host.as_mut() {
+                        let _ = h.send(&ToWorker::NoAudio { on: b }, &[]);
+                    }
+                    if !b {
+                        self.arm_flowing();
+                    }
+                }
+            }
             // Task 7: the scene's user properties, live (`wp_project_property_set_*`).
             "scene_props" => {
                 if let PropValue::Map(m) = v {
@@ -1286,8 +1446,8 @@ impl Source for SceneSource {
                 }
             }
             // Everything else (loop, hwdec, fps_cap, cache, demuxer_*, af, audio_delay,
-            // preview; gain.* and no_audio until Task 6) is stored: a global `set` never
-            // fails on a scene, and a scene has nothing for them to do yet.
+            // preview) is stored: a global `set` never fails on a scene, and a scene has
+            // nothing for them to do.
             _ => {}
         }
         self.props.insert(prop.to_string(), v.clone());
@@ -1295,8 +1455,11 @@ impl Source for SceneSource {
     }
 
     fn read(&self, prop: &str) -> Option<PropValue> {
-        if prop.starts_with("gain.") {
-            return Some(self.props.get(prop).cloned().unwrap_or(PropValue::F64(0.0)));
+        if let Some(slot) = prop
+            .strip_prefix("gain.")
+            .and_then(|s| s.parse::<GainSlot>().ok())
+        {
+            return Some(PropValue::F64(self.gains.get(slot)));
         }
         match prop {
             "kind" => Some(PropValue::Str("scene".into())),

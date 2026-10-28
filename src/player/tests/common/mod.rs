@@ -3,6 +3,7 @@
 //! than duplicating it).
 
 pub mod harness;
+pub mod pw;
 
 use glow::HasContext;
 use lp_player::gfx::{Gfx, Tex};
