@@ -56,6 +56,21 @@ task text where they differ:
   slider, bool, combo, text, …), show them in the item settings modal, apply live (`wp_project_property_set_*`
   through the worker protocol), persist per item in the library index (`LibMeta`), re-applied at every open. Matrix
   cells for set → live → persisted → survives a switch/restart. **+L task** (backend + worker + UI).
+  **Done (2026-10-28)** — the worker side was Task 7's `scene_props`; this added the rest
+  (`.claude/rules/library.md` § "Scene properties", `player-adapter.md` § Scenes, `web-backend.md`, `web-ui.md`):
+  `Helpers/SceneProperties.cs` (parse — order/index, types, HTML/`ui_*` labels —, coerce/encode, a JS-subset
+  `condition` evaluator), `LibMeta.SceneProps` (WE encoding, field-level, == default dropped), `GET/POST
+  /library/scene-props` + `/preview` (the drag twin), `scene_props` as a per-source value of the R61 resolver (every
+  open, Fresh passes incl. R81, live per item; a reset sends the default — LWE has no reset), the modal's "Scene
+  properties" (`ScenePropsEditor.tsx`), legacy `--set-property` at LWE's launch. **Deviations:** legacy is
+  launch-only (LWE has no live property IPC) — the modal says so; `scenetexture`/`file`/`directory` (a file picker)
+  and `usershortcut` (Windows launchers) are listed, not editable; a refused property (`scene.property` ok:false)
+  only logs; a multi-selection hides the section (each scene has its own set); the synthetic renderer gained a `color`
+  property (WE's 0–1 colour → `rgb`) so hermetic tests see the editor's encoding on a pixel (the one player change).
+  Tests: self-test `ScenePropertyAssertions` (a fixture of the corpus's odd cases + all 96 real scenes: 2066
+  properties, 868 conditions — RED first: 9 failures, the order rule, a default below its slider's min, conditions
+  with `a. value` and `ds+media.value`), adapter IT § scene properties (RED on the base backend: 15 failing, the rest
+  175 pass), matrix `sceneProp:set|switch|restart|reset`.
 - **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
 - **GPU budget = a setting, default auto-throttle**: on missed compositor frames attributable to a scene, lower that
   scene's fps stepwise, restore when it recovers (logged; `probe`); the setting turns it off (fixed fps).
@@ -1038,6 +1053,7 @@ build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items 
 
 ## Deferred (not Phase 2)
 
-Scene user properties live from the UI (`wp_project_property_set_*`, spec §6.1 "later"); `g_Daytime` (spike §4.2,
+~~Scene user properties live from the UI (`wp_project_property_set_*`, spec §6.1 "later")~~ (pulled into Phase 2 by
+the owner, done 2026-10-28 — see "Decided, round 2"); `g_Daytime` (spike §4.2,
 always 0); web wallpapers (Phase 4); scene-compatibility patches from the corpus (Phase 6); auto-mute as a player
 Signal (Phase 3 — the worker streams already carry the bus identity it will exclude).

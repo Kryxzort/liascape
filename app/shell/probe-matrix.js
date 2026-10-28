@@ -2186,6 +2186,93 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// a scene's user properties (the item modal's "Scene properties"): s1's project.json declares `color` (the synthetic
+// renderer's colour, WE-encoded — red by default), `clock` (bool) and `bars` (shown while clock is on). Oracle: s1's own
+// picture (a pixel of its source), its source's scene_props, the worker's `properties` answer, the index, the modal.
+const SP_GREEN = "0 255 0", SP_RED = "255 0 0";
+async function scPixel(p) {
+  const id = srcIdsOf(await ctl.call("state"), p)[0];
+  if (!id) return null;
+  const f = path.join(OUT, `mx-sp-${process.pid}.png`);
+  try { await ctl.call("capture", { target: id, path: f }); } catch { return null; }
+  return [...cp.execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-i", f, "-vf", "crop=1:1:100:100", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])].join(" ");
+}
+const waitPixel = (p, want, ms = 6000) => waitFor(async () => (await scPixel(p)) === want, ms, 150);
+const liveSp = (st, p) => { const id = srcIdsOf(st, p)[0]; return id ? st.graph[id].scene_props : undefined; };
+const spColor = (sp) => (Array.isArray(sp?.color) ? sp.color.map((x) => Math.round(x)) : sp?.color);
+const spIndex = () => readScIndex()[SC_KEY(SC[0])]?.sceneProps ?? null;
+const openSpModal = `await m.cardMenu("s1", "Settings (volume / speed)"); for (let i = 0; i < 50 && !document.querySelector("[data-scene-prop=color]"); i++) await m.sleep(100);`;
+const spSet = (name, value) => post("/library/scene-props", { path: SC[0], name, value });
+// set in the modal → live on the playing scene (same worker) → persisted; the bool hides its dependant at once
+C["sceneProp:set"] = { states: ["scene"], async run(c) {
+    await ui(`${openSpModal} m.setValue(document.querySelector('[data-scene-prop=color] input[type=color]'), "#00ff00", "color input");`);
+    c.green = await waitPixel(SC[0], SP_GREEN);
+    c.barsBefore = await ui(`return !!document.querySelector('[data-scene-prop=bars]');`);
+    await ui(`m.setCheck(document.querySelector('[data-scene-prop=clock] input[type=checkbox]'), false, "clock");`);
+    c.barsHidden = await waitFor(() => ui(`return !document.querySelector('[data-scene-prop=bars]');`), 4000, 100);
+    c.workerOk = await waitFor(async () => (await workersProbe()).find((w) => w.path === SC[0])?.properties?.color?.ok === true, 4000, 100);
+    await sleep(400); await ui(`m.closeModal();`);
+  }, check(c) {
+    const v = [];
+    if (!c.green) v.push("s1 didn't turn green live");
+    if (!c.workerOk) v.push("s1's worker never answered the colour (workers.properties.color.ok)");
+    if (!c.barsBefore || !c.barsHidden) v.push(`"Bars" (condition clock.value): shown before ${c.barsBefore}, hidden after clock off ${c.barsHidden}`);
+    const ix = spIndex();
+    if (ix?.color !== "0 1 0" || ix?.clock !== false || Object.keys(ix).length !== 2) v.push(`s1's index sceneProps ${JSON.stringify(ix)}, expected {"color":"0 1 0","clock":false}`);
+    const sp = liveSp(c.after.st, SC[0]);
+    if (JSON.stringify(spColor(sp)) !== "[0,1,0]" || sp?.clock !== false) v.push(`s1's source scene_props ${JSON.stringify(sp)}`);
+    return [...v, ...samePid(c, SC[0])];
+  } };
+// saved before s1 opens → applied at open; switched away (s2) and back (a new source): still applied
+C["sceneProp:switch"] = { states: ["scene"], switch: true,
+  async pre() { await spSet("color", "0 1 0"); },
+  async run(c) {
+    c.atOpen = await waitPixel(SC[0], SP_GREEN);
+    await ui(`m.click(m.card("s2")?.querySelector(".thumb-wrap"), "card s2");`);
+    c.away = await waitSettled(12000, SC[1]);
+    await ui(`m.click(m.card("s1")?.querySelector(".thumb-wrap"), "card s1");`);
+    c.back = await waitSettled(12000, SC[0]);
+    c.green = await waitPixel(SC[0], SP_GREEN);
+  }, check(c) {
+    const v = [...sceneShown(c, SC[0])];
+    if (!c.atOpen) v.push("a saved colour wasn't applied when s1 opened");
+    if (!c.away || !c.back) v.push(`the switches didn't settle (away ${c.away}, back ${c.back})`);
+    if (!c.green) v.push("after switching away and back, s1 isn't green (not re-applied at open)");
+    if (JSON.stringify(spColor(liveSp(c.after.st, SC[0]))) !== "[0,1,0]") v.push(`s1's new source scene_props ${JSON.stringify(liveSp(c.after.st, SC[0]))}`);
+    return v;
+  } };
+// a player crash (its compositor killed → supervised restart from the snapshot, then R81's re-apply): still applied
+C["sceneProp:restart"] = { states: ["scene"],
+  async pre() { await spSet("color", "0 1 0"); },
+  async run(c) {
+    c.pid0 = (await ctl.call("hello")).pid;
+    process.kill(c.pid0, "SIGKILL");
+    c.up = await waitFor(async () => { const h = await ctl.call("hello").catch(() => null); return !!h && h.pid !== c.pid0; }, 10000, 150);
+    c.green = await waitPixel(SC[0], SP_GREEN, 10000);
+  }, check(c) {
+    const v = [...sceneShown(c, SC[0])];
+    if (!c.up) v.push(`no new compositor after SIGKILL of ${c.pid0}`);
+    if (!c.green) v.push("after the player restart, s1 isn't green");
+    if (JSON.stringify(spColor(liveSp(c.after.st, SC[0]))) !== "[0,1,0]") v.push(`s1's restored source scene_props ${JSON.stringify(liveSp(c.after.st, SC[0]))}`);
+    return v;
+  } };
+// the modal's "Default": live back to the scene's own value (sent explicitly — LWE has no reset), dropped from the index
+C["sceneProp:reset"] = { states: ["scene"],
+  async pre() { await spSet("color", "0 1 0"); },
+  async run(c) {
+    c.atOpen = await waitPixel(SC[0], SP_GREEN);
+    await ui(`${openSpModal} m.click(document.querySelector('[data-scene-prop=color] button'), "color Default");`);
+    c.red = await waitPixel(SC[0], SP_RED);
+    await sleep(300); await ui(`m.closeModal();`);
+  }, check(c) {
+    const v = [];
+    if (!c.atOpen) v.push("the saved colour wasn't applied at open");
+    if (!c.red) v.push("Default didn't bring s1 back to red live");
+    if (spIndex() !== null) v.push(`s1's index sceneProps ${JSON.stringify(spIndex())}, expected none`);
+    if (JSON.stringify(spColor(liveSp(c.after.st, SC[0]))) !== "[1,0,0]") v.push(`s1's source scene_props ${JSON.stringify(liveSp(c.after.st, SC[0]))} (the default must be sent)`);
+    return [...v, ...samePid(c, SC[0])];
+  } };
+
 // Cells whose expectation waits on an owner decision: reported as KNOWN (with the reason), not FAIL.
 const KNOWN = [];
 

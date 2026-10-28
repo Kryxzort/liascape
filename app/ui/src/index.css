@@ -348,6 +348,16 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 /* library Settings modal: image-led + narrower so the thumbnail (often square) fills the width
    instead of floating centered with empty side gaps. Image shows at its OWN aspect, uncropped. */
 .modal.lib-settings { width: min(460px, 92vw); }
+/* the item modal's "Scene properties" (components/ScenePropsEditor.tsx) */
+.scene-props { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--surface0); }
+.sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.sp-title { font-size: 14px; font-weight: 600; }
+.sp-note { margin-bottom: 6px; }
+.sp-group { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin: 12px 0 2px; }
+.sp-text { margin: 6px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.sp-num { min-width: 3ch; text-align: right; }
+.sp-color { width: 38px; height: 24px; padding: 0; border: 1px solid var(--surface1); border-radius: 6px; background: none; cursor: pointer; }
+.sp-textin { width: 160px; }
 .modal.morph-panel { position: relative; z-index: 1; } /* above its .morph-ghost (components/useMorph.ts) */
 /* COOL: settings-modal morph (components/morph.ts). The media box flies (transform from its top-left +
    a clip-path re-crop, both set by WAAPI) and a panel-coloured ghost grows card → panel; meanwhile the

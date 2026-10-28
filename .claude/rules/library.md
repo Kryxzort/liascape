@@ -2,6 +2,7 @@
 paths:
   - "src/livepaper/Helpers/LibraryService.cs"
   - "src/livepaper/Helpers/LibraryStore.cs"
+  - "src/livepaper/Helpers/SceneProperties.cs"
   - "src/livepaper/Helpers/DownloadHelper.cs"
   - "src/livepaper/Helpers/ImportService.cs"
   - "src/livepaper/Models/LibraryItem.cs"
@@ -33,7 +34,7 @@ library/
 One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local, `<name>` for web/imported). Saved atomically (`AtomicFile`: temp + rename) and read with a retried parse — written in place, a read mid-save got an EMPTY index (matrix `race:indexSaveLoad`). One `LibMeta` per item:
 
 ```
-SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, Crashed, Whitelist,
+SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, Crashed, Whitelist, SceneProps?,
 Resolution, AgeRating, YoutubeUrl, PageUrl, AuthorName, Description,
 FileSizeBytes?, Subscriptions?, Favorites?, Views?, Tags[]
 ```
@@ -52,6 +53,35 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 - `LibraryService.ReadVolumeOverride/ReadSpeedOverride/IsWhitelisted/HasCrashed` → `LibraryStore.GetMeta(path)?.X`. **`PlayerHelper`'s private `ReadVolumeOverride/ReadSpeedOverride` delegate to these** — so *every* playback path (initial launch, playlist advance, transitions, scene launch, option baking) reads the same index.
 - `SaveVolumeOverride/SaveSpeedOverride` **drop the key when it equals the global** (volume `== Settings.Volume`, speed within 1e-6) → "use global."
 - **Live apply** (no restart): `POST /library/volume|speed` → save → `PlayerHelper.ApplyOverrideLive(path)` (mpv `set_property` for video volume/speed; `pactl` for live LWE **scene volume**; scenes are 1× so speed is a no-op). Timed-playlist advances carry the effective volume/speed as **`loadfile` per-file options** (atomic — avoids the post-load reset race). A global settings change applies the *effective* value (`override ?? global`) so it never clobbers an active override.
+
+## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
+
+A scene's `project.json` → `general.properties` (colours, sliders, toggles, combos, text) — the item settings modal's
+"Scene properties" (web-ui.md). **Overrides live per item in `LibMeta.SceneProps`** (`name → value`, absent = every
+property at the scene's own default), in **WE's own encoding**: bool `true/false`, slider a number, colour `"r g b"`
+(0–1 floats), combo the option's key (a string; a numeric option value as LWE keys it — `std::to_string(int)`), text
+a string. `LibraryService.SaveSceneProp(path, name, value?)` — field-level under the index lock; a value equal to the
+default (colours by component) **drops** the key, `value` null = back to the default, `name` null = all; validated
+by `SceneProperties.Coerce` (slider clamped to min..max and rounded when `fraction: false`; colour from `"r g b"`
+(0–1, or 0–255 when any part > 1), `[r,g,b]` or `#rrggbb`; combo must be an option; text ≤ 4096). Trash/undo carry
+it with the rest of the `LibMeta`.
+- **Parsing** (`Parse`, cached per file by mtime+size; anything malformed is skipped, never thrown): display order =
+  `order`, else `index`, else file order. Types (survey of the 96 SFW corpus scenes, 2066 properties): **editable**
+  `bool`, `slider` (min/max/step/fraction/precision; a default outside its own range widens it — one corpus slider has
+  0.4 with min 0.5), `color`, `combo` (options; no options → dropped), `textinput`; **labels** `text` (also an untyped
+  property and `"Text"` — HTML: tags stripped, entities decoded, never rendered as HTML — no remote images/links; an
+  image-only one is dropped) and `group`; **not editable** (listed with a reason) `scenetexture` / `file` /
+  `directory` (need a file picker — skipped for now) and `usershortcut` (a Windows app launcher), any unknown type.
+  Labels: `ui_*` localisation keys → English (`ui_browse_properties_scheme_color` → "Scheme color", others humanised).
+- **Visibility** (`Visible(condition, effective values)`): WE's `condition` is JS — evaluated as a subset: `<name>.value`
+  (whitespace around `.` allowed, as in JS — corpus), literals, `! && || == != === !== < <= > >= + -`, parentheses, a
+  stray `x.value=true` (a JS assignment → its value); JS loose equality (`"2" == 2`, `true == 1`). Anything it can't
+  evaluate (a syntax error, a bare identifier — a ReferenceError in JS) → **shown**. Every one of the corpus's 868
+  conditions parses (self-test).
+- **Playback.** lp-player: `SceneProperties.PlayerMap` (overrides that name an editable property, encoded for the
+  player — a colour as `[r,g,b]`) is the source's `scene_props` at every open and live (player-adapter.md § Scenes).
+  Legacy: `--set-property name=value` per override at LWE's launch (`CliArgs`) — **launch-only** (LWE has no live
+  property IPC), so a change shows at the scene's next start; the modal says so.
 
 ## Animated preview
 

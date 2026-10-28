@@ -135,6 +135,15 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes
   under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` lp-player it shows (a scene's speed scales its
   animation and its pitch-kept sound — matrix `itemSpd:scene`; it was hidden for every engine).
+- **"Scene properties" in the item modal (`components/ScenePropsEditor.tsx`, `key={path}`; a scene item, not a
+  multi-selection).** `api.sceneProps(path)` after the open-morph (380 ms, like the duration row); one row per
+  visible property (`data-scene-prop=<name>`): bool → checkbox, slider → range (+ value, `precision`), colour →
+  `<input type=color>` (sent as `#rrggbb`), combo → the app's `Select`, textinput → text field; `group` → a heading,
+  `text` → plain text (never HTML), not-editable types → greyed with their reason; a "Default" button on each
+  overridden row + "Reset all". Same contract as volume/speed: slider/colour → local value at once + throttled
+  `previewSceneProp` (~90 ms) + debounced persist (250 ms, per property); toggle/combo/reset persist at once; text
+  persists debounced; the POST's answer (overridden flags, condition visibility) replaces the list; unmount flushes
+  pending persists. Under legacy the backend's `note` shows ("applied when the scene starts").
 - **Global Volume/Speed sliders (Settings page) drag-preview live too** (`useGlobalPreview` in
   `views/Settings.tsx`): each `onChange` → `setSetting` (the store's debounced 250 ms `/settings` save
   persists) + a throttled (~90 ms, trailing) `api.preview({volume|speed, global: true})` — the backend
@@ -214,7 +223,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   > 1536 → the rotation advances, not marked crashed, the status bar's text), `playlist:sceneInterval` (a 4 s interval
   advances off a scene), `restore:scene` (the backend restarted on the same port — `LP_PORT` — the scene stays, same
   worker; the probe kills only the backend the stack started and records its replacement in `backend2.pid` for the
-  cleanup). `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
+  cleanup); **`sceneProp:set|switch|restart|reset`** (s1's project.json declares `color` — the synthetic renderer's
+  WE-encoded colour, red by default —, `clock`, and `bars` shown while clock is on; oracle: a pixel of s1's own
+  source, its `scene_props`, `workers.properties`, the index): set in the modal → green live on the same worker,
+  persisted, a toggle hides its dependant; saved before s1 opens → green at open, after s2 and back (a new source) too;
+  a compositor SIGKILL → the restored scene green; "Default" → red live (the default sent), dropped from the index.
+  `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
   worker / `scene/` / `worker/` / `vram.rs` / their probes → the scene family. Fuzz excludes them (their fixtures).
 
 ## Settings page under lp-player (Phase 2 scenes)

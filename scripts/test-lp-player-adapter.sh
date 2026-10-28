@@ -595,6 +595,82 @@ post /playlist/play "{\"paths\":[\"$A\",\"$S1\"],\"settings\":{\"Order\":0}}" >/
 waitfor 15000 switched_to "$S1" "$ns" end && waitfor $WAIT scene_ready "$S1" && ok "an aligned V→S at the video's end ($sc): $(method_of "$sc"), the scene shows" || bad "aligned V→S: corr ${sc:-none}, cur $(basename "$(cur path)") kind $(cur kind)"
 stop_now
 
+echo "-- scene properties (project.json general.properties → the item's index → scene_props, live)"
+# scene 1 gets WE-style user properties: `color` (the synthetic renderer's WE-encoded colour — red by default),
+# a bool other properties depend on (`condition`), a slider, a combo, a text input, a label and a usershortcut
+cat > "$S1/project.json" <<'EOF'
+{"type":"scene","title":"900000001","file":"scene.json","preview":"preview.png","general":{"properties":{
+ "color":{"order":0,"text":"ui_browse_properties_scheme_color","type":"color","value":"1 0 0"},
+ "hdr":{"order":1,"text":"<hr><h4>Clock</h4>"},
+ "clock":{"order":2,"text":"Show clock","type":"bool","value":true},
+ "style":{"order":3,"text":"Style","type":"combo","value":"1","options":[{"label":"Digital","value":"1"},{"label":"Analog","value":"2"}],"condition":"clock.value"},
+ "bars":{"order":4,"text":"Bars","type":"slider","value":32,"min":16,"max":64,"fraction":false,"condition":"clock.value && style.value == 2"},
+ "name":{"order":5,"text":"Name","type":"textinput","value":"YOU"},
+ "dock":{"order":6,"text":"#1","type":"usershortcut","value":""}}}}
+EOF
+sp_get() { curl -sf -m 5 "$U/library/scene-props?path=$S1"; }
+sp_set() { curl -s -m 10 -o "$T/sp.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$1" "$U/library/scene-props"; }
+sp_prev() { curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$1" "$U/library/scene-props/preview"; }
+live_sp() { ctl get "{\"path\":\"$1.scene_props\"}" | jq -c '.value'; }
+idx_sp()  { jq -c '."900000001".sceneProps // null' "$IDX"; }
+# one pixel of a source's own picture (rgb), from a capture
+px() { ctl capture "{\"target\":\"$1\",\"path\":\"$T/px.png\"}" >/dev/null 2>&1 && ffmpeg -nostdin -loglevel error -i "$T/px.png" -vf "crop=1:1:100:100" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //;s/ $//'; }
+px_is() { [ "$(px "$1")" = "$2" ]; }
+SPJ=$(sp_get)
+echo "$SPJ" | jq -e '[.props[].name] == ["color","hdr","clock","style","bars","name","dock"]
+  and (.props[0] | .type == "color" and .label == "Scheme color" and .value == "1 0 0" and .overridden == false and .editable)
+  and (.props[1] | .type == "text" and .label == "Clock" and (.editable | not))
+  and (.props[3] | .visible and (.options | length) == 2) and (.props[4] | .visible | not)
+  and (.props[6] | (.editable | not) and .unsupported != null) and .live == true' >/dev/null \
+  && ok "GET /library/scene-props: 7 properties in order, types/labels/defaults, condition visibility, usershortcut not editable" || bad "GET /library/scene-props → $(echo "$SPJ" | jq -c '[.props[] | {name, type, label, value, visible, editable}]')"
+post /apply "{\"path\":\"$S1\"}" >/dev/null
+waitfor $WAIT scene_ready "$S1" || bad "/apply scene 1 → $(basename "$(cur path)")"
+SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
+waitfor $WAIT px_is "$SID" "255 0 0" && [ "$(live_sp "$SID")" = "{}" ] && ok "at defaults: red, scene_props {}" || bad "defaults: pixel $(px "$SID"), scene_props $(live_sp "$SID")"
+code=$(sp_set "{\"path\":\"$S1\",\"name\":\"color\",\"value\":\"0 1 0\"}")
+[ "$code" = 200 ] && jq -e '.props[0] | .value == "0 1 0" and .overridden' "$T/sp.json" >/dev/null || bad "set color → HTTP $code $(head -c 300 "$T/sp.json")"
+waitfor $WAIT px_is "$SID" "0 255 0" && [ "$(wpid "$SID")" = "$WP" ] \
+  && ok "set color \"0 1 0\" → live: green on the same worker ($WP), scene_props $(live_sp "$SID")" || bad "set color: pixel $(px "$SID"), scene_props $(live_sp "$SID"), pid $WP → $(wpid "$SID")"
+wprop_ok() { ctl probe '{"name":"workers"}' | jq -e --arg id "$1" --arg n "$2" '.workers[] | select(.id==$id) | .properties[$n].ok == true' >/dev/null; }
+waitfor $WAIT wprop_ok "$SID" color && ok "…the worker took it (workers.properties.color.ok)" || bad "workers.properties: $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | .properties')"
+[ "$(idx_sp)" = '{"color":"0 1 0"}' ] && ok "persisted in the item's index: $(idx_sp)" || bad "index sceneProps $(idx_sp)"
+code=$(sp_set "{\"path\":\"$S1\",\"name\":\"clock\",\"value\":false}")
+[ "$code" = 200 ] && jq -e '(.props[] | select(.name=="style") | .visible | not) and (.props[] | select(.name=="clock") | .value == false)' "$T/sp.json" >/dev/null \
+  && ok "clock false → its dependants hidden (condition)" || bad "clock false → HTTP $code $(jq -c '[.props[] | {name, value, visible}]' "$T/sp.json" 2>/dev/null)"
+sp_is() { [ "$(live_sp "$1" | jq -c '{clock, color: (.color | map(round))}' 2>/dev/null)" = "$2" ]; }
+waitfor $WAIT sp_is "$SID" '{"clock":false,"color":[0,1,0]}' \
+  && ok "the source's scene_props carries both: $(live_sp "$SID")" || bad "scene_props $(live_sp "$SID")"
+code=$(sp_set "{\"path\":\"$S1\",\"name\":\"bars\",\"value\":999}")
+[ "$code" = 200 ] && jq -e '.props[] | select(.name=="bars") | .value == 64' "$T/sp.json" >/dev/null && ok "slider 999 → clamped to its max 64" || bad "bars 999 → HTTP $code"
+c1=$(sp_set "{\"path\":\"$S1\",\"name\":\"style\",\"value\":\"9\"}"); c2=$(sp_set "{\"path\":\"$S1\",\"name\":\"dock\",\"value\":\"x\"}"); c3=$(sp_set "{\"path\":\"$S1\",\"name\":\"nope\",\"value\":1}")
+[ "$c1$c2$c3" = 400400400 ] && ok "refused with 400: a combo value not among its options, a usershortcut, an unknown name" || bad "refusals: $c1 $c2 $c3"
+before=$(idx_sp)
+c=$(sp_prev "{\"path\":\"$S1\",\"name\":\"color\",\"value\":\"0 0 1\"}")
+[ "$c" = 200 ] && waitfor $WAIT px_is "$SID" "0 0 255" && [ "$(idx_sp)" = "$before" ] && ok "preview color blue → live, nothing persisted" || bad "preview: HTTP $c, pixel $(px "$SID"), index $(idx_sp)"
+sp_set "{\"path\":\"$S1\",\"name\":\"color\",\"value\":\"0 1 0\"}" >/dev/null   # the drag's persist (same value as saved)
+waitfor $WAIT px_is "$SID" "0 255 0" && ok "the persist after a drag puts the saved value back (green)" || bad "after preview + persist: pixel $(px "$SID")"
+# re-applied at every open: switch away and back (a new source), then a player restart
+post /apply "{\"path\":\"$S2\"}" >/dev/null; waitfor $WAIT scene_ready "$S2" || bad "→ scene 2: $(basename "$(cur path)")"
+post /apply "{\"path\":\"$S1\"}" >/dev/null; waitfor $WAIT scene_ready "$S1" || bad "→ scene 1 again: $(basename "$(cur path)")"
+SID2=$(srcIdForPath "$S1")
+[ "$SID2" != "$SID" ] && waitfor $WAIT px_is "$SID2" "0 255 0" && [ "$(live_sp "$SID2" | jq -c '{clock, color: (.color | map(round))}')" = '{"clock":false,"color":[0,1,0]}' ] \
+  && ok "switched away and back → a new source ($SID → $SID2) opens with them: green, $(live_sp "$SID2")" || bad "after switch back: $SID → $SID2, pixel $(px "$SID2"), scene_props $(live_sp "$SID2")"
+oldcp=$CP; kill -9 "$CP"
+waitfor 8000 eval 'CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$oldcp" ]' || bad "no restarted compositor after kill -9 $oldcp"
+waitfor $WAIT scene_ready "$S1" || bad "after the restart: cur $(basename "$(cur path)")"
+SID3=$(srcIdForPath "$S1")
+waitfor $WAIT px_is "$SID3" "0 255 0" && [ "$(live_sp "$SID3" | jq -c '.color | map(round)')" = '[0,1,0]' ] \
+  && ok "player restart (compositor $oldcp → $CP) → the restored scene has them: green, $(live_sp "$SID3")" || bad "after restart: $SID3 pixel $(px "$SID3"), scene_props $(live_sp "$SID3")"
+WP3=$(wpid "$SID3")
+code=$(sp_set "{\"path\":\"$S1\",\"name\":\"color\",\"reset\":true}")
+[ "$code" = 200 ] && jq -e '.props[0] | .value == "1 0 0" and (.overridden | not)' "$T/sp.json" >/dev/null && [ "$(idx_sp | jq -c 'has("color")')" = false ] \
+  && waitfor $WAIT px_is "$SID3" "255 0 0" && [ "$(wpid "$SID3")" = "$WP3" ] \
+  && ok "reset color → its default live (red, the default sent: $(live_sp "$SID3" | jq -c .color)), dropped from the index, same worker" || bad "reset color: HTTP $code, pixel $(px "$SID3"), index $(idx_sp), scene_props $(live_sp "$SID3")"
+code=$(sp_set "{\"path\":\"$S1\",\"reset\":true}")
+[ "$code" = 200 ] && [ "$(idx_sp)" = null ] && waitfor $WAIT eval '[ "$(live_sp "$SID3" | jq -c .clock)" = true ]' \
+  && ok "reset all → no sceneProps in the index, clock back to true live" || bad "reset all: HTTP $code, index $(idx_sp), scene_props $(live_sp "$SID3")"
+stop_now
+
 # a WebSocket client of the backend's /events (one text message per line) → $1; its pid in $WSP
 ws_listen() {
 python3 - "${U##*:}" > "$1" 2>&1 <<'PY' & WSP=$!

@@ -3311,9 +3311,12 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   `[r,g,b(,a)]` 0–1 → `…color…`, string → `…value…` (LWE parses by type: text, combo key,
   `"r g b"`); answers `PropertySet {name, ok, reason}` → event `scene.property` + probe
   `workers.properties`. A removed key keeps its value until the scene is opened again (LWE
-  has no reset). Synthetic: `rgb`/`rgb2`. The UI/backend editor (reading `project.json`
-  `general.properties`, persisting per item in `LibMeta`) is a later task: it sets
-  `set <src>.scene_props {…}`.
+  has no reset — the backend sends the default explicitly). Synthetic: `rgb`/`rgb2` (`[r,g,b]`
+  0–255) and `color` (= `rgb` in WE's colour encoding, `[r,g,b]` 0–1 — what the backend's editor
+  sends for a `color` property; unit `colour_props_take_bytes_or_we_unit_floats`). The UI/backend
+  editor (done: library.md § "Scene properties", player-adapter.md § Scenes) reads `project.json`
+  `general.properties`, persists per item in `LibMeta` and sets the whole map as `scene_props` at
+  create and live (`set <src>.scene_props {…}`, the resolver's per-source value).
 - **Probe `workers`** adds `assets_dir`, `steam_dir`, `wants_audio_input`, `input_dbfs`,
   `pointer`, `properties`.
 - **Measured** (debug worker, release LWE core, RTX 3070 Ti, stepped 30 fps of scene time,
@@ -3341,8 +3344,8 @@ below.) Task 9: nothing
 scene-specific in the pointer/visualiser paths (both sides of a transition are fed). Task 11:
 `ScenesAvailable` = `hello.capabilities` `scene`, else `lp-player scene-check` (exit + JSON
 `reason`); set `player.scene_assets` from a setting if one is added; scenes `create` may carry
-`scene_props`. Editor: read `general.properties`, persist per item, send `set
-<src>.scene_props` (whole map), subscribe `scene.property` for refusals.
+`scene_props`. Editor (done, above): reads `general.properties`, persists per item, sends `set
+<src>.scene_props` (whole map); `scene.property` refusals are not subscribed (they log).
 
 ### Scene audio (Task 6)
 

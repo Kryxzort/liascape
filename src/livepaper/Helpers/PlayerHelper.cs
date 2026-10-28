@@ -1307,7 +1307,7 @@ public static class PlayerHelper
                 var oldPids = GetLweProcPids();
 
                 int targetVol = ReadVolumeOverride(path) ?? settings.Volume;
-                var newPids = SpawnLweProcesses(lweArg, settings, targetVol);
+                var newPids = SpawnLweProcesses(lweArg, settings, targetVol, scenePath: path);
                 OnWallpaperChanged?.Invoke(path);
 
                 var capturedLwePids = oldLwePids;
@@ -3088,6 +3088,18 @@ public static class PlayerHelper
         if (!IsLweRunning) SetSpeed(LibraryService.ReadSpeedOverride(path) ?? s.Speed);
     }
 
+    // A scene item's user properties changed (`/library/scene-props`, saved first): lp-player → its live
+    // source(s) get the new `scene_props` (the worker sets each changed one on the running scene — live, same
+    // worker); `preview` = a drag's unsaved values (`/library/scene-props/preview`). Legacy: nothing live —
+    // LWE takes properties only at launch (`--set-property`, SpawnLweProcesses), so a change shows at the
+    // scene's next start (the one genuine launch-only case there, like LweMonitors).
+    public static void ApplyScenePropsLive(string path, IReadOnlyDictionary<string, System.Text.Json.JsonElement>? preview = null)
+    {
+        if (!PlayerEngine.IsLpPlayer || !IsScenePath(path)) return;
+        if (preview != null) LpPlayerMedia.PreviewSceneProps(path, preview);
+        else LpPlayerMedia.ApplySceneProps(path);
+    }
+
     public static void SetLoop(bool loop) =>
         TrySendCommand("set", "loop-file", loop ? "inf" : "no");
 
@@ -3689,10 +3701,12 @@ public static class PlayerHelper
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache"),
         "livepaper", $"lpscene-{output.Replace('/', '_').Replace(' ', '_')}.png");
 
-    private static string[] SpawnLweProcesses(string workshopId, AppSettings settings, int audioVolumePercent = 100)
+    private static string[] SpawnLweProcesses(string workshopId, AppSettings settings, int audioVolumePercent = 100, string? scenePath = null)
     {
         var pids = new List<string>();
         bool anyPrimary = settings.LweMonitors.Any(m => m.IsPrimary);
+        // the item's scene-property overrides (launch-only under legacy: LWE has no live property IPC)
+        var propArgs = scenePath == null ? [] : SceneProperties.CliArgs(scenePath, LibraryService.ReadSceneProps(scenePath));
 
         foreach (var monitor in settings.LweMonitors)
         {
@@ -3737,6 +3751,7 @@ public static class PlayerHelper
             psi.ArgumentList.Add(SceneShotPath(monitor.Name));
             psi.ArgumentList.Add("--screenshot-delay");
             psi.ArgumentList.Add("30");
+            foreach (var a in propArgs) psi.ArgumentList.Add(a);
             psi.ArgumentList.Add(workshopId);
 
             var proc = Process.Start(psi);

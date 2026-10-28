@@ -99,6 +99,15 @@ export interface TransitionEffect {
   author: string; license: string; uniforms: TransitionUniform[] | null;
   reveal?: boolean; // plays live (B keeps playing) in Reveal method; else frozen fallback there
 }
+// a scene's user property (SceneProperties.Describe): value/default in WE's encoding — bool, number,
+// colour "r g b" (0–1), combo key, text
+export interface SceneProp {
+  name: string; type: string; label: string; order: number; condition: string | null; visible: boolean;
+  editable: boolean; unsupported: string | null; default: unknown; value: unknown; overridden: boolean;
+  min: number | null; max: number | null; step: number | null; fraction: boolean; precision: number | null;
+  options: { label: string; value: string }[] | null;
+}
+export interface ScenePropsResp { path: string; engine: string; live: boolean; note: string | null; props: SceneProp[] }
 export interface CustomPlaylist { videoPaths: string[]; settings: PlaylistSettings; name: string | null; }
 export interface Theme {
   name: string; bgBase: string; bgMantle: string; bgCrust: string;
@@ -134,6 +143,12 @@ export const api = {
   // global sliders (every live wallpaper without its own override for that field — override ?? global)
   preview: (body: { volume?: number; speed?: number; paths?: string[]; global?: boolean }) => jpost("/preview", body),
   libraryWhitelist: (path: string, value: boolean) => jpost("/library/whitelist", { path, value }),
+  // API: a scene's user properties (project.json general.properties) — list, set (saved per item + live),
+  // reset (name: one, none: all), and the drag twin (live, nothing saved)
+  sceneProps: (path: string) => jget<ScenePropsResp>(`/library/scene-props?path=${encodeURIComponent(path)}`),
+  setSceneProp: (path: string, name: string, value: unknown) => jpost<ScenePropsResp>("/library/scene-props", { path, name, value }),
+  resetSceneProp: (path: string, name?: string) => jpost<ScenePropsResp>("/library/scene-props", { path, name, reset: true }),
+  previewSceneProp: (path: string, name: string, value: unknown) => jpost("/library/scene-props/preview", { path, name, value }),
   librarySync: () => jpost<{ added: string[] }>("/library/sync"),
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),
   undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),

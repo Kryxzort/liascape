@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { type MorphSource } from "./morph";
 import { useMorph } from "./useMorph";
+import { ScenePropsEditor } from "./ScenePropsEditor";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -182,6 +183,8 @@ export function LibrarySettingsModal({
               <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} onChange={(e) => setSpeed(+e.target.value)} />
                 {spdOv && <button className="mini ico" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
           )}
+          {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
+          {item.isScene && !multi && <ScenePropsEditor key={p} path={p} />}
           <div className="modal-actions">
             {item.youtubeUrl && (
               <button className="btn ghost ico" onClick={() => setYtPlaying((p) => !p)}><PlayCircle size={15} /> {ytPlaying ? "Hide trailer" : "Play YouTube"}</button>

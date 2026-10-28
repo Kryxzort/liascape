@@ -870,6 +870,7 @@ public static class LpPlayerMedia
         public double? ItemSpeed { get; init; }
         public double? GlobalGainDb { get; init; }
         public double? GlobalSpeed { get; init; }
+        public IReadOnlyDictionary<string, JsonElement>? ItemSceneProps { get; init; } // a scene-property drag (WE values)
         public IReadOnlySet<string>? Props { get; init; }         // null = every resolved prop (+ fit)
         public bool Fresh { get; init; }                          // diff against a new `state` read
         public bool Force { get; init; }                          // send even when the source already runs it
@@ -879,6 +880,21 @@ public static class LpPlayerMedia
     private static readonly IReadOnlySet<string> SpeedOnly = new HashSet<string> { "speed" };
     private static readonly IReadOnlySet<string> PerItem = new HashSet<string> { "gain.user", "speed" };
     private static readonly IReadOnlySet<string> MuteOnly = new HashSet<string> { "gain.mute" };
+    private static readonly IReadOnlySet<string> ScenePropsOnly = new HashSet<string> { "scene_props" };
+
+    // A scene item's user properties (its index overrides, `SceneProperties.PlayerMap`) onto its source(s) —
+    // on screen, either side of an effect, a pending B. `/library/scene-props` after the save. Coalescible per
+    // item: it re-reads the index when it runs. A property whose override went (a reset) gets its default sent
+    // (LWE has no reset; `WithResets`).
+    public static void ApplySceneProps(string path) =>
+        QueueSet("sceneprops:" + FullPath(path), () =>
+            ResolveNow(new Req { Items = [path], OnlyItems = true, Props = ScenePropsOnly }));
+
+    // `/library/scene-props/preview` (the modal's drag twin, nothing persisted): `values` over the saved overrides,
+    // on that item's source(s) only. Coalescible per item + property set.
+    public static void PreviewSceneProps(string path, IReadOnlyDictionary<string, JsonElement> values) =>
+        QueueSet("preview:scene_props:" + FullPath(path) + ":" + string.Join(",", values.Keys.Order(StringComparer.Ordinal)), () =>
+            ResolveNow(new Req { Items = [path], OnlyItems = true, Props = ScenePropsOnly, ItemSceneProps = values }));
 
     // Every setting the resolver owns, live, from the settings as they are now — /settings, the volume key
     // on the global, normalization, a loudness measurement landing.
@@ -959,7 +975,29 @@ public static class LpPlayerMedia
         if (Want("demuxer_max_mib")) d["demuxer_max_mib"] = (double)Math.Max(0, settings().DemuxerMaxBytes);
         if (Want("demuxer_back_mib")) d["demuxer_back_mib"] = (double)Math.Max(0, settings().DemuxerMaxBackBytes);
         if (Want("gain.mute")) d["gain.mute"] = muted ? MpvPropertyMap.SilentDb : 0.0;
+        // a scene's user properties: its overrides (+ a drag's transient values) — defaults aren't sent, LWE
+        // loads them itself; `WithResets` adds the default of one the source still runs from an earlier override
+        if (Want("scene_props") && PlayerHelper.IsScenePath(path))
+            d["scene_props"] = JsonSerializer.SerializeToElement(
+                SceneProperties.PlayerMap(path, Meta()?.SceneProps, item ? r!.ItemSceneProps : null));
         return d;
+    }
+
+    // `want` (an item's scene_props map) + the default of every property `have` (what the source runs) still
+    // carries and `want` doesn't: the player keeps a removed key's value until the next open, so a reset sends
+    // the default explicitly. A name no editable property of the scene has any more is dropped.
+    private static object WithResets(string path, JsonElement want, object? have)
+    {
+        if (have is not JsonElement { ValueKind: JsonValueKind.Object } h) return want;
+        Dictionary<string, object?>? merged = null;
+        foreach (var p in h.EnumerateObject())
+        {
+            if (want.TryGetProperty(p.Name, out _)) continue;
+            if (SceneProperties.PlayerDefault(path, p.Name) is not { } def) continue;
+            merged ??= want.EnumerateObject().ToDictionary(x => x.Name, x => (object?)x.Value);
+            merged[p.Name] = def;
+        }
+        return merged == null ? want : JsonSerializer.SerializeToElement(new SortedDictionary<string, object?>(merged, StringComparer.Ordinal));
     }
 
     private enum Sent { Ok, Gone, Failed, Stalled }
@@ -989,8 +1027,9 @@ public static class LpPlayerMedia
                 foreach (var id in ids)
                 {
                     if (!live.Values.TryGetValue(id, out var have)) live.Values[id] = have = [];
-                    foreach (var (prop, v) in want)
+                    foreach (var (prop, v0) in want)
                     {
+                        var v = prop == "scene_props" && v0 is JsonElement sp ? WithResets(path, sp, have.GetValueOrDefault(prop)) : v0;
                         if (!r.Force && have.TryGetValue(prop, out var h) && Same(h, v)) continue;
                         var sent = Send(client, id, prop, v);
                         if (sent == Sent.Ok) have[prop] = v;
@@ -1030,10 +1069,32 @@ public static class LpPlayerMedia
 
     private static bool Same(object? have, object want) => (have, want) switch
     {
+        (JsonElement a, JsonElement b) => JsonSame(a, b),
         (double a, double b) => Math.Abs(a - b) <= 1e-4,
         (null, _) => false,
         _ => have.Equals(want),
     };
+
+    // Two JSON values alike (a Map prop: what the player reports vs what we'd send) — numbers within 1e-6
+    // (the player's f64s round-trip, a C# double prints differently from serde's), objects by key set.
+    internal static bool JsonSame(JsonElement a, JsonElement b)
+    {
+        if (a.ValueKind == JsonValueKind.Number && b.ValueKind == JsonValueKind.Number) return Math.Abs(a.GetDouble() - b.GetDouble()) <= 1e-6;
+        if (a.ValueKind != b.ValueKind) return false;
+        switch (a.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var ap = a.EnumerateObject().ToList();
+                if (ap.Count != b.EnumerateObject().Count()) return false;
+                foreach (var p in ap) if (!b.TryGetProperty(p.Name, out var bv) || !JsonSame(p.Value, bv)) return false;
+                return true;
+            case JsonValueKind.Array:
+                if (a.GetArrayLength() != b.GetArrayLength()) return false;
+                return a.EnumerateArray().Zip(b.EnumerateArray()).All(z => JsonSame(z.First, z.Second));
+            case JsonValueKind.String: return a.GetString() == b.GetString();
+            default: return true; // true/false/null: same kind = same value
+        }
+    }
 
     // A property OUTSIDE the resolver: a layer prop → `lay:*:main`; mpv's `pause` → the player-level
     // pause (M7, R75 — never a node's own `paused`); anything else (`loop`, a decode/buffer literal no path
@@ -1312,6 +1373,7 @@ public static class LpPlayerMedia
                 JsonValueKind.String => p.Value.GetString(),
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
+                JsonValueKind.Object => p.Value.Clone(), // a Map prop (`scene_props`), diffed by JsonSame
                 _ => null,
             };
         }
