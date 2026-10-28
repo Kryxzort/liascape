@@ -35,3 +35,9 @@ Read this when the owner asks "anything I should know". Append during unattended
   (a wrong-typed JSON field no longer aborts the process, case-insensitive asset lookup fallback, an effect that can't
   compile is left out instead of blacking out its object). Still not ok: 3 3D scenes (LWE has no 3D) + 1 still image by
   design. The live player picks it up on its next upgrade (release rebuilt).
+- Pushed the fps-cap fix (`6e06b53`): an fps cap never reaches a still image any more (mpv's `fps` filter swallowed
+  the image's single frame). Found meanwhile: a race where re-opening the same scene right after a stop can seed it
+  with the previous loudness measurement (loses a few seconds of measurement, intermittent IT check) — in TODO, after
+  the rename.
+- Running: **Task 14 battery on your real monitors** (it stops the dev backend while it runs and starts it again at
+  the end; your wallpaper is not re-applied) and the **Liascape rename** (merged only after the battery).
