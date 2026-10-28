@@ -4,7 +4,9 @@
 //! (`worker::proto`), `P` the compositor's pid.
 //!
 //! First thing: `PR_SET_PDEATHSIG(SIGKILL)`, then `getppid() == P` (the parent may have died
-//! before the prctl) — a compositor killed outright never leaves a worker behind.
+//! before the prctl) — a compositor killed outright never leaves a worker behind. Then a soft
+//! `RLIMIT_CORE` of 1 (`skip_core_handler`: a crashing scene never reaches systemd-coredump /
+//! a desktop crash popup; `LP_SCENE_WORKER_COREDUMP=1` opts out).
 //!
 //! `--stub` (tests): no GPU, no scene — answers `Hello`/`Ping`/`Tick`, logs each `Start`'s
 //! position, scripted by `LP_SCENE_WORKER_TEST` (comma-separated): `crash_after_ms:N` (prints
@@ -133,6 +135,7 @@ fn main() {
         // signal the compositor relies on.
         libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
     }
+    skip_core_handler();
     let sock = unsafe { OwnedFd::from_raw_fd(fd) };
     let knobs = Knobs::parse(&std::env::var("LP_SCENE_WORKER_TEST").unwrap_or_default());
     if stub {
@@ -155,6 +158,30 @@ fn hello(sock: &OwnedFd, features: &[&str], sync: &str) {
             sync: sync.into(),
         },
     );
+}
+
+/// A scene that crashes LWE is an expected, handled event (the host restarts it, then marks it
+/// broken with a crash record + log tail) — not a desktop crash alert. Soft `RLIMIT_CORE` 1
+/// (never above the hard limit) makes the kernel skip a piped `core_pattern`: no
+/// systemd-coredump, no DrKonqi notification per crash (Task 13's corpus: 16 of them for 4
+/// broken scenes). `LP_SCENE_WORKER_COREDUMP=1` keeps the inherited limit (debugging LWE).
+fn skip_core_handler() {
+    if std::env::var("LP_SCENE_WORKER_COREDUMP").is_ok_and(|v| v == "1") {
+        return;
+    }
+    unsafe {
+        let mut cur = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if libc::getrlimit(libc::RLIMIT_CORE, &mut cur) == 0 {
+            let one = libc::rlimit {
+                rlim_cur: 1.min(cur.rlim_max),
+                rlim_max: cur.rlim_max,
+            };
+            libc::setrlimit(libc::RLIMIT_CORE, &one);
+        }
+    }
 }
 
 /// `abort()` (SIGABRT, no core: `RLIMIT_CORE` 1 skips a piped `core_pattern` — no

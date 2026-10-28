@@ -5820,6 +5820,72 @@ fn scene_capability_state_and_workers_probe() {
     assert_eq!(src["step_status"], json!("Done"));
 }
 
+/// The soft `RLIMIT_CORE` of process `pid` (`/proc/<pid>/limits`; "unlimited" = u64::MAX).
+fn core_limit_of(pid: u64) -> u64 {
+    let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).unwrap();
+    let line = limits
+        .lines()
+        .find(|l| l.starts_with("Max core file size"))
+        .unwrap_or_else(|| panic!("no core line: {limits}"));
+    let soft = line["Max core file size".len()..].split_whitespace().next().unwrap();
+    if soft == "unlimited" {
+        u64::MAX
+    } else {
+        soft.parse().unwrap()
+    }
+}
+
+/// Task 13 (the corpus: 4 broken LWE scenes = 16 real crashes, each one through
+/// systemd-coredump and a desktop crash notification): a scene worker runs with a soft
+/// `RLIMIT_CORE` of 1 — the kernel then skips a piped `core_pattern` — unless
+/// `LP_SCENE_WORKER_COREDUMP=1` keeps the inherited limit for debugging. A crash is already
+/// recorded (crash record + log tail); it's an expected, handled event, not a desktop alert.
+#[test]
+fn scene_worker_crashes_skip_the_core_handler() {
+    let Some(mut srv) = scene_serve(&[]) else {
+        return;
+    };
+    let mut ours = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    unsafe { libc::getrlimit(libc::RLIMIT_CORE, &mut ours) };
+    let worker_pid = |srv: &Serve| -> u64 {
+        let mut c = srv.client();
+        let id = create_scene(&mut c, "api-core", &synth(Pattern::Solid), json!({}));
+        show_all(&mut c, &id);
+        c.step(16);
+        worker_of(&mut c, &id)["pid"].as_u64().expect("a worker pid")
+    };
+    let pid = worker_pid(&srv);
+    let expect = 1.min(ours.rlim_max);
+    assert_eq!(
+        core_limit_of(pid),
+        expect,
+        "worker {pid}: soft core limit (ours: {} / {})",
+        ours.rlim_cur,
+        ours.rlim_max
+    );
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_env(
+        new_root(),
+        &[],
+        &[
+            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LP_SCENE_WORKER_COREDUMP", Path::new("1")),
+        ],
+        serial,
+    );
+    let pid = worker_pid(&srv);
+    let inherited = if ours.rlim_cur == libc::RLIM_INFINITY {
+        u64::MAX
+    } else {
+        ours.rlim_cur
+    };
+    assert_eq!(core_limit_of(pid), inherited, "opted out: inherited");
+}
+
 /// R75 for scenes: `player.paused` freezes `time_pos` and the picture (no latch), the
 /// node's own `paused` untouched, `effective_paused` in the probe; resuming continues.
 #[test]

@@ -3844,3 +3844,11 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
   re-applying the same item needs a new source (a `transition`; a same-path `set` is a no-op), as
   whitelisting already does; a scene can also break from repeated GPU context losses (the record's
   `reason` starts "GL context lost") — it is marked crashed like any other break.
+- **No core handler (Task 13).** The worker sets its own soft `RLIMIT_CORE` to 1 right after the
+  PDEATHSIG check (`skip_core_handler`, never above the hard limit): the kernel then skips a piped
+  `core_pattern`, so a scene that crashes LWE never reaches systemd-coredump or pops a desktop crash
+  notification (the corpus' first run: 16 of them for its 4 broken scenes — 4 crashes each). The
+  crash record + log tail are the diagnostics. `LP_SCENE_WORKER_COREDUMP=1` (in the compositor's
+  environment, inherited) keeps the inherited limit, for debugging LWE with a core. Test
+  `tests/api.rs::scene_worker_crashes_skip_the_core_handler` (`/proc/<worker>/limits`: 1, and the
+  inherited limit with the opt-out; RED before: unlimited, inherited from the test).
