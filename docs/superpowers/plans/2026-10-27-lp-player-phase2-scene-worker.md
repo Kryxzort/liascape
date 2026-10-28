@@ -70,7 +70,11 @@ task text where they differ:
   Tests: self-test `ScenePropertyAssertions` (a fixture of the corpus's odd cases + all 96 real scenes: 2066
   properties, 868 conditions — RED first: 9 failures, the order rule, a default below its slider's min, conditions
   with `a. value` and `ds+media.value`), adapter IT § scene properties (RED on the base backend: 15 failing, the rest
-  175 pass), matrix `sceneProp:set|switch|restart|reset`.
+  175 pass; GREEN 189/0), matrix `sceneProp:set|switch|restart|reset` (RED on the base backend + UI: 2 fail + 2
+  error; GREEN 4/4). Full matrix (`--changed lp-player`, every cell — central files changed, `--jobs 2`, 33 min, load
+  5–9 with other agents' runs): 748 pass / 1 fail / 2 error / 29 skip — `playlist × stripVol:other`,
+  `globalDragVol`, `globalDragSpd` (a Settings slider "not found" / an override not saved in time), each passing 2/2
+  alone (load). `test-settings-merge.sh` 53/0, `--lp-player-selftest` PASS.
 - **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
 - **GPU budget = a setting, default auto-throttle**: on missed compositor frames attributable to a scene, lower that
   scene's fps stepwise, restore when it recovers (logged; `probe`); the setting turns it off (fixed fps).
