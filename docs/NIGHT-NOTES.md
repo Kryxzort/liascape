@@ -41,3 +41,16 @@ Read this when the owner asks "anything I should know". Append during unattended
   the rename.
 - Running: **Task 14 battery on your real monitors** (it stops the dev backend while it runs and starts it again at
   the end; your wallpaper is not re-applied) and the **Liascape rename** (merged only after the battery).
+- **Liascape rename is built** (7 commits, not merged yet — it lands right after the battery so the two don't
+  collide). One `liascape` command: no argument = the app, `liascape next|previous|toggle-mute|toggle-pause|toggle-play|
+  restore|random|kill|volume up|volume down`, `liascape ctl …` = the player. Settings keys now match their UI labels
+  (e.g. `VideoFps` → `VideoFpsCap`, `AdvanceOnVideoEnd` → `SwitchWhenVideoEnds`, `LweMonitors` → `SceneMonitors`).
+  Checks: crate 498/498 in both render modes, adapter IT 264/266 (the 2 = the known loudness reseed race), settings
+  merge 72/72, UI matrix 780 pass / 29 skip / 0 fail, `nix build .#liascape` ok. A one-off migration script copies
+  your config/library to `~/.config/liascape` etc. (never touches the old dirs) — tested on a copy of your data: 315
+  library items, 2 scene monitors, the 219-item playlist all came through.
+- **Your Stop hook (`~/.local/bin/livepaper-post-hook.sh`) kills every Electron whose args contain `/app/shell`**
+  — including the test matrix's headless windows from the agents' worktrees (it was the cause of tonight's mystery
+  matrix hangs). It fires whenever `livepaper-watch` is inactive and the source changed. Worth narrowing it to your
+  installed app's path, or skipping it while a test runs. After the rename it also needs the new names
+  (`liascape-watch.service`, `~/.cache/liascape`, `liascape`, the backend now runs as `liascape-backend serve`).
