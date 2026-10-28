@@ -1,0 +1,6074 @@
+{
+ "generated": "2026-10-28 13:07 IST",
+ "run_started": "2026-10-28 12:46 IST",
+ "env": {
+  "commit": "7344e7b+dirty",
+  "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
+  "scene_check": {
+   "assets_dir": "/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
+   "features": [
+    "stub",
+    "synthetic",
+    "lwe"
+   ],
+   "ok": true,
+   "reason": null,
+   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/livepaper-pro/.claude/worktrees/agent-aa0acc641b76b8d8e/src/player/target/release/lp-scene-worker"
+  },
+  "player_version": "0.1.0",
+  "lwe_rev": "c5c2caddff06964611a7ae08e6406df3c3f3bcd9"
+ },
+ "summary": {
+  "scenes": 96,
+  "counts": {
+   "ok": 86,
+   "static": 1,
+   "blank": 1,
+   "load_failed": 4,
+   "renderer_failed": 0,
+   "crashed": 0,
+   "broken": 4,
+   "timeout": 0
+  },
+  "run_s": 481,
+  "ready_ms_median": 593.55,
+  "ready_ms_max": 7388.8,
+  "rss_median_mib": 447.3,
+  "gpu_ms_p50_median": 0.9497600197792053,
+  "vram_median_mib": 449.0,
+  "slowest_ready": [
+   "2883756643",
+   "2921510865",
+   "3042492564",
+   "3243449890",
+   "3516174947"
+  ],
+  "biggest_rss": [
+   "2921510865",
+   "2890767643",
+   "2883756643",
+   "3556794116",
+   "2325974975"
+  ],
+  "biggest_gpu": [
+   "3489263099",
+   "2921510865",
+   "3042865984",
+   "3419466417",
+   "3184155462"
+  ],
+  "not_ok": [
+   "1884904087",
+   "2047150134",
+   "2189783622",
+   "2783122117",
+   "3233141951",
+   "3276522107",
+   "3326873240",
+   "3354740764",
+   "3477054430",
+   "3509243656"
+  ],
+  "throttled": []
+ },
+ "scenes": [
+  {
+   "id": "1155728109",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1265
+   ],
+   "export": [
+    1920,
+    1265
+   ],
+   "ready_ms": 305.5,
+   "wall_ready_ms": 459,
+   "rss_hwm_mib": 300.0,
+   "vram_mib": 114,
+   "gpu_ms_p50": 0.10649599879980089,
+   "gpu_ms_p95": 0.11161600053310394,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.75,
+   "changed_pct_1_to_2_3": 0.607,
+   "capture_1s": {
+    "luma_mean": 130.98,
+    "luma_stddev": 57.01,
+    "top_colour_share": 0.0391,
+    "size": [
+     1920,
+     1265
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 131.02,
+    "luma_stddev": 57.05,
+    "top_colour_share": 0.0391,
+    "size": [
+     1920,
+     1265
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 131.04,
+    "luma_stddev": 57.07,
+    "top_colour_share": 0.0391,
+    "size": [
+     1920,
+     1265
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1160682576",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 240.8,
+   "wall_ready_ms": 402,
+   "rss_hwm_mib": 453.3,
+   "vram_mib": 226,
+   "gpu_ms_p50": 0.29286399483680725,
+   "gpu_ms_p95": 0.3031040132045746,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 51.909,
+   "changed_pct_1_to_2_3": 52.394,
+   "capture_1s": {
+    "luma_mean": 38.39,
+    "luma_stddev": 36.53,
+    "top_colour_share": 0.0182,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 38.28,
+    "luma_stddev": 36.67,
+    "top_colour_share": 0.0182,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 38.17,
+    "luma_stddev": 36.37,
+    "top_colour_share": 0.0182,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1174926427",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 170.9,
+   "wall_ready_ms": 319,
+   "rss_hwm_mib": 289.2,
+   "vram_mib": 110,
+   "gpu_ms_p50": 0.08601599931716919,
+   "gpu_ms_p95": 0.08908800035715103,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.16,
+   "changed_pct_1_to_2_3": 0.039,
+   "capture_1s": {
+    "luma_mean": 193.88,
+    "luma_stddev": 64.81,
+    "top_colour_share": 0.0261,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 193.88,
+    "luma_stddev": 64.81,
+    "top_colour_share": 0.0261,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 193.9,
+    "luma_stddev": 64.79,
+    "top_colour_share": 0.0261,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1195626192",
+   "outcome": "ready",
+   "native": [
+    6000,
+    3375
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 415.5,
+   "wall_ready_ms": 532,
+   "rss_hwm_mib": 742.6,
+   "vram_mib": 649,
+   "gpu_ms_p50": 0.8611840009689331,
+   "gpu_ms_p95": 0.894976019859314,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 19.567,
+   "changed_pct_1_to_2_3": 15.851,
+   "capture_1s": {
+    "luma_mean": 119.44,
+    "luma_stddev": 66.31,
+    "top_colour_share": 0.0017,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 119.55,
+    "luma_stddev": 66.17,
+    "top_colour_share": 0.0017,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 120.25,
+    "luma_stddev": 65.39,
+    "top_colour_share": 0.0017,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1264170639",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 298.8,
+   "wall_ready_ms": 431,
+   "rss_hwm_mib": 529.1,
+   "vram_mib": 304,
+   "gpu_ms_p50": 0.319487988948822,
+   "gpu_ms_p95": 0.32256001234054565,
+   "fps_actual": 31,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 54.007,
+   "changed_pct_1_to_2_3": 49.272,
+   "capture_1s": {
+    "luma_mean": 146.38,
+    "luma_stddev": 28.68,
+    "top_colour_share": 0.2565,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 146.36,
+    "luma_stddev": 28.7,
+    "top_colour_share": 0.2566,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 146.11,
+    "luma_stddev": 28.91,
+    "top_colour_share": 0.2565,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1556245028",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 616.6,
+   "wall_ready_ms": 838,
+   "rss_hwm_mib": 411.3,
+   "vram_mib": 462,
+   "gpu_ms_p50": 1.4602240324020386,
+   "gpu_ms_p95": 1.891327977180481,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 50.396,
+   "changed_pct_1_to_2_3": 36.237,
+   "capture_1s": {
+    "luma_mean": 49.97,
+    "luma_stddev": 35.87,
+    "top_colour_share": 0.0103,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 50.27,
+    "luma_stddev": 35.71,
+    "top_colour_share": 0.0091,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 51.6,
+    "luma_stddev": 35.54,
+    "top_colour_share": 0.0091,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1726902114",
+   "outcome": "ready",
+   "native": [
+    2048,
+    1423
+   ],
+   "export": [
+    1920,
+    1334
+   ],
+   "ready_ms": 192.2,
+   "wall_ready_ms": 352,
+   "rss_hwm_mib": 261.4,
+   "vram_mib": 124,
+   "gpu_ms_p50": 0.13209599256515503,
+   "gpu_ms_p95": 0.13619199395179749,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 9.469,
+   "changed_pct_1_to_2_3": 0.019,
+   "capture_1s": {
+    "luma_mean": 137.21,
+    "luma_stddev": 68.72,
+    "top_colour_share": 0.0019,
+    "size": [
+     1920,
+     1334
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 137.21,
+    "luma_stddev": 68.71,
+    "top_colour_share": 0.0019,
+    "size": [
+     1920,
+     1334
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 137.92,
+    "luma_stddev": 68.79,
+    "top_colour_share": 0.0019,
+    "size": [
+     1920,
+     1334
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1797172968",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1200
+   ],
+   "export": [
+    1920,
+    1200
+   ],
+   "ready_ms": 376.6,
+   "wall_ready_ms": 510,
+   "rss_hwm_mib": 463.8,
+   "vram_mib": 188,
+   "gpu_ms_p50": 0.6205440163612366,
+   "gpu_ms_p95": 0.6481919884681702,
+   "fps_actual": 31,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 30.766,
+   "changed_pct_1_to_2_3": 33.577,
+   "capture_1s": {
+    "luma_mean": 158.32,
+    "luma_stddev": 65.86,
+    "top_colour_share": 0.1285,
+    "size": [
+     1920,
+     1200
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 158.33,
+    "luma_stddev": 65.86,
+    "top_colour_share": 0.1288,
+    "size": [
+     1920,
+     1200
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 158.27,
+    "luma_stddev": 65.87,
+    "top_colour_share": 0.1287,
+    "size": [
+     1920,
+     1200
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1864677589",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 729.4,
+   "wall_ready_ms": 947,
+   "rss_hwm_mib": 541.4,
+   "vram_mib": 827,
+   "gpu_ms_p50": 0.6625279784202576,
+   "gpu_ms_p95": 0.6891520023345947,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 3.873,
+   "changed_pct_1_to_2_3": 3.495,
+   "capture_1s": {
+    "luma_mean": 94.67,
+    "luma_stddev": 47.0,
+    "top_colour_share": 0.0046,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 94.58,
+    "luma_stddev": 46.91,
+    "top_colour_share": 0.0046,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 94.44,
+    "luma_stddev": 46.78,
+    "top_colour_share": 0.0046,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "1884904087",
+   "outcome": "broken",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 3,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/1884904087-1793171834510.json)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 1 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 2 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 3 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)"
+   ],
+   "capture_errors": [],
+   "class": "broken",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 5,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
+   "note": "Reproduces without our worker (`lp-scene-worker --lwe-smoke`, LWE's core alone). gdb: SIGSEGV in `CParticle::CParticle(CScene&, Particle const&)` +108 ← `CScene::dispatchObjectType` ← `CScene::createObject` ← `CScene::CScene` ← `Project::render` ← `wp_render_frame` (the first render = the renderer build), so patch 0004's build guard never sees it. The particle object uses `particles/presets/leaves2.json` (+ a child emitter `leaves2b.json`) shipped inside the item's scene.pkg. Same crash as 2047150134 (`leaves5.json`); dozens of other corpus scenes with particle systems (presets with or without `instanceoverride`) build fine.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
+  },
+  {
+   "id": "1934084447",
+   "outcome": "ready",
+   "native": [
+    2560,
+    1440
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 246.2,
+   "wall_ready_ms": 418,
+   "rss_hwm_mib": 319.3,
+   "vram_mib": 155,
+   "gpu_ms_p50": 0.16486400365829468,
+   "gpu_ms_p95": 0.16793599724769592,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 1.727,
+   "changed_pct_1_to_2_3": 1.652,
+   "capture_1s": {
+    "luma_mean": 188.11,
+    "luma_stddev": 53.1,
+    "top_colour_share": 0.0108,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 188.1,
+    "luma_stddev": 53.1,
+    "top_colour_share": 0.0108,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 188.11,
+    "luma_stddev": 53.1,
+    "top_colour_share": 0.0108,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 2,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2047150134",
+   "outcome": "broken",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 3,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/2047150134-1793171840182.json)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 1 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 2 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "--- lp-player: worker killed by signal 11; restart 3 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)"
+   ],
+   "capture_errors": [],
+   "class": "broken",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
+   "note": "Same backtrace as 1884904087 (`CParticle::CParticle` +108 during the first `wp_render_frame`), reproduced with `--lwe-smoke`; the object uses `particles/presets/leaves5.json` from the scene.pkg.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
+  },
+  {
+   "id": "2064316482",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 653.4,
+   "wall_ready_ms": 810,
+   "rss_hwm_mib": 584.6,
+   "vram_mib": 719,
+   "gpu_ms_p50": 1.5646719932556152,
+   "gpu_ms_p95": 2.2466559410095215,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 12.28,
+   "changed_pct_1_to_2_3": 12.228,
+   "capture_1s": {
+    "luma_mean": 53.46,
+    "luma_stddev": 59.18,
+    "top_colour_share": 0.1767,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 53.31,
+    "luma_stddev": 58.9,
+    "top_colour_share": 0.1764,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 53.49,
+    "luma_stddev": 59.3,
+    "top_colour_share": 0.1763,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2134765860",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 871.1,
+   "wall_ready_ms": 1009,
+   "rss_hwm_mib": 355.8,
+   "vram_mib": 556,
+   "gpu_ms_p50": 0.8325120210647583,
+   "gpu_ms_p95": 1.3056000471115112,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.105,
+   "changed_pct_1_to_2_3": 0.048,
+   "capture_1s": {
+    "luma_mean": 107.18,
+    "luma_stddev": 43.71,
+    "top_colour_share": 0.0027,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 107.18,
+    "luma_stddev": 43.71,
+    "top_colour_share": 0.0027,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 107.18,
+    "luma_stddev": 43.71,
+    "top_colour_share": 0.0027,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 34,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2182433068",
+   "outcome": "ready",
+   "native": [
+    1491,
+    1449
+   ],
+   "export": [
+    1491,
+    1449
+   ],
+   "ready_ms": 187.8,
+   "wall_ready_ms": 382,
+   "rss_hwm_mib": 270.9,
+   "vram_mib": 112,
+   "gpu_ms_p50": 0.09932799637317656,
+   "gpu_ms_p95": 0.1013759970664978,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.207,
+   "changed_pct_1_to_2_3": 0.096,
+   "capture_1s": {
+    "luma_mean": 166.33,
+    "luma_stddev": 96.86,
+    "top_colour_share": 0.2428,
+    "size": [
+     1491,
+     1449
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 166.34,
+    "luma_stddev": 96.86,
+    "top_colour_share": 0.2426,
+    "size": [
+     1491,
+     1449
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 166.37,
+    "luma_stddev": 96.85,
+    "top_colour_share": 0.2423,
+    "size": [
+     1491,
+     1449
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2189783622",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 292.7,
+   "wall_ready_ms": 420,
+   "rss_hwm_mib": 319.5,
+   "vram_mib": 255,
+   "gpu_ms_p50": 0.10342399775981904,
+   "gpu_ms_p95": 0.116736002266407,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "GLSL fragment unit parsing Failed: ERROR: 0:125: 'v_Bounds' : undeclared identifier ",
+    "ERROR: 0:125: 'scalar swizzle' : not supported for this version or the enabled extensions ",
+    "ERROR: 0:125: 'scalar swizzle' : not supported for this version or the enabled extensions ",
+    "WARNING: 0:125: 'y' : vector swizzle selection out of range guessing right values",
+    "ERROR: 0:125: '' : missing #endif ",
+    "ERROR: 0:125: '' : compilation terminated ",
+    "ERROR: 5 compilation errors.  No code generated.",
+    "Vertex info",
+    "-----------",
+    "(0) : error C5145: must write to gl_Position",
+    "Failed to setup object 13: Vertex info",
+    "-----------",
+    "(0) : error C5145: must write to gl_Position",
+    "[info] lwe: loaded + built /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2189783622 in 202 ms: native 3840x2160, audio streams false, audio input false"
+   ],
+   "capture_errors": [],
+   "changed_pct": 0.0,
+   "changed_pct_1_to_2_3": 0.0,
+   "capture_1s": {
+    "luma_mean": 0.0,
+    "luma_stddev": 0.0,
+    "top_colour_share": 1.0,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 0.0,
+    "luma_stddev": 0.0,
+    "top_colour_share": 1.0,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 0.0,
+    "luma_stddev": 0.0,
+    "top_colour_share": 1.0,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "blank",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an effect shader packaged in the scene fails to compile, LWE then drops the scene's only object",
+   "note": "One image object with two effects (godrays, foliagesway) whose shaders ship as old copies inside the scene.pkg. glslang rejects the packaged godrays fragment (`'v_Bounds' : undeclared identifier`, `missing #endif`), the object's setup fails (`Failed to setup object 13`) and LWE renders nothing for it — the scene is that one object, so every frame is black. Wallpaper Engine would show the image, at worst without the effect.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: an object whose effect fails to compile disappears\""
+  },
+  {
+   "id": "2219762084",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 194.7,
+   "wall_ready_ms": 348,
+   "rss_hwm_mib": 263.0,
+   "vram_mib": 106,
+   "gpu_ms_p50": 0.1157120019197464,
+   "gpu_ms_p95": 0.11776000261306764,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 1.119,
+   "changed_pct_1_to_2_3": 2.217,
+   "capture_1s": {
+    "luma_mean": 191.24,
+    "luma_stddev": 58.67,
+    "top_colour_share": 0.064,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 191.27,
+    "luma_stddev": 58.67,
+    "top_colour_share": 0.0641,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 191.27,
+    "luma_stddev": 58.65,
+    "top_colour_share": 0.064,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2288455459",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 481.3,
+   "wall_ready_ms": 667,
+   "rss_hwm_mib": 413.5,
+   "vram_mib": 351,
+   "gpu_ms_p50": 1.7991679906845093,
+   "gpu_ms_p95": 2.288640022277832,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 62.423,
+   "changed_pct_1_to_2_3": 61.056,
+   "capture_1s": {
+    "luma_mean": 43.51,
+    "luma_stddev": 50.21,
+    "top_colour_share": 0.1103,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 43.44,
+    "luma_stddev": 50.05,
+    "top_colour_share": 0.1102,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 43.38,
+    "luma_stddev": 50.02,
+    "top_colour_share": 0.1093,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2290002190",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 344.6,
+   "wall_ready_ms": 506,
+   "rss_hwm_mib": 378.2,
+   "vram_mib": 257,
+   "gpu_ms_p50": 0.45158401131629944,
+   "gpu_ms_p95": 0.49561598896980286,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 3.305,
+   "changed_pct_1_to_2_3": 3.387,
+   "capture_1s": {
+    "luma_mean": 65.02,
+    "luma_stddev": 59.63,
+    "top_colour_share": 0.0323,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 65.08,
+    "luma_stddev": 59.67,
+    "top_colour_share": 0.0322,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 65.09,
+    "luma_stddev": 59.69,
+    "top_colour_share": 0.0323,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "2325974975",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 959.4,
+   "wall_ready_ms": 1170,
+   "rss_hwm_mib": 1543.7,
+   "vram_mib": 775,
+   "gpu_ms_p50": 0.2611199915409088,
+   "gpu_ms_p95": 0.27136000990867615,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 4.887,
+   "changed_pct_1_to_2_3": 4.719,
+   "capture_1s": {
+    "luma_mean": 91.05,
+    "luma_stddev": 66.41,
+    "top_colour_share": 0.0047,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 91.04,
+    "luma_stddev": 66.41,
+    "top_colour_share": 0.0047,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 91.03,
+    "luma_stddev": 66.4,
+    "top_colour_share": 0.0047,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 3,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2371103399",
+   "outcome": "ready",
+   "native": [
+    3840,
+    1080
+   ],
+   "export": [
+    3840,
+    1080
+   ],
+   "ready_ms": 778.7,
+   "wall_ready_ms": 908,
+   "rss_hwm_mib": 337.6,
+   "vram_mib": 285,
+   "gpu_ms_p50": 0.6144000291824341,
+   "gpu_ms_p95": 0.8069120049476624,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 40.669,
+   "changed_pct_1_to_2_3": 39.119,
+   "capture_1s": {
+    "luma_mean": 70.43,
+    "luma_stddev": 62.94,
+    "top_colour_share": 0.0095,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 70.41,
+    "luma_stddev": 62.93,
+    "top_colour_share": 0.0096,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 70.4,
+    "luma_stddev": 62.86,
+    "top_colour_share": 0.0095,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 7,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2375914945",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 661.7,
+   "wall_ready_ms": 832,
+   "rss_hwm_mib": 529.1,
+   "vram_mib": 601,
+   "gpu_ms_p50": 2.1770238876342773,
+   "gpu_ms_p95": 2.3603200912475586,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 90.048,
+   "changed_pct_1_to_2_3": 85.882,
+   "capture_1s": {
+    "luma_mean": 77.25,
+    "luma_stddev": 61.31,
+    "top_colour_share": 0.0427,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 77.89,
+    "luma_stddev": 61.31,
+    "top_colour_share": 0.0436,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 79.02,
+    "luma_stddev": 61.36,
+    "top_colour_share": 0.0442,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 5,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a WE feature LWE next-v2 does not implement"
+  },
+  {
+   "id": "2388299037",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1422.5,
+   "wall_ready_ms": 1561,
+   "rss_hwm_mib": 1507.4,
+   "vram_mib": 1468,
+   "gpu_ms_p50": 2.411520004272461,
+   "gpu_ms_p95": 3.008512020111084,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.056,
+   "changed_pct_1_to_2_3": 99.695,
+   "capture_1s": {
+    "luma_mean": 47.23,
+    "luma_stddev": 31.48,
+    "top_colour_share": 0.0024,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 51.77,
+    "luma_stddev": 33.62,
+    "top_colour_share": 0.0021,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 45.75,
+    "luma_stddev": 30.81,
+    "top_colour_share": 0.0021,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 14,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an LWE C++ exception while building the scene"
+  },
+  {
+   "id": "2469881470",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 516.4,
+   "wall_ready_ms": 647,
+   "rss_hwm_mib": 409.9,
+   "vram_mib": 263,
+   "gpu_ms_p50": 0.34508800506591797,
+   "gpu_ms_p95": 0.3799040019512177,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 61.741,
+   "changed_pct_1_to_2_3": 60.65,
+   "capture_1s": {
+    "luma_mean": 209.19,
+    "luma_stddev": 33.83,
+    "top_colour_share": 0.1041,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 209.48,
+    "luma_stddev": 33.68,
+    "top_colour_share": 0.1077,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 209.62,
+    "luma_stddev": 33.56,
+    "top_colour_share": 0.1026,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "2511663284",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 799.9,
+   "wall_ready_ms": 912,
+   "rss_hwm_mib": 457.1,
+   "vram_mib": 697,
+   "gpu_ms_p50": 1.9998719692230225,
+   "gpu_ms_p95": 2.47705602645874,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 64.379,
+   "changed_pct_1_to_2_3": 62.281,
+   "capture_1s": {
+    "luma_mean": 47.2,
+    "luma_stddev": 44.34,
+    "top_colour_share": 0.0334,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 47.69,
+    "luma_stddev": 44.5,
+    "top_colour_share": 0.0324,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 48.29,
+    "luma_stddev": 44.69,
+    "top_colour_share": 0.0332,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 7,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2542468435",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 328.4,
+   "wall_ready_ms": 416,
+   "rss_hwm_mib": 341.8,
+   "vram_mib": 329,
+   "gpu_ms_p50": 0.989184021949768,
+   "gpu_ms_p95": 1.0270719528198242,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 95.438,
+   "changed_pct_1_to_2_3": 91.637,
+   "capture_1s": {
+    "luma_mean": 107.56,
+    "luma_stddev": 82.92,
+    "top_colour_share": 0.0589,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 107.57,
+    "luma_stddev": 82.95,
+    "top_colour_share": 0.059,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 108.37,
+    "luma_stddev": 83.19,
+    "top_colour_share": 0.0598,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2561227934",
+   "outcome": "ready",
+   "native": [
+    5200,
+    3100
+   ],
+   "export": [
+    1920,
+    1145
+   ],
+   "ready_ms": 558.5,
+   "wall_ready_ms": 788,
+   "rss_hwm_mib": 451.6,
+   "vram_mib": 508,
+   "gpu_ms_p50": 0.7342079877853394,
+   "gpu_ms_p95": 0.792576014995575,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 58.424,
+   "changed_pct_1_to_2_3": 55.179,
+   "capture_1s": {
+    "luma_mean": 124.19,
+    "luma_stddev": 69.33,
+    "top_colour_share": 0.0021,
+    "size": [
+     1920,
+     1145
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 124.42,
+    "luma_stddev": 69.35,
+    "top_colour_share": 0.0021,
+    "size": [
+     1920,
+     1145
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 124.85,
+    "luma_stddev": 69.49,
+    "top_colour_share": 0.0022,
+    "size": [
+     1920,
+     1145
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2638125030",
+   "outcome": "ready",
+   "native": [
+    1919,
+    1079
+   ],
+   "export": [
+    1919,
+    1079
+   ],
+   "ready_ms": 220.7,
+   "wall_ready_ms": 322,
+   "rss_hwm_mib": 248.4,
+   "vram_mib": 100,
+   "gpu_ms_p50": 0.20582400262355804,
+   "gpu_ms_p95": 0.23449599742889404,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.729,
+   "changed_pct_1_to_2_3": 99.734,
+   "capture_1s": {
+    "luma_mean": 47.29,
+    "luma_stddev": 42.49,
+    "top_colour_share": 0.0019,
+    "size": [
+     1919,
+     1079
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 47.26,
+    "luma_stddev": 42.46,
+    "top_colour_share": 0.0022,
+    "size": [
+     1919,
+     1079
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 47.35,
+    "luma_stddev": 42.53,
+    "top_colour_share": 0.0022,
+    "size": [
+     1919,
+     1079
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2672425887",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 838.6,
+   "wall_ready_ms": 975,
+   "rss_hwm_mib": 421.3,
+   "vram_mib": 381,
+   "gpu_ms_p50": 1.7868800163269043,
+   "gpu_ms_p95": 2.283519983291626,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 98.936,
+   "changed_pct_1_to_2_3": 97.609,
+   "capture_1s": {
+    "luma_mean": 143.15,
+    "luma_stddev": 57.5,
+    "top_colour_share": 0.0157,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 152.05,
+    "luma_stddev": 60.06,
+    "top_colour_share": 0.0367,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 173.95,
+    "luma_stddev": 65.22,
+    "top_colour_share": 0.114,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 3,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2679248947",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 721.6,
+   "wall_ready_ms": 855,
+   "rss_hwm_mib": 475.1,
+   "vram_mib": 495,
+   "gpu_ms_p50": 1.657855987548828,
+   "gpu_ms_p95": 3.5287039279937744,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 59.535,
+   "changed_pct_1_to_2_3": 50.197,
+   "capture_1s": {
+    "luma_mean": 77.83,
+    "luma_stddev": 58.5,
+    "top_colour_share": 0.0034,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 78.81,
+    "luma_stddev": 59.03,
+    "top_colour_share": 0.0034,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 77.7,
+    "luma_stddev": 58.3,
+    "top_colour_share": 0.0035,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 2,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2679885269",
+   "outcome": "ready",
+   "native": [
+    1600,
+    900
+   ],
+   "export": [
+    1600,
+    900
+   ],
+   "ready_ms": 359.1,
+   "wall_ready_ms": 508,
+   "rss_hwm_mib": 276.7,
+   "vram_mib": 99,
+   "gpu_ms_p50": 0.16076800227165222,
+   "gpu_ms_p95": 0.16281600296497345,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 15.43,
+   "changed_pct_1_to_2_3": 15.035,
+   "capture_1s": {
+    "luma_mean": 51.39,
+    "luma_stddev": 45.56,
+    "top_colour_share": 0.0112,
+    "size": [
+     1600,
+     900
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 51.98,
+    "luma_stddev": 46.82,
+    "top_colour_share": 0.0112,
+    "size": [
+     1600,
+     900
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 51.82,
+    "luma_stddev": 46.59,
+    "top_colour_share": 0.0111,
+    "size": [
+     1600,
+     900
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a WE feature LWE next-v2 does not implement"
+  },
+  {
+   "id": "2683776412",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 424.6,
+   "wall_ready_ms": 561,
+   "rss_hwm_mib": 342.2,
+   "vram_mib": 249,
+   "gpu_ms_p50": 0.5570560097694397,
+   "gpu_ms_p95": 0.5847039818763733,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 15.856,
+   "changed_pct_1_to_2_3": 16.009,
+   "capture_1s": {
+    "luma_mean": 136.53,
+    "luma_stddev": 58.73,
+    "top_colour_share": 0.0331,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 136.54,
+    "luma_stddev": 58.71,
+    "top_colour_share": 0.0329,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 136.5,
+    "luma_stddev": 58.7,
+    "top_colour_share": 0.033,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "2694785040",
+   "outcome": "ready",
+   "native": [
+    4193,
+    3380
+   ],
+   "export": [
+    1920,
+    1548
+   ],
+   "ready_ms": 314.3,
+   "wall_ready_ms": 431,
+   "rss_hwm_mib": 337.5,
+   "vram_mib": 483,
+   "gpu_ms_p50": 1.5575040578842163,
+   "gpu_ms_p95": 1.9159040451049805,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 16.332,
+   "changed_pct_1_to_2_3": 12.187,
+   "capture_1s": {
+    "luma_mean": 232.85,
+    "luma_stddev": 38.65,
+    "top_colour_share": 0.3263,
+    "size": [
+     1920,
+     1548
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 232.97,
+    "luma_stddev": 38.66,
+    "top_colour_share": 0.3146,
+    "size": [
+     1920,
+     1548
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 233.06,
+    "luma_stddev": 38.63,
+    "top_colour_share": 0.2957,
+    "size": [
+     1920,
+     1548
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2783122117",
+   "outcome": "ready",
+   "native": [
+    3840,
+    1080
+   ],
+   "export": [
+    3840,
+    1080
+   ],
+   "ready_ms": 249.6,
+   "wall_ready_ms": 428,
+   "rss_hwm_mib": 296.8,
+   "vram_mib": 210,
+   "gpu_ms_p50": 0.17715199291706085,
+   "gpu_ms_p95": 0.1812479943037033,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "[info] lwe: loaded + built /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117 in 165 ms: native 3840x1080, audio streams true, audio input false",
+    "[mp3float @ 0x5562bf2de940] Could not update timestamps for skipped samples."
+   ],
+   "capture_errors": [],
+   "changed_pct": 0.0,
+   "changed_pct_1_to_2_3": 0.0,
+   "capture_1s": {
+    "luma_mean": 41.0,
+    "luma_stddev": 34.16,
+    "top_colour_share": 0.0205,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 41.0,
+    "luma_stddev": 34.16,
+    "top_colour_share": 0.0205,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 41.0,
+    "luma_stddev": 34.16,
+    "top_colour_share": 0.0205,
+    "size": [
+     3840,
+     1080
+    ]
+   },
+   "class": "static",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a still scene by design — not a failure",
+   "note": "scene.json holds two image objects (the same model, no effects, no particles, no scripts) and one sound object; identical frames at +1 s, +2.3 s and +4 s are correct. LWE's core alone (`--lwe-smoke`) renders the same still. Its sound plays (1 stream)."
+  },
+  {
+   "id": "2815800031",
+   "outcome": "ready",
+   "native": [
+    4096,
+    2044
+   ],
+   "export": [
+    2164,
+    1080
+   ],
+   "ready_ms": 804.5,
+   "wall_ready_ms": 1023,
+   "rss_hwm_mib": 439.1,
+   "vram_mib": 403,
+   "gpu_ms_p50": 0.9103360176086426,
+   "gpu_ms_p95": 0.933888018131256,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 24.387,
+   "changed_pct_1_to_2_3": 23.826,
+   "capture_1s": {
+    "luma_mean": 25.97,
+    "luma_stddev": 38.71,
+    "top_colour_share": 0.0419,
+    "size": [
+     2164,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 26.07,
+    "luma_stddev": 38.78,
+    "top_colour_share": 0.0418,
+    "size": [
+     2164,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 26.17,
+    "luma_stddev": 38.9,
+    "top_colour_share": 0.0418,
+    "size": [
+     2164,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "2828233985",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 313.6,
+   "wall_ready_ms": 435,
+   "rss_hwm_mib": 304.1,
+   "vram_mib": 257,
+   "gpu_ms_p50": 0.4669440090656281,
+   "gpu_ms_p95": 0.4935680031776428,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 20.269,
+   "changed_pct_1_to_2_3": 19.722,
+   "capture_1s": {
+    "luma_mean": 168.8,
+    "luma_stddev": 78.86,
+    "top_colour_share": 0.1142,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 168.76,
+    "luma_stddev": 78.85,
+    "top_colour_share": 0.1141,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 168.79,
+    "luma_stddev": 78.88,
+    "top_colour_share": 0.1139,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2883756643",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 7388.8,
+   "wall_ready_ms": 7577,
+   "rss_hwm_mib": 1830.2,
+   "vram_mib": 1606,
+   "gpu_ms_p50": 0.2662400007247925,
+   "gpu_ms_p95": 0.3328000009059906,
+   "fps_actual": 31,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 75.883,
+   "changed_pct_1_to_2_3": 94.423,
+   "capture_1s": {
+    "luma_mean": 183.56,
+    "luma_stddev": 68.97,
+    "top_colour_share": 0.2474,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 164.33,
+    "luma_stddev": 68.76,
+    "top_colour_share": 0.0574,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 200.56,
+    "luma_stddev": 63.85,
+    "top_colour_share": 0.321,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 5,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "2886313155",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 975.7,
+   "wall_ready_ms": 1060,
+   "rss_hwm_mib": 632.4,
+   "vram_mib": 418,
+   "gpu_ms_p50": 2.615295886993408,
+   "gpu_ms_p95": 6.692863941192627,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.989,
+   "changed_pct_1_to_2_3": 99.963,
+   "capture_1s": {
+    "luma_mean": 87.47,
+    "luma_stddev": 38.08,
+    "top_colour_share": 0.0004,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 85.5,
+    "luma_stddev": 36.52,
+    "top_colour_share": 0.0005,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 82.63,
+    "luma_stddev": 34.67,
+    "top_colour_share": 0.0009,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "2890767643",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1795.8,
+   "wall_ready_ms": 1965,
+   "rss_hwm_mib": 2116.3,
+   "vram_mib": 647,
+   "gpu_ms_p50": 2.5774080753326416,
+   "gpu_ms_p95": 5.928959846496582,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 97.647,
+   "changed_pct_1_to_2_3": 97.79,
+   "capture_1s": {
+    "luma_mean": 141.5,
+    "luma_stddev": 45.63,
+    "top_colour_share": 0.006,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 138.36,
+    "luma_stddev": 45.27,
+    "top_colour_share": 0.0059,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 134.56,
+    "luma_stddev": 46.25,
+    "top_colour_share": 0.0055,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "2905264428",
+   "outcome": "ready",
+   "native": [
+    2560,
+    1440
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 502.2,
+   "wall_ready_ms": 675,
+   "rss_hwm_mib": 306.9,
+   "vram_mib": 152,
+   "gpu_ms_p50": 0.4618239998817444,
+   "gpu_ms_p95": 0.4925439953804016,
+   "fps_actual": 31,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 58.884,
+   "changed_pct_1_to_2_3": 45.667,
+   "capture_1s": {
+    "luma_mean": 182.13,
+    "luma_stddev": 58.47,
+    "top_colour_share": 0.0206,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 182.18,
+    "luma_stddev": 58.44,
+    "top_colour_share": 0.0206,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 182.23,
+    "luma_stddev": 58.45,
+    "top_colour_share": 0.0206,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2921510865",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 5297.2,
+   "wall_ready_ms": 5517,
+   "rss_hwm_mib": 2471.4,
+   "vram_mib": 3583,
+   "gpu_ms_p50": 15.563776016235352,
+   "gpu_ms_p95": 18.134016036987305,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 53.34,
+   "changed_pct_1_to_2_3": 52.027,
+   "capture_1s": {
+    "luma_mean": 190.41,
+    "luma_stddev": 80.58,
+    "top_colour_share": 0.3235,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 190.65,
+    "luma_stddev": 80.86,
+    "top_colour_share": 0.323,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 190.41,
+    "luma_stddev": 80.71,
+    "top_colour_share": 0.3225,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2932157836",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1112.3,
+   "wall_ready_ms": 1222,
+   "rss_hwm_mib": 509.2,
+   "vram_mib": 723,
+   "gpu_ms_p50": 2.751487970352173,
+   "gpu_ms_p95": 3.1877119541168213,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 91.862,
+   "changed_pct_1_to_2_3": 88.674,
+   "capture_1s": {
+    "luma_mean": 105.32,
+    "luma_stddev": 57.15,
+    "top_colour_share": 0.0045,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 105.37,
+    "luma_stddev": 57.5,
+    "top_colour_share": 0.0048,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 105.86,
+    "luma_stddev": 57.29,
+    "top_colour_share": 0.0049,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 123,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "2951169110",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 438.1,
+   "wall_ready_ms": 638,
+   "rss_hwm_mib": 356.6,
+   "vram_mib": 206,
+   "gpu_ms_p50": 0.4136959910392761,
+   "gpu_ms_p95": 0.43827199935913086,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 35.83,
+   "changed_pct_1_to_2_3": 34.064,
+   "capture_1s": {
+    "luma_mean": 152.34,
+    "luma_stddev": 67.03,
+    "top_colour_share": 0.0112,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 152.27,
+    "luma_stddev": 67.02,
+    "top_colour_share": 0.0111,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 152.49,
+    "luma_stddev": 66.99,
+    "top_colour_share": 0.0111,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 7,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3013489778",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1139.5,
+   "wall_ready_ms": 1319,
+   "rss_hwm_mib": 597.8,
+   "vram_mib": 650,
+   "gpu_ms_p50": 1.4909440279006958,
+   "gpu_ms_p95": 1.8391040563583376,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.74,
+   "changed_pct_1_to_2_3": 98.393,
+   "capture_1s": {
+    "luma_mean": 69.19,
+    "luma_stddev": 24.69,
+    "top_colour_share": 0.0119,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 70.82,
+    "luma_stddev": 26.16,
+    "top_colour_share": 0.0119,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 74.47,
+    "luma_stddev": 28.55,
+    "top_colour_share": 0.0119,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 8,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a WE feature LWE next-v2 does not implement"
+  },
+  {
+   "id": "3019192537",
+   "outcome": "ready",
+   "native": [
+    3185,
+    1792
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 350.9,
+   "wall_ready_ms": 585,
+   "rss_hwm_mib": 307.9,
+   "vram_mib": 236,
+   "gpu_ms_p50": 1.1847679615020752,
+   "gpu_ms_p95": 1.5626239776611328,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 23.313,
+   "changed_pct_1_to_2_3": 21.076,
+   "capture_1s": {
+    "luma_mean": 98.6,
+    "luma_stddev": 69.2,
+    "top_colour_share": 0.006,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 98.61,
+    "luma_stddev": 69.19,
+    "top_colour_share": 0.006,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 98.57,
+    "luma_stddev": 69.21,
+    "top_colour_share": 0.0061,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 4,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3022080536",
+   "outcome": "ready",
+   "native": [
+    6208,
+    3520
+   ],
+   "export": [
+    1920,
+    1089
+   ],
+   "ready_ms": 718.1,
+   "wall_ready_ms": 868,
+   "rss_hwm_mib": 458.4,
+   "vram_mib": 860,
+   "gpu_ms_p50": 1.5083520412445068,
+   "gpu_ms_p95": 5.0872321128845215,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 13.418,
+   "changed_pct_1_to_2_3": 11.509,
+   "capture_1s": {
+    "luma_mean": 204.95,
+    "luma_stddev": 44.39,
+    "top_colour_share": 0.0398,
+    "size": [
+     1920,
+     1089
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 204.93,
+    "luma_stddev": 44.42,
+    "top_colour_share": 0.0398,
+    "size": [
+     1920,
+     1089
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 204.93,
+    "luma_stddev": 44.43,
+    "top_colour_share": 0.0398,
+    "size": [
+     1920,
+     1089
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 2,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a WE feature LWE next-v2 does not implement"
+  },
+  {
+   "id": "3023509773",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 475.1,
+   "wall_ready_ms": 611,
+   "rss_hwm_mib": 343.7,
+   "vram_mib": 255,
+   "gpu_ms_p50": 0.37068799138069153,
+   "gpu_ms_p95": 0.3758080005645752,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 41.461,
+   "changed_pct_1_to_2_3": 39.485,
+   "capture_1s": {
+    "luma_mean": 107.13,
+    "luma_stddev": 66.14,
+    "top_colour_share": 0.0283,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 107.33,
+    "luma_stddev": 65.97,
+    "top_colour_share": 0.0271,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 107.37,
+    "luma_stddev": 65.78,
+    "top_colour_share": 0.0256,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3028473503",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 842.8,
+   "wall_ready_ms": 1036,
+   "rss_hwm_mib": 589.7,
+   "vram_mib": 477,
+   "gpu_ms_p50": 2.8641281127929688,
+   "gpu_ms_p95": 7.791615962982178,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 82.622,
+   "changed_pct_1_to_2_3": 76.994,
+   "capture_1s": {
+    "luma_mean": 190.91,
+    "luma_stddev": 60.13,
+    "top_colour_share": 0.0859,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 188.33,
+    "luma_stddev": 61.49,
+    "top_colour_share": 0.0849,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 186.32,
+    "luma_stddev": 61.49,
+    "top_colour_share": 0.0838,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 9,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3029971128",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 430.0,
+   "wall_ready_ms": 517,
+   "rss_hwm_mib": 366.8,
+   "vram_mib": 291,
+   "gpu_ms_p50": 1.56876802444458,
+   "gpu_ms_p95": 2.184191942214966,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 22.776,
+   "changed_pct_1_to_2_3": 24.459,
+   "capture_1s": {
+    "luma_mean": 129.91,
+    "luma_stddev": 64.86,
+    "top_colour_share": 0.0039,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 129.96,
+    "luma_stddev": 64.87,
+    "top_colour_share": 0.0039,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 129.86,
+    "luma_stddev": 64.85,
+    "top_colour_share": 0.0039,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 4,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3042492564",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 2906.4,
+   "wall_ready_ms": 3021,
+   "rss_hwm_mib": 756.4,
+   "vram_mib": 1047,
+   "gpu_ms_p50": 3.082240104675293,
+   "gpu_ms_p95": 6.366208076477051,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 33.623,
+   "changed_pct_1_to_2_3": 32.768,
+   "capture_1s": {
+    "luma_mean": 34.76,
+    "luma_stddev": 18.26,
+    "top_colour_share": 0.0064,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 34.43,
+    "luma_stddev": 18.21,
+    "top_colour_share": 0.0064,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 34.04,
+    "luma_stddev": 18.07,
+    "top_colour_share": 0.0064,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 249,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3042865984",
+   "outcome": "ready",
+   "native": [
+    6880,
+    2880
+   ],
+   "export": [
+    2580,
+    1080
+   ],
+   "ready_ms": 1314.5,
+   "wall_ready_ms": 1468,
+   "rss_hwm_mib": 816.9,
+   "vram_mib": 2019,
+   "gpu_ms_p50": 10.134528160095217,
+   "gpu_ms_p95": 10.984448432922363,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 47.795,
+   "changed_pct_1_to_2_3": 44.308,
+   "capture_1s": {
+    "luma_mean": 30.87,
+    "luma_stddev": 35.26,
+    "top_colour_share": 0.2839,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 30.75,
+    "luma_stddev": 35.1,
+    "top_colour_share": 0.2839,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 30.67,
+    "luma_stddev": 34.95,
+    "top_colour_share": 0.2839,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 16,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3046119914",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1298.3,
+   "wall_ready_ms": 1504,
+   "rss_hwm_mib": 978.7,
+   "vram_mib": 998,
+   "gpu_ms_p50": 2.653183937072754,
+   "gpu_ms_p95": 5.017600059509277,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 91.688,
+   "changed_pct_1_to_2_3": 87.695,
+   "capture_1s": {
+    "luma_mean": 111.15,
+    "luma_stddev": 56.76,
+    "top_colour_share": 0.0048,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 111.46,
+    "luma_stddev": 56.35,
+    "top_colour_share": 0.0049,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 110.55,
+    "luma_stddev": 56.14,
+    "top_colour_share": 0.0048,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 14,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3089687436",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1141.6,
+   "wall_ready_ms": 1321,
+   "rss_hwm_mib": 659.3,
+   "vram_mib": 537,
+   "gpu_ms_p50": 2.1186559200286865,
+   "gpu_ms_p95": 6.7358717918396,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 27.232,
+   "changed_pct_1_to_2_3": 27.291,
+   "capture_1s": {
+    "luma_mean": 96.05,
+    "luma_stddev": 57.95,
+    "top_colour_share": 0.0028,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 96.01,
+    "luma_stddev": 57.88,
+    "top_colour_share": 0.0028,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 96.06,
+    "luma_stddev": 57.95,
+    "top_colour_share": 0.0028,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 4,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3104056709",
+   "outcome": "ready",
+   "native": [
+    7467,
+    4200
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 570.5,
+   "wall_ready_ms": 705,
+   "rss_hwm_mib": 486.1,
+   "vram_mib": 833,
+   "gpu_ms_p50": 1.919999957084656,
+   "gpu_ms_p95": 2.2599680423736572,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 76.673,
+   "changed_pct_1_to_2_3": 76.114,
+   "capture_1s": {
+    "luma_mean": 59.2,
+    "luma_stddev": 68.23,
+    "top_colour_share": 0.0132,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 59.2,
+    "luma_stddev": 68.12,
+    "top_colour_share": 0.0128,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 59.22,
+    "luma_stddev": 68.06,
+    "top_colour_share": 0.0127,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3134525336",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 314.0,
+   "wall_ready_ms": 437,
+   "rss_hwm_mib": 314.2,
+   "vram_mib": 285,
+   "gpu_ms_p50": 0.9031680226325988,
+   "gpu_ms_p95": 0.907263994216919,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 61.106,
+   "changed_pct_1_to_2_3": 60.593,
+   "capture_1s": {
+    "luma_mean": 91.07,
+    "luma_stddev": 55.93,
+    "top_colour_share": 0.0032,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 91.21,
+    "luma_stddev": 56.09,
+    "top_colour_share": 0.0024,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 90.99,
+    "luma_stddev": 55.85,
+    "top_colour_share": 0.0032,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3163060610",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1731.8,
+   "wall_ready_ms": 1929,
+   "rss_hwm_mib": 740.3,
+   "vram_mib": 1220,
+   "gpu_ms_p50": 1.9343359470367432,
+   "gpu_ms_p95": 4.873216152191162,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 12.997,
+   "changed_pct_1_to_2_3": 12.288,
+   "capture_1s": {
+    "luma_mean": 202.0,
+    "luma_stddev": 78.51,
+    "top_colour_share": 0.6173,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 201.89,
+    "luma_stddev": 78.6,
+    "top_colour_share": 0.6174,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 202.03,
+    "luma_stddev": 78.51,
+    "top_colour_share": 0.6178,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 156,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an asset LWE could not find"
+  },
+  {
+   "id": "3174556087",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 692.4,
+   "wall_ready_ms": 828,
+   "rss_hwm_mib": 476.4,
+   "vram_mib": 662,
+   "gpu_ms_p50": 3.9290881156921382,
+   "gpu_ms_p95": 4.7226881980896,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 96.04,
+   "changed_pct_1_to_2_3": 96.144,
+   "capture_1s": {
+    "luma_mean": 68.83,
+    "luma_stddev": 42.57,
+    "top_colour_share": 0.0012,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 69.27,
+    "luma_stddev": 42.27,
+    "top_colour_share": 0.0012,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 69.56,
+    "luma_stddev": 42.41,
+    "top_colour_share": 0.0012,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 22,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3184155462",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 535.1,
+   "wall_ready_ms": 619,
+   "rss_hwm_mib": 435.1,
+   "vram_mib": 751,
+   "gpu_ms_p50": 4.055039882659912,
+   "gpu_ms_p95": 4.636672019958496,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 37.854,
+   "changed_pct_1_to_2_3": 29.385,
+   "capture_1s": {
+    "luma_mean": 78.94,
+    "luma_stddev": 76.92,
+    "top_colour_share": 0.0083,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 78.97,
+    "luma_stddev": 76.89,
+    "top_colour_share": 0.0082,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 78.99,
+    "luma_stddev": 77.02,
+    "top_colour_share": 0.0082,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 9,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3219908811",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1426.7,
+   "wall_ready_ms": 1663,
+   "rss_hwm_mib": 744.9,
+   "vram_mib": 1316,
+   "gpu_ms_p50": 3.2378880977630615,
+   "gpu_ms_p95": 3.5942399501800537,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 70.668,
+   "changed_pct_1_to_2_3": 67.761,
+   "capture_1s": {
+    "luma_mean": 147.18,
+    "luma_stddev": 64.54,
+    "top_colour_share": 0.1313,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 146.47,
+    "luma_stddev": 64.64,
+    "top_colour_share": 0.1313,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 146.03,
+    "luma_stddev": 64.32,
+    "top_colour_share": 0.1313,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 81,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3233141951",
+   "outcome": "broken",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 3,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/3233141951-1793172102233.json)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 1 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 2 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 3 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string"
+   ],
+   "capture_errors": [],
+   "class": "broken",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 67,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
+   "note": "gdb: `nlohmann::json type_error 302 (type must be number, but is string)` thrown in `JsonExtensions::optional<int>` ← `ObjectParser::parseText` ← `WallpaperParser::parseObjects` ← `ProjectParser::parse` ← `wp_project_load_folder`; nothing catches it at the C API, so `terminate` → SIGABRT at every load: 4 crashes → broken (correct crash policy, but a load failure should not be a crash loop). Of the 45 corpus scenes with text objects exactly these two (3233141951, 3326873240) have a string `padding` (`\"32.00000 32.00000\"`); the 43 with a number get past the text parser. Reproduced with `--lwe-smoke`.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
+  },
+  {
+   "id": "3243449890",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 2151.8,
+   "wall_ready_ms": 2349,
+   "rss_hwm_mib": 1029.5,
+   "vram_mib": 1297,
+   "gpu_ms_p50": 2.6019840240478516,
+   "gpu_ms_p95": 5.593088150024414,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 34.517,
+   "changed_pct_1_to_2_3": 33.149,
+   "capture_1s": {
+    "luma_mean": 92.89,
+    "luma_stddev": 86.46,
+    "top_colour_share": 0.0927,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 95.21,
+    "luma_stddev": 86.99,
+    "top_colour_share": 0.0928,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 96.26,
+    "luma_stddev": 87.19,
+    "top_colour_share": 0.0928,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 128,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an LWE C++ exception while building the scene"
+  },
+  {
+   "id": "3276522107",
+   "outcome": "error",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 (a truncated scene.pkg or an unsupported project)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "Projection must have a width. Contents: null",
+    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 (a truncated scene.pkg or an unsupported project)"
+   ],
+   "capture_errors": [],
+   "class": "load_failed",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 23,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
+   "note": "LWE logs `Projection must have a width. Contents: null`: `general.orthogonalprojection` is null and the scene has a perspective `camera {eye, center, up}`. Same for 3477054430 and 3509243656.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
+  },
+  {
+   "id": "3289734539",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1374.0,
+   "wall_ready_ms": 1482,
+   "rss_hwm_mib": 666.7,
+   "vram_mib": 639,
+   "gpu_ms_p50": 0.6860799789428711,
+   "gpu_ms_p95": 0.711679995059967,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 17.364,
+   "changed_pct_1_to_2_3": 15.89,
+   "capture_1s": {
+    "luma_mean": 112.14,
+    "luma_stddev": 74.62,
+    "top_colour_share": 0.0116,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 112.01,
+    "luma_stddev": 74.52,
+    "top_colour_share": 0.0114,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 112.19,
+    "luma_stddev": 74.68,
+    "top_colour_share": 0.0109,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 2,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3291729669",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 323.3,
+   "wall_ready_ms": 410,
+   "rss_hwm_mib": 303.0,
+   "vram_mib": 249,
+   "gpu_ms_p50": 0.2181120067834854,
+   "gpu_ms_p95": 0.22732800245285031,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.035,
+   "changed_pct_1_to_2_3": 0.003,
+   "capture_1s": {
+    "luma_mean": 195.97,
+    "luma_stddev": 41.2,
+    "top_colour_share": 0.0063,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 195.97,
+    "luma_stddev": 41.2,
+    "top_colour_share": 0.0063,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 195.98,
+    "luma_stddev": 41.19,
+    "top_colour_share": 0.0063,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3291745179",
+   "outcome": "ready",
+   "native": [
+    2560,
+    1440
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 276.8,
+   "wall_ready_ms": 450,
+   "rss_hwm_mib": 269.3,
+   "vram_mib": 141,
+   "gpu_ms_p50": 0.131071999669075,
+   "gpu_ms_p95": 0.16076800227165222,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 10.169,
+   "changed_pct_1_to_2_3": 5.298,
+   "capture_1s": {
+    "luma_mean": 221.94,
+    "luma_stddev": 28.44,
+    "top_colour_share": 0.0073,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 222.35,
+    "luma_stddev": 28.5,
+    "top_colour_share": 0.0072,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 222.92,
+    "luma_stddev": 28.44,
+    "top_colour_share": 0.0082,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3309103316",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 230.8,
+   "wall_ready_ms": 443,
+   "rss_hwm_mib": 256.6,
+   "vram_mib": 226,
+   "gpu_ms_p50": 0.8089600205421448,
+   "gpu_ms_p95": 0.8335360288619995,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.864,
+   "changed_pct_1_to_2_3": 0.728,
+   "capture_1s": {
+    "luma_mean": 134.84,
+    "luma_stddev": 75.27,
+    "top_colour_share": 0.0061,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 134.83,
+    "luma_stddev": 75.27,
+    "top_colour_share": 0.0061,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 134.84,
+    "luma_stddev": 75.26,
+    "top_colour_share": 0.006,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 2,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3319542538",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1033.5,
+   "wall_ready_ms": 1218,
+   "rss_hwm_mib": 506.7,
+   "vram_mib": 541,
+   "gpu_ms_p50": 1.3629440069198608,
+   "gpu_ms_p95": 1.9742720127105713,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 77.167,
+   "changed_pct_1_to_2_3": 75.728,
+   "capture_1s": {
+    "luma_mean": 99.49,
+    "luma_stddev": 39.01,
+    "top_colour_share": 0.0094,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 99.67,
+    "luma_stddev": 39.33,
+    "top_colour_share": 0.0092,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 100.18,
+    "luma_stddev": 39.93,
+    "top_colour_share": 0.0078,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 18,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3326873240",
+   "outcome": "broken",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 3,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/3326873240-1793172136303.json)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 1 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 2 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string",
+    "--- lp-player: worker killed by signal 6; restart 3 ---",
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
+    "  what():  [json.exception.type_error.302] type must be number, but is string"
+   ],
+   "capture_errors": [],
+   "class": "broken",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 104,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
+   "note": "Same as 3233141951 (`padding: \"32.00000 32.00000\"` on a scripted clock text object): SIGABRT in `ObjectParser::parseText` at every load → broken.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
+  },
+  {
+   "id": "3354740764",
+   "outcome": "error",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 (a truncated scene.pkg or an unsupported project)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 (a truncated scene.pkg or an unsupported project)"
+   ],
+   "capture_errors": [],
+   "class": "load_failed",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 30,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an asset reference whose case differs from the file in the scene.pkg (WE on Windows is case-insensitive, LWE is not)",
+   "note": "LWE prints nothing. gdb (`catch throw`): the load fails in `AssetLocator::readString` ← `MaterialParser::load` ← `ModelParser::parse` ← `ObjectParser::parseImage`; the exception is caught inside LWE and `wp_project_load_folder` returns NULL. `models/Shadow.json` (3 objects) names `materials/shadow.json`; the pkg holds `materials/Shadow.json`.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: case-insensitive asset lookup\""
+  },
+  {
+   "id": "3363252053",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1049.2,
+   "wall_ready_ms": 1250,
+   "rss_hwm_mib": 1244.6,
+   "vram_mib": 944,
+   "gpu_ms_p50": 1.884160041809082,
+   "gpu_ms_p95": 2.7402238845825195,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 98.177,
+   "changed_pct_1_to_2_3": 96.736,
+   "capture_1s": {
+    "luma_mean": 88.07,
+    "luma_stddev": 39.21,
+    "top_colour_share": 0.0019,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 107.07,
+    "luma_stddev": 58.76,
+    "top_colour_share": 0.0029,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 92.03,
+    "luma_stddev": 40.07,
+    "top_colour_share": 0.0016,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 97,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3366535880",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 856.3,
+   "wall_ready_ms": 1044,
+   "rss_hwm_mib": 732.1,
+   "vram_mib": 745,
+   "gpu_ms_p50": 3.2440319061279297,
+   "gpu_ms_p95": 3.6280319690704346,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 57.429,
+   "changed_pct_1_to_2_3": 56.075,
+   "capture_1s": {
+    "luma_mean": 83.24,
+    "luma_stddev": 69.54,
+    "top_colour_share": 0.0028,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 83.3,
+    "luma_stddev": 69.56,
+    "top_colour_share": 0.0021,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 83.31,
+    "luma_stddev": 69.48,
+    "top_colour_share": 0.002,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3387433141",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 231.9,
+   "wall_ready_ms": 330,
+   "rss_hwm_mib": 326.4,
+   "vram_mib": 105,
+   "gpu_ms_p50": 0.1669120043516159,
+   "gpu_ms_p95": 0.19763199985027313,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 94.808,
+   "changed_pct_1_to_2_3": 64.953,
+   "capture_1s": {
+    "luma_mean": 52.08,
+    "luma_stddev": 55.62,
+    "top_colour_share": 0.0078,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 52.11,
+    "luma_stddev": 55.63,
+    "top_colour_share": 0.0078,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 51.82,
+    "luma_stddev": 55.5,
+    "top_colour_share": 0.0073,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3395587987",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 251.0,
+   "wall_ready_ms": 408,
+   "rss_hwm_mib": 290.2,
+   "vram_mib": 313,
+   "gpu_ms_p50": 0.3962880074977875,
+   "gpu_ms_p95": 0.4331519901752472,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 1.774,
+   "changed_pct_1_to_2_3": 0.761,
+   "capture_1s": {
+    "luma_mean": 156.81,
+    "luma_stddev": 48.83,
+    "top_colour_share": 0.0098,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 156.84,
+    "luma_stddev": 48.84,
+    "top_colour_share": 0.0098,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 156.9,
+    "luma_stddev": 48.84,
+    "top_colour_share": 0.0098,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3413117423",
+   "outcome": "ready",
+   "native": [
+    4096,
+    2160
+   ],
+   "export": [
+    2048,
+    1080
+   ],
+   "ready_ms": 210.8,
+   "wall_ready_ms": 332,
+   "rss_hwm_mib": 603.8,
+   "vram_mib": 451,
+   "gpu_ms_p50": 2.341887950897217,
+   "gpu_ms_p95": 4.284416198730469,
+   "fps_actual": 31,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 39.559,
+   "changed_pct_1_to_2_3": 39.671,
+   "capture_1s": {
+    "luma_mean": 227.02,
+    "luma_stddev": 52.15,
+    "top_colour_share": 0.5699,
+    "size": [
+     2048,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 227.03,
+    "luma_stddev": 52.23,
+    "top_colour_share": 0.6295,
+    "size": [
+     2048,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 227.0,
+    "luma_stddev": 52.28,
+    "top_colour_share": 0.6414,
+    "size": [
+     2048,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 11,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3414858021",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1379.1,
+   "wall_ready_ms": 1547,
+   "rss_hwm_mib": 532.2,
+   "vram_mib": 1193,
+   "gpu_ms_p50": 1.6066559553146362,
+   "gpu_ms_p95": 2.269184112548828,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 56.625,
+   "changed_pct_1_to_2_3": 48.916,
+   "capture_1s": {
+    "luma_mean": 96.03,
+    "luma_stddev": 49.62,
+    "top_colour_share": 0.0116,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 96.62,
+    "luma_stddev": 49.99,
+    "top_colour_share": 0.0116,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 96.26,
+    "luma_stddev": 49.89,
+    "top_colour_share": 0.0116,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 88,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an LWE C++ exception while building the scene"
+  },
+  {
+   "id": "3419466417",
+   "outcome": "ready",
+   "native": [
+    5120,
+    2160
+   ],
+   "export": [
+    2560,
+    1080
+   ],
+   "ready_ms": 1351.0,
+   "wall_ready_ms": 1432,
+   "rss_hwm_mib": 668.0,
+   "vram_mib": 868,
+   "gpu_ms_p50": 5.4917120933532715,
+   "gpu_ms_p95": 6.534143924713135,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 53.645,
+   "changed_pct_1_to_2_3": 49.809,
+   "capture_1s": {
+    "luma_mean": 30.92,
+    "luma_stddev": 26.3,
+    "top_colour_share": 0.0276,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 31.06,
+    "luma_stddev": 26.57,
+    "top_colour_share": 0.0278,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 30.75,
+    "luma_stddev": 25.86,
+    "top_colour_share": 0.0278,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 25,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3422085307",
+   "outcome": "ready",
+   "native": [
+    2560,
+    1440
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 327.4,
+   "wall_ready_ms": 545,
+   "rss_hwm_mib": 300.6,
+   "vram_mib": 179,
+   "gpu_ms_p50": 0.4925439953804016,
+   "gpu_ms_p95": 0.494592010974884,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 23.477,
+   "changed_pct_1_to_2_3": 16.496,
+   "capture_1s": {
+    "luma_mean": 167.11,
+    "luma_stddev": 56.24,
+    "top_colour_share": 0.0411,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 167.33,
+    "luma_stddev": 56.19,
+    "top_colour_share": 0.0412,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 167.38,
+    "luma_stddev": 56.03,
+    "top_colour_share": 0.0412,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3422383300",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 436.6,
+   "wall_ready_ms": 673,
+   "rss_hwm_mib": 369.4,
+   "vram_mib": 330,
+   "gpu_ms_p50": 0.7178239822387695,
+   "gpu_ms_p95": 0.7464960217475891,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 41.42,
+   "changed_pct_1_to_2_3": 38.04,
+   "capture_1s": {
+    "luma_mean": 61.21,
+    "luma_stddev": 53.2,
+    "top_colour_share": 0.0059,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 60.98,
+    "luma_stddev": 53.18,
+    "top_colour_share": 0.0061,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 60.44,
+    "luma_stddev": 53.28,
+    "top_colour_share": 0.0062,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3426575339",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 329.3,
+   "wall_ready_ms": 439,
+   "rss_hwm_mib": 631.8,
+   "vram_mib": 353,
+   "gpu_ms_p50": 0.6973440051078796,
+   "gpu_ms_p95": 1.070080041885376,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.997,
+   "changed_pct_1_to_2_3": 100.0,
+   "capture_1s": {
+    "luma_mean": 0.0,
+    "luma_stddev": 0.0,
+    "top_colour_share": 1.0,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 82.51,
+    "luma_stddev": 62.77,
+    "top_colour_share": 0.0044,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 82.45,
+    "luma_stddev": 62.72,
+    "top_colour_share": 0.0053,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3432876246",
+   "outcome": "ready",
+   "native": [
+    4000,
+    2800
+   ],
+   "export": [
+    1920,
+    1344
+   ],
+   "ready_ms": 726.2,
+   "wall_ready_ms": 822,
+   "rss_hwm_mib": 707.5,
+   "vram_mib": 582,
+   "gpu_ms_p50": 2.5364480018615723,
+   "gpu_ms_p95": 3.867647886276245,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.634,
+   "changed_pct_1_to_2_3": 99.705,
+   "capture_1s": {
+    "luma_mean": 139.2,
+    "luma_stddev": 59.75,
+    "top_colour_share": 0.0022,
+    "size": [
+     1920,
+     1344
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 137.13,
+    "luma_stddev": 59.83,
+    "top_colour_share": 0.0034,
+    "size": [
+     1920,
+     1344
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 136.86,
+    "luma_stddev": 60.02,
+    "top_colour_share": 0.0042,
+    "size": [
+     1920,
+     1344
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 7,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3432999904",
+   "outcome": "ready",
+   "native": [
+    2340,
+    1080
+   ],
+   "export": [
+    2340,
+    1080
+   ],
+   "ready_ms": 728.2,
+   "wall_ready_ms": 895,
+   "rss_hwm_mib": 473.7,
+   "vram_mib": 276,
+   "gpu_ms_p50": 0.18329599499702456,
+   "gpu_ms_p95": 0.6594560146331787,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 65.858,
+   "changed_pct_1_to_2_3": 63.06,
+   "capture_1s": {
+    "luma_mean": 157.12,
+    "luma_stddev": 23.23,
+    "top_colour_share": 0.0049,
+    "size": [
+     2340,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 157.06,
+    "luma_stddev": 23.21,
+    "top_colour_share": 0.0047,
+    "size": [
+     2340,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 156.83,
+    "luma_stddev": 23.31,
+    "top_colour_share": 0.0045,
+    "size": [
+     2340,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 25,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3445973124",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 972.1,
+   "wall_ready_ms": 1171,
+   "rss_hwm_mib": 461.0,
+   "vram_mib": 472,
+   "gpu_ms_p50": 2.1872639656066895,
+   "gpu_ms_p95": 3.336191892623902,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 81.462,
+   "changed_pct_1_to_2_3": 78.776,
+   "capture_1s": {
+    "luma_mean": 61.76,
+    "luma_stddev": 22.2,
+    "top_colour_share": 0.0243,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 61.81,
+    "luma_stddev": 22.32,
+    "top_colour_share": 0.0242,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 61.88,
+    "luma_stddev": 22.37,
+    "top_colour_share": 0.0246,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 24,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3461192631",
+   "outcome": "ready",
+   "native": [
+    1338,
+    755
+   ],
+   "export": [
+    1338,
+    755
+   ],
+   "ready_ms": 166.9,
+   "wall_ready_ms": 312,
+   "rss_hwm_mib": 259.6,
+   "vram_mib": 46,
+   "gpu_ms_p50": 0.09523200243711472,
+   "gpu_ms_p95": 0.09625600278377532,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 69.37,
+   "changed_pct_1_to_2_3": 69.424,
+   "capture_1s": {
+    "luma_mean": 32.75,
+    "luma_stddev": 45.77,
+    "top_colour_share": 0.1444,
+    "size": [
+     1338,
+     755
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 32.76,
+    "luma_stddev": 45.84,
+    "top_colour_share": 0.1436,
+    "size": [
+     1338,
+     755
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 32.75,
+    "luma_stddev": 45.79,
+    "top_colour_share": 0.1466,
+    "size": [
+     1338,
+     755
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3463520581",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1537.5,
+   "wall_ready_ms": 1691,
+   "rss_hwm_mib": 466.8,
+   "vram_mib": 877,
+   "gpu_ms_p50": 3.223551988601685,
+   "gpu_ms_p95": 5.884928226470947,
+   "fps_actual": 29,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 65.269,
+   "changed_pct_1_to_2_3": 65.228,
+   "capture_1s": {
+    "luma_mean": 143.78,
+    "luma_stddev": 62.6,
+    "top_colour_share": 0.0227,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 143.8,
+    "luma_stddev": 62.42,
+    "top_colour_share": 0.023,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 143.82,
+    "luma_stddev": 62.41,
+    "top_colour_share": 0.0232,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 11,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3477054430",
+   "outcome": "error",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 (a truncated scene.pkg or an unsupported project)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "Projection must have a width. Contents: null",
+    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 (a truncated scene.pkg or an unsupported project)"
+   ],
+   "capture_errors": [],
+   "class": "load_failed",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 25,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
+   "note": "`Projection must have a width. Contents: null`; `orthogonalprojection` null, a perspective camera.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
+  },
+  {
+   "id": "3478602089",
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 224.4,
+   "wall_ready_ms": 407,
+   "rss_hwm_mib": 259.6,
+   "vram_mib": 102,
+   "gpu_ms_p50": 0.18329599499702456,
+   "gpu_ms_p95": 0.19865599274635315,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 85.747,
+   "changed_pct_1_to_2_3": 29.327,
+   "capture_1s": {
+    "luma_mean": 141.24,
+    "luma_stddev": 38.26,
+    "top_colour_share": 0.0003,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 141.22,
+    "luma_stddev": 38.26,
+    "top_colour_share": 0.0003,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 144.63,
+    "luma_stddev": 38.26,
+    "top_colour_share": 0.0003,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3479521040",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 762.3,
+   "wall_ready_ms": 932,
+   "rss_hwm_mib": 437.9,
+   "vram_mib": 794,
+   "gpu_ms_p50": 2.624511957168579,
+   "gpu_ms_p95": 3.1549439430236816,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.024,
+   "changed_pct_1_to_2_3": 0.004,
+   "capture_1s": {
+    "luma_mean": 81.84,
+    "luma_stddev": 46.7,
+    "top_colour_share": 0.0662,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 81.84,
+    "luma_stddev": 46.7,
+    "top_colour_share": 0.0662,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 81.84,
+    "luma_stddev": 46.7,
+    "top_colour_share": 0.0662,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 25,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3480481965",
+   "outcome": "ready",
+   "native": [
+    5120,
+    2160
+   ],
+   "export": [
+    2560,
+    1080
+   ],
+   "ready_ms": 387.7,
+   "wall_ready_ms": 572,
+   "rss_hwm_mib": 271.4,
+   "vram_mib": 410,
+   "gpu_ms_p50": 0.4843519926071167,
+   "gpu_ms_p95": 0.4884479939937592,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.733,
+   "changed_pct_1_to_2_3": 0.388,
+   "capture_1s": {
+    "luma_mean": 15.12,
+    "luma_stddev": 15.77,
+    "top_colour_share": 0.4953,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 15.12,
+    "luma_stddev": 15.79,
+    "top_colour_share": 0.4952,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 15.13,
+    "luma_stddev": 15.86,
+    "top_colour_share": 0.4951,
+    "size": [
+     2560,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 31,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3489263099",
+   "outcome": "ready",
+   "native": [
+    2560,
+    1440
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 918.3,
+   "wall_ready_ms": 1123,
+   "rss_hwm_mib": 475.5,
+   "vram_mib": 689,
+   "gpu_ms_p50": 17.381376266479492,
+   "gpu_ms_p95": 30.18239974975586,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 93.909,
+   "changed_pct_1_to_2_3": 93.654,
+   "capture_1s": {
+    "luma_mean": 22.35,
+    "luma_stddev": 11.73,
+    "top_colour_share": 0.0125,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 23.31,
+    "luma_stddev": 12.6,
+    "top_colour_share": 0.007,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 24.06,
+    "luma_stddev": 12.83,
+    "top_colour_share": 0.0063,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 27,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3490034653",
+   "outcome": "ready",
+   "native": [
+    3440,
+    1440
+   ],
+   "export": [
+    2580,
+    1080
+   ],
+   "ready_ms": 817.8,
+   "wall_ready_ms": 939,
+   "rss_hwm_mib": 443.0,
+   "vram_mib": 559,
+   "gpu_ms_p50": 2.2466559410095215,
+   "gpu_ms_p95": 4.679679870605469,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 48.648,
+   "changed_pct_1_to_2_3": 38.19,
+   "capture_1s": {
+    "luma_mean": 99.8,
+    "luma_stddev": 73.57,
+    "top_colour_share": 0.1535,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 99.79,
+    "luma_stddev": 73.44,
+    "top_colour_share": 0.1501,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 100.62,
+    "luma_stddev": 73.22,
+    "top_colour_share": 0.1019,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 45,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a shader LWE failed to compile/translate"
+  },
+  {
+   "id": "3509243656",
+   "outcome": "error",
+   "native": null,
+   "export": null,
+   "ready_ms": null,
+   "wall_ready_ms": null,
+   "rss_hwm_mib": null,
+   "vram_mib": null,
+   "gpu_ms_p50": null,
+   "gpu_ms_p95": null,
+   "fps_actual": 0,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": null,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": "load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 (a truncated scene.pkg or an unsupported project)",
+   "log_tail": [
+    "[info] gfx: context priority requested low, granted low",
+    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
+    "Projection must have a width. Contents: null",
+    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 (a truncated scene.pkg or an unsupported project)"
+   ],
+   "capture_errors": [],
+   "class": "load_failed",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 233,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
+   "note": "`Projection must have a width. Contents: null`; `orthogonalprojection` null, a perspective camera.",
+   "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
+  },
+  {
+   "id": "3516106265",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1007.9,
+   "wall_ready_ms": 1185,
+   "rss_hwm_mib": 414.0,
+   "vram_mib": 403,
+   "gpu_ms_p50": 1.006592035293579,
+   "gpu_ms_p95": 2.3357439041137695,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 61.132,
+   "changed_pct_1_to_2_3": 51.164,
+   "capture_1s": {
+    "luma_mean": 86.43,
+    "luma_stddev": 38.58,
+    "top_colour_share": 0.018,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 86.59,
+    "luma_stddev": 38.78,
+    "top_colour_share": 0.0152,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 86.58,
+    "luma_stddev": 38.96,
+    "top_colour_share": 0.0133,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 127,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an asset LWE could not find"
+  },
+  {
+   "id": "3516174947",
+   "outcome": "ready",
+   "native": [
+    3440,
+    1440
+   ],
+   "export": [
+    2580,
+    1080
+   ],
+   "ready_ms": 2095.7,
+   "wall_ready_ms": 2270,
+   "rss_hwm_mib": 780.2,
+   "vram_mib": 887,
+   "gpu_ms_p50": 2.455552101135254,
+   "gpu_ms_p95": 3.1836159229278564,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 46.946,
+   "changed_pct_1_to_2_3": 44.105,
+   "capture_1s": {
+    "luma_mean": 177.55,
+    "luma_stddev": 75.45,
+    "top_colour_share": 0.1943,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 177.68,
+    "luma_stddev": 75.38,
+    "top_colour_share": 0.1943,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 178.7,
+    "luma_stddev": 74.95,
+    "top_colour_share": 0.1943,
+    "size": [
+     2580,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 89,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3556794116",
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 943.8,
+   "wall_ready_ms": 1082,
+   "rss_hwm_mib": 1817.9,
+   "vram_mib": 483,
+   "gpu_ms_p50": 1.9763200283050537,
+   "gpu_ms_p95": 3.438591957092285,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 99.811,
+   "changed_pct_1_to_2_3": 99.412,
+   "capture_1s": {
+    "luma_mean": 100.8,
+    "luma_stddev": 40.93,
+    "top_colour_share": 0.0019,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 100.38,
+    "luma_stddev": 40.73,
+    "top_colour_share": 0.0022,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 94.06,
+    "luma_stddev": 43.32,
+    "top_colour_share": 0.005,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": true,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": "an OpenGL error left by LWE's renderer"
+  },
+  {
+   "id": "3593587273",
+   "outcome": "ready",
+   "native": [
+    320,
+    293
+   ],
+   "export": [
+    320,
+    293
+   ],
+   "ready_ms": 241.6,
+   "wall_ready_ms": 393,
+   "rss_hwm_mib": 383.9,
+   "vram_mib": 72,
+   "gpu_ms_p50": 0.021503999829292297,
+   "gpu_ms_p95": 0.02252800017595291,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 0.0,
+   "changed_pct_1_to_2_3": 18.45,
+   "capture_1s": {
+    "luma_mean": 24.65,
+    "luma_stddev": 68.16,
+    "top_colour_share": 0.8462,
+    "size": [
+     320,
+     293
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 22.59,
+    "luma_stddev": 65.07,
+    "top_colour_share": 0.8569,
+    "size": [
+     320,
+     293
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 24.65,
+    "luma_stddev": 68.16,
+    "top_colour_share": 0.8462,
+    "size": [
+     320,
+     293
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  },
+  {
+   "id": "3749550751",
+   "outcome": "ready",
+   "native": [
+    6000,
+    2789
+   ],
+   "export": [
+    2323,
+    1080
+   ],
+   "ready_ms": 330.3,
+   "wall_ready_ms": 497,
+   "rss_hwm_mib": 355.3,
+   "vram_mib": 447,
+   "gpu_ms_p50": 0.35737600922584534,
+   "gpu_ms_p95": 0.3850240111351013,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": false,
+   "wants_audio_input": false,
+   "throttled": false,
+   "reason": null,
+   "capture_errors": [],
+   "changed_pct": 1.414,
+   "changed_pct_1_to_2_3": 0.966,
+   "capture_1s": {
+    "luma_mean": 104.69,
+    "luma_stddev": 67.81,
+    "top_colour_share": 0.0028,
+    "size": [
+     2323,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 104.72,
+    "luma_stddev": 67.84,
+    "top_colour_share": 0.0028,
+    "size": [
+     2323,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 104.77,
+    "luma_stddev": 67.88,
+    "top_colour_share": 0.0028,
+    "size": [
+     2323,
+     1080
+    ]
+   },
+   "class": "ok",
+   "project": {
+    "dependency": null,
+    "supports_audio_processing": false,
+    "user_properties": 1,
+    "has_scene_pkg": true,
+    "has_scene_json": false
+   },
+   "cause": ""
+  }
+ ]
+}

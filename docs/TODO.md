@@ -97,7 +97,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
-    done (+ 9, 12, the Task 8 backend wiring, and the properties editor); 10, 13–15, loudness learning left.
+    done (+ 9, 10, 12, 13, the Task 8 backend wiring, and the properties editor); 14–15, loudness learning left.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the item modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on
@@ -109,6 +109,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         `engine.userProperties` reacts through LWE (nothing of ours). Noticed, not checked: LWE's parser keeps a
         `textinput` default as its JSON dump (`"YOURNAME"` with the quotes, `PropertyParser::parseTextInput`) while a
         set value has none — a Phase 6 corpus item if a scene shows the quotes.
+  - [x] **Task 13 — scene corpus runner + first report** (2026-10-28): `docs/player/reports/scene-corpus.md`
+        (86/96 ok; every non-ok one fails in LWE alone); its LWE findings are Phase 6 items under "Scene
+        compatibility programme" below.
   - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
         runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
         a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
@@ -515,6 +518,41 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + lp-player world (both still build the
       pre-rewrite Avalonia app).
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#692, #625, #677, #631,
-      #694 …) as labelled patches; scene corpus runner over the `431960` workshop folder.
+      #694 …) as labelled patches. The corpus runner exists (Phase 2 Task 13:
+      `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 86 ok, 1 static
+      by design, 1 blank, 4 load_failed, 4 broken of 96); rerun it after every LWE patch. Its findings, each one an
+      LWE (fork) patch, none in the player — every one reproduces with `lp-scene-worker --lwe-smoke`, i.e. LWE's
+      core alone; the report has each one's log tail + backtrace:
+  - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
+        --ab-legacy --legacy-output DP-1 --reuse /tmp/lp-scene-corpus-<stamp>` (after `livepaper --kill`). Lists the
+        scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
+        = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
+  - [ ] **LWE: catch exceptions at the wp_* C API** — an exception escaping `wp_project_load_folder` (or a render)
+        `terminate`s the worker: a scene that can never load becomes a crash loop (4 crashes, then broken) instead
+        of a clean `load failed`. Wrap the C entry points (`try … catch → NULL / false + a log line`). Corpus:
+        3233141951, 3326873240.
+  - [ ] **LWE: text `padding` as a vec2 string** — `ObjectParser::parseText` reads `padding` with
+        `optional<int>`; WE ≥ 2.x writes `"32.00000 32.00000"` → `nlohmann type_error 302` → SIGABRT (above).
+        Parse a number or a vec2 string. Corpus: 3233141951, 3326873240 (2 of the 45 scenes with text).
+  - [ ] **LWE: CParticle segfault on embedded leaves presets** — SIGSEGV in `CParticle::CParticle` +108 during the
+        first `wp_render_frame` (the scene build) for particle objects using old presets shipped in the scene.pkg
+        (`particles/presets/leaves2.json` + child `leaves2b`, `leaves5.json`). Needs a debug LWE build to find the
+        null. Corpus: 1884904087, 2047150134.
+  - [ ] **LWE: 3D / perspective scenes** — `Projection must have a width. Contents: null`: `general.
+        orthogonalprojection` null + a perspective `camera {eye, center, up}`; next-v2 parses only 2D scenes.
+        Corpus: 3276522107, 3477054430, 3509243656. Likely the biggest item (upstream may have work in flight).
+  - [ ] **LWE: case-insensitive asset lookup** — WE (Windows) resolves `materials/shadow.json` to the pkg's
+        `materials/Shadow.json`; LWE's `AssetLocator` is case-sensitive, the load fails silently (`readString`
+        throws inside `MaterialParser::load`, caught → NULL). Fall back to a case-insensitive match (pkg entries,
+        the item folder, the assets dir). Corpus: 3354740764. Also: log *which* file wasn't found.
+  - [ ] **LWE: an object whose effect fails to compile disappears** — a packaged (old) godrays fragment fails
+        glslang (`'v_Bounds' : undeclared identifier`), `Failed to setup object 13`, and the object — the scene's
+        only one — draws nothing (black frame). Render the object without the failed effect (what WE does at
+        worst). Corpus: 2189783622.
+  - [ ] **`ctl capture` still encodes on the loop.** Task 13 found a capture of a 3840×1080 scene source held
+        the loop 820–875 ms (png's default `Balanced` compression; every output froze for it) and switched
+        `write_png*` to fdeflate's `Fast`: 39–112 ms (release). Still a synchronous readback + encode in a debug
+        verb a battery calls mid-measurement — read back on the loop, encode + write on a helper thread, reply
+        when written (a deferred reply like `step`'s).
 - [ ] Optionally offer our LWE patches upstream as PRs, with AI assistance disclosed. Upstream merged nothing since
       2026-06-20.
