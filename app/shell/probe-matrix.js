@@ -381,6 +381,11 @@ const STATES = {
     async pre() { await scenesOn(); }, async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS()); } },
   sceneS2: { optIn: true, exp: { paused: false }, roles: () => [SC[1], K[1]], playlist: () => ({ paths: rot(SC_PL(), 2), settings: PS() }),
     async pre() { await scenesOn(); }, async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 2), PS()); } },
+  // the scene playlist at s1 FOLLOWING the global rotation: advance-on-end, no minimum / maximum, "Separate timing for
+  // scenes" off — nothing moves the scene (opt-in: the global scene-timing cell)
+  sceneSGlobal: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS({ overrideGlobalSettings: false }) }),
+    async pre() { await scenesOn({ globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
+    async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS({ overrideGlobalSettings: false })); } },
 };
 
 // ---------------------------------------------------------------- controls
@@ -2318,6 +2323,64 @@ C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
     if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the strip's next after s1)`);
     const e = c.evs.find((x) => x.event === "transition.scheduled" && x.path === SC[1]);
     if (e && e.effect_id == null) v.push("the interval's switch off the scene was a cut (transitions are on)");
+    return v;
+  } };
+
+// "Separate timing for scenes" (advance-on-end only; player-adapter.md § Rotation): on → a scene / still image switches
+// after "Switch scenes after" (0 = off), the minimum / maximum apply to videos only. Driven through the real UI while s1
+// plays: the toggle shows only under "Switch when video ends", the seconds field only while it's on; 4 s → s1 (playing
+// for a while already: its play time counts since it showed) moves on to s2 now, with its transition.
+const sceneTimingCheck = (c, savedOn, savedSecs) => {
+  const v = [];
+  if (savedOn !== true || savedSecs !== 4) v.push(`separate timing ${savedOn} / switch scenes after ${savedSecs} after the UI change, expected true / 4`);
+  const early = c.evs.filter((e) => e.event === "transition.scheduled" && e._t < c.tChange - 300);
+  if (early.length) v.push(`a switch before the scene timing was set (to ${early.map((e) => TITLE(e.path))}) — nothing should move s1 then`);
+  if (!c.sw) v.push("no switch off s1 within 9 s of \"Switch scenes after\" 4 s");
+  else {
+    if (c.sw.align === "end") v.push("the scene's switch was align:end (a scene never ends — it must switch now)");
+    if (c.sw.effect_id == null) v.push("the scene's switch was a cut (transitions are on)");
+  }
+  if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the strip's next after s1)`);
+  return v;
+};
+const sceneSecsTo4 = (group) => `const iv = ${group}.querySelectorAll("input"); m.setValue(iv[0], 0, "h"); m.setValue(iv[1], 0, "m"); await m.sleep(200);
+  m.setValue(iv[2], 4, "s"); iv[2].dispatchEvent(new FocusEvent("focusout", { bubbles: true }));`;
+const plLabels = `[...document.querySelectorAll(".pl-modal .field-label, .pl-modal label.ck")].map((e) => e.textContent.trim())`;
+C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
+    // its own rotation: a 600 s timer (advance off) → the toggle isn't there; advance on → it is (on by default), with
+    // the seconds field; 4 s
+    await ui(plOpen); c.lab0 = await js(plLabels);
+    await ui(`m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); await m.sleep(400);`); c.lab1 = await js(plLabels);
+    await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), true, "separate"); await m.sleep(300);
+      ${sceneSecsTo4(`document.querySelectorAll(".pl-modal .hms")[2]`)} ${plClose}`);
+    c.tChange = Date.now();
+    await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
+    await waitSettled(8000, SC[1]);
+    c.saved = (await http("GET", "/playlist/state")).json?.settings;
+    // stop rotating before the checks: 0 = off → s2 (a scene) stays
+    await post("/playlist/state", { settings: { switchScenesAfterSeconds: 0 } }); await sleep(500);
+  }, check(c) {
+    const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
+    if (c.saved?.advanceOnVideoEnd !== true) v.push(`playlist advanceOnVideoEnd ${c.saved?.advanceOnVideoEnd}, expected true`);
+    if (c.lab0?.some((l) => /separate timing|switch scenes after/i.test(l))) v.push(`scene timing shown with "Switch when video ends" off: ${JSON.stringify(c.lab0)}`);
+    if (!c.lab1?.includes("Separate timing for scenes") || !c.lab1?.includes("SWITCH SCENES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes" + "SWITCH SCENES AFTER"`);
+    return v;
+  } };
+C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
+    // the globals: advance on, no limits, toggle off → s1 stays; the toggle row shows, the seconds row doesn't; on → it
+    // does; 4 s
+    await ui(settingsTab(`await m.sleep(200);`)); c.rows0 = await js(rowLabels);
+    await ui(`m.setCheck(m.input("Separate timing for scenes"), true, "separate"); await m.sleep(500);`); c.rows1 = await js(rowLabels);
+    await ui(sceneSecsTo4(`m.row("Switch scenes after")`));
+    c.tChange = Date.now();
+    await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
+    await waitSettled(8000, SC[1]);
+    c.savedS = await getSettings();
+    await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 0 }); await sleep(500);
+  }, check(c) {
+    const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
+    if (!c.rows0?.includes("Separate timing for scenes") || c.rows0?.includes("Switch scenes after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes after"`);
+    if (!c.rows1?.includes("Switch scenes after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes after"`);
     return v;
   } };
 

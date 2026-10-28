@@ -181,8 +181,10 @@ export const Settings = memo(function Settings() {
   const broken = features.filter((f) => f.ok === false && f.inUse !== false);
 
   // the rotation: "Switch when video ends" off → the interval is "Switch every" (a plain timer); on → the SAME field
-  // is "Minimum play time", with "Maximum play time" right below (player-adapter.md § Rotation)
+  // is "Minimum play time", with "Maximum play time" right below, then "Separate timing for scenes" (+ "Switch scenes
+  // after" while it's on) — player-adapter.md § Rotation. Every limit: 0 = off.
   const aoe = g("globalAdvanceOnVideoEnd", true);
+  const sepScenes = g("globalSeparateSceneTiming", true);
 
   const adv = g("advancedSettings", false); // gates demuxer / hw-decode / cache / copy-files / live previews
   type Mon = { name: string; fps: number; isPrimary: boolean };
@@ -256,10 +258,14 @@ export const Settings = memo(function Settings() {
       <Section title="Rotation (global)" icon={<Repeat size={15} />}>
         <Row label="Switch when video ends" rk="globalAdvanceOnVideoEnd"><input type="checkbox" checked={aoe} onChange={(e) => set("globalAdvanceOnVideoEnd", e.target.checked)} /></Row>
         {aoe ? <>
-          <Row label="Minimum play time" hint={ROT_HINT.min} rk="globalIntervalSeconds">
-            <PlayTimeInput label="Minimum play time" zeroText="none" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
-          <Row label="Maximum play time" hint={ROT_HINT.max} rk="globalMaxPlaySeconds">
-            <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 1800)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
+          <Row label="Minimum play time" hint={ROT_HINT.min + (sepScenes ? "" : ROT_HINT.minScenes)} rk="globalIntervalSeconds">
+            <PlayTimeInput label="Minimum play time" zeroText="off" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
+          <Row label="Maximum play time" hint={ROT_HINT.max + (sepScenes ? "" : ROT_HINT.maxScenes)} rk="globalMaxPlaySeconds">
+            <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 0)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
+          <Row label="Separate timing for scenes" hint={ROT_HINT.separate} rk="globalSeparateSceneTiming">
+            <input type="checkbox" checked={sepScenes} onChange={(e) => set("globalSeparateSceneTiming", e.target.checked)} /></Row>
+          {sepScenes && <Row label="Switch scenes after" hint={ROT_HINT.scenesAfter} rk="globalSwitchScenesAfterSeconds">
+            <PlayTimeInput label="Switch scenes after" zeroText="off" value={g("globalSwitchScenesAfterSeconds", 1800)} onChange={(v) => set("globalSwitchScenesAfterSeconds", v)} /></Row>}
         </> : <Row label="Switch every" hint={ROT_HINT.every} rk="globalIntervalSeconds">
           <PlayTimeInput label="Switch every" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>}
         <Row label="Auto-add new library items to playlist" rk="autoAddLibraryToPlaylist"><input type="checkbox" checked={g("autoAddLibraryToPlaylist", false)} onChange={(e) => set("autoAddLibraryToPlaylist", e.target.checked)} /></Row>
