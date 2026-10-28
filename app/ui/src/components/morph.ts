@@ -68,6 +68,17 @@ const rectPoly = (x0: number, y0: number, x1: number, y1: number) => `polygon(${
 export const fromSourceClip = (b: Box, s: Box): Keyframe => ({ clipPath: rectPoly(s.x - b.x, s.y - b.y, s.x + s.w - b.x, s.y + s.h - b.y) });
 export const fullClip = (b: Box): Keyframe => ({ clipPath: rectPoly(0, 0, b.w, b.h) });
 
-// a decelerating, slightly springy open; an ease-in-out close
+export type MorphTiming = { open: { duration: number; easing: string }; close: { duration: number; easing: string } };
+
+// a decelerating, slightly springy open; an ease-in-out close — the Browse preview's
 export const OPEN = { duration: 430, easing: "cubic-bezier(0.2, 0.9, 0.22, 1)" };
 export const CLOSE = { duration: 340, easing: "cubic-bezier(0.45, 0, 0.2, 1)" };
+export const PREVIEW_MORPH: MorphTiming = { open: OPEN, close: CLOSE };
+// COOL: the per-item settings modal flies slower (owner: "slow down morph" — 430 ms with an ease that does ~70 %
+// of the travel in its first quarter read as a snap): a longer, gentler ease-out open whose travel is spread over
+// the whole flight, and a matching ease-in-out close. Things that wait for the open to land (the duration row,
+// the scene properties, App's frozen gifs) key off these numbers.
+export const SETTINGS_MORPH: MorphTiming = {
+  open: { duration: 620, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" },
+  close: { duration: 500, easing: "cubic-bezier(0.45, 0, 0.25, 1)" },
+};

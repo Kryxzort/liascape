@@ -126,6 +126,19 @@ function flight(samples, from, to, aspect, what) {
   return v;
 }
 
+// how long the picture moved: the first frame off the start pose → the first frame of the end pose it stays in
+function movingMs(samples) {
+  const live = samples.filter((s) => s.vis && s.vis.w > 1);
+  if (live.length < 2) return 0;
+  const start = live[0].vis, end = live[live.length - 1].vis;
+  const a = live.find((s) => !edgesNear(s.vis, start, 0.5));
+  const bi = live.findIndex((s, i) => i > 0 && live.slice(i).every((x) => edgesNear(x.vis, end, 0.5)));
+  return a && bi > 0 ? live[bi].t - a.t : 0;
+}
+// the settings modal's morph runs slow on purpose (owner: "slow down morph" — the 430/340 ms flight read as a
+// snap); the Browse preview keeps its own pace (another modal, not asked for)
+const SLOW_OPEN_MS = 520, SLOW_CLOSE_MS = 420, BR_MAX_MS = 520;
+
 async function shots(surface, t) {
   // a separate open/close with screenshots for review (capturePage stalls frames: no checks here)
   const files = [];
@@ -161,12 +174,14 @@ app.whenReady().then(async () => {
     for (const surface of ["lib", "pl"]) for (const [t, aspect] of [["k1", 1], ["k2", 16 / 9]]) {
       let M = null;
       await cell(`${surface} ${t} open`, async () => {
-        const { S, samples } = await page(`return await m.open(${JSON.stringify(surface)}, ${JSON.stringify(t)}, 900);`);
+        const { S, samples } = await page(`return await m.open(${JSON.stringify(surface)}, ${JSON.stringify(t)}, 1300);`);
         const live = samples.filter((s) => s.vis && s.vis.w > 1);
         M = live.length ? live[live.length - 1].vis : null;
         const v = flight(samples, S, null, aspect, "open");
         const tail = live.slice(-4);
-        if (tail.length === 4 && !tail.every((s) => edgesNear(s.vis, tail[0].vis, 0.5))) v.push(`open: still moving 900 ms after the click (${fmt(tail[0].vis)} → ${fmt(tail[3].vis)})`);
+        if (tail.length === 4 && !tail.every((s) => edgesNear(s.vis, tail[0].vis, 0.5))) v.push(`open: still moving 1300 ms after the click (${fmt(tail[0].vis)} → ${fmt(tail[3].vis)})`);
+        const ms = movingMs(samples);
+        if (ms < SLOW_OPEN_MS) v.push(`open: the flight took ${ms.toFixed(0)} ms (want ≥ ${SLOW_OPEN_MS} — slowed on purpose)`);
         return v;
       });
       await cell(`${surface} ${t} animates in the modal`, async () => {
@@ -181,10 +196,12 @@ app.whenReady().then(async () => {
         return a.ok ? [] : [`the modal's preview is not animating (${a.kind}${a.t ? ` ${a.t.map((x) => x.toFixed(2)).join(" → ")}` : ""})`];
       });
       await cell(`${surface} ${t} close`, async () => {
-        const { S, samples, srcVisible } = await page(`return await m.close(${JSON.stringify(surface)}, ${JSON.stringify(t)}, 1100);`);
+        const { S, samples, srcVisible } = await page(`return await m.close(${JSON.stringify(surface)}, ${JSON.stringify(t)}, 1400);`);
         const v = flight(samples, M, S, aspect, "close");
         const goneAt = samples.find((s) => !s.open)?.t;
-        if (goneAt == null) v.push("close: the modal is still open 1.1 s after Close");
+        if (goneAt == null) v.push("close: the modal is still open 1.4 s after Close");
+        const ms = movingMs(samples.filter((s) => s.open));
+        if (ms < SLOW_CLOSE_MS) v.push(`close: the flight took ${ms.toFixed(0)} ms (want ≥ ${SLOW_CLOSE_MS})`);
         if (!srcVisible) v.push("close: the source thumbnail is still hidden after the close");
         return v;
       });
@@ -195,10 +212,10 @@ app.whenReady().then(async () => {
     await cell("lib k1 close mid-open", async () => {
       const r = await page(`const src = m.source("lib", "k1"); const S = m.rect(src); m.ctx(src); await m.sleep(250);
         const btn = m.byText(".lib-ctx button", "Settings (volume / speed)");
-        const samples = await m.sample(900, () => { btn.click(); setTimeout(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 120); });
+        const samples = await m.sample(1200, () => { btn.click(); setTimeout(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 120); });
         return { S, samples, srcVisible: getComputedStyle(src).visibility !== "hidden" };`);
       const v = flight(r.samples.filter((s) => s.open), r.S, r.S, 1, "open+close");
-      if (r.samples[r.samples.length - 1].open) v.push("still open 900 ms after an Escape at 120 ms");
+      if (r.samples[r.samples.length - 1].open) v.push("still open 1200 ms after an Escape at 120 ms");
       if (!r.srcVisible) v.push("the source is still hidden");
       return v;
     });
@@ -226,7 +243,10 @@ app.whenReady().then(async () => {
       const { S, samples } = await page(`return await m.open("br", "we1", 900);`);
       const live = samples.filter((x) => x.vis && x.vis.w > 1);
       BM = live.length ? live[live.length - 1].vis : null;
-      return flight(samples, S, null, 1, "open");
+      const v = flight(samples, S, null, 1, "open");
+      const ms = movingMs(samples);
+      if (ms > BR_MAX_MS) v.push(`open: the Browse preview's flight took ${ms.toFixed(0)} ms — it keeps its own pace (≤ ${BR_MAX_MS})`);
+      return v;
     });
     await cell("br we1 animates in the modal", async () => {
       await sleep(300);

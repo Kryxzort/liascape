@@ -3,7 +3,7 @@ import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield } fro
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { type MorphSource } from "./morph";
+import { SETTINGS_MORPH, type MorphSource } from "./morph";
 import { useMorph } from "./useMorph";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 
@@ -56,8 +56,8 @@ export function LibrarySettingsModal({
     setDur("");
     if (!item || item.isScene) return;
     let alive = true;
-    // defer past the open-morph: its setState re-render re-projects framer's layout nodes → jank
-    const t = setTimeout(() => { api.duration(item.videoPath).then((r) => alive && setDur(fmtDur(r.seconds))).catch(() => {}); }, 380);
+    // defer past the open-morph (a re-render mid-flight can re-lay the panel out)
+    const t = setTimeout(() => { api.duration(item.videoPath).then((r) => alive && setDur(fmtDur(r.seconds))).catch(() => {}); }, SETTINGS_MORPH.open.duration + 40);
     return () => { alive = false; clearTimeout(t); };
   }, [item]);
 
@@ -67,7 +67,7 @@ export function LibrarySettingsModal({
   const loadedAspect = loaded && loaded.path === item?.videoPath ? loaded.aspect : null;
   const aspect = source?.aspect ?? loadedAspect ?? 16 / 9;
   const [fullFor, setFullFor] = useState<string | null>(null); // the sharp layer shows once IT loaded
-  const { panelRef, mediaRef, ghostRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose });
+  const { panelRef, mediaRef, ghostRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
 
   if (!item) return null;
   const p = item.videoPath;

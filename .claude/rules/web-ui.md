@@ -136,7 +136,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` lp-player it shows (a scene's speed scales its
   animation and its pitch-kept sound — matrix `itemSpd:scene`; it was hidden for every engine).
 - **"Scene properties" in the item modal (`components/ScenePropsEditor.tsx`, `key={path}`; a scene item, not a
-  multi-selection).** `api.sceneProps(path)` after the open-morph (380 ms, like the duration row); one row per
+  multi-selection).** `api.sceneProps(path)` after the open-morph (`SETTINGS_MORPH.open` + 40 ms, like the duration row); one row per
   visible property (`data-scene-prop=<name>`): bool → checkbox, slider → range (+ value, `precision`), colour →
   `<input type=color>` (sent as `#rrggbb`), combo → the app's `Select`, textinput → text field; `group` → a heading,
   `text` → plain text (never HTML), not-editable types → greyed with their reason; a "Default" button on each
@@ -176,6 +176,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a library
   card, a strip item and a Browse card — a local WE item, offline: starts/ends on the source's crop,
   uniform aspect, smooth, lands; the preview animates; a close mid-open lands on the card).
+  **Timing (`morph.ts`, owner "slow down morph" 2026-10-28):** the settings modal flies `SETTINGS_MORPH` — open 620 ms
+  `cubic-bezier(0.3, 0.7, 0.2, 1)` (its travel spread over the flight; the old 430 ms ease did ~70 % in its first
+  quarter and read as a snap), close 500 ms ease-in-out; the Browse preview keeps `PREVIEW_MORPH` (430 / 340 ms —
+  not asked for). `useMorph({ timing })`; the duration row, the scene properties and App's `modal-open` gif freeze
+  key off these numbers. No reduced-motion branch (the app has none; noted, not added). probe-morph asserts the
+  settings flights move ≥ 520 / 420 ms and the Browse one ≤ 520 ms (RED before: 353–384 / 315–317 ms).
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
 - **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend

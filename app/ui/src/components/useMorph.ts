@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { atRest, boxFrame, boxOf, CLOSE, fromSourceClip, fullClip, OPEN, onScreen, onSource, sourceEl, type Box } from "./morph";
+import { atRest, boxFrame, boxOf, fromSourceClip, fullClip, onScreen, onSource, PREVIEW_MORPH, sourceEl, type Box, type MorphTiming } from "./morph";
 
 const MEDIA_RADIUS = 14;
 
@@ -16,7 +16,9 @@ const restBox = (panel: HTMLElement, el: HTMLElement): Box => {
 // `open` = what's open (a new value → a new flight); `ready` = the picture's aspect is known (the flight
 // waits for it, ≤ 300 ms, panel hidden — a box re-laid out mid-flight jumps); `landed` turns true once
 // its open flight finished (mount heavy layers after it — a big decode mid-flight hitches the animation).
-export function useMorph({ open, ready, morphId, aspect, onClose }: { open: unknown; ready: boolean; morphId: string | null; aspect: number; onClose: () => void }) {
+// `timing` = the flight durations + easings (morph.ts: the Browse preview's by default, SETTINGS_MORPH slower).
+export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVIEW_MORPH }: { open: unknown; ready: boolean; morphId: string | null; aspect: number; onClose: () => void; timing?: MorphTiming }) {
+  const { open: OPEN, close: CLOSE } = timing;
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
