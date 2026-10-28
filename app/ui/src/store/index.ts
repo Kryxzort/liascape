@@ -89,7 +89,7 @@ interface State {
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
   openItemSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeItemSettings(): void;
   // shared
-  applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean): void;
+  applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
   refreshPlayingStatus(): void;
 }
 
@@ -98,6 +98,7 @@ let filterTimer: ReturnType<typeof setTimeout>;
 let stateTimer: ReturnType<typeof setTimeout>;
 let settingsTimer: ReturnType<typeof setTimeout>;
 let statusTimer: ReturnType<typeof setTimeout>;
+let statusHeldUntil = 0;
 const dlCtrls: Record<string, AbortController> = {}; // per-download abort (cancel)
 
 // Reset-to-defaults for the playback/mpv fields.
@@ -361,13 +362,15 @@ export const useStore = create<State>((set, get) => ({
   },
   setPlaying(p) { set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
-  setStatus(s, timed = true) {
+  // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
+  setStatus(s, timed = true, hold = false) {
     clearTimeout(statusTimer);
     set({ status: s });
-    if (timed && s) statusTimer = setTimeout(() => { if (get().status === s) set({ status: buildPlayingStatus(get) }); }, 5000);
+    statusHeldUntil = hold && timed && s ? Date.now() + 5000 : 0;
+    if (timed && s) statusTimer = setTimeout(() => { statusHeldUntil = 0; if (get().status === s) set({ status: buildPlayingStatus(get) }); }, 5000);
   },
-  // Persistent "now playing" line (no auto-clear).
-  refreshPlayingStatus() { clearTimeout(statusTimer); set({ status: buildPlayingStatus(get) }); },
+  // Persistent "now playing" line (no auto-clear) — after a held notice's time is up (its own timer then shows it)
+  refreshPlayingStatus() { if (Date.now() < statusHeldUntil) return; clearTimeout(statusTimer); set({ status: buildPlayingStatus(get) }); },
 }));
 
 // Format an interval (e.g. "1h 30m", "45s").

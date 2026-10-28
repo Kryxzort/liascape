@@ -288,7 +288,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   Volume —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
   private player runs `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
-  `ApplyGpuSettings` there and back; scene → clip cut); the IT's § "Phase 2: scenes" (Integration test, below).
+  `ApplyGpuSettings` there and back; scene → clip cut); the IT's § "Phase 2: scenes" (Integration test, below); the UI matrix's scene cells (`scripts/test-ui-matrix.sh`, web-ui.md).
 
 ## Targeting (R61): ONE effective-settings resolver
 Every setting reaches the live sources through **`LpPlayerMedia.ResolveNow`** (design note at the top of

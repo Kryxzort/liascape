@@ -29,6 +29,8 @@ SET='set:|g[A-Z]|globalDrag|appear|noop|race:settings|cli:volume|autoMute|normal
 AUTOMUTE='autoMute|mute'
 MODAL='itemVol|itemSpd|stripVol|selVol|previewDrag|globalDrag'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'
+# the scene cells (Phase 2 Task 12): every control on a scene, the scene switches, the GPU / VRAM settings
+SCENE='[sS]cene|vram|next:[sv]→[sv]'
 
 full=0; parts=()
 add() { parts+=("$1"); echo "  $2 → $1" >&2; }
@@ -45,7 +47,10 @@ for f in $FILES; do
     src/livepaper/Scrapers/*|src/livepaper/Services/*|src/livepaper/Helpers/Steam*|src/livepaper/Web/SteamOps.cs|\
     src/livepaper/Helpers/Workshop*|src/livepaper/Helpers/DownloadHelper.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;
-    app/ui/src/views/Settings.tsx) add "$SET" "$f" ;;
+    # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
+    src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/lp-scene-worker/*|\
+    src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
+    app/ui/src/views/Settings.tsx) add "$SET|$SCENE" "$f" ;;
     app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL" "$f" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD" "$f" ;;

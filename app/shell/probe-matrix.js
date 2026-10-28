@@ -25,7 +25,9 @@ const ONLY = E.LP_ONLY ? new RegExp(E.LP_ONLY) : null;
 // index in the (--only filtered) cell list is ≡ i mod N — state-major order, so every shard gets a slice of
 // every state
 const SHARD = E.LP_SHARD ? E.LP_SHARD.split("/").map(Number) : null;
-const TITLE = (p) => (K.indexOf(p) >= 0 ? `k${K.indexOf(p) + 1}` : String(p));
+// synthetic WE scene items (test-ui-matrix.sh seeds them, titled s1..s3): s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashes
+const SC = JSON.parse(E.LP_SCENES || "[]");
+const TITLE = (p) => (K.indexOf(p) >= 0 ? `k${K.indexOf(p) + 1}` : SC.indexOf(p) >= 0 ? `s${SC.indexOf(p) + 1}` : String(p));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (test-ui-matrix.sh runs it on a private Xvfb: --ozone-platform=x11 --disable-gpu)
 app.setPath("userData", path.join(OUT, "electron-user-data"));
@@ -275,10 +277,54 @@ async function reset(pl) {
   await post("/mute", { user: true, value: false });
   while (((await http("GET", "/library/undo-depth")).json?.depth ?? 0) > 0) await post("/library/undo");
   await post("/settings", BASE_SETTINGS);
+  resetScenes();
   for (const p of K) { await post("/library/volume", { path: p, intValue: null }); await post("/library/speed", { path: p, doubleValue: null }); }
   await post("/playlist/state", { videoPaths: pl?.paths ?? [K[0], K[1], K[2]], settings: pl?.settings ?? PS(), name: null });
   await waitSettled(4000);
 }
+// ---------------------------------------------------------------- scenes (Phase 2 Task 12)
+// The scene items live in the library's `workshop` source (index.json there: their titles). Scene support is OFF in the
+// baseline settings (library stepping / random would otherwise land on them — s3 crashes); every scene state and
+// scene control turns it on before the UI loads. Each cell starts with the items as seeded: no crash mark, no
+// whitelist, no overrides, and a healthy fake VRAM sample (test-ui-matrix.sh: LP_PLAYER_VRAM_PROBE=fake:<file>).
+const SC_INDEX = SC.length ? path.join(path.dirname(SC[0]), "index.json") : null;
+const SC_KEY = (p) => path.basename(p);
+function vramFake(procs = {}) {
+  if (!E.LP_VRAM_FAKE) return;
+  fs.writeFileSync(E.LP_VRAM_FAKE + ".mx", JSON.stringify({ total_mib: 8192, free_mib: 6000, procs }));
+  fs.renameSync(E.LP_VRAM_FAKE + ".mx", E.LP_VRAM_FAKE);
+}
+function resetScenes() {
+  vramFake();
+  if (!SC_INDEX) return;
+  const idx = Object.fromEntries(SC.map((p, i) => [SC_KEY(p), { title: `s${i + 1}`, isScene: true, workshopId: SC_KEY(p) }]));
+  fs.writeFileSync(SC_INDEX + ".mx", JSON.stringify(idx, null, 2)); fs.renameSync(SC_INDEX + ".mx", SC_INDEX);
+}
+const readScIndex = () => { try { return JSON.parse(fs.readFileSync(SC_INDEX, "utf8")); } catch { return {}; } };
+async function scenesOn(extra = {}) { const s = await getSettings(); await post("/settings", { ...s, allowScenes: true, ...extra }); }
+const rot = (a, i) => [...a.slice(i), ...a.slice(0, i)];
+// the scene playlist [k1, s1, s2, k2], entered at index i (the strip in play order: next = the item after)
+const SC_PL = () => [K[0], SC[0], SC[1], K[1]];
+// the live source(s) / scene worker of a path, from a `state`
+const srcIdsOf = (st, p) => sourcesOf(st).filter(([, n]) => n.path === p).map(([id]) => id);
+const workerOf = (st, p) => (st.workers || []).find((w) => w.path === p || srcIdsOf(st, p).includes(w.id));
+const workersProbe = async () => (await ctl.call("probe", { name: "workers" }).catch(() => ({ workers: [] }))).workers || [];
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const pget = async (p) => (await ctl.call("get", { path: p }).catch((e) => ({ value: `<${e.code ?? e.message}>` }))).value;
+// a scene shown as itself: /current = it, cur:* kind scene + ready, one live worker for it
+function sceneShown(c, p) {
+  const v = [];
+  if (c.after.cur?.path !== p) v.push(`expected scene ${TITLE(p)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
+  const ids = srcIdsOf(c.after.st, p);
+  const n = ids.length ? c.after.st.graph[ids[0]] : null;
+  if (!n) v.push(`no live source for ${TITLE(p)}`);
+  else { if (n.kind !== "scene") v.push(`${TITLE(p)}'s source kind ${n.kind}, expected scene`); if (n.ready !== true) v.push(`${TITLE(p)}'s source not ready`); }
+  const w = workerOf(c.after.st, p);
+  if (!w?.pid) v.push(`no scene worker for ${TITLE(p)} (workers: ${JSON.stringify((c.after.st.workers || []).map((x) => [x.id, x.pid, x.state]))})`);
+  else if (!pidAlive(w.pid)) v.push(`${TITLE(p)}'s worker ${w.pid} is not running`);
+  return v;
+}
+
 const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ advanceOnVideoEnd: true, transitionDurationMs: 600 }) });
 const STATES = {
   // roles: which item is on screen (`shown`) and which other item is live in the state (`other`: the
@@ -321,6 +367,17 @@ const STATES = {
   playlist4: { optIn: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => ({ paths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300 }) }),
     async enter(c) { c.playlist = true; c.fresh = true;
       await post("/playlist/play", STATES.playlist4.playlist()); c.ok = await waitSettled(12000, K[0]); } },
+  // Phase 2 scenes (opt-in: only the scene controls run here; scene support on before the UI loads)
+  // a single scene (s1) on screen
+  scene: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], async pre() { await scenesOn(); },
+    async enter(c) { await withGlobalMs(ENTRY_MS, async () => { await post("/apply", { path: SC[0] }); c.ok = await waitSettled(12000, SC[0]); }); } },
+  // the scene playlist [k1, s1, s2, k2] (timed, 600 s) at k1 / s1 / s2: next = V→S / S→S / S→V
+  sceneV: { optIn: true, exp: { paused: false }, roles: () => [K[0], SC[0]], playlist: () => ({ paths: SC_PL(), settings: PS() }),
+    async pre() { await scenesOn(); }, async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, SC_PL(), PS()); } },
+  sceneS: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS() }),
+    async pre() { await scenesOn(); }, async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS()); } },
+  sceneS2: { optIn: true, exp: { paused: false }, roles: () => [SC[1], K[1]], playlist: () => ({ paths: rot(SC_PL(), 2), settings: PS() }),
+    async pre() { await scenesOn(); }, async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 2), PS()); } },
 };
 
 // ---------------------------------------------------------------- controls
@@ -1219,7 +1276,7 @@ const key = (k, mods = {}) => `window.dispatchEvent(new KeyboardEvent("keydown",
 C["selRange+Delete"] = { states: SEL_STATES, switch: true, async run(c) {
     const order = await ui(`return [...document.querySelectorAll(".card.lib")].map((e) => e.querySelector(".lib-title")?.title);`);
     const i = order.indexOf(TITLE(c.shown)); const j = i + 1 < order.length ? i + 1 : i - 1;
-    c.targets = [c.shown, K[order[j].slice(1) - 1]]; c.exp.paused = false;
+    c.targets = [c.shown, [...K, ...SC].find((p) => TITLE(p) === order[j])]; c.exp.paused = false; // the neighbour may be a scene card
     const shift = `m.card(${JSON.stringify(order[j])})?.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true })); await m.sleep(150);`;
     await ui(`${ctrlClick(c.shown)} ${shift} ${key("Delete")}`); await sleep(900);
   }, check: (c) => [...afterTrashMany(c, c.targets), ...armedCheck(c)] };
@@ -1231,7 +1288,7 @@ C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async
   }, check(c) {
     const v = [];
     if (c.midState.lib !== 0 || c.midState.cur) v.push(`after Ctrl+A, Delete: ${c.midState.lib} library items, /current ${TITLE(c.midState.cur)}`);
-    if ((c.after.lib || []).length !== K.length) v.push(`${(c.after.lib || []).length} library items after the undo, expected ${K.length}`);
+    if ((c.after.lib || []).length !== (c.before.lib || []).length) v.push(`${(c.after.lib || []).length} library items after the undo, expected ${(c.before.lib || []).length} (all of them back)`); // k1–k4 + the scene items
     const got = (c.after.ps?.videoPaths || []).map(TITLE), want = c.strip.map(TITLE);
     if (JSON.stringify(got) !== JSON.stringify(want)) v.push(`playlist ${JSON.stringify(got)} after the undo, was ${JSON.stringify(want)}`);
     if (c.after.cur?.path) v.push(`${TITLE(c.after.cur.path)} plays after deleting everything + undo (the delete stopped playback)`);
@@ -1871,6 +1928,264 @@ function notTargeted(c, p, { gone } = {}) {
   return v;
 }
 
+// ---------------------------------------------------------------- scene controls (Phase 2 Task 12)
+// Every one runs only in the states it lists (the scene states are opt-in) and checks the player itself: the general
+// oracle covers a scene source like a video's (gain.user / speed / no_audio / gain.mute / … are resolved per source),
+// plus what each control is about — the worker (`state.workers[]`: pid, fps_target, audio.gain_db / no_audio / speed),
+// the player props, the index's crash mark, the UI. `allowErr(e)`: a source.error the control causes on purpose.
+const scWorker = async (p) => workerOf(await ctl.call("state"), p);
+const waitWorker = (p, pred, ms = 5000) => waitFor(async () => { const w = await scWorker(p); return !!w && pred(w); }, ms, 100);
+const settingsRow = (label) => `m.tab("Settings"); for (let i = 0; i < 60 && !m.row(${JSON.stringify(label)}); i++) await m.sleep(100);`;
+const samePid = (c, p) => { const a = workerOf(c.before.st, p)?.pid, b = workerOf(c.after.st, p)?.pid; return a && a === b ? [] : [`${TITLE(p)}'s worker ${a} → ${b} (a setting must apply live, on the same worker)`]; };
+const scLogs = async (kind) => ((await ctl.call("logs", { kind_prefix: kind, limit: 1000 }).catch(() => null))?.events || []);
+
+// apply a scene by clicking its card — from nothing, over a single video, over a running playlist
+C["apply:scene"] = { states: ["idle", "single", "playlist"], switch: true, exp: { paused: false },
+  async pre() { await scenesOn(); },
+  async run(c) { c.target = SC[0]; await ui(`m.click(m.card("s1")?.querySelector(".thumb-wrap"), "card s1");`); c.pe = (await http("GET", "/player-engine")).json; },
+  check: (c) => [...expectShown(c, SC[0], { effect: !!c.before.cur?.path }), ...sceneShown(c, SC[0]),
+    ...(c.pe?.scenes?.available === true ? [] : [`/player-engine.scenes ${JSON.stringify(c.pe?.scenes)}`])] };
+
+// next in the scene playlist [k1, s1, s2, k2]: V→S, S→S, S→V × every transition method (a keybind, like the user's)
+for (const [combo, st] of [["v→s", "sceneV"], ["s→s", "sceneS"], ["s→v", "sceneS2"]]) for (const m of ["full-live", "reveal", "frozen"]) {
+  C[`next:${combo}:${m}`] = { states: [st], switch: true,
+    async pre() { await scenesOn({ transitionMethod: m }); },
+    async run(c) {
+      c.from = c.before.cur?.path; c.want = succ(c.before.ps?.videoPaths, c.from); c.aPid = workerOf(c.before.st, c.from)?.pid;
+      c.cli = await cli("next-wallpaper");
+      // the outgoing scene's worker is reaped once the switch has handed off
+      if (c.aPid) { await waitSettled(12000, c.want); c.aGone = await waitFor(() => !pidAlive(c.aPid), 3000, 100); }
+    },
+    check(c) {
+      const v = [...expectShown(c, c.want, { effect: true })];
+      if (SC.includes(c.want)) v.push(...sceneShown(c, c.want));
+      const sw = lastSwitch(c);
+      const started = sw && c.evs.find((e) => e.event === "transition.started" && e.corr === sw.corr);
+      if (!started) v.push(`the switch ${sw?.corr ?? "?"} never started`);
+      else if (started.method !== m) v.push(`the switch ran method ${started.method}, TransitionMethod is ${m}`);
+      if (sw && !c.evs.some((e) => e.event === "transition.handoff" && e.corr === sw.corr)) v.push(`no transition.handoff for ${sw.corr}`);
+      if (c.aPid && !c.aGone) v.push(`the outgoing scene ${TITLE(c.from)}'s worker ${c.aPid} still runs after the switch`);
+      return v;
+    } };
+}
+
+// pause a scene: the player pauses (the oracle), the scene's frames stop (the worker latches nothing, its clock stands
+// still, the picture is identical 500 ms apart) and its sound is gated out (gain.pause −96)
+C["pause:scene"] = { states: ["scene"], flipPause: true, async run(c) {
+    c.cli = await cli("toggle-pause");
+    await waitFor(async () => (await pget("player.paused")) === true, 4000, 50);
+    await sleep(300); // the pause gate's 30 ms ramp + the hold
+    const shot = async (n) => { const f = path.join(OUT, `mx-pause-${process.pid}-${n}.png`); await ctl.call("capture", { target: "out:VIRTUAL-1", path: f }); return fs.readFileSync(f); };
+    const w0 = await scWorker(SC[0]); const a = await shot("a");
+    await sleep(500);
+    const w1 = await scWorker(SC[0]); const b = await shot("b");
+    c.sameShot = a.equals(b); c.w0 = w0; c.w1 = w1;
+  }, check(c) {
+    const v = [];
+    if (!c.sameShot) v.push("the picture changed while paused (captures 500 ms apart differ)");
+    if (!c.w0 || !c.w1) v.push("no s1 worker while paused");
+    else {
+      if (c.w1.latched !== c.w0.latched) v.push(`s1's worker latched ${c.w1.latched - c.w0.latched} frames while paused`);
+      if (c.w1.scene_time !== c.w0.scene_time) v.push(`s1's scene clock moved while paused: ${c.w0.scene_time} → ${c.w1.scene_time}`);
+    }
+    for (const id of srcIdsOf(c.after.st, SC[0])) { const gp = c.after.st.graph[id].gain?.pause; if (!(gp <= -95.9)) v.push(`${id}(s1) gain.pause ${gp}, expected −96 while paused`); }
+    return v;
+  } };
+
+// mute a scene: gain.mute −96 on its source (the oracle) reaches its worker's stream
+C["mute:scene"] = { states: ["scene"], flipMute: true, async run(c) {
+    c.cli = await cli("toggle-mute");
+    await waitWorker(SC[0], (w) => w.audio?.gain_db <= -95, 4000);
+  }, check(c) { const g = workerOf(c.after.st, SC[0])?.audio?.gain_db; return g <= -95 ? [] : [`s1's worker stream gain ${g} dB while muted, expected −96`]; } };
+
+// the global volume on a scene: its source's gain.user (the oracle) and the worker's stream gain follow
+C["volume:scene"] = { states: ["scene"], async run(c) {
+    await ui(`${settingsRow("Volume")} m.setValue(m.input("Volume"), 55, "Volume");`);
+    await waitWorker(SC[0], (w) => near(w.audio?.gain_db, VolumeDb(55), 0.1), 5000);
+  }, check(c) {
+    const v = c.after.s.volume === 55 ? [] : [`settings.volume ${c.after.s.volume}, expected 55`];
+    const g = workerOf(c.after.st, SC[0])?.audio?.gain_db;
+    if (!near(g, VolumeDb(55), 0.1)) v.push(`s1's worker stream gain ${g} dB, expected ${VolumeDb(55).toFixed(2)} (Volume 55)`);
+    return [...v, ...samePid(c, SC[0])];
+  } };
+
+// the scene's own volume / speed (its settings modal): its source only, persisted, live on the same worker — a
+// scene's speed scales its animation and its pitch-kept sound under lp-player (owner decision), so the slider shows
+for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["itemSpd", 1, 1.7, "speedOverride"]]) {
+  C[`${k}:scene`] = { states: ["scene"], async run(c) {
+      await ui(`await m.cardMenu("s1", "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
+      await waitWorker(SC[0], (w) => (k === "itemVol" ? near(w.audio?.gain_db, VolumeDb(val), 0.1) : near(w.audio?.speed, val, 0.001)), 4000);
+      await sleep(500); await ui(`m.closeModal();`);
+    }, check(c) {
+      const v = [];
+      const ov = (c.after.lib || []).find((i) => i.videoPath === SC[0])?.[field];
+      if (ov !== val) v.push(`s1 ${field} ${ov}, expected ${val}`);
+      const w = workerOf(c.after.st, SC[0]);
+      if (k === "itemVol" && !near(w?.audio?.gain_db, VolumeDb(val), 0.1)) v.push(`s1's worker stream gain ${w?.audio?.gain_db}, expected ${VolumeDb(val).toFixed(2)}`);
+      if (k === "itemSpd" && !near(w?.audio?.speed, val, 0.001)) v.push(`s1's worker speed ${w?.audio?.speed}, expected ${val}`);
+      return [...v, ...samePid(c, SC[0])];
+    } };
+}
+
+// Mute audio (NoAudio) on a scene: no_audio on its source (the oracle) and its worker, live, same worker
+C["noAudio:scene"] = { states: ["scene"], async run(c) {
+    await ui(`${settingsRow("Mute audio")} m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
+    await waitWorker(SC[0], (w) => w.audio?.no_audio === true, 5000);
+  }, check(c) {
+    const v = c.after.s.noAudio === true ? [] : [`settings.noAudio ${c.after.s.noAudio}`];
+    if (workerOf(c.after.st, SC[0])?.audio?.no_audio !== true) v.push("s1's worker still plays its sound (audio.no_audio false)");
+    return [...v, ...samePid(c, SC[0])];
+  } };
+
+// trash the playing scene: a single one stops, a playlist plays on from the next item; its worker goes
+C["trash:playingScene"] = { states: ["scene", "sceneS"], switch: true, async run(c) {
+    c.target = SC[0]; trashEndsPause(c); c.aPid = workerOf(c.before.st, SC[0])?.pid;
+    await ui(`m.click(m.card("s1")?.querySelector(".del"), "trash s1");`); await sleep(900);
+    c.aGone = await waitFor(() => !pidAlive(c.aPid), 3000, 100);
+  }, check: (c) => [...afterTrash(c, SC[0]), ...(c.aGone ? [] : [`s1's worker ${c.aPid} still runs after it was trashed`])] };
+
+// a scene that crashes (s3: 1.5 s after every start) played from the strip: broken after 3 restarts → marked
+// crashed in its index entry, its card shows it, the rotation advances to the strip's next (s1)
+C["crash:scene"] = { states: ["scene"], switch: true, exp: { paused: false },
+  allowErr: (e) => String(e.reason ?? "").includes(SC_KEY(SC[2])), // "scene worker broken (crash record …/900000003-….json)"
+  async pre() { await post("/playlist/state", { videoPaths: [SC[2], SC[0]], settings: PS(), name: null }); },
+  async run(c) {
+    await ui(`m.click(m.strip("s3"), "strip s3");`);
+    c.marked = await waitFor(() => readScIndex()[SC_KEY(SC[2])]?.crashed === true, 30000, 200);
+    c.advanced = await waitSettled(12000, SC[0]);
+    c.card = await waitFor(() => ui(`return !!m.card("s3")?.classList.contains("crashed");`), 5000, 100);
+    c.broken = (await scLogs("source.broken")).filter((e) => e.path === SC[2]);
+  }, check(c) {
+    const v = [];
+    if (!c.broken.length) v.push("no source.broken for s3");
+    if (!c.marked) v.push(`s3 not marked crashed in its index entry (${JSON.stringify(readScIndex()[SC_KEY(SC[2])])})`);
+    if (!c.card) v.push("the UI doesn't show s3's card as crashed");
+    if (c.after.cur?.path !== SC[0]) v.push(`after s3 broke: /current ${TITLE(c.after.cur?.path)}, expected s1 (the strip's next)`);
+    return v;
+  } };
+
+// every output unplugged while a scene plays: it's parked (silent, paused, the worker kept); replugged it shows again
+C["noOutput:scene"] = { states: ["scene"], async run(c) {
+    c.pid0 = workerOf(c.before.st, SC[0])?.pid; c.ids = srcIdsOf(c.before.st, SC[0]);
+    for (const o of ["VIRTUAL-1", "VIRTUAL-2"]) await ctl.call("headless.remove_output", { name: o });
+    c.parked = await waitFor(async () => c.ids.includes((await ctl.call("state")).parked), 3000, 50);
+    c.pidParked = (await scWorker(SC[0]))?.pid;
+    for (const [name, w, h] of [["VIRTUAL-1", 640, 360], ["VIRTUAL-2", 320, 180]]) await ctl.call("headless.add_output", { name, width: w, height: h, hz: 60 });
+    c.back = await waitFor(async () => { const st = await ctl.call("state"); const s = screen(st); return Object.keys(s).length === 2 && Object.values(s).every((p) => p === SC[0]); }, 5000, 100);
+  }, check(c) {
+    const v = [];
+    if (!c.parked) v.push(`s1 (${c.ids}) wasn't parked with every output gone`);
+    if (c.pidParked !== c.pid0) v.push(`s1's worker ${c.pid0} → ${c.pidParked} while parked (it must be kept)`);
+    if (!c.back) v.push("replugged outputs don't show s1 again");
+    return [...v, ...samePid(c, SC[0])];
+  } };
+
+// per-monitor scene fps (Monitors (scenes) → fps (live)): out:<c>.scene_fps and the worker's rate, same worker
+C["settings:sceneFps"] = { states: ["scene"], async run(c) {
+    await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.byText(".settings button", "+ Add monitor"); i++) await m.sleep(100);
+      m.click(m.byText(".settings button", "+ Add monitor"), "add monitor"); await m.sleep(400);
+      const name = document.querySelector(".settings .mon-name"); m.setValue(name, "VIRTUAL-1", "monitor name"); await m.sleep(100);
+      m.setValue(name.parentElement.querySelector("input.num"), 45, "monitor fps");`);
+    c.fps = await waitFor(async () => (await pget("out:VIRTUAL-1.scene_fps")) === 45, 5000, 100);
+    await waitWorker(SC[0], (w) => near(w.fps_target, 45, 0.5), 3000);
+  }, check(c) {
+    const v = [];
+    const m = (c.after.s.lweMonitors || []).find((x) => x.name === "VIRTUAL-1");
+    if (!m || m.fps !== 45) v.push(`settings.lweMonitors ${JSON.stringify(c.after.s.lweMonitors)}, expected VIRTUAL-1 at 45`);
+    if (!c.fps) v.push("out:VIRTUAL-1.scene_fps never became 45");
+    const w = workerOf(c.after.st, SC[0]);
+    if (!near(w?.fps_target, 45, 0.5)) v.push(`s1's worker fps_target ${w?.fps_target}, expected 45`);
+    return [...v, ...samePid(c, SC[0])];
+  } };
+
+// the GPU / VRAM group (lp-player): each control → its player prop, live, the scene on the same worker
+for (const [name, prop, want, drive, saved] of [
+  ["sceneThrottle", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.sceneThrottle === false],
+  ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Limit VRAM per scene")} m.setCheck(m.input("Limit VRAM per scene"), true, "VRAM limit"); await m.sleep(300);
+    for (let i = 0; i < 30 && !m.input("VRAM limit (MiB)"); i++) await m.sleep(100); m.setValue(m.input("VRAM limit (MiB)"), 2048, "MiB");`, (s) => s.sceneVramLimitEnabled === true && s.sceneVramLimitMib === 2048],
+  ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When VRAM runs low")} await m.select("When VRAM runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
+]) {
+  C[`settings:${name}`] = { states: ["scene"], async run(c) {
+      c.was = await pget(prop);
+      await ui(drive);
+      c.ok = await waitFor(async () => (await pget(prop)) === want, 5000, 100);
+      c.lowActive = await pget("player.vram_low_active");
+    }, check(c) {
+      const v = [];
+      if (!c.ok) v.push(`${prop} ${JSON.stringify(c.was)} → never ${JSON.stringify(want)}`);
+      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ sceneThrottle: c.after.s.sceneThrottle, sceneVramLimitEnabled: c.after.s.sceneVramLimitEnabled, sceneVramLimitMib: c.after.s.sceneVramLimitMib, vramLowMode: c.after.s.vramLowMode })})`);
+      if (c.lowActive !== false) v.push(`player.vram_low_active ${c.lowActive} (the fake VRAM sample is healthy)`);
+      return [...v, ...samePid(c, SC[0])];
+    } };
+}
+
+// a scene over the per-scene VRAM limit (the fake probe reports its worker at 2000 MiB > 1536): the player stops it,
+// the rotation advances at once, the UI says why — and it is NOT marked crashed
+C["vram:exceeded"] = { states: ["sceneS"], switch: true,
+  allowErr: (e) => String(e.reason ?? "").includes("vram_exceeded"),
+  async pre() { await scenesOn({ sceneVramLimitEnabled: true, sceneVramLimitMib: 1536 }); },
+  async run(c) {
+    c.pid = workerOf(c.before.st, SC[0])?.pid;
+    vramFake({ [c.pid]: 2000 });
+    c.adv = await waitSettled(12000, SC[1]);
+    c.status = "";
+    await waitFor(async () => (c.status = String(await ui(`return document.querySelector(".status")?.textContent ?? "";`))).includes("stopped: used"), 5000, 100);
+    c.ev = (await scLogs("scene.vram_exceeded")).filter((e) => e.path === SC[0]);
+    vramFake();
+  }, check(c) {
+    const v = [...expectShown(c, SC[1], { effect: true })];
+    if (!c.ev.length) v.push(`no scene.vram_exceeded for s1 (worker ${c.pid})`);
+    if (readScIndex()[SC_KEY(SC[0])]?.crashed) v.push("s1 was marked crashed by a VRAM stop");
+    if (!c.status.includes("used 2000 MiB > limit 1536 MiB")) v.push(`the status bar says "${c.status}", expected "s1: stopped: used 2000 MiB > limit 1536 MiB of VRAM"`);
+    return v;
+  } };
+
+// a short playlist interval set while a scene plays (it never ends): the rotation advances off it to the next item
+C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
+    await ui(`${plOpen} m.setValue(${hms(2)}, 4, "s"); await m.sleep(300); m.setValue(${hms(1)}, 0, "m"); ${plClose}`);
+    c.saved = (await http("GET", "/playlist/state")).json?.settings?.intervalSeconds;
+    c.tChange = Date.now();
+    c.sw = await waitFor(async () => events.some((e) => e._t >= c.tChange - 500 && e.event === "transition.scheduled" && e.path === SC[1]), 9000, 100);
+    await waitSettled(8000, SC[1]);
+    // stop rotating before the checks (another client's save: the strip re-syncs)
+    await post("/playlist/state", { settings: { intervalSeconds: 600 } }); await sleep(500);
+  }, check(c) {
+    const v = [];
+    if (c.saved !== 4) v.push(`playlist interval ${c.saved} after the UI change, expected 4`);
+    if (!c.sw) v.push("no switch off the scene within 9 s of a 4 s interval");
+    if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the strip's next after s1)`);
+    const e = c.evs.find((x) => x.event === "transition.scheduled" && x.path === SC[1]);
+    if (e && e.effect_id == null) v.push("the interval's switch off the scene was a cut (transitions are on)");
+    return v;
+  } };
+
+// the backend restarted (dotnet watch, an app relaunch) while a scene plays: the same scene stays — no switch, the same
+// worker — and the new backend says so (/current, the UI's playing mark)
+let backendPid = Number(E.LP_BACKEND_PID || 0);
+const procAlive = (pid) => { try { return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return false; } };
+async function restartBackend() {
+  await win.loadURL("about:blank"); // the page's WebSocket would hold the old backend's shutdown open (Kestrel's 30 s)
+  const old = backendPid;
+  if (old && procAlive(old)) process.kill(old, "SIGTERM");
+  if (old && !(await waitFor(() => !procAlive(old), 35000, 100))) { process.kill(old, "SIGKILL"); await waitFor(() => !procAlive(old), 5000, 100); }
+  const env = { ...process.env, LP_PORT: new URL(U).port };
+  for (const k of ["DISPLAY", "LP_URL", "LP_CLIPS", "LP_OUT", "LP_ONLY", "LP_SHARD"]) delete env[k];
+  const log = fs.openSync(E.LP_BACKEND_LOG, "a");
+  const ch = cp.spawn(E.LP_DOTNET, [E.LP_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
+  fs.closeSync(log);
+  backendPid = ch.pid; if (E.LP_BACKEND_PID_FILE) fs.writeFileSync(E.LP_BACKEND_PID_FILE, String(ch.pid));
+  return waitFor(async () => (await http("GET", "/health")).json?.ok === true, 40000, 200);
+}
+C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
+    c.pid0 = workerOf(c.before.st, SC[0])?.pid;
+    c.up = await restartBackend();
+    await loadUi(); await sleep(500);
+  }, check(c) {
+    const v = [...sceneShown(c, SC[0]), ...samePid(c, SC[0])];
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    return v;
+  } };
+
 // Cells whose expectation waits on an owner decision: reported as KNOWN (with the reason), not FAIL.
 const KNOWN = [];
 
@@ -1944,7 +2259,7 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   if (fuzz && fs.existsSync(PENDING_ACTION)) v.push(`the playlist's tick never took a keybind's "${(() => { try { return fs.readFileSync(PENDING_ACTION, "utf8").trim(); } catch { return "?"; } })()}" (pending_action.txt still there > 4 s later; /current timed=${c.after.cur?.timed})`);
   for (const e of c.evs) {
     if (e.event === "transition.failed" && !K_.expectFail) v.push(`transition.failed ${e.corr}: ${e.reason}`);
-    if (e.event === "source.error" && !K_.expectFail) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
+    if (e.event === "source.error" && !K_.expectFail && !(K_.allowErr && K_.allowErr(e))) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
     if (e.event === "source.rejected") v.push(`source.rejected ${e.prop}: ${e.reason}`);
     if (rotated) continue;
     if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
@@ -2028,6 +2343,7 @@ const offGlobal = (vol, spd) => (x) => (vol === undefined || ![].concat(vol).inc
 const FUZZ_RULES = [
   [/^race:|^plState:partial$/, { exclude: "backend-only HTTP stress (no UI) that rewrites the playlist / index under the run" }],
   [/^apply:broken$/, { exclude: "a switch that FAILS on purpose (expectFail): its transition.failed would fail every later step" }],
+  [/[sS]cene|^vram:|^settings:vram|^next:[sv]→/, { exclude: "the scene controls: scene support on + their own scene fixtures (a crashing scene, the fake VRAM probe, a backend restart)" }],
   [/autoMute/, { exclude: "synthetic streams on the private audio server + Auto-Mute's delays outlive a step" }],
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],

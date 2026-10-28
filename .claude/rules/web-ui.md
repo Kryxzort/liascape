@@ -132,8 +132,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   playing" (mid-transition that's the incoming side: a drag on A moved B and left it there). No UI
   "is it playing" gate either (the store's `playingPath` is one side of a transition). Guard:
   `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
-  buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes**
-  (LWE is 1×, so it'd be a no-op).
+  buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes
+  under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` lp-player it shows (a scene's speed scales its
+  animation and its pitch-kept sound — matrix `itemSpd:scene`; it was hidden for every engine).
 - **Global Volume/Speed sliders (Settings page) drag-preview live too** (`useGlobalPreview` in
   `views/Settings.tsx`): each `onChange` → `setSetting` (the store's debounced 250 ms `/settings` save
   persists) + a throttled (~90 ms, trailing) `api.preview({volume|speed, global: true})` — the backend
@@ -193,6 +194,28 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   hidden BrowserWindow renders no frames — rAF never fires, so framer-motion / WAAPI exits never finish,
   dnd-kit's rAF-aligned pointermoves coalesce (a drop lands on a stale target) and `appActive` stays false.
   Drags that need real hit-testing go through `webContents.sendInputEvent` (the strip's dnd-kit reorder).
+  **Scene cells (Phase 2 Task 12).** `test-ui-matrix.sh` seeds three synthetic WE scenes into the private library
+  (`library/workshop/90000000{1,2,3}`, titled s1–s3 in that source's `index.json`, 320×180 previews; the worker's
+  synthetic renderer: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashing 1.5 s after every start), runs its player with
+  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LP_SCENE_WORKER_BIN` and `LP_PLAYER_VRAM_PROBE=fake:<file>` (healthy unless a
+  cell writes a worker's MiB into it; short `LP_PLAYER_VRAM_TIMING`). Scene support stays **off** in the baseline (the
+  library-stepping / random cells would land on scenes, s3 crashes) — the opt-in states `scene` (s1 alone), `sceneV`
+  / `sceneS` / `sceneS2` (the playlist [k1, s1, s2, k2] at k1 / s1 / s2) and every scene control turn it on before
+  the UI loads; each cell starts with the scenes unmarked (index rewritten) and the fake VRAM healthy. Cells (oracle in
+  brackets — `state.workers[]` pid / `fps_target` / `audio.gain_db|no_audio|speed`, player props, the index, the UI):
+  `apply:scene` (idle/single/playlist: a card click → kind scene, ready, a live worker, `/player-engine.scenes`),
+  `next:v→s|s→s|s→v:<full-live|reveal|frozen>` (the started switch's `method`, its handoff, the outgoing scene's
+  worker reaped), `pause:scene` (no frame latched, the scene clock still, captures 500 ms apart identical, `gain.pause`
+  −96), `mute:scene` / `volume:scene` / `itemVol:scene` / `itemSpd:scene` / `noAudio:scene` (the worker's stream, same
+  pid), `trash:playingScene` (scene / sceneS), `crash:scene` (s3 from the strip → `source.broken`, index `crashed`, its
+  card marked, the strip's next plays), `noOutput:scene` (parked with the worker kept, shown again on replug),
+  `settings:sceneFps` (Monitors → `out:VIRTUAL-1.scene_fps` 45 + `fps_target`), `settings:sceneThrottle|vramLimit|
+  vramLowMode` (the GPU / VRAM group → `player.*`, same pid), `vram:exceeded` (the fake reports s1's worker at 2000 MiB
+  > 1536 → the rotation advances, not marked crashed, the status bar's text), `playlist:sceneInterval` (a 4 s interval
+  advances off a scene), `restore:scene` (the backend restarted on the same port — `LP_PORT` — the scene stays, same
+  worker; the probe kills only the backend the stack started and records its replacement in `backend2.pid` for the
+  cleanup). `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
+  worker / `scene/` / `worker/` / `vram.rs` / their probes → the scene family. Fuzz excludes them (their fixtures).
 
 ## Settings page under lp-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;

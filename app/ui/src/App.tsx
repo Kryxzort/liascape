@@ -51,8 +51,11 @@ export default function App() {
     // lp-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
     else if (e.type === "scene-vram-stopped") {
       const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();
-      s.setStatus(`${t}: ${e.payload.message}`);
+      s.setStatus(`${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
     }
+    // a scene broke for good (lp-player: past its restart budget) — the backend marked it crashed in its index:
+    // its card shows it at once (it used to wait for the next library reload)
+    else if (e.type === "scene-crashed") s.itemChangedByBackend(e.payload.path, { hasCrashed: true });
     // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
     else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
   }, []); // eslint-disable-line
