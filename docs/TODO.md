@@ -77,6 +77,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       owner's call.
 
 ## lp-player (after design approval)
+- [x] **Auto-mute muted the wallpaper on our own switches** (owner, 2026-10-28: "auto mute is muting itself when
+      transition is playing audio" — with both delays 0 a hitch, with a non-zero "unmute after" muted that long).
+      Not a missing identity: every own stream (each switch's incoming mpv `lp-player` / scene worker
+      `lp-player-scene.<id>` stream, the bus playback) carries `node.name`/`target.object`/`application.name` from its
+      first `new` event, and R69's filter said "ours" every time. `AudioMonitor` counted a stream's level BEFORE that
+      verdict (checked 100 ms + a listing later) and every `change` (the uncork) re-added an excluded stream → B's
+      ramp-in at ≈ −62 dB beat the −70 dB threshold. Fix: classify-then-count (parec warms up, the level counts once
+      the stream is classified foreign; own ids remembered until `remove`). RED on the base backend: 10/12 method ×
+      V/S-combo cells muted (frozen V→S / S→S happened not to), a foreign `paplay` muted in 54 ms; GREEN: 12/12 clean,
+      the foreign stream as fast. Guard: adapter IT § "auto-mute never hears our own switches" (a private PipeWire +
+      pipewire-pulse). Legacy shares `AudioMonitor` and gets the same classify-then-count (not separately tested — owner:
+      lp-player only). The in-player auto-mute Signal stays PARKED (below).
 - [x] Write the implementation plan (Phase 0 spikes first: LWE `next-v2` core renders offscreen; worker → compositor
       dmabuf sharing on NVIDIA proprietary; libmpv core-profile GL + `volume-gain` crossfade).
       `docs/superpowers/plans/2026-10-20-lp-player-phase0-1.md`.
