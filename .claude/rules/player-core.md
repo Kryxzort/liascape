@@ -3794,8 +3794,15 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   cap × `STEP_UP` 1.25, each step after another calm 5 s; reaching the demand lifts the cap. A
   demand below the floor is never touched.
 - **Feeding it (`Runtime::feed_scene_budgets`, every `OBSERVE_EVERY` 500 ms, real clock).**
-  `missed_pct` = the worst, over the outputs showing the scene (`Graph::outputs_of`), of the
-  `frames` probe's paced window (`missed / count` over 2 s; no paced samples = 0). The scene adds
+  `missed_pct` = the worst, over **every** output (Phase 2 Task 14 — the GPU is shared; it
+  was the outputs showing the scene, `Graph::outputs_of`: on-machine a ~6 ms/frame worker on
+  DP-1 cost DP-2's 240 Hz video 71 missed frames in 2 s while the budget, reading DP-1 alone,
+  eased the cap back up; `probe::frames::worst_missed_pct`, unit
+  `budget_miss_rate_is_the_worst_output_not_only_the_scenes`), of the `frames` probe's paced
+  window (`missed / count` over 2 s; no paced samples = 0). **Open (TODO):** the throttle stops
+  at the GPU-load guard (400 ms/s) — on this machine a single heavy draw at 220–260 ms/s still
+  cost the 240 Hz output 33–38 missed frames per 2 s (the worker's low-priority context isn't
+  preempted mid-draw; with explicit sync off each swap waits for the GPU on the loop). The scene adds
   its **own** missed frames (deviation from the plan's text, which only counts the outputs): a
   worker latching under `DEFICIT_RATIO` 90 % of its tick rate over a whole 2 s window at that rate
   (`rate_since`: reset by a rate change, the load's first frame, an un-pause) counts its deficit

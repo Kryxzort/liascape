@@ -181,6 +181,26 @@ impl FrameStats {
     }
 }
 
+/// The GPU budget's miss rate (Phase 2 Task 14): the worst paced miss percentage over
+/// **every** output's 2 s window — not only the outputs showing a scene. The GPU is shared:
+/// on-machine, a ~6 ms/frame worker on DP-1 cost DP-2 (a 240 Hz video, no scene) 71 missed
+/// frames in 2 s while the budget, reading DP-1 alone, saw none and eased the cap back up.
+/// The budget's own GPU-load guard (`scene::budget::GPU_LOAD_MS_PER_S`) keeps a light scene
+/// from being blamed for another output's misses. An output with no paced samples is 0.
+pub fn worst_missed_pct<'a>(stats: impl IntoIterator<Item = &'a FrameStats>, now: Instant) -> f64 {
+    stats
+        .into_iter()
+        .map(|st| {
+            let s = st.paced(now);
+            if s.count == 0 {
+                0.0
+            } else {
+                s.missed as f64 * 100.0 / s.count as f64
+            }
+        })
+        .fold(0.0, f64::max)
+}
+
 fn push(q: &mut VecDeque<(Instant, f64)>, at: Instant, ms: f64) {
     q.push_back((at, ms));
     if q.len() > MAX_SAMPLES {
@@ -320,6 +340,25 @@ mod tests {
         assert!((p.max_ms.unwrap() - 6.945).abs() < 1e-6);
         assert_eq!(p.missed, 0);
         assert_eq!(s.presents, 145);
+    }
+
+    #[test]
+    fn budget_miss_rate_is_the_worst_output_not_only_the_scenes() {
+        // DP-1 shows the scene and paces cleanly; DP-2 (no scene) misses 2 of its 19 intervals.
+        let t0 = Instant::now();
+        let mut dp1 = FrameStats::new(143_981, t0);
+        let mut dp2 = FrameStats::new(239_760, t0);
+        let e1 = run(&mut dp1, t0, 0.0, 6.945, 21);
+        let mut t = run(&mut dp2, t0, 0.0, 4.171, 10);
+        t += ms(8.342);
+        dp2.on_present(t);
+        t += ms(8.342);
+        dp2.on_present(t);
+        let t = run(&mut dp2, t, 4.171, 4.171, 8).max(e1);
+        assert_eq!(worst_missed_pct([&dp1], t), 0.0);
+        let w = worst_missed_pct([&dp1, &dp2], t);
+        assert!((w - 200.0 / 19.0).abs() < 1e-9, "{w}");
+        assert_eq!(worst_missed_pct(std::iter::empty::<&FrameStats>(), t), 0.0);
     }
 
     #[test]
