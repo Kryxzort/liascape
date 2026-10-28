@@ -29,3 +29,9 @@ Read this when the owner asks "anything I should know". Append during unattended
   `gg` keeps 3660 s as the maximum; the globals and `ds` stay plain timers. I stopped/started the dev backend unit for
   it (your wallpaper may have gone blank for a moment). Press Ctrl+R in the app before changing settings.
 - Found by the rotation agent: an fps cap (VideoFps > 0) stopped still images from ever showing — an agent is fixing it.
+- **LWE fixes ported: scene corpus 86/96 → 92/96 ok** (`61b4d4c`, fork `livepaper/next-v2` fast-forwarded to
+  `40eacc9`). 8 of upstream main's 13 new commits ported (text `padding` as a string, the `"particle": null` crash on
+  clock text — that was the "leaf particle" segfault —, a script leak, effect sizing, …), plus 3 small patches of our own
+  (a wrong-typed JSON field no longer aborts the process, case-insensitive asset lookup fallback, an effect that can't
+  compile is left out instead of blacking out its object). Still not ok: 3 3D scenes (LWE has no 3D) + 1 still image by
+  design. The live player picks it up on its next upgrade (release rebuilt).
