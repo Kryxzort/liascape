@@ -21,15 +21,19 @@ export type LpEvent =
 // app: the backend serves the UI, API = "") connects to this page's own origin — it used to return
 // here instead, so the installed app never got a single push event (rotation/keybind switches,
 // download progress, Steam sign-in).
-export function useEvents(onEvent: (e: LpEvent) => void) {
+// `onReconnect`: every open after the first — the backend restarted (or the socket dropped): whatever changed in the
+// gap was never pushed, so the page re-reads what it mirrors (store.resync).
+export function useEvents(onEvent: (e: LpEvent) => void, onReconnect?: () => void) {
   useEffect(() => {
     const base = (API || location.origin).replace(/^http/, "ws");
     let ws: WebSocket | null = null;
     let stop = false;
+    let opened = false;
     let retry: ReturnType<typeof setTimeout>;
     const connect = () => {
       if (stop) return;
       ws = new WebSocket(`${base}/events`);
+      ws.onopen = () => { if (opened) onReconnect?.(); opened = true; };
       ws.onmessage = (m) => {
         try { onEvent(JSON.parse(m.data)); } catch { /* ignore */ }
       };
@@ -38,5 +42,5 @@ export function useEvents(onEvent: (e: LpEvent) => void) {
     };
     connect();
     return () => { stop = true; clearTimeout(retry); ws?.close(); };
-  }, [onEvent]);
+  }, [onEvent, onReconnect]);
 }

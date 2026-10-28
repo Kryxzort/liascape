@@ -185,6 +185,24 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   pending strip save can't put them back), both re-read it via `syncPlaylist()`. Another client's
   `POST /playlist/state` (a script, an agent) → WS `playlist-changed {client}` → `syncPlaylist()`; every POST
   carries the page's `X-LP-Client` id (`api/client.ts` `CLIENT_ID`) so a page skips the echo of its own save.
+- **Backend restart under an open page → `store.resync()`** (2026-10-28: "Library is empty" while a wallpaper played).
+  Everything the store mirrors — sources, themes, settings (+ theme vars), `/current`, library, strip (paths +
+  settings + name), playlist names, undo depth, Steam status — is read by ONE `resync()` (`readBackend`): at start
+  (`init` retries it — 250 ms doubling to 2 s — while any read fails for want of a backend: a `TypeError`, not an HTTP
+  error) and on every WS reopen after the first (`useEvents(onEvent, onReconnect)` → `App.tsx` `onReconnect`; also
+  reloads a Browse list the outage left empty). Each piece is applied only when ITS read succeeded — never `[]` for a
+  failed read (init used to `.catch(() => [])` the library) — and a strip / settings edit still waiting for its debounced
+  save keeps the local copy (`stripSavePending` / `settingsSavePending`). Overlapping calls coalesce into one more pass.
+  The incident: `dotnet watch` restarted the dev backend on a cherry-pick that also changed `api/client.ts`; Vite's HMR
+  re-created the store (empty) and re-ran `init` into the outage (journal: `hmr update /src/App.tsx …` 13:11:21, backend
+  `Exited` 13:11:26, listening 13:11:29) — `init` failed and nothing ever re-read; the backend's startup
+  `library-synced` broadcast fires before any page has reconnected, so it never helped. The backend serves the whole
+  library from its first request (`LoadAll` scans the folders per call — there's no lazy index load). Guard: matrix
+  `restart:backend` (idle/playlist: backend down 3 s under the open page — an item added, the strip and
+  `thumbnailAspect` changed on disk meanwhile → the page shows all three, and the new backend's first `/library` is
+  whole), `restart:midLibrary` (the page's first `/library` held, the backend SIGKILLed under it, then back),
+  `restart:initDown` (the built UI from `file://…?api=<port>` — the dev topology — started while the backend is down).
+  All three were RED before the fix.
 - **Origin**: production = `http://127.0.0.1:<backend port>`; `main.js` reuses the last port while free
   (`LP_PORT`) so localStorage prefs survive a relaunch; WS connects to `location.origin` when `API` is "".
 - Guard: `scripts/test-ui-matrix.sh` (every control × every player state through the real UI, hermetic;
