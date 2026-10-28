@@ -106,7 +106,11 @@ task text where they differ:
   complete result; legacy LWE scenes stay unnormalized; no matrix cell (the IT covers it — the matrix player has
   no short-window knob). Tests: units `audio::loudness` ×6 (RED by mutation: no K-weighting + no gates → 5 fail),
   worker `loudness_segments_count_only_played_sound`, api ×5 (RED: 5/5 fail before), self-test
-  `SceneLoudnessAssertions`, adapter IT § scene loudness (RED on the base backend).
+  `SceneLoudnessAssertions`, adapter IT § scene loudness (RED on the base backend: 13 failing, the rest 193 pass;
+  GREEN 204/0). Crate suite: default 1 fail (`transport_meets_the_spike_budget`, worker CPU 7.6 % at load ~10 — a
+  soundless scene, no loudness code runs; passes alone), `LP_PLAYER_RENDER_WORKER=off` all pass;
+  `test-settings-merge.sh` 53/0; `--lp-player-selftest` PASS; matrix (`--changed` → full, `--jobs 2`, 32 min)
+  751 pass / 0 fail / 0 error / 29 skip.
 - **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
   frame / preview, silent).
 
