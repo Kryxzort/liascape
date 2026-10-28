@@ -1,8 +1,8 @@
 ---
 paths:
-  - "src/livepaper/Models/AppSettings.cs"
-  - "src/livepaper/Models/LastSession.cs"
-  - "src/livepaper/Models/CustomPlaylist.cs"
+  - "src/backend/Models/AppSettings.cs"
+  - "src/backend/Models/LastSession.cs"
+  - "src/backend/Models/CustomPlaylist.cs"
 ---
 
 ## Settings & Session Persistence

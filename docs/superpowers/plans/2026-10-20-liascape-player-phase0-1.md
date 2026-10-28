@@ -165,7 +165,7 @@ written after this one lands and informed by the Task 1–2 findings.
 | `tests/common/mod.rs` | headless harness + synthetic media (`ensure_clip`) |
 | `tests/*.rs` | integration tests named per task |
 
-C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LiascapePlayerClient.cs,LiascapePlayerMedia.cs,MpvPropertyMap.cs}`.
+C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.cs,LiascapePlayerMedia.cs,MpvPropertyMap.cs}`.
 
 ---
 
@@ -672,20 +672,20 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LiascapePlayerClien
 ### Task 17: Backend adapter behind `PlayerEngine` (C#)
 
 **Files:**
-- Create: `src/livepaper/Player/PlayerEngine.cs`, `LiascapePlayerClient.cs`, `LiascapePlayerMedia.cs`, `MpvPropertyMap.cs`
-- Modify: `src/livepaper/Models/AppSettings.cs` (`public string PlayerEngine { get; set; } = "legacy";`)
-- Modify: `src/livepaper/Helpers/PlayerHelper.cs` — dispatch at the media primitives only:
+- Create: `src/backend/Player/PlayerEngine.cs`, `LiascapePlayerClient.cs`, `LiascapePlayerMedia.cs`, `MpvPropertyMap.cs`
+- Modify: `src/backend/Models/AppSettings.cs` (`public string PlayerEngine { get; set; } = "legacy";`)
+- Modify: `src/backend/Helpers/PlayerHelper.cs` — dispatch at the media primitives only:
   - `SwitchToFile` (l. 1070), `Launch` (l. 2826), `SendCommand` (l. 2542), `TrySendCommand`
   - `TryQueryCurrentPath`, `TryQueryTimePos` (l. 1862), `TryQueryProperty` (l. 1833), `TryQueryTimeRemaining` (l. 1884)
   - `KillCurrentProcess` (l. 2944), `KillAll` (l. 3042), `TogglePause` (l. 2515)
   - the V→V transitions-on branch of `DoVideoEndWait`
   - scene checks at l. 705, 736, 1011, 1149 and `IsSkippedPath` (l. 3071) → `PlayerEngine.ScenesPlayable(settings)`
-- Modify: `src/livepaper/Helpers/AudioMonitor.cs` (`GetNonMpvStreamIdsAsync`: exclude the liascape-player bus playback stream)
-- Modify: `src/livepaper/Helpers/TransitionService.cs`: extract `public static (string effectId, Dictionary<string,double[]> uniforms, int durationMs, string method)? Pick(Config cfg)` from `TryStart` (reuses `PickEffect`/`PickDuration`; no capture work)
-- Modify: `src/livepaper/Web/ServerHost.cs` (`/settings`: a `PlayerEngine` change → `PlayerHelper.SwitchEngineLive(prev, cur)` = stop the old engine, replay `LastSession` on the new one)
-- Modify: `src/livepaper/Program.cs`: hidden `--liascape-player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
+- Modify: `src/backend/Helpers/AudioMonitor.cs` (`GetNonMpvStreamIdsAsync`: exclude the liascape-player bus playback stream)
+- Modify: `src/backend/Helpers/TransitionService.cs`: extract `public static (string effectId, Dictionary<string,double[]> uniforms, int durationMs, string method)? Pick(Config cfg)` from `TryStart` (reuses `PickEffect`/`PickDuration`; no capture work)
+- Modify: `src/backend/Web/ServerHost.cs` (`/settings`: a `PlayerEngine` change → `PlayerHelper.SwitchEngineLive(prev, cur)` = stop the old engine, replay `LastSession` on the new one)
+- Modify: `src/backend/Program.cs`: hidden `--liascape-player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
 - Modify: `app/ui/src/views/Settings.tsx` (advanced row "Player engine": Legacy / liascape-player (experimental)), `app/ui/src/store/index.ts` (default `playerEngine: "legacy"`)
-- Create: `.claude/rules/player-adapter.md` (`paths: ["src/livepaper/Player/**"]`): the dispatch points, the property map, the event flow
+- Create: `.claude/rules/player-adapter.md` (`paths: ["src/backend/Player/**"]`): the dispatch points, the property map, the event flow
 
 **Interfaces:**
 - Consumes: liascape-player wire protocol (Task 12), `TransitionReq` fields (Task 11)
@@ -715,7 +715,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LiascapePlayerClien
 - [ ] **Step 1: Write the failing self-test** (`--liascape-player-selftest`):
   - `MpvPropertyMap` assertions: `volume 50` → `gain.user = −18.0618 ± 1e-3`; `volume 100` → 0; `panscan 0.0` → `fit:"fit"`; `aid no` → `no_audio:true`
   - round-trip: `hello`; a `transition` colour→clip with `align:now` receives `transition.handoff`
-- [ ] **Step 2:** Run `dotnet run --project src/livepaper -- --liascape-player-selftest` → FAIL.
+- [ ] **Step 2:** Run `dotnet run --project src/backend -- --liascape-player-selftest` → FAIL.
 - [ ] **Step 3:** Implement the four classes + dispatch + UI row. Legacy branches stay byte-for-byte when `!IsLiascapePlayer`.
 - [ ] **Step 4:** Self-test → PASS. Then on-machine with `PlayerEngine=liascape-player` via `curl -X POST /settings`:
   - `/apply` a clip; `/next` in the owner's `dp` playlist

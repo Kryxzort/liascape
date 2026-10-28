@@ -14,7 +14,7 @@ experimental until the switch-over bar (§6 below) is met.
 
 This file links to the per-module detail instead of duplicating it:
 `.claude/rules/player-core.md` (the Rust crate, one `##` section per module) and
-`.claude/rules/player-adapter.md` (the C# adapter, `src/livepaper/Player/`) are the sources of
+`.claude/rules/player-adapter.md` (the C# adapter, `src/backend/Player/`) are the sources of
 truth for mechanism; `docs/player/invariants.md` is the sources of truth for *why* a rule can't be
 broken. If this doc and either of those disagree, the rules file is right — fix this one.
 
@@ -86,7 +86,7 @@ overlay leaving mpvpaper parked — see the design spec §1 for the measured inc
      │             │ JSON Lines, one unix socket                   │ EGL + Wayland (src/wl.rs),
      │             │ $XDG_RUNTIME_DIR/livepaper/liascape-player.sock      │ or --headless virtual
      │             │                                               │ outputs (src/headless.rs)
-     │  livepaper backend (C#, src/livepaper/Player/) ─────────▶  wlr-layer-shell outputs
+     │  livepaper backend (C#, src/backend/Player/) ─────────▶  wlr-layer-shell outputs
      │  AppSettings.PlayerEngine = legacy | liascape-player             (one surface per wl_output)
      │
      │ SOCK_SEQPACKET (JSON datagrams + fds) · dmabuf frames + sync_file fences
@@ -251,7 +251,7 @@ reply is sent. The backend's `LiascapePlayerClient` background event connection
 | The audio bus, re-targeting, the meter | `src/player/src/audio/{bus,meter}.rs` | § Audio bus | `src/player/tests/onmachine/bus.sh`, `src/player/tests/api.rs::bus_*` |
 | Crash restart, startup-failure classification | `src/player/src/supervise.rs` | § Supervisor | `src/player/tests/supervise.rs` |
 | State persistence / `--restore` | `src/player/src/snapshot.rs` | § Snapshot | `src/player/tests/supervise.rs` (restore cases) |
-| The C# side of a setting / dispatch point | `src/livepaper/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-liascape-player-adapter.sh`, `--liascape-player-selftest` |
+| The C# side of a setting / dispatch point | `src/backend/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-liascape-player-adapter.sh`, `--liascape-player-selftest` |
 | Reference-based dropout detection | `src/player/src/probe/dropout.rs`, `scripts/liascape_audiowatch.py` | `docs/player/debugging.md` | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
 | Process memory, the glibc allocator policy, the `memory` probe | `src/player/src/mem.rs`, `src/player/src/probe/memory.rs`, `src/player/src/sources/reaper.rs` | `.claude/rules/player-core.md` § Memory | `src/player/tests/api.rs::t20b_switch_loop_rss_stays_flat`, `battery.sh soak --hermetic` |
 | Wayland EGL driver environment (NVIDIA explicit sync), libwayland default-queue drain | `src/player/src/wl.rs` (`apply_driver_env`, `Wayland::dispatch_default_queue`) | `.claude/rules/player-core.md` § Wayland → NVIDIA notes | `src/player/tests/api.rs::t20e_wayland_present_heap_stays_flat` (opt-in `LIASCAPE_PLAYER_TEST_WAYLAND`) |

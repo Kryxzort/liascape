@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- .NET dlopens libicu at startup for CultureInfo; NixOS has no libicu at the expected path
+         → self-contained binary SIGABRTs in Program.Main (arg parsing) before anything runs, so
+         the GUI's spawned backend dies and no UI appears. Invariant globalization drops the ICU
+         dependency entirely (ordinal string ops) — fine for a wallpaper app. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- the executable is `liascape-backend` (libexec/liascape/, started by the `liascape` launcher) -->
+    <AssemblyName>liascape-backend</AssemblyName>
+    <RootNamespace>Liascape</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Headless web backend serve mode: ASP.NET minimal API + WebSocket + image proxy. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
+    <PackageReference Include="SteamKit2" Version="3.4.0" />
+  </ItemGroup>
+</Project>

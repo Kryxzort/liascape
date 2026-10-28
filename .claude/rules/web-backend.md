@@ -1,7 +1,7 @@
 ---
 paths:
-  - "src/livepaper/Web/**"
-  - "src/livepaper/Program.cs"
+  - "src/backend/Web/**"
+  - "src/backend/Program.cs"
 ---
 
 # Web backend (`--serve`)

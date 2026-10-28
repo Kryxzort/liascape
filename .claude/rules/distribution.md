@@ -11,7 +11,7 @@ The app ships as **two pieces**: a published self-contained C# backend + the bui
 
 ### `scripts/install.sh` — the current installer
 1. `cd app/ui && npm install && npm run build` → UI bundle in `app/ui/dist/`.
-2. `dotnet publish src/livepaper -r linux-x64 --self-contained` → backend in `~/.local/share/livepaper-web/backend`.
+2. `dotnet publish src/backend -r linux-x64 --self-contained` → backend in `~/.local/share/livepaper-web/backend`.
 3. Stages the UI to `~/.local/share/livepaper-web/ui`; ensures `app/shell`'s Electron (`npm install`).
 4. Installs to `~/.local/bin`:
    - **`livepaper`** — bare = open the GUI (`exec livepaper-ui`); any flag = the headless backend/CLI (`backend/livepaper "$@"`). Sets `LIASCAPE_UI_DIR`.
@@ -23,7 +23,7 @@ The app ships as **two pieces**: a published self-contained C# backend + the bui
 ### ⚠️ Stale / not-yet-rebuilt packaging
 - **`scripts/build-appimage.sh`** and **`scripts/PKGBUILD`** still build the **pre-rewrite single-binary Avalonia app** (PKGBUILD has no `nodejs`/`electron` deps and points at the old upstream repo). They do **not** produce the current Electron+backend stack — treat as broken until rewritten.
 - **AppImage via electron-builder is NOT set up** — `app/shell/package.json` has only a `start` script (no `build`/`dist`, no electron-builder config). The "`npm run dist`" mentioned in older notes/README does not exist yet.
-- The old `src/livepaper/Assets/` icon (`livepaper.svg`/`.png`) was **deleted**; there is no packaged app icon wired up yet (the `.desktop` entry sets no `Icon=`). UI/static assets live under `app/ui/public`.
+- The old `src/backend/Assets/` icon (`livepaper.svg`/`.png`) was **deleted**; there is no packaged app icon wired up yet (the `.desktop` entry sets no `Icon=`). UI/static assets live under `app/ui/public`.
 
 ### Dev (no install)
 `scripts/dev.sh` → systemd user units: `livepaper-vite` (HMR :5173) + `livepaper-watch` (`dotnet watch -- --serve` :5174). Launch the app normally; `main.js` auto-detects Vite. `scripts/dev-stop.sh` stops them. `scripts/freeze-monitor.sh` watches for the main-thread freeze.
@@ -50,7 +50,7 @@ on non-NVIDIA machines (the path just doesn't exist). The `livepaper-ui` and `li
 in the top-level `livepaper` derivation both get `--set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player`
 alongside their existing `LIASCAPE_TRANSITION_BIN`/`LIASCAPE_AUDIO_BIN` sets.
 
-**Binary resolution** (`PlayerEngine.ResolveBinary`, `src/livepaper/Player/PlayerEngine.cs`): env
+**Binary resolution** (`PlayerEngine.ResolveBinary`, `src/backend/Player/PlayerEngine.cs`): env
 `LIASCAPE_PLAYER_BIN` → next to the running `livepaper` executable → the repo dev tree
 `src/player/target/{release,debug}/liascape-player` (walking up from the assembly) → `PATH`. Both packaging
 paths above work by setting `LIASCAPE_PLAYER_BIN` directly, so the backend never has to search

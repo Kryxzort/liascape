@@ -1,9 +1,9 @@
 ---
 paths:
-  - "src/livepaper/Scrapers/**"
-  - "src/livepaper/Services/**"
-  - "src/livepaper/Helpers/WorkshopDownloader.cs"
-  - "src/livepaper/Models/WorkshopFilter.cs"
+  - "src/backend/Scrapers/**"
+  - "src/backend/Services/**"
+  - "src/backend/Helpers/WorkshopDownloader.cs"
+  - "src/backend/Models/WorkshopFilter.cs"
 ---
 
 ## Wallpaper Sources

@@ -306,7 +306,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
       `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
 - [x] **The owner's installed `livepaper` (NixOS package) predates liascape-player entirely** — done 2026-10-25: `/etc/nixos/livepaper.nix` re-pinned to the local `liascape-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
-      `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `livepaper.dll` —
+      `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `liascape-backend.dll` —
       zero occurrences of `PlayerEngine`/`LIASCAPE_PLAYER_BIN` anywhere, while the current dev build has both. So
       every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
       `liascape-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
@@ -522,7 +522,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] **Two timer owners across a backend restart** (dotnet watch, app relaunch): switch storm every 1–16 s;
       the stopping backend now releases the timer first, a backend yields to a newer one, a superseded
       aligned switch re-arms instead of switching now (player.md § One timer owner).
-- [x] **`bin/Debug/livepaper.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
+- [x] **`bin/Debug/liascape-backend.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
       next to the owner's `dotnet watch` (same `obj/`) — the next watch restart (`dotnet run --no-build`)
       can't start without it. A plain `dotnet build` brought it back; cause not pinned down.
       — root cause: `/home/kryxzort/Projects` is a symlink to `/mnt/CachyOS/@home/kryxzort/Projects`, and

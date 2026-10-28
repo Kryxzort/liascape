@@ -191,7 +191,7 @@ The Settings tab covers:
 ```bash
 bash scripts/dev.sh                              # dev: Vite HMR + dotnet watch (then launch livepaper-ui)
 cd app/ui && npm run dev                         # UI only, in a browser (append ?api=<backend-port>)
-dotnet run --project src/livepaper -- --serve    # backend only (headless local API)
+dotnet run --project src/backend -- --serve    # backend only (headless local API)
 bash scripts/install.sh                          # build UI + backend, install livepaper + livepaper-ui
 ```
 

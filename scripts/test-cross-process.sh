@@ -14,16 +14,16 @@ BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 command -v jq >/dev/null || { echo "missing: jq"; exit 2; }
-DLL=$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll
+DLL=$ROOT/src/backend/bin/Debug/net10.0/liascape-backend.dll
 if [ $BUILD = 1 ]; then
-  "$DOTNET" build "$ROOT/src/livepaper" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
+  "$DOTNET" build "$ROOT/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -f "$DLL" ] || { echo "not built: $DLL (drop --no-build)"; exit 2; }
 
 T=$(mktemp -d /tmp/liascape-xp-XXXXXX)
 mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
-DLL=$T/backend/livepaper.dll
+DLL=$T/backend/liascape-backend.dll
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1

@@ -107,7 +107,7 @@ echo "==> building React UI"
 
 echo "==> publishing backend (self-contained) → $LIBDIR/backend"
 rm -rf "$S_LIB/backend"; mkdir -p "$S_LIB"
-dotnet publish "$ROOT/src/livepaper" -r linux-x64 --self-contained -c Release -o "$S_LIB/backend"
+dotnet publish "$ROOT/src/backend" -r linux-x64 --self-contained -c Release -o "$S_LIB/backend"
 
 echo "==> staging UI"
 rm -rf "$S_LIB/ui"; mkdir -p "$S_LIB/ui"; cp -r "$ROOT/app/ui/dist/." "$S_LIB/ui/"
@@ -170,14 +170,14 @@ export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$LIBDIR/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIBDIR/liascape-audio"
 [ -x "$WEBDIR/bin/liascape-player" ] && export LIASCAPE_PLAYER_BIN="$WEBDIR/bin/liascape-player"
 [ \$# -eq 0 ] && exec "$BINDIR/livepaper-ui"
-exec "$LIBDIR/backend/livepaper" "\$@"
+exec "$LIBDIR/backend/liascape-backend" "\$@"
 WRAP
 chmod 755 "$S_BIN/livepaper"
 
 echo "==> installing 'livepaper-ui' (GUI)"
 cat > "$S_BIN/livepaper-ui" <<WRAP
 #!/bin/bash
-export LIASCAPE_BACKEND="$LIBDIR/backend/livepaper"
+export LIASCAPE_BACKEND="$LIBDIR/backend/liascape-backend"
 export LIASCAPE_UI_DIR="$LIBDIR/ui"
 export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
 [ -x "$LIBDIR/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIBDIR/liascape-transition"

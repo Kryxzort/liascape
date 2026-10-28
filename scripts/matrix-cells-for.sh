@@ -41,14 +41,14 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    src/livepaper/Helpers/LibraryStore.cs|src/livepaper/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
-    src/livepaper/Helpers/PlaylistService.cs|src/livepaper/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
-    src/livepaper/Helpers/SettingsService.cs|src/livepaper/Models/AppSettings.cs) add "$SET" "$f" ;;
-    src/livepaper/Helpers/AudioMonitor.cs) add "$AUTOMUTE" "$f" ;;
-    src/livepaper/Helpers/AtomicFile.cs) add "race:|$LIB|$PL|$SET" "$f" ;;
-    src/livepaper/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
-    src/livepaper/Scrapers/*|src/livepaper/Services/*|src/livepaper/Helpers/Steam*|src/livepaper/Web/SteamOps.cs|\
-    src/livepaper/Helpers/Workshop*|src/livepaper/Helpers/DownloadHelper.cs)
+    src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
+    src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
+    src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET" "$f" ;;
+    src/backend/Helpers/AudioMonitor.cs) add "$AUTOMUTE" "$f" ;;
+    src/backend/Helpers/AtomicFile.cs) add "race:|$LIB|$PL|$SET" "$f" ;;
+    src/backend/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
+    src/backend/Scrapers/*|src/backend/Services/*|src/backend/Helpers/Steam*|src/backend/Web/SteamOps.cs|\
+    src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
@@ -57,7 +57,7 @@ for f in $FILES; do
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
     # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
-    src/livepaper/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
+    src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
     app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS" "$f" ;;

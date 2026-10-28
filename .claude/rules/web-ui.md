@@ -382,6 +382,6 @@ duration clamped to 50).
 
 ## Build / run / verify
 - `cd app/ui && npm run build` (or `npm run dev` + `?api=<port>` in browser).
-- Backend: `dotnet run --project src/livepaper -- --serve` (writes `serve.port`).
+- Backend: `dotnet run --project src/backend -- --serve` (writes `serve.port`).
 - App: Electron `main.js` (dev uses `demos/shell/node_modules/electron`); package via electron-builder (Phase 7).
 - **Self-test:** `electron app/shell/probe.js http://127.0.0.1:<port>` → prints PROBE_BROWSE/LIBRARY/SETTINGS counts.

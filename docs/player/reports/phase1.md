@@ -175,7 +175,7 @@ POST /next                                                -> 500
 POST /next                                                -> 500
 ```
 
-`PlayerHelper.TryStepLibrary` (`src/livepaper/Helpers/PlayerHelper.cs:2378-2404`, used by
+`PlayerHelper.TryStepLibrary` (`src/backend/Helpers/PlayerHelper.cs:2378-2404`, used by
 `/next`/`/prev`) and `ApplyRandom` (`:2547-2563`, used by `/random`) both step/pick from
 `LibraryService.LoadAll()` **unfiltered** — scenes included — and call `Apply(pickPath, ...)`
 (`:703`) unconditionally. `Apply()`'s own scene check (`:707-716`) is exactly right for a direct
@@ -227,9 +227,9 @@ first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out 
    confirmed the variable genuinely reached that exact process's own `execve` environment. **It
    made no difference — mpvpaper still launched.**
 2. That ruled out binary resolution, so: `strings -el` (UTF-16, how .NET stores string literals)
-   on the installed package's `livepaper.dll` for `"LIASCAPE_PLAYER_BIN"` / `"PlayerEngine"` —
+   on the installed package's `liascape-backend.dll` for `"LIASCAPE_PLAYER_BIN"` / `"PlayerEngine"` —
    **zero matches, anywhere in the derivation.** The same search on this worktree's own dev build
-   (`src/livepaper/bin/Debug/net10.0/livepaper.dll`, what `livepaper-watch`/`dotnet watch`
+   (`src/backend/bin/Debug/net10.0/liascape-backend.dll`, what `livepaper-watch`/`dotnet watch`
    actually runs) finds both immediately. **The owner's installed `livepaper` package is a stale
    build that predates `PlayerEngine`/liascape-player existing in the C# source at all** — not a
    resolvable-binary gap `LIASCAPE_PLAYER_BIN` could ever have fixed; the feature simply isn't compiled

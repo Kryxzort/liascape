@@ -23,9 +23,9 @@
 bash scripts/dev.sh                              # dev: Vite HMR (:5173) + dotnet watch --serve (:5174) as systemd user units
 livepaper                                        # open the app (GUI) — bare command launches the Electron shell
 livepaper-ui                                     # explicit GUI launcher (Electron)
-dotnet run --project src/livepaper -- --serve    # backend only (headless loopback API)
+dotnet run --project src/backend -- --serve    # backend only (headless loopback API)
 cd app/ui && npm run dev                          # React UI only, in a browser (append ?api=<backend-port>)
-dotnet build src/livepaper                        # build backend (no solution file at root)
+dotnet build src/backend                        # build backend (no solution file at root)
 cd app/ui && npm run build                        # build the UI bundle (dist/)
 bash scripts/install.sh                           # build UI + publish backend, install livepaper + livepaper-ui
 electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (offscreen, counts rendered elements)
@@ -52,7 +52,7 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
 ## Architecture
 
 ```text
-src/livepaper/            # headless C# backend (CLI + daemons + --serve API). NO GUI here anymore.
+src/backend/            # headless C# backend (CLI + daemons + --serve API). NO GUI here anymore.
 ├── Models/               # WallpaperResult, WallpaperDetail, LibraryItem, AppSettings, LastSession, LibMeta
 ├── Scrapers/             # MotionBgsScraper, MoewallsScraper, DesktophutScraper, WallpaperEngineScraper (static HTTP+HTML)
 ├── Services/             # IBgsProvider + one service per source; SteamWorkshopService
