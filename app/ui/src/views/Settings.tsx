@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
+import { NumInput } from "../components/NumInput";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
 import { PlayTimeInput } from "../components/PlayTimeInput";
 
@@ -208,7 +209,7 @@ export const Settings = memo(function Settings() {
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
         {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="keepPauseOnSwitch">
           <input type="checkbox" checked={g("keepPauseOnSwitch", false)} onChange={(e) => set("keepPauseOnSwitch", e.target.checked)} /></Row>}
-        <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><input className="num" type="number" min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(e) => set("restartIntervalSeconds", +e.target.value)} /></Row>
+        <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><NumInput min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(v) => set("restartIntervalSeconds", v)} /></Row>
         {adv && <Row label="Restart only at playlist changeover" hint="defer the restart to the next video change (no mid-video flash); lone videos still restart" rk="restartOnSwitchOnly"><input type="checkbox" checked={g("restartOnSwitchOnly", false)} onChange={(e) => set("restartOnSwitchOnly", e.target.checked)} /></Row>}
         <Help>Kills and relaunches mpvpaper periodically to prevent memory leaks.</Help>
       </Section>
@@ -223,9 +224,9 @@ export const Settings = memo(function Settings() {
         <Row label="Wait for video to end after interval" rk="globalWaitForVideoEnd"><input type="checkbox" checked={g("globalWaitForVideoEnd", false)} onChange={(e) => set("globalWaitForVideoEnd", e.target.checked)} /></Row>
         <Row label="Interval" rk="globalIntervalSeconds">
           <div className="hms">
-            <input className="num" type="number" min={0} max={99} value={H} onChange={(e) => setIv(+e.target.value, M, S)} /><span>h</span>
-            <input className="num" type="number" min={0} max={59} value={M} onChange={(e) => setIv(H, +e.target.value, S)} /><span>m</span>
-            <input className="num" type="number" min={0} max={59} value={S} onChange={(e) => setIv(H, M, +e.target.value)} /><span>s</span>
+            <NumInput min={0} max={99} value={H} onChange={(v) => setIv(v, M, S)} /><span>h</span>
+            <NumInput min={0} max={59} value={M} onChange={(v) => setIv(H, v, S)} /><span>m</span>
+            <NumInput min={0} max={59} value={S} onChange={(v) => setIv(H, M, v)} /><span>s</span>
           </div>
         </Row>
         <Row label="Auto-add new library items to playlist" rk="autoAddLibraryToPlaylist"><input type="checkbox" checked={g("autoAddLibraryToPlaylist", false)} onChange={(e) => set("autoAddLibraryToPlaylist", e.target.checked)} /></Row>
@@ -239,9 +240,9 @@ export const Settings = memo(function Settings() {
       <Section title="Auto-Mute" icon={<VolumeX size={15} />}>
         <Row label="Mute when system audio plays" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
         <Row label="Only if MPRIS player active" disabled={!am} rk="autoMuteOnlyIfMprisActive"><input type="checkbox" disabled={!am} checked={g("autoMuteOnlyIfMprisActive", false)} onChange={(e) => set("autoMuteOnlyIfMprisActive", e.target.checked)} /></Row>
-        <Row label="Mute after (ms)" disabled={!am} rk="autoMuteDelayMs"><input className="num" type="number" disabled={!am} min={0} max={30000} value={g("autoMuteDelayMs", 200)} onChange={(e) => set("autoMuteDelayMs", +e.target.value)} /></Row>
-        <Row label="Unmute after (ms)" disabled={!am} rk="autoUnmuteDelayMs"><input className="num" type="number" disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(e) => set("autoUnmuteDelayMs", +e.target.value)} /></Row>
-        <Row label="Min level (dB)" disabled={!am} rk="autoMuteThresholdDb"><input className="num" type="number" disabled={!am} min={-80} max={0} value={g("autoMuteThresholdDb", -70)} onChange={(e) => set("autoMuteThresholdDb", +e.target.value)} /></Row>
+        <Row label="Mute after (ms)" disabled={!am} rk="autoMuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoMuteDelayMs", 200)} onChange={(v) => set("autoMuteDelayMs", v)} /></Row>
+        <Row label="Unmute after (ms)" disabled={!am} rk="autoUnmuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(v) => set("autoUnmuteDelayMs", v)} /></Row>
+        <Row label="Min level (dB)" disabled={!am} rk="autoMuteThresholdDb"><NumInput disabled={!am} min={-80} max={0} value={g("autoMuteThresholdDb", -70)} onChange={(v) => set("autoMuteThresholdDb", v)} /></Row>
       </Section>
 
       <Section title="Rendering & Memory" icon={<Cpu size={15} />}>
@@ -255,9 +256,9 @@ export const Settings = memo(function Settings() {
           <Select value={g("videoScale", "fill")} onChange={(v) => set("videoScale", v)}
             options={[{ value: "fill", label: "fill" }, { value: "fit", label: "fit" }]} />
         </Row>
-        <Row label="Video FPS cap" hint="0 = native · applies to videos, not scenes" rk="videoFps"><input className="num" type="number" min={0} max={480} value={g("videoFps", 0)} onChange={(e) => set("videoFps", +e.target.value)} /></Row>
-        {adv && <Row label="Demuxer max (MiB)" rk="demuxerMaxBytes"><input className="num" type="number" min={1} max={10000} value={g("demuxerMaxBytes", 20)} onChange={(e) => set("demuxerMaxBytes", +e.target.value)} /></Row>}
-        {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackBytes"><input className="num" type="number" min={1} max={10000} value={g("demuxerMaxBackBytes", 5)} onChange={(e) => set("demuxerMaxBackBytes", +e.target.value)} /></Row>}
+        <Row label="Video FPS cap" hint="0 = native · applies to videos, not scenes" rk="videoFps"><NumInput min={0} max={480} value={g("videoFps", 0)} onChange={(v) => set("videoFps", v)} /></Row>
+        {adv && <Row label="Demuxer max (MiB)" rk="demuxerMaxBytes"><NumInput min={1} max={10000} value={g("demuxerMaxBytes", 20)} onChange={(v) => set("demuxerMaxBytes", v)} /></Row>}
+        {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackBytes"><NumInput min={1} max={10000} value={g("demuxerMaxBackBytes", 5)} onChange={(v) => set("demuxerMaxBackBytes", v)} /></Row>}
       </Section>
 
       {/* lp-player only (the player owns the GPU budget + both VRAM rules); every row applies live
@@ -269,7 +270,7 @@ export const Settings = memo(function Settings() {
           <Row label="Limit VRAM per scene" hint="stop a scene that uses more video memory than the limit (a playlist moves on; a single wallpaper keeps its last frame) — it isn't marked crashed" rk="sceneVramLimitEnabled">
             <input type="checkbox" checked={g("sceneVramLimitEnabled", false)} onChange={(e) => set("sceneVramLimitEnabled", e.target.checked)} /></Row>
           {g("sceneVramLimitEnabled", false) && <Row label="VRAM limit (MiB)" hint="per scene · ~1536 suits most scenes" rk="sceneVramLimitMib">
-            <input className="num" type="number" min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 1536)} onChange={(e) => set("sceneVramLimitMib", Math.max(64, +e.target.value || 64))} /><span>MiB</span></Row>}
+            <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 1536)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
           <Row label="When VRAM runs low" hint="when the GPU's free video memory runs out (a game took it): Stop frees the wallpaper's GPU memory and shows its last frame, Pause only pauses — either resumes once memory is free again" rk="vramLowMode">
             <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
               options={[{ value: "stop", label: "Stop (free memory)" }, { value: "pause", label: "Pause" }, { value: "off", label: "Off" }]} /></Row>
@@ -302,7 +303,7 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Replace direct downloads with Workshop copies" hint="when a directly-downloaded wallpaper appears in the WE folder, swap to the WE symlink/copy & reclaim the duplicate's disk" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>}
         <Row label="Allow scene support" rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
         <Row label="Auto-add new WE wallpapers to library" rk="autoImportWallpaperEngine"><input type="checkbox" checked={g("autoImportWallpaperEngine", false)} onChange={(e) => set("autoImportWallpaperEngine", e.target.checked)} /></Row>
-        {!lpActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><input className="num" type="number" min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(e) => set("sceneTransitionDelayMs", +e.target.value)} /></Row>}
+        {!lpActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><NumInput min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(v) => set("sceneTransitionDelayMs", v)} /></Row>}
         {lpActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
           <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
       </Section>
@@ -318,8 +319,8 @@ export const Settings = memo(function Settings() {
               <div className="hms">
                 <input className="text mon-name" list="lp-monitors" placeholder="e.g. DP-1" value={m.name}
                   onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-                <input className="num" type="number" min={1} max={480} value={m.fps}
-                  onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: +e.target.value } : x))} /><span>{lpActive ? "fps (live)" : "fps"}</span>
+                <NumInput min={1} max={480} value={m.fps}
+                  onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>{lpActive ? "fps (live)" : "fps"}</span>
                 {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section;
                     legacy only (LWE's audio-owning instance) — lp-player runs one worker for every output */}
                 {!lpActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
@@ -383,7 +384,7 @@ export const Settings = memo(function Settings() {
             options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>}
         {adv && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live A-sync offset" hint="Full-live only: aim the outgoing video this many ms vs the live wallpaper at the cover, to cancel per-machine sync drift (negative = aim ahead). If you see a slight rewind raise it toward 0; a slight skip-ahead lower it. ~-30 here." rk="transitionLagOffsetMs">
-          <input className="num" type="number" min={-200} max={200} step={5} value={g("transitionLagOffsetMs", -30)} onChange={(e) => set("transitionLagOffsetMs", +e.target.value || 0)} /><span>ms</span>
+          <NumInput min={-200} max={200} step={5} value={g("transitionLagOffsetMs", -30)} onChange={(v) => set("transitionLagOffsetMs", v)} /><span>ms</span>
         </Row>}
         {adv && <Row label="Volume keys adjust" hint="what the volume-up / volume-down keybinds change — Auto: the playing wallpaper's own volume if it has one, else the global; This wallpaper: always the playing wallpaper's own volume (gives it one); Global: always the global (a wallpaper with its own volume doesn't change)" rk="volumeKeyTarget">
           <Select value={g("volumeKeyTarget", "auto")} onChange={(v) => set("volumeKeyTarget", v)}

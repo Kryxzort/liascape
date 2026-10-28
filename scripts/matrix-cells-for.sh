@@ -31,6 +31,9 @@ MODAL='itemVol|itemSpd|stripVol|selVol|previewDrag|globalDrag'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'
 # the scene cells (Phase 2 Task 12): every control on a scene, the scene switches, the GPU / VRAM settings
 SCENE='[sS]cene|vram|next:[sv]→[sv]'
+# keys while a slider is held (hooks/rangeDrag.ts) / numeric fields that snap on blur (components/NumInput.tsx)
+KEYS='keys:'
+NUM='num:|plTr'
 
 full=0; parts=()
 add() { parts+=("$1"); echo "  $2 → $1" >&2; }
@@ -50,13 +53,15 @@ for f in $FILES; do
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/lp-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
-    app/ui/src/views/Settings.tsx) add "$SET|$SCENE" "$f" ;;
+    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM" "$f" ;;
+    app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
+    app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
     # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
     src/livepaper/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
     app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
-    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD" "$f" ;;
-    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear" "$f" ;;
+    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS" "$f" ;;
+    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f" ;;
     app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx|\
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx)
       echo "  $f → nothing here — run scripts/test-ui-matrix.sh --probe probe-morph.js (the morph probe)" >&2 ;;

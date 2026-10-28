@@ -27,6 +27,7 @@ public static class LpPlayerSelfTest
             OwnershipAssertions(fails);
             SceneSkipAssertions(fails);
             SceneAdapterAssertions(fails);
+            TransitionDurationAssertions(fails);
             ScenePropertyAssertions(fails);
             PlayLimitAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
@@ -82,6 +83,14 @@ public static class LpPlayerSelfTest
                  (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
                  (-7L, 10_000L, false, 10_000L, 0L) })
             if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
+    // ---- transition duration floor (0 = a cut; 1–49 ms allowed — the floor was 50) ----------------
+    private static void TransitionDurationAssertions(List<string> fails)
+    {
+        static TransitionService.Config C(int min, int max) => new(true, ["fade"], min, max, false);
+        foreach (var (min, max, want) in new[] { (0, 0, 0), (1, 0, 1), (20, 0, 20), (49, 0, 49), (-5, 0, 0), (600, 0, 600), (99999, 0, 10000) })
+            if (TransitionService.PickDuration(C(min, max)) is var got && got != want) fails.Add($"PickDuration({min}, max {max}) = {got}, want {want}");
+        for (int i = 0; i < 20; i++)
+            if (TransitionService.PickDuration(C(30, 40)) is var r && (r < 30 || r > 40)) fails.Add($"PickDuration(30..40) = {r}");
     }
 
     // ---- MpvPropertyMap ----------------------------------------------------------------------
