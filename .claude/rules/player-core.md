@@ -3140,7 +3140,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   effect whose pass can't be built is left out (`Leaving out effect …`) — the object used to be dropped.
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
-  scene corpus from 86 to 91 ok (§ "Scene corpus").
+  scene corpus from 86 to 92 ok (§ "Scene corpus").
 - **The headers are C++-only** (struct tags used as type names), so `lwe.rs` declares the ~20
   calls it uses by hand (`unsafe extern "C"`), and `patches/lwe/tests/host_api_test.cpp` is C++.
 - **`lwe.rs`** (feature `lwe`): `Scene::load(dir, assets)` (config with the explicit assets dir +
@@ -4088,9 +4088,11 @@ source. worker. scene.` gives `ready_ms` = `worker.spawned` → `source.ready`. 
 `--no-build`, `--bin`, `--assets`. **`--ab-legacy --legacy-output <out>`** runs the installed
 `linux-wallpaperengine --screen-root <out> --screenshot …` per scene — it draws on the real output,
 so it is **owner-run only**; the report then lists scenes that start there but not here.
-**The report's run (2026-10-28, 96 scenes, 481 s):** 86 ok, 1 static (a still image + a sound — by design),
-1 blank, 4 load_failed, 4 broken, 0 crashed/timeout; every failure reproduces with `--lwe-smoke`
-(LWE's core alone) — five LWE causes, Phase 6 items in `docs/TODO.md`. The runs also found three
+**The report's run (2026-10-28, LWE `40eacc9`, 96 scenes, 506 s):** 92 ok, 1 static (a still image + a sound
+— by design), 3 load_failed (3D/perspective scenes next-v2 can't parse), 0 blank/broken/crashed/timeout. The
+first run (LWE `c5c2cad`: 86 ok, 1 blank, 4 load_failed, 4 broken) found five LWE causes, every one reproducing
+with `--lwe-smoke` (LWE's core alone); four are fixed by fork patches 0012/0014–0017 (§ "LWE core"), the 3D
+one is a Phase 6 item in `docs/TODO.md`. The runs also found three
 player fixes: the stopped worker's last stderr line (§ `WorkerHost` "Log tail"), the core handler
 (above) and `capture`'s PNG compression (§ GFX / EGL `write_png`) — the 0.85 s capture stall had
 even made the GPU budget throttle two heavy 4K scenes (15–17 ms/frame) in an earlier run: the loop's

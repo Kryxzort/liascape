@@ -341,7 +341,8 @@ audio bus, crash recovery, and the backend adapter; Phase 2 added WE scenes — 
   loudness learned over a scene's first 60 s of audible play (`scene.loudness`, applied by the backend as
   `gain.normalize`), the backend adapter (`ScenesPlayable`, settings wired live, `LweMonitors` fps live) and
   UI matrix cells. The corpus runner (`src/player/tests/onmachine/scene_corpus.sh`) played all 96 Workshop
-  scenes of the owner's library: 86 ok, every failure an LWE-core bug (Phase 6;
+  scenes of the owner's library: 86 ok, every failure an LWE-core bug; with the fork's patches 0012–0017
+  (2026-10-28) 92 ok + 1 still-by-design, the 3 left are 3D scenes (Phase 6;
   `docs/player/reports/scene-corpus.md`). **Still open for Phase 2:** the on-machine battery and its report
   (Task 14 — outputs, dropout V↔S, crash isolation on real outputs, GPU budget under a heavy worker, soak,
   VT-switch/suspend). Deferred beyond Phase 2: the `g_Daytime` uniform (LWE's core never updates it; it
