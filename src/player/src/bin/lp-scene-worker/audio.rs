@@ -118,6 +118,9 @@ pub struct Control {
     paused: AtomicBool,
     no_audio: AtomicBool,
     speed: AtomicU64,
+    /// Meter the scene's loudness (`Start.loudness` / `LoudnessMeter`; off once the
+    /// compositor's measurement reached its cap).
+    meter: AtomicBool,
     /// Bumped on every arming change (see the module doc).
     arm: AtomicU64,
     quitting: AtomicBool,
@@ -143,6 +146,7 @@ impl Default for Control {
             paused: AtomicBool::new(true),
             no_audio: AtomicBool::new(false),
             speed: AtomicU64::new(f64_bits(1.0)),
+            meter: AtomicBool::new(true),
             arm: AtomicU64::new(0),
             quitting: AtomicBool::new(false),
             route: Mutex::new((0, AudioRoute::Null)),
@@ -166,6 +170,7 @@ impl Control {
             gain_db,
             no_audio,
             speed,
+            loudness,
             ..
         } = m
         else {
@@ -174,6 +179,7 @@ impl Control {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.meter.store(*loudness, Ordering::SeqCst);
         self.gain_db.store(f64_bits(*gain_db), Ordering::SeqCst);
         self.paused.store(*paused, Ordering::SeqCst);
         self.no_audio.store(*no_audio, Ordering::SeqCst);
@@ -202,6 +208,7 @@ impl Control {
             ToWorker::Speed { speed } => self
                 .speed
                 .store(f64_bits(speed.clamp(0.05, 8.0)), Ordering::SeqCst),
+            ToWorker::LoudnessMeter { on } => self.meter.store(*on, Ordering::SeqCst),
             ToWorker::Route { audio } => {
                 let mut r = self.route.lock().unwrap_or_else(|e| e.into_inner());
                 *r = (r.0 + 1, audio.clone());
@@ -251,6 +258,7 @@ impl Control {
                 && !self.quitting.load(Ordering::SeqCst),
             speed: f64::from_bits(self.speed.load(Ordering::SeqCst)),
             arm: self.arm.load(Ordering::SeqCst),
+            meter: self.meter.load(Ordering::SeqCst),
         }
     }
 
@@ -271,6 +279,8 @@ pub struct State {
     pub plays: bool,
     pub speed: f64,
     pub arm: u64,
+    /// Meter the loudness (off past the compositor's cap).
+    pub meter: bool,
 }
 
 /// The stream's signal path after the pull: stretch → gate → envelope → gain. Pure (the
@@ -351,7 +361,8 @@ impl Dsp {
         // Loudness counts only the scene's sound really played into a stream: not paused, not
         // `no_audio`, not a fade-out (`plays`), not the PipeWire-down fallback (`real`) — and
         // before the gate and the gain, so neither a user volume nor the normalization biases it.
-        if plays && pulled && real {
+        // Not at all once the measurement reached its cap (`st.meter` off).
+        if plays && pulled && real && st.meter {
             self.loud.feed(&self.scratch, &mut self.segs);
         }
         // The gate in whole frames (exact 0 and 1 at its ends).
@@ -711,6 +722,7 @@ mod tests {
             plays: true,
             speed: 1.0,
             arm: 0,
+            meter: true,
         }
     }
 
@@ -843,6 +855,13 @@ mod tests {
             d.process(&mut out, st(-40.0), Some(&mut tone), 0, false);
         }
         assert!(d.segs.is_empty(), "paused / fallback: {:?}", d.segs);
+        // Past the cap the compositor turns the meter off: nothing more is K-weighted.
+        let mut off = st(-40.0);
+        off.meter = false;
+        for _ in 0..40 {
+            d.process(&mut out, off, Some(&mut tone), 0, true);
+        }
+        assert!(d.segs.is_empty(), "meter off: {:?}", d.segs);
     }
 
     /// `AudioFlowing` once per arming, from the first buffer that pulled the scene's sound

@@ -48,6 +48,7 @@ fn start() -> ToWorker {
         gain_db: -96.0,
         no_audio: false,
         speed: 1.0,
+        loudness: true,
     }
 }
 

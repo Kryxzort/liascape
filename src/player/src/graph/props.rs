@@ -337,6 +337,14 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_props",
                 def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
             ),
+            // A scene's loudness measured over its earlier plays (`audio::loudness` state —
+            // the histogram the backend stored from the last `scene.loudness`), continued by
+            // this source; `{}` = none. Read at open (and a live set restarts the measurement
+            // from it); a `path` change drops it. Stored on every kind, used by scenes only.
+            (
+                "loudness_seed",
+                def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
+            ),
         ],
         NodeKind::Effect => vec![
             (

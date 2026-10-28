@@ -221,6 +221,12 @@ pub struct SceneOpts {
     /// Scene loudness learning: seconds of audible play to learn over (`audio::loudness`,
     /// `LP_PLAYER_LOUDNESS_WINDOW_S`; 60 by default).
     pub loudness_window_s: f64,
+    /// The total audible seconds (every play) after which nothing more is measured
+    /// (`LP_PLAYER_LOUDNESS_CAP_S`; 1800 by default).
+    pub loudness_cap_s: f64,
+    /// The measurement of earlier plays to continue (`loudness_seed`: the state the backend
+    /// stored from the last `scene.loudness`), if any.
+    pub loudness_seed: Option<Value>,
 }
 
 impl SceneOpts {
@@ -249,7 +255,16 @@ impl SceneOpts {
             defer_spawn: false,
             preview: String::new(),
             loudness_window_s: loudness::DEFAULT_WINDOW_S,
+            loudness_cap_s: loudness::DEFAULT_CAP_S,
+            loudness_seed: None,
         }
+    }
+
+    /// A learner for this scene's loudness: the window, the cap and the seed (if any).
+    fn learner(&self) -> Learner {
+        Learner::new(self.loudness_window_s)
+            .with_cap(self.loudness_cap_s)
+            .with_seed(self.loudness_seed.as_ref())
     }
 }
 
@@ -394,6 +409,9 @@ pub struct SceneSource {
     /// Scene loudness learned on first play (`audio::loudness`): the worker's segments of the
     /// current path — kept across worker restarts, started over by a `path` change.
     loudness: Learner,
+    /// Loudness segments the worker sent (every one, measured or not): the cap's meter-off shows
+    /// as this standing still (the `workers` probe `loudness.received`).
+    loudness_received: u64,
 }
 
 /// The hang-timeout knob (Task 10): a `Tick`/`Ping` unanswered this many ms = hung (tests
@@ -507,6 +525,12 @@ impl SceneSource {
         o.defer_spawn = true;
         o.hang_timeout = hang_timeout(std::env::var(HANG_ENV).ok().as_deref());
         o.loudness_window_s = loudness::window_s(std::env::var(loudness::WINDOW_ENV).ok().as_deref());
+        o.loudness_cap_s = loudness::cap_s(std::env::var(loudness::CAP_ENV).ok().as_deref());
+        if let Some(PropValue::Map(m)) = get("loudness_seed")
+            && !m.is_empty()
+        {
+            o.loudness_seed = Some(Value::Object(m.clone()));
+        }
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
         // Task 10: a scene the snapshot saved broken (past its restart budget before the
@@ -632,7 +656,8 @@ impl SceneSource {
             preview_error: None,
             restored_broken: false,
             context_losses: 0,
-            loudness: Learner::new(opts.loudness_window_s),
+            loudness: opts.learner(),
+            loudness_received: 0,
             opts,
         };
         if !src.opts.defer_spawn {
@@ -661,6 +686,8 @@ impl SceneSource {
             } else {
                 self.clock.speed()
             },
+            // A measurement already at its cap: nothing to meter.
+            loudness: !self.loudness.capped(),
         };
         self.gain_sent = Some(self.gains.effective_db());
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
@@ -1230,10 +1257,16 @@ impl SceneSource {
             }
             FromWorker::Envelope { t0_ms, dbfs_1ms } => self.on_envelope(t0_ms, &dbfs_1ms),
             FromWorker::Loudness { segments } => {
+                let capped = self.loudness.capped();
+                self.loudness_received += segments.len() as u64;
                 for seg in segments {
                     if let Some(l) = self.loudness.push(seg) {
                         self.report_loudness(l);
                     }
+                }
+                // The cap reached: the worker stops metering (folded into a restart's Start).
+                if self.loudness.capped() && !capped {
+                    self.send_loudness_meter();
                 }
             }
             FromWorker::PropertySet { name, ok, reason } => {
@@ -1435,7 +1468,10 @@ impl SceneSource {
         }
         self.latch.forget_worker();
         self.end_loudness();
-        self.loudness = Learner::new(self.opts.loudness_window_s);
+        // The seed was the old folder's measurement: the new one starts from nothing (the
+        // next worker's `Start` meters again).
+        self.opts.loudness_seed = None;
+        self.loudness = self.opts.learner();
         self.opts.path = PathBuf::from(&path);
         self.opts.synthetic = self
             .opts
@@ -1592,8 +1628,10 @@ impl SceneSource {
         }
     }
 
-    /// `scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}` —
-    /// what the backend stores in the item's index and normalizes the scene by from then on.
+    /// `scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s, played_s,
+    /// complete, capped, window_s, cap_s, state}` — the integration over every play so far
+    /// (`seconds` audible, `session_s` of them this source's); the backend stores it in the
+    /// item's index (`state` seeds the next play) and normalizes the scene by it.
     fn report_loudness(&self, l: Learned) {
         log::event(
             "scene",
@@ -1602,13 +1640,24 @@ impl SceneSource {
             None,
             json!({"id": self.opts.id, "path": self.opts.path, "lufs": l.lufs,
                    "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
-                   "seconds": l.seconds, "played_s": l.played_s, "complete": l.complete,
-                   "window_s": self.loudness.window_s()}),
+                   "seconds": l.seconds, "session_s": l.session_s,
+                   "seed_s": self.loudness.seed_s(), "played_s": l.played_s,
+                   "complete": l.complete, "capped": l.capped,
+                   "window_s": self.loudness.window_s(), "cap_s": self.loudness.cap_s(),
+                   "state": self.loudness.state_json()}),
         );
     }
 
-    /// The source stops playing its current path (destroyed, or `path` changed): a partial
-    /// loudness if enough was audible and nothing was learned yet.
+    /// Tell the worker whether to meter (off once the measurement is capped).
+    fn send_loudness_meter(&mut self) {
+        let on = !self.loudness.capped();
+        if let Some(h) = self.host.as_mut() {
+            let _ = h.send(&ToWorker::LoudnessMeter { on }, &[]);
+        }
+    }
+
+    /// The source stops playing its current path (destroyed, or `path` changed): what's left
+    /// unreported, if enough (`Learner::finish`).
     fn end_loudness(&mut self) {
         if let Some(l) = self.loudness.finish() {
             self.report_loudness(l);
@@ -1917,10 +1966,15 @@ impl SceneSource {
         v["context_losses"] = json!(self.context_losses);
         v["loudness"] = json!({
             "seconds": self.loudness.audible_s(),
+            "session_s": self.loudness.session_s(),
+            "seed_s": self.loudness.seed_s(),
             "played_s": self.loudness.played_s(),
             "lufs": self.loudness.integrated(),
             "done": self.loudness.done(),
+            "capped": self.loudness.capped(),
             "window_s": self.loudness.window_s(),
+            "cap_s": self.loudness.cap_s(),
+            "received": self.loudness_received,
         });
         v["preview"] = json!({
             "path": self.opts.preview,
@@ -2100,6 +2154,19 @@ impl Source for SceneSource {
             "scene_props" => {
                 if let PropValue::Map(m) = v {
                     self.set_properties(m);
+                }
+            }
+            // A new seed (the backend sets it at create; a live one is rare): the measurement
+            // restarts from it — what this source measured since its last report is dropped
+            // (it may be in the seed already: never counted twice).
+            "loudness_seed" => {
+                if let PropValue::Map(m) = v {
+                    let seed = (!m.is_empty()).then(|| Value::Object(m.clone()));
+                    if seed != self.opts.loudness_seed {
+                        self.opts.loudness_seed = seed;
+                        self.loudness = self.opts.learner();
+                        self.send_loudness_meter();
+                    }
                 }
             }
             // Everything else (loop, hwdec, fps_cap, cache, demuxer_*, af, audio_delay,

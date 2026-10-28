@@ -8209,6 +8209,12 @@ fn parked_scene_align_end_hands_off_at_once() {
 /// A real-clock `--ao null` server (the worker's real-time pull timer is the stream) whose scene
 /// loudness window is `window_s` seconds of audible play (`LP_PLAYER_LOUDNESS_WINDOW_S`).
 fn loudness_serve(window_s: &str) -> Option<Serve> {
+    loudness_serve_capped(window_s, "1800")
+}
+
+/// … and whose cap (total audible seconds measured over every play) is `cap_s`
+/// (`LP_PLAYER_LOUDNESS_CAP_S`).
+fn loudness_serve_capped(window_s: &str, cap_s: &str) -> Option<Serve> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
         return None;
@@ -8219,6 +8225,7 @@ fn loudness_serve(window_s: &str) -> Option<Serve> {
         &[
             ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
             ("LP_PLAYER_LOUDNESS_WINDOW_S", Path::new(window_s)),
+            ("LP_PLAYER_LOUDNESS_CAP_S", Path::new(cap_s)),
         ],
         Some(serial),
     ))
@@ -8285,18 +8292,136 @@ fn scene_loudness_is_learned_once_after_its_window() {
         assert!((ev["peak_dbfs"].as_f64().unwrap() + 20.0).abs() < 0.5, "{ev}");
         // Learned after the window of real play, never before it.
         assert!(ev["t_mono_ms"].as_f64().unwrap() - t0 >= 2000.0, "{ev}");
+        assert!(ev["state"]["counts"].is_array(), "the state to store: {ev}");
+        // Measuring goes on (2026-10-28), but the next report waits for another window.
         std::thread::sleep(Duration::from_millis(1500));
-        assert_eq!(loudness_events(&mut c, Some(&id)).len(), 1, "once");
+        assert_eq!(loudness_events(&mut c, Some(&id)).len(), 1, "not before the next window");
         let p = loudness_progress(&mut c, &id);
-        assert_eq!(p["done"], json!(true), "{p}");
+        assert_eq!(p["done"], json!(false), "{p}");
+        assert!(p["seconds"].as_f64().unwrap() > secs + 1.0, "still measuring: {p}");
         c.ok("destroy", json!({"id": id}));
-        std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(
-            loudness_events(&mut c, Some(&id)).len(),
-            1,
-            "no second report at the end"
-        );
+        // What was measured since: one report at the end.
+        let evs = wait_for(Duration::from_secs(3), "the end's report", || {
+            let e = loudness_events(&mut c, Some(&id));
+            (e.len() == 2).then_some(e)
+        });
+        let end = &evs[1];
+        assert!(end["seconds"].as_f64().unwrap() > secs + 1.0, "{end}");
+        assert!((end["lufs"].as_f64().unwrap() + 20.0).abs() < 1.0, "{end}");
+        assert_eq!(end["session_s"], end["seconds"], "no seed: {end}");
     }
+}
+
+/// Owner (2026-10-28): "keep measuring to get a more accurate measure when the scene is played
+/// in future". Play 1 reports its measurement's `state`; play 2 — a new source of the same
+/// scene seeded with it (`loudness_seed`, what the backend sends from the index) — continues
+/// it: its reports cover both plays (`seconds` = seed + its own, `seed_s`, `session_s`), and
+/// the integration is over both: a −20 dBFS play then a −23 dBFS play read their energy mean
+/// (−21.2 LUFS), not either alone. Seeded with the window already, play 2 reports after a
+/// window of its own play.
+#[test]
+fn scene_loudness_accumulates_over_two_plays() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let name = "api-loud-refine";
+    let a = create_scene(&mut c, name, &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &a);
+    let first = wait_for(Duration::from_secs(15), "play 1's report", || {
+        loudness_events(&mut c, Some(&a)).into_iter().next()
+    });
+    c.ok("destroy", json!({"id": a}));
+    // Its last word: the end's report (or the window's, if nothing much followed).
+    std::thread::sleep(Duration::from_millis(500));
+    let last = loudness_events(&mut c, Some(&a)).pop().unwrap();
+    println!("play 1: {first}\n  last: {last}");
+    let s1 = last["seconds"].as_f64().unwrap();
+    assert!((last["lufs"].as_f64().unwrap() + 20.0).abs() < 0.5, "{last}");
+    // Play 2: the same folder, its tone 3 dB quieter now, seeded with play 1's state.
+    let mut quieter = tone_scene(1000.0);
+    quieter.tone_dbfs = -23.0;
+    let b = create_scene(
+        &mut c,
+        name,
+        &quieter,
+        json!({"loudness_seed": last["state"].clone()}),
+    );
+    let p = loudness_progress(&mut c, &b);
+    assert!((p["seed_s"].as_f64().unwrap() - s1).abs() < 1e-6, "seeded: {p}");
+    assert!((p["seconds"].as_f64().unwrap() - s1).abs() < 1e-6, "{p}");
+    show_all(&mut c, &b);
+    let ev = wait_for(Duration::from_secs(15), "play 2's report", || {
+        loudness_events(&mut c, Some(&b)).into_iter().next()
+    });
+    println!("play 2: {ev}");
+    let (secs, own) = (
+        ev["seconds"].as_f64().unwrap(),
+        ev["session_s"].as_f64().unwrap(),
+    );
+    assert!((own - 2.0).abs() < 0.15, "a window of its own play: {ev}");
+    assert!((secs - (s1 + own)).abs() < 1e-6, "seed + own: {ev}");
+    assert_eq!(ev["seed_s"].as_f64(), Some(s1), "{ev}");
+    // The energy mean of both plays, weighted by their audible seconds.
+    let (e1, e2) = (10f64.powf(-2.0), 10f64.powf(-2.3));
+    let want = 10.0 * ((e1 * s1 + e2 * own) / (s1 + own)).log10();
+    let lufs = ev["lufs"].as_f64().unwrap();
+    assert!((lufs - want).abs() < 0.3, "{lufs} vs both plays {want:.2}");
+    assert!(lufs > -22.9 && lufs < -20.1, "neither play alone: {lufs}");
+    assert_eq!(ev["complete"], json!(true));
+    c.ok("destroy", json!({"id": b}));
+}
+
+/// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once
+/// the audible play over every session reaches it (`LP_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
+/// last report (`capped`) and the worker stops metering — no segment arrives any more, nothing
+/// at the end. A source seeded at the cap measures nothing from its start.
+#[test]
+fn scene_loudness_stops_at_the_cap() {
+    let Some(srv) = loudness_serve_capped("1", "3") else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_scene(&mut c, "api-loud-cap", &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &a);
+    let capped = wait_for(Duration::from_secs(20), "the capped report", || {
+        loudness_events(&mut c, Some(&a))
+            .into_iter()
+            .find(|e| e["capped"] == json!(true))
+    });
+    println!("{capped}");
+    assert!((capped["seconds"].as_f64().unwrap() - 3.0).abs() < 1e-6, "{capped}");
+    let n = loudness_events(&mut c, Some(&a)).len();
+    assert_eq!(n, 3, "the window (1 s), 2 s, the cap (3 s)");
+    std::thread::sleep(Duration::from_millis(300)); // segments already sent land
+    let p0 = loudness_progress(&mut c, &a);
+    std::thread::sleep(Duration::from_millis(1500));
+    let p1 = loudness_progress(&mut c, &a);
+    println!("{p0} → {p1}");
+    assert_eq!(p1["capped"], json!(true), "{p1}");
+    assert_eq!(p1["seconds"].as_f64(), Some(3.0), "{p1}");
+    assert_eq!(p0["received"], p1["received"], "the worker stopped metering");
+    c.ok("destroy", json!({"id": a}));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(loudness_events(&mut c, Some(&a)).len(), n, "nothing at the end");
+    // Seeded at the cap: nothing from the start.
+    let b = create_scene(
+        &mut c,
+        "api-loud-cap",
+        &tone_scene(1000.0),
+        json!({"loudness_seed": capped["state"].clone()}),
+    );
+    show_all(&mut c, &b);
+    wait_for(Duration::from_secs(5), "playing", || {
+        (get(&mut c, &format!("{b}.ready"))["result"]["value"] == json!(true)).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    let p = loudness_progress(&mut c, &b);
+    assert_eq!(p["capped"], json!(true), "{p}");
+    assert_eq!(p["received"].as_u64(), Some(0), "never metered: {p}");
+    c.ok("destroy", json!({"id": b}));
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(loudness_events(&mut c, Some(&b)).is_empty());
 }
 
 /// A scene without sound — no stream at all, or a stream of digital silence — never reports
