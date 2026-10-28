@@ -773,6 +773,7 @@ impl SceneSource {
         if let Some(h) = self.host.as_mut() {
             h.stop();
         }
+        self.release_ring_but_shown();
         self.vram_stopped = Some((used_mib, limit_mib));
         let reason = format!(
             "stopped: used {used_mib:.0} MiB > limit {limit_mib:.0} MiB of VRAM (vram_exceeded)"
@@ -783,6 +784,26 @@ impl SceneSource {
             });
             self.error = Some(reason);
         }
+    }
+
+    /// The worker is gone for good (a VRAM stop): every imported slot but the one on screen is
+    /// dropped — a dmabuf lives while anyone holds it, so the stopped worker's ring (~3 × the
+    /// export size of GPU memory) stayed alive through our imports. Frames still queued from
+    /// it are forgotten (one of a dropped slot must never latch: it has no texture any more);
+    /// the shown frame stays, never released (`Latch::forget_worker`). A `path` change brings
+    /// a new worker whose first latched frame drops this last slot too.
+    fn release_ring_but_shown(&mut self) {
+        self.latch.forget_worker();
+        match self.latch.current() {
+            Some((slot, _, _, generation)) => {
+                self.rings.retain(|r| r.generation == generation);
+                for r in &mut self.rings {
+                    r.retain_slots(&[slot]);
+                }
+            }
+            None => self.rings.clear(), // nothing shown (the preview, or nothing)
+        }
+        self.latest_set = None;
     }
 
     /// The VRAM guard stopped this scene: `(used_mib, limit_mib)`.

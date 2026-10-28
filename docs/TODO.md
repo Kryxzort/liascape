@@ -221,6 +221,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         pending B (armed for A's end) stopped by the guard fails that switch and the fallback switches to it now —
         it plays ~2 s before it's stopped again (bounded, but visible); decide whether a VRAM-stopped scene should be
         skipped for a while (it isn't broken). The low-VRAM hold has only a Settings status line (no tray/toast).
+  - [x] **A VRAM-stopped scene kept its imported ring** (~3 × its export size of GPU memory, the Task 8 gap;
+        2026-10-28, player-core.md § GPU budget and VRAM → per-scene guard): only the shown slot stays imported.
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
       `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
