@@ -118,35 +118,59 @@ public static class LibraryService
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
     }
 
-    // ---- a WE scene's loudness, learned by lp-player on first play (`scene.loudness`) ----
-    // The player measures (BS.1770, pre-gain, over the first ~60 s of AUDIBLE play — player-core.md § Scene worker
-    // → "Scene loudness"); this stores it like a video's loudness*, and the resolver turns it into the scene
-    // source's `gain.normalize` (LpPlayerMedia.SceneNormalizeDb). Learned once: a complete measurement is never
-    // replaced; a partial one (switched away early) is replaced by a complete one or a longer partial.
-    // Returns whether `m` changed. Pure (the self-test drives it on a bare LibMeta).
-    public static bool MergeSceneLoudness(LibMeta m, double lufs, double? peakDbfs, double seconds, bool complete)
+    // ---- a WE scene's loudness, learned by lp-player and refined on every play (`scene.loudness`) ----
+    // The player measures (BS.1770, pre-gain, AUDIBLE play — player-core.md § Scene worker → "Scene loudness"):
+    // the first report after ~60 s, then one per further 60 s and at the end of each play, each covering EVERY
+    // play so far (the source was seeded with the stored `state` — LpPlayerMedia.SourceProps), until its cap
+    // (30 min). This stores it like a video's loudness*, and the resolver turns it into the scene source's
+    // `gain.normalize` (LpPlayerMedia.SceneNormalizeDb).
+    // - The measurement (`state`, LoudnessSeconds, LoudnessPartial) is replaced by any report covering MORE audible
+    //   seconds (reports are cumulative: a lost one is made up by the next; two sources of one scene at once keep
+    //   the longer), or by a complete report over an entry without a state (one learned before 2026-10-28 — kept
+    //   and applied until then, never a seed: it can't be continued).
+    // - The APPLIED value (LoudnessI, LoudnessTP) moves only when it changed ≥ ApplyHysteresisLu (0.5 LU / dB):
+    //   `gain.normalize` follows a refinement smoothly (the 500 ms ramp) and never twitches by a tenth.
+    // Returns (stored: `m` changed, applied: LoudnessI/TP changed → normalization should follow it live). Pure (the
+    // self-test drives it on a bare LibMeta).
+    public const double ApplyHysteresisLu = 0.5;
+    public static (bool Stored, bool Applied) MergeSceneLoudness(LibMeta m, double lufs, double? peakDbfs, double seconds,
+        bool complete, JsonElement? state = null)
     {
-        if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return false;
-        if (m.LoudnessI != null && m.LoudnessPartial != true) return false; // learned already
-        if (m.LoudnessI != null && !complete && (m.LoudnessSeconds ?? 0) >= seconds) return false; // not longer
-        m.LoudnessI = lufs;
-        m.LoudnessTP = peakDbfs is double p && double.IsFinite(p) ? p : null;
-        m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
+        if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return (false, false);
+        bool longer = m.LoudnessI == null || seconds > (m.LoudnessSeconds ?? 0) + 1e-9;
+        bool relearn = m.LoudnessI != null && m.LoudnessState == null && complete && state != null;
+        if (!longer && !relearn) return (false, false);
+        m.LoudnessState = state is { ValueKind: JsonValueKind.Object } s ? s.Clone() : null;
         m.LoudnessSeconds = seconds;
         m.LoudnessPartial = complete ? null : true;
-        return true;
+        m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
+        double? peak = peakDbfs is double p && double.IsFinite(p) ? p : null;
+        bool applied = false;
+        if (m.LoudnessI is not double i || Math.Abs(lufs - i) >= ApplyHysteresisLu) { m.LoudnessI = lufs; applied = true; }
+        if (m.LoudnessTP is not double tp ? peak != null : peak is not double np || Math.Abs(np - tp) >= ApplyHysteresisLu)
+        {
+            m.LoudnessTP = peak; applied = true;
+        }
+        return (true, applied);
     }
 
-    // Store a scene's learned loudness in its index entry (a scene folder in the library only). True = stored
-    // (normalization should follow it live — PlayerHelper.OnLoudnessMeasured).
-    public static bool StoreSceneLoudness(string scenePath, double lufs, double? peakDbfs, double seconds, bool complete)
+    // Store a scene's loudness report in its index entry (a scene folder in the library only). Applied = the value
+    // normalization uses moved (it should follow live — PlayerHelper.OnLoudnessMeasured).
+    public static (bool Stored, bool Applied) StoreSceneLoudness(string scenePath, double lufs, double? peakDbfs,
+        double seconds, bool complete, JsonElement? state = null)
     {
-        // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `changed` stays false
-        if (!PlayerHelper.IsScenePath(scenePath)) return false;
-        bool changed = false;
-        LibraryStore.SetMeta(scenePath, m => changed = MergeSceneLoudness(m, lufs, peakDbfs, seconds, complete));
-        return changed;
+        // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `r` stays (false, false)
+        if (!PlayerHelper.IsScenePath(scenePath)) return (false, false);
+        (bool, bool) r = (false, false);
+        LibraryStore.SetMeta(scenePath, m => r = MergeSceneLoudness(m, lufs, peakDbfs, seconds, complete, state));
+        return r;
     }
+
+    // The stored measurement to continue (a source's `loudness_seed`), or null (none, or one learned before it was
+    // kept — re-learned from scratch).
+    public static JsonElement? SceneLoudnessSeed(string scenePath) => SceneLoudnessSeedOf(LibraryStore.GetMeta(scenePath));
+    public static JsonElement? SceneLoudnessSeedOf(LibMeta? m) =>
+        m?.LoudnessState is { ValueKind: JsonValueKind.Object } s ? s : null;
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _measuring = new();
 

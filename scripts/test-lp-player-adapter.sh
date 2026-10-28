@@ -1040,8 +1040,36 @@ A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b
 [ "$SID5b" != "$SID5" ] && near "$G5b" "$W5" 0.01 && [ "$A5b" = 0 ] \
   && ok "reopened ($SID5b): gain.normalize $G5b from its first frame (its create props — no ramp)" || bad "reopened $SID5b: gain.normalize $G5b (want $W5), ramps $A5b"
 ns_l() { ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq --arg id "$1" '[.events[] | select(.id==$id)] | length'; }
-waitfor 15000 eval '[ "$(ns_l "$SID5b")" -ge 1 ]' && [ "$(loud_i 900000005)" = "$I5" ] && ok "a second play's measurement keeps the learned one ($I5)" || bad "second play: events $(ns_l "$SID5b"), index $(idx_loud 900000005) (was $I5)"
-grep -q "loudness .* kept the stored one" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" || bad "adapter log has no 'kept the stored one' line"
+# refined across plays (2026-10-28): the reopened source continues the stored measurement (its `loudness_seed`), each
+# report covers both plays, the index keeps the longer one — and the applied value only moves by ≥ 0.5 LU
+idx_s() { jq -r --arg k "$1" '.[$k].loudnessSeconds // 0' "$IDX" 2>/dev/null; }
+S5s=$(idx_s 900000005)
+seed5=$(ctl get "{\"path\":\"$SID5b.loudness_seed\"}" | jq -c '.value | {v, n: ([.counts[]] | add)}')
+echo "$seed5" | jq -e --argjson s "$S5s" '.v == 1 and (.n / 10 - $s | fabs) < 0.05' >/dev/null \
+  && ok "reopened: seeded with the stored measurement ($seed5 = ${S5s} s)" || bad "reopened source's loudness_seed: $seed5 (index ${S5s} s)"
+waitfor 15000 eval '[ "$(ns_l "$SID5b")" -ge 1 ]'
+ev5b=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -c --arg id "$SID5b" '[.events[] | select(.id==$id)][0] | {seconds, seed_s, session_s, lufs}')
+echo "$ev5b" | jq -e --argjson s "$S5s" '(.seed_s - $s | fabs) < 0.05 and (.seconds - .seed_s - .session_s | fabs) < 0.05 and .session_s >= 3' >/dev/null \
+  && ok "the second play's report covers both plays: $ev5b" || bad "second play's report: $ev5b (stored before: ${S5s} s)"
+waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000005)\") > $S5s + 2.5 else 1)"' && [ "$(loud_i 900000005)" = "$I5" ] \
+  && ok "the index refined: $(idx_loud 900000005) — loudnessI kept at $I5 (moved < 0.5 LU)" || bad "second play: index $(idx_loud 900000005) (was $I5 over ${S5s} s)"
+A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
+[ "$A5b" = 0 ] && near "$(cur gain.normalize)" "$W5" 0.01 && ok "…gain.normalize untouched ($(cur gain.normalize), no ramp)" || bad "a sub-0.5 refinement moved gain.normalize: $(cur gain.normalize), ramps $A5b"
+grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
+# a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU →
+# gain.normalize ramps to it — same source, same worker
+stop_now
+mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-10}'
+post /apply "{\"path\":\"$S5\"}" >/dev/null
+waitfor 5000 scene_ready "$S5" || bad "third play s5 → $(basename "$(cur path)")"
+SID5c=$(srcIdForPath "$S5"); WP5c=$(wpid "$SID5c")
+waitfor 15000 eval 'python3 -c "import sys; sys.exit(0 if float(\"$(loud_i 900000005)\") >= $I5 + 0.5 else 1)"' \
+  && ok "a louder third play moved loudnessI $I5 → $(loud_i 900000005) ($(idx_loud 900000005))" || bad "third play: index $(idx_loud 900000005) (was $I5)"
+W5c=$(python3 -c "print(round(min(-14 - float('$(loud_i 900000005)'), -1.5 - float('$(jq -r '."900000005".loudnessTP' "$IDX")')), 3))")
+waitfor $WAIT cur_near gain.normalize "$W5c" 0.05 && [ "$(srcIdForPath "$S5")" = "$SID5c" ] && [ "$(wpid "$SID5c")" = "$WP5c" ] \
+  && ok "…gain.normalize ramped live to $(cur gain.normalize) dB — same source $SID5c, same worker $WP5c" || bad "third play: gain.normalize $(cur gain.normalize) (want $W5c), src $SID5c → $(srcIdForPath "$S5"), worker $WP5c → $(wpid "$SID5c")"
+ramp5c=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5c.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
+echo "$ramp5c" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp5c)" || bad "third play: normalize not ramped: $ramp5c"
 # a scene without sound: nothing learned, never normalized
 post /apply "{\"path\":\"$S6\"}" >/dev/null
 waitfor 5000 scene_ready "$S6" || bad "/apply s6 → $(basename "$(cur path)")"

@@ -32,6 +32,12 @@ public sealed class LibMeta
     // early) — replaced by a longer or complete measurement on a later play.
     public double? LoudnessSeconds { get; set; }
     public bool? LoudnessPartial { get; set; }
+    // The measurement itself (2026-10-28, refined across plays): the player's `scene.loudness` `state` — a
+    // histogram of BS.1770 block loudness (0.1 LU bins) + the sample peak — opaque here; sent back as the next
+    // source's `loudness_seed`, so every play continues the same integration until the player's cap (30 min of
+    // audible play). LoudnessSeconds = the audible seconds it covers (every play). LoudnessI moves only when the
+    // measurement moved ≥ 0.5 LU (MergeSceneLoudness), so `gain.normalize` never twitches.
+    public JsonElement? LoudnessState { get; set; }
     public bool Crashed { get; set; }
     public bool Whitelist { get; set; }
     // A scene's user-property overrides (project.json general.properties → name → value in WE's encoding:

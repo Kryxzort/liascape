@@ -168,6 +168,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         Open: a matrix cell (the matrix player would need the short window knob — covered by the adapter IT
         instead); the true peak isn't measured (sample peak, ≤ true peak by < 1 dB for most content); a scene
         whose sound depends on its user properties keeps the loudness of the properties it was first learned with.
+  - [x] **Scene loudness refined on every play, capped** (2026-10-28, owner: "60s to normalize for rest of scene, keep
+        measuring … when the scene is played in future (probably add a max cap …)"; same three docs): the compositor
+        keeps the BS.1770 blocks as a 0.1 LU histogram (−70…+5 LUFS — the relative gate recomputed over every play),
+        reports it (`state`) at the window, after each further 60 s of audible play, at the end of a play (≥ 5 s new)
+        and once at the cap (`LP_PLAYER_LOUDNESS_CAP_S`, 30 min of audible play over every play — then the worker
+        stops metering: `ToWorker::LoudnessMeter`, `PROTOCOL` 4); the backend stores the longest report
+        (`loudnessState`), seeds every new source with it (`loudness_seed`, create only) and moves the applied
+        `loudnessI`/`loudnessTP` → `gain.normalize` (500 ms ramp) only by ≥ 0.5 LU. Entries learned before: applied
+        as is, re-learned by the next complete report (no migration). Open: a compositor crash loses what the live
+        source measured since its last report (≤ 60 s; the snapshot restores it with its create-time seed); two
+        sources of one scene at once keep only the longer one's contribution; a `path` change on a live scene source
+        drops the seed but the graph/snapshot still carry the old one (the backend never path-changes a scene).
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the item modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on

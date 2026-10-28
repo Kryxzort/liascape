@@ -276,14 +276,16 @@ public static class LpPlayerMedia
     {
         if (kind == "scene.loudness")
         {
-            // a scene's loudness learned on first play — no source changed; store + apply off this callback
+            // a scene's loudness report (the first after ~60 s of audible play, then refined) — no source changed;
+            // store + apply off this callback
             var lp = Str(e, "path");
             double? Num(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
             if (lp.Length > 0 && Num("lufs") is double lufs && Num("seconds") is double secs)
             {
                 bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
                 var peak = Num("peak_dbfs");
-                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
+                JsonElement? state = e.TryGetProperty("state", out var sv) && sv.ValueKind == JsonValueKind.Object ? sv.Clone() : null;
+                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete, state); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
             }
             return;
         }
@@ -323,15 +325,16 @@ public static class LpPlayerMedia
             _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
     }
 
-    // `scene.loudness`: store it (learned once; a partial until a complete one) and, with normalization on, ramp
-    // every live source of that scene to its new `gain.normalize` — the same worker keeps playing.
-    private static void OnSceneLoudness(string path, double lufs, double? peak, double seconds, bool complete)
+    // `scene.loudness`: store it (the measurement covering the most audible play wins — MergeSceneLoudness) and,
+    // when the applied value moved (≥ 0.5 LU) with normalization on, ramp every live source of that scene to its new
+    // `gain.normalize` — the same worker keeps playing.
+    private static void OnSceneLoudness(string path, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
     {
-        bool stored = LibraryService.StoreSceneLoudness(path, lufs, peak, seconds, complete);
+        var (stored, applied) = LibraryService.StoreSceneLoudness(path, lufs, peak, seconds, complete, state);
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         LpPlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
-            + (complete ? "" : " (partial)") + (stored ? " — stored" : " — kept the stored one"));
-        if (stored) PlayerHelper.OnLoudnessMeasured(path);
+            + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
+        if (applied) PlayerHelper.OnLoudnessMeasured(path);
     }
 
     private static int _eventOutcomes;
@@ -568,6 +571,9 @@ public static class LpPlayerMedia
         // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,
         // a broken scene — player-core.md § Scene worker); the video-only props are stored, no effect
         if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
+        // the scene's loudness measured over its earlier plays: this source continues it (create only — never a
+        // resolver value: a live source already holds that measurement plus its own play since)
+        if (scene && LibraryService.SceneLoudnessSeed(path) is JsonElement seed) props["loudness_seed"] = seed;
         foreach (var (k, v) in Desired(path, () => s, PlayerHelper.IsMuted, null, item: false)) props[k] = v;
         return props;
     }

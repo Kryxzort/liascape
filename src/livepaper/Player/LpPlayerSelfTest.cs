@@ -275,25 +275,43 @@ public static class LpPlayerSelfTest
     // the gain the resolver gives a scene.
     private static void SceneLoudnessAssertions(List<string> fails)
     {
-        // MergeSceneLoudness: learned once; a partial is replaced by a complete one or a longer partial only
+        // MergeSceneLoudness (refined across plays, 2026-10-28): the report covering MORE audible seconds replaces the
+        // measurement (its state, seconds, partial flag); the applied I/TP move only by ≥ 0.5 LU/dB
         var m = new LibMeta();
-        void Merge(double lufs, double? peak, double secs, bool complete, bool want, string what)
+        JsonElement St(int n) => JsonSerializer.SerializeToElement(new { v = 1, first = 500, counts = new[] { n } });
+        void Merge(double lufs, double? peak, double secs, bool complete, (bool, bool) want, string what, JsonElement? state = null)
         {
-            bool got = LibraryService.MergeSceneLoudness(m, lufs, peak, secs, complete);
-            if (got != want) fails.Add($"MergeSceneLoudness({what}) = {got}, want {want} (now I={m.LoudnessI}, s={m.LoudnessSeconds}, partial={m.LoudnessPartial})");
+            var got = LibraryService.MergeSceneLoudness(m, lufs, peak, secs, complete, state ?? St((int)(secs * 10)));
+            if (got != want) fails.Add($"MergeSceneLoudness({what}) = {got}, want {want} (now I={m.LoudnessI}, TP={m.LoudnessTP}, s={m.LoudnessSeconds}, partial={m.LoudnessPartial})");
         }
-        Merge(-30, -12, 25, false, true, "first partial on an empty entry");
-        if (m.LoudnessI != -30 || m.LoudnessTP != -12 || m.LoudnessPartial != true || m.LoudnessSeconds != 25 || m.LoudnessLRA != null)
-            fails.Add($"a partial stored as I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} partial={m.LoudnessPartial} LRA={m.LoudnessLRA}");
-        Merge(-31, -12, 22, false, false, "a shorter partial");
-        Merge(-28, -11, 40, false, true, "a longer partial");
-        Merge(-27, -10, 60, true, true, "a complete one over a partial");
+        Merge(-30, -12, 25, false, (true, true), "first partial on an empty entry");
+        if (m.LoudnessI != -30 || m.LoudnessTP != -12 || m.LoudnessPartial != true || m.LoudnessSeconds != 25 || m.LoudnessLRA != null
+            || m.LoudnessState?.GetProperty("counts")[0].GetInt32() != 250)
+            fails.Add($"a partial stored as I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} partial={m.LoudnessPartial} LRA={m.LoudnessLRA} state={m.LoudnessState}");
+        Merge(-31, -12, 22, false, (false, false), "a shorter report (two sources at once: the longer stays)");
+        Merge(-28, -11, 40, false, (true, true), "a longer partial");
+        Merge(-27, -10, 60, true, (true, true), "a complete one over a partial");
         if (m.LoudnessI != -27 || m.LoudnessPartial != null || m.LoudnessSeconds != 60) fails.Add($"complete stored as I={m.LoudnessI} partial={m.LoudnessPartial} s={m.LoudnessSeconds}");
-        Merge(-20, -5, 60, true, false, "a second complete one (learned once)");
-        Merge(-20, -5, 90, false, false, "a partial after a complete one");
-        Merge(double.NegativeInfinity, null, 60, true, false, "-inf (silence) on a fresh entry");
-        if (LibraryService.MergeSceneLoudness(new LibMeta(), double.NaN, null, 60, true)) fails.Add("MergeSceneLoudness(NaN) stored");
-        if (LibraryService.MergeSceneLoudness(new LibMeta(), -20, null, 0, true)) fails.Add("MergeSceneLoudness(0 s) stored");
+        Merge(-27.3, -9.8, 120, true, (true, false), "refined by 0.3 LU: stored, not applied");
+        if (m.LoudnessI != -27 || m.LoudnessTP != -10 || m.LoudnessSeconds != 120 || m.LoudnessState?.GetProperty("counts")[0].GetInt32() != 1200)
+            fails.Add($"a sub-0.5 refinement: I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} (want I −27 TP −10 kept, s 120 + its state)");
+        Merge(-27.6, -9.8, 180, true, (true, true), "refined to 0.6 LU from the applied value (drift accumulates)");
+        if (m.LoudnessI != -27.6 || m.LoudnessTP != -10) fails.Add($"applied I={m.LoudnessI} TP={m.LoudnessTP}, want −27.6 / −10");
+        Merge(-27.6, -9.0, 240, true, (true, true), "the peak rose ≥ 0.5 dB");
+        if (m.LoudnessTP != -9.0) fails.Add($"TP {m.LoudnessTP}, want −9");
+        Merge(-20, -5, 240, true, (false, false), "the same seconds again (a duplicate report)");
+        Merge(-20, -5, 200, false, (false, false), "a shorter partial after a complete one");
+        Merge(double.NegativeInfinity, null, 60, true, (false, false), "-inf (silence)");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), double.NaN, null, 60, true) != (false, false)) fails.Add("MergeSceneLoudness(NaN) stored");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), -20, null, 0, true) != (false, false)) fails.Add("MergeSceneLoudness(0 s) stored");
+        // an entry learned before the state was kept (no LoudnessState): applied as it is until a complete report
+        // re-learns it — never a seed; a partial doesn't replace it
+        m = new LibMeta { LoudnessI = -22, LoudnessTP = -8, LoudnessSeconds = 60 };
+        if (LibraryService.SceneLoudnessSeedOf(m) != null) fails.Add("a state-less entry must not seed");
+        Merge(-30, -8, 25, false, (false, false), "a partial over a state-less entry");
+        Merge(-22.2, -8, 60, true, (true, false), "a complete report re-learns a state-less entry (0.2 LU: not applied)");
+        if (m.LoudnessState == null || m.LoudnessI != -22 || LibraryService.SceneLoudnessSeedOf(m) == null)
+            fails.Add($"re-learned: state={m.LoudnessState} I={m.LoudnessI}");
         // a video's ffmpeg measurement (all four fields) is never read as a scene's — and vice versa
         var sceneOnly = new LibMeta { LoudnessI = -20, LoudnessTP = -10, LoudnessSeconds = 60 };
         if (sceneOnly.LoudnessLRA != null) fails.Add("a scene measurement must not look like a video's (LRA set)");
