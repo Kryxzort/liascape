@@ -1,8 +1,8 @@
 {
- "generated": "2026-10-28 13:07 IST",
- "run_started": "2026-10-28 12:46 IST",
+ "generated": "2026-10-28 22:58 IST",
+ "run_started": "2026-10-28 22:49 IST",
  "env": {
-  "commit": "7344e7b+dirty",
+  "commit": "ff2802d",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
   "scene_check": {
    "assets_dir": "/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
@@ -13,59 +13,53 @@
    ],
    "ok": true,
    "reason": null,
-   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/livepaper-pro/.claude/worktrees/agent-aa0acc641b76b8d8e/src/player/target/release/lp-scene-worker"
+   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/livepaper-pro/.claude/worktrees/agent-a50f95de85cabc638/src/player/target/release/lp-scene-worker"
   },
   "player_version": "0.1.0",
-  "lwe_rev": "c5c2caddff06964611a7ae08e6406df3c3f3bcd9"
+  "lwe_rev": "40eacc9a278738ba3fce5d4f1b030e543b4ca2e0"
  },
  "summary": {
   "scenes": 96,
   "counts": {
-   "ok": 86,
+   "ok": 92,
    "static": 1,
-   "blank": 1,
-   "load_failed": 4,
+   "blank": 0,
+   "load_failed": 3,
    "renderer_failed": 0,
    "crashed": 0,
-   "broken": 4,
+   "broken": 0,
    "timeout": 0
   },
-  "run_s": 481,
-  "ready_ms_median": 593.55,
-  "ready_ms_max": 7388.8,
-  "rss_median_mib": 447.3,
-  "gpu_ms_p50_median": 0.9497600197792053,
-  "vram_median_mib": 449.0,
+  "run_s": 506,
+  "ready_ms_median": 564.4,
+  "ready_ms_max": 6684.7,
+  "rss_median_mib": 446.8,
+  "gpu_ms_p50_median": 1.1735039949417114,
+  "vram_median_mib": 425,
   "slowest_ready": [
    "2883756643",
    "2921510865",
-   "3042492564",
    "3243449890",
-   "3516174947"
+   "3516174947",
+   "3042492564"
   ],
   "biggest_rss": [
    "2921510865",
    "2890767643",
+   "3326873240",
    "2883756643",
-   "3556794116",
-   "2325974975"
+   "3556794116"
   ],
   "biggest_gpu": [
    "3489263099",
    "2921510865",
    "3042865984",
-   "3419466417",
-   "3184155462"
+   "3233141951",
+   "3419466417"
   ],
   "not_ok": [
-   "1884904087",
-   "2047150134",
-   "2189783622",
    "2783122117",
-   "3233141951",
    "3276522107",
-   "3326873240",
-   "3354740764",
    "3477054430",
    "3509243656"
   ],
@@ -83,12 +77,12 @@
     1920,
     1265
    ],
-   "ready_ms": 305.5,
-   "wall_ready_ms": 459,
-   "rss_hwm_mib": 300.0,
+   "ready_ms": 195.3,
+   "wall_ready_ms": 289,
+   "rss_hwm_mib": 296.6,
    "vram_mib": 114,
-   "gpu_ms_p50": 0.10649599879980089,
-   "gpu_ms_p95": 0.11161600053310394,
+   "gpu_ms_p50": 0.10342399775981904,
+   "gpu_ms_p95": 0.10751999914646149,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -97,11 +91,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.75,
-   "changed_pct_1_to_2_3": 0.607,
+   "changed_pct": 0.754,
+   "changed_pct_1_to_2_3": 0.54,
    "capture_1s": {
     "luma_mean": 130.98,
-    "luma_stddev": 57.01,
+    "luma_stddev": 57.0,
     "top_colour_share": 0.0391,
     "size": [
      1920,
@@ -110,7 +104,7 @@
    },
    "capture_2.3s": {
     "luma_mean": 131.02,
-    "luma_stddev": 57.05,
+    "luma_stddev": 57.04,
     "top_colour_share": 0.0391,
     "size": [
      1920,
@@ -118,8 +112,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 131.04,
-    "luma_stddev": 57.07,
+    "luma_mean": 131.05,
+    "luma_stddev": 57.08,
     "top_colour_share": 0.0391,
     "size": [
      1920,
@@ -147,12 +141,12 @@
     1920,
     1080
    ],
-   "ready_ms": 240.8,
-   "wall_ready_ms": 402,
-   "rss_hwm_mib": 453.3,
+   "ready_ms": 250.1,
+   "wall_ready_ms": 436,
+   "rss_hwm_mib": 449.8,
    "vram_mib": 226,
-   "gpu_ms_p50": 0.29286399483680725,
-   "gpu_ms_p95": 0.3031040132045746,
+   "gpu_ms_p50": 0.29900801181793213,
+   "gpu_ms_p95": 0.30822399258613586,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -161,11 +155,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 51.909,
-   "changed_pct_1_to_2_3": 52.394,
+   "changed_pct": 51.91,
+   "changed_pct_1_to_2_3": 52.397,
    "capture_1s": {
-    "luma_mean": 38.39,
-    "luma_stddev": 36.53,
+    "luma_mean": 38.38,
+    "luma_stddev": 36.54,
     "top_colour_share": 0.0182,
     "size": [
      1920,
@@ -183,7 +177,7 @@
    },
    "capture_4s": {
     "luma_mean": 38.17,
-    "luma_stddev": 36.37,
+    "luma_stddev": 36.38,
     "top_colour_share": 0.0182,
     "size": [
      1920,
@@ -211,12 +205,12 @@
     1920,
     1080
    ],
-   "ready_ms": 170.9,
-   "wall_ready_ms": 319,
-   "rss_hwm_mib": 289.2,
+   "ready_ms": 166.7,
+   "wall_ready_ms": 361,
+   "rss_hwm_mib": 288.3,
    "vram_mib": 110,
-   "gpu_ms_p50": 0.08601599931716919,
-   "gpu_ms_p95": 0.08908800035715103,
+   "gpu_ms_p50": 0.08499199897050858,
+   "gpu_ms_p95": 0.08601599931716919,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -225,8 +219,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.16,
-   "changed_pct_1_to_2_3": 0.039,
+   "changed_pct": 0.092,
+   "changed_pct_1_to_2_3": 0.037,
    "capture_1s": {
     "luma_mean": 193.88,
     "luma_stddev": 64.81,
@@ -246,8 +240,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 193.9,
-    "luma_stddev": 64.79,
+    "luma_mean": 193.89,
+    "luma_stddev": 64.8,
     "top_colour_share": 0.0261,
     "size": [
      1920,
@@ -275,12 +269,12 @@
     1920,
     1080
    ],
-   "ready_ms": 415.5,
-   "wall_ready_ms": 532,
-   "rss_hwm_mib": 742.6,
+   "ready_ms": 328.9,
+   "wall_ready_ms": 539,
+   "rss_hwm_mib": 740.9,
    "vram_mib": 649,
-   "gpu_ms_p50": 0.8611840009689331,
-   "gpu_ms_p95": 0.894976019859314,
+   "gpu_ms_p50": 0.8437759876251221,
+   "gpu_ms_p95": 0.8755199909210205,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -289,20 +283,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 19.567,
-   "changed_pct_1_to_2_3": 15.851,
+   "changed_pct": 19.24,
+   "changed_pct_1_to_2_3": 16.982,
    "capture_1s": {
-    "luma_mean": 119.44,
-    "luma_stddev": 66.31,
-    "top_colour_share": 0.0017,
+    "luma_mean": 119.43,
+    "luma_stddev": 66.32,
+    "top_colour_share": 0.0018,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 119.55,
-    "luma_stddev": 66.17,
+    "luma_mean": 119.58,
+    "luma_stddev": 66.16,
     "top_colour_share": 0.0017,
     "size": [
      1920,
@@ -310,9 +304,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 120.25,
-    "luma_stddev": 65.39,
-    "top_colour_share": 0.0017,
+    "luma_mean": 119.91,
+    "luma_stddev": 65.76,
+    "top_colour_share": 0.0016,
     "size": [
      1920,
      1080
@@ -339,13 +333,13 @@
     1920,
     1080
    ],
-   "ready_ms": 298.8,
-   "wall_ready_ms": 431,
-   "rss_hwm_mib": 529.1,
+   "ready_ms": 272.2,
+   "wall_ready_ms": 426,
+   "rss_hwm_mib": 522.5,
    "vram_mib": 304,
-   "gpu_ms_p50": 0.319487988948822,
-   "gpu_ms_p95": 0.32256001234054565,
-   "fps_actual": 31,
+   "gpu_ms_p50": 0.31436800956726074,
+   "gpu_ms_p95": 0.32051199674606323,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": false,
@@ -353,20 +347,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 54.007,
-   "changed_pct_1_to_2_3": 49.272,
+   "changed_pct": 54.022,
+   "changed_pct_1_to_2_3": 49.676,
    "capture_1s": {
     "luma_mean": 146.38,
     "luma_stddev": 28.68,
-    "top_colour_share": 0.2565,
+    "top_colour_share": 0.2566,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 146.36,
-    "luma_stddev": 28.7,
+    "luma_mean": 146.37,
+    "luma_stddev": 28.71,
     "top_colour_share": 0.2566,
     "size": [
      1920,
@@ -403,12 +397,12 @@
     1920,
     1080
    ],
-   "ready_ms": 616.6,
-   "wall_ready_ms": 838,
-   "rss_hwm_mib": 411.3,
+   "ready_ms": 707.1,
+   "wall_ready_ms": 864,
+   "rss_hwm_mib": 411.5,
    "vram_mib": 462,
-   "gpu_ms_p50": 1.4602240324020386,
-   "gpu_ms_p95": 1.891327977180481,
+   "gpu_ms_p50": 3.048448085784912,
+   "gpu_ms_p95": 4.4410881996154785,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -417,20 +411,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 50.396,
-   "changed_pct_1_to_2_3": 36.237,
+   "changed_pct": 51.305,
+   "changed_pct_1_to_2_3": 49.154,
    "capture_1s": {
-    "luma_mean": 49.97,
-    "luma_stddev": 35.87,
-    "top_colour_share": 0.0103,
+    "luma_mean": 50.07,
+    "luma_stddev": 35.89,
+    "top_colour_share": 0.0091,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 50.27,
-    "luma_stddev": 35.71,
+    "luma_mean": 50.87,
+    "luma_stddev": 35.41,
     "top_colour_share": 0.0091,
     "size": [
      1920,
@@ -438,9 +432,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 51.6,
-    "luma_stddev": 35.54,
-    "top_colour_share": 0.0091,
+    "luma_mean": 51.84,
+    "luma_stddev": 35.41,
+    "top_colour_share": 0.0092,
     "size": [
      1920,
      1080
@@ -467,12 +461,12 @@
     1920,
     1334
    ],
-   "ready_ms": 192.2,
-   "wall_ready_ms": 352,
-   "rss_hwm_mib": 261.4,
+   "ready_ms": 215.3,
+   "wall_ready_ms": 319,
+   "rss_hwm_mib": 260.7,
    "vram_mib": 124,
-   "gpu_ms_p50": 0.13209599256515503,
-   "gpu_ms_p95": 0.13619199395179749,
+   "gpu_ms_p50": 0.26316800713539124,
+   "gpu_ms_p95": 0.3164159953594208,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -481,8 +475,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 9.469,
-   "changed_pct_1_to_2_3": 0.019,
+   "changed_pct": 7.312,
+   "changed_pct_1_to_2_3": 0.013,
    "capture_1s": {
     "luma_mean": 137.21,
     "luma_stddev": 68.72,
@@ -502,8 +496,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 137.92,
-    "luma_stddev": 68.79,
+    "luma_mean": 138.23,
+    "luma_stddev": 68.72,
     "top_colour_share": 0.0019,
     "size": [
      1920,
@@ -531,13 +525,13 @@
     1920,
     1200
    ],
-   "ready_ms": 376.6,
-   "wall_ready_ms": 510,
-   "rss_hwm_mib": 463.8,
+   "ready_ms": 423.8,
+   "wall_ready_ms": 516,
+   "rss_hwm_mib": 465.9,
    "vram_mib": 188,
-   "gpu_ms_p50": 0.6205440163612366,
-   "gpu_ms_p95": 0.6481919884681702,
-   "fps_actual": 31,
+   "gpu_ms_p50": 0.6174719929695129,
+   "gpu_ms_p95": 1.977344036102295,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -545,12 +539,12 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 30.766,
-   "changed_pct_1_to_2_3": 33.577,
+   "changed_pct": 30.566,
+   "changed_pct_1_to_2_3": 33.67,
    "capture_1s": {
     "luma_mean": 158.32,
     "luma_stddev": 65.86,
-    "top_colour_share": 0.1285,
+    "top_colour_share": 0.1286,
     "size": [
      1920,
      1200
@@ -566,9 +560,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 158.27,
-    "luma_stddev": 65.87,
-    "top_colour_share": 0.1287,
+    "luma_mean": 158.28,
+    "luma_stddev": 65.86,
+    "top_colour_share": 0.1286,
     "size": [
      1920,
      1200
@@ -595,12 +589,12 @@
     1920,
     1080
    ],
-   "ready_ms": 729.4,
-   "wall_ready_ms": 947,
-   "rss_hwm_mib": 541.4,
+   "ready_ms": 773.1,
+   "wall_ready_ms": 873,
+   "rss_hwm_mib": 539.5,
    "vram_mib": 827,
-   "gpu_ms_p50": 0.6625279784202576,
-   "gpu_ms_p95": 0.6891520023345947,
+   "gpu_ms_p50": 0.652288019657135,
+   "gpu_ms_p95": 0.6563839912414551,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -609,8 +603,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 3.873,
-   "changed_pct_1_to_2_3": 3.495,
+   "changed_pct": 3.93,
+   "changed_pct_1_to_2_3": 3.445,
    "capture_1s": {
     "luma_mean": 94.67,
     "luma_stddev": 47.0,
@@ -621,8 +615,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 94.58,
-    "luma_stddev": 46.91,
+    "luma_mean": 94.61,
+    "luma_stddev": 46.93,
     "top_colour_share": 0.0046,
     "size": [
      1920,
@@ -650,37 +644,59 @@
   },
   {
    "id": "1884904087",
-   "outcome": "broken",
-   "native": null,
-   "export": null,
-   "ready_ms": null,
-   "wall_ready_ms": null,
-   "rss_hwm_mib": null,
-   "vram_mib": null,
-   "gpu_ms_p50": null,
-   "gpu_ms_p95": null,
-   "fps_actual": 0,
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 274.8,
+   "wall_ready_ms": 408,
+   "rss_hwm_mib": 329.9,
+   "vram_mib": 118,
+   "gpu_ms_p50": 0.2007039934396744,
+   "gpu_ms_p95": 0.2088959962129593,
+   "fps_actual": 30,
    "fps_target": 30.0,
-   "restarts": 3,
-   "has_audio": null,
+   "restarts": 0,
+   "has_audio": true,
    "wants_audio_input": false,
    "throttled": false,
-   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/1884904087-1793171834510.json)",
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 1 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 2 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 3 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)"
-   ],
+   "reason": null,
    "capture_errors": [],
-   "class": "broken",
+   "changed_pct": 28.223,
+   "changed_pct_1_to_2_3": 27.004,
+   "capture_1s": {
+    "luma_mean": 98.03,
+    "luma_stddev": 62.0,
+    "top_colour_share": 0.0018,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 97.84,
+    "luma_stddev": 61.98,
+    "top_colour_share": 0.0018,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 98.26,
+    "luma_stddev": 62.04,
+    "top_colour_share": 0.0018,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": false,
@@ -688,9 +704,7 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
-   "note": "Reproduces without our worker (`lp-scene-worker --lwe-smoke`, LWE's core alone). gdb: SIGSEGV in `CParticle::CParticle(CScene&, Particle const&)` +108 ← `CScene::dispatchObjectType` ← `CScene::createObject` ← `CScene::CScene` ← `Project::render` ← `wp_render_frame` (the first render = the renderer build), so patch 0004's build guard never sees it. The particle object uses `particles/presets/leaves2.json` (+ a child emitter `leaves2b.json`) shipped inside the item's scene.pkg. Same crash as 2047150134 (`leaves5.json`); dozens of other corpus scenes with particle systems (presets with or without `instanceoverride`) build fine.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
+   "cause": ""
   },
   {
    "id": "1934084447",
@@ -703,9 +717,9 @@
     1920,
     1080
    ],
-   "ready_ms": 246.2,
-   "wall_ready_ms": 418,
-   "rss_hwm_mib": 319.3,
+   "ready_ms": 255.1,
+   "wall_ready_ms": 435,
+   "rss_hwm_mib": 317.6,
    "vram_mib": 155,
    "gpu_ms_p50": 0.16486400365829468,
    "gpu_ms_p95": 0.16793599724769592,
@@ -717,8 +731,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 1.727,
-   "changed_pct_1_to_2_3": 1.652,
+   "changed_pct": 1.738,
+   "changed_pct_1_to_2_3": 1.655,
    "capture_1s": {
     "luma_mean": 188.11,
     "luma_stddev": 53.1,
@@ -739,7 +753,7 @@
    },
    "capture_4s": {
     "luma_mean": 188.11,
-    "luma_stddev": 53.1,
+    "luma_stddev": 53.11,
     "top_colour_share": 0.0108,
     "size": [
      1920,
@@ -758,37 +772,59 @@
   },
   {
    "id": "2047150134",
-   "outcome": "broken",
-   "native": null,
-   "export": null,
-   "ready_ms": null,
-   "wall_ready_ms": null,
-   "rss_hwm_mib": null,
-   "vram_mib": null,
-   "gpu_ms_p50": null,
-   "gpu_ms_p95": null,
-   "fps_actual": 0,
+   "outcome": "ready",
+   "native": [
+    1366,
+    768
+   ],
+   "export": [
+    1366,
+    768
+   ],
+   "ready_ms": 171.0,
+   "wall_ready_ms": 354,
+   "rss_hwm_mib": 271.9,
+   "vram_mib": 62,
+   "gpu_ms_p50": 0.05427199974656105,
+   "gpu_ms_p95": 0.055296000093221664,
+   "fps_actual": 30,
    "fps_target": 30.0,
-   "restarts": 3,
-   "has_audio": null,
+   "restarts": 0,
+   "has_audio": true,
    "wants_audio_input": false,
    "throttled": false,
-   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/2047150134-1793171840182.json)",
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 1 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 2 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "--- lp-player: worker killed by signal 11; restart 3 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)"
-   ],
+   "reason": null,
    "capture_errors": [],
-   "class": "broken",
+   "changed_pct": 0.143,
+   "changed_pct_1_to_2_3": 0.051,
+   "capture_1s": {
+    "luma_mean": 170.62,
+    "luma_stddev": 59.62,
+    "top_colour_share": 0.0096,
+    "size": [
+     1366,
+     768
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 170.61,
+    "luma_stddev": 59.61,
+    "top_colour_share": 0.0096,
+    "size": [
+     1366,
+     768
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 170.61,
+    "luma_stddev": 59.6,
+    "top_colour_share": 0.0096,
+    "size": [
+     1366,
+     768
+    ]
+   },
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": false,
@@ -796,9 +832,7 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
-   "note": "Same backtrace as 1884904087 (`CParticle::CParticle` +108 during the first `wp_render_frame`), reproduced with `--lwe-smoke`; the object uses `particles/presets/leaves5.json` from the scene.pkg.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
+   "cause": ""
   },
   {
    "id": "2064316482",
@@ -811,12 +845,12 @@
     1920,
     1080
    ],
-   "ready_ms": 653.4,
-   "wall_ready_ms": 810,
-   "rss_hwm_mib": 584.6,
+   "ready_ms": 681.4,
+   "wall_ready_ms": 857,
+   "rss_hwm_mib": 594.7,
    "vram_mib": 719,
-   "gpu_ms_p50": 1.5646719932556152,
-   "gpu_ms_p95": 2.2466559410095215,
+   "gpu_ms_p50": 2.03878402709961,
+   "gpu_ms_p95": 3.7693440914154057,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -825,11 +859,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 12.28,
-   "changed_pct_1_to_2_3": 12.228,
+   "changed_pct": 12.344,
+   "changed_pct_1_to_2_3": 12.254,
    "capture_1s": {
-    "luma_mean": 53.46,
-    "luma_stddev": 59.18,
+    "luma_mean": 53.49,
+    "luma_stddev": 59.2,
     "top_colour_share": 0.1767,
     "size": [
      1920,
@@ -837,8 +871,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 53.31,
-    "luma_stddev": 58.9,
+    "luma_mean": 53.3,
+    "luma_stddev": 58.89,
     "top_colour_share": 0.1764,
     "size": [
      1920,
@@ -846,9 +880,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 53.49,
-    "luma_stddev": 59.3,
-    "top_colour_share": 0.1763,
+    "luma_mean": 53.51,
+    "luma_stddev": 59.31,
+    "top_colour_share": 0.1764,
     "size": [
      1920,
      1080
@@ -875,12 +909,12 @@
     1920,
     1080
    ],
-   "ready_ms": 871.1,
-   "wall_ready_ms": 1009,
-   "rss_hwm_mib": 355.8,
+   "ready_ms": 863.8,
+   "wall_ready_ms": 994,
+   "rss_hwm_mib": 351.7,
    "vram_mib": 556,
-   "gpu_ms_p50": 0.8325120210647583,
-   "gpu_ms_p95": 1.3056000471115112,
+   "gpu_ms_p50": 0.7505919933319092,
+   "gpu_ms_p95": 1.0393600463867188,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -889,30 +923,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.105,
-   "changed_pct_1_to_2_3": 0.048,
+   "changed_pct": 0.159,
+   "changed_pct_1_to_2_3": 0.107,
    "capture_1s": {
-    "luma_mean": 107.18,
-    "luma_stddev": 43.71,
-    "top_colour_share": 0.0027,
+    "luma_mean": 107.2,
+    "luma_stddev": 45.13,
+    "top_colour_share": 0.0026,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 107.18,
-    "luma_stddev": 43.71,
-    "top_colour_share": 0.0027,
+    "luma_mean": 107.2,
+    "luma_stddev": 45.13,
+    "top_colour_share": 0.0026,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 107.18,
-    "luma_stddev": 43.71,
-    "top_colour_share": 0.0027,
+    "luma_mean": 107.2,
+    "luma_stddev": 45.14,
+    "top_colour_share": 0.0026,
     "size": [
      1920,
      1080
@@ -939,12 +973,12 @@
     1491,
     1449
    ],
-   "ready_ms": 187.8,
-   "wall_ready_ms": 382,
-   "rss_hwm_mib": 270.9,
+   "ready_ms": 215.8,
+   "wall_ready_ms": 316,
+   "rss_hwm_mib": 267.2,
    "vram_mib": 112,
    "gpu_ms_p50": 0.09932799637317656,
-   "gpu_ms_p95": 0.1013759970664978,
+   "gpu_ms_p95": 0.1003519967198372,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -953,19 +987,10 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.207,
-   "changed_pct_1_to_2_3": 0.096,
+   "changed_pct": 0.281,
+   "changed_pct_1_to_2_3": 0.176,
    "capture_1s": {
     "luma_mean": 166.33,
-    "luma_stddev": 96.86,
-    "top_colour_share": 0.2428,
-    "size": [
-     1491,
-     1449
-    ]
-   },
-   "capture_2.3s": {
-    "luma_mean": 166.34,
     "luma_stddev": 96.86,
     "top_colour_share": 0.2426,
     "size": [
@@ -973,9 +998,18 @@
      1449
     ]
    },
+   "capture_2.3s": {
+    "luma_mean": 166.35,
+    "luma_stddev": 96.86,
+    "top_colour_share": 0.2425,
+    "size": [
+     1491,
+     1449
+    ]
+   },
    "capture_4s": {
     "luma_mean": 166.37,
-    "luma_stddev": 96.85,
+    "luma_stddev": 96.86,
     "top_colour_share": 0.2423,
     "size": [
      1491,
@@ -1003,12 +1037,12 @@
     1920,
     1080
    ],
-   "ready_ms": 292.7,
-   "wall_ready_ms": 420,
-   "rss_hwm_mib": 319.5,
-   "vram_mib": 255,
-   "gpu_ms_p50": 0.10342399775981904,
-   "gpu_ms_p95": 0.116736002266407,
+   "ready_ms": 293.5,
+   "wall_ready_ms": 403,
+   "rss_hwm_mib": 316.5,
+   "vram_mib": 265,
+   "gpu_ms_p50": 0.7290880084037781,
+   "gpu_ms_p95": 2.870271921157837,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1016,55 +1050,37 @@
    "wants_audio_input": false,
    "throttled": false,
    "reason": null,
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "GLSL fragment unit parsing Failed: ERROR: 0:125: 'v_Bounds' : undeclared identifier ",
-    "ERROR: 0:125: 'scalar swizzle' : not supported for this version or the enabled extensions ",
-    "ERROR: 0:125: 'scalar swizzle' : not supported for this version or the enabled extensions ",
-    "WARNING: 0:125: 'y' : vector swizzle selection out of range guessing right values",
-    "ERROR: 0:125: '' : missing #endif ",
-    "ERROR: 0:125: '' : compilation terminated ",
-    "ERROR: 5 compilation errors.  No code generated.",
-    "Vertex info",
-    "-----------",
-    "(0) : error C5145: must write to gl_Position",
-    "Failed to setup object 13: Vertex info",
-    "-----------",
-    "(0) : error C5145: must write to gl_Position",
-    "[info] lwe: loaded + built /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2189783622 in 202 ms: native 3840x2160, audio streams false, audio input false"
-   ],
    "capture_errors": [],
-   "changed_pct": 0.0,
-   "changed_pct_1_to_2_3": 0.0,
+   "changed_pct": 11.248,
+   "changed_pct_1_to_2_3": 13.424,
    "capture_1s": {
-    "luma_mean": 0.0,
-    "luma_stddev": 0.0,
-    "top_colour_share": 1.0,
+    "luma_mean": 58.3,
+    "luma_stddev": 59.39,
+    "top_colour_share": 0.061,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 0.0,
-    "luma_stddev": 0.0,
-    "top_colour_share": 1.0,
+    "luma_mean": 58.47,
+    "luma_stddev": 59.92,
+    "top_colour_share": 0.061,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 0.0,
-    "luma_stddev": 0.0,
-    "top_colour_share": 1.0,
+    "luma_mean": 58.37,
+    "luma_stddev": 59.72,
+    "top_colour_share": 0.061,
     "size": [
      1920,
      1080
     ]
    },
-   "class": "blank",
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": false,
@@ -1072,9 +1088,7 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "an effect shader packaged in the scene fails to compile, LWE then drops the scene's only object",
-   "note": "One image object with two effects (godrays, foliagesway) whose shaders ship as old copies inside the scene.pkg. glslang rejects the packaged godrays fragment (`'v_Bounds' : undeclared identifier`, `missing #endif`), the object's setup fails (`Failed to setup object 13`) and LWE renders nothing for it — the scene is that one object, so every frame is black. Wallpaper Engine would show the image, at worst without the effect.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: an object whose effect fails to compile disappears\""
+   "cause": "a shader LWE failed to compile/translate"
   },
   {
    "id": "2219762084",
@@ -1087,12 +1101,12 @@
     1920,
     1080
    ],
-   "ready_ms": 194.7,
-   "wall_ready_ms": 348,
-   "rss_hwm_mib": 263.0,
+   "ready_ms": 199.7,
+   "wall_ready_ms": 315,
+   "rss_hwm_mib": 261.0,
    "vram_mib": 106,
-   "gpu_ms_p50": 0.1157120019197464,
-   "gpu_ms_p95": 0.11776000261306764,
+   "gpu_ms_p50": 0.11468800157308578,
+   "gpu_ms_p95": 0.116736002266407,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1101,8 +1115,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 1.119,
-   "changed_pct_1_to_2_3": 2.217,
+   "changed_pct": 1.398,
+   "changed_pct_1_to_2_3": 2.215,
    "capture_1s": {
     "luma_mean": 191.24,
     "luma_stddev": 58.67,
@@ -1113,7 +1127,7 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 191.27,
+    "luma_mean": 191.26,
     "luma_stddev": 58.67,
     "top_colour_share": 0.0641,
     "size": [
@@ -1122,7 +1136,7 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 191.27,
+    "luma_mean": 191.26,
     "luma_stddev": 58.65,
     "top_colour_share": 0.064,
     "size": [
@@ -1151,12 +1165,12 @@
     1920,
     1080
    ],
-   "ready_ms": 481.3,
-   "wall_ready_ms": 667,
-   "rss_hwm_mib": 413.5,
+   "ready_ms": 439.0,
+   "wall_ready_ms": 599,
+   "rss_hwm_mib": 417.1,
    "vram_mib": 351,
-   "gpu_ms_p50": 1.7991679906845093,
-   "gpu_ms_p95": 2.288640022277832,
+   "gpu_ms_p50": 1.464319944381714,
+   "gpu_ms_p95": 1.8176000118255615,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1165,20 +1179,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 62.423,
-   "changed_pct_1_to_2_3": 61.056,
+   "changed_pct": 62.341,
+   "changed_pct_1_to_2_3": 60.898,
    "capture_1s": {
-    "luma_mean": 43.51,
-    "luma_stddev": 50.21,
-    "top_colour_share": 0.1103,
+    "luma_mean": 43.53,
+    "luma_stddev": 50.23,
+    "top_colour_share": 0.1107,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 43.44,
-    "luma_stddev": 50.05,
+    "luma_mean": 43.36,
+    "luma_stddev": 50.03,
     "top_colour_share": 0.1102,
     "size": [
      1920,
@@ -1186,9 +1200,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 43.38,
-    "luma_stddev": 50.02,
-    "top_colour_share": 0.1093,
+    "luma_mean": 43.48,
+    "luma_stddev": 50.11,
+    "top_colour_share": 0.1095,
     "size": [
      1920,
      1080
@@ -1215,12 +1229,12 @@
     1920,
     1080
    ],
-   "ready_ms": 344.6,
-   "wall_ready_ms": 506,
-   "rss_hwm_mib": 378.2,
+   "ready_ms": 341.0,
+   "wall_ready_ms": 500,
+   "rss_hwm_mib": 371.7,
    "vram_mib": 257,
-   "gpu_ms_p50": 0.45158401131629944,
-   "gpu_ms_p95": 0.49561598896980286,
+   "gpu_ms_p50": 0.4372479915618897,
+   "gpu_ms_p95": 0.4546560049057007,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1229,11 +1243,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 3.305,
-   "changed_pct_1_to_2_3": 3.387,
+   "changed_pct": 3.349,
+   "changed_pct_1_to_2_3": 3.393,
    "capture_1s": {
-    "luma_mean": 65.02,
-    "luma_stddev": 59.63,
+    "luma_mean": 65.04,
+    "luma_stddev": 59.64,
     "top_colour_share": 0.0323,
     "size": [
      1920,
@@ -1241,8 +1255,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 65.08,
-    "luma_stddev": 59.67,
+    "luma_mean": 65.1,
+    "luma_stddev": 59.7,
     "top_colour_share": 0.0322,
     "size": [
      1920,
@@ -1250,8 +1264,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 65.09,
-    "luma_stddev": 59.69,
+    "luma_mean": 65.08,
+    "luma_stddev": 59.68,
     "top_colour_share": 0.0323,
     "size": [
      1920,
@@ -1279,12 +1293,12 @@
     1920,
     1080
    ],
-   "ready_ms": 959.4,
-   "wall_ready_ms": 1170,
-   "rss_hwm_mib": 1543.7,
+   "ready_ms": 736.5,
+   "wall_ready_ms": 942,
+   "rss_hwm_mib": 1518.9,
    "vram_mib": 775,
-   "gpu_ms_p50": 0.2611199915409088,
-   "gpu_ms_p95": 0.27136000990867615,
+   "gpu_ms_p50": 0.2467840015888214,
+   "gpu_ms_p95": 0.25804799795150757,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1293,8 +1307,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 4.887,
-   "changed_pct_1_to_2_3": 4.719,
+   "changed_pct": 4.892,
+   "changed_pct_1_to_2_3": 4.729,
    "capture_1s": {
     "luma_mean": 91.05,
     "luma_stddev": 66.41,
@@ -1343,12 +1357,12 @@
     3840,
     1080
    ],
-   "ready_ms": 778.7,
-   "wall_ready_ms": 908,
-   "rss_hwm_mib": 337.6,
-   "vram_mib": 285,
-   "gpu_ms_p50": 0.6144000291824341,
-   "gpu_ms_p95": 0.8069120049476624,
+   "ready_ms": 772.8,
+   "wall_ready_ms": 896,
+   "rss_hwm_mib": 352.7,
+   "vram_mib": 274,
+   "gpu_ms_p50": 0.4413439929485321,
+   "gpu_ms_p95": 0.5212159752845764,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1357,30 +1371,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 40.669,
-   "changed_pct_1_to_2_3": 39.119,
+   "changed_pct": 37.069,
+   "changed_pct_1_to_2_3": 35.626,
    "capture_1s": {
-    "luma_mean": 70.43,
-    "luma_stddev": 62.94,
-    "top_colour_share": 0.0095,
+    "luma_mean": 70.53,
+    "luma_stddev": 63.15,
+    "top_colour_share": 0.0098,
     "size": [
      3840,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 70.41,
-    "luma_stddev": 62.93,
-    "top_colour_share": 0.0096,
+    "luma_mean": 70.57,
+    "luma_stddev": 63.16,
+    "top_colour_share": 0.0097,
     "size": [
      3840,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 70.4,
-    "luma_stddev": 62.86,
-    "top_colour_share": 0.0095,
+    "luma_mean": 70.53,
+    "luma_stddev": 63.05,
+    "top_colour_share": 0.0097,
     "size": [
      3840,
      1080
@@ -1407,12 +1421,12 @@
     1920,
     1080
    ],
-   "ready_ms": 661.7,
-   "wall_ready_ms": 832,
-   "rss_hwm_mib": 529.1,
+   "ready_ms": 682.5,
+   "wall_ready_ms": 769,
+   "rss_hwm_mib": 531.5,
    "vram_mib": 601,
-   "gpu_ms_p50": 2.1770238876342773,
-   "gpu_ms_p95": 2.3603200912475586,
+   "gpu_ms_p50": 1.9292160272598269,
+   "gpu_ms_p95": 2.186239957809448,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1421,30 +1435,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 90.048,
-   "changed_pct_1_to_2_3": 85.882,
+   "changed_pct": 91.596,
+   "changed_pct_1_to_2_3": 85.115,
    "capture_1s": {
-    "luma_mean": 77.25,
-    "luma_stddev": 61.31,
-    "top_colour_share": 0.0427,
+    "luma_mean": 77.27,
+    "luma_stddev": 61.35,
+    "top_colour_share": 0.0428,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 77.89,
-    "luma_stddev": 61.31,
-    "top_colour_share": 0.0436,
+    "luma_mean": 78.04,
+    "luma_stddev": 61.33,
+    "top_colour_share": 0.0437,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 79.02,
-    "luma_stddev": 61.36,
-    "top_colour_share": 0.0442,
+    "luma_mean": 79.96,
+    "luma_stddev": 61.34,
+    "top_colour_share": 0.0455,
     "size": [
      1920,
      1080
@@ -1471,12 +1485,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1422.5,
-   "wall_ready_ms": 1561,
-   "rss_hwm_mib": 1507.4,
-   "vram_mib": 1468,
-   "gpu_ms_p50": 2.411520004272461,
-   "gpu_ms_p95": 3.008512020111084,
+   "ready_ms": 1164.0,
+   "wall_ready_ms": 1314,
+   "rss_hwm_mib": 1513.3,
+   "vram_mib": 1409,
+   "gpu_ms_p50": 3.711999893188477,
+   "gpu_ms_p95": 5.037055969238281,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1485,20 +1499,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.056,
-   "changed_pct_1_to_2_3": 99.695,
+   "changed_pct": 98.804,
+   "changed_pct_1_to_2_3": 99.767,
    "capture_1s": {
-    "luma_mean": 47.23,
-    "luma_stddev": 31.48,
-    "top_colour_share": 0.0024,
+    "luma_mean": 47.06,
+    "luma_stddev": 31.64,
+    "top_colour_share": 0.0023,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 51.77,
-    "luma_stddev": 33.62,
+    "luma_mean": 51.82,
+    "luma_stddev": 33.85,
     "top_colour_share": 0.0021,
     "size": [
      1920,
@@ -1506,8 +1520,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 45.75,
-    "luma_stddev": 30.81,
+    "luma_mean": 45.77,
+    "luma_stddev": 31.06,
     "top_colour_share": 0.0021,
     "size": [
      1920,
@@ -1535,12 +1549,12 @@
     1920,
     1080
    ],
-   "ready_ms": 516.4,
-   "wall_ready_ms": 647,
-   "rss_hwm_mib": 409.9,
+   "ready_ms": 485.3,
+   "wall_ready_ms": 604,
+   "rss_hwm_mib": 409.5,
    "vram_mib": 263,
-   "gpu_ms_p50": 0.34508800506591797,
-   "gpu_ms_p95": 0.3799040019512177,
+   "gpu_ms_p50": 0.34406399726867676,
+   "gpu_ms_p95": 0.4659200012683869,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1549,30 +1563,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 61.741,
-   "changed_pct_1_to_2_3": 60.65,
+   "changed_pct": 59.621,
+   "changed_pct_1_to_2_3": 58.785,
    "capture_1s": {
-    "luma_mean": 209.19,
-    "luma_stddev": 33.83,
-    "top_colour_share": 0.1041,
+    "luma_mean": 209.78,
+    "luma_stddev": 35.68,
+    "top_colour_share": 0.0857,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 209.48,
-    "luma_stddev": 33.68,
-    "top_colour_share": 0.1077,
+    "luma_mean": 209.66,
+    "luma_stddev": 35.88,
+    "top_colour_share": 0.089,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 209.62,
-    "luma_stddev": 33.56,
-    "top_colour_share": 0.1026,
+    "luma_mean": 209.8,
+    "luma_stddev": 35.75,
+    "top_colour_share": 0.0853,
     "size": [
      1920,
      1080
@@ -1599,12 +1613,12 @@
     1920,
     1080
    ],
-   "ready_ms": 799.9,
-   "wall_ready_ms": 912,
-   "rss_hwm_mib": 457.1,
+   "ready_ms": 869.4,
+   "wall_ready_ms": 1046,
+   "rss_hwm_mib": 455.5,
    "vram_mib": 697,
-   "gpu_ms_p50": 1.9998719692230225,
-   "gpu_ms_p95": 2.47705602645874,
+   "gpu_ms_p50": 1.798143982887268,
+   "gpu_ms_p95": 2.2026240825653076,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1613,30 +1627,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 64.379,
-   "changed_pct_1_to_2_3": 62.281,
+   "changed_pct": 63.764,
+   "changed_pct_1_to_2_3": 61.343,
    "capture_1s": {
-    "luma_mean": 47.2,
-    "luma_stddev": 44.34,
-    "top_colour_share": 0.0334,
+    "luma_mean": 47.24,
+    "luma_stddev": 44.32,
+    "top_colour_share": 0.0322,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 47.69,
-    "luma_stddev": 44.5,
-    "top_colour_share": 0.0324,
+    "luma_mean": 47.93,
+    "luma_stddev": 44.52,
+    "top_colour_share": 0.0307,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 48.29,
-    "luma_stddev": 44.69,
-    "top_colour_share": 0.0332,
+    "luma_mean": 48.36,
+    "luma_stddev": 44.54,
+    "top_colour_share": 0.0289,
     "size": [
      1920,
      1080
@@ -1663,12 +1677,12 @@
     1920,
     1080
    ],
-   "ready_ms": 328.4,
-   "wall_ready_ms": 416,
-   "rss_hwm_mib": 341.8,
+   "ready_ms": 296.6,
+   "wall_ready_ms": 485,
+   "rss_hwm_mib": 344.6,
    "vram_mib": 329,
-   "gpu_ms_p50": 0.989184021949768,
-   "gpu_ms_p95": 1.0270719528198242,
+   "gpu_ms_p50": 1.879040002822876,
+   "gpu_ms_p95": 2.613248109817505,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1677,11 +1691,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 95.438,
-   "changed_pct_1_to_2_3": 91.637,
+   "changed_pct": 95.546,
+   "changed_pct_1_to_2_3": 92.494,
    "capture_1s": {
-    "luma_mean": 107.56,
-    "luma_stddev": 82.92,
+    "luma_mean": 107.54,
+    "luma_stddev": 82.91,
     "top_colour_share": 0.0589,
     "size": [
      1920,
@@ -1689,8 +1703,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 107.57,
-    "luma_stddev": 82.95,
+    "luma_mean": 107.61,
+    "luma_stddev": 82.96,
     "top_colour_share": 0.059,
     "size": [
      1920,
@@ -1700,7 +1714,7 @@
    "capture_4s": {
     "luma_mean": 108.37,
     "luma_stddev": 83.19,
-    "top_colour_share": 0.0598,
+    "top_colour_share": 0.0597,
     "size": [
      1920,
      1080
@@ -1727,12 +1741,12 @@
     1920,
     1145
    ],
-   "ready_ms": 558.5,
-   "wall_ready_ms": 788,
-   "rss_hwm_mib": 451.6,
+   "ready_ms": 564.0,
+   "wall_ready_ms": 715,
+   "rss_hwm_mib": 453.8,
    "vram_mib": 508,
-   "gpu_ms_p50": 0.7342079877853394,
-   "gpu_ms_p95": 0.792576014995575,
+   "gpu_ms_p50": 1.7305599451065063,
+   "gpu_ms_p95": 2.442239999771118,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1741,11 +1755,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 58.424,
-   "changed_pct_1_to_2_3": 55.179,
+   "changed_pct": 69.642,
+   "changed_pct_1_to_2_3": 55.253,
    "capture_1s": {
     "luma_mean": 124.19,
-    "luma_stddev": 69.33,
+    "luma_stddev": 69.32,
     "top_colour_share": 0.0021,
     "size": [
      1920,
@@ -1753,17 +1767,17 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 124.42,
-    "luma_stddev": 69.35,
-    "top_colour_share": 0.0021,
+    "luma_mean": 124.44,
+    "luma_stddev": 69.32,
+    "top_colour_share": 0.0022,
     "size": [
      1920,
      1145
     ]
    },
    "capture_4s": {
-    "luma_mean": 124.85,
-    "luma_stddev": 69.49,
+    "luma_mean": 125.52,
+    "luma_stddev": 69.21,
     "top_colour_share": 0.0022,
     "size": [
      1920,
@@ -1791,12 +1805,12 @@
     1919,
     1079
    ],
-   "ready_ms": 220.7,
-   "wall_ready_ms": 322,
-   "rss_hwm_mib": 248.4,
+   "ready_ms": 214.3,
+   "wall_ready_ms": 354,
+   "rss_hwm_mib": 249.4,
    "vram_mib": 100,
-   "gpu_ms_p50": 0.20582400262355804,
-   "gpu_ms_p95": 0.23449599742889404,
+   "gpu_ms_p50": 0.2099200040102005,
+   "gpu_ms_p95": 0.22118400037288663,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1805,20 +1819,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.729,
-   "changed_pct_1_to_2_3": 99.734,
+   "changed_pct": 99.753,
+   "changed_pct_1_to_2_3": 99.748,
    "capture_1s": {
     "luma_mean": 47.29,
-    "luma_stddev": 42.49,
-    "top_colour_share": 0.0019,
+    "luma_stddev": 42.51,
+    "top_colour_share": 0.0018,
     "size": [
      1919,
      1079
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 47.26,
-    "luma_stddev": 42.46,
+    "luma_mean": 47.3,
+    "luma_stddev": 42.44,
     "top_colour_share": 0.0022,
     "size": [
      1919,
@@ -1826,9 +1840,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 47.35,
-    "luma_stddev": 42.53,
-    "top_colour_share": 0.0022,
+    "luma_mean": 47.25,
+    "luma_stddev": 42.48,
+    "top_colour_share": 0.0018,
     "size": [
      1919,
      1079
@@ -1855,12 +1869,12 @@
     1920,
     1080
    ],
-   "ready_ms": 838.6,
-   "wall_ready_ms": 975,
-   "rss_hwm_mib": 421.3,
+   "ready_ms": 741.0,
+   "wall_ready_ms": 951,
+   "rss_hwm_mib": 427.7,
    "vram_mib": 381,
-   "gpu_ms_p50": 1.7868800163269043,
-   "gpu_ms_p95": 2.283519983291626,
+   "gpu_ms_p50": 1.56876802444458,
+   "gpu_ms_p95": 5.426176071166992,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1869,30 +1883,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 98.936,
-   "changed_pct_1_to_2_3": 97.609,
+   "changed_pct": 98.424,
+   "changed_pct_1_to_2_3": 97.744,
    "capture_1s": {
-    "luma_mean": 143.15,
-    "luma_stddev": 57.5,
-    "top_colour_share": 0.0157,
+    "luma_mean": 144.35,
+    "luma_stddev": 58.9,
+    "top_colour_share": 0.0202,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 152.05,
-    "luma_stddev": 60.06,
-    "top_colour_share": 0.0367,
+    "luma_mean": 161.03,
+    "luma_stddev": 62.42,
+    "top_colour_share": 0.0887,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 173.95,
-    "luma_stddev": 65.22,
-    "top_colour_share": 0.114,
+    "luma_mean": 179.29,
+    "luma_stddev": 65.07,
+    "top_colour_share": 0.1328,
     "size": [
      1920,
      1080
@@ -1919,12 +1933,12 @@
     1920,
     1080
    ],
-   "ready_ms": 721.6,
-   "wall_ready_ms": 855,
-   "rss_hwm_mib": 475.1,
+   "ready_ms": 730.2,
+   "wall_ready_ms": 939,
+   "rss_hwm_mib": 494.3,
    "vram_mib": 495,
-   "gpu_ms_p50": 1.657855987548828,
-   "gpu_ms_p95": 3.5287039279937744,
+   "gpu_ms_p50": 1.798143982887268,
+   "gpu_ms_p95": 6.514688014984131,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1933,20 +1947,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 59.535,
-   "changed_pct_1_to_2_3": 50.197,
+   "changed_pct": 60.911,
+   "changed_pct_1_to_2_3": 50.365,
    "capture_1s": {
-    "luma_mean": 77.83,
-    "luma_stddev": 58.5,
-    "top_colour_share": 0.0034,
+    "luma_mean": 78.16,
+    "luma_stddev": 58.69,
+    "top_colour_share": 0.0033,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 78.81,
-    "luma_stddev": 59.03,
+    "luma_mean": 78.89,
+    "luma_stddev": 59.2,
     "top_colour_share": 0.0034,
     "size": [
      1920,
@@ -1954,8 +1968,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 77.7,
-    "luma_stddev": 58.3,
+    "luma_mean": 77.74,
+    "luma_stddev": 58.45,
     "top_colour_share": 0.0035,
     "size": [
      1920,
@@ -1983,12 +1997,12 @@
     1600,
     900
    ],
-   "ready_ms": 359.1,
-   "wall_ready_ms": 508,
-   "rss_hwm_mib": 276.7,
+   "ready_ms": 273.7,
+   "wall_ready_ms": 489,
+   "rss_hwm_mib": 277.1,
    "vram_mib": 99,
-   "gpu_ms_p50": 0.16076800227165222,
-   "gpu_ms_p95": 0.16281600296497345,
+   "gpu_ms_p50": 0.1515520066022873,
+   "gpu_ms_p95": 0.15667200088500977,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -1997,11 +2011,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 15.43,
-   "changed_pct_1_to_2_3": 15.035,
+   "changed_pct": 16.762,
+   "changed_pct_1_to_2_3": 15.743,
    "capture_1s": {
-    "luma_mean": 51.39,
-    "luma_stddev": 45.56,
+    "luma_mean": 51.42,
+    "luma_stddev": 45.59,
     "top_colour_share": 0.0112,
     "size": [
      1600,
@@ -2009,8 +2023,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 51.98,
-    "luma_stddev": 46.82,
+    "luma_mean": 51.95,
+    "luma_stddev": 47.05,
     "top_colour_share": 0.0112,
     "size": [
      1600,
@@ -2018,9 +2032,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 51.82,
-    "luma_stddev": 46.59,
-    "top_colour_share": 0.0111,
+    "luma_mean": 52.14,
+    "luma_stddev": 47.4,
+    "top_colour_share": 0.0112,
     "size": [
      1600,
      900
@@ -2047,12 +2061,12 @@
     1920,
     1080
    ],
-   "ready_ms": 424.6,
-   "wall_ready_ms": 561,
-   "rss_hwm_mib": 342.2,
+   "ready_ms": 261.4,
+   "wall_ready_ms": 478,
+   "rss_hwm_mib": 351.0,
    "vram_mib": 249,
-   "gpu_ms_p50": 0.5570560097694397,
-   "gpu_ms_p95": 0.5847039818763733,
+   "gpu_ms_p50": 0.5457919836044312,
+   "gpu_ms_p95": 0.567296028137207,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2061,12 +2075,12 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 15.856,
-   "changed_pct_1_to_2_3": 16.009,
+   "changed_pct": 15.618,
+   "changed_pct_1_to_2_3": 16.023,
    "capture_1s": {
-    "luma_mean": 136.53,
-    "luma_stddev": 58.73,
-    "top_colour_share": 0.0331,
+    "luma_mean": 136.52,
+    "luma_stddev": 58.72,
+    "top_colour_share": 0.033,
     "size": [
      1920,
      1080
@@ -2111,12 +2125,12 @@
     1920,
     1548
    ],
-   "ready_ms": 314.3,
-   "wall_ready_ms": 431,
-   "rss_hwm_mib": 337.5,
-   "vram_mib": 483,
-   "gpu_ms_p50": 1.5575040578842163,
-   "gpu_ms_p95": 1.9159040451049805,
+   "ready_ms": 320.8,
+   "wall_ready_ms": 504,
+   "rss_hwm_mib": 328.1,
+   "vram_mib": 420,
+   "gpu_ms_p50": 0.41471999883651733,
+   "gpu_ms_p95": 0.4311040043830872,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2125,20 +2139,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 16.332,
-   "changed_pct_1_to_2_3": 12.187,
+   "changed_pct": 7.316,
+   "changed_pct_1_to_2_3": 4.802,
    "capture_1s": {
-    "luma_mean": 232.85,
-    "luma_stddev": 38.65,
-    "top_colour_share": 0.3263,
+    "luma_mean": 230.47,
+    "luma_stddev": 42.57,
+    "top_colour_share": 0.3273,
     "size": [
      1920,
      1548
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 232.97,
-    "luma_stddev": 38.66,
+    "luma_mean": 230.53,
+    "luma_stddev": 42.58,
     "top_colour_share": 0.3146,
     "size": [
      1920,
@@ -2146,9 +2160,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 233.06,
-    "luma_stddev": 38.63,
-    "top_colour_share": 0.2957,
+    "luma_mean": 230.68,
+    "luma_stddev": 42.57,
+    "top_colour_share": 0.3065,
     "size": [
      1920,
      1548
@@ -2175,12 +2189,12 @@
     3840,
     1080
    ],
-   "ready_ms": 249.6,
-   "wall_ready_ms": 428,
-   "rss_hwm_mib": 296.8,
+   "ready_ms": 218.6,
+   "wall_ready_ms": 342,
+   "rss_hwm_mib": 295.9,
    "vram_mib": 210,
-   "gpu_ms_p50": 0.17715199291706085,
-   "gpu_ms_p95": 0.1812479943037033,
+   "gpu_ms_p50": 0.17510400712490082,
+   "gpu_ms_p95": 0.17715199291706085,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2191,8 +2205,8 @@
    "log_tail": [
     "[info] gfx: context priority requested low, granted low",
     "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "[info] lwe: loaded + built /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117 in 165 ms: native 3840x1080, audio streams true, audio input false",
-    "[mp3float @ 0x5562bf2de940] Could not update timestamps for skipped samples."
+    "[info] lwe: loaded + built /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117 in 136 ms: native 3840x1080, audio streams true, audio input false",
+    "[mp3float @ 0x61a18b60e3c0] Could not update timestamps for skipped samples."
    ],
    "capture_errors": [],
    "changed_pct": 0.0,
@@ -2246,12 +2260,12 @@
     2164,
     1080
    ],
-   "ready_ms": 804.5,
-   "wall_ready_ms": 1023,
-   "rss_hwm_mib": 439.1,
-   "vram_mib": 403,
-   "gpu_ms_p50": 0.9103360176086426,
-   "gpu_ms_p95": 0.933888018131256,
+   "ready_ms": 740.2,
+   "wall_ready_ms": 900,
+   "rss_hwm_mib": 436.9,
+   "vram_mib": 425,
+   "gpu_ms_p50": 1.810431957244873,
+   "gpu_ms_p95": 2.1073920726776123,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2260,30 +2274,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 24.387,
-   "changed_pct_1_to_2_3": 23.826,
+   "changed_pct": 61.746,
+   "changed_pct_1_to_2_3": 57.837,
    "capture_1s": {
-    "luma_mean": 25.97,
-    "luma_stddev": 38.71,
-    "top_colour_share": 0.0419,
+    "luma_mean": 79.28,
+    "luma_stddev": 83.32,
+    "top_colour_share": 0.02,
     "size": [
      2164,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 26.07,
-    "luma_stddev": 38.78,
-    "top_colour_share": 0.0418,
+    "luma_mean": 79.51,
+    "luma_stddev": 83.37,
+    "top_colour_share": 0.0199,
     "size": [
      2164,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 26.17,
-    "luma_stddev": 38.9,
-    "top_colour_share": 0.0418,
+    "luma_mean": 79.06,
+    "luma_stddev": 83.19,
+    "top_colour_share": 0.0203,
     "size": [
      2164,
      1080
@@ -2310,12 +2324,12 @@
     1920,
     1080
    ],
-   "ready_ms": 313.6,
-   "wall_ready_ms": 435,
-   "rss_hwm_mib": 304.1,
+   "ready_ms": 379.4,
+   "wall_ready_ms": 606,
+   "rss_hwm_mib": 299.0,
    "vram_mib": 257,
-   "gpu_ms_p50": 0.4669440090656281,
-   "gpu_ms_p95": 0.4935680031776428,
+   "gpu_ms_p50": 0.45260798931121826,
+   "gpu_ms_p95": 0.4761599898338318,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2324,12 +2338,12 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 20.269,
-   "changed_pct_1_to_2_3": 19.722,
+   "changed_pct": 20.811,
+   "changed_pct_1_to_2_3": 20.604,
    "capture_1s": {
     "luma_mean": 168.8,
     "luma_stddev": 78.86,
-    "top_colour_share": 0.1142,
+    "top_colour_share": 0.1143,
     "size": [
      1920,
      1080
@@ -2337,7 +2351,7 @@
    },
    "capture_2.3s": {
     "luma_mean": 168.76,
-    "luma_stddev": 78.85,
+    "luma_stddev": 78.87,
     "top_colour_share": 0.1141,
     "size": [
      1920,
@@ -2346,8 +2360,8 @@
    },
    "capture_4s": {
     "luma_mean": 168.79,
-    "luma_stddev": 78.88,
-    "top_colour_share": 0.1139,
+    "luma_stddev": 78.86,
+    "top_colour_share": 0.114,
     "size": [
      1920,
      1080
@@ -2374,13 +2388,13 @@
     1920,
     1080
    ],
-   "ready_ms": 7388.8,
-   "wall_ready_ms": 7577,
-   "rss_hwm_mib": 1830.2,
+   "ready_ms": 6684.7,
+   "wall_ready_ms": 6871,
+   "rss_hwm_mib": 1826.0,
    "vram_mib": 1606,
-   "gpu_ms_p50": 0.2662400007247925,
-   "gpu_ms_p95": 0.3328000009059906,
-   "fps_actual": 31,
+   "gpu_ms_p50": 0.21094399690628052,
+   "gpu_ms_p95": 0.27750399708747864,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -2388,30 +2402,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 75.883,
-   "changed_pct_1_to_2_3": 94.423,
+   "changed_pct": 75.433,
+   "changed_pct_1_to_2_3": 94.39,
    "capture_1s": {
-    "luma_mean": 183.56,
-    "luma_stddev": 68.97,
-    "top_colour_share": 0.2474,
+    "luma_mean": 184.65,
+    "luma_stddev": 68.87,
+    "top_colour_share": 0.2505,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 164.33,
-    "luma_stddev": 68.76,
-    "top_colour_share": 0.0574,
+    "luma_mean": 164.32,
+    "luma_stddev": 68.86,
+    "top_colour_share": 0.0585,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 200.56,
-    "luma_stddev": 63.85,
-    "top_colour_share": 0.321,
+    "luma_mean": 198.26,
+    "luma_stddev": 64.62,
+    "top_colour_share": 0.3298,
     "size": [
      1920,
      1080
@@ -2438,12 +2452,12 @@
     1920,
     1080
    ],
-   "ready_ms": 975.7,
-   "wall_ready_ms": 1060,
-   "rss_hwm_mib": 632.4,
+   "ready_ms": 926.3,
+   "wall_ready_ms": 1047,
+   "rss_hwm_mib": 632.7,
    "vram_mib": 418,
-   "gpu_ms_p50": 2.615295886993408,
-   "gpu_ms_p95": 6.692863941192627,
+   "gpu_ms_p50": 1.9691519737243652,
+   "gpu_ms_p95": 5.391359806060791,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2452,11 +2466,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.989,
-   "changed_pct_1_to_2_3": 99.963,
+   "changed_pct": 99.977,
+   "changed_pct_1_to_2_3": 99.968,
    "capture_1s": {
-    "luma_mean": 87.47,
-    "luma_stddev": 38.08,
+    "luma_mean": 87.61,
+    "luma_stddev": 38.19,
     "top_colour_share": 0.0004,
     "size": [
      1920,
@@ -2464,18 +2478,18 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 85.5,
-    "luma_stddev": 36.52,
-    "top_colour_share": 0.0005,
+    "luma_mean": 86.45,
+    "luma_stddev": 37.48,
+    "top_colour_share": 0.0006,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 82.63,
-    "luma_stddev": 34.67,
-    "top_colour_share": 0.0009,
+    "luma_mean": 83.76,
+    "luma_stddev": 35.81,
+    "top_colour_share": 0.0007,
     "size": [
      1920,
      1080
@@ -2502,12 +2516,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1795.8,
-   "wall_ready_ms": 1965,
-   "rss_hwm_mib": 2116.3,
-   "vram_mib": 647,
-   "gpu_ms_p50": 2.5774080753326416,
-   "gpu_ms_p95": 5.928959846496582,
+   "ready_ms": 1707.3,
+   "wall_ready_ms": 1952,
+   "rss_hwm_mib": 2113.6,
+   "vram_mib": 639,
+   "gpu_ms_p50": 2.974720001220703,
+   "gpu_ms_p95": 3.9833600521087646,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2516,30 +2530,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 97.647,
-   "changed_pct_1_to_2_3": 97.79,
+   "changed_pct": 97.886,
+   "changed_pct_1_to_2_3": 94.703,
    "capture_1s": {
-    "luma_mean": 141.5,
-    "luma_stddev": 45.63,
-    "top_colour_share": 0.006,
+    "luma_mean": 139.44,
+    "luma_stddev": 44.24,
+    "top_colour_share": 0.0066,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 138.36,
-    "luma_stddev": 45.27,
-    "top_colour_share": 0.0059,
+    "luma_mean": 136.32,
+    "luma_stddev": 47.08,
+    "top_colour_share": 0.0063,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 134.56,
-    "luma_stddev": 46.25,
-    "top_colour_share": 0.0055,
+    "luma_mean": 140.97,
+    "luma_stddev": 45.45,
+    "top_colour_share": 0.0048,
     "size": [
      1920,
      1080
@@ -2566,13 +2580,13 @@
     1920,
     1080
    ],
-   "ready_ms": 502.2,
-   "wall_ready_ms": 675,
-   "rss_hwm_mib": 306.9,
+   "ready_ms": 362.5,
+   "wall_ready_ms": 478,
+   "rss_hwm_mib": 311.1,
    "vram_mib": 152,
-   "gpu_ms_p50": 0.4618239998817444,
-   "gpu_ms_p95": 0.4925439953804016,
-   "fps_actual": 31,
+   "gpu_ms_p50": 0.449535995721817,
+   "gpu_ms_p95": 0.4669440090656281,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -2580,8 +2594,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 58.884,
-   "changed_pct_1_to_2_3": 45.667,
+   "changed_pct": 58.757,
+   "changed_pct_1_to_2_3": 47.84,
    "capture_1s": {
     "luma_mean": 182.13,
     "luma_stddev": 58.47,
@@ -2593,8 +2607,8 @@
    },
    "capture_2.3s": {
     "luma_mean": 182.18,
-    "luma_stddev": 58.44,
-    "top_colour_share": 0.0206,
+    "luma_stddev": 58.43,
+    "top_colour_share": 0.0205,
     "size": [
      1920,
      1080
@@ -2630,12 +2644,12 @@
     1920,
     1080
    ],
-   "ready_ms": 5297.2,
-   "wall_ready_ms": 5517,
-   "rss_hwm_mib": 2471.4,
+   "ready_ms": 5268.8,
+   "wall_ready_ms": 5406,
+   "rss_hwm_mib": 2479.5,
    "vram_mib": 3583,
-   "gpu_ms_p50": 15.563776016235352,
-   "gpu_ms_p95": 18.134016036987305,
+   "gpu_ms_p50": 13.683712005615234,
+   "gpu_ms_p95": 15.138815879821776,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2644,30 +2658,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 53.34,
-   "changed_pct_1_to_2_3": 52.027,
+   "changed_pct": 53.212,
+   "changed_pct_1_to_2_3": 51.943,
    "capture_1s": {
-    "luma_mean": 190.41,
-    "luma_stddev": 80.58,
-    "top_colour_share": 0.3235,
+    "luma_mean": 190.3,
+    "luma_stddev": 80.72,
+    "top_colour_share": 0.3237,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 190.65,
-    "luma_stddev": 80.86,
-    "top_colour_share": 0.323,
+    "luma_mean": 190.64,
+    "luma_stddev": 80.89,
+    "top_colour_share": 0.3231,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 190.41,
-    "luma_stddev": 80.71,
-    "top_colour_share": 0.3225,
+    "luma_mean": 190.37,
+    "luma_stddev": 80.75,
+    "top_colour_share": 0.3224,
     "size": [
      1920,
      1080
@@ -2694,12 +2708,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1112.3,
-   "wall_ready_ms": 1222,
-   "rss_hwm_mib": 509.2,
-   "vram_mib": 723,
-   "gpu_ms_p50": 2.751487970352173,
-   "gpu_ms_p95": 3.1877119541168213,
+   "ready_ms": 1093.1,
+   "wall_ready_ms": 1200,
+   "rss_hwm_mib": 501.2,
+   "vram_mib": 692,
+   "gpu_ms_p50": 2.3808000087738037,
+   "gpu_ms_p95": 2.933759927749634,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2708,30 +2722,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 91.862,
-   "changed_pct_1_to_2_3": 88.674,
+   "changed_pct": 86.501,
+   "changed_pct_1_to_2_3": 81.799,
    "capture_1s": {
-    "luma_mean": 105.32,
-    "luma_stddev": 57.15,
-    "top_colour_share": 0.0045,
+    "luma_mean": 106.64,
+    "luma_stddev": 58.07,
+    "top_colour_share": 0.0106,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 105.37,
-    "luma_stddev": 57.5,
-    "top_colour_share": 0.0048,
+    "luma_mean": 106.6,
+    "luma_stddev": 58.12,
+    "top_colour_share": 0.0106,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 105.86,
-    "luma_stddev": 57.29,
-    "top_colour_share": 0.0049,
+    "luma_mean": 106.59,
+    "luma_stddev": 58.08,
+    "top_colour_share": 0.0107,
     "size": [
      1920,
      1080
@@ -2758,12 +2772,12 @@
     1920,
     1080
    ],
-   "ready_ms": 438.1,
-   "wall_ready_ms": 638,
-   "rss_hwm_mib": 356.6,
+   "ready_ms": 365.9,
+   "wall_ready_ms": 563,
+   "rss_hwm_mib": 360.9,
    "vram_mib": 206,
-   "gpu_ms_p50": 0.4136959910392761,
-   "gpu_ms_p95": 0.43827199935913086,
+   "gpu_ms_p50": 0.4270080029964447,
+   "gpu_ms_p95": 0.42905598878860474,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2772,8 +2786,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 35.83,
-   "changed_pct_1_to_2_3": 34.064,
+   "changed_pct": 35.703,
+   "changed_pct_1_to_2_3": 34.305,
    "capture_1s": {
     "luma_mean": 152.34,
     "luma_stddev": 67.03,
@@ -2793,7 +2807,7 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 152.49,
+    "luma_mean": 152.5,
     "luma_stddev": 66.99,
     "top_colour_share": 0.0111,
     "size": [
@@ -2822,12 +2836,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1139.5,
-   "wall_ready_ms": 1319,
-   "rss_hwm_mib": 597.8,
+   "ready_ms": 1122.2,
+   "wall_ready_ms": 1334,
+   "rss_hwm_mib": 605.2,
    "vram_mib": 650,
-   "gpu_ms_p50": 1.4909440279006958,
-   "gpu_ms_p95": 1.8391040563583376,
+   "gpu_ms_p50": 1.4807039499282837,
+   "gpu_ms_p95": 1.7950719594955444,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2836,11 +2850,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.74,
-   "changed_pct_1_to_2_3": 98.393,
+   "changed_pct": 99.046,
+   "changed_pct_1_to_2_3": 98.11,
    "capture_1s": {
-    "luma_mean": 69.19,
-    "luma_stddev": 24.69,
+    "luma_mean": 70.86,
+    "luma_stddev": 29.1,
     "top_colour_share": 0.0119,
     "size": [
      1920,
@@ -2848,8 +2862,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 70.82,
-    "luma_stddev": 26.16,
+    "luma_mean": 72.38,
+    "luma_stddev": 30.37,
     "top_colour_share": 0.0119,
     "size": [
      1920,
@@ -2857,8 +2871,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 74.47,
-    "luma_stddev": 28.55,
+    "luma_mean": 75.98,
+    "luma_stddev": 32.2,
     "top_colour_share": 0.0119,
     "size": [
      1920,
@@ -2886,12 +2900,12 @@
     1920,
     1080
    ],
-   "ready_ms": 350.9,
-   "wall_ready_ms": 585,
-   "rss_hwm_mib": 307.9,
+   "ready_ms": 360.2,
+   "wall_ready_ms": 559,
+   "rss_hwm_mib": 307.0,
    "vram_mib": 236,
-   "gpu_ms_p50": 1.1847679615020752,
-   "gpu_ms_p95": 1.5626239776611328,
+   "gpu_ms_p50": 1.1735039949417114,
+   "gpu_ms_p95": 1.4725120067596436,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2900,8 +2914,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 23.313,
-   "changed_pct_1_to_2_3": 21.076,
+   "changed_pct": 23.27,
+   "changed_pct_1_to_2_3": 21.232,
    "capture_1s": {
     "luma_mean": 98.6,
     "luma_stddev": 69.2,
@@ -2950,12 +2964,12 @@
     1920,
     1089
    ],
-   "ready_ms": 718.1,
-   "wall_ready_ms": 868,
-   "rss_hwm_mib": 458.4,
-   "vram_mib": 860,
-   "gpu_ms_p50": 1.5083520412445068,
-   "gpu_ms_p95": 5.0872321128845215,
+   "ready_ms": 835.0,
+   "wall_ready_ms": 1048,
+   "rss_hwm_mib": 449.4,
+   "vram_mib": 863,
+   "gpu_ms_p50": 1.3424639701843262,
+   "gpu_ms_p95": 3.2737278938293457,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -2964,30 +2978,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 13.418,
-   "changed_pct_1_to_2_3": 11.509,
+   "changed_pct": 13.415,
+   "changed_pct_1_to_2_3": 11.815,
    "capture_1s": {
-    "luma_mean": 204.95,
-    "luma_stddev": 44.39,
-    "top_colour_share": 0.0398,
+    "luma_mean": 209.97,
+    "luma_stddev": 45.4,
+    "top_colour_share": 0.0478,
     "size": [
      1920,
      1089
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 204.93,
-    "luma_stddev": 44.42,
-    "top_colour_share": 0.0398,
+    "luma_mean": 209.95,
+    "luma_stddev": 45.42,
+    "top_colour_share": 0.0478,
     "size": [
      1920,
      1089
     ]
    },
    "capture_4s": {
-    "luma_mean": 204.93,
-    "luma_stddev": 44.43,
-    "top_colour_share": 0.0398,
+    "luma_mean": 209.96,
+    "luma_stddev": 45.43,
+    "top_colour_share": 0.0479,
     "size": [
      1920,
      1089
@@ -3014,11 +3028,11 @@
     1920,
     1080
    ],
-   "ready_ms": 475.1,
-   "wall_ready_ms": 611,
-   "rss_hwm_mib": 343.7,
+   "ready_ms": 346.0,
+   "wall_ready_ms": 585,
+   "rss_hwm_mib": 340.8,
    "vram_mib": 255,
-   "gpu_ms_p50": 0.37068799138069153,
+   "gpu_ms_p50": 0.36556801199913025,
    "gpu_ms_p95": 0.3758080005645752,
    "fps_actual": 30,
    "fps_target": 30.0,
@@ -3028,30 +3042,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 41.461,
-   "changed_pct_1_to_2_3": 39.485,
+   "changed_pct": 42.036,
+   "changed_pct_1_to_2_3": 39.682,
    "capture_1s": {
-    "luma_mean": 107.13,
+    "luma_mean": 107.14,
     "luma_stddev": 66.14,
-    "top_colour_share": 0.0283,
+    "top_colour_share": 0.0282,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 107.33,
-    "luma_stddev": 65.97,
-    "top_colour_share": 0.0271,
+    "luma_mean": 107.31,
+    "luma_stddev": 65.94,
+    "top_colour_share": 0.027,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 107.37,
-    "luma_stddev": 65.78,
-    "top_colour_share": 0.0256,
+    "luma_mean": 107.33,
+    "luma_stddev": 65.8,
+    "top_colour_share": 0.0258,
     "size": [
      1920,
      1080
@@ -3078,13 +3092,13 @@
     1920,
     1080
    ],
-   "ready_ms": 842.8,
-   "wall_ready_ms": 1036,
-   "rss_hwm_mib": 589.7,
+   "ready_ms": 523.2,
+   "wall_ready_ms": 715,
+   "rss_hwm_mib": 587.9,
    "vram_mib": 477,
-   "gpu_ms_p50": 2.8641281127929688,
-   "gpu_ms_p95": 7.791615962982178,
-   "fps_actual": 30,
+   "gpu_ms_p50": 3.4846720695495605,
+   "gpu_ms_p95": 6.1675519943237305,
+   "fps_actual": 29,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": false,
@@ -3092,10 +3106,10 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 82.622,
-   "changed_pct_1_to_2_3": 76.994,
+   "changed_pct": 82.623,
+   "changed_pct_1_to_2_3": 76.995,
    "capture_1s": {
-    "luma_mean": 190.91,
+    "luma_mean": 190.9,
     "luma_stddev": 60.13,
     "top_colour_share": 0.0859,
     "size": [
@@ -3104,8 +3118,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 188.33,
-    "luma_stddev": 61.49,
+    "luma_mean": 188.32,
+    "luma_stddev": 61.5,
     "top_colour_share": 0.0849,
     "size": [
      1920,
@@ -3142,12 +3156,12 @@
     1920,
     1080
    ],
-   "ready_ms": 430.0,
-   "wall_ready_ms": 517,
-   "rss_hwm_mib": 366.8,
+   "ready_ms": 405.7,
+   "wall_ready_ms": 485,
+   "rss_hwm_mib": 363.7,
    "vram_mib": 291,
-   "gpu_ms_p50": 1.56876802444458,
-   "gpu_ms_p95": 2.184191942214966,
+   "gpu_ms_p50": 1.1263999938964844,
+   "gpu_ms_p95": 1.415168046951294,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3156,10 +3170,10 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 22.776,
-   "changed_pct_1_to_2_3": 24.459,
+   "changed_pct": 23.016,
+   "changed_pct_1_to_2_3": 24.501,
    "capture_1s": {
-    "luma_mean": 129.91,
+    "luma_mean": 129.92,
     "luma_stddev": 64.86,
     "top_colour_share": 0.0039,
     "size": [
@@ -3168,8 +3182,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 129.96,
-    "luma_stddev": 64.87,
+    "luma_mean": 129.95,
+    "luma_stddev": 64.88,
     "top_colour_share": 0.0039,
     "size": [
      1920,
@@ -3177,7 +3191,7 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 129.86,
+    "luma_mean": 129.87,
     "luma_stddev": 64.85,
     "top_colour_share": 0.0039,
     "size": [
@@ -3206,12 +3220,12 @@
     1920,
     1080
    ],
-   "ready_ms": 2906.4,
-   "wall_ready_ms": 3021,
-   "rss_hwm_mib": 756.4,
-   "vram_mib": 1047,
-   "gpu_ms_p50": 3.082240104675293,
-   "gpu_ms_p95": 6.366208076477051,
+   "ready_ms": 2600.2,
+   "wall_ready_ms": 2740,
+   "rss_hwm_mib": 749.2,
+   "vram_mib": 1016,
+   "gpu_ms_p50": 2.751487970352173,
+   "gpu_ms_p95": 6.087679862976074,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3220,30 +3234,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 33.623,
-   "changed_pct_1_to_2_3": 32.768,
+   "changed_pct": 20.261,
+   "changed_pct_1_to_2_3": 19.553,
    "capture_1s": {
-    "luma_mean": 34.76,
-    "luma_stddev": 18.26,
-    "top_colour_share": 0.0064,
+    "luma_mean": 35.78,
+    "luma_stddev": 19.23,
+    "top_colour_share": 0.0073,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 34.43,
-    "luma_stddev": 18.21,
-    "top_colour_share": 0.0064,
+    "luma_mean": 35.83,
+    "luma_stddev": 19.39,
+    "top_colour_share": 0.0073,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 34.04,
-    "luma_stddev": 18.07,
-    "top_colour_share": 0.0064,
+    "luma_mean": 35.87,
+    "luma_stddev": 19.42,
+    "top_colour_share": 0.0073,
     "size": [
      1920,
      1080
@@ -3270,12 +3284,12 @@
     2580,
     1080
    ],
-   "ready_ms": 1314.5,
-   "wall_ready_ms": 1468,
-   "rss_hwm_mib": 816.9,
+   "ready_ms": 1272.7,
+   "wall_ready_ms": 1456,
+   "rss_hwm_mib": 811.9,
    "vram_mib": 2019,
-   "gpu_ms_p50": 10.134528160095217,
-   "gpu_ms_p95": 10.984448432922363,
+   "gpu_ms_p50": 8.854528427124023,
+   "gpu_ms_p95": 9.591808319091797,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3284,11 +3298,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 47.795,
-   "changed_pct_1_to_2_3": 44.308,
+   "changed_pct": 47.801,
+   "changed_pct_1_to_2_3": 44.117,
    "capture_1s": {
-    "luma_mean": 30.87,
-    "luma_stddev": 35.26,
+    "luma_mean": 30.77,
+    "luma_stddev": 35.29,
     "top_colour_share": 0.2839,
     "size": [
      2580,
@@ -3296,8 +3310,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 30.75,
-    "luma_stddev": 35.1,
+    "luma_mean": 30.65,
+    "luma_stddev": 35.12,
     "top_colour_share": 0.2839,
     "size": [
      2580,
@@ -3305,8 +3319,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 30.67,
-    "luma_stddev": 34.95,
+    "luma_mean": 30.55,
+    "luma_stddev": 34.94,
     "top_colour_share": 0.2839,
     "size": [
      2580,
@@ -3334,12 +3348,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1298.3,
-   "wall_ready_ms": 1504,
-   "rss_hwm_mib": 978.7,
+   "ready_ms": 1162.4,
+   "wall_ready_ms": 1437,
+   "rss_hwm_mib": 975.3,
    "vram_mib": 998,
-   "gpu_ms_p50": 2.653183937072754,
-   "gpu_ms_p95": 5.017600059509277,
+   "gpu_ms_p50": 3.1539199352264404,
+   "gpu_ms_p95": 4.118527889251709,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3348,20 +3362,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 91.688,
-   "changed_pct_1_to_2_3": 87.695,
+   "changed_pct": 91.768,
+   "changed_pct_1_to_2_3": 88.221,
    "capture_1s": {
-    "luma_mean": 111.15,
-    "luma_stddev": 56.76,
-    "top_colour_share": 0.0048,
+    "luma_mean": 111.23,
+    "luma_stddev": 56.75,
+    "top_colour_share": 0.0046,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 111.46,
-    "luma_stddev": 56.35,
+    "luma_mean": 111.3,
+    "luma_stddev": 56.27,
     "top_colour_share": 0.0049,
     "size": [
      1920,
@@ -3398,12 +3412,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1141.6,
-   "wall_ready_ms": 1321,
-   "rss_hwm_mib": 659.3,
+   "ready_ms": 824.5,
+   "wall_ready_ms": 1008,
+   "rss_hwm_mib": 661.1,
    "vram_mib": 537,
-   "gpu_ms_p50": 2.1186559200286865,
-   "gpu_ms_p95": 6.7358717918396,
+   "gpu_ms_p50": 2.884608030319214,
+   "gpu_ms_p95": 4.146175861358643,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3412,10 +3426,10 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 27.232,
-   "changed_pct_1_to_2_3": 27.291,
+   "changed_pct": 27.241,
+   "changed_pct_1_to_2_3": 27.266,
    "capture_1s": {
-    "luma_mean": 96.05,
+    "luma_mean": 96.04,
     "luma_stddev": 57.95,
     "top_colour_share": 0.0028,
     "size": [
@@ -3433,8 +3447,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 96.06,
-    "luma_stddev": 57.95,
+    "luma_mean": 96.05,
+    "luma_stddev": 57.94,
     "top_colour_share": 0.0028,
     "size": [
      1920,
@@ -3462,12 +3476,12 @@
     1920,
     1080
    ],
-   "ready_ms": 570.5,
-   "wall_ready_ms": 705,
-   "rss_hwm_mib": 486.1,
+   "ready_ms": 545.2,
+   "wall_ready_ms": 751,
+   "rss_hwm_mib": 484.8,
    "vram_mib": 833,
-   "gpu_ms_p50": 1.919999957084656,
-   "gpu_ms_p95": 2.2599680423736572,
+   "gpu_ms_p50": 1.5196160078048706,
+   "gpu_ms_p95": 1.8124799728393557,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3476,12 +3490,12 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 76.673,
-   "changed_pct_1_to_2_3": 76.114,
+   "changed_pct": 28.39,
+   "changed_pct_1_to_2_3": 76.507,
    "capture_1s": {
-    "luma_mean": 59.2,
-    "luma_stddev": 68.23,
-    "top_colour_share": 0.0132,
+    "luma_mean": 59.22,
+    "luma_stddev": 68.19,
+    "top_colour_share": 0.0127,
     "size": [
      1920,
      1080
@@ -3489,16 +3503,16 @@
    },
    "capture_2.3s": {
     "luma_mean": 59.2,
-    "luma_stddev": 68.12,
-    "top_colour_share": 0.0128,
+    "luma_stddev": 68.09,
+    "top_colour_share": 0.0127,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 59.22,
-    "luma_stddev": 68.06,
+    "luma_mean": 59.21,
+    "luma_stddev": 68.05,
     "top_colour_share": 0.0127,
     "size": [
      1920,
@@ -3526,12 +3540,12 @@
     1920,
     1080
    ],
-   "ready_ms": 314.0,
-   "wall_ready_ms": 437,
-   "rss_hwm_mib": 314.2,
+   "ready_ms": 317.9,
+   "wall_ready_ms": 518,
+   "rss_hwm_mib": 314.4,
    "vram_mib": 285,
-   "gpu_ms_p50": 0.9031680226325988,
-   "gpu_ms_p95": 0.907263994216919,
+   "gpu_ms_p50": 0.8908799886703491,
+   "gpu_ms_p95": 0.8980479836463928,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3540,11 +3554,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 61.106,
-   "changed_pct_1_to_2_3": 60.593,
+   "changed_pct": 61.471,
+   "changed_pct_1_to_2_3": 60.492,
    "capture_1s": {
-    "luma_mean": 91.07,
-    "luma_stddev": 55.93,
+    "luma_mean": 91.08,
+    "luma_stddev": 55.92,
     "top_colour_share": 0.0032,
     "size": [
      1920,
@@ -3553,7 +3567,7 @@
    },
    "capture_2.3s": {
     "luma_mean": 91.21,
-    "luma_stddev": 56.09,
+    "luma_stddev": 56.03,
     "top_colour_share": 0.0024,
     "size": [
      1920,
@@ -3561,9 +3575,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 90.99,
-    "luma_stddev": 55.85,
-    "top_colour_share": 0.0032,
+    "luma_mean": 90.94,
+    "luma_stddev": 55.86,
+    "top_colour_share": 0.003,
     "size": [
      1920,
      1080
@@ -3590,12 +3604,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1731.8,
-   "wall_ready_ms": 1929,
-   "rss_hwm_mib": 740.3,
-   "vram_mib": 1220,
-   "gpu_ms_p50": 1.9343359470367432,
-   "gpu_ms_p95": 4.873216152191162,
+   "ready_ms": 1730.4,
+   "wall_ready_ms": 1953,
+   "rss_hwm_mib": 732.1,
+   "vram_mib": 1193,
+   "gpu_ms_p50": 2.0848639011383057,
+   "gpu_ms_p95": 2.7545599937438965,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3604,30 +3618,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 12.997,
-   "changed_pct_1_to_2_3": 12.288,
+   "changed_pct": 24.904,
+   "changed_pct_1_to_2_3": 23.598,
    "capture_1s": {
-    "luma_mean": 202.0,
-    "luma_stddev": 78.51,
-    "top_colour_share": 0.6173,
+    "luma_mean": 150.91,
+    "luma_stddev": 66.56,
+    "top_colour_share": 0.0175,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 201.89,
-    "luma_stddev": 78.6,
-    "top_colour_share": 0.6174,
+    "luma_mean": 150.78,
+    "luma_stddev": 66.56,
+    "top_colour_share": 0.0175,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 202.03,
-    "luma_stddev": 78.51,
-    "top_colour_share": 0.6178,
+    "luma_mean": 150.83,
+    "luma_stddev": 66.51,
+    "top_colour_share": 0.0174,
     "size": [
      1920,
      1080
@@ -3654,12 +3668,12 @@
     1920,
     1080
    ],
-   "ready_ms": 692.4,
-   "wall_ready_ms": 828,
-   "rss_hwm_mib": 476.4,
+   "ready_ms": 659.9,
+   "wall_ready_ms": 811,
+   "rss_hwm_mib": 477.7,
    "vram_mib": 662,
-   "gpu_ms_p50": 3.9290881156921382,
-   "gpu_ms_p95": 4.7226881980896,
+   "gpu_ms_p50": 3.788800001144409,
+   "gpu_ms_p95": 4.571135997772217,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3668,11 +3682,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 96.04,
-   "changed_pct_1_to_2_3": 96.144,
+   "changed_pct": 96.053,
+   "changed_pct_1_to_2_3": 96.099,
    "capture_1s": {
-    "luma_mean": 68.83,
-    "luma_stddev": 42.57,
+    "luma_mean": 68.68,
+    "luma_stddev": 42.47,
     "top_colour_share": 0.0012,
     "size": [
      1920,
@@ -3680,8 +3694,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 69.27,
-    "luma_stddev": 42.27,
+    "luma_mean": 69.34,
+    "luma_stddev": 42.37,
     "top_colour_share": 0.0012,
     "size": [
      1920,
@@ -3689,8 +3703,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 69.56,
-    "luma_stddev": 42.41,
+    "luma_mean": 69.4,
+    "luma_stddev": 42.64,
     "top_colour_share": 0.0012,
     "size": [
      1920,
@@ -3718,12 +3732,12 @@
     1920,
     1080
    ],
-   "ready_ms": 535.1,
-   "wall_ready_ms": 619,
-   "rss_hwm_mib": 435.1,
+   "ready_ms": 468.7,
+   "wall_ready_ms": 665,
+   "rss_hwm_mib": 436.6,
    "vram_mib": 751,
-   "gpu_ms_p50": 4.055039882659912,
-   "gpu_ms_p95": 4.636672019958496,
+   "gpu_ms_p50": 3.3751039505004883,
+   "gpu_ms_p95": 3.9372799396514897,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3732,29 +3746,29 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 37.854,
-   "changed_pct_1_to_2_3": 29.385,
+   "changed_pct": 37.882,
+   "changed_pct_1_to_2_3": 32.263,
    "capture_1s": {
-    "luma_mean": 78.94,
-    "luma_stddev": 76.92,
-    "top_colour_share": 0.0083,
-    "size": [
-     1920,
-     1080
-    ]
-   },
-   "capture_2.3s": {
-    "luma_mean": 78.97,
-    "luma_stddev": 76.89,
+    "luma_mean": 78.92,
+    "luma_stddev": 76.91,
     "top_colour_share": 0.0082,
     "size": [
      1920,
      1080
     ]
    },
-   "capture_4s": {
+   "capture_2.3s": {
     "luma_mean": 78.99,
-    "luma_stddev": 77.02,
+    "luma_stddev": 76.9,
+    "top_colour_share": 0.0081,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 79.0,
+    "luma_stddev": 76.99,
     "top_colour_share": 0.0082,
     "size": [
      1920,
@@ -3782,12 +3796,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1426.7,
-   "wall_ready_ms": 1663,
-   "rss_hwm_mib": 744.9,
-   "vram_mib": 1316,
-   "gpu_ms_p50": 3.2378880977630615,
-   "gpu_ms_p95": 3.5942399501800537,
+   "ready_ms": 1509.5,
+   "wall_ready_ms": 1587,
+   "rss_hwm_mib": 740.5,
+   "vram_mib": 1320,
+   "gpu_ms_p50": 3.1201279163360596,
+   "gpu_ms_p95": 4.3079681396484375,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3796,30 +3810,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 70.668,
-   "changed_pct_1_to_2_3": 67.761,
+   "changed_pct": 33.598,
+   "changed_pct_1_to_2_3": 29.929,
    "capture_1s": {
-    "luma_mean": 147.18,
-    "luma_stddev": 64.54,
-    "top_colour_share": 0.1313,
+    "luma_mean": 191.93,
+    "luma_stddev": 72.45,
+    "top_colour_share": 0.4065,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 146.47,
-    "luma_stddev": 64.64,
-    "top_colour_share": 0.1313,
+    "luma_mean": 191.78,
+    "luma_stddev": 72.42,
+    "top_colour_share": 0.4045,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 146.03,
-    "luma_stddev": 64.32,
-    "top_colour_share": 0.1313,
+    "luma_mean": 191.37,
+    "luma_stddev": 72.39,
+    "top_colour_share": 0.4011,
     "size": [
      1920,
      1080
@@ -3837,45 +3851,59 @@
   },
   {
    "id": "3233141951",
-   "outcome": "broken",
-   "native": null,
-   "export": null,
-   "ready_ms": null,
-   "wall_ready_ms": null,
-   "rss_hwm_mib": null,
-   "vram_mib": null,
-   "gpu_ms_p50": null,
-   "gpu_ms_p95": null,
-   "fps_actual": 0,
-   "fps_target": 30.0,
-   "restarts": 3,
-   "has_audio": null,
-   "wants_audio_input": false,
-   "throttled": false,
-   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/3233141951-1793172102233.json)",
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 1 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 2 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 3 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string"
+   "outcome": "ready",
+   "native": [
+    4096,
+    2296
    ],
+   "export": [
+    1927,
+    1080
+   ],
+   "ready_ms": 1666.0,
+   "wall_ready_ms": 1855,
+   "rss_hwm_mib": 865.2,
+   "vram_mib": 1296,
+   "gpu_ms_p50": 5.692416191101074,
+   "gpu_ms_p95": 7.2775678634643555,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
    "capture_errors": [],
-   "class": "broken",
+   "changed_pct": 44.897,
+   "changed_pct_1_to_2_3": 35.567,
+   "capture_1s": {
+    "luma_mean": 95.46,
+    "luma_stddev": 68.05,
+    "top_colour_share": 0.0309,
+    "size": [
+     1927,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 96.07,
+    "luma_stddev": 68.06,
+    "top_colour_share": 0.0288,
+    "size": [
+     1927,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 96.1,
+    "luma_stddev": 67.92,
+    "top_colour_share": 0.0166,
+    "size": [
+     1927,
+     1080
+    ]
+   },
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": true,
@@ -3883,9 +3911,7 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
-   "note": "gdb: `nlohmann::json type_error 302 (type must be number, but is string)` thrown in `JsonExtensions::optional<int>` ← `ObjectParser::parseText` ← `WallpaperParser::parseObjects` ← `ProjectParser::parse` ← `wp_project_load_folder`; nothing catches it at the C API, so `terminate` → SIGABRT at every load: 4 crashes → broken (correct crash policy, but a load failure should not be a crash loop). Of the 45 corpus scenes with text objects exactly these two (3233141951, 3326873240) have a string `padding` (`\"32.00000 32.00000\"`); the 43 with a number get past the text parser. Reproduced with `--lwe-smoke`.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
+   "cause": "a shader LWE failed to compile/translate"
   },
   {
    "id": "3243449890",
@@ -3898,12 +3924,12 @@
     1920,
     1080
    ],
-   "ready_ms": 2151.8,
-   "wall_ready_ms": 2349,
-   "rss_hwm_mib": 1029.5,
-   "vram_mib": 1297,
-   "gpu_ms_p50": 2.6019840240478516,
-   "gpu_ms_p95": 5.593088150024414,
+   "ready_ms": 3044.0,
+   "wall_ready_ms": 3213,
+   "rss_hwm_mib": 1027.1,
+   "vram_mib": 1299,
+   "gpu_ms_p50": 1.3404159545898438,
+   "gpu_ms_p95": 3.4201600551605225,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -3912,30 +3938,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 34.517,
-   "changed_pct_1_to_2_3": 33.149,
+   "changed_pct": 34.481,
+   "changed_pct_1_to_2_3": 32.404,
    "capture_1s": {
-    "luma_mean": 92.89,
-    "luma_stddev": 86.46,
-    "top_colour_share": 0.0927,
+    "luma_mean": 95.16,
+    "luma_stddev": 90.13,
+    "top_colour_share": 0.1494,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 95.21,
-    "luma_stddev": 86.99,
-    "top_colour_share": 0.0928,
+    "luma_mean": 97.68,
+    "luma_stddev": 90.65,
+    "top_colour_share": 0.1494,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 96.26,
-    "luma_stddev": 87.19,
-    "top_colour_share": 0.0928,
+    "luma_mean": 98.99,
+    "luma_stddev": 90.41,
+    "top_colour_share": 0.15,
     "size": [
      1920,
      1080
@@ -3985,7 +4011,7 @@
     "has_scene_json": false
    },
    "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
-   "note": "LWE logs `Projection must have a width. Contents: null`: `general.orthogonalprojection` is null and the scene has a perspective `camera {eye, center, up}`. Same for 3477054430 and 3509243656.",
+   "note": "LWE logs `Projection must have a width. Contents: null`: `general.orthogonalprojection` is null and the scene has a perspective `camera {eye, center, up}`. Same for 3477054430 and 3509243656. Upstream `main` (checked 2026-10-28, `38a5d60`) has nothing for it either.",
    "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
   },
   {
@@ -3999,12 +4025,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1374.0,
-   "wall_ready_ms": 1482,
-   "rss_hwm_mib": 666.7,
+   "ready_ms": 1260.3,
+   "wall_ready_ms": 1471,
+   "rss_hwm_mib": 666.5,
    "vram_mib": 639,
-   "gpu_ms_p50": 0.6860799789428711,
-   "gpu_ms_p95": 0.711679995059967,
+   "gpu_ms_p50": 1.7346559762954712,
+   "gpu_ms_p95": 2.7351040840148926,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4013,30 +4039,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 17.364,
-   "changed_pct_1_to_2_3": 15.89,
+   "changed_pct": 19.496,
+   "changed_pct_1_to_2_3": 17.5,
    "capture_1s": {
-    "luma_mean": 112.14,
-    "luma_stddev": 74.62,
-    "top_colour_share": 0.0116,
+    "luma_mean": 112.06,
+    "luma_stddev": 74.58,
+    "top_colour_share": 0.0117,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 112.01,
-    "luma_stddev": 74.52,
-    "top_colour_share": 0.0114,
+    "luma_mean": 111.9,
+    "luma_stddev": 74.46,
+    "top_colour_share": 0.0112,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 112.19,
-    "luma_stddev": 74.68,
-    "top_colour_share": 0.0109,
+    "luma_mean": 112.13,
+    "luma_stddev": 74.62,
+    "top_colour_share": 0.0116,
     "size": [
      1920,
      1080
@@ -4063,12 +4089,12 @@
     1920,
     1080
    ],
-   "ready_ms": 323.3,
-   "wall_ready_ms": 410,
-   "rss_hwm_mib": 303.0,
+   "ready_ms": 335.0,
+   "wall_ready_ms": 551,
+   "rss_hwm_mib": 298.5,
    "vram_mib": 249,
-   "gpu_ms_p50": 0.2181120067834854,
-   "gpu_ms_p95": 0.22732800245285031,
+   "gpu_ms_p50": 0.21299199759960177,
+   "gpu_ms_p95": 0.5273600220680237,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4077,10 +4103,10 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.035,
+   "changed_pct": 0.006,
    "changed_pct_1_to_2_3": 0.003,
    "capture_1s": {
-    "luma_mean": 195.97,
+    "luma_mean": 195.98,
     "luma_stddev": 41.2,
     "top_colour_share": 0.0063,
     "size": [
@@ -4089,7 +4115,7 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 195.97,
+    "luma_mean": 195.98,
     "luma_stddev": 41.2,
     "top_colour_share": 0.0063,
     "size": [
@@ -4099,7 +4125,7 @@
    },
    "capture_4s": {
     "luma_mean": 195.98,
-    "luma_stddev": 41.19,
+    "luma_stddev": 41.2,
     "top_colour_share": 0.0063,
     "size": [
      1920,
@@ -4127,12 +4153,12 @@
     1920,
     1080
    ],
-   "ready_ms": 276.8,
-   "wall_ready_ms": 450,
-   "rss_hwm_mib": 269.3,
+   "ready_ms": 280.7,
+   "wall_ready_ms": 460,
+   "rss_hwm_mib": 266.3,
    "vram_mib": 141,
-   "gpu_ms_p50": 0.131071999669075,
-   "gpu_ms_p95": 0.16076800227165222,
+   "gpu_ms_p50": 0.12902399897575378,
+   "gpu_ms_p95": 1.257472038269043,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4141,11 +4167,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 10.169,
-   "changed_pct_1_to_2_3": 5.298,
+   "changed_pct": 12.888,
+   "changed_pct_1_to_2_3": 8.423,
    "capture_1s": {
-    "luma_mean": 221.94,
-    "luma_stddev": 28.44,
+    "luma_mean": 221.95,
+    "luma_stddev": 28.46,
     "top_colour_share": 0.0073,
     "size": [
      1920,
@@ -4153,18 +4179,18 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 222.35,
-    "luma_stddev": 28.5,
-    "top_colour_share": 0.0072,
+    "luma_mean": 222.62,
+    "luma_stddev": 28.46,
+    "top_colour_share": 0.0076,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 222.92,
-    "luma_stddev": 28.44,
-    "top_colour_share": 0.0082,
+    "luma_mean": 223.11,
+    "luma_stddev": 28.55,
+    "top_colour_share": 0.0103,
     "size": [
      1920,
      1080
@@ -4191,12 +4217,12 @@
     1920,
     1080
    ],
-   "ready_ms": 230.8,
-   "wall_ready_ms": 443,
-   "rss_hwm_mib": 256.6,
+   "ready_ms": 282.6,
+   "wall_ready_ms": 417,
+   "rss_hwm_mib": 252.9,
    "vram_mib": 226,
-   "gpu_ms_p50": 0.8089600205421448,
-   "gpu_ms_p95": 0.8335360288619995,
+   "gpu_ms_p50": 0.8028159737586975,
+   "gpu_ms_p95": 2.0695040225982666,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4205,11 +4231,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.864,
-   "changed_pct_1_to_2_3": 0.728,
+   "changed_pct": 0.628,
+   "changed_pct_1_to_2_3": 0.44,
    "capture_1s": {
-    "luma_mean": 134.84,
-    "luma_stddev": 75.27,
+    "luma_mean": 134.81,
+    "luma_stddev": 75.28,
     "top_colour_share": 0.0061,
     "size": [
      1920,
@@ -4217,9 +4243,9 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 134.83,
+    "luma_mean": 134.82,
     "luma_stddev": 75.27,
-    "top_colour_share": 0.0061,
+    "top_colour_share": 0.006,
     "size": [
      1920,
      1080
@@ -4227,8 +4253,8 @@
    },
    "capture_4s": {
     "luma_mean": 134.84,
-    "luma_stddev": 75.26,
-    "top_colour_share": 0.006,
+    "luma_stddev": 75.28,
+    "top_colour_share": 0.0061,
     "size": [
      1920,
      1080
@@ -4255,13 +4281,13 @@
     1920,
     1080
    ],
-   "ready_ms": 1033.5,
-   "wall_ready_ms": 1218,
-   "rss_hwm_mib": 506.7,
+   "ready_ms": 978.6,
+   "wall_ready_ms": 1125,
+   "rss_hwm_mib": 503.1,
    "vram_mib": 541,
-   "gpu_ms_p50": 1.3629440069198608,
-   "gpu_ms_p95": 1.9742720127105713,
-   "fps_actual": 30,
+   "gpu_ms_p50": 3.4314239025115967,
+   "gpu_ms_p95": 5.478400230407715,
+   "fps_actual": 29,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -4269,30 +4295,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 77.167,
-   "changed_pct_1_to_2_3": 75.728,
+   "changed_pct": 76.289,
+   "changed_pct_1_to_2_3": 75.566,
    "capture_1s": {
-    "luma_mean": 99.49,
-    "luma_stddev": 39.01,
-    "top_colour_share": 0.0094,
+    "luma_mean": 99.67,
+    "luma_stddev": 39.19,
+    "top_colour_share": 0.0096,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 99.67,
-    "luma_stddev": 39.33,
-    "top_colour_share": 0.0092,
+    "luma_mean": 99.83,
+    "luma_stddev": 39.53,
+    "top_colour_share": 0.0093,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 100.18,
-    "luma_stddev": 39.93,
-    "top_colour_share": 0.0078,
+    "luma_mean": 100.15,
+    "luma_stddev": 39.85,
+    "top_colour_share": 0.0087,
     "size": [
      1920,
      1080
@@ -4310,45 +4336,59 @@
   },
   {
    "id": "3326873240",
-   "outcome": "broken",
-   "native": null,
-   "export": null,
-   "ready_ms": null,
-   "wall_ready_ms": null,
-   "rss_hwm_mib": null,
-   "vram_mib": null,
-   "gpu_ms_p50": null,
-   "gpu_ms_p95": null,
-   "fps_actual": 0,
-   "fps_target": 30.0,
-   "restarts": 3,
-   "has_audio": null,
-   "wants_audio_input": false,
-   "throttled": false,
-   "reason": "scene worker broken (crash record /tmp/t13-kryxzort/full4/priv/state/livepaper/lp-player/crashes/3326873240-1793172136303.json)",
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 1 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 2 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string",
-    "--- lp-player: worker killed by signal 6; restart 3 ---",
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
-    "  what():  [json.exception.type_error.302] type must be number, but is string"
+   "outcome": "ready",
+   "native": [
+    3840,
+    2160
    ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 2385.9,
+   "wall_ready_ms": 2543,
+   "rss_hwm_mib": 1965.5,
+   "vram_mib": 1876,
+   "gpu_ms_p50": 2.094079971313477,
+   "gpu_ms_p95": 3.0853118896484375,
+   "fps_actual": 30,
+   "fps_target": 30.0,
+   "restarts": 0,
+   "has_audio": true,
+   "wants_audio_input": true,
+   "throttled": false,
+   "reason": null,
    "capture_errors": [],
-   "class": "broken",
+   "changed_pct": 67.363,
+   "changed_pct_1_to_2_3": 63.748,
+   "capture_1s": {
+    "luma_mean": 135.05,
+    "luma_stddev": 84.62,
+    "top_colour_share": 0.156,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 133.53,
+    "luma_stddev": 85.7,
+    "top_colour_share": 0.156,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 132.95,
+    "luma_stddev": 85.84,
+    "top_colour_share": 0.1578,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": true,
@@ -4356,35 +4396,63 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
-   "note": "Same as 3233141951 (`padding: \"32.00000 32.00000\"` on a scripted clock text object): SIGABRT in `ObjectParser::parseText` at every load → broken.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
+   "cause": "a shader LWE failed to compile/translate"
   },
   {
    "id": "3354740764",
-   "outcome": "error",
-   "native": null,
-   "export": null,
-   "ready_ms": null,
-   "wall_ready_ms": null,
-   "rss_hwm_mib": null,
-   "vram_mib": null,
-   "gpu_ms_p50": null,
-   "gpu_ms_p95": null,
-   "fps_actual": 0,
+   "outcome": "ready",
+   "native": [
+    1920,
+    1080
+   ],
+   "export": [
+    1920,
+    1080
+   ],
+   "ready_ms": 1217.5,
+   "wall_ready_ms": 1375,
+   "rss_hwm_mib": 391.5,
+   "vram_mib": 351,
+   "gpu_ms_p50": 3.7498879432678223,
+   "gpu_ms_p95": 5.405695915222168,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
-   "has_audio": null,
-   "wants_audio_input": false,
+   "has_audio": true,
+   "wants_audio_input": true,
    "throttled": false,
-   "reason": "load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 (a truncated scene.pkg or an unsupported project)",
-   "log_tail": [
-    "[info] gfx: context priority requested low, granted low",
-    "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
-    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 (a truncated scene.pkg or an unsupported project)"
-   ],
+   "reason": null,
    "capture_errors": [],
-   "class": "load_failed",
+   "changed_pct": 89.722,
+   "changed_pct_1_to_2_3": 89.714,
+   "capture_1s": {
+    "luma_mean": 58.37,
+    "luma_stddev": 40.65,
+    "top_colour_share": 0.1032,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_2.3s": {
+    "luma_mean": 107.05,
+    "luma_stddev": 74.59,
+    "top_colour_share": 0.1033,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "capture_4s": {
+    "luma_mean": 107.43,
+    "luma_stddev": 74.53,
+    "top_colour_share": 0.1033,
+    "size": [
+     1920,
+     1080
+    ]
+   },
+   "class": "ok",
    "project": {
     "dependency": null,
     "supports_audio_processing": true,
@@ -4392,9 +4460,7 @@
     "has_scene_pkg": true,
     "has_scene_json": false
    },
-   "cause": "an asset reference whose case differs from the file in the scene.pkg (WE on Windows is case-insensitive, LWE is not)",
-   "note": "LWE prints nothing. gdb (`catch throw`): the load fails in `AssetLocator::readString` ← `MaterialParser::load` ← `ModelParser::parse` ← `ObjectParser::parseImage`; the exception is caught inside LWE and `wp_project_load_folder` returns NULL. `models/Shadow.json` (3 objects) names `materials/shadow.json`; the pkg holds `materials/Shadow.json`.",
-   "todo": "Phase 6 — docs/TODO.md \"LWE: case-insensitive asset lookup\""
+   "cause": "a shader LWE failed to compile/translate"
   },
   {
    "id": "3363252053",
@@ -4407,12 +4473,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1049.2,
-   "wall_ready_ms": 1250,
-   "rss_hwm_mib": 1244.6,
-   "vram_mib": 944,
-   "gpu_ms_p50": 1.884160041809082,
-   "gpu_ms_p95": 2.7402238845825195,
+   "ready_ms": 913.3,
+   "wall_ready_ms": 1148,
+   "rss_hwm_mib": 1255.5,
+   "vram_mib": 950,
+   "gpu_ms_p50": 4.8056321144104,
+   "gpu_ms_p95": 6.181888103485107,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4421,30 +4487,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 98.177,
-   "changed_pct_1_to_2_3": 96.736,
+   "changed_pct": 98.474,
+   "changed_pct_1_to_2_3": 95.004,
    "capture_1s": {
-    "luma_mean": 88.07,
-    "luma_stddev": 39.21,
-    "top_colour_share": 0.0019,
+    "luma_mean": 137.78,
+    "luma_stddev": 58.88,
+    "top_colour_share": 0.018,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 107.07,
-    "luma_stddev": 58.76,
-    "top_colour_share": 0.0029,
+    "luma_mean": 151.92,
+    "luma_stddev": 71.28,
+    "top_colour_share": 0.1444,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 92.03,
-    "luma_stddev": 40.07,
-    "top_colour_share": 0.0016,
+    "luma_mean": 145.1,
+    "luma_stddev": 60.3,
+    "top_colour_share": 0.0108,
     "size": [
      1920,
      1080
@@ -4471,12 +4537,12 @@
     1920,
     1080
    ],
-   "ready_ms": 856.3,
-   "wall_ready_ms": 1044,
-   "rss_hwm_mib": 732.1,
+   "ready_ms": 787.5,
+   "wall_ready_ms": 943,
+   "rss_hwm_mib": 731.8,
    "vram_mib": 745,
-   "gpu_ms_p50": 3.2440319061279297,
-   "gpu_ms_p95": 3.6280319690704346,
+   "gpu_ms_p50": 3.371007919311523,
+   "gpu_ms_p95": 7.552000045776367,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4485,11 +4551,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 57.429,
-   "changed_pct_1_to_2_3": 56.075,
+   "changed_pct": 49.934,
+   "changed_pct_1_to_2_3": 56.023,
    "capture_1s": {
     "luma_mean": 83.24,
-    "luma_stddev": 69.54,
+    "luma_stddev": 69.55,
     "top_colour_share": 0.0028,
     "size": [
      1920,
@@ -4498,7 +4564,7 @@
    },
    "capture_2.3s": {
     "luma_mean": 83.3,
-    "luma_stddev": 69.56,
+    "luma_stddev": 69.55,
     "top_colour_share": 0.0021,
     "size": [
      1920,
@@ -4506,8 +4572,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 83.31,
-    "luma_stddev": 69.48,
+    "luma_mean": 83.29,
+    "luma_stddev": 69.51,
     "top_colour_share": 0.002,
     "size": [
      1920,
@@ -4535,12 +4601,12 @@
     1920,
     1080
    ],
-   "ready_ms": 231.9,
-   "wall_ready_ms": 330,
-   "rss_hwm_mib": 326.4,
+   "ready_ms": 268.4,
+   "wall_ready_ms": 441,
+   "rss_hwm_mib": 328.7,
    "vram_mib": 105,
-   "gpu_ms_p50": 0.1669120043516159,
-   "gpu_ms_p95": 0.19763199985027313,
+   "gpu_ms_p50": 0.16998399794101715,
+   "gpu_ms_p95": 0.1740799993276596,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4549,11 +4615,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 94.808,
-   "changed_pct_1_to_2_3": 64.953,
+   "changed_pct": 95.056,
+   "changed_pct_1_to_2_3": 75.004,
    "capture_1s": {
-    "luma_mean": 52.08,
-    "luma_stddev": 55.62,
+    "luma_mean": 52.1,
+    "luma_stddev": 55.7,
     "top_colour_share": 0.0078,
     "size": [
      1920,
@@ -4561,18 +4627,18 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 52.11,
-    "luma_stddev": 55.63,
-    "top_colour_share": 0.0078,
+    "luma_mean": 52.15,
+    "luma_stddev": 55.69,
+    "top_colour_share": 0.0082,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 51.82,
-    "luma_stddev": 55.5,
-    "top_colour_share": 0.0073,
+    "luma_mean": 51.85,
+    "luma_stddev": 55.47,
+    "top_colour_share": 0.0078,
     "size": [
      1920,
      1080
@@ -4599,12 +4665,12 @@
     1920,
     1080
    ],
-   "ready_ms": 251.0,
-   "wall_ready_ms": 408,
-   "rss_hwm_mib": 290.2,
+   "ready_ms": 264.0,
+   "wall_ready_ms": 442,
+   "rss_hwm_mib": 290.4,
    "vram_mib": 313,
-   "gpu_ms_p50": 0.3962880074977875,
-   "gpu_ms_p95": 0.4331519901752472,
+   "gpu_ms_p50": 0.38604798913002014,
+   "gpu_ms_p95": 0.9267200231552124,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4613,8 +4679,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 1.774,
-   "changed_pct_1_to_2_3": 0.761,
+   "changed_pct": 1.68,
+   "changed_pct_1_to_2_3": 0.824,
    "capture_1s": {
     "luma_mean": 156.81,
     "luma_stddev": 48.83,
@@ -4625,7 +4691,7 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 156.84,
+    "luma_mean": 156.85,
     "luma_stddev": 48.84,
     "top_colour_share": 0.0098,
     "size": [
@@ -4634,9 +4700,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 156.9,
-    "luma_stddev": 48.84,
-    "top_colour_share": 0.0098,
+    "luma_mean": 156.89,
+    "luma_stddev": 48.85,
+    "top_colour_share": 0.0097,
     "size": [
      1920,
      1080
@@ -4663,13 +4729,13 @@
     2048,
     1080
    ],
-   "ready_ms": 210.8,
-   "wall_ready_ms": 332,
-   "rss_hwm_mib": 603.8,
+   "ready_ms": 564.4,
+   "wall_ready_ms": 696,
+   "rss_hwm_mib": 604.9,
    "vram_mib": 451,
-   "gpu_ms_p50": 2.341887950897217,
-   "gpu_ms_p95": 4.284416198730469,
-   "fps_actual": 31,
+   "gpu_ms_p50": 3.1836159229278564,
+   "gpu_ms_p95": 4.1902079582214355,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": false,
@@ -4677,30 +4743,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 39.559,
-   "changed_pct_1_to_2_3": 39.671,
+   "changed_pct": 39.256,
+   "changed_pct_1_to_2_3": 39.316,
    "capture_1s": {
-    "luma_mean": 227.02,
-    "luma_stddev": 52.15,
-    "top_colour_share": 0.5699,
+    "luma_mean": 226.94,
+    "luma_stddev": 52.25,
+    "top_colour_share": 0.5702,
     "size": [
      2048,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 227.03,
-    "luma_stddev": 52.23,
-    "top_colour_share": 0.6295,
+    "luma_mean": 227.07,
+    "luma_stddev": 52.2,
+    "top_colour_share": 0.6347,
     "size": [
      2048,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 227.0,
+    "luma_mean": 226.99,
     "luma_stddev": 52.28,
-    "top_colour_share": 0.6414,
+    "top_colour_share": 0.6398,
     "size": [
      2048,
      1080
@@ -4727,12 +4793,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1379.1,
-   "wall_ready_ms": 1547,
-   "rss_hwm_mib": 532.2,
-   "vram_mib": 1193,
-   "gpu_ms_p50": 1.6066559553146362,
-   "gpu_ms_p95": 2.269184112548828,
+   "ready_ms": 1409.8,
+   "wall_ready_ms": 1573,
+   "rss_hwm_mib": 538.9,
+   "vram_mib": 1199,
+   "gpu_ms_p50": 1.4612480401992798,
+   "gpu_ms_p95": 1.8749439716339111,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4741,11 +4807,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 56.625,
-   "changed_pct_1_to_2_3": 48.916,
+   "changed_pct": 52.585,
+   "changed_pct_1_to_2_3": 45.703,
    "capture_1s": {
-    "luma_mean": 96.03,
-    "luma_stddev": 49.62,
+    "luma_mean": 115.3,
+    "luma_stddev": 57.27,
     "top_colour_share": 0.0116,
     "size": [
      1920,
@@ -4753,8 +4819,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 96.62,
-    "luma_stddev": 49.99,
+    "luma_mean": 115.71,
+    "luma_stddev": 57.58,
     "top_colour_share": 0.0116,
     "size": [
      1920,
@@ -4762,8 +4828,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 96.26,
-    "luma_stddev": 49.89,
+    "luma_mean": 115.79,
+    "luma_stddev": 57.6,
     "top_colour_share": 0.0116,
     "size": [
      1920,
@@ -4791,12 +4857,12 @@
     2560,
     1080
    ],
-   "ready_ms": 1351.0,
-   "wall_ready_ms": 1432,
-   "rss_hwm_mib": 668.0,
+   "ready_ms": 1302.7,
+   "wall_ready_ms": 1490,
+   "rss_hwm_mib": 672.4,
    "vram_mib": 868,
-   "gpu_ms_p50": 5.4917120933532715,
-   "gpu_ms_p95": 6.534143924713135,
+   "gpu_ms_p50": 4.956160068511963,
+   "gpu_ms_p95": 5.782527923583984,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4805,11 +4871,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 53.645,
-   "changed_pct_1_to_2_3": 49.809,
+   "changed_pct": 50.904,
+   "changed_pct_1_to_2_3": 51.662,
    "capture_1s": {
-    "luma_mean": 30.92,
-    "luma_stddev": 26.3,
+    "luma_mean": 30.9,
+    "luma_stddev": 26.28,
     "top_colour_share": 0.0276,
     "size": [
      2560,
@@ -4817,18 +4883,18 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 31.06,
-    "luma_stddev": 26.57,
-    "top_colour_share": 0.0278,
+    "luma_mean": 31.09,
+    "luma_stddev": 26.53,
+    "top_colour_share": 0.0279,
     "size": [
      2560,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 30.75,
-    "luma_stddev": 25.86,
-    "top_colour_share": 0.0278,
+    "luma_mean": 30.73,
+    "luma_stddev": 25.83,
+    "top_colour_share": 0.0279,
     "size": [
      2560,
      1080
@@ -4855,12 +4921,12 @@
     1920,
     1080
    ],
-   "ready_ms": 327.4,
-   "wall_ready_ms": 545,
-   "rss_hwm_mib": 300.6,
+   "ready_ms": 284.3,
+   "wall_ready_ms": 500,
+   "rss_hwm_mib": 302.1,
    "vram_mib": 179,
-   "gpu_ms_p50": 0.4925439953804016,
-   "gpu_ms_p95": 0.494592010974884,
+   "gpu_ms_p50": 1.154047966003418,
+   "gpu_ms_p95": 1.8575359582901,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4869,11 +4935,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 23.477,
-   "changed_pct_1_to_2_3": 16.496,
+   "changed_pct": 23.679,
+   "changed_pct_1_to_2_3": 16.758,
    "capture_1s": {
-    "luma_mean": 167.11,
-    "luma_stddev": 56.24,
+    "luma_mean": 167.06,
+    "luma_stddev": 56.15,
     "top_colour_share": 0.0411,
     "size": [
      1920,
@@ -4882,16 +4948,16 @@
    },
    "capture_2.3s": {
     "luma_mean": 167.33,
-    "luma_stddev": 56.19,
-    "top_colour_share": 0.0412,
+    "luma_stddev": 56.15,
+    "top_colour_share": 0.0411,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 167.38,
-    "luma_stddev": 56.03,
+    "luma_mean": 167.3,
+    "luma_stddev": 56.14,
     "top_colour_share": 0.0412,
     "size": [
      1920,
@@ -4919,12 +4985,12 @@
     1920,
     1080
    ],
-   "ready_ms": 436.6,
-   "wall_ready_ms": 673,
-   "rss_hwm_mib": 369.4,
+   "ready_ms": 504.6,
+   "wall_ready_ms": 632,
+   "rss_hwm_mib": 365.6,
    "vram_mib": 330,
-   "gpu_ms_p50": 0.7178239822387695,
-   "gpu_ms_p95": 0.7464960217475891,
+   "gpu_ms_p50": 0.7065600156784058,
+   "gpu_ms_p95": 0.711679995059967,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4933,11 +4999,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 41.42,
-   "changed_pct_1_to_2_3": 38.04,
+   "changed_pct": 41.45,
+   "changed_pct_1_to_2_3": 37.472,
    "capture_1s": {
-    "luma_mean": 61.21,
-    "luma_stddev": 53.2,
+    "luma_mean": 61.22,
+    "luma_stddev": 53.22,
     "top_colour_share": 0.0059,
     "size": [
      1920,
@@ -4945,17 +5011,17 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 60.98,
-    "luma_stddev": 53.18,
-    "top_colour_share": 0.0061,
+    "luma_mean": 61.03,
+    "luma_stddev": 53.19,
+    "top_colour_share": 0.006,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 60.44,
-    "luma_stddev": 53.28,
+    "luma_mean": 60.45,
+    "luma_stddev": 53.29,
     "top_colour_share": 0.0062,
     "size": [
      1920,
@@ -4983,12 +5049,12 @@
     1920,
     1080
    ],
-   "ready_ms": 329.3,
-   "wall_ready_ms": 439,
-   "rss_hwm_mib": 631.8,
+   "ready_ms": 900.8,
+   "wall_ready_ms": 1032,
+   "rss_hwm_mib": 628.4,
    "vram_mib": 353,
-   "gpu_ms_p50": 0.6973440051078796,
-   "gpu_ms_p95": 1.070080041885376,
+   "gpu_ms_p50": 0.21196800470352173,
+   "gpu_ms_p95": 1.6947200298309326,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -4997,30 +5063,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.997,
-   "changed_pct_1_to_2_3": 100.0,
+   "changed_pct": 94.336,
+   "changed_pct_1_to_2_3": 93.429,
    "capture_1s": {
-    "luma_mean": 0.0,
-    "luma_stddev": 0.0,
-    "top_colour_share": 1.0,
+    "luma_mean": 82.53,
+    "luma_stddev": 62.78,
+    "top_colour_share": 0.0048,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 82.51,
+    "luma_mean": 82.45,
     "luma_stddev": 62.77,
-    "top_colour_share": 0.0044,
+    "top_colour_share": 0.005,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 82.45,
-    "luma_stddev": 62.72,
-    "top_colour_share": 0.0053,
+    "luma_mean": 82.46,
+    "luma_stddev": 62.62,
+    "top_colour_share": 0.005,
     "size": [
      1920,
      1080
@@ -5047,13 +5113,13 @@
     1920,
     1344
    ],
-   "ready_ms": 726.2,
-   "wall_ready_ms": 822,
-   "rss_hwm_mib": 707.5,
+   "ready_ms": 524.6,
+   "wall_ready_ms": 631,
+   "rss_hwm_mib": 711.0,
    "vram_mib": 582,
-   "gpu_ms_p50": 2.5364480018615723,
-   "gpu_ms_p95": 3.867647886276245,
-   "fps_actual": 30,
+   "gpu_ms_p50": 3.836927890777588,
+   "gpu_ms_p95": 5.5562238693237305,
+   "fps_actual": 31,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -5061,30 +5127,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.634,
-   "changed_pct_1_to_2_3": 99.705,
+   "changed_pct": 99.831,
+   "changed_pct_1_to_2_3": 99.759,
    "capture_1s": {
-    "luma_mean": 139.2,
-    "luma_stddev": 59.75,
-    "top_colour_share": 0.0022,
+    "luma_mean": 139.56,
+    "luma_stddev": 59.82,
+    "top_colour_share": 0.0021,
     "size": [
      1920,
      1344
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 137.13,
-    "luma_stddev": 59.83,
-    "top_colour_share": 0.0034,
+    "luma_mean": 137.29,
+    "luma_stddev": 59.87,
+    "top_colour_share": 0.0035,
     "size": [
      1920,
      1344
     ]
    },
    "capture_4s": {
-    "luma_mean": 136.86,
-    "luma_stddev": 60.02,
-    "top_colour_share": 0.0042,
+    "luma_mean": 136.76,
+    "luma_stddev": 60.07,
+    "top_colour_share": 0.0044,
     "size": [
      1920,
      1344
@@ -5111,12 +5177,12 @@
     2340,
     1080
    ],
-   "ready_ms": 728.2,
-   "wall_ready_ms": 895,
-   "rss_hwm_mib": 473.7,
+   "ready_ms": 753.9,
+   "wall_ready_ms": 941,
+   "rss_hwm_mib": 474.3,
    "vram_mib": 276,
-   "gpu_ms_p50": 0.18329599499702456,
-   "gpu_ms_p95": 0.6594560146331787,
+   "gpu_ms_p50": 0.18227200210094452,
+   "gpu_ms_p95": 0.6604800224304199,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5125,7 +5191,7 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 65.858,
+   "changed_pct": 65.792,
    "changed_pct_1_to_2_3": 63.06,
    "capture_1s": {
     "luma_mean": 157.12,
@@ -5146,8 +5212,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 156.83,
-    "luma_stddev": 23.31,
+    "luma_mean": 156.85,
+    "luma_stddev": 23.3,
     "top_colour_share": 0.0045,
     "size": [
      2340,
@@ -5175,12 +5241,12 @@
     1920,
     1080
    ],
-   "ready_ms": 972.1,
-   "wall_ready_ms": 1171,
-   "rss_hwm_mib": 461.0,
+   "ready_ms": 912.0,
+   "wall_ready_ms": 1191,
+   "rss_hwm_mib": 467.9,
    "vram_mib": 472,
-   "gpu_ms_p50": 2.1872639656066895,
-   "gpu_ms_p95": 3.336191892623902,
+   "gpu_ms_p50": 4.159488201141357,
+   "gpu_ms_p95": 5.794816017150879,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5189,11 +5255,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 81.462,
-   "changed_pct_1_to_2_3": 78.776,
+   "changed_pct": 81.339,
+   "changed_pct_1_to_2_3": 78.548,
    "capture_1s": {
-    "luma_mean": 61.76,
-    "luma_stddev": 22.2,
+    "luma_mean": 61.74,
+    "luma_stddev": 22.24,
     "top_colour_share": 0.0243,
     "size": [
      1920,
@@ -5201,8 +5267,8 @@
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 61.81,
-    "luma_stddev": 22.32,
+    "luma_mean": 61.78,
+    "luma_stddev": 22.36,
     "top_colour_share": 0.0242,
     "size": [
      1920,
@@ -5210,8 +5276,8 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 61.88,
-    "luma_stddev": 22.37,
+    "luma_mean": 61.95,
+    "luma_stddev": 22.41,
     "top_colour_share": 0.0246,
     "size": [
      1920,
@@ -5239,12 +5305,12 @@
     1338,
     755
    ],
-   "ready_ms": 166.9,
-   "wall_ready_ms": 312,
-   "rss_hwm_mib": 259.6,
+   "ready_ms": 180.6,
+   "wall_ready_ms": 375,
+   "rss_hwm_mib": 264.0,
    "vram_mib": 46,
-   "gpu_ms_p50": 0.09523200243711472,
-   "gpu_ms_p95": 0.09625600278377532,
+   "gpu_ms_p50": 0.24985599517822263,
+   "gpu_ms_p95": 0.4372479915618897,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5253,30 +5319,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 69.37,
-   "changed_pct_1_to_2_3": 69.424,
+   "changed_pct": 69.151,
+   "changed_pct_1_to_2_3": 68.967,
    "capture_1s": {
-    "luma_mean": 32.75,
-    "luma_stddev": 45.77,
-    "top_colour_share": 0.1444,
+    "luma_mean": 32.77,
+    "luma_stddev": 45.7,
+    "top_colour_share": 0.1454,
     "size": [
      1338,
      755
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 32.76,
-    "luma_stddev": 45.84,
-    "top_colour_share": 0.1436,
+    "luma_mean": 32.74,
+    "luma_stddev": 45.77,
+    "top_colour_share": 0.1457,
     "size": [
      1338,
      755
     ]
    },
    "capture_4s": {
-    "luma_mean": 32.75,
+    "luma_mean": 32.74,
     "luma_stddev": 45.79,
-    "top_colour_share": 0.1466,
+    "top_colour_share": 0.1462,
     "size": [
      1338,
      755
@@ -5303,13 +5369,13 @@
     1920,
     1080
    ],
-   "ready_ms": 1537.5,
-   "wall_ready_ms": 1691,
-   "rss_hwm_mib": 466.8,
+   "ready_ms": 1513.6,
+   "wall_ready_ms": 1694,
+   "rss_hwm_mib": 476.6,
    "vram_mib": 877,
-   "gpu_ms_p50": 3.223551988601685,
-   "gpu_ms_p95": 5.884928226470947,
-   "fps_actual": 29,
+   "gpu_ms_p50": 3.814399957656861,
+   "gpu_ms_p95": 6.550528049468994,
+   "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -5317,20 +5383,20 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 65.269,
-   "changed_pct_1_to_2_3": 65.228,
+   "changed_pct": 62.227,
+   "changed_pct_1_to_2_3": 66.012,
    "capture_1s": {
-    "luma_mean": 143.78,
-    "luma_stddev": 62.6,
-    "top_colour_share": 0.0227,
+    "luma_mean": 143.61,
+    "luma_stddev": 62.66,
+    "top_colour_share": 0.023,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 143.8,
-    "luma_stddev": 62.42,
+    "luma_mean": 143.78,
+    "luma_stddev": 62.44,
     "top_colour_share": 0.023,
     "size": [
      1920,
@@ -5338,9 +5404,9 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 143.82,
-    "luma_stddev": 62.41,
-    "top_colour_share": 0.0232,
+    "luma_mean": 143.9,
+    "luma_stddev": 62.38,
+    "top_colour_share": 0.0233,
     "size": [
      1920,
      1080
@@ -5404,12 +5470,12 @@
     1920,
     1080
    ],
-   "ready_ms": 224.4,
-   "wall_ready_ms": 407,
-   "rss_hwm_mib": 259.6,
+   "ready_ms": 209.8,
+   "wall_ready_ms": 349,
+   "rss_hwm_mib": 258.4,
    "vram_mib": 102,
-   "gpu_ms_p50": 0.18329599499702456,
-   "gpu_ms_p95": 0.19865599274635315,
+   "gpu_ms_p50": 0.17510400712490082,
+   "gpu_ms_p95": 0.18227200210094452,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5418,8 +5484,8 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 85.747,
-   "changed_pct_1_to_2_3": 29.327,
+   "changed_pct": 31.149,
+   "changed_pct_1_to_2_3": 28.187,
    "capture_1s": {
     "luma_mean": 141.24,
     "luma_stddev": 38.26,
@@ -5439,7 +5505,7 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 144.63,
+    "luma_mean": 141.14,
     "luma_stddev": 38.26,
     "top_colour_share": 0.0003,
     "size": [
@@ -5468,12 +5534,12 @@
     1920,
     1080
    ],
-   "ready_ms": 762.3,
-   "wall_ready_ms": 932,
-   "rss_hwm_mib": 437.9,
+   "ready_ms": 661.3,
+   "wall_ready_ms": 790,
+   "rss_hwm_mib": 433.6,
    "vram_mib": 794,
-   "gpu_ms_p50": 2.624511957168579,
-   "gpu_ms_p95": 3.1549439430236816,
+   "gpu_ms_p50": 2.3101439476013184,
+   "gpu_ms_p95": 3.357696056365967,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5482,30 +5548,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.024,
-   "changed_pct_1_to_2_3": 0.004,
+   "changed_pct": 0.234,
+   "changed_pct_1_to_2_3": 0.187,
    "capture_1s": {
-    "luma_mean": 81.84,
-    "luma_stddev": 46.7,
-    "top_colour_share": 0.0662,
+    "luma_mean": 82.12,
+    "luma_stddev": 48.21,
+    "top_colour_share": 0.0722,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 81.84,
-    "luma_stddev": 46.7,
-    "top_colour_share": 0.0662,
+    "luma_mean": 82.12,
+    "luma_stddev": 48.21,
+    "top_colour_share": 0.0722,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 81.84,
-    "luma_stddev": 46.7,
-    "top_colour_share": 0.0662,
+    "luma_mean": 82.12,
+    "luma_stddev": 48.21,
+    "top_colour_share": 0.0722,
     "size": [
      1920,
      1080
@@ -5532,12 +5598,12 @@
     2560,
     1080
    ],
-   "ready_ms": 387.7,
-   "wall_ready_ms": 572,
-   "rss_hwm_mib": 271.4,
+   "ready_ms": 288.4,
+   "wall_ready_ms": 489,
+   "rss_hwm_mib": 274.3,
    "vram_mib": 410,
-   "gpu_ms_p50": 0.4843519926071167,
-   "gpu_ms_p95": 0.4884479939937592,
+   "gpu_ms_p50": 0.4792320132255554,
+   "gpu_ms_p95": 0.502784013748169,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5546,11 +5612,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 0.733,
-   "changed_pct_1_to_2_3": 0.388,
+   "changed_pct": 0.962,
+   "changed_pct_1_to_2_3": 0.215,
    "capture_1s": {
     "luma_mean": 15.12,
-    "luma_stddev": 15.77,
+    "luma_stddev": 15.79,
     "top_colour_share": 0.4953,
     "size": [
      2560,
@@ -5559,17 +5625,17 @@
    },
    "capture_2.3s": {
     "luma_mean": 15.12,
-    "luma_stddev": 15.79,
-    "top_colour_share": 0.4952,
+    "luma_stddev": 15.77,
+    "top_colour_share": 0.4953,
     "size": [
      2560,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 15.13,
-    "luma_stddev": 15.86,
-    "top_colour_share": 0.4951,
+    "luma_mean": 15.16,
+    "luma_stddev": 16.06,
+    "top_colour_share": 0.495,
     "size": [
      2560,
      1080
@@ -5596,13 +5662,13 @@
     1920,
     1080
    ],
-   "ready_ms": 918.3,
-   "wall_ready_ms": 1123,
-   "rss_hwm_mib": 475.5,
-   "vram_mib": 689,
-   "gpu_ms_p50": 17.381376266479492,
-   "gpu_ms_p95": 30.18239974975586,
-   "fps_actual": 30,
+   "ready_ms": 854.8,
+   "wall_ready_ms": 986,
+   "rss_hwm_mib": 481.2,
+   "vram_mib": 684,
+   "gpu_ms_p50": 18.297855377197266,
+   "gpu_ms_p95": 52.22502517700195,
+   "fps_actual": 29,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -5610,30 +5676,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 93.909,
-   "changed_pct_1_to_2_3": 93.654,
+   "changed_pct": 84.082,
+   "changed_pct_1_to_2_3": 93.627,
    "capture_1s": {
-    "luma_mean": 22.35,
-    "luma_stddev": 11.73,
-    "top_colour_share": 0.0125,
+    "luma_mean": 22.49,
+    "luma_stddev": 11.96,
+    "top_colour_share": 0.0124,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 23.31,
-    "luma_stddev": 12.6,
-    "top_colour_share": 0.007,
+    "luma_mean": 23.29,
+    "luma_stddev": 12.76,
+    "top_colour_share": 0.0064,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 24.06,
-    "luma_stddev": 12.83,
-    "top_colour_share": 0.0063,
+    "luma_mean": 24.0,
+    "luma_stddev": 12.9,
+    "top_colour_share": 0.0064,
     "size": [
      1920,
      1080
@@ -5660,13 +5726,13 @@
     2580,
     1080
    ],
-   "ready_ms": 817.8,
-   "wall_ready_ms": 939,
-   "rss_hwm_mib": 443.0,
-   "vram_mib": 559,
-   "gpu_ms_p50": 2.2466559410095215,
-   "gpu_ms_p95": 4.679679870605469,
-   "fps_actual": 30,
+   "ready_ms": 819.7,
+   "wall_ready_ms": 1061,
+   "rss_hwm_mib": 446.8,
+   "vram_mib": 560,
+   "gpu_ms_p50": 2.2077438831329346,
+   "gpu_ms_p95": 4.2045440673828125,
+   "fps_actual": 29,
    "fps_target": 30.0,
    "restarts": 0,
    "has_audio": true,
@@ -5674,30 +5740,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 48.648,
-   "changed_pct_1_to_2_3": 38.19,
+   "changed_pct": 33.295,
+   "changed_pct_1_to_2_3": 28.014,
    "capture_1s": {
-    "luma_mean": 99.8,
-    "luma_stddev": 73.57,
-    "top_colour_share": 0.1535,
+    "luma_mean": 101.33,
+    "luma_stddev": 76.38,
+    "top_colour_share": 0.1538,
     "size": [
      2580,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 99.79,
-    "luma_stddev": 73.44,
-    "top_colour_share": 0.1501,
+    "luma_mean": 101.29,
+    "luma_stddev": 76.29,
+    "top_colour_share": 0.1532,
     "size": [
      2580,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 100.62,
-    "luma_stddev": 73.22,
-    "top_colour_share": 0.1019,
+    "luma_mean": 101.83,
+    "luma_stddev": 76.12,
+    "top_colour_share": 0.1285,
     "size": [
      2580,
      1080
@@ -5761,12 +5827,12 @@
     1920,
     1080
    ],
-   "ready_ms": 1007.9,
-   "wall_ready_ms": 1185,
-   "rss_hwm_mib": 414.0,
-   "vram_mib": 403,
-   "gpu_ms_p50": 1.006592035293579,
-   "gpu_ms_p95": 2.3357439041137695,
+   "ready_ms": 1009.2,
+   "wall_ready_ms": 1176,
+   "rss_hwm_mib": 419.9,
+   "vram_mib": 404,
+   "gpu_ms_p50": 1.005568027496338,
+   "gpu_ms_p95": 2.61734390258789,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5775,30 +5841,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 61.132,
-   "changed_pct_1_to_2_3": 51.164,
+   "changed_pct": 61.212,
+   "changed_pct_1_to_2_3": 52.587,
    "capture_1s": {
-    "luma_mean": 86.43,
-    "luma_stddev": 38.58,
-    "top_colour_share": 0.018,
+    "luma_mean": 89.6,
+    "luma_stddev": 43.63,
+    "top_colour_share": 0.0178,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 86.59,
-    "luma_stddev": 38.78,
-    "top_colour_share": 0.0152,
+    "luma_mean": 90.16,
+    "luma_stddev": 44.31,
+    "top_colour_share": 0.0155,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 86.58,
-    "luma_stddev": 38.96,
-    "top_colour_share": 0.0133,
+    "luma_mean": 89.67,
+    "luma_stddev": 43.97,
+    "top_colour_share": 0.0155,
     "size": [
      1920,
      1080
@@ -5825,12 +5891,12 @@
     2580,
     1080
    ],
-   "ready_ms": 2095.7,
-   "wall_ready_ms": 2270,
-   "rss_hwm_mib": 780.2,
-   "vram_mib": 887,
-   "gpu_ms_p50": 2.455552101135254,
-   "gpu_ms_p95": 3.1836159229278564,
+   "ready_ms": 2698.3,
+   "wall_ready_ms": 2934,
+   "rss_hwm_mib": 776.3,
+   "vram_mib": 891,
+   "gpu_ms_p50": 2.968575954437256,
+   "gpu_ms_p95": 4.30182409286499,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5839,30 +5905,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 46.946,
-   "changed_pct_1_to_2_3": 44.105,
+   "changed_pct": 41.785,
+   "changed_pct_1_to_2_3": 40.226,
    "capture_1s": {
-    "luma_mean": 177.55,
-    "luma_stddev": 75.45,
-    "top_colour_share": 0.1943,
+    "luma_mean": 179.19,
+    "luma_stddev": 79.94,
+    "top_colour_share": 0.3421,
     "size": [
      2580,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 177.68,
-    "luma_stddev": 75.38,
-    "top_colour_share": 0.1943,
+    "luma_mean": 179.4,
+    "luma_stddev": 79.91,
+    "top_colour_share": 0.3437,
     "size": [
      2580,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 178.7,
-    "luma_stddev": 74.95,
-    "top_colour_share": 0.1943,
+    "luma_mean": 180.25,
+    "luma_stddev": 79.47,
+    "top_colour_share": 0.3403,
     "size": [
      2580,
      1080
@@ -5889,12 +5955,12 @@
     1920,
     1080
    ],
-   "ready_ms": 943.8,
-   "wall_ready_ms": 1082,
-   "rss_hwm_mib": 1817.9,
-   "vram_mib": 483,
-   "gpu_ms_p50": 1.9763200283050537,
-   "gpu_ms_p95": 3.438591957092285,
+   "ready_ms": 1200.7,
+   "wall_ready_ms": 1403,
+   "rss_hwm_mib": 1823.2,
+   "vram_mib": 471,
+   "gpu_ms_p50": 1.8309119939804075,
+   "gpu_ms_p95": 3.22867202758789,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -5903,30 +5969,30 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 99.811,
-   "changed_pct_1_to_2_3": 99.412,
+   "changed_pct": 99.458,
+   "changed_pct_1_to_2_3": 98.273,
    "capture_1s": {
-    "luma_mean": 100.8,
-    "luma_stddev": 40.93,
-    "top_colour_share": 0.0019,
+    "luma_mean": 101.9,
+    "luma_stddev": 40.95,
+    "top_colour_share": 0.0032,
     "size": [
      1920,
      1080
     ]
    },
    "capture_2.3s": {
-    "luma_mean": 100.38,
-    "luma_stddev": 40.73,
-    "top_colour_share": 0.0022,
+    "luma_mean": 99.82,
+    "luma_stddev": 41.97,
+    "top_colour_share": 0.0026,
     "size": [
      1920,
      1080
     ]
    },
    "capture_4s": {
-    "luma_mean": 94.06,
-    "luma_stddev": 43.32,
-    "top_colour_share": 0.005,
+    "luma_mean": 92.97,
+    "luma_stddev": 40.56,
+    "top_colour_share": 0.0063,
     "size": [
      1920,
      1080
@@ -5953,12 +6019,12 @@
     320,
     293
    ],
-   "ready_ms": 241.6,
-   "wall_ready_ms": 393,
-   "rss_hwm_mib": 383.9,
+   "ready_ms": 167.5,
+   "wall_ready_ms": 328,
+   "rss_hwm_mib": 379.8,
    "vram_mib": 72,
-   "gpu_ms_p50": 0.021503999829292297,
-   "gpu_ms_p95": 0.02252800017595291,
+   "gpu_ms_p50": 0.020479999482631683,
+   "gpu_ms_p95": 0.021503999829292297,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -6017,12 +6083,12 @@
     2323,
     1080
    ],
-   "ready_ms": 330.3,
-   "wall_ready_ms": 497,
-   "rss_hwm_mib": 355.3,
+   "ready_ms": 320.5,
+   "wall_ready_ms": 484,
+   "rss_hwm_mib": 354.0,
    "vram_mib": 447,
-   "gpu_ms_p50": 0.35737600922584534,
-   "gpu_ms_p95": 0.3850240111351013,
+   "gpu_ms_p50": 0.35020801424980164,
+   "gpu_ms_p95": 0.3532800078392029,
    "fps_actual": 30,
    "fps_target": 30.0,
    "restarts": 0,
@@ -6031,11 +6097,11 @@
    "throttled": false,
    "reason": null,
    "capture_errors": [],
-   "changed_pct": 1.414,
-   "changed_pct_1_to_2_3": 0.966,
+   "changed_pct": 1.673,
+   "changed_pct_1_to_2_3": 0.725,
    "capture_1s": {
     "luma_mean": 104.69,
-    "luma_stddev": 67.81,
+    "luma_stddev": 67.8,
     "top_colour_share": 0.0028,
     "size": [
      2323,
@@ -6044,7 +6110,7 @@
    },
    "capture_2.3s": {
     "luma_mean": 104.72,
-    "luma_stddev": 67.84,
+    "luma_stddev": 67.82,
     "top_colour_share": 0.0028,
     "size": [
      2323,
@@ -6052,7 +6118,7 @@
     ]
    },
    "capture_4s": {
-    "luma_mean": 104.77,
+    "luma_mean": 104.78,
     "luma_stddev": 67.88,
     "top_colour_share": 0.0028,
     "size": [

@@ -641,10 +641,12 @@ Two bug classes kept recurring; fix the class, not the instance:
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + lp-player world (both still build the
       pre-rewrite Avalonia app).
-- [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#692, #625, #677, #631,
-      #694 …) as labelled patches. The corpus runner exists (Phase 2 Task 13:
-      `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 86 ok, 1 static
-      by design, 1 blank, 4 load_failed, 4 broken of 96); rerun it after every LWE patch. Its findings, each one an
+- [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625, #631, #694 …;
+      #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
+      labelled patches. The corpus runner exists (Phase 2 Task 13:
+      `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 92 ok, 1 static
+      by design, 3 load_failed (3D) of 96 with LWE `40eacc9`; it was 86 ok, 1 blank, 4 load_failed, 4 broken with
+      `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `lp-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
   - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
