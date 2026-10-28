@@ -194,10 +194,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [x] **Task 13 — scene corpus runner + first report** (2026-10-28): `docs/player/reports/scene-corpus.md`
         (86/96 ok; every non-ok one fails in LWE alone); its LWE findings are Phase 6 items under "Scene
         compatibility programme" below.
-  - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
-        runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
-        a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
-        (cycles, or serialise the binary). Never just loosen it.
+  - [x] `tests/scene.rs::transport_meets_the_spike_budget` red in most full-suite runs (2026-10-28, player-core.md
+        § Frame transport → "What the worker's CPU figure is"): **the machine, not the work** — a constant 175–178 k
+        user instructions + 4 wake-ups per frame read 2.1–25 % CPU with core type (P/E +30 %), clock (`powersave`
+        cores at 0.8–1.4 GHz) and memory contention (7×). The features cost ≤ 0.15 % (GPU timer 7 k instructions;
+        reset status 0; the idle audio thread 0.06 % — removed: a soundless scene starts none). The test now pins
+        to the P-cores, takes the median of 1 s windows, and asserts the work (instructions, wake-ups) + the CPU
+        budget, reporting an over-budget CPU figure with the work in budget as the machine.
   - [x] **Phase 2 Task 11 — scenes playable under lp-player in the backend** (2026-10-28,
         `.claude/rules/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
         capability (else `lp-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;

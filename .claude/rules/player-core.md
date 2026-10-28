@@ -3017,6 +3017,29 @@ machine shared with other agents' tests; the spike's numbers for comparison):
 | trivial frame | **143.98** (spike 143.98) | **0 / 0 / 0** | **1.60 %** (1.48) | **1.77 %** (transport ≈ 0.54 % of 4.04) | 1.18 / 1.41 ms (incl. the test loop's 1 ms poll) |
 | ~3 ms GPU per frame (`gpu_work` 2500) | **143.98** (144.00 at 3.7 ms) | **0 / 0 / 0** | 1.60 % (1.38) | 1.81 % | 4.21 / 5.25 ms |
 
+**What the worker's CPU figure is (2026-10-28, the test's red full-suite runs settled).** The
+same work — a constant **175–178 k user instructions and 4 wake-ups per frame** (debug worker;
+~102 k release) — read anywhere from 2.1 to 25 % of a core, because CPU time per frame is set by
+the machine, not the worker: **core type** (pinned: 214–231 µs a frame on a P-core, 276–290 on an
+E-core of this i9-12900K — unpinned runs land in between), **clock** (`powersave`/HWP: the cores of
+a light periodic load sit at 0.8–1.4 GHz on a quiet machine — 350 k user cycles a frame read 7.6 %
+at load 3, 3.0 % when other load kept the clocks up) and **memory contention** (12
+memory-streaming processes: the same 175 k instructions in 5.4 M user cycles, 25 %). Per-thread
+(P-core, debug, load ~4): renderer 2.0–2.3 %, `lp-scene-proto` 0.9 % (Task 7's protocol thread:
+one extra hop per message — the bulk of the growth since Task 4's 1.6 %; it is what answers pings
+during a load), `lp-scene-audio` 0.06 % (now gone for a soundless scene, § "Scene audio").
+Feature A/B (P-core, 2 × 5 s each, instructions per frame): the `GL_TIME_ELAPSED` query 7 k
+(~11 µs, ≈ 0.15 %), `glGetGraphicsResetStatus` 0, the idle audio thread 0 instructions (0.06 %
+CPU); log-tail reading is the compositor's, loudness segments exist only for a stream. GPU
+contention (a second worker at `gpu_work` 6000) +20 %. So the test now measures the cost of the
+work: the worker pinned to the P-cores (`performance_cores`, `/sys/devices/cpu_core/cpus`),
+`schedstat` ns per thread, the **median of 1 s windows** over ≥ 5 s (up to 15 s while over
+budget); it asserts the work — user instructions per frame < 250 k (`perf_event_open`, 1.4× the
+measured) and voluntary wake-ups < 4.5 — and the CPU budget; a CPU figure over budget with that
+work in budget is printed as `MACHINE, NOT WORK` (with the cycles) rather than failed — on a
+machine without counters the CPU budget must hold as measured. The compositor's `update` cost is
+this thread's CPU time (`CLOCK_THREAD_CPUTIME_ID`, preemption excluded), judged the same way.
+
 Under ~6 ms of GPU per frame (`latch_never_waits_on_an_unsignalled_fence`, 2212 updates in
 2 s): `update` p50 10 µs, p99 78 µs, max 103 µs, 1935 stale reuses — the latch never waits.
 `transport_never_shows_stale_torn_or_out_of_order`: 600 of 600 ticks latched, 0 bad. Four
@@ -3034,8 +3057,9 @@ readbacks over 2 s identical, same texture), `restart_replaces_ring_after_first_
 (same texture + pixels until the new generation latches, then a new texture, one ring, seq
 continues), `fdpoll_fallback_is_equally_correct` (300 frames), `scene_texture_holds_image_top_at_t0`,
 `scene_frame_is_opaque`, `huge_native_scene_exports_at_cover_size` (7467×4200 → 1920×1080),
-`four_workers_latch_independently`, `transport_meets_the_spike_budget`,
-`context_priorities_compositor_high_worker_low`.
+`four_workers_latch_independently` (a wall-time ratio of `update` costs: load-sensitive, failed
+once 269 vs 57 µs in a full run, passed alone), `transport_meets_the_spike_budget`,
+`audio_thread_only_for_a_scene_with_sound`, `context_priorities_compositor_high_worker_low`.
 
 **What Task 5 builds on:** (done — § "The `scene` Source kind (Task 5)" below).
 
@@ -3405,11 +3429,14 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   false`; the route: `Device("pipewire/lp-player-bus")` → `target.object = lp-player-bus` +
   `node.dont-reconnect` (the compositor re-routes us, never WirePlumber), `Default` → no target,
   `Null` (`--ao null`) → a real-time timer thread pulling and discarding (so `AudioFlowing`,
-  envelopes and the scene's sound clock work in hermetic tests). The thread starts at `Start`
-  but **opens the stream only once a sound is installed** (the load said `has_audio`: LWE stream
-  count > 0, synthetic `has_audio`) — silent then (gate shut, gain ramping from 0); a scene
-  without sound never opens one (found by `transport_meets_the_spike_budget`: an always-on null
-  timer took the worker from ~3.4–5.4 % to 7.2 % CPU); a PipeWire that can't be reached →
+  envelopes and the scene's sound clock work in hermetic tests). The thread **starts only once a
+  sound is installed** (`Renderer::install_audio`: the load said `has_audio` — LWE stream count >
+  0, synthetic `has_audio`) and opens the stream at once — silent then (gate shut, gain ramping
+  from 0); a scene without sound has **no audio thread at all** (found by
+  `transport_meets_the_spike_budget`: an always-on null timer took the worker from ~3.4–5.4 % to
+  7.2 % CPU; until 2026-10-28 the thread still started at `Start` and polled for a sound 50×/s,
+  0.06 % CPU for nothing — `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`, RED
+  before: `lp-scene-audio` in a soundless worker); a PipeWire that can't be reached →
   the same timer (keeps the sound in step with the picture, reports **no** flow), retried every
   1 s; a `Route` change fades the old stream out on the gate (≤ 100 ms bound), then rebuilds.
 - **The signal path per buffer (`audio::Dsp`, pure, unit-tested):** pull (LWE's
@@ -3668,8 +3695,9 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   previous frame (`None` when none did) — so each measurement is reported once. Synthetic knob
   `report_gpu_ms` (tests) stands in for it. Measured: the synthetic 1080p frame 0.03 ms. Cost:
   `transport_meets_the_spike_budget`'s worker CPU (144 fps, load ~4) read 6.6 / 6.0 % with the
-  timer and 4.4 / 6.0 % with its `begin` disabled — within that test's known load noise (it fails
-  at 5–7 % on the base commit too; it passed in the render-worker-off run).
+  timer and 4.4 / 6.0 % with its `begin` disabled — load noise; counted (2026-10-28): the query
+  costs 7 k user instructions per frame (~11 µs, ≈ 0.15 % at 144 fps — kept: the budget needs it),
+  § "Frame transport" → "What the worker's CPU figure is".
 - **The budget (`scene::budget::Budget`, pure; units `budget_halves_under_starvation_and_recovers`,
   `budget_ignores_misses_a_light_worker_cannot_cause`, `budget_floor_is_10`,
   `budget_demand_change_lifts_a_cap_it_meets`).** `observe(now, missed_pct, gpu_ms_p50,
