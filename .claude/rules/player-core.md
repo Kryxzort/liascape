@@ -521,9 +521,11 @@ busy around it): before 810 ms; a synchronous readback alone 1.6–10 ms each ti
 ms (1920×1080) — the driver pins the new buffer's memory at its first `glReadPixels` (2.7–7.6 ms
 for 16 MB, measured without the spare: every capture paid it) — and **every repeat 0.07–0.10 ms**
 (loop max busy 0.3–1.2 ms, other work); the reply after 0.76–1.2 s (the debug encode). Guard
-`tests/api.rs::capture_encodes_off_the_loop` (an output and a source, twice each: < 10 ms for a
-first capture at a size, < 2 ms for a repeat, the PNG complete at the reply, a pipelined `probe`
-answered after it; RED before: 810 ms; a synchronous readback's repeats read 2.5–3.0).
+`tests/api.rs::capture_encodes_off_the_loop` (an output and a source, twice each: the capture's
+request < 10 ms for a first capture at a size, < 1 ms for a repeat, the loop's longest stretch
+around each < 10 ms — the loop's own debug ticks reach ~2 ms, so the request is the capture's
+measure —, the PNG complete at the reply, a pipelined `probe` answered after it; RED before: 810
+ms; a synchronous readback's repeats read 2.5–3.0).
 
 **`write_png` orientation: top-down, flipped from GL's own order.** `Gfx::write_png` reads
 the whole texture (bottom-left origin, same as `read_rgba`) and flips rows before encoding,

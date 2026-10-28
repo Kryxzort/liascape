@@ -2764,8 +2764,9 @@ fn pipelined_step_then_capture() {
 /// `lp-capture` straight from the mapped buffer, the reply comes once the file is complete,
 /// and a request pipelined behind the capture is answered after it (per-client FIFO, like
 /// `step`). Both targets (a 3840×1080 output, a 1920×1080 source), twice each: the first
-/// capture at a size makes its buffer (the driver pins its memory: < 10 ms, once), a repeat
-/// reuses it (< 2 ms — a synchronous readback alone took 2.5–3.0).
+/// capture at a size makes its buffer (the driver pins its memory: < 10 ms, once), a repeat's
+/// request reuses it (< 1 ms — a synchronous readback alone took 2.5–3.0); the loop's longest
+/// stretch around each < 10 ms (the encode on the loop took 810).
 #[test]
 fn capture_encodes_off_the_loop() {
     let Some(srv) = Serve::start_with(&["--clock", "real", "--outputs", "3840x1080@60"]) else {
@@ -2815,24 +2816,28 @@ fn capture_encodes_off_the_loop() {
         );
         // the window since the reset covers the capture: every loop stretch and request
         let lp = c.ok("probe", json!({"name": "loop"}));
-        let busy = lp["max_busy_ms"]
-            .as_f64()
-            .expect("max_busy_ms")
-            .max(lp["max_request_ms"].as_f64().expect("max_request_ms"));
+        let busy = lp["max_busy_ms"].as_f64().expect("max_busy_ms");
+        let request = lp["max_request_ms"].as_f64().expect("max_request_ms");
         println!(
             "capture {target}: reply after {:.1} ms, loop max busy {busy:.2} ms (slowest \
-             request {} {} ms)",
+             request {} {request:.3} ms)",
             took.as_secs_f64() * 1e3,
             lp["max_request_cmd"],
-            lp["max_request_ms"]
         );
+        // The capture's own share of the loop: its request (≥ the slowest request's time)…
         let (bound, what) = if n % 2 == 0 {
             (10.0, "a first capture at its size")
         } else {
-            (2.0, "a repeat capture")
+            (1.0, "a repeat capture")
         };
         assert!(
-            busy < bound,
+            request < bound,
+            "{what} of {target} held the loop {request} ms: {lp}"
+        );
+        // …and nothing else stalls it meanwhile (the map/unmap/reply run in other dispatches;
+        // the loop's own ticks compose 3840×1080 at 60 Hz in this debug build: ~1–2 ms).
+        assert!(
+            busy < 10.0,
             "the loop was busy {busy} ms during {what} of {target}: {lp}"
         );
     }
