@@ -57,7 +57,7 @@ src/livepaper/            # headless C# backend (CLI + daemons + --serve API). N
 ├── Services/             # IBgsProvider + one service per source; SteamWorkshopService
 ├── Helpers/              # PlayerHelper, DownloadHelper, LibraryService, LibraryStore, ImportService,
 │                         #   SettingsService, AudioMonitor, MonitorDetector, TransitionService, WorkshopDownloader, WorkshopUnsubQueue,
-#   SceneProperties (a WE scene's project.json user properties — library.md)
+│                         #   SceneProperties (a WE scene's project.json user properties — library.md)
 ├── Player/               # lp-player adapter (PlayerEngine=lp-player) — .claude/rules/player-adapter.md
 └── Web/                  # ServerHost (minimal-API endpoints), AppOps (orchestration), EventBus (WS), SteamOps
 src/native/lp-transition/ # C: wlr-layer-shell + EGL/GLES transition renderer (built by install.sh) — legacy engine
