@@ -361,6 +361,131 @@ fn an_unramped_cut_at_effect_start_is_flagged() {
     }
 }
 
+/// The frozen fixture 10 dB louder (a −10 dB tone, like the on-machine run: at −20 dB the
+/// edge bin's 3 ms of ramp averages just under the −55 dB "audible" line), with B's sound
+/// reaching the bus `late_ms` after A's lag.
+fn loud_late_b(
+    origin: f64,
+    late_ms: f64,
+) -> (
+    Vec<(Duration, f64)>,
+    Vec<(Duration, f64)>,
+    Vec<(Duration, f64)>,
+) {
+    let (mut observed, mut coarse, mut fine) = frozen_fixture(origin, 2.0, None);
+    for e in coarse.iter_mut().chain(fine.iter_mut()) {
+        e.1 += 10.0;
+    }
+    for s in observed.iter_mut() {
+        let rel = s.0.as_secs_f64() * 1000.0 - origin;
+        let shift = if rel > 1000.0 { 2.0 + late_ms } else { 2.0 };
+        s.1 = (frozen_curve(rel - shift) + 10.0 - 3.0).max(SILENT_DB);
+    }
+    (observed, coarse, fine)
+}
+
+#[test]
+fn ramp_in_a_few_ms_late_is_not_a_drop() {
+    // Phase 2 Task 14 (on-machine, frozen V→S at 60 Hz: 4 of 20 switches, `at_ms` 1510,
+    // 41 dB under): one lag serves the whole window and A's video pins it, but a scene B's
+    // sound reaches the bus ~3 ms later than its own gain schedule says (another stream, its
+    // own latency). B's ramp-in starts 7 ms into a 10 ms bin, so that bin's expected power
+    // mean is just audible (> −55 dB) while the observed bin is still silent: a "drop" on the
+    // very edge of a correctly shaped ramp. B's sound was there, whole, 3 ms late.
+    for origin in [3967.9, 4000.0] {
+        let (observed, coarse, fine) = loud_late_b(origin, 3.0);
+        let report = analyse_with_fine(&observed, &coarse, &fine);
+        assert!(report.drops.is_empty(), "origin {origin}: {report:?}");
+        assert!(report.micro_gaps.is_empty(), "origin {origin}: {report:?}");
+    }
+}
+
+#[test]
+fn ramp_in_that_never_comes_is_still_a_drop() {
+    // The rule above must not hide a real late onset: B silent 60 ms past its ramp's start.
+    let (observed, coarse, fine) = loud_late_b(4000.0, 60.0);
+    let report = analyse_with_fine(&observed, &coarse, &fine);
+    assert!(
+        report
+            .drops
+            .iter()
+            .any(|d| (1560..=1590).contains(&d.at_ms) && d.len_ms >= 20),
+        "a 60 ms late onset must be a drop: {report:?}"
+    );
+}
+
+#[test]
+fn meter_discontinuity_is_unmeasured_not_a_gap() {
+    // Phase 2 Task 14 (on-machine, 1–2 % of 720 switches): the bus meter's capture (the
+    // non-real-time `lp-bus` thread, by design) misses graph cycles — its timestamps jump
+    // 2.3–22 ms and the blocks right after are −96 (silence PipeWire hands a stream that
+    // missed its cycles). The bus itself never had a hole there; the detector must call that
+    // stretch unmeasured, never a micro-gap or a drop.
+    // Three audible levels pin the lag at 0 (a flat window lets the lag search slide the
+    // hole out of the window).
+    let level = |t: f64| {
+        if t < 50.0 {
+            -40.0
+        } else if t < 200.0 {
+            -23.0
+        } else {
+            -30.0
+        }
+    };
+    let expected: Vec<(Duration, f64)> = (0..=30)
+        .map(|k| (ms((k * 10) as u64), level((k * 10) as f64)))
+        .collect();
+    let mut observed: Vec<(Duration, f64)> = Vec::new();
+    for t in 0..=129u64 {
+        observed.push((
+            Duration::from_secs_f64(t as f64 / 1000.0 + 0.0003),
+            level(t as f64),
+        ));
+    }
+    // A 3.67 ms jump, two silent blocks, then the tone again (the measured shape).
+    for (i, db) in [SILENT_DB, SILENT_DB].iter().enumerate() {
+        observed.push((Duration::from_secs_f64((132.97 + i as f64) / 1000.0), *db));
+    }
+    for t in 135..=300u64 {
+        observed.push((
+            Duration::from_secs_f64(t as f64 / 1000.0 - 0.0000_3),
+            level(t as f64),
+        ));
+    }
+    let report = analyse(&observed, &expected);
+    assert!(report.drops.is_empty(), "drops = {:?}", report.drops);
+    assert!(
+        report.micro_gaps.is_empty(),
+        "micro_gaps = {:?}",
+        report.micro_gaps
+    );
+    assert_eq!(
+        report.unmeasured.len(),
+        1,
+        "unmeasured = {:?}",
+        report.unmeasured
+    );
+    assert!(
+        (128..=131).contains(&report.unmeasured[0].at_ms),
+        "{:?}",
+        report.unmeasured
+    );
+    // The same two silent blocks WITHOUT a timestamp jump are a real hole.
+    let mut contiguous: Vec<(Duration, f64)> = (0..=300u64)
+        .map(|t| {
+            (
+                Duration::from_secs_f64(t as f64 / 1000.0 + 0.0003),
+                level(t as f64),
+            )
+        })
+        .collect();
+    contiguous[130].1 = SILENT_DB;
+    contiguous[131].1 = SILENT_DB;
+    let report = analyse(&contiguous, &expected);
+    assert_eq!(report.micro_gaps.len(), 1, "a contiguous hole: {report:?}");
+    assert!(report.unmeasured.is_empty());
+}
+
 // ----------------------------------------------------------- expected_envelope() (ffmpeg)
 
 #[test]
