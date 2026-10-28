@@ -43,7 +43,7 @@ happen regardless of timing.
   and state paths. § Command API.
 - `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
   `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more;
-  `memory.rs`: `memory`, Task 20b).
+  `memory.rs`: `memory`, Task 20b; `workers.rs`: `workers`, Phase 2; `vram.rs`: `vram`, Task 8).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `loudness.rs` (scene
   loudness learned on first play — § Scene worker → "Scene loudness"), `Audio` (what
@@ -1903,11 +1903,13 @@ the `lp-open` worker, `dither=ordered`, the shader cache) 8–26 ms (median 17�
 first `render_into` (6–20 ms: shader compile/link — cached binaries help little on this
 NVIDIA driver, which already has its own disk cache — scaler LUTs, texture/FBO setup) still run
 on the loop, i.e. one to five missed frames at 240 Hz on every output per switch; Task 20's
-pacing criterion should exclude the switch frame. **Phase 2 plan:** a render worker thread with
+pacing criterion should exclude the switch frame. **Phase 2 (as built):** a render worker thread with
 its own EGL context in the compositor's share group owns every `MpvSource`'s render context —
 creation, first render, and every later render into a shared texture (with a sync fence per
-frame) — so the loop only samples finished textures; the same thread is where dmabuf imports
-from the scene/web workers land. Until then the loop counts the open share apart
+frame) — so the loop only samples finished textures. (Scene workers' dmabuf imports and latches
+deliberately do **not** go through that thread — they run on the loop's own context, § Scene worker →
+"Frame transport"; the plan's "same thread" idea was dropped for the share-group rebind and the extra hop.)
+Until the render worker landed the loop counts the open share apart
 (`max_open_ms`). These numbers hold for every `hwdec` since Task 20d (copy modes, no GL interop
 init in the render context — § Sources "Hardware decoding"; before, `hwdec=auto` cost 230–320 ms
 and a loadable libcuda 65–90 ms per switch). **Done since (2026-10-26/27):** the render worker
@@ -2748,11 +2750,20 @@ gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaning
 ## Scene worker
 
 Phase 2 (plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`, Tasks
-3–5; spec §4.1, §5.2, §6.3; evidence `docs/player/spikes/dmabuf.md`). A WE scene renders in
-its own `lp-scene-worker` process; the compositor drives it over a socket and samples its
-frames. `src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the worker.
+1–13 plus the scene-properties editor and loudness learning; spec §4.1, §5.2, §6.3; evidence
+`docs/player/spikes/dmabuf.md`; only the on-machine battery, Task 14, is still to run). A WE scene
+renders in its own `lp-scene-worker` process — **one per scene source, shared by every output
+showing it** (D1) — the compositor drives it over a socket and samples its frames.
+`src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the worker. This section is
+organised by the task that built each part; the subsections below are the as-built source of
+truth where they disagree with the plan or with the Task 3 text directly under this paragraph.
+Map: protocol + lifecycle (here) · "Frame transport" · "LWE core" · "The `scene` Source kind" ·
+"Real scenes" · "Scene audio" · "Scene loudness" · "GPU budget and VRAM" · "Transitions with
+scenes" · "Crash policy" · "Scene corpus".
 
-**Protocol (`worker/proto.rs`, `PROTOCOL` 1).** One JSON object per `SOCK_SEQPACKET`
+**Protocol (`worker/proto.rs`, `PROTOCOL` 3 — bumped by Task 6, audio, and by scene loudness; the
+shapes below are Task 3's plus the additions named inline and in the later subsections: `Start` also
+carries `id`, `gain_db`, `no_audio`, `speed`, `properties`; `ToWorker::Speed`; `FromWorker::Loudness`).** One JSON object per `SOCK_SEQPACKET`
 datagram, ≤ `MAX_MSG` (64 KiB), fds on the same datagram via `SCM_RIGHTS` (≤ `MAX_FDS` 8).
 Internally tagged by **`msg`** (snake_case variant name — not `t`, which `Tick`/`Frame` use
 for scene time): `{"msg":"tick","seq":3,"t":0.02,"input":null}`. `ToWorker`: `start {path,

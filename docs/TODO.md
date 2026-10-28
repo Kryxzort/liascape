@@ -108,8 +108,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal is PARKED; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
-  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
-    done (+ 9, 10, 12, 13, the Task 8 backend wiring, the properties editor and loudness learning); 14–15 left.
+  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): **all tasks
+    done except Task 14** (Tasks 1–13 and 15, the Task 8 backend wiring, the properties editor and loudness
+    learning). Open: Task 14 — the on-machine battery + `docs/player/reports/phase2.md`, which the owner runs
+    (nine steps in the plan; its findings become their own follow-up tasks).
+  - [x] **Phase 2 Task 15 — docs sweep** (2026-10-28): `docs/player/architecture.md` (process model with
+        `lp-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
+        never blocks the compositor) + #11 (a worker's audio is a gain on a stream that keeps running),
+        `docs/player/debugging.md` § Scenes (black / frozen / silent / crash loop / throttled / VRAM / loudness,
+        `probe workers {"log_tail":true}`), `.claude/rules/player-core.md` + `CLAUDE.md` consistency.
   - [x] **Scene loudness learned on first play** (2026-10-28, player-core.md § Scene worker → "Scene loudness",
         player-adapter.md § Scenes → "Loudness", library.md § Loudness): the worker K-weights what the scene really
         plays (pre-gain; paused / `no_audio` / fallback excluded) into 100 ms segments (`PROTOCOL` 3), the compositor
@@ -550,6 +557,11 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] **PARKED (owner, 2026-10-28): in-player auto-mute rework** — the Phase 3 auto-mute Signal (per-stream
       metering in the player, own bus excluded by ownership, ≤ 100 ms). Auto-mute stays `AudioMonitor` in the
       backend for both engines until the owner un-parks it. Design: spec §4.4 / §11 4b.
+- [ ] **Deferred from Phase 2** (not Phase 2 work): web wallpapers — WE `web` items via CEF / LWE's `webhelper`,
+      an optional build module, **Phase 4**, gated on the NVIDIA LINEAR-dmabuf external-only risk (spec §12); the
+      `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike `lwe-core.md` §4.2; needs a host-side
+      clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below); the in-player auto-mute
+      Signal (**PARKED**, first item of this section).
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once

@@ -418,3 +418,67 @@ restored as the preview, no worker). Tests: `tests/scene.rs::crash_holds_last_fr
 `tests/transition.rs::scene_b_worker_crash_mid_effect_still_hands_off`,
 `scene_b_broken_mid_effect_snaps_back` (`.claude/rules/player-core.md` § Scene worker → "Crash
 policy (Task 10)").
+
+## 10. A worker frame never blocks the compositor
+
+**Why:** a scene worker renders on the same GPU as the compositor and can be arbitrarily slow
+(a heavy 4K scene, a driver stall, a hang). If the compositor ever *waited* for a worker's frame —
+`eglWaitSync` on the worker's fence, `glFinish`, a blocking read of the socket, "wait for the next
+frame" — one slow scene would stall the one event loop that presents **every** output and drives
+every video and audio ramp: missed frames and audio dropouts on screens that show nothing of the
+scene. Spike `docs/player/spikes/dmabuf.md` §5 measured the alternatives (an implicit-sync or
+no-fence read shows the slot's *previous* frame; a blocking fence wait costs the worker's whole
+frame time on the loop). So the rule is one-directional: the compositor takes what is already
+done and otherwise keeps what it has.
+
+**Enforced by:** `worker::dmabuf::Latch::latch` — of the queued frames it picks the newest whose
+acquire fence **already polls readable** (no fd = fdpoll mode = the worker waited on its own
+fence), releases the older ones without a fence (never sampled), and when nothing is ready counts a
+`stale_reuses` and leaves the previous frame in place — never black, never a wait. The only
+GPU-side wait on a worker fence is `gpu_wait_fence` on a fence that is *already signalled* (a safety
+net, free by construction). `SceneSource::update` is non-blocking everywhere (`WorkerHost::poll`,
+`proto::recv` return `Ok(None)`; a full socket is `WouldBlock`, not a wait), the worker is spawned
+(`posix_spawn`) and stopped (`reap` thread) without blocking, and a restarted worker's ring only
+replaces the old one once its first frame latched (the old texture is shown until then). The
+worker side of the same rule: it never `glFinish`es (fence, or its own fdpoll, or a bounded
+`glClientWaitSync`). Tests: `tests/scene.rs::latch_never_waits_on_an_unsignalled_fence` (a worker
+doing ~6 ms of GPU per frame: every `SceneSource::update` p99 ≤ 1 ms, max < 4 ms, `stale_reuses` >
+0 — a fence wait would cost the frame's GPU time), `transport_never_shows_stale_torn_or_out_of_order`
+(RED by mutation — every queued frame treated as ready: `frame 143: marker [141, 0, 0]`, the slot's
+previous frame), `fdpoll_fallback_is_equally_correct`, `four_workers_latch_independently`,
+`killed_worker_keeps_last_frame`; units `worker::dmabuf::latch_takes_newest_signalled_and_releases_the_rest`,
+`forget_worker_keeps_the_frame_and_never_releases_it`, `external_only_modifier_is_refused`;
+`tests/api.rs::scene_create_and_destroy_never_stall_the_loop` (max loop busy ≤ 3 ms around a scene's
+creation and destruction). See `.claude/rules/player-core.md` § Scene worker → "Frame transport (Task 4)".
+
+## 11. A worker's audio is a gain on a stream that keeps running
+
+**Why:** invariant #1 applied to a scene's sound. LWE decodes and mixes the scene's audio inside the
+worker, so the scene's sound necessarily leaves the worker as its **own** PipeWire stream on the
+player bus. If the compositor controlled that sound by creating or destroying streams (or the worker
+by starting a stream when the scene "begins to be heard"), a switch would have a moment of "nothing
+playing yet" or "the old thing already stopped" — exactly the seam the player exists to remove. So the
+stream is opened silent and left alone; the *compositor* ramps it in dB like any video's
+`volume-gain`, and the stream is only closed once the level reaching the bus is exactly zero.
+
+**Enforced by:** the worker's `audio::Dsp` — pull (LWE's host audio driver, patch 0003; pitch-kept
+time-stretch, bit-exact at 1×) → a 30 ms linear-amplitude **gate** (open while the scene plays; a pause,
+`no_audio`, a route change or a quit fades it, counted in whole frames) → **gain** (the compositor's
+`Gain {db}` — the source's `gain.*` slots summed in dB, interpolated linearly in amplitude across one
+buffer; ≤ −96 dB is exact `0.0`). `Gain`/`NoAudio`/`Speed` are folded into a restart's `Start`, so a
+restarted worker resumes at the same level, faded in by the gate. The process callback runs on
+PipeWire's data thread with `RT_PROCESS` (a normal-priority thread dropped one 64-frame cycle at
+random — a real dropout on the bus). Closing waits for level 0 (`Control::quit`, ≤ 200 ms); the
+compositor's retire ramp has normally made it silent already. Onsets follow invariant #8: the worker
+sends one `AudioFlowing` per arming only after a buffer really pulled the scene's sound into a real
+stream, and the recipe's ramp-in waits for it. Scene audio is *not* handed over on a crash (the
+process is gone — that is the one unavoidable cut, covered by #9). Tests: worker units
+`gain_change_ramps_across_one_buffer`, `silent_db_is_exact_zero`, `gate_declicks_only_an_audible_stream`,
+`audio_flowing_once_per_arming`, `time_stretch_speed_changes_are_continuous`; `tests/api.rs` (private
+PipeWire) `scene_audio_on_bus_with_identity`, `scene_gain_ramp_reaches_the_bus` (a dB-linear
+staircase-free ramp on the bus; 0 xruns with `RT_PROCESS`), `scene_no_audio_toggle_is_live`,
+`scene_crossfades_are_equal_power_on_the_bus` (V→S, S→S, S→V, each with `probe dropout`: no
+drops/micro-gaps), `scene_pause_park_and_destroy_on_the_bus`, `scene_reroutes_after_pipewire_restart`,
+and `--ao null` `scene_audio_flowing_gates_every_onset` (each `onset.started` is `reason: flowed`;
+RED with the worker's `AudioFlowing` suppressed: `reason: timeout`). See `.claude/rules/player-core.md`
+§ Scene worker → "Scene audio (Task 6)".

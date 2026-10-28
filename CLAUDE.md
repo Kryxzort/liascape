@@ -10,8 +10,9 @@
 - `pactl` / `parec` (libpulse) — Auto-Mute stream detection (+ live LWE scene volume via `pactl`)
 - `ffmpeg` — thumbnail extraction (Import) + frozen-frame grabs + transition frame capture (→ raw RGBA)
 - `wl-clipboard` — `wl-copy` for keybind Copy buttons (renderer uses `navigator.clipboard`, falls back to `wl-copy`)
-- `linux-wallpaperengine` *(optional)* — WE **scene** support (Settings → "Allow scene support")
-- *(build-time, required unless `install.sh --no-scenes`)* `cmake` + `git` + SDL2/freetype/glm/lz4/zlib/FFmpeg/libGL dev — build LWE's `next-v2` core from the owner's fork (`third_party/lwe/PIN`, `scripts/lwe.sh`, `UPSTREAM.md`) for lp-player's scene worker; the flake + devShell build it themselves
+- `linux-wallpaperengine` *(optional)* — WE **scene** support under the legacy engine (Settings → "Allow scene support"). Under `lp-player` scenes need no installed binary — only Wallpaper Engine's own `assets/` (its Steam install, auto-found in the Steam libraries; else `LP_WE_ASSETS_DIR` / `player.scene_assets`)
+- *(build-time, REQUIRED)* Rust toolchain (`cargo`/`rustc`, edition 2024) + `libclang` (bindgen) + wayland/EGL/GLES/`mpv`/`libpipewire`/`libxkbcommon` dev — build `lp-player` and its `lp-scene-worker` (`install.sh` preflights them; the flake handles it)
+- *(build-time, required unless `install.sh --no-scenes`)* `cmake` + `git` + SDL2/freetype/glm/lz4/zlib/FFmpeg/libGL dev — build LWE's `next-v2` core from the owner's fork (`third_party/lwe/PIN`, `scripts/lwe.sh`, `UPSTREAM.md`) for lp-player's scene worker (`lp-scene-worker` links it); `install.sh --no-scenes` skips it (scenes then hidden under lp-player); the flake + devShell build it themselves
 - `grim` — *fallback* scene-frame capture for transitions (scene-A cover); the primary path is LWE's own `--screenshot` (windowless framebuffer dump per output)
 - *(build-time, REQUIRED)* `cc` + `make` + `wayland-scanner` + wayland/EGL/GLES + `mpv` dev headers — build `lp-transition` (transition renderer). Transitions animate every wallpaper switch and are a core feature, never a no-op — `install.sh` hard-fails if the toolchain is missing (the flake handles it automatically)
 - *(build-time, REQUIRED)* `cc` + `libpulse` dev — build `lp-audio` (event-driven scene-audio crossfade helper) so scene switches crossfade instead of hard-cutting audio
@@ -63,8 +64,9 @@ src/livepaper/            # headless C# backend (CLI + daemons + --serve API). N
 src/native/lp-transition/ # C: wlr-layer-shell + EGL/GLES transition renderer (built by install.sh) — legacy engine
 src/native/lp-audio/      # C: libpulse helper — event-driven scene-audio crossfade (built by install.sh) — legacy engine
 src/player/               # Rust: lp-player, the experimental compositor replacing mpvpaper + lp-transition +
-                          #   per-monitor LWE + lp-audio with one process. docs/player/architecture.md,
-                          #   .claude/rules/player-core.md
+                          #   per-monitor LWE + lp-audio with one process; also builds `lp-scene-worker`, the
+                          #   per-scene LWE worker process. docs/player/architecture.md, .claude/rules/player-core.md
+patches/lwe/, third_party/lwe/  # our LWE `next-v2` patch series + its pin (build-time fetch, scripts/lwe.sh, UPSTREAM.md)
 transitions/             # shared GLSL effect catalog (glsl/ + manifest.json + wrap.* + preview/) — UI previews +
                           #   the legacy renderer + lp-player's effect catalogue (credited in UPSTREAM.md)
 docs/player/              # AI-facing lp-player docs: architecture.md, invariants.md, spikes/
@@ -80,8 +82,10 @@ The Avalonia UI (`Views/`, `ViewModels/`, `App.axaml`) was **removed** in the El
 **Player engine.** `AppSettings.PlayerEngine` = `legacy` (default: mpvpaper + `lp-transition` + per-monitor LWE +
 `lp-audio`, described above) | `lp-player` (experimental: one Rust process owning every wallpaper type and
 transition, built so it never hands an audible/visible stream between owners — video/image/colour, and WE
-scenes (Phase 2, an `lp-scene-worker` per scene) when its worker + WE's assets resolve, else scenes are skipped
-like `AllowScenes=false`). Switch is live (Settings → Advanced → "Player engine").
+scenes (Phase 2, done bar its on-machine battery: an `lp-scene-worker` process per scene source, dmabuf frames,
+its own audio stream on the player bus, crash isolation) when its worker + WE's assets resolve, else scenes are
+skipped like `AllowScenes=false`). Scenes play under it with every transition method; `LweMonitors` fps, the GPU
+budget / VRAM settings, scene user properties, speed and volume are all live there. Switch is live (Settings → Advanced → "Player engine").
 Dev: `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q` (the stray `LD_LIBRARY_PATH` this
 machine's shell carries breaks native links — see `.claude/rules/player-core.md` for why); `lp-player ctl state` /
 `ctl logs '{"corr":"..."}'` / `ctl probe '{"name":"sources"}'` inspect a running player. Full design, the block
