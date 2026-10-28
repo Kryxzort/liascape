@@ -2,7 +2,7 @@
 # Dev mode with hot reload. Starts two invisible background services (Vite HMR + dotnet watch)
 # as systemd user units, then you just launch the app normally — main.js auto-detects Vite on
 # :5173 and loads the UI with HMR (edits apply live, no rebuild, no Stop-hook). The C# backend is
-# `dotnet watch --serve` on a pinned port (5174), so .cs edits recompile in ~seconds without losing
+# `dotnet watch -- serve` on a pinned port (5174), so .cs edits recompile in ~seconds without losing
 # the open window.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
@@ -18,6 +18,13 @@ make -C "$ROOT/src/native/liascape-audio" >/dev/null
 echo "==> building liascape-player"
 cargo build --release --manifest-path "$ROOT/src/player/Cargo.toml" >/dev/null
 
+# The units' definitions live in-tree (scripts/dev/*.service, @ROOT@ = this checkout's physical path):
+# (re)installed on every run, so a change to them reaches the running dev setup.
+UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+mkdir -p "$UNITS"
+for u in liascape-vite liascape-watch; do
+  sed "s|@ROOT@|$ROOT|g" "$ROOT/scripts/dev/$u.service" > "$UNITS/$u.service"
+done
 systemctl --user daemon-reload
 systemctl --user enable --now liascape-vite.service liascape-watch.service
 
@@ -26,6 +33,6 @@ systemctl --user --no-pager --plain is-active liascape-vite.service liascape-wat
 echo "    Vite HMR : http://localhost:5173"
 echo "    backend  : 127.0.0.1:5174  (dotnet watch)"
 echo ""
-echo "Now launch the app (liascape-ui / your launcher) — it auto-uses HMR while these run."
+echo "Now launch the app (liascape, or your launcher) — it auto-uses HMR while these run."
 echo "Logs : journalctl --user -fu liascape-vite   |   journalctl --user -fu liascape-watch"
 echo "Stop : systemctl --user stop liascape-vite liascape-watch   (or: scripts/dev-stop.sh)"

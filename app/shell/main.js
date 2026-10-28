@@ -1,6 +1,6 @@
 // Electron shell. Two modes, auto-detected:
 //  • DEV (HMR): if a Vite dev server is up on :5173 (systemd liascape-vite), load the UI from Vite
-//    (hot-reload) and talk to the systemd `dotnet watch -- --serve` backend (port via serve.port).
+//    (hot-reload) and talk to the systemd `dotnet watch -- serve` backend (port via serve.port).
 //  • PROD: no Vite → spawn our own backend (LIASCAPE_BACKEND or `dotnet run`) and load the built dist
 //    same-origin. Packaging spawns the published binary.
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
@@ -15,6 +15,9 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
 const portFile = path.join(os.homedir(), ".config", "liascape", "serve.port");
 const VITE = "http://localhost:5173";
+// Chromium's profile (the renderer's localStorage, caches) in ~/.config/liascape-shell — productName
+// "Liascape" would otherwise put it in ~/.config/Liascape, beside the backend's own ~/.config/liascape.
+app.setPath("userData", path.join(app.getPath("appData"), "liascape-shell"));
 
 // ── GPU / ozone platform selection (the load-bearing bit on Linux) ─────────────────────────────
 // ozone platform follows the ACTUAL session: Wayland if WAYLAND_DISPLAY is set, else X11. Use the
@@ -68,8 +71,8 @@ async function startBackend() {
   if (!env.LIASCAPE_PORT && prev && (await portFree(prev))) env.LIASCAPE_PORT = String(prev);
   const spawnIt = () => {
     backend = process.env.LIASCAPE_BACKEND
-      ? spawn(process.env.LIASCAPE_BACKEND, ["--serve"], { env, stdio: "inherit" })
-      : spawn("dotnet", ["run", "--project", "src/backend", "--", "--serve"], { cwd: repoRoot, env: { ...env, LIASCAPE_UI_DIR: uiDir }, stdio: "inherit" });
+      ? spawn(process.env.LIASCAPE_BACKEND, ["serve"], { env, stdio: "inherit" })
+      : spawn("dotnet", ["run", "--project", "src/backend", "--", "serve"], { cwd: repoRoot, env: { ...env, LIASCAPE_UI_DIR: uiDir }, stdio: "inherit" });
     backend.once("exit", () => {
       if (fs.existsSync(portFile) || !env.LIASCAPE_PORT || process.env.LIASCAPE_PORT) return;
       delete env.LIASCAPE_PORT; spawnIt();
@@ -102,7 +105,7 @@ ipcMain.handle("liascape:pick", async (_e, opts) => {
 
 function openWindow(loadUrl) {
   const win = new BrowserWindow({
-    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "liascape",
+    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "Liascape",
     webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, "preload.js") },
   });
   win.setMenuBarVisibility(false);

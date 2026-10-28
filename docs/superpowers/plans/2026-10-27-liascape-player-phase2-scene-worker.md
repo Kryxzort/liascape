@@ -74,7 +74,7 @@ task text where they differ:
   error; GREEN 4/4). Full matrix (`--changed liascape-player`, every cell — central files changed, `--jobs 2`, 33 min, load
   5–9 with other agents' runs): 748 pass / 1 fail / 2 error / 29 skip — `playlist × stripVol:other`,
   `globalDragVol`, `globalDragSpd` (a Settings slider "not found" / an override not saved in time), each passing 2/2
-  alone (load). `test-settings-merge.sh` 53/0, `--liascape-player-selftest` PASS.
+  alone (load). `test-settings-merge.sh` 53/0, `player-selftest` PASS.
 - **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
 - **GPU budget = a setting, default auto-throttle**: on missed compositor frames attributable to a scene, lower that
   scene's fps stepwise, restore when it recovers (logged; `probe`); the setting turns it off (fixed fps).
@@ -109,7 +109,7 @@ task text where they differ:
   `SceneLoudnessAssertions`, adapter IT § scene loudness (RED on the base backend: 13 failing, the rest 193 pass;
   GREEN 204/0). Crate suite: default 1 fail (`transport_meets_the_spike_budget`, worker CPU 7.6 % at load ~10 — a
   soundless scene, no loudness code runs; passes alone), `LIASCAPE_PLAYER_RENDER_WORKER=off` all pass;
-  `test-settings-merge.sh` 53/0; `--liascape-player-selftest` PASS; matrix (`--changed` → full, `--jobs 2`, 32 min)
+  `test-settings-merge.sh` 53/0; `player-selftest` PASS; matrix (`--changed` → full, `--jobs 2`, 32 min)
   751 pass / 0 fail / 0 error / 29 skip.
 - **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
   frame / preview, silent).
@@ -928,7 +928,7 @@ advances the rotation without a crash mark.
     `/next` skips scenes; `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
     == false` with a reason; `/stop` → the worker pid gone ≤ 1 s; the legacy section starts/kills no mpvpaper
 - [x] **Step 2:** `bash scripts/test-liascape-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
-- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/backend -- --liascape-player-selftest` → PASS;
+- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/backend -- player-selftest` → PASS;
   `cd app/ui && npm run build` ok.
 - [x] **Step 5:** Commit `Play Scenes Under liascape-player In The Backend`.
 

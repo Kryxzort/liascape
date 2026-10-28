@@ -614,7 +614,7 @@ public static class TransitionService
         if (_bin != null) return _bin.Length == 0 ? null : _bin;
         var env = Environment.GetEnvironmentVariable("LIASCAPE_TRANSITION_BIN");
         if (env != null && File.Exists(env)) { _bin = env; return env; }
-        // installed on PATH (~/.local/bin) or the repo build
+        // PATH (the launcher sets LIASCAPE_TRANSITION_BIN to libexec/liascape/) or the repo build
         foreach (var cand in new[] {
             PathLookup("liascape-transition"),
             RepoPath("src/native/liascape-transition/liascape-transition") })
@@ -626,7 +626,7 @@ public static class TransitionService
     {
         yield return env;
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".local", "share", "liascape-web", installed);
+            ".local", "lib", "liascape", installed);
         yield return RepoPath(repoTail);
     }
 

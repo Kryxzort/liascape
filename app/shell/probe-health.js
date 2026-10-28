@@ -132,7 +132,7 @@ app.whenReady().then(async () => {
       LIASCAPE_PLAYER_VRAM_PROBE: "none", LIASCAPE_TRANSITIONS_DIR: cat };
     for (const k of ["DISPLAY", "LIASCAPE_URL", "LIASCAPE_CLIPS", "LIASCAPE_OUT", "LIASCAPE_ONLY", "LIASCAPE_SHARD", "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES"]) delete env[k];
     const log = fs.openSync(E.LIASCAPE_BACKEND_LOG, "a");
-    const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
+    const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "serve"], { env, stdio: ["ignore", log, log] });
     fs.closeSync(log);
     if (E.LIASCAPE_BACKEND_PID_FILE) fs.writeFileSync(E.LIASCAPE_BACKEND_PID_FILE, String(ch.pid));
     if (!(await waitFor(async () => (await http("GET", "/health")).json?.ok === true, 40000, 200))) throw new Error("the restarted backend didn't answer /health");

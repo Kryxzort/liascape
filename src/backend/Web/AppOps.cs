@@ -232,7 +232,7 @@ public static class AppOps
         return item;
     }
 
-    // A volume keybind (`--action=volume-up|down`, `/volume {delta}`): PlayerHelper.AdjustVolume moves the
+    // A volume keybind (`liascape volume up|down`, `/volume {delta}`): PlayerHelper.AdjustVolume moves the
     // global or the playing wallpaper's own volume (`VolumeKeyTarget`); the UI holds its own copies of both
     // and saves the settings whole — tell it which one changed, or its next save / open modal reverts it.
     public static void VolumeKey(int delta)
@@ -243,13 +243,13 @@ public static class AppOps
             EventBus.Broadcast("settings-changed", new { volume = SettingsService.Load().Volume });
     }
 
-    // The keybind actions (`--action=<name>`, forwarded to a running backend's `/action` — ActionForward).
-    // null = done; else the reason it couldn't run. next-wallpaper/previous-wallpaper/random (and
+    // The keybind actions (`liascape <action>`, forwarded to a running backend's `/action` — ActionForward).
+    // null = done; else the reason it couldn't run. next/previous/random (and
     // play/toggle-play's Restore()) throw when the library/session has no item playable under the
     // current engine (e.g. an all-scene library under liascape-player, PlayerHelper.IsSkippedPath) — reported
     // cleanly, same contract as the /next /prev /random HTTP routes.
     public static readonly string[] Actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-        "next-wallpaper", "previous-wallpaper", "random", "volume-up", "volume-down"];
+        "next", "previous", "random", "volume-up", "volume-down"];
     public static string? RunAction(string action)
     {
         if (!Actions.Contains(action)) return $"unknown action (one of: {string.Join(", ", Actions)})";
@@ -284,10 +284,10 @@ public static class AppOps
                     else
                         PlayerHelper.Restore();
                     break;
-                case "next-wallpaper":
+                case "next":
                     PlayerHelper.NextWallpaper();
                     break;
-                case "previous-wallpaper":
+                case "previous":
                     PlayerHelper.PreviousWallpaper();
                     break;
                 case "random":

@@ -1,0 +1,30 @@
+# Template — scripts/dev.sh installs it into ~/.config/systemd/user/ with @ROOT@ = the repo's physical path.
+[Unit]
+Description=Liascape backend (dotnet watch -- serve, full restart on every change)
+After=default.target
+
+[Service]
+# The PHYSICAL path: /home/kryxzort/Projects is a symlink to /mnt/CachyOS/@home/kryxzort/Projects, and MSBuild's
+# IncrementalClean compares FileListAbsolute.txt by path string — building through two spellings deletes outputs.
+WorkingDirectory=@ROOT@
+Environment=LIASCAPE_PORT=5174
+# DOTNET_ROOT is provided by the flake devShell (was CachyOS /usr/share/dotnet — wrong on NixOS)
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=DOTNET_NOLOGO=1
+# graphical session env so the players this backend spawns (liascape-player / mpvpaper / LWE) can attach to the
+# compositor (else they die → no wallpaper). PassEnvironment forwards them from the user manager (which has
+# them: DISPLAY=:1 is this session's Xwayland — the old explicit DISPLAY=:0 fallback was wrong);
+# WAYLAND_DISPLAY/XDG_SESSION_TYPE keep explicit fallbacks in case they aren't imported at start.
+PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE HYPRLAND_INSTANCE_SIGNATURE
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=XDG_SESSION_TYPE=wayland
+# NixOS: run inside the flake devShell so dotnet + native build env are present (login shell = `nix` on PATH).
+# --no-hot-reload: every .cs change is a full rebuild + restart. A hot-reload delta never runs a NEW static
+# field's initializer (a merge left POST /settings on a null map, 2026-10-26) and one with a new static once
+# crashed the process (2026-09-22); the owner prefers restarts over staleness anyway.
+ExecStart=/bin/bash -lc 'exec nix develop @ROOT@ -c dotnet watch --no-hot-reload --project src/backend -- serve'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

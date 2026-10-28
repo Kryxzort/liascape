@@ -1,5 +1,5 @@
 {
-  description = "liascape — live wallpaper manager for Wayland (video + Wallpaper Engine scenes)";
+  description = "Liascape — live wallpaper manager for Wayland (video + Wallpaper Engine scenes)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -199,49 +199,41 @@
         dontUnpack = true;
         nativeBuildInputs = [ pkgs.makeWrapper ];
 
+        # The same layout install.sh makes (scripts/liascape resolves libexec/ + lib/ relative to itself):
+        # bin/liascape, libexec/liascape/<the internal executables>, lib/liascape/{ui,shell,transitions}.
         installPhase = ''
           runHook preInstall
-          mkdir -p $out/bin $out/share/liascape $out/share/applications
+          mkdir -p $out/bin $out/libexec/liascape $out/lib/liascape $out/share/applications
 
-          # transitions assets (shaders + manifest + preview frames)
-          cp -r ${./transitions} $out/share/liascape/transitions
+          # transitions assets (shaders + manifest + preview frames), the UI bundle, the Electron shell
+          cp -r ${./transitions} $out/lib/liascape/transitions
+          ln -s ${ui} $out/lib/liascape/ui
+          ln -s ${shellSrc} $out/lib/liascape/shell
 
-          # GUI launcher: electron shell → spawns the backend (--serve) + loads the UI.
-          makeWrapper ${pkgs.electron_42}/bin/electron $out/bin/liascape-ui \
-            --add-flags ${shellSrc} \
-            --set LIASCAPE_BACKEND ${backend}/bin/liascape-backend \
-            --set LIASCAPE_UI_DIR ${ui} \
-            --set LIASCAPE_TRANSITIONS_DIR $out/share/liascape/transitions \
-            --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
-            --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
-            --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
+          # the internal executables, off PATH (the player finds its scene worker next to its own exe too)
+          ln -s ${backend}/bin/liascape-backend $out/libexec/liascape/liascape-backend
+          ln -s ${liascape-player}/bin/liascape-player $out/libexec/liascape/liascape-player
+          ln -s ${liascape-player}/bin/liascape-scene-worker $out/libexec/liascape/liascape-scene-worker
+          ln -s ${liascape-transition}/bin/liascape-transition $out/libexec/liascape/liascape-transition
+          ln -s ${liascape-audio}/bin/liascape-audio $out/libexec/liascape/liascape-audio
+
+          # the one command: bare = the app (nixpkgs' electron — the bundled prebuilt can't load its libs
+          # here), `liascape <command>` = the backend's CLI, `liascape ctl …` = the player's
+          install -Dm755 ${./scripts/liascape} $out/bin/liascape
+          patchShebangs $out/bin/liascape
+          wrapProgram $out/bin/liascape \
+            --set-default LIASCAPE_ELECTRON ${pkgs.electron_42}/bin/electron \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
-
-          # Headless CLI (--restore/--action/daemons/--serve). Bare `liascape` opens the GUI.
-          makeWrapper ${backend}/bin/liascape-backend $out/bin/liascape-cli \
-            --set LIASCAPE_UI_DIR ${ui} \
-            --set LIASCAPE_TRANSITIONS_DIR $out/share/liascape/transitions \
-            --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
-            --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
-            --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
-            --prefix PATH : ${lib.makeBinPath runtimeTools}
-
-          cat > $out/bin/liascape <<EOF
-          #!${pkgs.runtimeShell}
-          # bare invocation → GUI; any flag → headless backend
-          if [ \$# -eq 0 ]; then exec $out/bin/liascape-ui; fi
-          exec $out/bin/liascape-cli "\$@"
-          EOF
-          chmod +x $out/bin/liascape
 
           cat > $out/share/applications/liascape.desktop <<EOF
           [Desktop Entry]
           Name=Liascape
           Comment=Live wallpaper manager (Wayland)
-          Exec=$out/bin/liascape-ui
+          Exec=$out/bin/liascape
           Type=Application
           Categories=Utility;
           Keywords=wallpaper;live;wayland;video;
+          StartupWMClass=liascape
           EOF
 
           runHook postInstall

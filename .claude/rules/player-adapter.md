@@ -12,7 +12,7 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
 
 ## Files
 - **`PlayerEngine.cs`** — `IsLiascapePlayer` (cached; lazy from settings.json, refreshed by `/settings`
-  via `PlayerHelper.SwitchEngineLive`, loaded at `--serve` start so a change compares against what
+  via `PlayerHelper.SwitchEngineLive`, loaded at `serve` start so a change compares against what
   actually runs), `WouldBeLiascapePlayer(s)`, `ScenesPlayable(s) = AllowScenes && (IsLiascapePlayer ?
   LiascapePlayerClient.Shared.ScenesAvailable : IsLweAvailable())` (the pure rule `ScenesPlayableFor`, lazy —
   only the running engine is asked), `SceneStatus(s)` / `SceneUnavailableReason(s)` (§ Scenes),
@@ -51,7 +51,7 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   player older than this build has no `health` and falls back to the CLI of the new binary.
 - **`LiascapePlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
 - **`MpvPropertyMap.cs`** — mpv IPC property sets → liascape-player properties.
-- **`LiascapePlayerSelfTest.cs`** — `liascape --liascape-player-selftest`.
+- **`LiascapePlayerSelfTest.cs`** — `liascape player-selftest`.
 - **`scripts/test-liascape-player-adapter.sh`** — the hermetic HTTP integration test (§ Integration test).
 
 ## Threading: nothing waits on the player under PlayerHelper's `_lock`
@@ -167,7 +167,7 @@ back to Legacy always stays possible).
   while the process we started lives, ≤ 30 s (it exiting ends the wait, with its exit hint). A failure
   keeps `_serveArgs`, so the fallback (`EnsureRunning`) starts the same arguments + `--restore`. Never twice onto the same build (a check that can't see through
   some wrapper must not restart the player every 10 s). **When**: before every switch (`Switch`, after
-  `EnsureRunning`), and from a 10 s check in `--serve` only while **no transition is pending** — an
+  `EnsureRunning`), and from a 10 s check in `serve` only while **no transition is pending** — an
   armed align:end switch would be dropped by the restart and the rotation would switch early (failure
   path), so an advance-on-end playlist upgrades at its next switch. `AutoSpawn=false` (self-test) never
   upgrades. `/player-engine` → `running {pid, supervisor, exe, started, stale}`.
@@ -212,7 +212,7 @@ code below it is unchanged)
 | `Apply(scene)` | liascape-player: `SceneUnavailableReason(s)` → its message (scene support off / the player can't: no worker, built `--no-scenes`, no WE assets — `scene-check`'s reason), a crashed non-whitelisted scene → "This scene crashed and won't be played — tick Whitelist…"; legacy's own AllowScenes / LWE-missing messages unchanged |
 | `ApplyTimedPlaylist` (liascape-player) | starts at the first item that isn't skipped (a crashed scene first in the list used to stop playback in `SwitchToFile`); `AdvanceToNext`'s history walk (a next after a previous) steps past a skipped one too |
 | `OnSceneBroken(path)` (from `source.broken`) | § Scenes |
-| `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
+| `/next` `/prev` `/random` (+ `liascape next\|previous\|random`, `random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
 | `ApplyTimedPlaylist` (Play / play-from / a timed restore) | `QueueNewSession` before its first switch (I1 — it was missing: Play and play-from while paused stayed paused; Apply/Launch already had it) |
 | `StepBackAndLaunch` (timed `prev`) | the item before `PlayingHistoryIndex`; none (a fresh session's first item) → nothing at all. With an advance-on-end pre-fetch it used to undo only the pre-fetch and relaunch the playing item — restarted, its armed switch cancelled |
 | `AppOps.Trash` | `LiascapePlayerMedia.ShownOrIncomingPaths()` (one `state` read after a bounded `Drain`): every layer's content (an effect's `to`, never its leaving `from`) + each requested switch's B unless it's an aligned one in `waiting_start` — so trashing an item whose switch was requested but not yet running still stops/advances (web-backend.md § Trash) |
@@ -315,7 +315,7 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
   (the item restarts, like the countdown). **Never reset by an edit.** Persisted in `timed_state.json`
   (`ItemPlayedMs` + `PlayedSavedAtMs`); `LoadTimedState` adds the time since that save unless paused
   (`PlayedAfterLoad`) — the player outlives the backend and played on while no process counted (a backend restart,
-  the `--timer-daemon` hand-over, which is SIGKILLed without saving).
+  the `timer-daemon` hand-over, which is SIGKILLed without saving).
 - **1-item playlist**: never switches itself (`CanRotate`; no aligned switch is armed, no limit fires — the scene
   timing neither).
 - **User switches** (next / prev / random / restore / play-from): the new item's play time starts at 0.
@@ -528,7 +528,7 @@ computed for the playing item at request time landed on whatever played when it 
 - **Pause — the contract (final review I1/I3).** The PLAYER owns pause: `player.paused`, persisted
   in its snapshot and restored with it across a crash restart. The backend keeps **no copy**:
   `TogglePause` reads `get player.paused` and sets the opposite (so a keybind's one-shot
-  `--action=toggle-pause` CLI process and the serve backend always agree), and R81's reapply
+  `liascape toggle-pause` CLI process and the serve backend always agree), and R81's reapply
   reads it (logged) but never re-asserts it. A pause belongs to its **session**: `stop` clears it
   on the player side, and a new session — `Apply`, `ApplyPlaylist`, a cold `Launch` — queues `set
   player.paused false` (`LiascapePlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
@@ -639,7 +639,7 @@ python3; builds liascape-player via the flake devShell + `dotnet build` unless `
 sleep; a window is measured from the clip's own position; "what had happened by t" is judged by the events'
 own `t_mono_ms`/`t_wall` (reads after a window took seconds under load); fixed windows remain only where the
 window is the check (no switch in N s) and the latency bounds (< 500 ms SIGSTOPped, < 100 ms) keep theirs —
-docs/TODO.md "Load-sensitive test flakes". The REAL `liascape --serve` (from this tree's
+docs/TODO.md "Load-sensitive test flakes". The REAL `liascape serve` (from this tree's
 `bin/Debug`) against a private `liascape-player serve --headless --outputs 640x360@60,320x180@60 --clock real
 --ao null`, all over HTTP, checked with `liascape-player ctl`. **Hermetic**: temp HOME + every XDG dir (own
 settings.json with `PlayerEngine=liascape-player`, own library, own liascape-player socket + event log), its own
@@ -649,7 +649,7 @@ SIGCONTs + stops the player and the backend and removes the temp dir. Covers: `/
 full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps
 (+ VideoFps 30 × an image item: it plays — the player never caps a still, player-core.md § Sources), HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
 (interval 20 s + Wait + Advance, 2 s clips → align:end advances); `/next` mid-wait; `/next` during an aligned switch's running effect (1.5 s fade on a 4 s clip: → the item AFTER its B, the running one committed — handoff, not cancelled; RED before: → the same B, cancelled); `/stop`;
-`/library/volume|speed` on the playing item; **final review**: a CLI `--action=toggle-pause` (a
+`/library/volume|speed` on the playing item; **final review**: a CLI `liascape toggle-pause` (a
 separate process) surviving a compositor kill -9 + the backend's reapply (I3), pause → `/stop` →
 `/apply` and pause → `/apply` both playing (I1), all outputs removed during an advance-on-end
 rotation → no switch storm (≤ 2 requests in 8 s), the last target parked and shown on replug,
@@ -662,7 +662,7 @@ follows the global to one with its own override 30 / 0.8× moves A only, persist
 and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LIASCAPE_PLAYER_BIN` is a link into `$T/bin`, replaced by a
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
 a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
-owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend
+owns `gui_timer.pid`, no `timer-daemon` left (RED before: 7 superseded switches); a second backend
 started while the first runs → the first yields ("stops ticking"); **a crash while an aligned switch is
 armed** (E1 → E2): E1 comes back at its position (not E2), the switch is re-armed `align:end`, no `align:now`,
 one handoff at E1's end (RED before: E2 restored at once + an `align:now` switch after the 1 s back-off); **a crash
@@ -731,7 +731,7 @@ exports `PULSE_SERVER` at that socket (libpulse can't fall back to another serve
 
 ## Self-test
 `LIASCAPE_PLAYER_BIN=<repo>/src/player/target/debug/liascape-player dotnet run --project src/backend --
---liascape-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
+player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
 assertions on synthetic `pactl` blocks, **`ScenePropertyAssertions`** (a project.json with the corpus's odd cases —
 BOM, untyped / `"Text"` HTML labels, `ui_*` keys, numeric combo values, `fraction: false`, a 0–255 colour, conditions
 with `|| ( ) !` and a stray `=`, usershortcut / scenetexture, `order` vs `index` —: order, types, labels, defaults;

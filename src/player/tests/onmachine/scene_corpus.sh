@@ -31,7 +31,7 @@
 #                        it (`--screenshot`), then list the scenes that start there but not here.
 #                        THIS DRAWS ON THE REAL OUTPUT NAMED BY --legacy-output (it takes over the
 #                        desktop session for ~20 s per scene): owner-run only, never in a test lane.
-#                        Stop the app's own wallpaper first (`liascape --kill`); the runner kills
+#                        Stop the app's own wallpaper first (`liascape kill`); the runner kills
 #                        each LWE it started and nothing else.
 #   --legacy-output NAME the output LWE draws on (required with --ab-legacy, e.g. DP-1)
 #   --legacy-delay N     LWE's --screenshot-delay in frames (default 120 = 4 s at 30 fps)

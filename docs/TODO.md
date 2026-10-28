@@ -308,8 +308,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] **The owner's installed `liascape` (NixOS package) predates liascape-player entirely** — done 2026-10-25: `/etc/nixos/liascape.nix` re-pinned to the local `liascape-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
       `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `liascape-backend.dll` —
       zero occurrences of `PlayerEngine`/`LIASCAPE_PLAYER_BIN` anywhere, while the current dev build has both. So
-      every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
-      `liascape-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
+      every one-shot CLI command (`restore`, `random`, `kill`, a keybind action) silently runs legacy whenever
+      `liascape-player` is selected, even though the long-running `serve` backend (what the UI talks to) is fine.
       Needs an actual rebuild from this branch, not a code change — **owner action:**
       `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
 - [x] **No explicit cap on concurrent `lia-open` worker threads** (final review I5's async mpv-core-open
@@ -441,7 +441,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `crash_restores` still fails 6/19 there on its 1.5 s `RESTART_BUDGET` (hello 1.5–3.6 s after a SIGSEGV
       under IO load) — a stated latency budget, kept; measured, not fixed.
 - [ ] **UI × player-state matrix** (`scripts/test-ui-matrix.sh`, driver `app/shell/probe-matrix.js`: every
-      playback control of the real UI + every `--action` keybind × idle / single / playlist / effect running /
+      playback control of the real UI + every keybind command × idle / single / playlist / effect running /
       align:end pending / paused / paused mid-effect / no output / muted, hermetic). Fixed from its first run:
       trash left items in the playlist (a rotation played the missing file; an armed switch still fired to
       it), trashing an item whose switch was requested but not yet running kept it playing, undo didn't put
@@ -699,7 +699,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
   - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
-        --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape --kill`). Lists the
+        --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
         = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
   - [x] **LWE: catch exceptions at the wp_* C API** (2026-10-28, fork patch 0015) — the C entry points already

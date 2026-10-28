@@ -333,7 +333,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Produces:
   - `pub struct Catalogue { … }`
   - `Catalogue::load(dir: &Path) -> Result<Catalogue, String>`
-    - dir = `LIASCAPE_TRANSITIONS_DIR` → `~/.local/share/liascape-web/transitions` → repo `transitions/`
+    - dir = `LIASCAPE_TRANSITIONS_DIR` → `~/.local/lib/liascape/transitions` → repo `transitions/`
   - `Catalogue::ids() -> Vec<String>`
   - `Catalogue::program(&Gfx, id) -> Result<&EffectProgram, String>` (lazy compile + cache)
   - `EffectProgram::draw(&Gfx, from: &Tex, to: &Tex, progress: f64, ratio: f64, params: &serde_json::Map)`
@@ -683,7 +683,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Modify: `src/backend/Helpers/AudioMonitor.cs` (`GetNonMpvStreamIdsAsync`: exclude the liascape-player bus playback stream)
 - Modify: `src/backend/Helpers/TransitionService.cs`: extract `public static (string effectId, Dictionary<string,double[]> uniforms, int durationMs, string method)? Pick(Config cfg)` from `TryStart` (reuses `PickEffect`/`PickDuration`; no capture work)
 - Modify: `src/backend/Web/ServerHost.cs` (`/settings`: a `PlayerEngine` change → `PlayerHelper.SwitchEngineLive(prev, cur)` = stop the old engine, replay `LastSession` on the new one)
-- Modify: `src/backend/Program.cs`: hidden `--liascape-player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
+- Modify: `src/backend/Program.cs`: hidden `player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
 - Modify: `app/ui/src/views/Settings.tsx` (advanced row "Player engine": Legacy / liascape-player (experimental)), `app/ui/src/store/index.ts` (default `playerEngine: "legacy"`)
 - Create: `.claude/rules/player-adapter.md` (`paths: ["src/backend/Player/**"]`): the dispatch points, the property map, the event flow
 
@@ -712,15 +712,15 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
   - `AudioMonitor` (legacy auto-mute, still used in Phase 1): `GetNonMpvStreamIdsAsync` also skips streams whose
     `node.name` starts with `liascape-player-bus` or whose `application.name` is `liascape-player`.
 
-- [ ] **Step 1: Write the failing self-test** (`--liascape-player-selftest`):
+- [ ] **Step 1: Write the failing self-test** (`player-selftest`):
   - `MpvPropertyMap` assertions: `volume 50` → `gain.user = −18.0618 ± 1e-3`; `volume 100` → 0; `panscan 0.0` → `fit:"fit"`; `aid no` → `no_audio:true`
   - round-trip: `hello`; a `transition` colour→clip with `align:now` receives `transition.handoff`
-- [ ] **Step 2:** Run `dotnet run --project src/backend -- --liascape-player-selftest` → FAIL.
+- [ ] **Step 2:** Run `dotnet run --project src/backend -- player-selftest` → FAIL.
 - [ ] **Step 3:** Implement the four classes + dispatch + UI row. Legacy branches stay byte-for-byte when `!IsLiascapePlayer`.
 - [ ] **Step 4:** Self-test → PASS. Then on-machine with `PlayerEngine=liascape-player` via `curl -X POST /settings`:
   - `/apply` a clip; `/next` in the owner's `dp` playlist
   - timed interval 20 s with `WaitForVideoEnd` + `AdvanceOnVideoEnd` (the owner's settings)
-  - live `/settings` changes of Volume, Speed, Loop, VideoScale, VideoFps, HwDec, NoAudio, NormalizeAudio; mute toggle; pause toggle; `--action=volume-up`
+  - live `/settings` changes of Volume, Speed, Loop, VideoScale, VideoFps, HwDec, NoAudio, NormalizeAudio; mute toggle; pause toggle; `liascape volume-up`
   - each takes effect on the playing wallpaper without a restart (`ctl state` confirms)
   - switching back to `legacy` restores today's behaviour
   - `automute_ignores_own_bus`: `AutoMute=true`, delay 0, a clip playing for 30 s → no `SetMute(true)`, and the
@@ -746,7 +746,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - [ ] **Step 3:** Verify:
   - `env -u LD_LIBRARY_PATH nix build .#default` succeeds
   - the grep finds `LIASCAPE_PLAYER_BIN` in both wrappers
-  - `result/bin/liascape-cli --liascape-player-selftest` prints `PASS`
+  - `result/bin/liascape-cli player-selftest` prints `PASS`
   - `bash -n scripts/install.sh` passes
   - with `PATH` lacking cargo, `install.sh` exits non-zero with the hint
 - [ ] **Step 4:** Commit: `git commit -m "Packaging: Build and Wire liascape-player"`.

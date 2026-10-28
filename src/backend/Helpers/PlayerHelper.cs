@@ -224,7 +224,7 @@ public static class PlayerHelper
 
     // PulseAudio stream-restore continuously saves the linux-wallpaperengine app volume, so a transient
     // crossfade value (e.g. 25% mid-fade, or 0% at fade-out) gets remembered and poisons the NEXT fresh
-    // scene launch (first playlist item / --restore / --random) — which has no crossfade to set the right
+    // scene launch (first playlist item / restore / random) — which has no crossfade to set the right
     // level → it comes up silent/quiet. LWE forces its own application.name and pipewire ignores
     // module-stream-restore.id, so we can't change the restore key. Instead, correct reactively: hold the
     // just-launched scene at `target` via liascape-audio (event-driven → overrides the restored value the instant
@@ -310,7 +310,7 @@ public static class PlayerHelper
         try { if (File.ReadAllText(GuiTimerPidPath).Trim() == Environment.ProcessId.ToString()) File.Delete(GuiTimerPidPath); } catch { }
     }
 
-    // Another live `--serve` backend's pid in gui_timer.pid (it took the timed playlist over), else null.
+    // Another live `serve` backend's pid in gui_timer.pid (it took the timed playlist over), else null.
     // Checked by its cmdline, not liveness alone: a stale file's pid may belong to anything by now.
     private static int? OtherTimerOwner()
     {
@@ -318,13 +318,13 @@ public static class PlayerHelper
         {
             if (!int.TryParse(File.ReadAllText(GuiTimerPidPath).Trim(), out int pid) || pid == Environment.ProcessId) return null;
             var argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0');
-            return argv.Contains("--serve") && argv.Any(a => a.Contains("liascape")) ? pid : null;
+            return argv.Contains("serve") && argv.Any(a => a.Contains("liascape")) ? pid : null;
         }
         catch { return null; }
     }
 
     // This process stops owning the timed playlist — its backend is shutting down and hands it to a
-    // `--timer-daemon`, or another backend took it over — WITHOUT touching the session the new owner
+    // `timer-daemon`, or another backend took it over — WITHOUT touching the session the new owner
     // resumes from (saved first; TeardownTimer would clear it and consume a pending action): no more
     // ticks, and its armed end-of-video wait is cancelled (the new owner arms its own; left armed, it
     // would be superseded and switch now). The stopping backend used to tick on until the process exited
@@ -378,7 +378,7 @@ public static class PlayerHelper
                 RedirectStandardError = true,
             };
             foreach (var a in selfArgs) psi.ArgumentList.Add(a);
-            psi.ArgumentList.Add("--timer-daemon");
+            psi.ArgumentList.Add("timer-daemon");
             var proc = System.Diagnostics.Process.Start(psi);
             if (proc != null)
             {
@@ -392,7 +392,7 @@ public static class PlayerHelper
     // Build the argv prefix needed to re-invoke this same liascape process
     // (without args).
     //   - Self-contained (AppImage, install.sh): the apphost binary and
-    //     entry assembly share a name (liascape / liascape-backend.dll). The
+    //     entry assembly share a name (liascape-backend / liascape-backend.dll). The
     //     apphost runs its bundled dll automatically; we just spawn it.
     //   - Framework-dependent (AUR PKGBUILD): the process executable is the
     //     dotnet host. We need to pass the entry assembly path so the
@@ -410,7 +410,7 @@ public static class PlayerHelper
             return args;
 
         // Apphost vs dotnet host: in a self-contained build the apphost is
-        // named after the assembly (liascape ↔ liascape-backend.dll), so the names
+        // named after the assembly (liascape-backend ↔ liascape-backend.dll), so the names
         // match and we don't need a separate dll arg. Framework-dependent
         // builds run under `dotnet` whose name differs.
         var procStem = Path.GetFileNameWithoutExtension(processPath);
@@ -488,7 +488,7 @@ public static class PlayerHelper
                 RedirectStandardError = true,
             };
             foreach (var a in selfArgs) psi.ArgumentList.Add(a);
-            psi.ArgumentList.Add("--restart-daemon");
+            psi.ArgumentList.Add("restart-daemon");
             var proc = System.Diagnostics.Process.Start(psi);
             if (proc != null)
             {
@@ -593,7 +593,7 @@ public static class PlayerHelper
         }
     }
 
-    // Entry point for the --restart-daemon CLI flag. Blocks indefinitely,
+    // Entry point for the restart-daemon CLI flag. Blocks indefinitely,
     // restarting mpvpaper every RestartIntervalSeconds. Killed when the GUI opens.
     public static void RunRestartDaemon()
     {
@@ -1034,7 +1034,7 @@ public static class PlayerHelper
         lock (_lock)
         {
             if (_timerReleased) return;
-            // a backend started while this one still runs (a dev restart, a second `--serve`) took over
+            // a backend started while this one still runs (a dev restart, a second `serve`) took over
             if (!_daemonMode && DateTime.UtcNow - _ownerCheckedAt > TimeSpan.FromSeconds(1))
             {
                 _ownerCheckedAt = DateTime.UtcNow;
@@ -3502,8 +3502,8 @@ public static class PlayerHelper
                 using (p) { try { p.Kill(entireProcessTree: true); } catch { } }
     }
 
-    // Graceful shutdown reaper for the long-lived daemons (--monitor/--timer-daemon/--restart-daemon).
-    // Those receive SIGTERM ONLY on system shutdown / session-stop: GUI close kills just the --serve
+    // Graceful shutdown reaper for the long-lived daemons (monitor-daemon/timer-daemon/restart-daemon).
+    // Those receive SIGTERM ONLY on system shutdown / session-stop: GUI close kills just the serve
     // backend (the wallpaper must SURVIVE that), and the app tears its OWN daemons down with
     // Process.Kill() = SIGKILL (no handler fires). So a SIGTERM/HUP reaching a daemon == the machine is
     // going down → reap the whole wallpaper tree, so detached mpvpaper doesn't linger, hold /home busy,

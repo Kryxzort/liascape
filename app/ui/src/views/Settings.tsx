@@ -209,7 +209,7 @@ export const Settings = memo(function Settings() {
   };
 
   const actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-    "next-wallpaper", "previous-wallpaper", "random", "volume-up", "volume-down"];
+    "next", "previous", "random", "volume-up", "volume-down"];
 
   // Global transition config (the fallback used when a playlist doesn't override). The picker speaks
   // the per-playlist field names, so adapt to/from the global* keys.
@@ -450,12 +450,12 @@ export const Settings = memo(function Settings() {
       <Section title="Keybind reference" icon={<Keyboard size={15} />}>
         {actions.map((a) => (
           <Row key={a} label={a}>
-            <code className="kb">liascape --action={a}</code>
-            <button className="mini" onClick={() => navigator.clipboard?.writeText(`liascape --action=${a}`)}>copy</button>
+            <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
+            <button className="mini" onClick={() => navigator.clipboard?.writeText(`liascape ${a.replace("volume-", "volume ")}`)}>copy</button>
           </Row>
         ))}
-        <Row label="Autostart"><code className="kb">liascape --restore</code>
-          <button className="mini" onClick={() => navigator.clipboard?.writeText("liascape --restore")}>copy</button></Row>
+        <Row label="Autostart"><code className="kb">liascape restore</code>
+          <button className="mini" onClick={() => navigator.clipboard?.writeText("liascape restore")}>copy</button></Row>
       </Section>
 
       <Section title="Library" icon={<LibraryIcon size={15} />}>

@@ -29,7 +29,7 @@ The interface is an **Electron + React** app over a **headless C# backend** — 
 yay -S liascape-git
 ```
 
-> ⚠️ The AUR package currently still builds the **legacy single-binary app**, not this Electron+backend rewrite. Until the `PKGBUILD` is updated, install from source.
+> ⚠️ Not published to the AUR yet — `scripts/PKGBUILD` builds through `scripts/install.sh` (`makepkg` in `scripts/`); until it is, install from source.
 
 ### From source
 
@@ -39,7 +39,7 @@ cd liascape
 bash scripts/install.sh            # add --no-scenes to build without Wallpaper Engine scene support under liascape-player
 ```
 
-Builds the React UI, publishes the self-contained C# backend, and installs **`liascape`** to `~/.local/bin` (bare = open the GUI; flags = CLI/daemons), plus **`liascape-ui`** (explicit GUI launcher) and a desktop entry.
+Builds the React UI, publishes the self-contained C# backend, builds the player, and installs **`liascape`** to `~/.local/bin` (bare = open the app; `liascape <command>` = the CLI) and a desktop entry. Its internal programs go to `~/.local/libexec/liascape/` (off `PATH`), the UI, the Electron shell and the effect catalogue to `~/.local/lib/liascape/` — `bash scripts/install.sh --dry-run` prints the layout.
 
 > The install script assumes its runtime deps (`ffmpeg`, `mpvpaper`, Electron, …) resolve from your system in the usual FHS paths — true on Arch/Ubuntu/Fedora. **NixOS has no global lib paths**, so use the flake below instead; it carries every dependency with it.
 
@@ -107,13 +107,15 @@ All three pull the full dependency closure — the app never relies on system li
 
 ```bash
 liascape                     # open the app (Electron GUI)
-liascape --restore           # re-apply the last wallpaper, no GUI (for autostart)
-liascape --random            # pick a random wallpaper (from the active playlist if one's running, otherwise the library)
-liascape --kill              # stop the wallpaper
-liascape --action=<action>   # control the running session (see Compositor keybinds)
+liascape restore            # re-apply the last wallpaper, no GUI (for autostart)
+liascape random             # pick a random wallpaper (from the active playlist if one's running, otherwise the library)
+liascape kill               # stop the wallpaper
+liascape next               # control the running session (see Compositor keybinds)
+liascape ctl state          # what the player shows (its control socket: state, logs, probe, …)
+liascape help               # every command
 ```
 
-Bare `liascape` opens the GUI; any flag runs the headless side (`--serve` is the local backend the GUI talks to). `liascape-ui` also launches the GUI directly.
+Bare `liascape` opens the app; `liascape <command>` runs it headless (`serve` is the local backend the app starts itself).
 
 ### Autostart
 
@@ -121,35 +123,35 @@ To restore your wallpaper on login, add to your compositor config:
 
 **Hyprland** (`hyprland.conf`):
 ```ini
-exec-once = liascape --restore
+exec-once = liascape restore
 ```
 
 **Sway** (`config`):
 ```ini
-exec liascape --restore
+exec liascape restore
 ```
 
 ### Compositor keybinds
 
-`--action=<action>` controls a running session without opening the UI. Available actions:
+`liascape <action>` controls a running session without opening the UI. Available actions:
 
 - `stop` — stop playback
 - `play` — relaunch the last session
 - `toggle-play` — stop if playing, otherwise relaunch the last session
 - `toggle-pause` — pause/resume playback (and freeze/resume the playlist timer)
 - `toggle-mute` — toggle audio mute
-- `next-wallpaper` — skip forward in the playlist
-- `previous-wallpaper` — go back one wallpaper
+- `next` — skip forward in the playlist
+- `previous` — go back one wallpaper
 - `random` — pick a random wallpaper (from the active playlist if one's running, otherwise the library)
-- `volume-up` / `volume-down` — adjust volume by 5 (persists; clamped 0-100)
+- `volume up` / `volume down` — adjust volume by 5 (persists; clamped 0-100)
 
 The Settings tab provides ready-to-copy snippets for each.
 
 **Hyprland** example:
 ```ini
-bind = SUPER, M, exec, liascape --action=toggle-mute
-bind = SUPER, N, exec, liascape --action=next-wallpaper
-bind = SUPER, P, exec, liascape --action=toggle-play
+bind = SUPER, M, exec, liascape toggle-mute
+bind = SUPER, N, exec, liascape next
+bind = SUPER, P, exec, liascape toggle-play
 ```
 
 ## Sources
@@ -189,13 +191,13 @@ The Settings tab covers:
 ## Building
 
 ```bash
-bash scripts/dev.sh                              # dev: Vite HMR + dotnet watch (then launch liascape-ui)
+bash scripts/dev.sh                              # dev: Vite HMR + dotnet watch (then launch liascape)
 cd app/ui && npm run dev                         # UI only, in a browser (append ?api=<backend-port>)
-dotnet run --project src/backend -- --serve    # backend only (headless local API)
-bash scripts/install.sh                          # build UI + backend, install liascape + liascape-ui
+dotnet run --project src/backend -- serve    # backend only (headless local API)
+bash scripts/install.sh                          # build UI + backend, install liascape
 ```
 
-> Packaging (AppImage / AUR) is **not** rebuilt for the Electron stack yet — `scripts/build-appimage.sh` + `PKGBUILD` still target the old single-binary app. Use `scripts/install.sh` for now.
+> Packaging: `scripts/PKGBUILD` and `scripts/build-appimage.sh` both build through `scripts/install.sh` (same layout); the Nix flake builds the same layout declaratively.
 
 ## License
 

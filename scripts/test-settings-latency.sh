@@ -74,7 +74,7 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
-"$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")

@@ -21,7 +21,7 @@ paths:
 - liascape-player GPU / VRAM (live; `player-adapter.md` § Scenes): `SceneThrottle` (true), `SceneVramLimitEnabled` (false) + `SceneVramLimitMib` (1536, 64–1048576), `VramLowMode` (`stop` | `pause` | `off`)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `WallpaperBgAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `liascapeDbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
-- `LastSession`: tracks last applied mode for `--restore`
+- `LastSession`: tracks last applied mode for `liascape restore`
 
 `CustomPlaylist` (JSON at `~/.config/liascape/playlist_state.json` for in-progress; named files in `~/.local/share/liascape/playlists/`):
 - `VideoPaths`, `Name` (nullable; only set after Save or Load)
@@ -29,7 +29,7 @@ paths:
 - `IntervalSeconds`/`AdvanceOnVideoEnd`/`MaxPlaySeconds`/`SeparateSceneTiming`/`SwitchScenesAfterSeconds` only used when `OverrideGlobalSettings` is true. The maximum and the scene timing are NOT in `LastSession`: a session reads it from the current playlist state + settings at its start / restore / resume (like the transitions); the minimum is the session's own interval.
 
 `LastSession` model fields:
-- `IsPlaylist` — Play All session; `IsTimedPlaylist` — timed playlist; `IsRandom` — `--random` session
+- `IsPlaylist` — Play All session; `IsTimedPlaylist` — timed playlist; `IsRandom` — `random` session
 - `Paths` — path(s) used; `Shuffle` — shuffle was on
 - `TimedIntervalSeconds` (the timer, or the minimum under advance-on-end), `AdvanceOnVideoEnd`, `OverrideGlobalSettings` — restores exact interval/mode rather than current globals
 
@@ -80,7 +80,7 @@ matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`, `seq:plP
 ## WE Auto-Import
 
 `LibraryService.SyncWallpaperEngine(workshopPath, allowScenes, weCopyFiles)` — headless scan of the WE workshop dir. Creates `local/<id>` symlinks + index entries; returns newly-added paths (a video file, or the scene **folder** — scenes are folders now, no `.scene` marker). Called:
-- `--serve` startup: `RunHeadlessAutoSync()` off-thread in `ServerHost` (then broadcasts the `library-synced` WS event)
-- `--restore`: `RunHeadlessAutoSync()` in `Program.cs` before `PlayerHelper.Restore()`
+- `serve` startup: `RunHeadlessAutoSync()` off-thread in `ServerHost` (then broadcasts the `library-synced` WS event)
+- `liascape restore`: `RunHeadlessAutoSync()` in `Program.cs` before `PlayerHelper.Restore()`
 
 After sync, if `AutoAddLibraryToPlaylist` is true: `AddCardToPlaylist` for each new item, then `AppendToActivePlaylist` for mid-session injection, and `LastSession.Paths` updated + saved so next `--restore` includes them.

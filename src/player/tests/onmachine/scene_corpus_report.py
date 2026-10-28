@@ -392,7 +392,7 @@ def write_md(rep, path):
         a("each scene on a real output for ~20 s), so the owner runs it:")
         a("")
         a("```sh")
-        a("liascape --kill   # stop the app's own wallpaper first")
+        a("liascape kill   # stop the app's own wallpaper first")
         a("bash src/player/tests/onmachine/scene_corpus.sh --ab-legacy --legacy-output DP-1 \\")
         a("     --reuse /tmp/liascape-scene-corpus-<stamp>   # reuse this run's liascape-player half (or omit to redo it)")
         a("```")

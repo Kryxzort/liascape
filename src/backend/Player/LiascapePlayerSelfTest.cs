@@ -11,7 +11,7 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// Hidden `liascape --liascape-player-selftest`: MpvPropertyMap + stream-ownership assertions, then a
+// Hidden `liascape player-selftest`: MpvPropertyMap + stream-ownership assertions, then a
 // protocol round-trip against a PRIVATE `liascape-player serve --headless --clock stepped --ao null`
 // (temp XDG_RUNTIME_DIR/XDG_STATE_HOME + its own socket, killed at the end). It never touches a
 // real running player: the shared client is pointed at the temp socket and never auto-spawns.
@@ -552,7 +552,7 @@ public static class LiascapePlayerSelfTest
     // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
     // private IsSkippedPath uses, reused here rather than invented (.claude/rules/player.md /
     // player-adapter.md: "skipped exactly like AllowScenes=false"). Needs no player, no
-    // mpvpaper, no `--serve` — pure decision logic, so this also covers the "legacy engine
+    // mpvpaper, no `serve` — pure decision logic, so this also covers the "legacy engine
     // check that scenes are still reachable when AllowScenes=true" requirement without needing
     // linux-wallpaperengine installed on the test box (it stops at the decision point when LWE
     // isn't on PATH here — documented below, same allowance task-20c gives the IT script).
@@ -925,7 +925,7 @@ public static class LiascapePlayerSelfTest
                 else Phase($"R81: stall recovery triggered a reapply ({LiascapePlayerMedia.ReapplyCount}x so far)");
 
                 // I3 (final review): the pause is toggled by ANOTHER process (a keybind's one-shot
-                // `liascape --action=toggle-pause` — here a second, independent client): this
+                // `liascape toggle-pause` — here a second, independent client): this
                 // backend has no memory of it, and must never re-assert one. After the supervised
                 // restart below (whose snapshot restores `player.paused`) and its R81 reapply, the
                 // pause must still be on — not flipped.

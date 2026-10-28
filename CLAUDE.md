@@ -1,6 +1,12 @@
 # CLAUDE.md
 
-**liascape** — Linux live-wallpaper manager for Wayland. An **Electron + React** UI over a **headless C# backend**: the same `liascape` binary runs the CLI, the background daemons, and a loopback web API (`--serve`) that the UI talks to. Wallpapers are applied via [mpvpaper](https://github.com/GhostNaN/mpvpaper) (videos) and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (WE scenes).
+**Liascape** — Linux live-wallpaper manager for Wayland. An **Electron + React** UI over a **headless C# backend**: users type one command, `liascape` (`scripts/liascape`, a launcher — bare = the app, `liascape <command>` = the CLI, `liascape ctl …` = the player's control socket); the backend executable `liascape-backend` runs the CLI, the background daemons, and a loopback web API (`serve`) that the UI talks to. Wallpapers are played by `liascape-player` (the Rust compositor; or, under the legacy engine, [mpvpaper](https://github.com/GhostNaN/mpvpaper) for videos and [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) for WE scenes).
+
+**Names.** The one command `liascape`; the internal executables (off `PATH`, in `<prefix>/libexec/liascape/`):
+`liascape-backend` (C#, `src/backend/`), `liascape-player` + `liascape-scene-worker` (Rust, `src/player/`),
+`liascape-transition` + `liascape-audio` (C, legacy engine, `src/native/`). Env vars `LIASCAPE_*`; dirs
+`~/.config/liascape`, `~/.local/share/liascape`, `~/.local/state/liascape`, `~/.cache/liascape`,
+`$XDG_RUNTIME_DIR/liascape`; OS thread names `lia-<role>` (Linux caps them at 15 bytes); C# namespace `Liascape`.
 
 ## System Dependencies
 
@@ -20,39 +26,42 @@
 ## Common Commands
 
 ```bash
-bash scripts/dev.sh                              # dev: Vite HMR (:5173) + dotnet watch --serve (:5174) as systemd user units
-liascape                                        # open the app (GUI) — bare command launches the Electron shell
-liascape-ui                                     # explicit GUI launcher (Electron)
-dotnet run --project src/backend -- --serve    # backend only (headless loopback API)
-cd app/ui && npm run dev                          # React UI only, in a browser (append ?api=<backend-port>)
-dotnet build src/backend                        # build backend (no solution file at root)
-cd app/ui && npm run build                        # build the UI bundle (dist/)
-bash scripts/install.sh                           # build UI + publish backend, install liascape + liascape-ui
+bash scripts/dev.sh                              # dev: Vite HMR (:5173) + `dotnet watch -- serve` (:5174) as systemd user units (liascape-vite / liascape-watch, defined in scripts/dev/)
+liascape                                         # open the app (GUI) — the launcher runs Electron on lib/liascape/shell
+liascape help                                    # every CLI command
+dotnet run --project src/backend -- serve        # backend only (headless loopback API)
+cd app/ui && npm run dev                         # React UI only, in a browser (append ?api=<backend-port>)
+dotnet build src/backend                         # build backend (no solution file at root)
+cd app/ui && npm run build                       # build the UI bundle (dist/)
+bash scripts/install.sh                          # build everything, install bin/liascape + libexec/liascape/ + lib/liascape/ (--dry-run prints the layout)
 electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (offscreen, counts rendered elements)
 ```
 
 > **Note:** `app/shell` has its own Electron (decoupled from `demos/`, which is the old framework bake-off — kept, untracked). The CDP debug window (`LIASCAPE_DEBUG=1`, port `:9222`, `node app/shell/cdp.js "<expr>"`) is for read-only inspection.
 
-## CLI Flags
+## CLI
 
-`liascape` with **no args opens the GUI**; any flag runs headless:
+`liascape` with **no command opens the app**; `liascape <command>` runs headless (the launcher hands every command but
+`ctl` to `liascape-backend`, whose `Program.cs` parses it — `liascape-backend` with no command = `serve`):
 
-- `--serve` *(internal default for the backend)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`. The Electron shell spawns this with an explicit `--serve`.
-- `--restore` — re-applies last session without a UI. Timed playlists: `setsid`-spawns `--timer-daemon` and returns.
-- `--random` — picks a random library wallpaper, applies, exits. Saves the pick so `--restore` replays it.
-- `--kill` — stops playback, exits.
-- `--monitor` *(internal)* — starts `AudioMonitor`, blocks. Spawned detached when the app closes with AutoMute on.
-- `--timer-daemon` *(internal)* — owns the timed-playlist tick loop, blocks. Spawned by `--restore` (timed) and on close.
-- `--restart-daemon` *(internal)* — periodically relaunches mpvpaper (frame-buffer leak workaround). Blocks. Spawned by `--restore`/on-close when playing; killed by `--kill` and on app open.
-- `--action=<action>` — sends a command to the running session, exits:
-  - `toggle-mute`, `toggle-pause`, `stop`, `play`, `toggle-play`
-  - `next-wallpaper`, `previous-wallpaper`, `random`
-  - `volume-up` / `volume-down` — ±5, clamped 0–100, persisted to settings.json
+- `restore` — re-applies the last session without a UI (autostart). Timed playlists: `setsid`-spawns `timer-daemon` and returns.
+- `random` — a random library wallpaper. Saves the pick so `restore` replays it.
+- `kill` — stops playback without asking a running app, exits.
+- Keybind actions — handed to the running app's backend (`ActionForward` → `POST /action`), else run here:
+  `next`, `previous`, `random`, `play`, `stop`, `toggle-play`, `toggle-pause`, `toggle-mute`,
+  `volume up` / `volume down` (±5, clamped 0–100, persisted; a multi-word command is its words joined by `-`, so
+  `volume-up` works too).
+- `ctl <verb> ['<json>']` — the running player's control socket (`liascape-player ctl`: `state`, `logs`, `probe`, …).
+- `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`.
+- `monitor-daemon` / `timer-daemon` / `restart-daemon` *(internal)* — `AudioMonitor`, the timed-playlist tick loop,
+  the mpvpaper relauncher (frame-buffer leak workaround); spawned detached when the app closes / by `restore`; killed by
+  `kill` and on app open.
+- `player-selftest` *(hidden)* — MpvPropertyMap + protocol round-trip against a private headless player (PASS/FAIL).
 
 ## Architecture
 
 ```text
-src/backend/            # headless C# backend (CLI + daemons + --serve API). NO GUI here anymore.
+src/backend/            # headless C# backend (CLI + daemons + serve API). NO GUI here anymore.
 ├── Models/               # WallpaperResult, WallpaperDetail, LibraryItem, AppSettings, LastSession, LibMeta
 ├── Scrapers/             # MotionBgsScraper, MoewallsScraper, DesktophutScraper, WallpaperEngineScraper (static HTTP+HTML)
 ├── Services/             # IBgsProvider + one service per source; SteamWorkshopService
@@ -72,7 +81,7 @@ transitions/             # shared GLSL effect catalog (glsl/ + manifest.json + w
 docs/player/              # AI-facing liascape-player docs: architecture.md, invariants.md, spikes/
 app/
 ├── ui/                   # Vite + React 19 + TS + zustand + framer-motion (the renderer)
-└── shell/                # Electron main/preload + probes; spawns `liascape --serve`, loads the UI same-origin
+└── shell/                # Electron main/preload + probes; spawns `liascape serve`, loads the UI same-origin
 ```
 
 WE-style **transitions** animate every wallpaper switch (gl-transitions GLSL) — see `.claude/rules/player.md`. v1: video→video, **full-live** (both sides keep playing through the effect — libmpv decodes A+B in the renderer; frozen stills are the warmup/scene fallback).

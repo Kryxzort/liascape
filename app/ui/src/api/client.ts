@@ -1,4 +1,4 @@
-// API: typed client for the C# --serve backend. The Electron shell launches the window with
+// API: typed client for the C# serve backend. The Electron shell launches the window with
 // ?api=<port> (read from ~/.config/liascape/serve.port); browser dev: append ?api=PORT.
 const params = new URLSearchParams(location.search);
 const port = params.get("api") || localStorage.getItem("liascape_api_port") || "";
@@ -34,7 +34,7 @@ export const CARD_STILL_W = 640;
 export const thumb = (u: string, referer?: string) =>
   /^https?:/i.test(u) ? img(u, referer) : media(u);
 
-// API: this page's id on every POST (X-LP-Client) — a state broadcast names the client that made the change, so a
+// API: this page's id on every POST (X-Liascape-Client) — a state broadcast names the client that made the change, so a
 // page ignores the echo of its own save (a resync over a pending strip edit) and follows everyone else's
 export const CLIENT_ID = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 
@@ -46,7 +46,7 @@ async function jget<T>(path: string): Promise<T> {
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-LP-Client": CLIENT_ID },
+    headers: { "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });

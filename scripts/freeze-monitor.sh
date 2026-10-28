@@ -20,7 +20,7 @@ hi=0
 while true; do
   # match LIASCAPE's renderer specifically via --app-path (NOT any Electron app — Discord/VSCode also
   # spawn "type=renderer", which caused a wrong-process mixup before).
-  rpid=$(pgrep -f -- "type=renderer.*app-path=.*liascape/app/shell" | head -1)
+  rpid=$(pgrep -f -- "type=renderer.*app-path=.*(/app/shell|/lib/liascape/shell)" | head -1)
   [ -z "$rpid" ] && { echo "$(date '+%H:%M:%S') no liascape renderer" >> "$LOG"; sleep 8; continue; }
   cpu=$(inst_cpu "$rpid" 3) || { sleep 8; continue; }
   rss=$(awk '{print int($1*4096/1048576)}' /proc/$rpid/statm 2>/dev/null)   # MB

@@ -43,7 +43,7 @@ public static class AudioMonitor
                 RedirectStandardError = true,
             };
             foreach (var a in selfArgs) psi.ArgumentList.Add(a);
-            psi.ArgumentList.Add("--monitor");
+            psi.ArgumentList.Add("monitor-daemon");
             var proc = Process.Start(psi);
             if (proc != null)
             {
@@ -69,7 +69,7 @@ public static class AudioMonitor
     private static int _aboveThresholdCount;
     private static volatile bool _onlyIfMprisActive;
 
-    // Entry point for the detached `liascape --monitor` daemon process.
+    // Entry point for the detached `liascape monitor-daemon` daemon process.
     public static void RunDaemon()
     {
         WriteMonitorPid();

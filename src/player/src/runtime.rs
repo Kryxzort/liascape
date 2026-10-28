@@ -4101,7 +4101,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
                 "effects.missing",
                 None,
                 json!({ "hint": "no transitions/ directory resolved (LIASCAPE_TRANSITIONS_DIR, \
-                                 ~/.local/share/liascape-web/transitions, the repo); \
+                                 ~/.local/lib/liascape/transitions, the repo); \
                                  only cuts are available" }),
             );
             Catalogue::empty()
