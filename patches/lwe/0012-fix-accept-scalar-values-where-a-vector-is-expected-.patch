@@ -1,0 +1,105 @@
+From 236966116292c674e7dfa99d59dbad6cec8874d5 Mon Sep 17 00:00:00 2001
+From: Liang Jun Chen <151501304+senti0726@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 10:30:34 +0800
+Subject: [PATCH 12/17] fix: accept scalar values where a vector is expected
+ (#652)
+
+* fix: accept scalar values where a vector is expected
+
+Wallpaper Engine is not consistent about how it serialises vector fields.
+The same field can be written either as a "x y" string or as a bare scalar
+meaning the same value on every component - text objects in particular write
+`"padding": "32.00000 32.00000"` in some scenes and `"padding": 32` in others.
+
+JsonExtensions::get<glm::vec<...>> assumed the string form unconditionally and
+called get<std::string>() on the node, so whichever form a scene did not use
+threw type_error.302 and aborted before the wallpaper could load.
+
+Accept both forms: broadcast a JSON number across every component, and parse
+the string form as before.
+
+TextData::padding was also typed `int`, which could only ever hold the scalar
+form. It is a 2-component value, so make it a glm::vec2 and read it through
+the same path.
+
+Tested against 105 scene packages: 4 still fail (unrelated shader and missing
+texture problems), the rest load. No scene that previously loaded regressed.
+
+Refs #96
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+* Potential fix for pull request finding
+
+use reference for json base to improve performance
+
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+(cherry picked from commit 01bebb2ab0abb6e3cd40de6f7614f69a0680375f)
+
+Origin: upstream-PR
+Upstream-PR: https://github.com/Almamu/linux-wallpaperengine/pull/652
+Adapted-by: livepaper
+Why: text objects writing "padding" as a "x y" string aborted the scene worker at every load (scene corpus: 3233141951, 3326873240)
+Status: upstream: merged on Almamu/linux-wallpaperengine main 2026-10-28, not (yet) on next-v2
+---
+ src/core/WallpaperEngine/Data/JSON.h                  | 11 ++++++++++-
+ src/core/WallpaperEngine/Data/Model/Object.h          |  5 +++--
+ .../WallpaperEngine/Data/Parsers/ObjectParser.cpp     |  2 +-
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/JSON.h b/src/core/WallpaperEngine/Data/JSON.h
+index 2960d8f..2887352 100644
+--- a/src/core/WallpaperEngine/Data/JSON.h
++++ b/src/core/WallpaperEngine/Data/JSON.h
+@@ -45,7 +45,16 @@ public:
+     }
+     template <int length, typename type, glm::qualifier qualifier>
+     [[nodiscard]] glm::vec<length, type, qualifier> get () const {
+-	return VectorBuilder::parse<length, type, qualifier> (this->base ().get<std::string> ());
++	const auto& base = this->base ();
++
++	// Wallpaper Engine writes vectors as "x y z" strings, but it is not consistent about it:
++	// the same field can come through as a bare scalar (padding: 32 vs padding: "32.0 32.0"),
++	// which means the same value on every component. Accept both instead of throwing.
++	if (base.is_number ()) {
++	    return glm::vec<length, type, qualifier> (base.get<type> ());
++	}
++
++	return VectorBuilder::parse<length, type, qualifier> (base.get<std::string> ());
+     }
+     [[nodiscard]] Model::Color get () const { return ColorBuilder::parse (this->base ().get<std::string> ()); }
+     [[nodiscard]] base_type require (const std::string& key, const std::string& message) const {
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index d82f16f..3dfa6e9 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -610,8 +610,9 @@ struct TextData {
+     std::string alignment;
+     /** Vertical alignment: "top", "center", "bottom" */
+     std::string verticalalign;
+-    /** Padding inside the bounding box */
+-    int padding;
++    /** Padding inside the bounding box (x, y). WE writes this either as a "x y" string or as a
++     *  bare scalar meaning both axes; JsonExtensions::get<vec> accepts both forms. */
++    glm::vec2 padding;
+     // TODO: PARSE LIMITS TOO!
+ };
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index d6b8589..dfa03ad 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -136,7 +136,7 @@ TextUniquePtr ObjectParser::parseText (const JSON& it, const Project& project, O
+ 	    .visible = it.user ("visible", project.properties, true),
+ 	    .alignment = it.optional ("horizontalalign", it.optional ("alignment", std::string ("center"))),
+ 	    .verticalalign = it.optional ("verticalalign", std::string ("center")),
+-	    .padding = it.optional ("padding", 0),
++	    .padding = it.optional ("padding", glm::vec2 (0.0f)),
+ 	}
+     );
+ }

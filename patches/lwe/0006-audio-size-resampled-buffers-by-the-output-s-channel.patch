@@ -1,7 +1,7 @@
 From c5c2caddff06964611a7ae08e6406df3c3f3bcd9 Mon Sep 17 00:00:00 2001
 From: Kryxzort <virajslko@gmail.com>
 Date: Tue, 27 Oct 2026 20:54:01 +0530
-Subject: [PATCH 6/6] audio: size resampled buffers by the output's channel
+Subject: [PATCH 06/17] audio: size resampled buffers by the output's channel
  count
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

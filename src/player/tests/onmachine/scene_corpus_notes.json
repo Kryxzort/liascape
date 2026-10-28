@@ -1,36 +1,11 @@
 {
-  "1884904087": {
-    "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
-    "note": "Reproduces without our worker (`lp-scene-worker --lwe-smoke`, LWE's core alone). gdb: SIGSEGV in `CParticle::CParticle(CScene&, Particle const&)` +108 ← `CScene::dispatchObjectType` ← `CScene::createObject` ← `CScene::CScene` ← `Project::render` ← `wp_render_frame` (the first render = the renderer build), so patch 0004's build guard never sees it. The particle object uses `particles/presets/leaves2.json` (+ a child emitter `leaves2b.json`) shipped inside the item's scene.pkg. Same crash as 2047150134 (`leaves5.json`); dozens of other corpus scenes with particle systems (presets with or without `instanceoverride`) build fine.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
-  },
-  "2047150134": {
-    "cause": "LWE segfaults building a particle system from an old WE particle preset embedded in the scene.pkg",
-    "note": "Same backtrace as 1884904087 (`CParticle::CParticle` +108 during the first `wp_render_frame`), reproduced with `--lwe-smoke`; the object uses `particles/presets/leaves5.json` from the scene.pkg.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: CParticle segfault on embedded leaves presets\""
-  },
-  "2189783622": {
-    "cause": "an effect shader packaged in the scene fails to compile, LWE then drops the scene's only object",
-    "note": "One image object with two effects (godrays, foliagesway) whose shaders ship as old copies inside the scene.pkg. glslang rejects the packaged godrays fragment (`'v_Bounds' : undeclared identifier`, `missing #endif`), the object's setup fails (`Failed to setup object 13`) and LWE renders nothing for it — the scene is that one object, so every frame is black. Wallpaper Engine would show the image, at worst without the effect.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: an object whose effect fails to compile disappears\""
-  },
   "2783122117": {
     "cause": "a still scene by design — not a failure",
     "note": "scene.json holds two image objects (the same model, no effects, no particles, no scripts) and one sound object; identical frames at +1 s, +2.3 s and +4 s are correct. LWE's core alone (`--lwe-smoke`) renders the same still. Its sound plays (1 stream)."
   },
-  "3233141951": {
-    "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
-    "note": "gdb: `nlohmann::json type_error 302 (type must be number, but is string)` thrown in `JsonExtensions::optional<int>` ← `ObjectParser::parseText` ← `WallpaperParser::parseObjects` ← `ProjectParser::parse` ← `wp_project_load_folder`; nothing catches it at the C API, so `terminate` → SIGABRT at every load: 4 crashes → broken (correct crash policy, but a load failure should not be a crash loop). Of the 45 corpus scenes with text objects exactly these two (3233141951, 3326873240) have a string `padding` (`\"32.00000 32.00000\"`); the 43 with a number get past the text parser. Reproduced with `--lwe-smoke`.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
-  },
-  "3326873240": {
-    "cause": "LWE reads a text object's `padding` as a number; this scene writes it as a \"x y\" string → an uncaught JSON exception aborts the load",
-    "note": "Same as 3233141951 (`padding: \"32.00000 32.00000\"` on a scripted clock text object): SIGABRT in `ObjectParser::parseText` at every load → broken.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: text `padding` as a vec2 string\" + \"LWE: catch exceptions at the wp_* C API\""
-  },
   "3276522107": {
     "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
-    "note": "LWE logs `Projection must have a width. Contents: null`: `general.orthogonalprojection` is null and the scene has a perspective `camera {eye, center, up}`. Same for 3477054430 and 3509243656.",
+    "note": "LWE logs `Projection must have a width. Contents: null`: `general.orthogonalprojection` is null and the scene has a perspective `camera {eye, center, up}`. Same for 3477054430 and 3509243656. Upstream `main` (checked 2026-10-28, `38a5d60`) has nothing for it either.",
     "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
   },
   "3477054430": {
@@ -42,10 +17,5 @@
     "cause": "a 3D (perspective) scene — LWE next-v2 parses only 2D orthographic scenes",
     "note": "`Projection must have a width. Contents: null`; `orthogonalprojection` null, a perspective camera.",
     "todo": "Phase 6 — docs/TODO.md \"LWE: 3D / perspective scenes\""
-  },
-  "3354740764": {
-    "cause": "an asset reference whose case differs from the file in the scene.pkg (WE on Windows is case-insensitive, LWE is not)",
-    "note": "LWE prints nothing. gdb (`catch throw`): the load fails in `AssetLocator::readString` ← `MaterialParser::load` ← `ModelParser::parse` ← `ObjectParser::parseImage`; the exception is caught inside LWE and `wp_project_load_folder` returns NULL. `models/Shadow.json` (3 objects) names `materials/shadow.json`; the pkg holds `materials/Shadow.json`.",
-    "todo": "Phase 6 — docs/TODO.md \"LWE: case-insensitive asset lookup\""
   }
 }

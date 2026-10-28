@@ -1,7 +1,7 @@
 From 1381aa30b6a63479673c1f2eebfed97ae5b6a5cf Mon Sep 17 00:00:00 2001
 From: Kryxzort <virajslko@gmail.com>
 Date: Tue, 27 Oct 2026 20:52:34 +0530
-Subject: [PATCH 4/6] render: never render a project whose renderer failed to
+Subject: [PATCH 04/17] render: never render a project whose renderer failed to
  build
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

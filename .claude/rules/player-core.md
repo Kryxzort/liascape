@@ -3130,6 +3130,17 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (no SIGSEGV on the 2nd call), size stays 1×1. **0005:** `engine.setTimeout/setInterval` run on
   the context's `renderTime` (the host clock), a clock going back reschedules them. **0006:** a mono
   sound on a stereo output corrupted the heap in `resampleAudio` (found by 0003's test).
+  **0007–0014** (2026-10-28) are upstream **`main`** fixes cherry-picked onto the fork (`main` diverged from
+  `next-v2`; `base` stays `next-v2` — UPSTREAM.md lists which of `main`'s 13 commits were picked and why the
+  rest weren't): #618, #619, #613, #677 (its `GLPlayer` half), #674, #652 (`padding` as a vec2 / a number
+  broadcasts), #634, #692 (`"particle": null|"None"` on a text object). **0015:** `JsonExtensions::optional`
+  is `noexcept` — a wrong-typed optional value is now absent/default + `Ignoring "<key>": …` instead of a
+  `terminate` (the C API's `try`/`catch` never saw it). **0016:** a path no mountpoint has exactly is matched
+  ignoring ASCII case (`Found X as Y (case differs)`; exact matches everywhere first). **0017:** an image
+  effect whose pass can't be built is left out (`Leaving out effect …`) — the object used to be dropped.
+  `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
+  `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
+  scene corpus from 86 to 91 ok (§ "Scene corpus").
 - **The headers are C++-only** (struct tags used as type names), so `lwe.rs` declares the ~20
   calls it uses by hand (`unsafe extern "C"`), and `patches/lwe/tests/host_api_test.cpp` is C++.
 - **`lwe.rs`** (feature `lwe`): `Scene::load(dir, assets)` (config with the explicit assets dir +

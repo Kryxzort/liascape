@@ -1,0 +1,75 @@
+From 40eacc9a278738ba3fce5d4f1b030e543b4ca2e0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Wed, 28 Oct 2026 22:19:03 +0530
+Subject: [PATCH 17/17] render: leave out an image effect that can't be built,
+ not the image
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A Workshop scene can ship its own (older) copy of an effect's shader in its
+scene.pkg. When that copy doesn't compile here (2189783622's godrays
+fragment uses v_Bounds, which its vertex stage never declares), the CPass
+constructor throws, CImage::setup unwinds, and CScene drops the whole
+object ("Failed to setup object 13"). For a scene whose background is that
+one image the wallpaper renders black; elsewhere a layer silently goes
+missing.
+
+CImage::setup now builds each effect's passes inside its own try block: if
+any pass of an effect throws, the passes that effect already added are
+deleted and the image goes on with its other effects, logging
+"Leaving out effect <id> (<name>) of object <id>: <reason>". Wallpaper
+Engine shows the image in that case too (at worst without the effect).
+
+Not for a passthrough or fullscreen layer (composelayer / fullscreenlayer
+models): those exist only to post-process what is below them, and part of
+their effect chain is an arbitrary picture — 3432999904's fullscreen layer
+with its tone_mapping effect left out covered the whole scene in black. A
+failing effect still drops such a layer whole, as before.
+
+Origin: ours
+Why: one broken packaged effect blanked a whole scene in lp-player (scene corpus: 2189783622) and dropped image layers of others (3233141951, 3326873240, 3354740764)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index a5586cd..062c7b5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -647,7 +647,12 @@ void CImage::setup () {
+ 	    auto endEffect = cur->effect->passes.end ();
+ 	    auto curOverride = cur->passOverrides.begin ();
+ 	    auto endOverride = cur->passOverrides.end ();
++	    // an effect whose pass can't be built (a packaged shader that doesn't compile, a missing material) is
++	    // left out on its own: the image still renders, without it — not dropped with the whole object
++	    // (except a passthrough/fullscreen layer, below)
++	    const auto passesBefore = this->m_passes.size ();
+ 
++	    try {
+ 	    for (; curEffect != endEffect; ++curEffect) {
+ 		if (!(*curEffect)->material.has_value ()) {
+ 		    if (!(*curEffect)->command.has_value ()) {
+@@ -705,6 +710,20 @@ void CImage::setup () {
+ 		    }
+ 		}
+ 	    }
++	    } catch (const std::exception& e) {
++		// a passthrough/fullscreen layer exists only to post-process what's below it: part of its effect
++		// chain is an arbitrary picture (measured: a black screen over 3432999904), so it still goes whole
++		if (this->m_image.model->passthrough || this->m_image.model->fullscreen) {
++		    throw;
++		}
++
++		sLog.error ("Leaving out effect ", cur->id, " (", cur->name, ") of object ", this->m_image.id, ": ", e.what ());
++
++		while (this->m_passes.size () > passesBefore) {
++		    delete this->m_passes.back ();
++		    this->m_passes.pop_back ();
++		}
++	    }
+ 	}
+     }
+ 
