@@ -2163,11 +2163,21 @@ C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
 // worker — and the new backend says so (/current, the UI's playing mark)
 let backendPid = Number(E.LP_BACKEND_PID || 0);
 const procAlive = (pid) => { try { return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return false; } };
+// SIGTERM, SIGKILL after `graceMs` (0: SIGKILL at once — the restart landing mid-request). An open page's WebSocket
+// holds a graceful shutdown open (Kestrel's 30 s), as under `dotnet watch`, whose restart then kills it.
+async function stopBackend(graceMs = 35000) {
+  const old = backendPid;
+  if (!old || !procAlive(old)) return;
+  process.kill(old, graceMs ? "SIGTERM" : "SIGKILL");
+  if (!(await waitFor(() => !procAlive(old), graceMs || 5000, 50))) { process.kill(old, "SIGKILL"); await waitFor(() => !procAlive(old), 5000, 50); }
+}
 async function restartBackend() {
   await win.loadURL("about:blank"); // the page's WebSocket would hold the old backend's shutdown open (Kestrel's 30 s)
-  const old = backendPid;
-  if (old && procAlive(old)) process.kill(old, "SIGTERM");
-  if (old && !(await waitFor(() => !procAlive(old), 35000, 100))) { process.kill(old, "SIGKILL"); await waitFor(() => !procAlive(old), 5000, 100); }
+  await stopBackend();
+  return startBackend();
+}
+// a new backend on the same port (LP_PORT), recorded for test-ui-matrix.sh's cleanup; true once it answers /health
+async function startBackend() {
   const env = { ...process.env, LP_PORT: new URL(U).port };
   for (const k of ["DISPLAY", "LP_URL", "LP_CLIPS", "LP_OUT", "LP_ONLY", "LP_SHARD"]) delete env[k];
   const log = fs.openSync(E.LP_BACKEND_LOG, "a");
@@ -2183,6 +2193,101 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
   }, check(c) {
     const v = [...sceneShown(c, SC[0]), ...samePid(c, SC[0])];
     if (!c.up) v.push("the restarted backend didn't answer /health");
+    return v;
+  } };
+
+// The backend restarted UNDER AN OPEN PAGE (the owner's incident: `dotnet watch` restarted the dev backend on a
+// cherry-pick while the app stayed open, and Vite's HMR of the same change re-ran the store's init into the outage —
+// the Library tab said "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
+// up everything it mirrors from the backend by itself — no reload: the library (cards), the strip, the settings
+// (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
+const CFG = path.dirname(E.LP_USER_MUTE); // the stack's ~/.config/livepaper (settings.json, playlist_state.json)
+const K5 = () => path.join(path.dirname(path.dirname(K[0])), "k5", "k5.mp4");
+const ASPECT_CSS = { "1:1": "1 / 1", "16:9": "16 / 9" };
+function editJson(file, fn) {
+  const j = JSON.parse(fs.readFileSync(file, "utf8")); fn(j);
+  fs.writeFileSync(file + ".mx", JSON.stringify(j, null, 2)); fs.renameSync(file + ".mx", file);
+}
+const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name[0].toUpperCase() + name.slice(1);
+// what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
+const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.title).sort(),
+  empty: !!document.querySelector(".center-msg"), strip: [...document.querySelectorAll(".pl-item")].map((e) => e.title),
+  aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
+const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
+// k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)
+async function dropK5() {
+  const it = ((await http("GET", "/library").catch(() => null))?.json || []).find((i) => i.videoPath === K5());
+  if (it) await post("/library/delete", it);
+}
+C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run(c) {
+    const wantTitles = [...(await libTitles()), "k5"].sort();
+    await stopBackend(3000);
+    try {
+      // while it's down, what another process changes (a CLI's WE sync, a hand edit, the next build's startup): an item
+      // added, the thumbnail aspect flipped, the strip rewritten
+      fs.mkdirSync(path.dirname(K5()), { recursive: true }); fs.copyFileSync(K[3], K5());
+      editJson(path.join(CFG, "settings.json"), (s) => { const k = keyIn(s, "thumbnailAspect"); c.aspect = (s[k] ?? "1:1") === "16:9" ? "1:1" : "16:9"; s[k] = c.aspect; });
+      editJson(path.join(CFG, "playlist_state.json"), (p) => { p[keyIn(p, "videoPaths")] = [K[2], K[0]]; });
+      await sleep(500);
+      c.up = await startBackend();
+      c.firstLib = await libTitles(); // the new backend's first /library: whole, never an empty list while it loads
+      c.recovered = await waitFor(async () => { const d = (c.page = await pageData());
+        return JSON.stringify(d.cards) === JSON.stringify(wantTitles) && JSON.stringify(d.strip) === '["k3","k1"]' && d.aspect === ASPECT_CSS[c.aspect]; }, 12000, 200);
+      c.want = { cards: wantTitles, strip: ["k3", "k1"], aspect: ASPECT_CSS[c.aspect] };
+    } finally { await dropK5(); }
+  }, check(c) {
+    const v = [];
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (JSON.stringify(c.firstLib) !== JSON.stringify(c.want?.cards)) v.push(`the restarted backend's first /library: ${JSON.stringify(c.firstLib)}, expected ${JSON.stringify(c.want?.cards)}`);
+    if (!c.recovered) v.push(`the open page didn't take the restarted backend's data within 12 s (no reload): shows ${JSON.stringify(c.page)}, expected ${JSON.stringify(c.want)}`);
+    return v;
+  } };
+// the page's first /library in flight when the backend dies (held at the request, the backend SIGKILLed, then let go):
+// the failed read must not become "Library is empty", and the page fills itself once the backend is back
+C["restart:midLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const wantTitles = await libTitles();
+    let seen = false, release;
+    const go = new Promise((r) => (release = r));
+    const filter = { urls: [`${U}/library`] };
+    session.defaultSession.webRequest.onBeforeRequest(filter, (d, cb) => { if (seen) return cb({}); seen = true; go.then(() => cb({})); });
+    try {
+      await win.loadURL(U + "/");
+      c.held = await waitFor(() => seen, 8000, 20);
+      await sleep(600); // the page's other startup reads land
+      await stopBackend(0);
+    } finally { release(); session.defaultSession.webRequest.onBeforeRequest(filter, null); }
+    await sleep(1500);
+    c.during = await pageData();
+    c.up = await startBackend();
+    c.recovered = await waitFor(async () => JSON.stringify((c.page = await pageData()).cards) === JSON.stringify(wantTitles), 12000, 200);
+    c.want = wantTitles;
+    await js(PAGE);
+  }, check(c) {
+    const v = [];
+    if (!c.held) v.push("the page's /library was never seen (nothing was held)");
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (!c.recovered) v.push(`after its /library failed mid-restart the page didn't recover the library within 12 s (no reload): shows ${JSON.stringify(c.page)}, expected cards ${JSON.stringify(c.want)}`);
+    return v;
+  } };
+// the page STARTS while the backend is down (the dev UI is Vite's, another origin: an HMR update re-runs the store's
+// init — the incident's path. Here: the built UI from file:// with ?api=<port>), then the backend comes up
+C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const wantTitles = await libTitles();
+    const ps = (await http("GET", "/playlist/state")).json;
+    c.want = { cards: wantTitles, strip: (ps?.videoPaths || []).map(TITLE), aspect: ASPECT_CSS[BASE_SETTINGS.thumbnailAspect ?? "1:1"] };
+    await win.loadURL("about:blank");
+    await stopBackend();
+    await win.loadURL(`file://${E.LP_UI_DIR}/index.html?api=${new URL(U).port}`);
+    await sleep(2500);
+    c.during = await pageData();
+    c.up = await startBackend();
+    c.recovered = await waitFor(async () => { const d = (c.page = await pageData());
+      return JSON.stringify(d.cards) === JSON.stringify(c.want.cards) && JSON.stringify(d.strip) === JSON.stringify(c.want.strip) && d.aspect === c.want.aspect; }, 12000, 200);
+    await js(PAGE);
+  }, check(c) {
+    const v = [];
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (!c.recovered) v.push(`a page started while the backend was down didn't load once it came up (12 s, no reload): shows ${JSON.stringify(c.page)}, expected ${JSON.stringify(c.want)}`);
     return v;
   } };
 
@@ -2434,6 +2539,7 @@ const FUZZ_RULES = [
   [/autoMute/, { exclude: "synthetic streams on the private audio server + Auto-Mute's delays outlive a step" }],
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
+  [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
   [/^plShuffle$/, { last: "a shuffled order makes every later 'the strip's next' expectation (armedCheck, *+next) unknowable" }],
   [/^(plInterval|plIntervalZero|plWaitEnd|gInterval8s|gWaitEnd|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],
