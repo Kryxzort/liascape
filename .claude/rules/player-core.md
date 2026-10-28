@@ -2002,7 +2002,7 @@ full), `io` (capture write, ctl connect).
 cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
 (runtime, `position` is debug-level ~10 Hz, every change in stepped mode),
 `source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
-(host), `transition.output_adopted`, `output.added|removed|changed|layer_failed|
+(host), `source.broken` (a scene past its restart budget, § Scene worker), `transition.output_adopted`, `output.added|removed|changed|layer_failed|
 present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|layer|
 gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the last two Task
 20e), `input.pointer` (debug), `loop.failed`,
@@ -2820,7 +2820,7 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   `.ready {pid, protocol, features, sync, ms}`, `.exited {pid, signal, code, hung,
   uptime_ms}`, `.hung {pid, waited_ms, hello}`, `.restart {attempt, prev_pid, pid, why}`,
   `.broken {reason, record, restarts}`, `.stopped`, `.bad_message`, `.spawn_failed`,
-  `.record_failed`. `source.broken` is Task 10's (the source's view).
+  `.record_failed`. `source.broken` is the source's view (§ "The `scene` Source kind" → Errors).
 
 **`lp-scene-worker --fd N --parent-pid P [--stub]`.** `--stub` (tests, no GPU): `hello
 {features: [stub], sync: none}`, answers `ping`/`tick` (a slot-0 `frame` without fd), logs
@@ -3144,8 +3144,13 @@ hard-coded `kind == "video"` learned about `scene`.
   `Broken` on an error. Seqs (= frame_index markers) are deterministic: one tick per step that
   moves `t`.
 - **Errors.** A fatal worker `error` → `SourceEvent::Error {"<path>: <reason>"}` + the worker
-  stopped (no restart loop, no crash record); `broken` (restart budget spent) → also `Error`
-  for now (Task 10 adds `source.broken` and the preview); either holds until `path` changes.
+  stopped (no restart loop, no crash record); `broken` (restart budget spent) → also `Error`,
+  plus ONE `source.broken {id, path, scene_id, reason, restarts, record, signal|code}` (error,
+  comp `source`; the fields from the crash record the host just wrote — Phase 2 Task 11, what the
+  backend adapter marks the item crashed from: player-adapter.md § Scenes; Task 10 adds the
+  preview); either holds until `path` changes. Test `tests/api.rs::source_broken_event_names_the_scene`
+  (a synthetic scene crashing every 100 ms, real clock: one event, `restarts: 3`, `signal: 6`, the
+  record on disk; RED before: no event in 20 s).
 - **Property semantics:** `path` live (above); `paused` freezes; `position` = scene time at
   start/restore/crash resume, a live set jumps; `speed` scales the clock (stepped: the step
   advance does); `kind` change → `unsupported` (both ways: `MpvSource` refuses `scene`);

@@ -755,12 +755,21 @@ public static class PlayerHelper
             if (IsScenePath(videoPath))
             {
                 if (PlayerEngine.IsLpPlayer)
-                    throw new InvalidOperationException("Scenes need the Legacy player engine for now — lp-player plays scenes in Phase 2 (Settings → Advanced → Player engine)");
-                var s = SettingsService.Load();
-                if (!s.AllowScenes)
-                    throw new InvalidOperationException("Enable \"Allow scene support\" in Settings to play scenes");
-                if (!IsLweAvailable())
-                    throw new InvalidOperationException("linux-wallpaperengine not found in PATH — install it to use scenes");
+                {
+                    // Phase 2: lp-player plays scenes when they're on and the player can (its worker +
+                    // WE's assets) — else the reason; a crashed one only when whitelisted (D6)
+                    if (PlayerEngine.SceneUnavailableReason(SettingsService.Load()) is string why) throw new InvalidOperationException(why);
+                    if (LibraryService.HasCrashed(videoPath) && !LibraryService.IsWhitelisted(videoPath))
+                        throw new InvalidOperationException("This scene crashed and won't be played — tick \"Whitelist\" in its settings to play it anyway");
+                }
+                else
+                {
+                    var s = SettingsService.Load();
+                    if (!s.AllowScenes)
+                        throw new InvalidOperationException("Enable \"Allow scene support\" in Settings to play scenes");
+                    if (!IsLweAvailable())
+                        throw new InvalidOperationException("linux-wallpaperengine not found in PATH — install it to use scenes");
+                }
             }
             TeardownTimer();
             ClearTimedStateFile();
@@ -826,9 +835,18 @@ public static class PlayerHelper
             if (paths.Count == 0) { KillCurrentProcess(); return; }
 
             var ordered = new List<string>(paths); // caller is responsible for initial order; shuffle flag only controls cycle-end reshuffle
+            // lp-player: start at the first item that can play — a scene marked crashed (D6) first in the
+            // list used to reach SwitchToFile, which stops playback for an unplayable scene (legacy unchanged)
+            int first = 0;
+            if (PlayerEngine.IsLpPlayer && IsSkippedPath(ordered[0]))
+            {
+                bool ok = PlayerEngine.ScenesPlayable(SettingsService.Load());
+                first = ordered.FindIndex(p => !IsSkippedPath(p, ok));
+                if (first < 0) { KillCurrentProcess(); return; }
+            }
 
             _timedPaths = ordered;
-            _timedIndex = 0;
+            _timedIndex = first;
             _timedOptions = mpvOptions;
             _timedShuffle = shuffle;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
@@ -840,15 +858,15 @@ public static class PlayerHelper
             // Pick up per-video speed override for the first item so tick scales interval
             // correctly from the first tick rather than after the next transition's SetSpeed.
             // Scenes always play at 1× (tick uses 1.0 factor anyway), so override irrelevant for them.
-            _currentSpeed = IsScenePath(ordered[0])
+            _currentSpeed = IsScenePath(ordered[first])
                 ? SettingsService.Load().Speed
-                : (ReadSpeedOverride(ordered[0]) ?? SettingsService.Load().Speed);
-            _history = [ordered[0]];
+                : (ReadSpeedOverride(ordered[first]) ?? SettingsService.Load().Speed);
+            _history = [ordered[first]];
             _historyIndex = 0;
             if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // I1: a new playlist session plays (Play / play-from while paused stayed paused)
-            SwitchToFile(ordered[0], mpvOptions);
+            SwitchToFile(ordered[first], mpvOptions);
 
-            if (_advanceOnVideoEnd && !IsScenePath(ordered[0]) && ordered.Count > 1)
+            if (_advanceOnVideoEnd && !IsScenePath(ordered[first]) && ordered.Count > 1)
             {
                 var next = AdvanceToNext();
                 if (next != null)
@@ -1018,7 +1036,9 @@ public static class PlayerHelper
             // Skip while _waitingForVideoEnd: in advance-on-end mode history is pre-fetched
             // one step ahead, so _history[_historyIndex] may point to a scene that isn't
             // playing yet — checking it here would be a false positive.
-            if (!_waitingForVideoEnd &&
+            // Legacy only: lp-player runs no LWE process (IsLweRunning is always false there) — a broken
+            // scene arrives as its `source.broken` event instead (OnSceneBroken).
+            if (!_waitingForVideoEnd && !PlayerEngine.IsLpPlayer &&
                 _history != null && _historyIndex >= 0 && _historyIndex < _history.Count &&
                 IsScenePath(_history[_historyIndex]) && !IsSkippedPath(_history[_historyIndex]) && !IsLweRunning)
             {
@@ -1169,13 +1189,14 @@ public static class PlayerHelper
     private static void SwitchToFile(string path, string mpvOptions)
     {
         // lp-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
-        // no pre-launch crossover, no overlay, no IPC loadfile. Scenes are skipped in Phase 1 exactly
-        // like AllowScenes=false (which stops playback here).
+        // no pre-launch crossover, no overlay, no IPC loadfile — for a scene too (Phase 2: `kind: scene`,
+        // kind-agnostic in the player; no V→S lead, no SceneTransitionDelayMs). A scene that can't play
+        // stops playback here, exactly like legacy with AllowScenes=false (the pickers never hand one over).
         bool keepPause = _keepPauseNextSwitch; // a user switch staying paused: a cut (KeepPauseOnSwitch)
         _keepPauseNextSwitch = false;
         if (PlayerEngine.IsLpPlayer)
         {
-            if (IsScenePath(path)) { KillCurrentProcess(); return; }
+            if (IsScenePath(path) && !PlayerEngine.ScenesPlayable(SettingsService.Load())) { KillCurrentProcess(); return; }
             var lpSettings = SettingsService.Load();
             var lpCfg = TransitionService.CurrentConfig();
             LpPlayerMedia.QueueSwitch(path, lpSettings, lpCfg.Enabled && !keepPause ? lpCfg : null, alignEnd: false); // queued: we may hold _lock
@@ -2072,10 +2093,14 @@ public static class PlayerHelper
         //    no playtime polling and no `_lastSwitchTarget` settle gate (legacy-only): the previous
         //    switch's transition.handoff is the gate (a new request would supersede a pre-Running one).
         //    Cancel (ct) → `cancel {corr}` inside SwitchAndWait.
-        if (PlayerEngine.IsLpPlayer && !nextIsScene && !prevIsScene)
+        //    Phase 2: a scene on either side too (kind-agnostic in the player). A scene A never ends, so
+        //    a switch away from one (wait-for-video-end after the interval, scenes' only arming path) is
+        //    align:"now" — legacy's "prevIsScene → switch now".
+        if (PlayerEngine.IsLpPlayer)
         {
             await LpPlayerMedia.WaitLastHandoff(ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested) return;
+            bool aIsScene = !prevIsVideo && LpPlayerMedia.CurrentPath() is string aPath && IsScenePath(aPath);
             var lpCfg = TransitionService.CurrentConfig();
             // B is the session's current item from the moment its effect RUNS, not from its handoff: the
             // player shows it (`cur:*` = B) and a new request commits it. Counted only at the handoff, a
@@ -2098,7 +2123,7 @@ public static class PlayerHelper
                 PostSwitch(next);
                 return true;
             }
-            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: true, ct,
+            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: !aIsScene, ct,
                 onStarted: () => { lock (_lock) Commit(); }).ConfigureAwait(false);
             lock (_lock)
             {
@@ -2169,8 +2194,17 @@ public static class PlayerHelper
                 committed = true; // a started callback still queued must not commit it again
                 _waitingForVideoEnd = false;
                 _waitCts = null;
-                SwitchToFile(next, SettingsService.Load().BuildMpvOptions());
-                PostSwitch(next);
+                // a scene B that broke before its handoff (`source.broken` marked it crashed meanwhile —
+                // the back-off above outlasts that event): switch to the item after it instead (D6)
+                var to = next;
+                if (IsScenePath(next) && IsSkippedPath(next))
+                {
+                    to = AdvanceToNext();
+                    LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: it can't play (crashed / unplayable) → {(to != null ? System.IO.Path.GetFileName(to) : "nothing else to play")}");
+                    if (to == null) { _timedRemainingMs = (long)_timedInterval.TotalMilliseconds; SaveTimedState(); return; }
+                }
+                SwitchToFile(to, SettingsService.Load().BuildMpvOptions());
+                PostSwitch(to);
             }
             return;
         }
@@ -2706,7 +2740,7 @@ public static class PlayerHelper
                 CancelVideoEndWait();
                 _advanceOnVideoEnd = advanceOnVideoEnd;
 
-                if (advanceOnVideoEnd && !IsLweRunning && _timedPaths!.Count > 1)
+                if (advanceOnVideoEnd && !ScenePlaying && _timedPaths!.Count > 1)
                 {
                     var next = AdvanceToNext();
                     if (next != null)
@@ -3267,10 +3301,12 @@ public static class PlayerHelper
 
     private static string? AdvanceToNext()
     {
-        if (_history != null && _historyIndex < _history.Count - 1)
+        // forward through the history (a next after a previous) — under lp-player past an item skipped
+        // since it played (a scene marked crashed, D6); legacy unchanged
+        while (_history != null && _historyIndex < _history.Count - 1)
         {
             _historyIndex++;
-            return _history[_historyIndex];
+            if (!PlayerEngine.IsLpPlayer || !IsSkippedPath(_history[_historyIndex])) return _history[_historyIndex];
         }
 
         var p = _timedPaths;
@@ -3552,21 +3588,69 @@ public static class PlayerHelper
     public static bool IsScenePath(string path) =>
         !string.IsNullOrEmpty(path) && Path.GetExtension(path).Length == 0;
 
+    // Is this item skipped by the pickers (next/prev/random, a rotation's advance)? A scene when scenes
+    // can't play, or (D6, Phase 2) when it is marked crashed and not whitelisted — what the item settings
+    // modal promises ("Scene crashed — won't be played"). Pure — the self-test's truth table. Marking
+    // happens only under lp-player (OnSceneBroken), so it is inert for legacy unless lp-player marked one.
+    public static bool SkipScene(bool isScene, bool playable, bool crashed, bool whitelisted) =>
+        isScene && (!playable || (crashed && !whitelisted));
+
     private static bool IsSkippedPath(string path)
     {
         if (!IsScenePath(path)) return false;
-        var s = SettingsService.Load();
-        return !PlayerEngine.ScenesPlayable(s);
+        return IsSkippedPath(path, PlayerEngine.ScenesPlayable(SettingsService.Load()));
+    }
+
+    // a scene is what plays now: legacy = an LWE process runs; lp-player = the session's playing item is a
+    // scene folder (no LWE process exists there — every `IsLweRunning` check is legacy-only)
+    private static bool ScenePlaying => PlayerEngine.IsLpPlayer
+        ? _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count && IsScenePath(_history[PlayingHistoryIndex])
+        : IsLweRunning;
+
+    // lp-player Phase 2: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
+    // marked crashed in its index entry (skipped from now on unless whitelisted, D6), the UI told
+    // (WS `scene-crashed`), and — the owner's call — a rotation PLAYING it advances at once (the tick's
+    // own advance: its owner check, pause and mode rules apply). A single wallpaper keeps what the player
+    // shows (its last frame or preview, silent). A broken PENDING B is the switch's own failure
+    // (`transition.failed` → DoVideoEndWait's fallback, which skips an item marked meanwhile).
+    public static void OnSceneBroken(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
+        LibraryService.MarkCrashed(path);
+        OnSceneCrashed?.Invoke(path);
+        lock (_lock)
+        {
+            if (_timedPaths == null || _timedTimerStopped || _timerReleased || _history == null || _waitingForVideoEnd) return;
+            int i = PlayingHistoryIndex;
+            if (i < 0 || i >= _history.Count || !SamePath(_history[i], path)) return;
+            TransitionService.TransLog($"scene broken while playing: {System.IO.Path.GetFileName(path)} → advance");
+            if (_timedInterval > TimeSpan.Zero)
+            {
+                _timedRemainingMs = 0;
+                _playlistTimer?.Change(TimeSpan.Zero, Timeout.InfiniteTimeSpan); // the tick advances now
+            }
+            else AdvanceAndLaunch(); // no countdown to expire (a pure advance-on-end session)
+        }
+    }
+
+    private static bool SamePath(string a, string b)
+    {
+        try { return Path.GetFullPath(a).TrimEnd('/') == Path.GetFullPath(b).TrimEnd('/'); } catch { return a == b; }
     }
 
     private static string NoPlayableMessage() => PlayerEngine.IsLpPlayer
-        ? "No playable wallpaper in the library — every item is a scene, and scenes need the Legacy player engine for now (Settings → Advanced → Player engine)"
+        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Allow scene support\" + Wallpaper Engine's assets (lp-player), and a crashed scene plays only when whitelisted"
         : "No playable wallpaper in the library — every item is a scene, and scenes need \"Allow scene support\" + linux-wallpaperengine";
 
-    // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which`)
-    // instead of once per scene item.
-    private static bool IsSkippedPath(string path, bool scenesPlayable) =>
-        IsScenePath(path) && !scenesPlayable;
+    // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which` / the
+    // player's capability) instead of once per scene item; the crash mark is one index read per scene.
+    private static bool IsSkippedPath(string path, bool scenesPlayable)
+    {
+        if (!IsScenePath(path)) return false;
+        if (!scenesPlayable) return true;
+        var m = LibraryStore.GetMeta(path);
+        return SkipScene(true, true, m?.Crashed ?? false, m?.Whitelist ?? false);
+    }
 
     // Spawns one linux-wallpaperengine process per monitor, writes new PIDs to
     // LwePidPath, and returns the new PID strings. Does NOT kill any existing

@@ -799,7 +799,7 @@ Nothing else in the recipe is kind-specific: a scene is not a still (reveal/froz
 
 `LweVolume` is read by neither engine (scenes follow Volume / the item override), so there is nothing to port.
 
-**From Task 8 (player side done; wire these live):** a Settings group "GPU & VRAM" → `set
+**From Task 8 (player side done; wire these live — NOT done in Task 11, a follow-up):** a Settings group "GPU & VRAM" → `set
 player.scene_throttle <bool>` (default true; "auto-throttle"), `set player.scene_vram_limit_mib
 <MiB>` (0 = off, the default; toggle on → the limit, suggested 1536), `set player.vram_low_mode
 stop|pause|off` (default `stop`); per-monitor fps stays `out:<c>.scene_fps` (above). Subscribe
@@ -811,7 +811,7 @@ pause (`player.paused` stays false — don't mirror it into the UI's pause state
 setting → `get player.<prop>` live; with `LP_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
 advances the rotation without a crash mark.
 
-- [ ] **Step 1: Write failing checks:**
+- [x] **Step 1: Write failing checks:**
   - self-test: `SourceProps` of a scene folder (kind, preview, no af); `OwnStreamFilter` excludes a synthetic
     `pactl` block with `node.name = lp-player-scene.src4`; the `ScenesPlayable` truth table (AllowScenes ×
     capability × engine)
@@ -823,10 +823,30 @@ advances the rotation without a crash mark.
     whitelisted → plays again; missing folder → `transition.failed`, not marked crashed; `AllowScenes=false` →
     `/next` skips scenes; `LP_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
     == false` with a reason; `/stop` → the worker pid gone ≤ 1 s; the legacy section starts/kills no mpvpaper
-- [ ] **Step 2:** `bash scripts/test-lp-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
-- [ ] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/livepaper -- --lp-player-selftest` → PASS;
+- [x] **Step 2:** `bash scripts/test-lp-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
+- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/livepaper -- --lp-player-selftest` → PASS;
   `cd app/ui && npm run build` ok.
-- [ ] **Step 5:** Commit `Play Scenes Under lp-player In The Backend`.
+- [x] **Step 5:** Commit `Play Scenes Under lp-player In The Backend`.
+
+**Done (2026-10-28) — deviations** (`.claude/rules/player-adapter.md` § Scenes): every player-side name the
+task assumed matched the code (`hello.capabilities` `scene`, `kind: "scene"`, `preview`, `out:<c>.scene_fps`,
+`lp-player scene-check` `{worker, features, assets_dir, ok, reason}`, worker streams `lp-player-scene.<id>`)
+except **`source.broken`, which didn't exist** (Task 10 isn't done): the player now logs it — the minimal
+event half of Task 10 (`sources/scene.rs` `log_broken`, `{id, path, scene_id, reason, restarts, record,
+signal|code}` from the crash record; `tests/api.rs::source_broken_event_names_the_scene`); Task 10 keeps the
+preview fallback, the snapshot's `broken` and the rest. `ScenesAvailable` = the capability from the CURRENT
+connection's `hello` (a dropped connection re-greets — a player restarted with another environment), else
+`scene-check` cached 30 s. Extra, found while wiring: the tick's LWE crash branch and `UpdateTimedSettings`'s
+"scene plays" were `IsLweRunning` checks (always false under lp-player → a scene would have counted as
+crashed every tick) — gated / `ScenePlaying`; `DoVideoEndWait`'s lp-player branch now takes scene sides
+(`align:"now"` when A is a scene — it never ends); its failure fallback, `ApplyTimedPlaylist`'s first item and
+`AdvanceToNext`'s history walk skip a crashed scene (lp-player only — legacy unchanged); `Apply` refuses a
+crashed non-whitelisted scene with a message; a scene's `preview` falls back to `preview.gif|webp`. The
+plan's `/next V→S and S→V` became V→S, S→S, S→V through `/next` + an aligned V→S at a clip's end; `/library/
+volume` "moves that source only" is checked mid-fade between two scenes; the IT exports
+`LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LP_SCENE_WORKER_BIN` for every player (the upgrade test copies the
+binary away from its worker) and gained `LP_IT_DLL` (the RED run: the base commit's backend failed every scene
+check). Settings also shows `/player-engine.scenes.reason` when scenes can't play.
 
 **Size: L** (≈ 2 days incl. the IT).
 

@@ -26,6 +26,7 @@ public static class LpPlayerSelfTest
             MapAssertions(fails);
             OwnershipAssertions(fails);
             SceneSkipAssertions(fails);
+            SceneAdapterAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -95,7 +96,51 @@ public static class LpPlayerSelfTest
         Own("bus playback node", Block("x", "1", "lp-player-bus.playback", "12"), true);
         Own("targets the bus sink", Block("x", "1", "y", "57"), true);
         Own("application.name lp-player", Block("lp-player", "1", "y", "12"), true);
+        // Phase 2: a scene worker's own stream (its own process, its own app name here) — by node name
+        Own("scene worker stream", Block("x", "1", "lp-player-scene.src4", "12"), true);
         Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
+    }
+
+    // ---- Phase 2 Task 11: scenes under lp-player (pure decisions + a scene's create props) ------
+    private static void SceneAdapterAssertions(List<string> fails)
+    {
+        // ScenesPlayable: AllowScenes × engine × (lp-player: the player's `scene` capability | legacy: LWE)
+        foreach (var allow in new[] { false, true })
+        foreach (var lp in new[] { false, true })
+        foreach (var cap in new[] { false, true })
+        foreach (var lwe in new[] { false, true })
+        {
+            bool want = allow && (lp ? cap : lwe);
+            bool got = PlayerEngine.ScenesPlayableFor(allow, lp, () => cap, () => lwe);
+            if (got != want) fails.Add($"ScenesPlayable(AllowScenes={allow}, lp-player={lp}, scene capability={cap}, LWE={lwe}) = {got}, want {want}");
+        }
+        // D6: a scene marked crashed is skipped unless whitelisted; a video never
+        foreach (var crashed in new[] { false, true })
+        foreach (var wl in new[] { false, true })
+        {
+            bool want = crashed && !wl;
+            if (PlayerHelper.SkipScene(true, true, crashed, wl) != want) fails.Add($"D6: a playable scene crashed={crashed} whitelisted={wl}: skipped={!want}, want {want}");
+            if (!PlayerHelper.SkipScene(true, false, crashed, wl)) fails.Add($"an unplayable scene (crashed={crashed}, whitelisted={wl}) must be skipped");
+            if (PlayerHelper.SkipScene(false, true, crashed, wl) || PlayerHelper.SkipScene(false, false, crashed, wl)) fails.Add("a video must never be skipped");
+        }
+        // a scene folder's create props: kind scene, its preview image, no audio filter
+        var dir = Path.Combine("/tmp", "lpst-scene-" + Guid.NewGuid().ToString("N")[..8], "workshop", "900000001");
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "project.json"), "{\"type\":\"scene\"}");
+            File.WriteAllBytes(Path.Combine(dir, "preview.png"), [0x89, 0x50, 0x4e, 0x47]);
+            var props = LpPlayerMedia.SourceProps(dir, new AppSettings { NormalizeAudio = true, Volume = 50 });
+            string P(string k) => props.TryGetValue(k, out var v) ? v?.ToString() ?? "null" : "<absent>";
+            if (P("kind") != "scene") fails.Add($"SourceProps(scene folder).kind = {P("kind")}, want scene");
+            if (P("preview") != Path.Combine(dir, "preview.png")) fails.Add($"SourceProps(scene folder).preview = {P("preview")}, want its preview.png");
+            if (P("af") != "") fails.Add($"SourceProps(scene folder).af = {P("af")}, want \"\" (no loudnorm on a scene)");
+            if (props.TryGetValue("gain.user", out var gu) && Math.Abs(Convert.ToDouble(gu) - MpvPropertyMap.VolumeDb(50)) > 1e-3)
+                fails.Add($"SourceProps(scene folder).gain.user = {gu}, want {MpvPropertyMap.VolumeDb(50):0.###} (Volume 50)");
+            var vid = LpPlayerMedia.SourceProps(Path.Combine(dir, "x.mp4"), new AppSettings());
+            if (vid["kind"] as string != "video" || vid.ContainsKey("preview")) fails.Add($"SourceProps(.mp4) = kind {vid["kind"]}, preview {(vid.ContainsKey("preview") ? "set" : "absent")}; want video, absent");
+        }
+        finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
     }
 
     // ---- Task 20c: next/prev/random's scene-skip decision point ------------------------------
@@ -120,12 +165,14 @@ public static class LpPlayerSelfTest
 
         try
         {
-            var lp = new AppSettings { PlayerEngine = PlayerEngine.LpPlayer, AllowScenes = true };
-            PlayerEngine.Refresh(lp); // deterministically sets the cached IsLpPlayer ScenesPlayable reads
-            if (!WouldSkip(scenePath, lp))
-                fails.Add("lp-player Phase 1 should still skip a scene even with AllowScenes=true");
-            if (WouldSkip(videoPath, lp))
-                fails.Add("lp-player should never skip a video");
+            // lp-player (Phase 2): playable exactly when the player has the `scene` capability — the
+            // capability half is SceneAdapterAssertions' truth table (pure: asking the shared client
+            // here would greet whatever player owns the default socket)
+            static bool LpSkip(string path, bool cap) =>
+                PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayableFor(true, true, () => cap, () => false);
+            if (!LpSkip(scenePath, cap: false)) fails.Add("lp-player without the scene capability should skip a scene");
+            if (LpSkip(scenePath, cap: true)) fails.Add("lp-player with the scene capability + AllowScenes should play a scene");
+            if (LpSkip(videoPath, cap: false)) fails.Add("lp-player should never skip a video");
 
             var legacyOff = new AppSettings { PlayerEngine = PlayerEngine.Legacy, AllowScenes = false };
             PlayerEngine.Refresh(legacyOff);
@@ -227,6 +274,7 @@ public static class LpPlayerSelfTest
             psi.Environment["XDG_STATE_HOME"] = Path.Combine(tmp, "st");
             psi.Environment.Remove("LP_PLAYER_SOCKET");
             psi.Environment.Remove("LD_LIBRARY_PATH"); // a stray one on this machine breaks the Nix binary's libs
+            psi.Environment["LP_PLAYER_ALLOW_SYNTHETIC_SCENES"] = "1"; // the scene round trip below (a synthetic scene)
             if (TransitionService.ResolveDir() is { } tdir) psi.Environment["LP_TRANSITIONS_DIR"] = tdir;
             var logPath = Path.Combine(tmp, "serve.log");
             serve = Process.Start(psi)!;
@@ -248,6 +296,12 @@ public static class LpPlayerSelfTest
             if (helloSup != serve.Id) fails.Add($"hello: supervisor_pid {helloSup?.ToString() ?? "null"} != spawned supervisor {serve.Id}");
             if (client.PlayerPid != helloPid) fails.Add($"client.PlayerPid {client.PlayerPid} != hello.pid {helloPid}");
             if (client.SupervisorPid != helloSup) fails.Add($"client.SupervisorPid {client.SupervisorPid} != hello.supervisor_pid {helloSup}");
+            // Phase 2: the capabilities `hello` lists (this private player allows synthetic scenes, so it
+            // has `scene` whenever lp-scene-worker resolves — next to lp-player in the dev tree)
+            var caps = hello.GetProperty("capabilities").EnumerateArray().Select(x => x.GetString()).ToHashSet();
+            if (!client.Capabilities.Contains("video")) fails.Add($"client.Capabilities = [{string.Join(",", client.Capabilities)}], want hello's [{string.Join(",", caps)}]");
+            if (!caps.Contains("scene")) fails.Add($"the private player (synthetic scenes allowed) has no `scene` capability [{string.Join(",", caps)}] — is lp-scene-worker built next to {bin}?");
+            if (client.ScenesAvailable != caps.Contains("scene")) fails.Add($"client.ScenesAvailable = {client.ScenesAvailable}, hello says scene={caps.Contains("scene")}");
 
             // the stepped clock only moves on `step` → a pump on its own connection (pausable)
             var stepper = new LpPlayerClient(sock) { AutoSpawn = false };
@@ -395,6 +449,34 @@ public static class LpPlayerSelfTest
                 stepping.Set();
                 if (LpPlayerMedia.CurrentPath() != b) fails.Add("cancel didn't leave A (b.mp4) on screen");
 
+                // Phase 2 Task 11: a scene folder plays as `kind: scene` (a synthetic one), takes the
+                // settings like a video, and the per-monitor scene fps reaches its output live
+                var scene = Path.Combine(tmp, "workshop", "900000001");
+                SyntheticScene(scene);
+                using (var to = new CancellationTokenSource(20000))
+                {
+                    bool ok = LpPlayerMedia.SwitchAndWaitHandoff(scene, s, cfg, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    if (!ok) fails.Add($"clip→scene fade: no transition.handoff (corr {LpPlayerMedia.LastCorr})");
+                }
+                string? Cur(string prop) { try { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:*.{prop}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText(); } catch (LpPlayerException e) { return e.Code; } }
+                if (Cur("kind") != "scene" || Cur("ready") != "true" || Cur("preview") != Path.Combine(scene, "preview.png"))
+                    fails.Add($"the scene folder plays as kind={Cur("kind")} ready={Cur("ready")} preview={Cur("preview")}, want scene/true/its preview.png");
+                else Phase("clip→scene fade: kind scene, ready, preview set");
+                LpPlayerMedia.ApplySceneFps([], [new LweMonitorSettings { Name = "VIRTUAL-1", Fps = 45 }]);
+                LpPlayerMedia.Drain().Wait(2000);
+                double Fps() => client.Call("get", new Dictionary<string, object?> { ["path"] = "out:VIRTUAL-1.scene_fps" }).GetProperty("value").GetDouble();
+                if (Math.Abs(Fps() - 45) > 1e-6) fails.Add($"ApplySceneFps(VIRTUAL-1 45) → out:VIRTUAL-1.scene_fps {Fps()}, want 45");
+                LpPlayerMedia.ApplySceneFps([new LweMonitorSettings { Name = "VIRTUAL-1", Fps = 45 }], []);
+                LpPlayerMedia.Drain().Wait(2000);
+                if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from LweMonitors → scene_fps {Fps()}, want the default 30");
+                else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 30 when removed");
+                using (var to = new CancellationTokenSource(20000))
+                {
+                    bool ok = LpPlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    if (!ok || LpPlayerMedia.CurrentPath() != b) fails.Add($"scene→clip cut: handoff={ok}, cur {LpPlayerMedia.CurrentPath() ?? "null"}");
+                }
+                LpPlayerMedia.Mpv(["set_property", "volume", 50]); LpPlayerMedia.Drain().Wait(2000);
+
                 // a STOPPED player costs one quick timeout, then the stall breaker answers at once.
                 // The COMPOSITOR holds the socket (the supervisor never does) — SIGSTOP/SIGCONT it, never
                 // the supervisor, which would see no effect at all and prove nothing.
@@ -519,6 +601,18 @@ public static class LpPlayerSelfTest
     private static bool StillRunning(int pid)
     {
         try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget) == "lp-player"; } catch { return false; }
+    }
+
+    // A synthetic scene item folder (what lp-player's tests/common::synthetic_scene writes): plays the
+    // worker's synthetic renderer only when the player runs with LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1.
+    internal static void SyntheticScene(string dir, string spec = "{\"pattern\":\"solid\",\"rgb\":[0,128,255],\"native\":[640,360]}")
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "project.json"), "{\"type\":\"scene\",\"title\":\"synthetic\",\"file\":\"scene.json\",\"preview\":\"preview.png\"}");
+        File.WriteAllBytes(Path.Combine(dir, "scene.pkg"), new byte[16]);
+        File.WriteAllText(Path.Combine(dir, "lp-synthetic.json"), spec);
+        File.WriteAllBytes(Path.Combine(dir, "preview.png"), Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC"));
     }
 
     private static bool Clip(string path, string pattern)

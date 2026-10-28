@@ -134,6 +134,10 @@ public static class ServerHost
     // Push live settings onto the (startup-built, reused) provider instances per request. Without this
     // the workshop/WE services keep their startup defaults (e.g. AllowScenes=false), so toggling scene
     // support has no effect and scene-only results (Puppet Warp etc.) are silently filtered to 0.
+    // LweMonitors equal entry by entry (name, fps, primary) — /settings' scene-fps diff
+    private static bool SameMonitors(IReadOnlyList<LweMonitorSettings> a, IReadOnlyList<LweMonitorSettings> b) =>
+        a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps && p.First.IsPrimary == p.Second.IsPrimary);
+
     private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter)
     {
         if (p is SteamWorkshopService ws)
@@ -354,6 +358,8 @@ public static class ServerHost
                 // § Targeting); covers the legacy calls below and ApplyPlaybackSettingsLive's
                 PlayerHelper.ApplyEffectiveLive(prev, s, curPlaying);
                 Mark("resolve");
+                // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
+                if (!SameMonitors(prev.LweMonitors, s.LweMonitors)) livepaper.Player.LpPlayerMedia.ApplySceneFps(prev.LweMonitors, s.LweMonitors);
             }
             else
             {
@@ -564,8 +570,8 @@ public static class ServerHost
                 ? Results.Json(new { error = e }, statusCode: AppOps.Actions.Contains(r.Name) ? 409 : 400)
                 : Results.Json(new { ok = true });
         });
-        // next/prev/random step the library/playlist to pick an item — under lp-player Phase 1,
-        // scenes are skipped exactly like AllowScenes=false (PlayerHelper.IsSkippedPath), but when
+        // next/prev/random step the library/playlist to pick an item — unplayable scenes (AllowScenes off,
+        // the engine can't, or crashed and not whitelisted) are skipped (PlayerHelper.IsSkippedPath), but when
         // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()
         // an unplayable path. Catch that domain exception here so it's a clear 409, never an
         // unhandled 500 (player-adapter.md / player.md: never invent a new skip mechanism).

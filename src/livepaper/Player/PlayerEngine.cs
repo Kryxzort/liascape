@@ -6,7 +6,8 @@ using livepaper.Models;
 namespace livepaper.Player;
 
 // Which player drives the wallpaper: "legacy" (mpvpaper + lp-transition + LWE, the default) or
-// "lp-player" (the Rust player, experimental, Phase 1 = videos/images only). PlayerHelper dispatches
+// "lp-player" (the Rust player, experimental: videos/images, and scenes when its scene worker + WE's
+// assets resolve — Phase 2). PlayerHelper dispatches
 // at its media primitives on IsLpPlayer; every legacy branch is untouched when it's false.
 public static class PlayerEngine
 {
@@ -49,8 +50,48 @@ public static class PlayerEngine
     public static string UnavailableReason =>
         "lp-player binary not found (LP_PLAYER_BIN, next to livepaper, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
 
-    // Phase 1: lp-player plays no scenes → scene items are skipped exactly like AllowScenes=false.
-    public static bool ScenesPlayable(AppSettings s) => s.AllowScenes && PlayerHelper.IsLweAvailable() && !IsLpPlayer;
+    // Can a scene item play right now? Scene support on, and the engine that runs can play one: lp-player
+    // (Phase 2) when the player has the `scene` capability — its lp-scene-worker AND WE's assets dir
+    // resolve (`LpPlayerClient.ScenesAvailable`); legacy when linux-wallpaperengine is on PATH.
+    public static bool ScenesPlayable(AppSettings s) =>
+        ScenesPlayableFor(s.AllowScenes, IsLpPlayer, () => LpPlayerClient.Shared.ScenesAvailable, PlayerHelper.IsLweAvailable);
+
+    // The rule itself (pure — the self-test's truth table): lazily asks only what the engine needs.
+    public static bool ScenesPlayableFor(bool allowScenes, bool isLpPlayer, Func<bool> lpScenes, Func<bool> lweAvailable) =>
+        allowScenes && (isLpPlayer ? lpScenes() : lweAvailable());
+
+    // `/player-engine.scenes`: can a scene play now, and if not, why (the first condition that fails).
+    public static object SceneStatus(AppSettings s)
+    {
+        if (IsLpPlayer)
+        {
+            var (ok, why, assets) = LpPlayerClient.Shared.SceneStatus(withAssets: true);
+            return new
+            {
+                available = ok && s.AllowScenes,
+                reason = !s.AllowScenes ? SceneSupportOff : why,
+                assets_dir = assets,
+            };
+        }
+        bool lwe = PlayerHelper.IsLweAvailable();
+        return new
+        {
+            available = s.AllowScenes && lwe,
+            reason = !s.AllowScenes ? SceneSupportOff : lwe ? null : "linux-wallpaperengine not found in PATH — install it to use scenes",
+            assets_dir = (string?)null,
+        };
+    }
+
+    public const string SceneSupportOff = "scene support is off (Settings → Wallpaper Engine → Allow scene support)";
+
+    // Why a scene can't be applied right now (Apply's error) — null when it can.
+    public static string? SceneUnavailableReason(AppSettings s)
+    {
+        if (!s.AllowScenes) return "Enable \"Allow scene support\" in Settings to play scenes";
+        if (!IsLpPlayer) return PlayerHelper.IsLweAvailable() ? null : "linux-wallpaperengine not found in PATH — install it to use scenes";
+        var (ok, why, _) = LpPlayerClient.Shared.SceneStatus(withAssets: false);
+        return ok ? null : $"lp-player can't play scenes here: {why}";
+    }
 
     // env LP_PLAYER_BIN → next to the running livepaper executable → the repo dev tree
     // src/player/target/{release,debug}/lp-player → PATH (release first: debug is opt-level 0 and the
@@ -110,6 +151,7 @@ public static class PlayerEngine
             available = bin != null,
             binary = bin,
             running = LpPlayerClient.Shared.RunningInfo(),
+            scenes = SceneStatus(s),
             reason = bin == null ? UnavailableReason
                 : Wants(s) && !IsLpPlayer ? "lp-player was not found when it was selected — select it again to switch now"
                 : LpPlayerClient.Shared.LastError,

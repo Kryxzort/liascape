@@ -194,6 +194,14 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   dnd-kit's rAF-aligned pointermoves coalesce (a drop lands on a stale target) and `appActive` stays false.
   Drags that need real hit-testing go through `webContents.sendInputEvent` (the strip's dnd-kit reorder).
 
+## Settings page under lp-player (Phase 2 scenes)
+`views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;
+while `active === "lp-player"` (`lpActive`): "Scene transition delay" is hidden (the player switches once the
+scene's first frame is in — no lead), the Monitors (scenes) rows drop the **primary** radio (one scene worker
+for every output; its sound is one stream) and label the fps **"fps (live)"** (the backend sets
+`out:<name>.scene_fps` on save), and a scene that can't play shows `scenes.reason` under the toggle. Legacy:
+unchanged.
+
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
 - `// COOL:` — motion/glow/UX intent.
