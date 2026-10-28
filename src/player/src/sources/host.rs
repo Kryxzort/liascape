@@ -48,7 +48,16 @@ const MIRRORED: [&str; 9] = [
 struct Hosted {
     src: Box<dyn Source>,
     wake: Option<RawFd>,
+    /// The value last mirrored into the graph per [`MIRRORED`] prop (Phase 2 Task 14): an
+    /// unchanged one isn't written again. A scene updates on every frame and the mirror used
+    /// to format, parse and resolve nine paths per update — the bulk of the compositor's CPU
+    /// per worker (perf, on-machine). Cleared whenever a change is forwarded to the source,
+    /// so a `set` the source refuses is still mirrored back exactly as before.
+    mirrored: [Option<PropValue>; MIRRORED.len()],
 }
+
+/// Nothing mirrored yet.
+const UNMIRRORED: [Option<PropValue>; MIRRORED.len()] = [const { None }; MIRRORED.len()];
 
 /// Phase 2 Task 8 (low VRAM, mode `stop`): a media source whose decoder/worker was dropped to
 /// free GPU memory while its node stays in the graph ([`SourceHost::suspend_media`]).
@@ -495,6 +504,7 @@ impl SourceHost {
         let Some(h) = self.sources.get_mut(id) else {
             return;
         };
+        h.mirrored = UNMIRRORED;
         if let Err(e) = h.src.apply("paused", &PropValue::Bool(paused)) {
             let reason = format!("apply paused: {e}");
             log::event(
@@ -765,6 +775,7 @@ impl SourceHost {
                     || (player_paused && !self.pause_exclusions.contains(id)),
             ));
             let apply_v = effective.as_ref().unwrap_or(v);
+            h.mirrored = UNMIRRORED;
             if let Err(e) = h.src.apply(prop, apply_v) {
                 let reason = format!("apply {prop}: {e}");
                 log::event(
@@ -804,6 +815,7 @@ impl SourceHost {
                 let effective = PropValue::Bool(
                     node_paused || (player_paused && !self.pause_exclusions.contains(&id)),
                 );
+                h.mirrored = UNMIRRORED;
                 if let Err(e) = h.src.apply("paused", &effective) {
                     let reason = format!("apply paused: {e}");
                     log::event(
@@ -887,6 +899,7 @@ impl SourceHost {
                 return Ok(Hosted {
                     src: Box::new(src),
                     wake,
+                    mirrored: UNMIRRORED,
                 });
             }
             _ => return self.open_mpv(gfx, node, player_paused, None),
@@ -903,7 +916,11 @@ impl SourceHost {
                 }
             }
         }
-        Ok(Hosted { src, wake: None })
+        Ok(Hosted {
+            src,
+            wake: None,
+            mirrored: UNMIRRORED,
+        })
     }
 
     /// The `MpvSource` for `node`: its opts (base + every writable prop, `paused` the
@@ -953,6 +970,7 @@ impl SourceHost {
         Ok(Hosted {
             src: Box::new(m),
             wake,
+            mirrored: UNMIRRORED,
         })
     }
 
@@ -1079,15 +1097,19 @@ impl SourceHost {
                 }
                 new_events.push((id.clone(), ev));
             }
-            for prop in MIRRORED {
-                if prop == "paused" && self.player_paused {
+            for (i, prop) in MIRRORED.iter().enumerate() {
+                if *prop == "paused" && self.player_paused {
                     continue;
                 }
                 if resuming.is_some() {
                     continue;
                 }
                 if let Some(v) = h.src.read(prop) {
-                    let _ = graph.set_observed(&PropPath(format!("{id}.{prop}")), v);
+                    if h.mirrored[i].as_ref() == Some(&v) {
+                        continue;
+                    }
+                    let _ = graph.set_observed(&PropPath(format!("{id}.{prop}")), v.clone());
+                    h.mirrored[i] = Some(v);
                 }
             }
         }
