@@ -8203,3 +8203,232 @@ fn parked_scene_align_end_hands_off_at_once() {
     assert!(handed(&corrs[0]), "from a parked scene: at once: {evs:?}");
     assert!(!handed(&corrs[1]), "from a parked video: waits: {evs:?}");
 }
+
+// ------------------------------------------- Phase 2: scene loudness learned on first play
+
+/// A real-clock `--ao null` server (the worker's real-time pull timer is the stream) whose scene
+/// loudness window is `window_s` seconds of audible play (`LP_PLAYER_LOUDNESS_WINDOW_S`).
+fn loudness_serve(window_s: &str) -> Option<Serve> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    Some(Serve::spawn_env(
+        new_root(),
+        &["--clock", "real", "--log-level", "debug"],
+        &[
+            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LP_PLAYER_LOUDNESS_WINDOW_S", Path::new(window_s)),
+        ],
+        Some(serial),
+    ))
+}
+
+/// Every `scene.loudness` event so far (of source `id`, or all with `None`).
+fn loudness_events(c: &mut Client, id: Option<&str>) -> Vec<Value> {
+    c.ok(
+        "logs",
+        json!({"kind_prefix": "scene.loudness", "min_level": "debug", "limit": 10000}),
+    )["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            e["kind"] == json!("scene.loudness") && id.is_none_or(|i| e["id"] == json!(i))
+        })
+        .cloned()
+        .collect()
+}
+
+/// `id`'s learning progress (`workers` probe → `loudness`).
+fn loudness_progress(c: &mut Client, id: &str) -> Value {
+    worker_of(c, id)["loudness"].clone()
+}
+
+fn audible_s(c: &mut Client, id: &str) -> f64 {
+    loudness_progress(c, id)["seconds"]
+        .as_f64()
+        .unwrap_or(-1.0)
+}
+
+/// Owner decision (Phase 2): a scene's integrated loudness is learned over its first
+/// `window` seconds of audible play and reported ONCE as `scene.loudness {complete: true}` —
+/// a stereo 1 kHz tone at −20 dBFS peak reads −20 LUFS (BS.1770; ±1 LU asserted). Measured
+/// before the gain (a −30 dB `gain.user` doesn't move it) and at any speed (the stretch keeps
+/// the level).
+#[test]
+fn scene_loudness_is_learned_once_after_its_window() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    for (name, speed, gain) in [("api-loud-1x", 1.0, 0.0), ("api-loud-2x", 2.0, -30.0)] {
+        let id = create_scene(
+            &mut c,
+            name,
+            &tone_scene(1000.0),
+            json!({"speed": speed, "gain.user": gain}),
+        );
+        show_all(&mut c, &id);
+        let t0 = now_ms(&mut c);
+        let ev = wait_for(Duration::from_secs(15), "scene.loudness", || {
+            loudness_events(&mut c, Some(&id)).into_iter().next()
+        });
+        println!("{name}: {ev}");
+        let lufs = ev["lufs"].as_f64().unwrap();
+        assert!((lufs + 20.0).abs() < 1.0, "{name}: lufs {lufs}");
+        assert_eq!(ev["complete"], json!(true), "{ev}");
+        let dir = common::synthetic_scene(name, &tone_scene(1000.0));
+        assert_eq!(ev["path"], json!(s(&dir)), "{ev}");
+        let secs = ev["seconds"].as_f64().unwrap();
+        assert!((2.0..2.5).contains(&secs), "{name}: seconds {secs}");
+        assert!((ev["peak_dbfs"].as_f64().unwrap() + 20.0).abs() < 0.5, "{ev}");
+        // Learned after the window of real play, never before it.
+        assert!(ev["t_mono_ms"].as_f64().unwrap() - t0 >= 2000.0, "{ev}");
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(loudness_events(&mut c, Some(&id)).len(), 1, "once");
+        let p = loudness_progress(&mut c, &id);
+        assert_eq!(p["done"], json!(true), "{p}");
+        c.ok("destroy", json!({"id": id}));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            loudness_events(&mut c, Some(&id)).len(),
+            1,
+            "no second report at the end"
+        );
+    }
+}
+
+/// A scene without sound — no stream at all, or a stream of digital silence — never reports
+/// a loudness (nothing to normalize), not at the window, not when it ends.
+#[test]
+fn silent_scene_learns_no_loudness() {
+    let Some(srv) = loudness_serve("1") else {
+        return;
+    };
+    let mut c = srv.client();
+    let mut quiet = tone_scene(1000.0);
+    quiet.tone_dbfs = -120.0; // the tone's amplitude is exactly 0
+    for (name, spec) in [
+        ("api-loud-none", synth(Pattern::Solid)),
+        ("api-loud-zero", quiet),
+    ] {
+        let id = create_scene(&mut c, name, &spec, json!({}));
+        show_all(&mut c, &id);
+        wait_for(Duration::from_secs(5), "ready", || {
+            (get(&mut c, &format!("{id}.ready"))["result"]["value"] == json!(true)).then_some(())
+        });
+        std::thread::sleep(Duration::from_millis(2500));
+        let p = loudness_progress(&mut c, &id);
+        println!("{name}: {p}");
+        assert_eq!(p["seconds"].as_f64(), Some(0.0), "{p}");
+        c.ok("destroy", json!({"id": id}));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(loudness_events(&mut c, Some(&id)).is_empty(), "{name}: no event");
+    }
+}
+
+/// Paused and `no_audio` stretches add nothing (the worker pulls no sound then): the audible
+/// time stands still through both, and the result is the tone's level.
+#[test]
+fn paused_and_muted_play_never_counts_toward_loudness() {
+    let Some(srv) = loudness_serve("3") else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-loud-pause", &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(10), "0.5 s audible", || {
+        (audible_s(&mut c, &id) >= 0.5).then_some(())
+    });
+    for (prop, on, off) in [
+        ("player.paused".to_string(), json!(true), json!(false)),
+        (format!("{id}.no_audio"), json!(true), json!(false)),
+    ] {
+        c.ok("set", json!({"path": prop, "value": on}));
+        std::thread::sleep(Duration::from_millis(300)); // a segment in flight lands
+        let a = audible_s(&mut c, &id);
+        std::thread::sleep(Duration::from_millis(1500));
+        let b = audible_s(&mut c, &id);
+        println!("{prop}: audible {a:.1} → {b:.1} s");
+        assert!(b - a < 0.15, "{prop} counted: {a} → {b}");
+        c.ok("set", json!({"path": prop, "value": off}));
+        assert!(loudness_events(&mut c, Some(&id)).is_empty());
+    }
+    let ev = wait_for(Duration::from_secs(15), "scene.loudness", || {
+        loudness_events(&mut c, Some(&id)).into_iter().next()
+    });
+    println!("{ev}");
+    assert!((ev["lufs"].as_f64().unwrap() + 20.0).abs() < 1.0, "{ev}");
+    // Everything played was audible: played ≈ audible + the first block's 3 segments.
+    let played = ev["played_s"].as_f64().unwrap();
+    let secs = ev["seconds"].as_f64().unwrap();
+    assert!(played - secs < 0.5, "paused/muted time counted as played: {ev}");
+}
+
+/// A scene that ends early (switched away, destroyed) reports what it measured once it had a
+/// third of the window (`complete: false`); below that, nothing.
+#[test]
+fn scene_ended_early_reports_a_partial_loudness() {
+    let Some(srv) = loudness_serve("6") else {
+        return;
+    };
+    let mut c = srv.client();
+    let mut quieter = tone_scene(1000.0);
+    quieter.tone_dbfs = -26.0;
+    let a = create_scene(&mut c, "api-loud-short", &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(10), "0.5 s audible", || {
+        (audible_s(&mut c, &a) >= 0.5).then_some(())
+    });
+    c.ok("destroy", json!({"id": a}));
+    let b = create_scene(&mut c, "api-loud-partial", &quieter, json!({}));
+    show_all(&mut c, &b);
+    wait_for(Duration::from_secs(15), "2.5 s audible", || {
+        (audible_s(&mut c, &b) >= 2.5).then_some(())
+    });
+    c.ok("destroy", json!({"id": b}));
+    let ev = wait_for(Duration::from_secs(3), "a partial", || {
+        loudness_events(&mut c, Some(&b)).into_iter().next()
+    });
+    println!("{ev}");
+    assert_eq!(ev["complete"], json!(false), "{ev}");
+    assert!((ev["lufs"].as_f64().unwrap() + 26.0).abs() < 1.0, "{ev}");
+    let secs = ev["seconds"].as_f64().unwrap();
+    assert!((2.5..6.0).contains(&secs), "{ev}");
+    assert!(
+        loudness_events(&mut c, Some(&a)).is_empty(),
+        "< a third of the window: nothing"
+    );
+}
+
+/// A worker crash mid-measurement loses at most the segment in flight: the source keeps what
+/// it measured and the restarted worker's sound completes the window.
+#[test]
+fn scene_loudness_survives_a_worker_restart() {
+    let Some(srv) = loudness_serve("3") else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-loud-crash", &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(10), "1.5 s audible", || {
+        (audible_s(&mut c, &id) >= 1.5).then_some(())
+    });
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    let before = audible_s(&mut c, &id);
+    let t_kill = now_ms(&mut c);
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    let ev = wait_for(Duration::from_secs(15), "scene.loudness", || {
+        loudness_events(&mut c, Some(&id)).into_iter().next()
+    });
+    println!("audible {before:.1} s at the kill; {ev}");
+    let now_pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    assert_ne!(now_pid, pid, "a restarted worker");
+    assert!((ev["lufs"].as_f64().unwrap() + 20.0).abs() < 1.0, "{ev}");
+    assert_eq!(ev["complete"], json!(true));
+    // What was measured before the kill counts: the rest of the window (+ the restart) is
+    // less than a whole new window (3 s) would take.
+    let after_kill = ev["t_mono_ms"].as_f64().unwrap() - t_kill;
+    assert!(after_kill < 2800.0, "learned {after_kill:.0} ms after the kill: {ev}");
+}

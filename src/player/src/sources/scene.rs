@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value, json};
 
 use super::{MpvSource, Source, SourceEvent, StepStatus, unsupported};
+use crate::audio::loudness::{self, Learned, Learner};
 use crate::gfx::dmabuf::DmabufDesc;
 use crate::gfx::{Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
@@ -217,6 +218,9 @@ pub struct SceneOpts {
     /// The item's preview image (Task 10: shown while no worker frame exists after a crash,
     /// and for a scene restored broken). Empty = none.
     pub preview: String,
+    /// Scene loudness learning: seconds of audible play to learn over (`audio::loudness`,
+    /// `LP_PLAYER_LOUDNESS_WINDOW_S`; 60 by default).
+    pub loudness_window_s: f64,
 }
 
 impl SceneOpts {
@@ -244,6 +248,7 @@ impl SceneOpts {
             crash_dir: crate::paths::crash_dir(),
             defer_spawn: false,
             preview: String::new(),
+            loudness_window_s: loudness::DEFAULT_WINDOW_S,
         }
     }
 }
@@ -386,6 +391,9 @@ pub struct SceneSource {
     restored_broken: bool,
     /// `ContextLost` reports (the worker's GL context was lost → a crash restart).
     context_losses: u32,
+    /// Scene loudness learned on first play (`audio::loudness`): the worker's segments of the
+    /// current path — kept across worker restarts, started over by a `path` change.
+    loudness: Learner,
 }
 
 /// The hang-timeout knob (Task 10): a `Tick`/`Ping` unanswered this many ms = hung (tests
@@ -498,6 +506,7 @@ impl SceneSource {
         };
         o.defer_spawn = true;
         o.hang_timeout = hang_timeout(std::env::var(HANG_ENV).ok().as_deref());
+        o.loudness_window_s = loudness::window_s(std::env::var(loudness::WINDOW_ENV).ok().as_deref());
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
         // Task 10: a scene the snapshot saved broken (past its restart budget before the
@@ -623,6 +632,7 @@ impl SceneSource {
             preview_error: None,
             restored_broken: false,
             context_losses: 0,
+            loudness: Learner::new(opts.loudness_window_s),
             opts,
         };
         if !src.opts.defer_spawn {
@@ -1219,6 +1229,13 @@ impl SceneSource {
                 }
             }
             FromWorker::Envelope { t0_ms, dbfs_1ms } => self.on_envelope(t0_ms, &dbfs_1ms),
+            FromWorker::Loudness { segments } => {
+                for seg in segments {
+                    if let Some(l) = self.loudness.push(seg) {
+                        self.report_loudness(l);
+                    }
+                }
+            }
             FromWorker::PropertySet { name, ok, reason } => {
                 log::event(
                     "scene",
@@ -1417,6 +1434,8 @@ impl SceneSource {
             drop(h); // `quit`, reaped off the loop
         }
         self.latch.forget_worker();
+        self.end_loudness();
+        self.loudness = Learner::new(self.opts.loudness_window_s);
         self.opts.path = PathBuf::from(&path);
         self.opts.synthetic = self
             .opts
@@ -1570,6 +1589,29 @@ impl SceneSource {
         }
         while self.envelope.len() > ENVELOPE_KEEP {
             self.envelope.pop_front();
+        }
+    }
+
+    /// `scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}` —
+    /// what the backend stores in the item's index and normalizes the scene by from then on.
+    fn report_loudness(&self, l: Learned) {
+        log::event(
+            "scene",
+            Level::Info,
+            "scene.loudness",
+            None,
+            json!({"id": self.opts.id, "path": self.opts.path, "lufs": l.lufs,
+                   "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
+                   "seconds": l.seconds, "played_s": l.played_s, "complete": l.complete,
+                   "window_s": self.loudness.window_s()}),
+        );
+    }
+
+    /// The source stops playing its current path (destroyed, or `path` changed): a partial
+    /// loudness if enough was audible and nothing was learned yet.
+    fn end_loudness(&mut self) {
+        if let Some(l) = self.loudness.finish() {
+            self.report_loudness(l);
         }
     }
 
@@ -1873,6 +1915,13 @@ impl SceneSource {
         v["restored_broken"] = json!(self.restored_broken);
         v["resuming"] = json!(self.resuming.is_some());
         v["context_losses"] = json!(self.context_losses);
+        v["loudness"] = json!({
+            "seconds": self.loudness.audible_s(),
+            "played_s": self.loudness.played_s(),
+            "lufs": self.loudness.integrated(),
+            "done": self.loudness.done(),
+            "window_s": self.loudness.window_s(),
+        });
         v["preview"] = json!({
             "path": self.opts.preview,
             "open": self.preview.is_some(),
@@ -2095,6 +2144,7 @@ impl Source for SceneSource {
     /// The worker quits now (never blocks); a preview image goes through `MpvSource`'s own
     /// two-phase teardown (R51) before this source may be dropped.
     fn begin_teardown(&mut self) -> bool {
+        self.end_loudness();
         if let Some(h) = self.host.take() {
             epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, h.wake_fd());
             drop(h); // `quit`, reaped off the loop

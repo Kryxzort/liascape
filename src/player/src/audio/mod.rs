@@ -8,6 +8,7 @@
 //! mpv's default device and the meter reports itself unavailable.
 
 pub mod bus;
+pub mod loudness;
 pub mod meter;
 pub mod sysmon;
 
