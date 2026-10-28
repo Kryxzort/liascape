@@ -34,14 +34,47 @@ yay -S livepaper-git
 ### From source
 
 ```bash
-git clone https://github.com/sunwoo101/livepaper.git
-cd livepaper
-bash scripts/install.sh
+git clone https://github.com/Kryxzort/livepaper-pro.git
+cd livepaper-pro
+bash scripts/install.sh            # add --no-scenes to build without Wallpaper Engine scene support under lp-player
 ```
 
 Builds the React UI, publishes the self-contained C# backend, and installs **`livepaper`** to `~/.local/bin` (bare = open the GUI; flags = CLI/daemons), plus **`livepaper-ui`** (explicit GUI launcher) and a desktop entry.
 
 > The install script assumes its runtime deps (`ffmpeg`, `mpvpaper`, Electron, …) resolve from your system in the usual FHS paths — true on Arch/Ubuntu/Fedora. **NixOS has no global lib paths**, so use the flake below instead; it carries every dependency with it.
+
+### Build dependencies
+
+What `scripts/install.sh` needs on your machine to build everything (the experimental `lp-player` engine and its
+Wallpaper Engine scene worker included). It checks each group **before** building anything and hard-fails with the
+matching package line. **On NixOS skip all of this — the flake (below) carries every dependency.** The package names
+below are the ones `install.sh` / `scripts/lwe.sh` print; `bash scripts/lwe.sh deps` re-checks the scene group alone.
+
+**Build-time**
+
+| Group | Needed for | Arch | Debian / Ubuntu | Fedora |
+|---|---|---|---|---|
+| Rust toolchain (`cargo`, `rustc`, edition 2024) | `lp-player`, `lp-scene-worker` | `rust` | `cargo rustc` | `cargo rust` |
+| Native toolchain + dev headers: `cc`, `make`, `pkg-config`, `wayland-scanner`, wayland / EGL / GLES / `mpv` / `libpulse` / PipeWire / xkbcommon, `libclang` (bindgen) | `lp-transition`, `lp-audio`, `lp-player` | `base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang` | `build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev` | `gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel` |
+| Wallpaper Engine scenes — builds LWE's `next-v2` core (`cmake`, `git`, a C++ compiler, SDL2, freetype, glm, lz4, zlib, FFmpeg, mpv, libGL) | `lp-scene-worker` | `cmake git sdl2 freetype2 glm lz4 zlib ffmpeg mpv libglvnd` | `cmake git libsdl2-dev libfreetype-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libmpv-dev libgl-dev` | `cmake git SDL2-devel freetype-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel mpv-libs-devel libglvnd-devel` |
+| .NET 10 SDK and Node.js / npm | the C# backend; the React UI and the Electron shell | *`install.sh` prints no package names for these — use your distro's .NET 10 SDK and Node.js / npm packages* | | |
+
+Pass **`--no-scenes`** to `scripts/install.sh` to skip the third row (no `cmake`, SDL2, freetype, glm, lz4 or FFmpeg dev
+packages needed): `lp-scene-worker` is then built without the LWE core, scenes are hidden under `lp-player` exactly like
+"Allow scene support" off, and everything else is unchanged. The scene build fetches the pinned LWE source at build time
+(`third_party/lwe/PIN`), so it needs network access.
+
+**Runtime** (needed to run, not to build)
+
+- `mpvpaper` and `mpv` — video wallpapers on the default (`legacy`) engine; `ffmpeg` — thumbnails and frame grabs;
+  `libpulse` (`pactl`/`parec`, from `pulseaudio` or `pipewire-pulse`) — Auto-Mute; `wl-clipboard` — keybind Copy buttons.
+- Electron is installed by `install.sh` through npm (`app/shell`), not from a distro package.
+- `lp-player` uses libmpv, Wayland, EGL/GLES, xkbcommon and PipeWire at run time (the libraries behind the dev headers
+  above), and plays Wallpaper Engine **scenes** from Wallpaper Engine's own `assets/` directory (its Steam install, found
+  automatically in your Steam libraries; otherwise set `LP_WE_ASSETS_DIR`). Scenes under `lp-player` do not need the
+  `linux-wallpaperengine` binary.
+- Optional: `linux-wallpaperengine` — scenes on the default (`legacy`) engine; `playerctl` — the "Only mute if MPRIS
+  media player is active" option.
 
 ### NixOS (flake)
 
@@ -160,3 +193,10 @@ bash scripts/install.sh                          # build UI + backend, install l
 ```
 
 > Packaging (AppImage / AUR) is **not** rebuilt for the Electron stack yet — `scripts/build-appimage.sh` + `PKGBUILD` still target the old single-binary app. Use `scripts/install.sh` for now.
+
+## License
+
+livepaper is licensed under the **GNU GPL v3.0** — see [`LICENSE`](LICENSE). It started as a fork of
+[sunwoo101/livepaper](https://github.com/sunwoo101/livepaper); the portions that come from upstream keep their MIT notice in
+[`LICENSE.upstream-MIT`](LICENSE.upstream-MIT). The scene worker links
+[linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (GPL-3.0).
