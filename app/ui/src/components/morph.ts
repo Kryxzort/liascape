@@ -1,10 +1,20 @@
-// COOL: the per-item settings modal's morph (LibrarySettingsModal). A source surface (library card
-// `.thumb-wrap`, playlist-strip `.pl-item`) carries `data-morph-id`; the modal's media box flies from that
-// surface's visible crop to its own place — ONE uniform scale (the picture never stretches) while a
-// clip-path inset re-crops it from the card's cover-crop to the image's own aspect — and a panel-coloured
-// ghost grows from the card to the panel. framer's layoutId scaled one <img> between a 16:9 crop and the
-// natural aspect (stretched mid-flight), flew a low-res still, and couldn't fly back out of the strip's
-// scroll row (clipped there), so the strip close just vanished.
+// COOL: the card → modal morph (LibrarySettingsModal, PreviewModal — the useMorph hook). A source surface
+// (library card `.thumb-wrap`, playlist-strip `.pl-item`, Browse card) carries `data-morph-id`; the modal's
+// media box flies from that surface's visible crop to its own place — the picture with ONE uniform scale (it
+// never stretches) while its crop grows from the card's cover-crop to the image's own aspect — the panel's
+// chrome (its `::before`: background, border, shadow) grows from the card to the panel, and the body is
+// clipped to it. framer's layoutId scaled one <img> between a 16:9 crop and the natural aspect (stretched
+// mid-flight), flew a low-res still, and couldn't fly back out of the strip's scroll row (clipped there).
+//
+// PERF: every flight animates `transform` (+ the body's opacity) ONLY — compositor work, no layout, no
+// repaint. The owner's NVIDIA box renders the UI in software (main.js: disable-gpu), where the old flight
+// (the ghost's left/top/width/height/border-radius + its 60 px shadow re-rastered every frame, clip-path
+// re-crops repainting the media and the body) spent ~6 ms of raster + ~5 ms of compositing per frame and
+// dropped about half the frames of a 240 Hz display. A re-crop without clip-path = two nested boxes: the
+// outer one (overflow hidden, rounded) scaled NON-uniformly onto the crop, the inner one counter-scaled so
+// the content's net scale is the picture's (uniform) — or 1 for the body, which stays put while its clip
+// grows. Nested scales interpolate per factor, not per product, so the keyframes are SAMPLED (the easing
+// baked in, `linear` between samples, ~one per 12 ms) and the product stays exact to a fraction of a pixel.
 
 export type Box = { x: number; y: number; w: number; h: number };
 
@@ -43,42 +53,81 @@ export function cover(s: Box, a: number): Box {
     : { x: s.x + (s.w - s.h * a) / 2, y: s.y, w: s.h * a, h: s.h };
 }
 
-// keyframe for the media box (laid out at `m`, transform-origin 0 0) that shows exactly the source's
-// crop `s` with corner radius `rs`: moved + uniformly scaled onto cover(s), clipped (in its own, unscaled
-// coordinates) to s
-export function onSource(m: Box, s: Box, rs: number, a: number): Keyframe {
-  const c = cover(s, a);
-  const k = c.w / m.w;
-  const t = (s.y - c.y) / k, r = (c.x + c.w - s.x - s.w) / k, b = (c.y + c.h - s.y - s.h) / k, l = (s.x - c.x) / k;
-  return {
-    transform: `translate(${c.x - m.x}px, ${c.y - m.y}px) scale(${k})`,
-    clipPath: `inset(${t}px ${r}px ${b}px ${l}px round ${rs / k}px)`,
+const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
+export const lerpBox = (a: Box, b: Box, p: number): Box => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), w: lerp(a.w, b.w, p), h: lerp(a.h, b.h, p) });
+
+// One frame of a flight, every box on screen (px): V = the media's visible crop, C = the whole picture
+// (V's cover box — same aspect all the way, so a box lerp between two of them never stretches it),
+// G = the panel chrome (the "ghost"), R = the body's visible clip. Each edge runs linearly between two
+// poses (the same eased progress for all), so V ⊂ G and R ⊂ G all the way when they hold at both ends.
+export type Pose = { V: Box; C: Box; G: Box; R: Box };
+export const sourcePose = (S: Box, aspect: number): Pose => ({ V: S, C: cover(S, aspect), G: S, R: S });
+// at rest: M = the media box, P = the panel, B = the body (their untransformed boxes)
+export type Rest = { M: Box; P: Box; B: Box };
+export const restPose = ({ M, P, B }: Rest): Pose => ({ V: M, C: M, G: P, R: B });
+export const lerpPose = (a: Pose, b: Pose, p: number): Pose => ({ V: lerpBox(a.V, b.V, p), C: lerpBox(a.C, b.C, p), G: lerpBox(a.G, b.G, p), R: lerpBox(a.R, b.R, p) });
+
+// the transform (transform-origin 0 0) that puts an element laid out at `rest` onto the screen box `t`
+const mapTo = (rest: Box, t: Box) => `translate(${t.x - rest.x}px, ${t.y - rest.y}px) scale(${t.w / rest.w}, ${t.h / rest.h})`;
+// an inner box laid out over its outer one (inset 0, both at `rest`), the outer mapped onto `V`: the
+// inner's transform (in the outer's scaled coordinates) that puts its content on the screen box `C`
+const innerTo = (rest: Box, V: Box, C: Box) => {
+  const sx = V.w / rest.w, sy = V.h / rest.h;
+  return `translate(${(C.x - V.x) / sx}px, ${(C.y - V.y) / sy}px) scale(${C.w / V.w}, ${C.h / V.h})`;
+};
+
+// CSS cubic-bezier(x1, y1, x2, y2) as a function of time fraction → progress
+export type Bezier = [number, number, number, number];
+export function bezier([x1, y1, x2, y2]: Bezier): (t: number) => number {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = (s: number) => ((ax * s + bx) * s + cx) * s, Y = (s: number) => ((ay * s + by) * s + cy) * s;
+  const dX = (s: number) => (3 * ax * s + 2 * bx) * s + cx;
+  return (t) => {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    let s = t;
+    for (let i = 0; i < 8; i++) { const e = X(s) - t, d = dX(s); if (Math.abs(e) < 1e-6) return Y(s); if (Math.abs(d) < 1e-6) break; s -= e / d; }
+    let lo = 0, hi = 1; s = t;
+    for (let i = 0; i < 40; i++) { const x = X(s); if (Math.abs(x - t) < 1e-6) break; if (x < t) lo = s; else hi = s; s = (lo + hi) / 2; }
+    return Y(s);
   };
 }
+export const cssEase = (b: Bezier) => `cubic-bezier(${b.join(", ")})`;
 
-export const atRest = (radius: number): Keyframe => ({ transform: "translate(0px, 0px) scale(1)", clipPath: `inset(0px 0px 0px 0px round ${radius}px)` });
+// the keyframes of a flight `from` → `to` (eased by `ease`, sampled — see the header), for: the media box
+// (outer crop) + its `[data-morph-pic]` (inner picture), the panel's `::before` (chrome) and the body's
+// clip box + the body inside it. Apply each with `easing: "linear"`.
+export type FlightFrames = { media: Keyframe[]; pic: Keyframe[]; chrome: Keyframe[]; clip: Keyframe[]; body: Keyframe[] };
+export function flightFrames(rest: Rest, from: Pose, to: Pose, ease: (t: number) => number, duration: number): FlightFrames {
+  const n = Math.max(8, Math.ceil(duration / 12));
+  const f: FlightFrames = { media: [], pic: [], chrome: [], clip: [], body: [] };
+  for (let i = 0; i <= n; i++) {
+    const offset = i / n, q = lerpPose(from, to, ease(offset));
+    f.media.push({ offset, transform: mapTo(rest.M, q.V) });
+    f.pic.push({ offset, transform: innerTo(rest.M, q.V, q.C) });
+    f.chrome.push({ offset, transform: mapTo(rest.P, q.G) });
+    f.clip.push({ offset, transform: mapTo(rest.B, q.R) });
+    f.body.push({ offset, transform: innerTo(rest.B, q.R, rest.B) });
+  }
+  return f;
+}
 
-export const boxFrame = (b: Box, radius: number): Keyframe => ({ left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px`, borderRadius: `${radius}px` });
+export type Flight = { duration: number; bezier: Bezier };
+export type MorphTiming = { open: Flight; close: Flight };
 
-// clip keyframes for an element laid out at `b` that keep it inside the ghost growing from `s` to the
-// panel (which contains `b`): each clip edge runs from s's edge to b's with the same easing, so it never
-// passes the ghost's edge (which runs to the panel's, further out). A polygon, not inset(): insets that
-// add up to more than the box are scaled down proportionally — the edges would no longer track.
-const rectPoly = (x0: number, y0: number, x1: number, y1: number) => `polygon(${x0}px ${y0}px, ${x1}px ${y0}px, ${x1}px ${y1}px, ${x0}px ${y1}px)`;
-export const fromSourceClip = (b: Box, s: Box): Keyframe => ({ clipPath: rectPoly(s.x - b.x, s.y - b.y, s.x + s.w - b.x, s.y + s.h - b.y) });
-export const fullClip = (b: Box): Keyframe => ({ clipPath: rectPoly(0, 0, b.w, b.h) });
-
-export type MorphTiming = { open: { duration: number; easing: string }; close: { duration: number; easing: string } };
-
-// a decelerating, slightly springy open; an ease-in-out close — the Browse preview's
-export const OPEN = { duration: 430, easing: "cubic-bezier(0.2, 0.9, 0.22, 1)" };
-export const CLOSE = { duration: 340, easing: "cubic-bezier(0.45, 0, 0.2, 1)" };
-export const PREVIEW_MORPH: MorphTiming = { open: OPEN, close: CLOSE };
-// COOL: the per-item settings modal flies slower (owner: "slow down morph" — 430 ms with an ease that does ~70 %
-// of the travel in its first quarter read as a snap): a longer, gentler ease-out open whose travel is spread over
-// the whole flight, and a matching ease-in-out close. Things that wait for the open to land (the duration row,
-// the scene properties, App's frozen gifs) key off these numbers.
+// the Browse preview's: a decelerating, slightly springy open; an ease-in-out close
+export const PREVIEW_MORPH: MorphTiming = {
+  open: { duration: 430, bezier: [0.2, 0.9, 0.22, 1] },
+  close: { duration: 340, bezier: [0.45, 0, 0.2, 1] },
+};
+// COOL: TUNE HERE — the per-item settings modal's flight (owner 2026-10-28: 430 ms "snap" → 620 ms "still too
+// snappy"): slow and soft, one symmetric ease-in-out (sine-like: 25 % of the time → 15 % of the travel, the
+// middle fastest, the landing as gentle as the take-off) both ways, the close a little quicker than the open.
+// Things that wait for the open to land (the duration row, the scene properties, the video preview, App's
+// frozen gifs) key off these numbers; probe-morph.js asserts the flight times around them.
+const SOFT: Bezier = [0.37, 0, 0.63, 1];
 export const SETTINGS_MORPH: MorphTiming = {
-  open: { duration: 620, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" },
-  close: { duration: 500, easing: "cubic-bezier(0.45, 0, 0.25, 1)" },
+  open: { duration: 900, bezier: SOFT },
+  close: { duration: 700, bezier: SOFT },
 };

@@ -358,18 +358,31 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 .sp-num { min-width: 3ch; text-align: right; }
 .sp-color { width: 38px; height: 24px; padding: 0; border: 1px solid var(--surface1); border-radius: 6px; background: none; cursor: pointer; }
 .sp-textin { width: 160px; }
-.modal.morph-panel { position: relative; z-index: 1; } /* above its .morph-ghost (components/useMorph.ts) */
-/* COOL: settings-modal morph (components/morph.ts). The media box flies (transform from its top-left +
-   a clip-path re-crop, both set by WAAPI) and a panel-coloured ghost grows card → panel; meanwhile the
-   panel itself is see-through ([data-morph]) and its body fades in late. */
-/* z-index: above the body, which stacks like a positioned element while its opacity animates */
+/* COOL + PERF: the card → modal morph (components/morph.ts, useMorph.ts) flies on transform only — the owner's
+   NVIDIA box composites the UI in software, where animating a box's size / radius / shadow / clip-path re-rasters
+   it every frame. The panel's chrome (background, border, shadow) is its ::before — its own layer, rastered once,
+   scaled card → panel; the panel itself draws nothing (its border stays, transparent, so the layout is the same). */
+.modal.morph-panel { position: relative; z-index: 1; background: none; border-color: transparent; box-shadow: none; }
+.modal.morph-panel::before { content: ""; position: absolute; inset: -1px; z-index: -1; pointer-events: none;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr), transparent);
+  border: 1px solid var(--surface1); border-radius: 16px; box-shadow: 0 24px 60px rgba(0,0,0,.6), var(--glow);
+  transform-origin: 0 0; will-change: transform; }
+/* the media: an outer crop box (rounded, clipped; scaled non-uniformly onto the crop) + [data-morph-pic], the
+   picture layers counter-scaled to one uniform scale. z-index: above the body, which stacks like a positioned
+   element while its opacity animates */
 .morph-media { position: relative; z-index: 2; margin: 0 auto; border-radius: 14px; overflow: hidden; transform-origin: 0 0;
-  background: var(--bg-crust); will-change: transform; }
-.morph-media > img, .morph-media > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.morph-media > .mm-full { opacity: 0; transition: opacity .25s ease; }
-.morph-media > .mm-full.on { opacity: 1; }
-.morph-ghost { position: fixed; z-index: 0; display: none; pointer-events: none; box-sizing: border-box; }
-.modal.morph-panel[data-morph] { background: transparent; border-color: transparent; box-shadow: none; }
+  will-change: transform; }
+/* its own background + will-change: Chromium won't run a transform animation on the compositor for an element
+   that paints nothing itself (compositeFailed "no visible change") — it ran on the main thread, a commit a frame */
+.morph-pic { position: absolute; inset: 0; transform-origin: 0 0; background: var(--bg-crust); will-change: transform; }
+.morph-pic > img, .morph-pic > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.morph-pic > .mm-full, .morph-pic > video.mm-anim { opacity: 0; transition: opacity .25s ease; }
+.morph-pic > .mm-full.on, .morph-pic > video.mm-anim.on { opacity: 1; }
+/* the body's clip (grows with the chrome) + the body counter-scaled inside it: clipped + layers only in flight */
+.morph-clip { position: relative; transform-origin: 0 0; }
+.morph-clip > .modal-body { transform-origin: 0 0; }
+.morph-panel[data-morph] .morph-clip { overflow: hidden; will-change: transform, opacity; }
+.morph-panel[data-morph] .morph-clip > .modal-body { will-change: transform; }
 .modal-img.natural { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; }
 .modal-body { padding: 18px 20px 20px; max-height: 62vh; overflow-y: auto; }
 .modal-body h2 { margin: 0 0 8px; font-size: 20px; }

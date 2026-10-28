@@ -40,16 +40,20 @@ const PAGE = `window.__mo = {
   ctx(el) { const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   modal() { return document.querySelector(".modal-backdrop .modal"); },
   media() { return document.querySelector(".modal-backdrop [data-morph-media]") || document.querySelector(".modal-backdrop .modal img"); },
-  // the media's visible box: its transformed border box minus its clip-path inset (scaled by the
-  // transform's scale — transform-origin 0 0 or not, the inset scales with the box)
+  // box = the whole picture on screen ([data-morph-pic], counter-scaled inside the media box), vis = what
+  // shows of it: the media box (it clips) minus a clip-path inset if it has one (the old re-crop — scaled by
+  // the transform's scale, transform-origin 0 0 or not, the inset scales with the box)
   vis(el) {
+    const pic = el.querySelector("[data-morph-pic]");
+    const pb = pic ? pic.getBoundingClientRect() : null;
     const b = el.getBoundingClientRect(); const cs = getComputedStyle(el);
     let t = 0, r = 0, bo = 0, l = 0;
     const m = /inset\\(([^)]*)\\)/.exec(cs.clipPath || "");
     if (m) { const v = m[1].split(" round ")[0].trim().split(/\\s+/).map(parseFloat);
       [t, r, bo, l] = v.length === 1 ? [v[0], v[0], v[0], v[0]] : v.length === 2 ? [v[0], v[1], v[0], v[1]] : v.length === 3 ? [v[0], v[1], v[2], v[1]] : v; }
     const k = el.offsetWidth ? b.width / el.offsetWidth : 1;
-    return { box: { x: b.x, y: b.y, w: b.width, h: b.height }, vis: { x: b.x + l * k, y: b.y + t * k, w: b.width - (l + r) * k, h: b.height - (t + bo) * k } };
+    const box = pb ? { x: pb.x, y: pb.y, w: pb.width, h: pb.height } : { x: b.x, y: b.y, w: b.width, h: b.height };
+    return { box, vis: { x: b.x + l * k, y: b.y + t * k, w: b.width - (l + r) * k, h: b.height - (t + bo) * k } };
   },
   sample(ms, trigger) {
     return new Promise((res) => {
@@ -135,9 +139,46 @@ function movingMs(samples) {
   const bi = live.findIndex((s, i) => i > 0 && live.slice(i).every((x) => edgesNear(x.vis, end, 0.5)));
   return a && bi > 0 ? live[bi].t - a.t : 0;
 }
-// the settings modal's morph runs slow on purpose (owner: "slow down morph" — the 430/340 ms flight read as a
-// snap); the Browse preview keeps its own pace (another modal, not asked for)
-const SLOW_OPEN_MS = 520, SLOW_CLOSE_MS = 420, BR_MAX_MS = 520;
+// the moving window [first frame off the start pose, first frame of the end pose] (sample indices)
+function movingWindow(samples) {
+  const live = samples.filter((s) => s.vis && s.vis.w > 1);
+  if (live.length < 2) return null;
+  const start = live[0].vis, end = live[live.length - 1].vis;
+  const a = live.findIndex((s) => !edgesNear(s.vis, start, 0.5));
+  const b = live.findIndex((s, i) => i > 0 && live.slice(i).every((x) => edgesNear(x.vis, end, 0.5)));
+  return a >= 0 && b > a ? { live, a, b } : null;
+}
+// how far the picture's centre + width got (0 → 1) at `frac` of the moving time — a front-loaded curve
+// (the old open did ~70 % in its first quarter) reads as a snap however long the flight is
+function progressAt(samples, frac) {
+  const w = movingWindow(samples); if (!w) return null;
+  const c = (s) => [s.vis.x + s.vis.w / 2, s.vis.y + s.vis.h / 2, s.vis.w];
+  const [x0, y0, w0] = c(w.live[w.a - 1] ?? w.live[0]), [x1, y1, w1] = c(w.live[w.b]);
+  const total = Math.hypot(x1 - x0, y1 - y0) + Math.abs(w1 - w0);
+  const t = w.live[w.a].t + frac * (w.live[w.b].t - w.live[w.a].t);
+  const s = w.live.find((x) => x.t >= t); if (!s || total < 40) return null;
+  const [x, y, z] = c(s);
+  return (Math.hypot(x - x0, y - y0) + Math.abs(z - w0)) / total;
+}
+// frame pacing through the moving window vs the page's idle frame interval (rAF deltas — the sampler's
+// own per-frame reads included, so a bound, not a benchmark): median within 25 % of idle, ≤ 15 % of the
+// frames late by more than one idle interval
+function pacing(samples, idle, what) {
+  const w = movingWindow(samples); if (!w) return [];
+  const d = []; for (let i = w.a + 1; i <= w.b; i++) d.push(w.live[i].t - w.live[i - 1].t);
+  if (d.length < 5) return [];
+  const sorted = [...d].sort((x, y) => x - y), med = sorted[Math.floor(sorted.length / 2)];
+  const late = d.filter((x) => x > 2 * idle).length;
+  const v = [];
+  if (med > 1.25 * idle) v.push(`${what}: median frame ${med.toFixed(1)} ms vs ${idle.toFixed(1)} ms idle`);
+  if (late > 0.15 * d.length) v.push(`${what}: ${late}/${d.length} frames over ${(2 * idle).toFixed(0)} ms (max ${sorted[sorted.length - 1].toFixed(0)})`);
+  return v;
+}
+// the settings modal's morph runs slow + soft on purpose (owner: "slow down morph" — 430 ms read as a snap,
+// 620 ms "still too snappy"; morph.ts SETTINGS_MORPH = 900 / 700 ms, a symmetric ease-in-out); the Browse
+// preview keeps its own pace (another modal, not asked for)
+const SLOW_OPEN_MS = 780, SLOW_OPEN_MAX = 1050, SLOW_CLOSE_MS = 590, SLOW_CLOSE_MAX = 850, BR_MAX_MS = 520, QUARTER_MAX = 0.3;
+let IDLE_FRAME = 16.7;
 
 async function shots(surface, t) {
   // a separate open/close with screenshots for review (capturePage stalls frames: no checks here)
@@ -171,6 +212,8 @@ app.whenReady().then(async () => {
     await win.loadURL(U + "/");
     for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4 && await js(`document.querySelectorAll('.pl-item').length`) >= 3) break; await sleep(100); }
     await js(PAGE); await sleep(800);
+    IDLE_FRAME = await js(`new Promise((res) => { const d = []; let l = null; const f = (t) => { if (l != null) d.push(t - l); l = t; if (d.length < 40) requestAnimationFrame(f); else { d.sort((a, b) => a - b); res(d[20]); } }; requestAnimationFrame(f); })`);
+    console.log(`idle frame ${IDLE_FRAME.toFixed(1)} ms`);
     for (const surface of ["lib", "pl"]) for (const [t, aspect] of [["k1", 1], ["k2", 16 / 9]]) {
       let M = null;
       await cell(`${surface} ${t} open`, async () => {
@@ -181,7 +224,11 @@ app.whenReady().then(async () => {
         const tail = live.slice(-4);
         if (tail.length === 4 && !tail.every((s) => edgesNear(s.vis, tail[0].vis, 0.5))) v.push(`open: still moving 1300 ms after the click (${fmt(tail[0].vis)} → ${fmt(tail[3].vis)})`);
         const ms = movingMs(samples);
-        if (ms < SLOW_OPEN_MS) v.push(`open: the flight took ${ms.toFixed(0)} ms (want ≥ ${SLOW_OPEN_MS} — slowed on purpose)`);
+        if (ms < SLOW_OPEN_MS || ms > SLOW_OPEN_MAX) v.push(`open: the flight took ${ms.toFixed(0)} ms (want ${SLOW_OPEN_MS}–${SLOW_OPEN_MAX} — slowed on purpose)`);
+        const q = progressAt(samples, 0.25);
+        if (q != null && q > QUARTER_MAX) v.push(`open: ${(q * 100).toFixed(0)} % of the travel in the first quarter of the flight (want ≤ ${QUARTER_MAX * 100} — front-loaded)`);
+        v.push(...pacing(samples, IDLE_FRAME, "open"));
+        console.log(`        open ${ms.toFixed(0)} ms, quarter ${q == null ? "—" : (q * 100).toFixed(0) + " %"}`);
         return v;
       });
       await cell(`${surface} ${t} animates in the modal`, async () => {
@@ -201,7 +248,11 @@ app.whenReady().then(async () => {
         const goneAt = samples.find((s) => !s.open)?.t;
         if (goneAt == null) v.push("close: the modal is still open 1.4 s after Close");
         const ms = movingMs(samples.filter((s) => s.open));
-        if (ms < SLOW_CLOSE_MS) v.push(`close: the flight took ${ms.toFixed(0)} ms (want ≥ ${SLOW_CLOSE_MS})`);
+        if (ms < SLOW_CLOSE_MS || ms > SLOW_CLOSE_MAX) v.push(`close: the flight took ${ms.toFixed(0)} ms (want ${SLOW_CLOSE_MS}–${SLOW_CLOSE_MAX})`);
+        const q = progressAt(samples.filter((s) => s.open), 0.25);
+        if (q != null && q > QUARTER_MAX) v.push(`close: ${(q * 100).toFixed(0)} % of the travel in the first quarter of the flight (want ≤ ${QUARTER_MAX * 100})`);
+        v.push(...pacing(samples.filter((s) => s.open), IDLE_FRAME, "close"));
+        console.log(`        close ${ms.toFixed(0)} ms, quarter ${q == null ? "—" : (q * 100).toFixed(0) + " %"}`);
         if (!srcVisible) v.push("close: the source thumbnail is still hidden after the close");
         return v;
       });
@@ -246,6 +297,7 @@ app.whenReady().then(async () => {
       const v = flight(samples, S, null, 1, "open");
       const ms = movingMs(samples);
       if (ms > BR_MAX_MS) v.push(`open: the Browse preview's flight took ${ms.toFixed(0)} ms — it keeps its own pace (≤ ${BR_MAX_MS})`);
+      v.push(...pacing(samples, IDLE_FRAME, "open"));
       return v;
     });
     await cell("br we1 animates in the modal", async () => {
@@ -261,6 +313,7 @@ app.whenReady().then(async () => {
       const { S, samples, srcVisible } = await page(`return await m.close("br", "we1", 1100);`);
       const v = flight(samples, BM, S, 1, "close");
       if (samples.find((x) => !x.open) == null) v.push("close: still open 1.1 s after Close");
+      v.push(...pacing(samples.filter((x) => x.open), IDLE_FRAME, "close"));
       if (!srcVisible) v.push("close: the card is still hidden after the close");
       return v;
     });
