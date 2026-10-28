@@ -9,7 +9,7 @@ pkgrel=1
 pkgdesc="Live wallpaper manager for Wayland (video + Wallpaper Engine scenes) — Electron/React + C# backend"
 arch=('x86_64')
 url="https://github.com/Kryxzort/livepaper-pro"
-license=('MIT')
+license=('GPL-3.0-only' 'MIT')
 # Runtime: backend is published --self-contained (bundles .NET) so no dotnet-runtime needed.
 depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron')
 # Build: .NET SDK + Node for the app; C toolchain + wayland/EGL/mpv/pulse headers for lp-transition/lp-audio.
