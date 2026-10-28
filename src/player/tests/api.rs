@@ -2759,6 +2759,85 @@ fn pipelined_step_then_capture() {
     );
 }
 
+/// `capture` never stalls the loop (TODO "`ctl capture` still encodes on the loop"): the loop
+/// only starts the GPU readback into a pixel-pack buffer; the PNG encode and the write run on
+/// `lp-capture` straight from the mapped buffer, the reply comes once the file is complete,
+/// and a request pipelined behind the capture is answered after it (per-client FIFO, like
+/// `step`). Both targets (a 3840×1080 output, a 1920×1080 source), twice each: the first
+/// capture at a size makes its buffer (the driver pins its memory: < 10 ms, once), a repeat
+/// reuses it (< 2 ms — a synchronous readback alone took 2.5–3.0).
+#[test]
+fn capture_encodes_off_the_loop() {
+    let Some(srv) = Serve::start_with(&["--clock", "real", "--outputs", "3840x1080@60"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    let targets = ["out:VIRTUAL-1", "out:VIRTUAL-1", id.as_str(), id.as_str()];
+    for (n, target) in targets.into_iter().enumerate() {
+        let p = srv.path(&format!("big-{n}.png"));
+        c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+        let batch = format!(
+            "{}\n{}\n",
+            json!({"id": 201, "cmd": "capture", "args": {"target": target, "path": s(&p)}}),
+            json!({"id": 202, "cmd": "probe", "args": {"name": "loop"}}),
+        );
+        let t = Instant::now();
+        c.w.write_all(batch.as_bytes()).unwrap();
+        let mut replies = Vec::new();
+        while replies.len() < 2 {
+            let m = c.read_msg().expect("reply");
+            if m.get("event").is_none() {
+                assert_eq!(m["ok"], json!(true), "{m}");
+                if m["id"] == 201 {
+                    // the reply means the file is complete
+                    let px = png_pixel(&p, 100, 100);
+                    near(px, [255, 0, 0], 3, "the capture, read at its reply");
+                    let w = if target == id { 1920 } else { 3840 };
+                    assert_eq!(m["result"]["width"], w, "{m}");
+                }
+                replies.push(m);
+            }
+        }
+        let took = t.elapsed();
+        assert_eq!(
+            replies
+                .iter()
+                .map(|m| m["id"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [201, 202],
+            "replies in request order"
+        );
+        // the window since the reset covers the capture: every loop stretch and request
+        let lp = c.ok("probe", json!({"name": "loop"}));
+        let busy = lp["max_busy_ms"]
+            .as_f64()
+            .expect("max_busy_ms")
+            .max(lp["max_request_ms"].as_f64().expect("max_request_ms"));
+        println!(
+            "capture {target}: reply after {:.1} ms, loop max busy {busy:.2} ms (slowest \
+             request {} {} ms)",
+            took.as_secs_f64() * 1e3,
+            lp["max_request_cmd"],
+            lp["max_request_ms"]
+        );
+        let (bound, what) = if n % 2 == 0 {
+            (10.0, "a first capture at its size")
+        } else {
+            (2.0, "a repeat capture")
+        };
+        assert!(
+            busy < bound,
+            "the loop was busy {busy} ms during {what} of {target}: {lp}"
+        );
+    }
+}
+
 /// Item 8: a client that half-closes after a `step` still gets the (deferred) reply.
 #[test]
 fn half_closed_client_gets_step_reply() {

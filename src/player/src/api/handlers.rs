@@ -57,8 +57,8 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
     ),
     (
         "capture",
-        capture,
-        "write an output or source texture to PNG {target, path}",
+        capture_placeholder,
+        "write an output or source texture to PNG {target, path} (replies once written)",
     ),
     (
         "logs",
@@ -116,6 +116,9 @@ pub fn handle(
             Ok(()) => None,
             Err(e) => Some(Err(e)),
         };
+    }
+    if req.cmd == "capture" {
+        return capture(rt, client, &req.id, &req.args);
     }
     let Some((_, f, _)) = VERBS.iter().find(|(n, _, _)| *n == req.cmd) else {
         return Some(Err(proto::no_such_verb(&req.cmd, &verb_names())));
@@ -571,7 +574,33 @@ fn cancel(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
 
 // ---------------------------------------------------------------- capture
 
-fn capture(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+/// `capture`: the GPU readback is started here, on the loop (`Gfx::start_read_back`, never
+/// waited for); the runtime maps it once the copy is done and `lp-capture` encodes and writes
+/// it (`api::capture`). The reply is deferred until the file is complete (`None`; the runtime
+/// answers it, the client's later requests wait — per-client FIFO, like `step`). Errors (bad
+/// target/path, no frame) reply at once.
+fn capture(
+    rt: &mut Runtime,
+    client: u64,
+    id: &Value,
+    args: &Value,
+) -> Option<Result<Value, ApiError>> {
+    match capture_start(rt, args) {
+        Ok((path, readback)) => {
+            rt.capture.submit(client, id.clone(), path.into(), readback);
+            rt.pump_captures();
+            None
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+/// `capture`'s target resolved and its readback started (an output or its main layer: the
+/// last composed frame, written top-down; a source: its current texture, already upright).
+fn capture_start(
+    rt: &mut Runtime,
+    args: &Value,
+) -> Result<(String, crate::gfx::PendingReadback), ApiError> {
     let target = arg_str(args, "target")?;
     let path = arg_str(args, "path")?;
     if !path.starts_with('/') {
@@ -579,12 +608,6 @@ fn capture(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
             "path {path:?} must be absolute (the player's cwd isn't yours)"
         )));
     }
-    let io = |e: std::io::Error| ApiError {
-        code: "io",
-        message: format!("writing {path}: {e}"),
-        hint: hint("check the directory exists and is writable"),
-    };
-    // An output (or its main layer): the last composed frame.
     let out_name = target.strip_prefix("out:").or_else(|| {
         target
             .strip_prefix("lay:")
@@ -598,10 +621,9 @@ fn capture(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
                 hint: hint("`lp-player ctl state` lists the outputs"),
             });
         };
-        rt.gfx.write_png(tex, path).map_err(io)?;
-        return Ok(json!({ "path": path, "width": tex.w, "height": tex.h }));
+        let spare = rt.capture.take_spare();
+        return Ok((path.to_string(), rt.gfx.start_read_back(tex, true, spare)));
     }
-    // A source: its current texture, upright.
     if rt.graph.kind_of(target) == Some(NodeKind::Source) {
         let Some(tex) = rt.host.texture(target) else {
             return Err(ApiError {
@@ -610,14 +632,18 @@ fn capture(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
                 hint: hint("wait for `source.ready` (stepped clock: `step` first)"),
             });
         };
-        rt.gfx.write_png_source(tex, path).map_err(io)?;
-        return Ok(json!({ "path": path, "width": tex.w, "height": tex.h }));
+        let spare = rt.capture.take_spare();
+        return Ok((path.to_string(), rt.gfx.start_read_back(tex, false, spare)));
     }
     Err(ApiError {
         code: "no_such_node",
         message: format!("capture target {target:?} is not an output, main layer or source"),
         hint: hint("targets: `out:<name>`, `lay:<name>:main`, or a source id (`ctl state`)"),
     })
+}
+
+fn capture_placeholder(_: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
+    unreachable!("`capture` is handled before the table (deferred reply)")
 }
 
 // ---------------------------------------------------------------- lifecycle

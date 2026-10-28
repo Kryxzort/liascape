@@ -76,6 +76,8 @@ const GAIN_TICK_PERIOD: Duration = Duration::from_millis(1);
 /// one event per 1 kHz tick (which would allocate a JSON object even below the log
 /// level threshold, exactly the per-tick cost R90 asks to bound).
 const GAIN_PUSH_HISTORY: usize = 256;
+/// How often a `capture`'s GPU readback is polled while it is in flight.
+const CAPTURE_POLL: Duration = Duration::from_millis(1);
 /// Steps that may wait behind the running one (one per client at most, by the FIFO).
 pub const STEP_QUEUE_MAX: usize = 64;
 /// Repeated warnings (same key) are logged at most this often (`warn_limited`).
@@ -424,6 +426,11 @@ pub struct Runtime {
     pub(crate) wake_pending: bool,
     step: Option<PendingStep>,
     step_queue: VecDeque<(u64, Value, Duration)>,
+    /// `capture`'s readbacks in flight + `lp-capture` (encode + write); its replies are
+    /// deferred (`api::capture`).
+    pub(crate) capture: crate::api::capture::Capturer,
+    /// The 1 ms timer polling a capture's GPU readback is armed.
+    capture_timer: bool,
     pub(crate) local: BTreeMap<String, LocalTime>,
     /// `stop`/`quit`: sources to destroy once their anti-click ramp is over.
     /// `(ramp end, id, armed)`: armed at the first tick at/after the ramp end — whose sync
@@ -692,6 +699,7 @@ impl Runtime {
             "hosted": self.host.ids().len(),
             "opening": self.host.opening(),
             "open_queued": crate::sources::host::open_queued(),
+            "captures_in_flight": self.capture.in_flight(),
             "dying": self.host.dying(),
             "transitions": active,
             "graves": graves,
@@ -3051,6 +3059,8 @@ impl Runtime {
         }
         self.pending_destroy.clear();
         self.sync_sources();
+        // a requested capture is still written (each bounded by its encode)
+        self.capture.shutdown(&self.gfx);
         let t = Instant::now();
         self.host.finish_teardown(Duration::from_millis(500));
         // Phase 2: the render worker frees every render context it still holds (each before
@@ -3803,8 +3813,9 @@ impl Runtime {
                     } {
                         Some(r) => self.respond(cid, &req.id, r),
                         None => {
-                            // Deferred (`step`) — unless it was answered at once.
-                            if self.step_pending_for(cid, &req.id)
+                            // Deferred (`step`, `capture`) — unless answered at once.
+                            if (self.step_pending_for(cid, &req.id)
+                                || self.capture.pending_for(cid, &req.id))
                                 && let Some(c) = self.server.clients.get_mut(&cid)
                             {
                                 c.awaiting = true;
@@ -3852,6 +3863,10 @@ impl Runtime {
             self.update_sources();
         }
         self.advance_step();
+        if self.capture.in_flight() > 0 {
+            self.pump_captures();
+        }
+        self.capture.expire_spare(&self.gfx);
         let more: Vec<u64> = self
             .server
             .clients
@@ -3885,6 +3900,53 @@ impl Runtime {
             .clients
             .values()
             .any(|c| c.more_input && !c.awaiting && c.dead.is_none())
+    }
+
+    /// Hand finished GPU readbacks of `capture` to `lp-capture`; while one is still on the
+    /// GPU a 1 ms timer re-polls it (a stepped loop has no tick to do it).
+    pub(crate) fn pump_captures(&mut self) {
+        self.capture.pump(&self.gfx, None);
+        self.finish_captures();
+        if self.capture_timer || !self.capture.waiting_gpu() {
+            return;
+        }
+        self.capture_timer = true;
+        if let Err(e) = self.handle.insert_source(
+            Timer::from_duration(CAPTURE_POLL),
+            |_, _, rt: &mut Runtime| {
+                rt.capture.pump(&rt.gfx, None);
+                rt.finish_captures();
+                if rt.capture.waiting_gpu() {
+                    TimeoutAction::ToDuration(CAPTURE_POLL)
+                } else {
+                    rt.capture_timer = false;
+                    TimeoutAction::Drop
+                }
+            },
+        ) {
+            // every dispatch still pumps: a capture finishes at the next wake-up
+            self.capture_timer = false;
+            log::event(
+                "runtime",
+                Level::Warn,
+                "loop.capture_timer_failed",
+                None,
+                json!({ "error": e.to_string() }),
+            );
+        }
+    }
+
+    /// Answer every `capture` whose file `lp-capture` finished writing (its buffer unmapped
+    /// first); its client's later requests may proceed (a client has at most one deferred
+    /// reply: nothing more is read from it meanwhile).
+    pub(crate) fn finish_captures(&mut self) {
+        for d in self.capture.take_done(&self.gfx) {
+            self.respond(d.client, &d.id, d.result);
+            if let Some(c) = self.server.clients.get_mut(&d.client) {
+                c.awaiting = false;
+                c.more_input = true;
+            }
+        }
     }
 
     /// Whether client `cid`'s request `req` is a step still running or queued.
@@ -4082,6 +4144,14 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             (Box::new(h), None)
         }
     };
+    // `capture` encodes on `lp-capture`; a finished one wakes the loop, which answers it.
+    let (capture_ping, capture_ping_src) =
+        calloop::ping::make_ping().map_err(|e| format!("ping: {e}"))?;
+    handle
+        .insert_source(capture_ping_src, |_, _, rt: &mut Runtime| {
+            rt.finish_captures()
+        })
+        .map_err(|e| format!("event loop: {}", e.error))?;
     let mut rt = Runtime {
         gfx,
         cat,
@@ -4103,6 +4173,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         wake_pending: false,
         step: None,
         step_queue: VecDeque::new(),
+        capture: crate::api::capture::Capturer::new(Arc::new(move || capture_ping.ping())),
+        capture_timer: false,
         local: BTreeMap::new(),
         pending_destroy: Vec::new(),
         teardown_anim: Animator::new(),

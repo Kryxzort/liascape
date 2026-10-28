@@ -48,7 +48,7 @@ happen regardless of timing.
   (Task 13). § Wayland.
 - `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
-  `handlers.rs` (the verbs). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
+  `handlers.rs` (the verbs), `capture.rs` (`capture`'s readback + encode off the loop). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
   and state paths. § Command API.
 - `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
   `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more;
@@ -490,11 +490,40 @@ raw source texture (image top already at row 0, R25) — `capture` of a source i
 too. **`Catalogue::empty()`** (Task 12): no effects (no `transitions/` resolved) — the
 runtime still serves cuts.
 
-**`write_png*` compress with fdeflate's `Compression::Fast`** (Task 13): `capture` writes on the
-loop, and the default `Balanced` held it 820–875 ms for a 3840×1080 scene frame (release) — every
-output froze; `Fast` 39–112 ms. Guard `tests/gfx_basic.rs::write_png_is_fast_enough_for_the_loop`
-(readback + encode < ½ of a `Balanced` encode alone on a noisy 1080p frame, pixels round-trip; RED
-with `Balanced`: 1845 vs 1923 ms in the debug build). Encoding off the loop is a TODO.
+**`write_png*` compress with fdeflate's `Compression::Fast`** (Task 13): when `capture` still wrote
+on the loop, the default `Balanced` held it 820–875 ms for a 3840×1080 scene frame (release) —
+every output froze; `Fast` 39–112 ms (now the reply's latency). Guard
+`tests/gfx_basic.rs::write_png_is_fast_enough_for_the_loop` (readback + encode < ½ of a `Balanced`
+encode alone on a noisy 1080p frame, pixels round-trip; RED with `Balanced`: 1845 vs 1923 ms in the
+debug build).
+
+**`capture` never stalls the loop (2026-10-28, `api/capture.rs`).** The handler only *starts* the
+readback — `Gfx::start_read_back`: `glReadPixels` into a `GL_PIXEL_PACK_BUFFER` (`STREAM_READ`) + a
+fence + `glFlush`; the GPU copies in command order, so the picture is the one at the request (stepped
+captures stay deterministic). `Runtime::pump_captures` polls the fence (`Gfx::map_read_back`,
+`client_wait_sync` timeout 0) after every dispatch and on a 1 ms calloop timer while one is on the
+GPU (a stepped loop has no tick), maps the buffer and hands the mapping (`MappedPixels`, `Send`:
+plain memory valid until unmapped) to the **`lp-capture`** thread (started with the first capture,
+idle on its channel until shutdown), which flips/encodes/writes straight from it; the loop then
+unmaps the buffer (`Gfx::end_read_back`, its own context, after the thread dropped its view), keeps
+it as the **spare** for the next capture of that size (freed after `SPARE_IDLE` 10 s unused, or by a
+capture of another size) and sends the reply (`finish_captures`, woken by a calloop ping). The reply
+is deferred like `step`'s (`client.awaiting`; per-client FIFO — a request pipelined behind a capture
+is answered after it). A thread that can't start → the encode runs on the loop (as before). `quit`
+writes every capture in flight first (`Capturer::shutdown`: its GPU copy ≤ 1 s, then the encode).
+`loop` probe `bounds.captures_in_flight`. `write_png` / `write_png_source` (tests, `--lwe-smoke`)
+stay synchronous (`Gfx::read_back` + `Readback`). **Every GL call stays on the loop's context:** a
+GPU copy read back on `lp-capture`'s own shared context (tried) stalled the loop 29–47 ms — the
+NVIDIA driver's process-wide lock around a new context's first `eglMakeCurrent`. **Measured** (debug,
+`--clock real`, a playing 1080p clip on a 3840×1080 output; the capture request / the loop's max
+busy around it): before 810 ms; a synchronous readback alone 1.6–10 ms each time (the GPU wait + a
+16 MB copy into fresh pages); now the **first** capture at a size 4.5–5.0 ms (3840×1080) / 0.5–0.9
+ms (1920×1080) — the driver pins the new buffer's memory at its first `glReadPixels` (2.7–7.6 ms
+for 16 MB, measured without the spare: every capture paid it) — and **every repeat 0.07–0.10 ms**
+(loop max busy 0.3–1.2 ms, other work); the reply after 0.76–1.2 s (the debug encode). Guard
+`tests/api.rs::capture_encodes_off_the_loop` (an output and a source, twice each: < 10 ms for a
+first capture at a size, < 2 ms for a repeat, the PNG complete at the reply, a pipelined `probe`
+answered after it; RED before: 810 ms; a synchronous readback's repeats read 2.5–3.0).
 
 **`write_png` orientation: top-down, flipped from GL's own order.** `Gfx::write_png` reads
 the whole texture (bottom-left origin, same as `read_rgba`) and flips rows before encoding,
@@ -2005,7 +2034,7 @@ note on stderr and exits 0 (or stdout closes).
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
 | `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
-| `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
+| `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` — deferred until the file is written (the client's later requests wait, like `step`'s); the picture is the one at the request | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
 | `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
 | `probe` | `{name, args?}` | the probe's result | `no_such_probe` | `ctl probe '{"name":"sources"}'` |
 | `effects` | — | `{ids}` (catalogue order; `[]` without `transitions/`) | — | `ctl effects` |
@@ -4027,7 +4056,7 @@ path}` with **no preview** (a crash can't pass for a picture), `set lay:*:main.c
 poll `probe workers` until `ready` / `broken` / `last_error` / 20 s, capture the source at Ready
 +1 s, +2.3 s and +4 s (the off-grid middle one: ticks run on a 30 fps grid of scene time, so a loop
 whose period divides 3 s — found: 3593587273 — repeats its +1 s frame at +4 s), read the rates
-(`fps_actual`, `gpu_ms_p50`) **before** the +4 s capture (a `capture` encodes its PNG on the loop),
+(`fps_actual`, `gpu_ms_p50`) **before** the +4 s capture (a `capture` encoded its PNG on the loop until 2026-10-28 — kept, harmless),
 then `probe workers
 {"log_tail": true}` + the worker's VmHWM + its `nvidia-smi` line. A background `ctl subscribe
 source. worker. scene.` gives `ready_ms` = `worker.spawned` → `source.ready`. Classes (first match):

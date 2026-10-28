@@ -657,10 +657,10 @@ Two bug classes kept recurring; fix the class, not the instance:
         glslang (`'v_Bounds' : undeclared identifier`), `Failed to setup object 13`, and the object — the scene's
         only one — draws nothing (black frame). Render the object without the failed effect (what WE does at
         worst). Corpus: 2189783622.
-  - [ ] **`ctl capture` still encodes on the loop.** Task 13 found a capture of a 3840×1080 scene source held
-        the loop 820–875 ms (png's default `Balanced` compression; every output froze for it) and switched
-        `write_png*` to fdeflate's `Fast`: 39–112 ms (release). Still a synchronous readback + encode in a debug
-        verb a battery calls mid-measurement — read back on the loop, encode + write on a helper thread, reply
-        when written (a deferred reply like `step`'s).
+  - [x] **`ctl capture` still encodes on the loop** (2026-10-28, player-core.md § GFX / EGL "`capture` never
+        stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lp-capture` maps → encodes → writes, the
+        reply is deferred until written (like `step`'s). Loop max busy around a 3840×1080 capture 810 ms (debug)
+        → 0.07–0.10 ms per repeat (4.5–5 ms the first at a size: the driver pins the buffer); guard
+        `tests/api.rs::capture_encodes_off_the_loop`.
 - [ ] Optionally offer our LWE patches upstream as PRs, with AI assistance disclosed. Upstream merged nothing since
       2026-06-20.
