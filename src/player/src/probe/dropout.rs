@@ -164,8 +164,9 @@
 //!    is still flagged (`ramp_in_that_never_comes_is_still_a_drop`; RED before:
 //!    `ramp_in_a_few_ms_late_is_not_a_drop`, a drop at 1560 len 10).
 //! 2. **The meter's missed cycles** ([`drop_meter_discontinuities`]): the bus meter's
-//!    capture (non-real-time `lp-bus` thread, by design) sometimes skips graph cycles — a
-//!    timestamp jump followed by −96 blocks. Those samples are left out and reported as
+//!    capture, while it ran on the non-real-time `lp-bus` thread, skipped graph cycles under
+//!    load — a timestamp jump followed by −96 blocks (since then RT, `audio::meter`; this
+//!    stays the safety net for a meter without RT scheduling). Those samples are left out and reported as
 //!    `unmeasured`, never as a gap (`meter_discontinuity_is_unmeasured_not_a_gap`; RED
 //!    before: a 2 ms micro-gap at 132). A contiguous hole is still a micro-gap.
 
@@ -267,7 +268,7 @@ pub struct DropoutReport {
     /// move a whole 10 ms bin's power average.
     pub micro_gaps: Vec<Drop>,
     /// Stretches the meter itself didn't capture: its timestamps jump (a missed graph
-    /// cycle of the non-real-time capture) — from the sample before the jump through
+    /// cycle of the capture) — from the sample before the jump through
     /// [`UNMEASURED_TAIL_MS`] after it. Excluded from `drops`/`micro_gaps` and the fit;
     /// `under_db` is 0. A real hole on the bus is contiguous in time and never lands here.
     pub unmeasured: Vec<Drop>,
@@ -324,8 +325,9 @@ const METER_STEP_MAX: Duration = Duration::from_micros(1500);
 pub const UNMEASURED_TAIL_MS: u64 = 4;
 
 /// Phase 2 Task 14: splits `observed` into the samples the meter really captured in
-/// sequence and the stretches it didn't. The bus meter's capture runs on the non-real-time
-/// `lp-bus` thread (by design): under load it misses graph cycles — its timestamps jump
+/// sequence and the stretches it didn't. A bus meter capture that isn't real-time (it ran
+/// on the `lp-bus` main loop until Task 14; a session without rtkit still has no RT) misses
+/// graph cycles under load — its timestamps jump
 /// (measured 2.3–22 ms) and the blocks right after read −96 (what PipeWire hands a stream
 /// that missed its cycles), and the block before the jump joins two non-adjacent pieces.
 /// None of that is the bus: from the sample before a jump through `UNMEASURED_TAIL_MS`

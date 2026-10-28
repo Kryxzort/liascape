@@ -17,8 +17,9 @@
 //!
 //! Everything PipeWire runs on one thread ("lp-bus") with its own main loop + context +
 //! core: the module's nodes, the registry/metadata watch, the latency measurement and the
-//! meter's capture stream (none of which use `RT_PROCESS`, so every callback runs on that
-//! one thread — capture buffers carry their own cycle time, `pw_buffer.time`). The rest of
+//! meter's capture stream (only the meter's capture uses `RT_PROCESS` — its process callback
+//! runs on PipeWire's real-time data thread, Phase 2 Task 14; every other callback runs on
+//! this one thread — capture buffers carry their own cycle time, `pw_buffer.time`). The rest of
 //! the player only sees [`Bus`] (state behind a mutex) and [`super::Meter`].
 //!
 //! **Latency** ([`Bus::latency`]): measured once at creation with an impulse — a probe
@@ -1570,7 +1571,15 @@ impl Watch {
                 return;
             }
         };
-        if let Err(e) = connect(&stream, spa::utils::Direction::Input) {
+        // Phase 2 Task 14: the callback runs on PipeWire's real-time data thread — on this
+        // non-RT main loop it missed whole cycles under load (a switch spawning a worker or
+        // tearing a source down), each an unmeasured stretch for the dropout detector. It is
+        // RT-safe: no allocation (scratch + staging sized up front), the ring via `try_lock`.
+        if let Err(e) = connect_with(
+            &stream,
+            spa::utils::Direction::Input,
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS | StreamFlags::RT_PROCESS,
+        ) {
             m.set_error(format!("meter: {e}"));
             return;
         }

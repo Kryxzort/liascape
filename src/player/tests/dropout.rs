@@ -416,8 +416,8 @@ fn ramp_in_that_never_comes_is_still_a_drop() {
 
 #[test]
 fn meter_discontinuity_is_unmeasured_not_a_gap() {
-    // Phase 2 Task 14 (on-machine, 1–2 % of 720 switches): the bus meter's capture (the
-    // non-real-time `lp-bus` thread, by design) misses graph cycles — its timestamps jump
+    // Phase 2 Task 14 (on-machine): the bus meter's capture (then on the non-real-time
+    // `lp-bus` thread) missed graph cycles — its timestamps jump
     // 2.3–22 ms and the blocks right after are −96 (silence PipeWire hands a stream that
     // missed its cycles). The bus itself never had a hole there; the detector must call that
     // stretch unmeasured, never a micro-gap or a drop.

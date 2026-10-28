@@ -14,18 +14,20 @@
 //!   transition events. A block's time = its graph cycle's start (`pw_time.now`,
 //!   CLOCK_MONOTONIC) + its first frame's offset in that buffer; a block spanning two buffers
 //!   is stamped at its first frame.
-//! - The capture's `process` callback runs on the bus's own `lp-bus` thread
-//!   (`main_loop.iterate()`) — not a separate RT data thread, since nothing here sets
-//!   `RT_PROCESS` (see `bus.rs`'s module doc) — and never blocks: blocks go to a
-//!   callback-local staging buffer, moved into the ring under a `try_lock` (a reader copying
-//!   a window just delays them to the next cycle).
+//! - The capture's `process` callback runs on PipeWire's **real-time data thread**
+//!   (`RT_PROCESS`, Phase 2 Task 14) — on the non-RT `lp-bus` main loop it missed whole graph
+//!   cycles under load (a timestamp jump, then silent blocks), exactly when a switch loads the
+//!   machine — and never blocks or allocates: blocks go to a callback-local staging buffer,
+//!   moved into the ring under a `try_lock` (a reader copying a window just delays them to
+//!   the next cycle). The thread it ran on is recorded once per stream (`callback_thread`,
+//!   `callback_policy` in [`MeterStatus`]).
 //!
 //! [`Meter::available`] is false when the bus is down, the stream isn't streaming, or the
 //! newest sample is more than [`STALE`] old — consumers (the dropout detector) must report
 //! themselves unavailable then, never pass silently.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -181,6 +183,11 @@ pub(crate) struct MeterShared {
     pub dropped: AtomicU64,
     /// Frames in the last captured buffer (the graph quantum the meter runs at).
     pub last_frames: AtomicU64,
+    /// The process callback's thread name (`comm`, ≤ 15 bytes, NUL-padded) as two words —
+    /// written from the RT callback without allocating. All zero = no callback yet.
+    pub callback_comm: [AtomicU64; 2],
+    /// That thread's scheduling policy (`SCHED_OTHER` 0, `FIFO` 1, `RR` 2); −1 = unknown.
+    pub callback_policy: AtomicI32,
 }
 
 impl MeterShared {
@@ -196,7 +203,18 @@ impl MeterShared {
             base_ns,
             dropped: AtomicU64::new(0),
             last_frames: AtomicU64::new(0),
+            callback_comm: [AtomicU64::new(0), AtomicU64::new(0)],
+            callback_policy: AtomicI32::new(-1),
         }
+    }
+
+    /// The recorded callback thread name, if a callback ran.
+    pub fn callback_thread(&self) -> Option<String> {
+        let mut b = [0u8; 16];
+        b[..8].copy_from_slice(&self.callback_comm[0].load(Ordering::Relaxed).to_le_bytes());
+        b[8..].copy_from_slice(&self.callback_comm[1].load(Ordering::Relaxed).to_le_bytes());
+        let n = b.iter().position(|&c| c == 0).unwrap_or(16);
+        (n > 0).then(|| String::from_utf8_lossy(&b[..n]).into_owned())
     }
 
     pub fn set_error(&self, e: impl Into<String>) {
@@ -228,6 +246,8 @@ pub(crate) struct MeterRt {
     pub shared: Arc<MeterShared>,
     pub blocks: BlockMeter,
     staging: Vec<(i64, f32)>,
+    /// The callback's thread has been recorded (once per stream).
+    noted_thread: bool,
 }
 
 impl MeterRt {
@@ -236,12 +256,40 @@ impl MeterRt {
             shared,
             blocks: BlockMeter::new(rate, channels),
             staging: Vec::with_capacity(STAGING_LEN),
+            noted_thread: false,
         }
+    }
+
+    /// Records the calling thread's name + policy into the shared state (no allocation:
+    /// `PR_GET_NAME` into a stack buffer).
+    fn note_thread(&mut self) {
+        self.noted_thread = true;
+        let mut name = [0u8; 16];
+        // SAFETY: PR_GET_NAME writes at most 16 bytes into the buffer.
+        unsafe {
+            libc::prctl(
+                libc::PR_GET_NAME,
+                name.as_mut_ptr() as libc::c_ulong,
+                0,
+                0,
+                0,
+            )
+        };
+        let w = |i: usize| u64::from_le_bytes(name[i * 8..i * 8 + 8].try_into().unwrap_or([0; 8]));
+        self.shared.callback_comm[0].store(w(0), Ordering::Relaxed);
+        self.shared.callback_comm[1].store(w(1), Ordering::Relaxed);
+        // SAFETY: plain query of the calling thread's policy.
+        // rtkit / module-rt set SCHED_RESET_ON_FORK on top of the policy.
+        let policy = unsafe { libc::sched_getscheduler(0) } & !libc::SCHED_RESET_ON_FORK;
+        self.shared.callback_policy.store(policy, Ordering::Relaxed);
     }
 
     /// One captured buffer (`t_ns` = its first frame). RT-safe: no allocation while the
     /// staging buffer has room, never blocks on the ring.
     pub fn process(&mut self, samples: &[f32], t_ns: i64) {
+        if !self.noted_thread {
+            self.note_thread();
+        }
         let frames = samples.len() / self.blocks.channels();
         self.shared
             .last_frames
@@ -280,6 +328,11 @@ pub struct MeterStatus {
     pub quantum_frames: u64,
     pub dropped: u64,
     pub error: Option<String>,
+    /// The thread the capture callback runs on (`data-loop.0` with `RT_PROCESS`), null before
+    /// the first callback.
+    pub callback_thread: Option<String>,
+    /// Its scheduling policy: `other` | `fifo` | `rr` (real-time) | null.
+    pub callback_policy: Option<&'static str>,
 }
 
 impl Meter {
@@ -322,6 +375,13 @@ impl Meter {
             quantum_frames: self.shared.last_frames.load(Ordering::Relaxed),
             dropped: self.shared.dropped.load(Ordering::Relaxed),
             error,
+            callback_thread: self.shared.callback_thread(),
+            callback_policy: match self.shared.callback_policy.load(Ordering::Relaxed) {
+                0 => Some("other"),
+                1 => Some("fifo"),
+                2 => Some("rr"),
+                _ => None,
+            },
         }
     }
 }
