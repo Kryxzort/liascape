@@ -16,7 +16,9 @@
 //! every in-flight transition's scaffolding. **A transition in flight is saved as its
 //! target B** on the outputs it covers: B's own props, playing (`paused: false` — the
 //! recipe holds B paused only until it starts), `xfade`/`anticlick` left out (0 dB), and
-//! its position (= its requested start until it has started playing). A numeric prop that
+//! its position (= its requested start until it has started playing) — **except an
+//! `align: end` one still waiting for A's end**, saved as A where it plays (B would cut A's
+//! remaining play short; the backend re-arms the switch on the restarted player). A numeric prop that
 //! is animating is saved at the animation's **target** (R41) — never mid-ramp; once the
 //! animation is over, the prop's own value (a `set` after it must win —
 //! `Animator::live_target_of`).
@@ -48,7 +50,7 @@ use crate::anim::{Animator, PropPath};
 use crate::graph::props::schema_for_kind;
 use crate::graph::{Graph, NodeKind, PropType, PropValue};
 use crate::log::{self, Level};
-use crate::recipes::TransitionStatus;
+use crate::recipes::{Align, TransitionStatus};
 
 /// The snapshot format this player writes and reads; any other `version` is invalid.
 pub const VERSION: u32 = 1;
@@ -238,8 +240,11 @@ fn persistent(
 /// What output `out_id` (`out:<c>`) shows, as a source to save: an in-flight transition's
 /// B (then `true`), else its main layer's source, or the `to` side of an effect there.
 fn content_of(g: &Graph, out_id: &str, trs: &[TransitionStatus]) -> Option<(String, bool)> {
+    // An `align: end` switch still waiting for A's end saves what shows now (A, below):
+    // restoring its B would cut A's remaining play short — the requester re-arms it.
     if let Some(t) = trs.iter().find(|t| t.outputs.iter().any(|o| o == out_id))
         && g.kind_of(&t.to) == Some(NodeKind::Source)
+        && !(t.align == Align::End && t.phase.pre_running())
     {
         return Some((t.to.clone(), true));
     }
@@ -461,6 +466,12 @@ pub struct WriterStats {
     pub last_write_us: AtomicU64,
 }
 
+/// Test-only: every snapshot write waits this many ms first (read once per writer) —
+/// what an `fsync` under heavy I/O load costs (measured 0.1–11.8 s), deterministically.
+/// The adapter IT reproduces a snapshot that lags a switch and a slow clean quit with it.
+/// Never set it outside tests.
+pub const TEST_WRITE_DELAY_ENV: &str = "LP_PLAYER_TEST_SNAPSHOT_WRITE_MS";
+
 /// The snapshot writer thread: the latest snapshot sent wins (older pending ones are
 /// skipped), each written atomically.
 pub struct Writer {
@@ -520,11 +531,18 @@ impl Drop for Writer {
 
 fn writer_loop(rx: mpsc::Receiver<Vec<u8>>, dir: &Path, st: &WriterStats) {
     let mut failing = false;
+    let delay = std::env::var(TEST_WRITE_DELAY_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis);
     while let Ok(mut bytes) = rx.recv() {
         while let Ok(newer) = rx.try_recv() {
             bytes = newer;
         }
         let t = Instant::now();
+        if let Some(d) = delay {
+            std::thread::sleep(d); // counted in write_ms: it stands for a slow fsync
+        }
         match write_atomic(dir, &bytes) {
             Ok(()) => {
                 st.writes.fetch_add(1, Ordering::Relaxed);
@@ -571,7 +589,7 @@ fn writer_loop(rx: mpsc::Receiver<Vec<u8>>, dir: &Path, st: &WriterStats) {
 mod tests {
     use super::*;
     use crate::anim::{AnimUnit, Animation, Curve};
-    use crate::recipes::{Method, Phase};
+    use crate::recipes::{Align, Method, Phase};
 
     fn p(s: &str) -> PropPath {
         PropPath(s.to_string())
@@ -692,6 +710,7 @@ mod tests {
             corr: log::CorrId("tr-1".into()),
             phase: Phase::WaitingReady,
             method: Method::FullLive,
+            align: Align::Now,
             outputs: vec!["out:DP-1".into()],
             to: "bnew".into(),
             from: vec!["a".into()],
@@ -709,6 +728,41 @@ mod tests {
             !s.sources.contains_key("a"),
             "A (only on DP-1) is gone with it"
         );
+    }
+
+    /// An `align: end` switch still waiting for A's end is saved as what shows NOW (A, at its
+    /// position), not as its B: restoring B would cut A's remaining play short — the backend
+    /// re-arms the aligned switch on the restarted player (player-adapter.md § Reconnection).
+    #[test]
+    fn aligned_pending_transition_is_saved_as_a() {
+        let mut g = graph();
+        src(
+            &mut g,
+            "bnew",
+            json!({"path": "/w/b.mp4", "paused": true, "gain.xfade": -96.0}),
+        );
+        let tr = |phase| TransitionStatus {
+            corr: log::CorrId("tr-1".into()),
+            phase,
+            method: Method::FullLive,
+            align: Align::End,
+            outputs: vec!["out:DP-1".into()],
+            to: "bnew".into(),
+            from: vec!["a".into()],
+            held: vec!["bnew".into()],
+        };
+        for phase in [Phase::Scheduled, Phase::WaitingReady, Phase::WaitingStart] {
+            let s = cap(&g, &Animator::new(), &[tr(phase)]);
+            assert_eq!(s.outputs["DP-1"].content.as_deref(), Some("a"), "{phase:?}");
+            assert!(!s.sources.contains_key("bnew"), "{phase:?}: no pending B");
+            let a = &s.sources["a"];
+            assert!(!a.transition_target, "{phase:?}");
+            assert_eq!(a.position, 3.5, "{phase:?}: A where it plays");
+        }
+        // once its effect runs, B is what shows: saved as B, like an `align: now` one
+        let s = cap(&g, &Animator::new(), &[tr(Phase::Running)]);
+        assert_eq!(s.outputs["DP-1"].content.as_deref(), Some("bnew"));
+        assert!(s.sources["bnew"].transition_target);
     }
 
     #[test]

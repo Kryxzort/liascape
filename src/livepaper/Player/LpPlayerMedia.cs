@@ -198,6 +198,7 @@ public static class LpPlayerMedia
     {
         // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
         InvalidateSources();
+        TrackIntent(kind, e);
         var outcome = OutcomeOf(kind, e);
         if ((outcome == null && kind != "transition.started") || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
         var corr = c.GetString()!;
@@ -224,6 +225,8 @@ public static class LpPlayerMedia
     // leave a stale value on screen. Fire-and-forget: this runs ON the client's event-reading callback
     // (inside LpPlayerClient.Call's lock for the request-connection case), so it must never block —
     // Queue(...) returns at once; ReapplyAllNow runs later, on the thread pool.
+    // The wallpaper too (`ReconcileShown`): queued FIRST — before the waits fail, so an aligned switch
+    // the backend re-arms (DoVideoEndWait, "failed:player restarted") is requested after it.
     private static void OnRestarted()
     {
         LpPlayerClient.Log("lp-player restarted (new pid) — pending switch waits end as failed");
@@ -232,9 +235,79 @@ public static class LpPlayerMedia
         _startedAt.Clear();
         _onStarted.Clear();
         _lastCorr = null;
+        _alignedCorrs.Clear();
+        if (_intent is { } it) _intent = it with { Corr = null }; // corr ids start over in the new process
+        QueueEssential(ReconcileShown);
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
         ReapplyAll();
     }
+
+    // ---- what the screen should show: the backend's model of it (R81 for the wallpaper) ----------
+    // A restarted player shows what its snapshot holds, and that can be behind the backend: every write is
+    // fsync'ed (2.4 s under I/O load once), so a crash right after a switch brought back the wallpaper
+    // BEFORE it — and R81 only re-applied settings, so the screen kept it while the backend and every UI
+    // said otherwise. The player can't close that window itself (a switch's reply can't wait for an
+    // fsync), so the backend, the one authority on WHAT plays, puts it back.
+    // `_intent` = what this backend last put on screen: an align:now switch's B from its request (it
+    // shows within ms, or its switch fails), an aligned switch's B from its effect's start (until then A
+    // shows and the switch is only armed — DoVideoEndWait re-arms it after a restart), nothing after our
+    // `stop`. Unknown (null) when another client switched (a `transition.scheduled` for a path we didn't
+    // request — a second backend, `ctl`), our switch failed, or before our first switch: then the
+    // player's own state stands.
+    private sealed record Intent(string? Path, string? Corr);
+    private static volatile Intent? _intent;
+    private static volatile string? _requesting; // the path of the `transition` request in flight (its events can beat the reply)
+    private static readonly ConcurrentDictionary<string, string> _alignedCorrs = new(); // our armed aligned switches: corr → B's path
+
+    private static void TrackIntent(string kind, JsonElement e)
+    {
+        var corr = e.TryGetProperty("corr", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+        switch (kind)
+        {
+            case "transition.scheduled":
+                var path = Str(e, "path");
+                if (path.Length > 0 && path != _requesting && path != _intent?.Path && !_alignedCorrs.Values.Contains(path))
+                    _intent = null; // another client's switch: what shows is theirs
+                break;
+            case "transition.started" or "transition.handoff" when corr != null && _alignedCorrs.TryGetValue(corr, out var b):
+                _intent = new Intent(b, corr); // our aligned switch's effect runs: B shows from here
+                if (kind == "transition.handoff") _alignedCorrs.TryRemove(corr, out _);
+                break;
+            case "transition.cancelled" or "transition.failed" when corr != null:
+                _alignedCorrs.TryRemove(corr, out _);
+                if (_intent?.Corr == corr) _intent = null; // ours didn't show (failed / taken over): the player's state stands
+                break;
+        }
+    }
+
+    // Queued by OnRestarted, so ordered with every switch and stop: the screen shows `_intent` again. A
+    // live transition to it (requested since the restart), or it shown on any layer / parked → nothing.
+    // Else a cut to it (or a stop, after our own stop). Any transition settings would do — what matters
+    // is that the screen and the backend agree again.
+    private static void ReconcileShown()
+    {
+        var intent = _intent;
+        var client = C;
+        if (intent == null || !client.SocketExists) return;
+        var shown = ShownOrIncoming(client, parked: true);
+        if (shown == null) return; // no answer: R81's reapply logs it; the next switch catches up anyway
+        if (intent.Path == null)
+        {
+            if (shown.Count == 0) return;
+            LpPlayerClient.Log($"lp-player restarted showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
+            Stop();
+            return;
+        }
+        if (shown.Contains(intent.Path)) return;
+        LpPlayerClient.Log($"lp-player restarted showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
+            + $" (its snapshot was behind) — the backend last switched to {Path.GetFileName(intent.Path)}: switching back (cut)");
+        Interlocked.Increment(ref _reconciles);
+        Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
+    }
+
+    private static int _reconciles;
+    // how many times a restart's screen was put back to the backend's last switch — self-test/IT evidence
+    public static int Reconciles => Volatile.Read(ref _reconciles);
 
     // R81, the other half: a mutation made while the stall breaker was open is dropped, not queued
     // (LpPlayerClient.QuickMs + the breaker — see the "Threading" section of player-adapter.md) and
@@ -451,23 +524,27 @@ public static class LpPlayerMedia
             req["method"] = p.method;
         }
         else req["effect_id"] = null; // cut: 30 ms ramp A down, swap, 30 ms ramp B up
-        try { return Requested(client.Call("transition", req)); }
+        _requesting = path; // its `transition.scheduled` is ours, even when it beats the reply
+        try { return Requested(client.Call("transition", req), path, alignEnd); }
         catch (LpPlayerException e) when (e.Code == "no_such_effect" && pick != null)
         {
             LpPlayerClient.Log($"effect {pick.Value.effectId} not in lp-player's catalogue ({e.Hint}) → cut");
             req["effect_id"] = null;
             req.Remove("params"); req.Remove("duration_ms"); req.Remove("method");
-            try { return Requested(client.Call("transition", req)); }
+            try { return Requested(client.Call("transition", req), path, alignEnd); }
             catch (LpPlayerException e2) { LpPlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
         }
         catch (LpPlayerException e) { LpPlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
+        finally { _requesting = null; }
     }
 
-    private static string? Requested(JsonElement res)
+    private static string? Requested(JsonElement res, string path, bool alignEnd)
     {
         var corr = Str(res, "corr");
         if (corr.Length == 0) return null;
         _lastCorr = corr;
+        if (alignEnd) _alignedCorrs[corr] = path; // shows from its effect's start (TrackIntent)
+        else _intent = new Intent(path, corr);
         return corr;
     }
 
@@ -607,6 +684,8 @@ public static class LpPlayerMedia
     public static void Stop()
     {
         var client = C;
+        _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
+        _alignedCorrs.Clear();
         if (client.SocketExists) client.TryCall("stop", null, LpPlayerClient.QuickMs); // item 6
         InvalidateSources();
     }
@@ -622,6 +701,8 @@ public static class LpPlayerMedia
         client.QuitOrKill();
         InvalidateSources();
         _lastCorr = null;
+        _intent = null; // no player: nothing to put back
+        _alignedCorrs.Clear();
     }
 
     // ---- the effective-settings resolver (player-adapter.md § Targeting) ---------------------------
@@ -1004,12 +1085,20 @@ public static class LpPlayerMedia
     public static List<string> ShownOrIncomingPaths()
     {
         var client = C;
-        var paths = new List<string>();
-        if (!client.SocketExists) return paths;
+        if (!client.SocketExists) return [];
         try { Drain().Wait(1000); } catch { }
+        return ShownOrIncoming(client, parked: false) ?? [];
+    }
+
+    // One `state` read (no drain — ReconcileShown runs ON the queue's worker): every layer's content (an
+    // effect's `to`), each requested switch's B unless it's an aligned one waiting for A's end, and with
+    // `parked` the parked wallpaper (no output: what the next one shows). null = no answer.
+    private static List<string>? ShownOrIncoming(LpPlayerClient client, bool parked)
+    {
+        var paths = new List<string>();
         JsonElement st;
         try { st = client.Call("state", null, LpPlayerClient.QuickMs); }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return paths; }
+        catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return null; }
         if (!st.TryGetProperty("graph", out var g) || g.ValueKind != JsonValueKind.Object) return paths;
         string? PathOf(string id) =>
             id.Length > 0 && g.TryGetProperty(id, out var n) && Str(n, "kind") is not ("effect" or "layer") && Str(n, "path") is { Length: > 0 } p ? p : null;
@@ -1023,6 +1112,7 @@ public static class LpPlayerMedia
         if (st.TryGetProperty("transitions", out var trs) && trs.ValueKind == JsonValueKind.Array)
             foreach (var t in trs.EnumerateArray())
                 if (Str(t, "phase") is not ("waiting_start" or "done")) Add(PathOf(Str(t, "to")));
+        if (parked && st.TryGetProperty("parked", out var pk) && pk.ValueKind == JsonValueKind.String) Add(PathOf(pk.GetString()!));
         return paths;
     }
 

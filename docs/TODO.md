@@ -442,10 +442,15 @@ Two bug classes kept recurring; fix the class, not the instance:
       it; a paused source has no next frame. `MpvSource::refetch_lost_frame` re-seeks to where it is after 300 ms
       (player-core.md § Sources). Matrix `race:settingsDuringApply` RED 4/4 → GREEN; repro 3/8 → 0/10.
 
-- [ ] **A crash restart can bring back the previous wallpaper** (found 2026-10-27 by the flake-hardening agent under
+- [x] **A crash restart can bring back the previous wallpaper** (found 2026-10-27 by the flake-hardening agent under
       IO load): the snapshot lagged a switch by 2.4 s (fsync under load), the supervised restart restored dee instead
       of `a`, and R81 re-applies only settings, never the wallpaper — the backend's model and the screen disagree.
       Fix idea: on `Restarted`, the adapter compares `cur:*.path` with what it switched to last and re-switches.
+      — done 2026-10-28: `LpPlayerMedia.ReconcileShown` (queued by `OnRestarted` before the waits fail) cuts back to
+      the backend's last shown switch (`_intent`; unknown after another client's switch → nothing); an armed aligned
+      switch is saved by the snapshot as A where it plays and re-armed by `DoVideoEndWait` (it switched NOW before).
+      Player-side ordering considered: a switch's reply can't wait for an fsync, so the backend closes the window.
+      IT RED 5 → GREEN (a lagging snapshot via `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS`; a crash while armed).
 - [ ] **In-place upgrade fails under IO load**: the old compositor's clean quit took 3.1–3.3 s, `UpgradeInPlace`'s fixed
       3 s wait gave up, and the backend fell back to a plain `serve` without `--restore`/`--headless`. Wait on the
       supervisor's exit / socket instead of a fixed 3 s, and keep the args on the fallback.

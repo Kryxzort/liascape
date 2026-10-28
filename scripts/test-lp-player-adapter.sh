@@ -121,6 +121,17 @@ cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 EOF
 
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
+# A fresh player in place of the running one (`ctl quit` — its final snapshot may take seconds), with extra
+# env for it: `restart_player <n> VAR=value …`. The backend finds the new pid at its next request.
+restart_player() {
+  local n=$1; shift
+  "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
+  for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$SP" 2>/dev/null && { echo "  note: supervisor $SP outlived its quit by 60 s — SIGKILL"; kill -9 "$SP"; }
+  (cd /tmp && exec env "$@" "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$n.log" 2>&1) & SP=$!
+  for _ in $(seq 1 100); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
+  CP=$(ctl hello 2>/dev/null | jq -r '.pid // empty')
+}
 start_player 1
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
 CP=$(comp_pid)   # the compositor — `$SP` (spawned by `start_player`) is its SUPERVISOR, a different pid
@@ -687,6 +698,43 @@ one_advance && ok "one advance at E1's end" || bad "$dh handoffs, the last to $(
 grep -q "stops ticking" "$T/backend2.log" && ok "the first backend yielded: $(grep -m1 "stops ticking" "$T/backend2.log")" || bad "the first backend never yielded the timer"
 kill "$first" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$first" 2>/dev/null || break; sleep 0.1; done
 stop_now
+
+echo "== a crash while an end-of-video switch is armed: A comes back where it was, the switch re-armed for A's end"
+# The snapshot saved an armed align:end switch as its B — the restart showed B at once, cutting A's rest — and
+# the backend's wait ended "failed:player restarted" → its fallback switched NOW (align:now) after a 1 s back-off.
+newcomp() { c=$(comp_pid); [ -n "$c" ] && [ "$c" != "$1" ]; }
+snap_after() { [ "$(jq -r '.saved_unix_ms // 0' "$SNAP" 2>/dev/null)" -gt "$1" ]; }
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT cur_is path "$E1" || bad "/playlist/play e1 → cur $(cur path)"
+armed_only; ta=$(ms_now)
+waitfor $WAIT snap_after "$ta" || bad "precondition: no snapshot saved after the end-of-video switch was armed"
+p0=$(tpos 0); oldCP=$CP; kill -9 "$CP"
+waitfor $WAIT newcomp "$oldCP" || bad "no new compositor after killing $oldCP"; CP=$(comp_pid)
+waitfor $WAIT cur_is ready true   # a restored source reads its position once it plays again
+cp1=$(cur path); p1=$(tpos -1)   # the restarted player's own log starts empty: every event below is after the crash
+[ "$cp1" = "$E1" ] && near "$p1" "$p0" 2.6 && ok "e1 back after the crash at ${p1} s (was ${p0} s), not e2" || bad "after the crash: cur $(basename "$cp1") at $p1 s (e1 was at $p0 s)"
+waitfor $WAIT armed_for "$E2" && ok "the switch to e2 is re-armed for e1's end ($ac)" || bad "no aligned switch to e2 on the restarted player"
+[ "$(nows)" = 0 ] && ok "no immediate (align:now) switch after the crash" || bad "$(nows) align:now switch(es) after the crash (the armed one fired early)"
+waitfor 20000 handed_more 0; waitfor $WAIT shows "$E2"
+nh=$(handoffs); [ "$nh" = 1 ] && [ "$(cur path)" = "$E2" ] && [ "$(nows)" = 0 ] && ok "one handoff to e2 at e1's end" || bad "after e1's end: $nh handoffs, cur $(basename "$(cur path)"), $(nows) align:now"
+stop_now
+
+echo "== a crash whose snapshot lags the last switch (an fsync under I/O load): the backend puts back what it switched to"
+# Every snapshot write takes 4 s here (LP_PLAYER_TEST_SNAPSHOT_WRITE_MS — what an fsync took under load): a crash
+# right after a switch restores the wallpaper before it. R81 re-applied settings only, never the wallpaper — the
+# screen kept a, while the backend (and every UI) said c.
+restart_player 4 LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
+snap_shows() { jq -e --arg p "$1" '[.outputs[].content as $k | .sources[$k].path] | length > 0 and all(. == $p)' "$SNAP" >/dev/null 2>&1; }
+post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → cur $(cur path)"
+waitfor 20000 snap_shows "$A" || bad "precondition: the snapshot never showed a"
+post /apply "{\"path\":\"$C\"}" >/dev/null; waitfor $WAIT shows "$C" || bad "/apply c → cur $(cur path)"
+snap_shows "$A" && ok "precondition: the snapshot still shows a (its write lags the switch to c)" || bad "precondition: the snapshot caught up with c already"
+oldCP=$CP; kill -9 "$CP"
+waitfor $WAIT newcomp "$oldCP" || bad "no new compositor after killing $oldCP"; CP=$(comp_pid)
+waitfor $WAIT shows "$C" && ok "c on screen after the restart (the snapshot brought back a)" || bad "after the restart: cur $(basename "$(cur path)") — the backend last switched to c"
+[ "$(curl -sf -m 5 "$U/current" | jq -r .path)" = "$C" ] && ok "/current says c" || bad "/current $(curl -sf -m 5 "$U/current" | jq -c .)"
+stop_now
+restart_player 6   # normal snapshot writes again for the sections below
 
 echo "== a rebuilt player binary: the backend restarts the player onto it, keeping what it shows"
 # The player outlives the backend on purpose, so a rebuild/reinstall never reached a running one: fixes
