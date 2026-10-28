@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change; `Hello.protocol` must equal it.
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 /// Largest datagram either side sends or accepts.
 pub const MAX_MSG: usize = 64 * 1024;
 /// Most fds one datagram may carry (a 4-plane buffer + a fence, with room to spare).
@@ -59,6 +59,11 @@ pub enum ToWorker {
         no_audio: bool,
         #[serde(default = "unit_speed")]
         speed: f64,
+        /// Scene loudness: meter what plays (`FromWorker::Loudness`). False once the scene's
+        /// measurement reached its cap (`audio::loudness`) — nothing more is metered; every
+        /// live `LoudnessMeter` is folded in here too.
+        #[serde(default = "yes")]
+        loudness: bool,
     },
     /// Render one frame at scene time `t` (seconds). `input` = 1024 u8 visualiser samples.
     /// Answered by a `Frame` carrying `seq` (the heartbeat: an unanswered one is a hang).
@@ -92,6 +97,11 @@ pub enum ToWorker {
     /// (bit-exact passthrough at exactly 1×).
     Speed {
         speed: f64,
+    },
+    /// Meter the scene's loudness or not (off once its measurement reached the cap, on again
+    /// for a new measurement — `audio::loudness`).
+    LoudnessMeter {
+        on: bool,
     },
     /// The pointer over the scene, in the scene's **native pixels** (x right, y down from
     /// the image's top — what LWE's mouse callbacks hand `CScene`); `buttons` bit 0 left,
@@ -205,6 +215,10 @@ pub enum FromWorker {
 
 fn silent_db() -> f64 {
     crate::units::SILENT_DB
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn unit_speed() -> f64 {

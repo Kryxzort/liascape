@@ -55,7 +55,7 @@ happen regardless of timing.
   `memory.rs`: `memory`, Task 20b; `workers.rs`: `workers`, Phase 2; `vram.rs`: `vram`, Task 8).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `loudness.rs` (scene
-  loudness learned on first play — § Scene worker → "Scene loudness"), `Audio` (what
+  loudness learned on first play and refined on every play — § Scene worker → "Scene loudness"), `Audio` (what
   `serve` runs, `mod.rs`). § Audio bus. `sysmon.rs` — the scene visualiser's system-audio
   input (Phase 2 Task 7, § Scene worker → "Real scenes").
 - `src/supervise.rs` — the supervisor (`serve` without `--no-supervise`): spawns, waits
@@ -2770,9 +2770,9 @@ Map: protocol + lifecycle (here) · "Frame transport" · "LWE core" · "The `sce
 "Real scenes" · "Scene audio" · "Scene loudness" · "GPU budget and VRAM" · "Transitions with
 scenes" · "Crash policy" · "Scene corpus".
 
-**Protocol (`worker/proto.rs`, `PROTOCOL` 3 — bumped by Task 6, audio, and by scene loudness; the
+**Protocol (`worker/proto.rs`, `PROTOCOL` 4 — bumped by Task 6, audio, and twice by scene loudness; the
 shapes below are Task 3's plus the additions named inline and in the later subsections: `Start` also
-carries `id`, `gain_db`, `no_audio`, `speed`, `properties`; `ToWorker::Speed`; `FromWorker::Loudness`).** One JSON object per `SOCK_SEQPACKET`
+carries `id`, `gain_db`, `no_audio`, `speed`, `properties`, `loudness`; `ToWorker::Speed`, `ToWorker::LoudnessMeter`; `FromWorker::Loudness`).** One JSON object per `SOCK_SEQPACKET`
 datagram, ≤ `MAX_MSG` (64 KiB), fds on the same datagram via `SCM_RIGHTS` (≤ `MAX_FDS` 8).
 Internally tagged by **`msg`** (snake_case variant name — not `t`, which `Tick`/`Frame` use
 for scene time): `{"msg":"tick","seq":3,"t":0.02,"input":null}`. `ToWorker`: `start {path,
@@ -3388,7 +3388,7 @@ compositor's dB gains exactly like a video's `volume-gain` — the invariants (#
 scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; compositor side
 `sources/scene.rs`; the dropout reference `probe/dropout.rs` (`SceneEnvelopes`).
 
-- **Protocol (`PROTOCOL` 2; 3 since scene loudness added `FromWorker::Loudness` — § "Scene loudness").** `Start` gained `id` (the source id), `gain_db` (default −96),
+- **Protocol (`PROTOCOL` 2; 3 since scene loudness added `FromWorker::Loudness`, 4 since its cap added `Start.loudness` + `ToWorker::LoudnessMeter` — § "Scene loudness").** `Start` gained `id` (the source id), `gain_db` (default −96),
   `no_audio`, `speed`; `ToWorker::Speed {speed}` is new; `Gain`/`NoAudio`/`Speed` are
   **folded into the restart's `Start`** by `WorkerHost` (recorded while connected too, like
   `SetProperty`) — a restarted worker resumes at the same level/mute/speed. The worker's
@@ -3528,13 +3528,17 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   max-channel RMS, no K-weighting) but from the worker's own K-weighted segments, § "Scene
   loudness" below. Task 11: `no_audio`/`gain.*`/`speed` on a scene are live like a video's.
 
-### Scene loudness (learned on first play)
+### Scene loudness (learned on first play, refined on every play)
 
 Owner decision (Phase 2 plan, "Loudness: learn on first play"): a scene's integrated loudness is measured
 over its first ~60 s of play from its worker's own stream, stored in the item's index like a video's
-`loudness*`, and normalizes the scene from then on. The player measures and reports; the backend stores
-and applies (player-adapter.md § Scenes → "Loudness"). Code: `audio/loudness.rs` (pure), the worker's
-`audio.rs` (`Dsp`), `sources/scene.rs` (`Learner` per source), `PROTOCOL` **3** (`FromWorker::Loudness`).
+`loudness*`, and normalizes the scene from then on. **Refined (owner 2026-10-28: "60s to normalize for
+rest of scene, keep measuring to get a more accurate measure when the scene is played in future (probably
+add a max cap for people who will never change wallpaper)")**: measuring goes on past the window and on
+every later play, continuing ONE integration over all of them, until a cap. The player measures and
+reports; the backend stores and applies (player-adapter.md § Scenes → "Loudness"). Code:
+`audio/loudness.rs` (pure), the worker's `audio.rs` (`Dsp`), `sources/scene.rs` (`Learner` per source),
+`PROTOCOL` **4** (3: `FromWorker::Loudness`; 4: `Start.loudness` + `ToWorker::LoudnessMeter`).
 
 - **BS.1770-4 / EBU R128, split across the two processes.** The worker's `SegmentMeter` K-weights (the
   standard's 48 kHz shelf + RLB high-pass biquads; the worker's stream is always 48 kHz stereo) the
@@ -3551,30 +3555,60 @@ and applies (player-adapter.md § Scenes → "Loudness"). Code: `audio/loudness.
   those above the absolute gate (−70 LUFS) and integrates with the relative gate (−10 LU):
   `lufs = −0.691 + 10·log10(mean of the gated blocks)`. A stereo 1 kHz sine at −20 dBFS peak reads
   −20.0 LUFS (EBU Tech 3341 case 1 −23 → −23.0; a 997 Hz 0 dBFS mono sine −3.01).
+- **What's kept: a histogram, not the blocks** (the standard trick for a continuable integration).
+  BS.1770's relative gate is computed from the mean of ALL blocks, so two sessions can't be combined
+  from their results (a quiet play then a loud one: the loud one gates the quiet out — −20, where a
+  seconds-weighted energy mean of the two results says −25.8). Each block's loudness goes into a
+  **0.1 LU bin over −70…+5 LUFS** (750 counts; louder → the last bin); the integration runs over the
+  bins at their centres (±0.05 LU per block), and two histograms simply add. The **state** = `{v: 1,
+  first, counts: [the non-zero span], peak_dbfs}` (`Learner::state_json`, typically a few hundred
+  numbers) — what the backend stores and hands the next play back.
+- **Seeded plays.** Source prop **`loudness_seed`** (Map; `{}` = none) = a stored state: the source's
+  `Learner` starts from it (`with_seed`: its counts, peak, audible seconds) and continues the SAME
+  integration. Read at open; a live set restarts the measurement from the new seed (what the source
+  measured since its last report is dropped — it may already be in that seed: never counted twice; the
+  backend only sets it at create); a `path` change drops it (the old folder's). A malformed seed is
+  ignored (measured from nothing). Each session forms its own first block (its first 3 segments start
+  none: 0.3 s less than one long run).
 - **The window = audible play.** `LP_PLAYER_LOUDNESS_WINDOW_S` (default 60; tests 1–6) seconds of
   blocks **above the absolute gate** — a silent stretch doesn't count, a paused or muted one isn't
-  even measured. Reached → ONE `scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s,
-  complete: true, window_s}` (info, comp `scene`) and learning stops for that source. `seconds` =
-  audible seconds, `played_s` = segments received (audible or not), `peak_dbfs` = the sample peak
-  (≤ the true peak; null if none).
-- **Ending early** (the source destroyed — switched away, stopped, retired — or its `path` changed;
-  `begin_teardown` / `change_path`): with at least **a third of the window** audible (20 s by default)
-  and nothing learned yet → the same event with `complete: false`; less → nothing (the next play
-  measures afresh). The backend keeps the longest measurement until a complete one.
+  even measured. **Reports** (`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
+  played_s, complete, capped, window_s, cap_s, state}`, info, comp `scene` — each one cumulative over
+  every play): when the audible seconds over every play (seed included) reach the window; then after
+  **each further window** of audible play (60 s); **at the end** (`finish` — destroyed, switched away,
+  retired, its `path` changed) for what's left unreported if ≥ a twelfth of the window (5 s — a quick
+  switch costs no index write) and the total is ≥ a third of the window (20 s); and once **at the cap**.
+  `seconds` = audible seconds over every play, `session_s` = this source's, `seed_s` = the seed's,
+  `played_s` = segments this source received (audible or not), `complete` = `seconds` ≥ the window
+  (else a partial: switched away early on a first play), `peak_dbfs` = the sample peak over every play
+  (≤ the true peak; null if none). So a first play normalizes after 60 s (as before) and keeps refining.
+- **The cap.** `LP_PLAYER_LOUDNESS_CAP_S` (default **1800** = 30 min of audible play over every play;
+  never below the window; tests 3): reached → one last report (`capped: true`) and measuring stops for
+  good: the compositor sends **`ToWorker::LoudnessMeter {on: false}`** (folded into a restart's
+  `Start.loudness`) and the worker stops K-weighting (`Dsp`: `st.meter`) — no `Loudness` message any
+  more. A seed already at the cap → `Start.loudness: false` from the first moment, nothing metered,
+  nothing reported. Why 30 min: the integrated loudness of a scene's sound has converged long before
+  (its loops/variations are minutes long at most); past that the bins only grow, a wallpaper that's
+  never switched away would accumulate and keep a (small) DSP + 10 messages/s going forever.
 - **Silence:** a scene without sound (no stream: `has_audio` false) sends no segments; a stream of
   digital silence or anything under −70 LUFS has no gated block → never an event, nothing stored,
   never normalized.
 - **Edge cases.** Speed ≠ 1: measured after the pitch-kept stretch, which keeps the level (2×
   measured −19.99 for the −20 tone); the window is wall seconds of audio. A worker crash/hang loses at
   most the partial segment in flight (the `Learner` lives in the compositor; the restarted worker's
-  segments continue it). A **compositor** crash/restart loses the measurement in progress (the
-  restored source measures afresh; nothing was stored). Paused/`no_audio`: not measured (above);
-  `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
+  segments continue it). A **compositor** crash/restart loses what this source measured since its last
+  report (the restored source — its `loudness_seed` is the one it was created with — continues from
+  that seed; the backend keeps whichever report covers more seconds, so until the restored one passes
+  the stored one its reports are ignored, then it replaces it: bounded loss, never a double count).
+  Two sources of one scene at once (a transition to the same item) each continue the same seed; the
+  backend keeps the longer — the other's part is lost, never added twice. Paused/`no_audio`: not
+  measured (above); `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
 - **Applying it** is the backend's: the scene source's **`gain.normalize`** slot (the summed `Gains`
   → the worker's stream; § Units) — set at create from the stored value, live through `animate` (a
   setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too).
-- **Probe `workers` → `loudness`**: `{seconds (audible), played_s, lufs (so far, null = nothing
-  audible), done, window_s}`.
+- **Probe `workers` → `loudness`**: `{seconds (audible, every play), session_s, seed_s, played_s,
+  lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, received
+  (segments the worker sent, measured or not — stands still once the meter is off)}`.
 - **Tests.** Units `audio::loudness` (`stereo_1khz_sine_reads_its_level_in_lufs`,
   `k_weighting_shapes_the_spectrum`, `gating_excludes_silence_and_quiet_passages`,
   `silence_learns_nothing_and_the_window_is_audible_play`,
@@ -3586,7 +3620,19 @@ and applies (player-adapter.md § Scenes → "Loudness"). Code: `audio/loudness.
   digital silence), `paused_and_muted_play_never_counts_toward_loudness` (player pause and
   `no_audio`: audible time still), `scene_ended_early_reports_a_partial_loudness`,
   `scene_loudness_survives_a_worker_restart` (SIGKILL at 1.5 of 3 s: learned < 2.8 s after) — RED
-  before: 5 of 5 failed (no event / no progress).
+  before: 5 of 5 failed (no event / no progress). **Refinement (2026-10-28):** units
+  `histogram_merge_across_sessions_equals_one_long_integration` (5 levels incl. silence, 4 splits:
+  seeded session 2 vs one exact block integration < 0.1 LU), `relative_gate_is_recomputed_across_quiet_and_loud_sessions`
+  (−38 for 30 s then −20 for 10 s → −20, either order), `reports_each_further_window_and_at_the_end`,
+  `cap_stops_measuring`, `state_round_trips_and_a_bad_seed_is_ignored` (RED against the API with the old
+  semantics: 5 of 5); worker `loudness_segments_count_only_played_sound` + meter off; lib
+  `restart_start_folds_live_changes` + `LoudnessMeter`; api `scene_loudness_is_learned_once_after_its_window`
+  (now: not again before the next window, and a report at the end), `scene_loudness_accumulates_over_two_plays`
+  (−20 then −23 dBFS plays of one folder, the second seeded with the first's state → `seed_s`/`session_s`,
+  the energy mean of both within 0.3 LU), `scene_loudness_stops_at_the_cap` (window 1, cap 3: reports at
+  1/2/3 s, `capped`, `received` stands still, nothing at the end; seeded at the cap → nothing metered) —
+  RED by mutation: seed ignored + cap off → both fail; the meter-off message suppressed → the cap test
+  fails (`received` 36 → more).
 
 ### GPU budget and VRAM (Task 8)
 

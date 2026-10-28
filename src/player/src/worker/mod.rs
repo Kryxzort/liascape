@@ -366,6 +366,7 @@ impl WorkerHost {
             gain_db: sg,
             no_audio: sn,
             speed: ss,
+            loudness: sl,
             ..
         } = &mut self.spec.start
         else {
@@ -386,6 +387,8 @@ impl WorkerHost {
             ToWorker::Gain { db } => *sg = *db,
             ToWorker::NoAudio { on } => *sn = *on,
             ToWorker::Speed { speed } => *ss = *speed,
+            // A capped loudness measurement stays capped across a restart.
+            ToWorker::LoudnessMeter { on } => *sl = *on,
             _ => return false,
         }
         true
@@ -1152,6 +1155,7 @@ mod tests {
             gain_db: crate::units::SILENT_DB,
             no_audio: false,
             speed: 1.0,
+            loudness: true,
         };
         let mut spec = WorkerSpec::new("src1", "/nonexistent/lp-scene-worker", start);
         spec.crash_dir = std::env::temp_dir();
@@ -1209,6 +1213,7 @@ mod tests {
         host.send(&ToWorker::Gain { db: -6.0 }, &[]).unwrap();
         host.send(&ToWorker::NoAudio { on: true }, &[]).unwrap();
         host.send(&ToWorker::Speed { speed: 1.5 }, &[]).unwrap();
+        host.send(&ToWorker::LoudnessMeter { on: false }, &[]).unwrap();
         let e = host
             .send(
                 &ToWorker::Pointer {
@@ -1230,8 +1235,10 @@ mod tests {
                 gain_db,
                 no_audio,
                 speed,
+                loudness,
                 ..
             } => {
+                assert!(!*loudness, "the cap's meter-off survives a restart");
                 assert_eq!(*gain_db, -6.0);
                 assert!(*no_audio);
                 assert_eq!(*speed, 1.5);
