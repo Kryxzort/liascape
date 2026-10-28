@@ -384,11 +384,16 @@ public static class ServerHost
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
                 PlayerHelper.UpdateRestartTimer();
-            // the maximum play time → the running rotation, live (the effective one: a playlist with its own
-            // override keeps its own — /playlist/state applies those). Before the rotation below, so a switch it
-            // arms (advance-on-end just turned on) already reads it.
-            if (prev.GlobalMaxPlaySeconds != s.GlobalMaxPlaySeconds)
-                PlayerHelper.ApplyMaxPlayLive(PlayerHelper.EffectiveRotation(s, PlaylistService.LoadCurrentState()?.Settings).Max);
+            // the maximum play time / the scene timing ("Separate timing for scenes" + "Switch scenes after") → the
+            // running rotation, live (the effective one: a playlist with its own override keeps its own —
+            // /playlist/state applies those). Before the rotation below, so a switch it arms (advance-on-end just
+            // turned on) already reads them.
+            if ((prev.GlobalMaxPlaySeconds, prev.GlobalSeparateSceneTiming, prev.GlobalSwitchScenesAfterSeconds)
+                != (s.GlobalMaxPlaySeconds, s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds))
+            {
+                var r = PlayerHelper.EffectiveRotation(s, PlaylistService.LoadCurrentState()?.Settings);
+                PlayerHelper.ApplyPlayLimitsLive(r.Max, r.SeparateScenes, r.ScenesAfter);
+            }
             // rotation (interval — the minimum play time under advance-on-end — / advance-on-end) changed →
             // live-update a RUNNING timed playlist that follows the GLOBAL settings (a playlist with its own
             // override is updated by /playlist/state instead). No replay needed.

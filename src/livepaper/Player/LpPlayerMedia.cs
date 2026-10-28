@@ -556,6 +556,8 @@ public static class LpPlayerMedia
 
     // ---- switches --------------------------------------------------------------------------------
     private static readonly string[] ImageExt = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".jxl", ".tif", ".tiff"];
+    // a still image the player shows (`kind: image`) — it never ends (PlayerHelper.PlayKindOf, the rotation's rules)
+    public static bool IsImagePath(string path) => ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant());
 
     // B's create props: everything the legacy launch/loadfile carried, as live properties — the
     // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
@@ -565,7 +567,7 @@ public static class LpPlayerMedia
         var props = new Dictionary<string, object?>
         {
             ["path"] = path,
-            ["kind"] = scene ? "scene" : ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant()) ? "image" : "video",
+            ["kind"] = scene ? "scene" : IsImagePath(path) ? "image" : "video",
             ["loop"] = s.Loop,
         };
         // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,

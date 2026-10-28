@@ -44,26 +44,38 @@ public static class LpPlayerSelfTest
     private static void PlayLimitAssertions(List<string> fails)
     {
         // effective: the playlist's own rotation only when it overrides the global one
-        var g = new AppSettings { GlobalIntervalSeconds = 30, GlobalAdvanceOnVideoEnd = true, GlobalMaxPlaySeconds = 600 };
-        var own = new PlaylistSettings { OverrideGlobalSettings = true, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 0 };
-        var follows = new PlaylistSettings { OverrideGlobalSettings = false, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 7 };
-        void Eff(PlaylistSettings? p, (int, bool, int) want, string what)
+        var g = new AppSettings { GlobalIntervalSeconds = 30, GlobalAdvanceOnVideoEnd = true, GlobalMaxPlaySeconds = 600,
+                                  GlobalSeparateSceneTiming = true, GlobalSwitchScenesAfterSeconds = 90 };
+        var own = new PlaylistSettings { OverrideGlobalSettings = true, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 0,
+                                         SeparateSceneTiming = false, SwitchScenesAfterSeconds = 12 };
+        var follows = new PlaylistSettings { OverrideGlobalSettings = false, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 7,
+                                             SeparateSceneTiming = false, SwitchScenesAfterSeconds = 12 };
+        void Eff(PlaylistSettings? p, (int, bool, int, bool, int) want, string what)
         {
             var got = PlayerHelper.EffectiveRotation(g, p);
             if (got != want) fails.Add($"EffectiveRotation({what}) = {got}, want {want}");
         }
-        Eff(own, (5, false, 0), "override"); Eff(follows, (30, true, 600), "follows the globals"); Eff(null, (30, true, 600), "no playlist state");
+        Eff(own, (5, false, 0, false, 12), "override"); Eff(follows, (30, true, 600, true, 90), "follows the globals");
+        Eff(null, (30, true, 600, true, 90), "no playlist state");
         // the limits a rotation acts on: under advance-on-end the interval IS the minimum; off, the interval is the
         // timer and neither limit applies
         foreach (var (iv, adv, max, want) in new[] { (30, true, 600, (30, 600)), (0, true, 0, (0, 0)), (30, false, 600, (0, 0)),
                                                      (20, true, 2, (20, 2)), (-4, true, 400000, (0, 359999)) })
             if (PlayerHelper.PlayLimits(iv, adv, max) != want) fails.Add($"PlayLimits(interval {iv}, advance {adv}, max {max}) = {PlayerHelper.PlayLimits(iv, adv, max)}, want {want}");
-        // the defaults = the old default rotation (switch at each video end, 30 min at most), globally and per playlist
+        // the defaults (2026-10-28, "0 = off unless set"): a video plays to its end however long — no minimum, no
+        // maximum —, a scene / still image (they never end) switches after its own 30 min; globally and per playlist
         var d = new AppSettings(); var dp = new PlaylistSettings();
-        if ((d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds) != (0, true, 1800))
-            fails.Add($"default global rotation = {(d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds)}, want (0, True, 1800)");
-        if ((dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds) != (0, true, 1800))
-            fails.Add($"default playlist rotation = {(dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds)}, want (0, True, 1800)");
+        var dG = (d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds, d.GlobalSeparateSceneTiming, d.GlobalSwitchScenesAfterSeconds);
+        var dP = (dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds, dp.SeparateSceneTiming, dp.SwitchScenesAfterSeconds);
+        if (dG != (0, true, 0, true, 1800)) fails.Add($"default global rotation = {dG}, want (0, True, 0, True, 1800)");
+        if (dP != (0, true, 0, true, 1800)) fails.Add($"default playlist rotation = {dP}, want (0, True, 0, True, 1800)");
+        // a file written before the scene toggle loads with its defaults; an explicit value loads as written
+        var pre = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":0,"GlobalAdvanceOnVideoEnd":true,"GlobalMaxPlaySeconds":0}""")!;
+        if ((pre.GlobalSeparateSceneTiming, pre.GlobalSwitchScenesAfterSeconds) != (true, 1800))
+            fails.Add($"a settings.json without the scene keys loads them as {(pre.GlobalSeparateSceneTiming, pre.GlobalSwitchScenesAfterSeconds)}, want (True, 1800)");
+        var exp = JsonSerializer.Deserialize<PlaylistSettings>("""{"SeparateSceneTiming":false,"SwitchScenesAfterSeconds":45}""")!;
+        if ((exp.SeparateSceneTiming, exp.SwitchScenesAfterSeconds) != (false, 45))
+            fails.Add($"a playlist's own scene timing loads as {(exp.SeparateSceneTiming, exp.SwitchScenesAfterSeconds)}, want (False, 45)");
         // the removed wait toggle / separate minimum: gone from the models (an old file's keys load as unknown ones)
         foreach (var t in new[] { typeof(AppSettings), typeof(PlaylistSettings), typeof(LastSession) })
             foreach (var name in new[] { "GlobalWaitForVideoEnd", "PlaylistWaitForVideoEnd", "WaitForVideoEnd", "GlobalMinPlaySeconds", "MinPlaySeconds" })
@@ -76,7 +88,41 @@ public static class LpPlayerSelfTest
         {
             var s = new AppSettings { GlobalMaxPlaySeconds = v }; var p = new PlaylistSettings { MaxPlaySeconds = v };
             if (s.GlobalMaxPlaySeconds != want || p.MaxPlaySeconds != want) fails.Add($"max play time {v} → {s.GlobalMaxPlaySeconds}/{p.MaxPlaySeconds}, want {want}");
+            var s2 = new AppSettings { GlobalSwitchScenesAfterSeconds = v }; var p2 = new PlaylistSettings { SwitchScenesAfterSeconds = v };
+            if (s2.GlobalSwitchScenesAfterSeconds != want || p2.SwitchScenesAfterSeconds != want)
+                fails.Add($"switch scenes after {v} → {s2.GlobalSwitchScenesAfterSeconds}/{p2.SwitchScenesAfterSeconds}, want {want}");
         }
+        // what each kind of item plays under advance-on-end: (minimum — for an item that never ends, reaching it IS its
+        // end; NeverMs = it stays —, maximum — 0 = none). 0 = off everywhere. A video: always the minimum / maximum (0/0 →
+        // its end, however short or long). Separate timing for scenes OFF: a scene's end = the minimum (none → only the
+        // maximum moves it, else it stays), a still image shows for the minimum (0 → it flashes by) — the old rules.
+        // ON: a scene AND a still image switch after "Switch scenes after" (0 → they stay), the minimum / maximum don't
+        // apply to them.
+        const long N = PlayerHelper.NeverMs;
+        foreach (var (kind, min, max, sep, after, want) in new (PlayerHelper.PlayKind, long, long, bool, long, (long, long))[] {
+                 (PlayerHelper.PlayKind.Video, 0, 0, false, 0, (0, 0)),          // 0/0: a video switches at its end, whatever its length
+                 (PlayerHelper.PlayKind.Video, 5000, 9000, false, 3000, (5000, 9000)),
+                 (PlayerHelper.PlayKind.Video, 5000, 9000, true, 3000, (5000, 9000)),  // the scene timing never touches a video
+                 (PlayerHelper.PlayKind.Video, 0, 0, true, 3000, (0, 0)),
+                 (PlayerHelper.PlayKind.Image, 0, 0, false, 3000, (0, 0)),       // toggle off: the minimum (0 → it flashes by)
+                 (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
+                 (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
+                 (PlayerHelper.PlayKind.Image, 0, 0, true, 0, (N, 0)),           // …0 = off → it stays
+                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 9000)),
+                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → only the maximum moves it
+                 (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
+                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 3000, (3000, 0)),
+                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 0, (N, 0)) })
+        {
+            var got = PlayerHelper.ItemPlayRule(kind, min, max, sep, after);
+            if (got != want) fails.Add($"ItemPlayRule({kind}, min {min}, max {max}, separate {sep}, scenes after {after}) = {got}, want {want}");
+        }
+        foreach (var (path, want) in new[] { ("/x/a.mp4", PlayerHelper.PlayKind.Video), ("/x/a.PNG", PlayerHelper.PlayKind.Image),
+                                             ("/x/b.webp", PlayerHelper.PlayKind.Image), ("/lib/workshop/900000001", PlayerHelper.PlayKind.Scene) })
+            if (PlayerHelper.PlayKindOf(path) != want) fails.Add($"PlayKindOf({path}) = {PlayerHelper.PlayKindOf(path)}, want {want}");
+        // NeverMs never reached, never overflows the hold's arithmetic
+        if (PlayerHelper.SceneMinReached(true, true, true, 359999_000L, N) || PlayerHelper.MinPlayReached(359999_000L, 12_000, N))
+            fails.Add("NeverMs was reached");
         // a scene (it never ends) moves on at the minimum under advance-on-end; no minimum → never by it
         foreach (var (adv, rot, scene, played, min, want) in new[] {
                  (true, true, true, 3000L, 3000L, true), (true, true, true, 2999L, 3000L, false), (true, true, true, 9000L, 0L, false),
