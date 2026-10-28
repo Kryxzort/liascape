@@ -188,8 +188,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Backend restart under an open page → `store.resync()`** (2026-10-28: "Library is empty" while a wallpaper played).
   Everything the store mirrors — sources, themes, settings (+ theme vars), `/current`, library, strip (paths +
   settings + name), playlist names, undo depth, Steam status — is read by ONE `resync()` (`readBackend`): at start
-  (`init` retries it — 250 ms doubling to 2 s — while any read fails for want of a backend: a `TypeError`, not an HTTP
-  error) and on every WS reopen after the first (`useEvents(onEvent, onReconnect)` → `App.tsx` `onReconnect`; also
+  (`init` retries it — 250 ms doubling to 2 s — while a CORE read — sources, themes, settings, current, library,
+  strip — fails for want of a backend: a `TypeError`, not an HTTP error; names / undo depth / Steam never hold it up) and on every WS reopen after the first (`useEvents(onEvent, onReconnect)` → `App.tsx` `onReconnect`; also
   reloads a Browse list the outage left empty). Each piece is applied only when ITS read succeeded — never `[]` for a
   failed read (init used to `.catch(() => [])` the library) — and a strip / settings edit still waiting for its debounced
   save keeps the local copy (`stripSavePending` / `settingsSavePending`). Overlapping calls coalesce into one more pass.
