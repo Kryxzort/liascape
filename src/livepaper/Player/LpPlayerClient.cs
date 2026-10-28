@@ -231,6 +231,11 @@ public sealed class LpPlayerClient
                                 }
                             }
                             if (sup != SupervisorPid) _supervisorIdentity = sup is int sp2 ? ProcIdentity.Of(sp2) : null;
+                            if ((sup ?? p) != _serveArgsOf) // a new player process: what a respawn starts (EnsureRunning, UpgradeInPlace)
+                            {
+                                _serveArgsOf = sup ?? p;
+                                _serveArgs = ServeArgs(sup ?? p) ?? _serveArgs;
+                            }
                             SupervisorPid = sup;
                         }
                         MarkAnswered();
@@ -328,7 +333,9 @@ public sealed class LpPlayerClient
     // alive a short moment later (PDEATHSIG race / unsupervised), SIGKILL it directly too. Unsupervised
     // (`--no-supervise`, SupervisorPid null): the compositor pid IS the only target throughout, same as
     // before.
-    public void QuitOrKill(int waitMs = 1500)
+    // `quitWaitMs`: how long the clean quit may take before the escalation (its final snapshot is fsync'ed —
+    // seconds under I/O load); `waitMs`: each escalation step's wait.
+    public void QuitOrKill(int waitMs = 1500, int? quitWaitMs = null)
     {
         int? compositor = PlayerPid;
         int? supervisor = SupervisorPid;
@@ -352,8 +359,8 @@ public sealed class LpPlayerClient
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 500 && (compositorId is { } cid2 ? cid2.StillIs(c) : IsPlayerProcess(c))) Thread.Sleep(25);
         }
-        if (Gone(waitMs)) { FinishCompositor(); return; }
-        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit — SIGTERM");
+        if (Gone(quitWaitMs ?? waitMs)) { FinishCompositor(); return; }
+        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit within {quitWaitMs ?? waitMs} ms — SIGTERM");
         if (StillTarget()) { kill(t, 18); kill(t, 15); } // SIGCONT, SIGTERM
         if (Gone(waitMs)) { FinishCompositor(); return; }
         Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) ignored SIGTERM — SIGKILL");
@@ -437,6 +444,13 @@ public sealed class LpPlayerClient
     // after ~0.2 s, settings re-applied by the Restarted handler (R81). Never twice onto the same build:
     // one that still reads as stale after its upgrade (a wrapper this check can't see through) must not
     // restart the player every 10 s — a new build may try again.
+    // Every wait here is on the real condition, bounded by a deadline that scales — never a fixed 3 s:
+    // under I/O load the old player's clean quit took 3.1–3.3 s (its final snapshot is fsync'ed; measured
+    // up to 11.8 s), the upgrade gave up on it, SIGKILLed it mid-snapshot, and the next switch fell back to
+    // a plain `serve` (no --headless/--socket/--restore). Now: the old supervisor's exit (`QuitOrKill`,
+    // `QuitWaitMs` — three snapshot writes at the player's own last measured write time), then the NEW
+    // player's hello while the process we started lives (`StartWaitMs`). A failure leaves `_serveArgs`, so
+    // the fallback (EnsureRunning) starts the same arguments + --restore.
     private string? _upgradedTo;
     public bool UpgradeInPlace(string why)
     {
@@ -445,28 +459,64 @@ public sealed class LpPlayerClient
             if (!AutoSpawn) return false;
             var bin = PlayerEngine.ResolveBinary(fresh: true);
             if (bin == null || (SupervisorPid ?? PlayerPid) is not int src) return false;
-            if (ServeArgs(src) is not { } args) { Log($"lp-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
+            if ((ServeArgs(src) ?? _serveArgs?.ToList()) is not { } args) { Log($"lp-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
+            _serveArgs = [.. args];
             var target = $"{bin} {BuildOf(bin)}";
             if (target == _upgradedTo) { Log($"lp-player still reads as out of date after upgrading it onto {bin} ({why}) — not restarting it again for this build"); return false; }
             _upgradedTo = target;
             int? old = PlayerPid;
-            Log($"lp-player is out of date ({why}) — restarting it onto {bin} with --restore");
+            int quitWait = QuitWaitMs(LastSnapshotWriteMs());
+            Log($"lp-player is out of date ({why}) — restarting it onto {bin} with --restore (its clean quit may take {quitWait / 1000} s)");
             var evThread = _evThread;
-            QuitOrKill(); // also stops the event thread
+            QuitOrKill(waitMs: SupervisorStopWaitMs, quitWaitMs: quitWait); // also stops the event thread
             args.Add("--restore");
-            try { Spawn(bin, args); }
+            Process? p;
+            try { p = Spawn(bin, args); }
             catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
             var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 3000 && !Reachable()) Thread.Sleep(50);
-            bool ok = Reachable();
+            bool ok = false;
+            while (sw.ElapsedMilliseconds < StartWaitMs)
+            {
+                if (Reachable() && PlayerPid != old) { ok = true; break; }
+                if (p is { HasExited: true }) break; // it gave up (or lost the instance lock) — no point waiting
+                Thread.Sleep(50);
+            }
             // resubscribe at once (the old event thread must be gone first, or StartEvents keeps it)
             evThread?.Join(1000);
             if (ok) { StartEvents(); WaitSubscribed(1000); }
-            Log(ok ? $"lp-player upgraded in place: pid {old} → {PlayerPid}" : $"lp-player upgrade: the new player didn't answer within 3 s (see ~/.cache/livepaper/lp-player-serve.log)");
-            if (!ok) Fail("lp-player did not come back after an in-place upgrade");
+            string failure = p is { HasExited: true } ? $"exited {p.ExitCode}{ExitHint(p.ExitCode)}" : $"didn't answer within {StartWaitMs / 1000} s";
+            Log(ok ? $"lp-player upgraded in place: pid {old} → {PlayerPid} ({sw.ElapsedMilliseconds} ms to answer)"
+                   : $"lp-player upgrade: the new player {failure} (see ~/.cache/livepaper/lp-player-serve.log) — the next switch starts `{string.Join(" ", _serveArgs)} --restore`");
+            if (!ok) Fail($"lp-player did not come back after an in-place upgrade: it {failure}");
             return ok;
         }
     }
+
+    // The supervisor's own stop bound (player-core.md § Supervisor: SIGTERM → its child gets STOP_WAIT 10 s,
+    // then SIGKILL) + margin: the escalation steps of an upgrade's quit.
+    private const int SupervisorStopWaitMs = 12_000;
+    // A new player's first hello: an exec, its EGL init, a --restore (a source per output) — seconds under load.
+    private const int StartWaitMs = 30_000;
+    // A clean quit finishes the snapshot write in flight, then writes the final one: 3 writes at the player's
+    // last measured write time (0.1–11.8 s measured under I/O load), never under 10 s or over 120 s.
+    internal static int QuitWaitMs(double? lastWriteMs) => (int)Math.Clamp(10_000 + 3 * (lastWriteMs ?? 0), 10_000, 120_000);
+
+    // the running player's last snapshot write time (`probe snapshot` `last_write_ms`), null = unknown
+    private double? LastSnapshotWriteMs()
+    {
+        try
+        {
+            var r = Call("probe", new Dictionary<string, object?> { ["name"] = "snapshot" }, QuickMs);
+            return r.TryGetProperty("last_write_ms", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+        }
+        catch (LpPlayerException) { return null; }
+    }
+
+    // The `serve` arguments of the player this client last talked to (its supervisor's, minus the restart
+    // plumbing) — what EnsureRunning and UpgradeInPlace start when they must start one: a plain `serve`
+    // lost --headless / --outputs / --socket / --ao (a failed upgrade under I/O load fell back to one).
+    private List<string>? _serveArgs;
+    private int? _serveArgsOf; // the pid they were read from
 
     // The `serve` arguments `pid` (a verified lp-player process) was started with, minus the restart
     // plumbing the supervisor adds to its child — what an upgrade starts the new player with.
@@ -540,7 +590,12 @@ public sealed class LpPlayerClient
             var bin = PlayerEngine.ResolveBinary();
             if (bin == null) { Fail(PlayerEngine.UnavailableReason); return false; }
             Process? p;
-            try { p = Spawn(bin, SocketPath == DefaultSocketPath() ? ["serve"] : ["serve", "--socket", SocketPath]); }
+            // the last player's own arguments + --restore (it went away: a failed upgrade, its supervisor gave up
+            // or was killed) — the same outputs/socket/audio, showing what it showed until the switch lands; a
+            // first start: the defaults
+            List<string> args = _serveArgs is { } known ? [.. known, "--restore"]
+                : SocketPath == DefaultSocketPath() ? ["serve"] : ["serve", "--socket", SocketPath];
+            try { p = Spawn(bin, args); }
             catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 3000)
