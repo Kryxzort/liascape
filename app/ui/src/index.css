@@ -449,6 +449,10 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 .settings input[type=checkbox], .settings input[type=radio] { width: 17px; height: 17px; accent-color: var(--accent); transition: filter .2s; }
 /* COOL: glow native toggles/sliders on hover (drop-shadow works on the accent-colored control) */
 .settings input[type=range]:hover, .settings input[type=checkbox]:hover, .settings input[type=radio]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
+/* no system focus ring on a slider (a key pressed while one is held flipped it to keyboard focus → a yellow
+   outline); keyboard focus shows the same accent glow as hover instead — never while it's held (hooks/rangeDrag.ts) */
+input[type=range]:focus-visible { outline: none; }
+:root:not(.range-dragging) input[type=range]:focus-visible { filter: drop-shadow(0 0 4px var(--accent)); }
 .settings select, .num, .text { background: var(--surface1); border: 1px solid var(--surface2); color: var(--text);
   border-radius: 7px; padding: 5px 9px; outline: none; transition: border-color .15s, box-shadow .2s; }
 .settings select:hover, .num:hover, .text:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }

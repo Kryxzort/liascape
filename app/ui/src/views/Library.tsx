@@ -3,12 +3,9 @@ import { useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
+// never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
+import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
-
-const typing = () => {
-  const el = document.activeElement as HTMLElement | null;
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-};
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
