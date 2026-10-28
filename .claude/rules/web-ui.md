@@ -175,9 +175,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   reserved, since the panel is centred and growing mid-flight moves the landing spot. The close lands one frame AFTER
   finishing (unmounting in the finishing frame never painted the landing pose).
   The media box layers the card's own `still()` (cached → frame 1 IS the card) and the card's gif URL (same image →
-  same animation) from the first frame; **the sharp native image and the video preview mount once `landed`** (the
-  video — often the wallpaper itself, 4K, software-decoded — starts where the card's hover video was + the open's
-  duration, fades in on `playing`; `settingsSource`, read at the click), and a playing video is paused for the close.
+  same animation) from the first frame; **the sharp native image and the video preview mount at the click** (owner: "keep the time they loaded like it
+  was" — fine since the UI is GPU-composited on NVIDIA too, below; the video starts where the card's hover video was,
+  fades in on `playing`; `settingsSource`, read at the click), and a playing video is paused for the close.
   framer's `layoutId` used to scale one `<img>` between aspects (stretched mid-flight), flew a low-res
   still, and the strip's close vanished (the id was dropped at once, and the row clips). Guard:
   `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a library
@@ -186,13 +186,13 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   quarter; rAF pacing vs the page's idle frame (median ≤ 1.25×, ≤ 15 % of frames > 2×); the preview animates; a close
   mid-open lands on the card).
   **Timing — TUNE in `morph.ts` `SETTINGS_MORPH`** (owner "slow down morph" → 620 ms "still too snappy", 2026-10-28):
-  open 900 ms / close 700 ms, both `SOFT` = `cubic-bezier(0.37, 0, 0.63, 1)` (symmetric, sine-like: 25 % of the time →
+  open 720 ms / close 560 ms (owner: 900/700 "too slow now, a bit faster"), both `SOFT` = `cubic-bezier(0.37, 0, 0.63, 1)` (symmetric, sine-like: 25 % of the time →
   ~15 % of the travel; measured 18–19 % on screen). The 620 ms curve `(0.3, 0.7, 0.2, 1)` still did 67–76 % of its
   travel in the first quarter — that front-load, not the length, read as the snap. The Browse preview keeps
   `PREVIEW_MORPH` (430 / 340 ms, not asked for). The duration row, the scene properties (`open.duration + 40`) and App's
   `modal-open` gif freeze key off these numbers; the matrix's `keys:sliderHeld` waits 1400 ms for the landing (a real
   press hit-tests). No reduced-motion branch (the app has none; noted, not added). probe-morph asserts the settings
-  flights move 780–1050 / 590–850 ms (measured 872–884 / 681–684) and the Browse one ≤ 520 ms (RED on the 620 ms UI: 8
+  flights move 620–840 / 470–680 ms and the Browse one ≤ 520 ms (RED on the 620 ms UI: 8
   cells — 532–567 / 461–485 ms, 67–76 % in the first quarter).
   **PERF (measured 2026-10-28, `/tmp`-scratch probe on the matrix stack, 1920×1080 Xvfb, `--disable-gpu
   --enable-unsafe-swiftshader` = main.js's NVIDIA branch, Chromium tracing):** the owner's UI is software-composited, so
@@ -208,7 +208,11 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   the floor — the remaining cost is the software compositor itself, not the morph. Keep it that way: no
   size / radius / shadow / filter / clip-path animation in a flight, nothing heavy mounting mid-flight.
 
-## Hardware GL on NVIDIA (checked 2026-10-28 — default unchanged: software)
+## Hardware GL on NVIDIA (2026-10-28 — now the DEFAULT: ANGLE `gles-egl`)
+The owner ran `LP_HWGL=1 LP_ANGLE=gles-egl livepaper-ui` in the real Wayland session: the window shows, stays up, the
+morph is GPU-composited. So `main.js` now defaults NVIDIA to hardware GL via `--use-angle=gles-egl`; `LP_SOFTGL=1`
+brings back the SwiftShader path; `LP_ANGLE` overrides the backend. The log line "'--ozone-platform=wayland' is not
+compatible with Vulkan" is harmless. History below.
 `main.js` still puts NVIDIA on `disable-gpu` + SwiftShader (memory `nixos-electron-ozone-x11`: native Wayland → the
 surface via Vulkan, rejected; XWayland → GPU-process segfault). Hermetic check (no display: `--ozone-platform=headless`,
 an offscreen window animating + WebGL, 5 s) with the store's electron 42.11.18 (the flake's `electron_42`) and 44.9.3 on

@@ -128,6 +128,6 @@ export const PREVIEW_MORPH: MorphTiming = {
 // frozen gifs) key off these numbers; probe-morph.js asserts the flight times around them.
 const SOFT: Bezier = [0.37, 0, 0.63, 1];
 export const SETTINGS_MORPH: MorphTiming = {
-  open: { duration: 900, bezier: SOFT },
-  close: { duration: 700, bezier: SOFT },
+  open: { duration: 720, bezier: SOFT },
+  close: { duration: 560, bezier: SOFT },
 };

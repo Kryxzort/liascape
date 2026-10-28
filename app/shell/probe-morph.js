@@ -177,7 +177,7 @@ function pacing(samples, idle, what) {
 // the settings modal's morph runs slow + soft on purpose (owner: "slow down morph" — 430 ms read as a snap,
 // 620 ms "still too snappy"; morph.ts SETTINGS_MORPH = 900 / 700 ms, a symmetric ease-in-out); the Browse
 // preview keeps its own pace (another modal, not asked for)
-const SLOW_OPEN_MS = 780, SLOW_OPEN_MAX = 1050, SLOW_CLOSE_MS = 590, SLOW_CLOSE_MAX = 850, BR_MAX_MS = 520, QUARTER_MAX = 0.3;
+const SLOW_OPEN_MS = 620, SLOW_OPEN_MAX = 840, SLOW_CLOSE_MS = 470, SLOW_CLOSE_MAX = 680, BR_MAX_MS = 520, QUARTER_MAX = 0.3;
 let IDLE_FRAME = 16.7;
 
 async function shots(surface, t) {

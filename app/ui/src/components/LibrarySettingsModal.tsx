@@ -68,7 +68,7 @@ export function LibrarySettingsModal({
   const aspect = source?.aspect ?? loadedAspect ?? 16 / 9;
   const [fullFor, setFullFor] = useState<string | null>(null); // the sharp layer shows once IT loaded
   const [vidOn, setVidOn] = useState<string | null>(null); // the video layer shows once IT plays
-  const { panelRef, mediaRef, bodyRef, requestClose, landed } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
+  const { panelRef, mediaRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
 
   if (!item) return null;
   const p = item.videoPath;
@@ -129,9 +129,8 @@ export function LibrarySettingsModal({
   // the picture, bottom → top: the card's own still (cached: the first frame IS the card) → the sharp
   // native image → the playing preview: the card's gif URL (the same image → the same animation, no
   // restart), or the video from where the card's hover video was (+ the flight).
-  // PERF: the sharp image and the video mount once the open flight landed — a full-size decode (the video is
-  // often the wallpaper itself, 4K, software-decoded) mid-flight competes with the software-rendered morph
-  // for the CPU; the flight shows the card's still (+ its small gif, which keeps the card's animation going)
+  // the sharp image and the video mount at the click (owner: load as early as before) — the UI is GPU-composited
+  // now (main.js), so their decode no longer competes with the flight; each fades in once ready
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
   const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : "";
@@ -149,11 +148,11 @@ export function LibrarySettingsModal({
             <div className="morph-pic" data-morph-pic>
             {baseSrc && <img src={baseSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && !loadedAspect) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); }} />}
-            {fullSrc && landed && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt=""
+            {fullSrc && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); setFullFor(fullSrc); }} />}
             {gifSrc && <img className="mm-anim" src={gifSrc} alt="" />}
-            {!gifSrc && vidSrc && landed && <video className={`mm-anim${vidOn === vidSrc ? " on" : ""}`} src={vidSrc} muted loop autoPlay playsInline
-              onLoadedMetadata={(e) => { const v = e.currentTarget; if (source?.videoTime != null && v.duration) v.currentTime = (source.videoTime + SETTINGS_MORPH.open.duration / 1000) % v.duration; }}
+            {!gifSrc && vidSrc && <video className={`mm-anim${vidOn === vidSrc ? " on" : ""}`} src={vidSrc} muted loop autoPlay playsInline
+              onLoadedMetadata={(e) => { const v = e.currentTarget; if (source?.videoTime != null && v.duration) v.currentTime = source.videoTime % v.duration; }}
               onPlaying={() => setVidOn(vidSrc)} />}
             </div>
           </div>
