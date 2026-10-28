@@ -1595,6 +1595,7 @@ impl Runtime {
             .mark_shown_gated(graph, &changed, Instant::now(), |src, out| {
                 scene_gate_period(host, graph, src, out)
             });
+        let mut errored = false;
         for (id, ev) in self.host.events() {
             let (kind, level, fields) = match &ev {
                 SourceEvent::Ready => ("source.ready", Level::Info, json!({ "id": id })),
@@ -1625,7 +1626,13 @@ impl Runtime {
                 SourceEvent::AudioFlowing => "audio_flowing".to_string(),
             };
             self.last_event.insert(id.clone(), name);
+            // Task 10: a source that broke (a scene past its restart budget is saved
+            // `broken`) is news for the snapshot even when no graph change came with it.
+            errored |= matches!(ev, SourceEvent::Error { .. });
             self.src_events.push((id, ev));
+        }
+        if errored {
+            self.snapshot_dirty();
         }
         self.last_event
             .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
@@ -3396,8 +3403,9 @@ impl Runtime {
         }
         let s = snap.sources.get(saved)?;
         let mut props = s.create_props();
-        // A video or a scene (its worker's stream, Phase 2) will be heard.
-        let audible = onset::kind_has_audio(&s.kind) && !s.paused;
+        // A video or a scene (its worker's stream, Phase 2) will be heard — not a scene
+        // restored broken (Task 10: its preview, no worker, nothing to fade in).
+        let audible = onset::kind_has_audio(&s.kind) && !s.paused && !s.broken;
         if audible {
             props.insert("gain.anticlick".into(), json!(SILENT_DB));
         }

@@ -782,7 +782,7 @@ broken worker is already a `SourceEvent::Error`).
   the worker) = a crash restart), `snapshot.rs` (a broken scene is saved `broken: true` and restored as its preview,
   no worker), `tests/scene.rs`, `tests/api.rs`, `tests/supervise.rs`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - `crash_holds_last_frame_and_resumes_at_position` (kill at t ≈ 3.0: captures identical during the restart; the
     new worker's first frame has t ≥ 3.0 − one tick; `time_pos` continuous within 0.1 s)
   - `crash_before_first_frame_shows_preview` (crash_after_ms 0 on a restored scene → texture = the preview's colour)
@@ -792,8 +792,37 @@ broken worker is already a `SourceEvent::Error`).
     `LP_SCENE_WORKER_HANG_MS` — 300 in tests — else `HANG_TIMEOUT` 2 s)
   - api `broken_after_three_restarts_in_60s` (`source.broken {restarts: 3}`; the record JSON's fields; Error event)
   - supervise `broken_scene_restores_as_preview`; `context_lost_is_a_restart`
-- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
-- [ ] **Step 5:** Commit `Hold Frames And Restart Crashed Scene Workers`.
+- [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
+- [x] **Step 5:** Commit `Hold Frames And Restart Crashed Scene Workers`.
+
+**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Crash
+policy (Task 10)"; invariant #9): **resume** = the scene clock stopped at the held frame's `t` from
+`Hung`/`Exited`/`Restarted` until a frame of the next worker generation latched, one resume tick at
+it (the worker ignores `Start.position` — it renders `Tick.t` — so the clock was the fix; a `position`
+set the frame didn't show yet wins); measured first new frame `t` = the held `t` exactly (RED: +0.18 s).
+**Preview** = a paused silent image `MpvSource` opened **only** on the crash paths (a worker dies with
+no frame on screen, a restored broken scene) — a synchronous ~10–30 ms loop cost there, never on a
+normal load; retired (two-phase teardown) at the first worker frame; stepped `Pending("preview")`.
+**Broken**: a read-only observed Source prop `broken` (graph + `state`, seeded at create by a restore);
+`has_audio` false / `AudioFlowing` immediate once broken (nothing waits on it); `source.broken` gained
+`total_restarts`, `uptime_ms`, `shows` (`last_frame|preview|nothing`) — Task 11's shape kept.
+**ContextLost**: the worker's context is now robust (`OffscreenOpts::robust`, + the NV video-memory-purge
+reset where listed) and polls `glGetGraphicsResetStatus` per frame; the compositor
+`kill_for_restart("GL context lost")` → the ordinary restart through the **same** budget (judgement
+call: the protocol has no reset kind, so an innocent reset counts too — one suspend/resume is one
+restart); hermetic test via a synthetic `context_lost_after_ms` knob, real detection on-machine only.
+**Snapshot**: `SourceSnap.broken` (only when true), restored with no worker ever spawned; a source
+`Error` now marks the snapshot dirty (a scene that never readied isn't refreshed by the 2 s rule).
+**Hang knob** `LP_SCENE_WORKER_HANG_MS` read at each scene's open (unit `hang_timeout_knob`).
+Test changes: `hang_is_killed_and_restarted` is an api test (it tests the env knob through `serve`);
+`crash_before_first_frame_shows_preview` runs in the harness (not on a restored scene — the restore
+is `broken_scene_restores_as_preview`); `context_lost_is_a_restart` is a harness test, not supervise;
+`crash_never_touches_other_outputs` kills **4** times (3 restarts, then broken — a 5th has no worker)
+and bounds VIRTUAL-1 against its own baseline window (GREEN before Task 10 too: a guard); unit
+`broken_scene_is_saved_and_recreated_broken`. **For the backend (not changed here):** a player restart
+brings a broken scene back `broken` (preview, no worker) — expected after a restart; replaying the same
+item needs a new source (a `transition`), as whitelisting already does; a break can come from repeated
+GPU context losses (the record's `reason` starts "GL context lost").
 
 **Size: M** (≈ 1 day).
 

@@ -392,3 +392,29 @@ not a change). Test: `tests/api.rs::i6_every_onset_waits_for_flowing_audio` (unp
 R88 resume, frozen B, restore fade-in: each `onset.started` is `reason: flowed` and preceded by
 that source's own `source.audio_flowing`).
 
+
+## 9. A crashed scene keeps its picture, resumes where it froze, and touches nothing else
+
+**Why:** spec §6.3 / the Phase 2 crash policy. A scene renders in a separate process
+(`lp-scene-worker`) precisely so that LWE crashing, hanging or losing its GL context can't take
+the wallpaper — or anything else — down with it. The picture must never go black or jump: the
+source keeps the last frame it latched (or, if none ever arrived, the item's preview image),
+the scene clock stops at that frame for the outage so the restarted worker continues exactly
+from it, and a scene that keeps crashing (3 restarts within 60 s) stops being retried — broken,
+silent, its last frame / preview held, a crash record written and `source.broken` logged (the
+backend advances a rotation from it). Another output, a video, the audio bus and the loop are
+never affected. A player restart must not resurrect a broken scene into a fresh crash loop.
+
+**Enforced by:** `sources::scene::SceneSource` (`hold_for_restart`: the clock stopped at the held
+`t`, one resume tick, the clock released at the first frame of the next worker generation; the
+internal preview `MpvSource`; `ContextLost` → `WorkerHost::kill_for_restart`; read-only
+`broken`), `worker::WorkerHost` (restart budget, crash record), `snapshot` (`broken: true` →
+restored as the preview, no worker). Tests: `tests/scene.rs::crash_holds_last_frame_and_resumes_at_position`
+(the first new frame's `t` equals the held one; RED: +0.18 s), `crash_before_first_frame_shows_preview`,
+`context_lost_is_a_restart`, `killed_worker_keeps_last_frame`, `restart_replaces_ring_after_first_new_frame`;
+`tests/api.rs::crash_never_touches_other_outputs`, `hang_is_killed_and_restarted`,
+`broken_after_three_restarts_in_60s`, `source_broken_event_names_the_scene`;
+`tests/supervise.rs::broken_scene_restores_as_preview`; mid-transition:
+`tests/transition.rs::scene_b_worker_crash_mid_effect_still_hands_off`,
+`scene_b_broken_mid_effect_snaps_back` (`.claude/rules/player-core.md` § Scene worker → "Crash
+policy (Task 10)").

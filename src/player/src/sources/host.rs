@@ -32,7 +32,7 @@ use crate::log::{self, Level};
 /// load), and recipes decide what is a still by it. `has_audio` (R92): what mpv actually
 /// resolved — distinct from `no_audio` (our own request) — so a video with literally no
 /// audio track is never mistaken for one that merely has audio disabled.
-const MIRRORED: [&str; 8] = [
+const MIRRORED: [&str; 9] = [
     "kind",
     "ready",
     "duration",
@@ -41,6 +41,8 @@ const MIRRORED: [&str; 8] = [
     "height",
     "paused",
     "has_audio",
+    // Phase 2 Task 10: a scene past its restart budget (the snapshot saves it).
+    "broken",
 ];
 
 struct Hosted {

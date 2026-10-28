@@ -219,6 +219,27 @@ pub fn synthetic_scene(
     dir
 }
 
+/// A solid `rgb` 8×8 PNG at `<crate>/target/test-media/<name>.png` (a scene's `preview`
+/// image in the Task 10 crash-policy tests); written via a temp name + rename.
+#[allow(dead_code)] // not every test target uses every helper
+pub fn solid_png(name: &str, rgb: [u8; 3]) -> std::path::PathBuf {
+    let _guard = CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-media");
+    std::fs::create_dir_all(&root).expect("create target/test-media");
+    let path = root.join(format!("{name}.png"));
+    let tmp = root.join(format!(".{name}.png.tmp-{}", std::process::id()));
+    {
+        let f = std::fs::File::create(&tmp).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 8, 8);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&rgb.repeat(64)).unwrap();
+    }
+    std::fs::rename(&tmp, &path).unwrap();
+    path
+}
+
 /// Generate (once) a synthetic test clip into `<crate>/target/test-media/` with `ffmpeg`
 /// from `PATH` and return its path. A clip is regenerated only when it's missing or its
 /// `<name>.spec` stamp (the `Debug` form of `spec`) differs — so changing a spec under

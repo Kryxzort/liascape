@@ -288,6 +288,11 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "has_audio",
                 def(PropType::Bool, true, PropValue::Bool(true)),
             ),
+            // Phase 2 Task 10: a `scene` past its restart budget (3 crashes within 60 s) —
+            // observed from the live source; it shows its last frame (or its `preview`), silent,
+            // no worker. Seeded `true` at create by a snapshot restore (read-only like `of`):
+            // the scene comes back as its preview, no worker. A `path` change plays again.
+            ("broken", def(PropType::Bool, true, PropValue::Bool(false))),
             ("duration", def(PropType::F64, true, PropValue::F64(0.0))),
             ("time_pos", def(PropType::F64, true, PropValue::F64(0.0))),
             ("width", def(PropType::I64, true, PropValue::I64(0))),
