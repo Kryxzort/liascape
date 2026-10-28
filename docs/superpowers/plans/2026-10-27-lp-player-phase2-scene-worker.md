@@ -1069,8 +1069,15 @@ desktop crash notification; 0 coredumps since), `write_png*` with fdeflate `Fast
 added its own), `CLAUDE.md` (scenes play under lp-player; `LweMonitors` is no longer launch-only there; the new
 build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items and the deferred items below)
 
-- [ ] **Step 1:** Update the files; `cargo test -q --test credits` PASS.
-- [ ] **Step 2:** Commit `Document The Scene Worker`.
+- [x] **Step 1:** Update the files; `cargo test -q --test credits` PASS.
+- [x] **Step 2:** Commit `Document The Scene Worker`.
+
+**Done (2026-10-28) — deviations:** invariant numbers are **#10** (worker frame never blocks the compositor) and
+**#11** (worker audio is a gain on a stream that keeps running) — #9 was taken by Task 10's crash policy. The
+architecture doc's "one worker per output" text became "one per scene source, shared by outputs" (D1); the
+`player-core.md` Scene worker section got its header/`PROTOCOL` 3 note and the stale "dmabuf imports land on the
+`lp-render` thread" sentence corrected (they run on the loop's context). No `CLAUDE.md` claim was wrong; it gained
+the Rust/`libclang`/PipeWire build line, the WE `assets/` requirement for lp-player scenes and `--no-scenes`.
 
 **Size: S.**
 
