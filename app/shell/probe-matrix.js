@@ -2162,10 +2162,10 @@ const limitSaved = (c, where, key, want) => {
 };
 // minimum 15 s: the switch armed for k4's first loop end is re-requested — k4 loops once more and advances at the end of
 // its 2nd loop (align:end, never mid-loop)
-for (const where of ["playlist", "global"]) C[`${where}:minPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], async run(c) {
+for (const where of ["playlist", "global"]) C[`${where}:minPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], rearms: true, async run(c) {
     c.k4 = await k4LoopEnd(c, 4000); if (!c.k4) return;
     await ui(limitDrive(where, "minimum", 15)); c.tChange = Date.now();
-    c.tSwitched = await waitFor(async () => (await http("GET", "/current")).json?.path === K[0] && Date.now(), 26000, 100);
+    await waitFor(async () => (await http("GET", "/current")).json?.path === K[0] && (c.tSwitched = Date.now()), 26000, 100);
     await waitSettled(8000);
   }, check(c) {
     const v = limitSaved(c, where, "minPlaySeconds", 15);
@@ -2177,10 +2177,10 @@ for (const where of ["playlist", "global"]) C[`${where}:minPlay`] = { states: [w
     return v;
   } };
 // maximum 4 s: k4 advances once it played 4 s — now (align:now, a transition), long before its end
-for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], async run(c) {
+for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [where === "playlist" ? "pending" : "pendingGlobal"], rearms: true, async run(c) {
     c.k4 = await k4LoopEnd(c, 3000); if (!c.k4) return;
     await ui(limitDrive(where, "maximum", 4)); c.tChange = Date.now();
-    c.sw = await waitFor(async () => events.find((e) => e._t >= c.tChange - 2000 && e.event === "transition.scheduled" && e.path === K[0] && e.align !== "end"), 7000, 100);
+    await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 2000 && e.event === "transition.scheduled" && e.path === K[0] && e.align !== "end")), 7000, 100);
     await waitSettled(8000);
   }, check(c) {
     const v = limitSaved(c, where, "maxPlaySeconds", 4);
