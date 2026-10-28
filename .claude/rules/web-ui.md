@@ -277,6 +277,24 @@ Settings is open under lp-player it re-reads `/player-engine` every 5 s and says
 low-VRAM hold — not a user pause). WS `scene-vram-stopped` → the status bar: "<title>: stopped: used X MiB > limit Y
 MiB of VRAM" (`App.tsx`).
 
+## Keys while a slider is held (`hooks/rangeDrag.ts`, owner todo 2026-10-28)
+"Make F not do yellow outline when holding slider": **nothing in the app is bound to F** (no shortcut in `app/ui`
+or `app/shell`; the app's keys are Ctrl+A / Delete / Escape in Library + Browse, Escape in the modals and
+dropdowns). The yellow outline was Chromium's own focus ring: a mouse-focused `<input type=range>` doesn't match
+`:focus-visible`, but ANY keydown flips the page to keyboard modality and the held slider then does (outline
+`auto`, measured). `installRangeDragGuard()` (from `main.tsx`, before any other listener): a capture-phase
+`pointerdown` on an enabled range input marks a drag (`html.range-dragging`) until `pointerup`/`pointercancel`/
+window `blur`; while it lasts every `keydown`/`keyup` is `preventDefault` + `stopImmediatePropagation`ed on window
+capture (no app shortcut, no Escape-closes-the-modal, no arrow stepping the slider under the pointer), and a
+slider that got a key during its drag is `blur()`ed on release so it doesn't keep the keyboard-modality ring.
+CSS: `input[type=range]:focus-visible { outline: none }` everywhere; keyboard focus gets the hover's accent glow
+instead (`:root:not(.range-dragging)`), so tabbing to a slider still shows where focus is. `shortcutsBlocked()`
+(= typing in a field OR holding a slider) replaced Library/Browse's local `typing()`. Guard: matrix
+`keys:sliderHeld` (idle, single — a real mouse press on the item modal's volume slider via `sendInputEvent`, two
+cards selected, then f/F/Delete/Escape/Right: no outline/glow on the held slider, the modal stays open, the value
+doesn't step, nothing trashed, no keyboard ring after the release; RED on the base UI: the outline `auto` + Escape
+closed the modal).
+
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
 - `// COOL:` — motion/glow/UX intent.

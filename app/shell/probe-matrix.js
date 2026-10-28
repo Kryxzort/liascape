@@ -1211,6 +1211,40 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
     }
     return v;
   } };
+// keys pressed while a slider is HELD (owner: "make F not do yellow outline when holding slider"): a real mouse
+// press on the item modal's volume slider (two library cards selected), then F, Delete, Escape and an arrow key
+// while it's held. Nothing may react — no focus ring / outline on the held slider (Chromium flips a mouse-focused
+// control to keyboard focus on any key: the system ring), the selection isn't trashed, the modal stays open, the
+// value doesn't step — and after the release the slider shows no keyboard-focus ring either
+C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c) {
+    c.targets = [K[2], K[3]];
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(K[2]))}, "Settings (volume / speed)"); await m.sleep(1000);`);
+    const r = await ui(`const s = m.modalRange(0); if (!s) throw new Error("no volume slider"); const b = s.getBoundingClientRect(); return { x: Math.round(b.x + b.width * 0.3), y: Math.round(b.y + b.height / 2), w: Math.round(b.width) };`);
+    const send = (e) => win.webContents.sendInputEvent(e);
+    send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(60);
+    send({ type: "mouseDown", x: r.x, y: r.y, button: "left", clickCount: 1 }); await sleep(80);
+    send({ type: "mouseMove", x: r.x + 20, y: r.y, button: "left", modifiers: ["leftButtonDown"] }); await sleep(120);
+    const look = `const s = m.modalRange(0); const cs = s ? getComputedStyle(s) : null;
+      return { open: !!document.querySelector(".lib-settings"), value: s?.value, focusVisible: !!s?.matches(":focus-visible"),
+        outline: cs ? cs.outlineStyle + " " + cs.outlineWidth : null, filter: cs?.filter ?? null };`;
+    c.held0 = await ui(look);
+    for (const k of ["f", "F", "Delete", "Escape", "Right"]) {
+      send({ type: "keyDown", keyCode: k }); if (k.length === 1) send({ type: "char", keyCode: k }); await sleep(40); send({ type: "keyUp", keyCode: k }); await sleep(120);
+    }
+    c.held = await ui(look);
+    send({ type: "mouseUp", x: r.x + 20, y: r.y, button: "left", clickCount: 1 }); await sleep(300);
+    c.released = await ui(look);
+    await ui(`if (document.querySelector(".modal-backdrop")) m.closeModal();`); await sleep(900);
+  }, check(c) {
+    const v = [];
+    if (!c.held.open || !c.released.open) v.push("the modal closed while the slider was held (Escape went through)");
+    if (c.held.outline && !/^none /.test(c.held.outline) && !/ 0px$/.test(c.held.outline)) v.push(`the held slider shows an outline after a key: ${c.held.outline}`);
+    if (c.held.filter && c.held.filter !== "none") v.push(`the held slider glows after a key: ${c.held.filter}`);
+    if (c.held.value !== c.held0.value) v.push(`a key stepped the held slider: ${c.held0.value} → ${c.held.value}`);
+    if (c.released.focusVisible) v.push(`after the release the slider still has keyboard focus (${c.released.outline}, ${c.released.filter})`);
+    for (const p of c.targets) if (!(c.after.lib || []).some((i) => i.videoPath === p)) v.push(`${TITLE(p)} was trashed by Delete while the slider was held`);
+    return v;
+  } };
 // the card's own toggle (one item): take what plays out of the playlist / put another one in
 C["cardToggle:shown"] = { states: PL_STATES, rearms: true, async run(c) { c.target = c.shown;
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900); }, check: afterRemove };

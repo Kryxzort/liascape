@@ -4,13 +4,9 @@ import { Card } from "../components/Card";
 import { WorkshopFilterBar } from "../components/WorkshopFilterBar";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
+// never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
+import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper } from "../api/client";
-
-// don't hijack Ctrl+A / Delete etc. while typing in a field
-const typing = () => {
-  const el = document.activeElement as HTMLElement | null;
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-};
 
 // WE-local browse sort menu (client-side over the single loaded page).
 function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {

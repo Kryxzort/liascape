@@ -87,6 +87,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
         polling path untouched — owner: lp-player only).
   - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
+- [x] **F / any key while holding a slider** (owner todo, 2026-10-28: "make F not do yellow outline when holding
+      slider"): no app shortcut is bound to F — any key flipped the held (mouse-focused) slider to keyboard focus →
+      Chromium's focus ring. `hooks/rangeDrag.ts` swallows keys during a range drag (shortcuts, Escape, arrows) and
+      blurs a keyed slider on release; ranges show the accent glow for keyboard focus, never the system ring.
+      Guard: matrix `keys:sliderHeld` (RED: outline `auto`, Escape closed the modal).
 - [x] **Slow down morph** (owner todo, 2026-10-28): the item settings modal's card → modal flight (and back) is
       `SETTINGS_MORPH` (open 620 ms with an ease that spreads the travel, close 500 ms) instead of the Browse
       preview's 430 / 340 ms; the Browse preview is unchanged. Guard: `--probe probe-morph.js` (moving time ≥ 520 /
