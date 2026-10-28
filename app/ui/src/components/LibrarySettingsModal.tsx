@@ -67,7 +67,8 @@ export function LibrarySettingsModal({
   const loadedAspect = loaded && loaded.path === item?.videoPath ? loaded.aspect : null;
   const aspect = source?.aspect ?? loadedAspect ?? 16 / 9;
   const [fullFor, setFullFor] = useState<string | null>(null); // the sharp layer shows once IT loaded
-  const { panelRef, mediaRef, ghostRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
+  const [vidOn, setVidOn] = useState<string | null>(null); // the video layer shows once IT plays
+  const { panelRef, mediaRef, bodyRef, requestClose, landed } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
 
   if (!item) return null;
   const p = item.videoPath;
@@ -127,7 +128,10 @@ export function LibrarySettingsModal({
 
   // the picture, bottom → top: the card's own still (cached: the first frame IS the card) → the sharp
   // native image → the playing preview: the card's gif URL (the same image → the same animation, no
-  // restart), or the video from where the card's hover video was
+  // restart), or the video from where the card's hover video was (+ the flight).
+  // PERF: the sharp image and the video mount once the open flight landed — a full-size decode (the video is
+  // often the wallpaper itself, 4K, software-decoded) mid-flight competes with the software-rendered morph
+  // for the CPU; the flight shows the card's still (+ its small gif, which keeps the card's animation going)
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
   const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : "";
@@ -137,23 +141,25 @@ export function LibrarySettingsModal({
 
   return (
     <div className="modal-backdrop" onClick={requestClose}>
-      {/* panel-coloured layer that grows card → panel (and back) while the panel itself is see-through */}
-      <div className="morph-ghost" ref={ghostRef} />
+      {/* the panel's chrome is its ::before, which grows card → panel (and back) — components/morph.ts */}
       <div className="modal lib-settings morph-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
         <div className="lib-stage">
           <div className="morph-media" data-morph-media ref={mediaRef}
             style={{ aspectRatio: String(aspect), width: `min(100%, calc(62vh * ${aspect}))` }}>
+            <div className="morph-pic" data-morph-pic>
             {baseSrc && <img src={baseSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && !loadedAspect) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); }} />}
-            {fullSrc && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt=""
+            {fullSrc && landed && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); setFullFor(fullSrc); }} />}
             {gifSrc && <img className="mm-anim" src={gifSrc} alt="" />}
-            {!gifSrc && vidSrc && <video className="mm-anim" src={vidSrc} muted loop autoPlay playsInline
-              onLoadedMetadata={(e) => { if (source?.videoTime) e.currentTarget.currentTime = source.videoTime; }} />}
+            {!gifSrc && vidSrc && landed && <video className={`mm-anim${vidOn === vidSrc ? " on" : ""}`} src={vidSrc} muted loop autoPlay playsInline
+              onLoadedMetadata={(e) => { const v = e.currentTarget; if (source?.videoTime != null && v.duration) v.currentTime = (source.videoTime + SETTINGS_MORPH.open.duration / 1000) % v.duration; }}
+              onPlaying={() => setVidOn(vidSrc)} />}
+            </div>
           </div>
           {ytPlaying && item.youtubeUrl && <YouTubeEmbed url={item.youtubeUrl} onClose={() => setYtPlaying(false)} />}
         </div>
-        <div className="modal-body" ref={bodyRef}>
+        <div className="morph-clip" ref={bodyRef}><div className="modal-body">
           <h2>{item.title}{multi && <span className="shint"> · applies to {targets.length} selected</span>}</h2>
           <div className="meta">
             {/* its row is reserved before the duration loads: a panel growing mid-morph moves (it's centred)
@@ -195,7 +201,7 @@ export function LibrarySettingsModal({
             )}
             <button className="btn ghost" onClick={requestClose}>Close</button>
           </div>
-        </div>
+        </div></div>
       </div>
     </div>
   );

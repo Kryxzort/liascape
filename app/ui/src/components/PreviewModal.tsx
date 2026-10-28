@@ -31,7 +31,7 @@ export function PreviewModal({
   if (pageUrl && srcAspect?.url !== pageUrl) setSrcAspect({ url: pageUrl, aspect: captureSource(`br-${pageUrl}`).aspect });
   const known = (srcAspect?.url === pageUrl ? srcAspect?.aspect : null) ?? (loaded?.url === pageUrl ? loaded?.aspect : null) ?? null;
   const aspect = known ?? 16 / 9;
-  const { panelRef, mediaRef, ghostRef, bodyRef, requestClose, landed } = useMorph({ open: w, ready: known != null, morphId: pageUrl ? `br-${pageUrl}` : null, aspect, onClose });
+  const { panelRef, mediaRef, bodyRef, requestClose, landed } = useMorph({ open: w, ready: known != null, morphId: pageUrl ? `br-${pageUrl}` : null, aspect, onClose });
 
   useEffect(() => {
     if (!w) return;
@@ -51,20 +51,21 @@ export function PreviewModal({
 
   return (
     <div className="modal-backdrop" onClick={requestClose}>
-      <div className="morph-ghost" ref={ghostRef} />
       <div className="modal morph-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
         <div className="modal-stage">
           <div className="morph-media" data-morph-media ref={mediaRef}
             style={{ aspectRatio: String(aspect), width: `min(100%, calc(62vh * ${aspect}))` }}>
+            <div className="morph-pic" data-morph-pic>
             <img src={baseSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth) setLoaded({ url: w.pageUrl, aspect: i.naturalWidth / i.naturalHeight }); }} />
             {/* PERF: mounted once landed — its (large) decode mid-flight would hitch the morph */}
             {fullSrc && landed && <img className={`mm-full${fullFor === fullSrc ? " on" : ""}`} src={fullSrc} alt="" onLoad={() => setFullFor(fullSrc)} />}
             {gifSrc && <img className="mm-anim" src={gifSrc} alt="" />}
+            </div>
           </div>
           {ytPlaying && yt && <YouTubeEmbed url={yt} onClose={() => setYtFor(null)} />}
         </div>
-        <div className="modal-body" ref={bodyRef}>
+        <div className="morph-clip" ref={bodyRef}><div className="modal-body">
           <h2>{w.title}</h2>
           <div className="meta">
             {w.resolution && <span className="mrow"><Monitor size={14} /> {w.resolution}</span>}
@@ -93,7 +94,7 @@ export function PreviewModal({
             )}
             <button className="btn ghost ico" onClick={requestClose}><X size={14} /> Close</button>
           </div>
-        </div>
+        </div></div>
       </div>
     </div>
   );

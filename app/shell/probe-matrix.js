@@ -1247,7 +1247,7 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
 // value doesn't step — and after the release the slider shows no keyboard-focus ring either
 C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c) {
     c.targets = [K[2], K[3]];
-    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(K[2]))}, "Settings (volume / speed)"); await m.sleep(1000);`);
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(K[2]))}, "Settings (volume / speed)"); await m.sleep(1400);`); // landed (the open flies 900 ms): a real press hit-tests
     const r = await ui(`const s = m.modalRange(0); if (!s) throw new Error("no volume slider"); const b = s.getBoundingClientRect(); return { x: Math.round(b.x + b.width * 0.3), y: Math.round(b.y + b.height / 2), w: Math.round(b.width) };`);
     const send = (e) => win.webContents.sendInputEvent(e);
     send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(60);

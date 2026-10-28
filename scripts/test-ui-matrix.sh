@@ -51,6 +51,7 @@
 #   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that
 #   reruns exactly that sequence on one stack. --jobs defaults to 2 here (LP_FUZZ_JOBS), capped at the run count.
 #   Results: <out>/fuzz.jsonl, one record per run (seed, run, start, sequence, replay, per-step phases + violations).
+# LP_MATRIX_SCREEN=<w>x<h> (default 1400x900): the private Xvfb's screen size (a probe that measures at the owner's 1080p).
 # LP_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
@@ -364,7 +365,7 @@ XP=""
 for n in $(seq 90 189); do
   x_taken "$n" && continue
   : > "$T/xdisplay"
-  "$XVFB" ":$n" -displayfd 3 -nolisten tcp -screen 0 1400x900x24 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
+  "$XVFB" ":$n" -displayfd 3 -nolisten tcp -screen 0 "${LP_MATRIX_SCREEN:-1400x900}x24" 3>"$T/xdisplay" >"$T/xvfb.log" 2>&1 & XP=$!
   for _ in $(seq 1 50); do { [ -s "$T/xdisplay" ] || ! kill -0 $XP 2>/dev/null; } && break; sleep 0.1; done
   [ -s "$T/xdisplay" ] && kill -0 $XP 2>/dev/null && break
   kill $XP 2>/dev/null; wait $XP 2>/dev/null; XP=""

@@ -153,35 +153,72 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Settings-modal morph (`components/morph.ts` + the `useMorph` hook, not framer — also the Browse
   preview's).** The surface that opened the modal (card
   `.thumb-wrap` / strip `.pl-item`) carries `data-morph-id` (`lib-…` / `pl-…` = `settingsMorphId`) and is
-  `.lifted` (hidden) while the modal is out. WAAPI flights, both ways: the media box (`[data-morph-media]`,
-  transform-origin 0 0) moves with ONE uniform scale onto the cover-box of the source while a clip-path
-  `inset()` re-crops it to the source's visible crop (so it never stretches between a 16:9/square card crop
-  and the image's own aspect); a fixed `.morph-ghost` with the panel's bg/border/shadow grows source →
-  panel (the panel is see-through meanwhile, `[data-morph]`); the body is clipped to the growing ghost
-  (a `polygon()` clip — `inset()`s summing past the box get scaled down and stop tracking) and fades in
-  late / out early. Close re-measures the source (the strip may have scrolled) and lands on it, then
-  `closeItemSettings` (source shown in the same render); off-screen/missing source → fade. Escape closes; a
-  close while the open flight still runs reverses it from where it is (cancelling it jumped to the end pose).
-  The flight waits (panel hidden, ≤ 300 ms) until the picture's aspect is known — from the source's
-  loaded still/gif/video at the click, else the modal's own copy loading — since a box re-laid out
-  mid-flight jumps; a row that fills in late (the duration) is reserved, since the panel is centred
-  and growing mid-flight moves the landing spot. The close lands one frame AFTER finishing (unmounting
-  in the finishing frame never painted the landing pose); a close mid-open `commitStyles()`s the pose
-  it's in and decelerates into the source from there (reversing replayed the ease-out backwards).
-  The media box layers the card's own `still()` (cached → frame 1 IS the card), the sharp native image,
-  and the playing preview: the card's gif URL (same image → same animation) or the video, started where
-  the card's hover video was (`settingsSource`, read at the click — the card's layer unmounts on open).
+  `.lifted` (hidden) while the modal is out. WAAPI flights, both ways, **on `transform` (+ the body's opacity) ONLY**
+  (2026-10-28, owner "why is morph so laggy" — see the perf note below). Every flight lerps one screen-space pose
+  `{V, C, G, R}` between the source pose (`sourcePose(S, aspect)`: V = G = R = the source box, C = its cover box) and
+  the rest pose (`restPose`: the media box, the panel, the body): **V** = the media's visible crop — the outer
+  `[data-morph-media]` box (rounded, `overflow: hidden`, transform-origin 0 0) scaled NON-uniformly onto it; **C** =
+  the whole picture — its one child `[data-morph-pic]` (holds every picture layer) counter-scaled inside so its net
+  scale is uniform (C keeps the image's aspect at both ends, so its lerp never stretches); **G** = the panel's chrome —
+  the panel draws nothing itself (`.morph-panel`: no background/shadow, a transparent border), its `::before` carries
+  the background / border / radius / shadow, has its own layer (`will-change`), is rastered once and is scaled source →
+  panel (`animate(…, { pseudoElement: "::before" })`); **R** = the body's clip — `bodyRef` is a `.morph-clip` wrapping
+  `.modal-body`, scaled onto R (`overflow: hidden` only in flight, `[data-morph]`) with the body counter-scaled to stay
+  put; the body fades in late / out early (opacity on the clip box). Nested scales interpolate per factor, not per
+  product, so `flightFrames` SAMPLES the keyframes (the easing baked in, one per ~12 ms, `easing: "linear"`) — exact to a
+  fraction of a pixel; `bezier()` evaluates the CSS cubic-bezier. Close re-measures the source (the strip may have
+  scrolled) and lands on it, then `closeItemSettings` (source shown in the same render); off-screen/missing source →
+  fade. Escape closes; a close while the open still flies starts from the pose it's in (`lerpPose` at the open's eased
+  progress) and decelerates into the source (reversing replayed the ease-out backwards). The flight waits (panel
+  hidden, ≤ 300 ms) until the picture's aspect is known — from the source's loaded still/gif/video at the click, else
+  the modal's own copy loading — since a box re-laid out mid-flight jumps; a row that fills in late (the duration) is
+  reserved, since the panel is centred and growing mid-flight moves the landing spot. The close lands one frame AFTER
+  finishing (unmounting in the finishing frame never painted the landing pose).
+  The media box layers the card's own `still()` (cached → frame 1 IS the card) and the card's gif URL (same image →
+  same animation) from the first frame; **the sharp native image and the video preview mount once `landed`** (the
+  video — often the wallpaper itself, 4K, software-decoded — starts where the card's hover video was + the open's
+  duration, fades in on `playing`; `settingsSource`, read at the click), and a playing video is paused for the close.
   framer's `layoutId` used to scale one `<img>` between aspects (stretched mid-flight), flew a low-res
   still, and the strip's close vanished (the id was dropped at once, and the row clips). Guard:
   `scripts/test-ui-matrix.sh --probe probe-morph.js` (per-frame boxes through open + close from a library
   card, a strip item and a Browse card — a local WE item, offline: starts/ends on the source's crop,
-  uniform aspect, smooth, lands; the preview animates; a close mid-open lands on the card).
-  **Timing (`morph.ts`, owner "slow down morph" 2026-10-28):** the settings modal flies `SETTINGS_MORPH` — open 620 ms
-  `cubic-bezier(0.3, 0.7, 0.2, 1)` (its travel spread over the flight; the old 430 ms ease did ~70 % in its first
-  quarter and read as a snap), close 500 ms ease-in-out; the Browse preview keeps `PREVIEW_MORPH` (430 / 340 ms —
-  not asked for). `useMorph({ timing })`; the duration row, the scene properties and App's `modal-open` gif freeze
-  key off these numbers. No reduced-motion branch (the app has none; noted, not added). probe-morph asserts the
-  settings flights move ≥ 520 / 420 ms and the Browse one ≤ 520 ms (RED before: 353–384 / 315–317 ms).
+  uniform aspect — the `[data-morph-pic]` box —, smooth, lands; the flight times; ≤ 30 % of the travel in the first
+  quarter; rAF pacing vs the page's idle frame (median ≤ 1.25×, ≤ 15 % of frames > 2×); the preview animates; a close
+  mid-open lands on the card).
+  **Timing — TUNE in `morph.ts` `SETTINGS_MORPH`** (owner "slow down morph" → 620 ms "still too snappy", 2026-10-28):
+  open 900 ms / close 700 ms, both `SOFT` = `cubic-bezier(0.37, 0, 0.63, 1)` (symmetric, sine-like: 25 % of the time →
+  ~15 % of the travel; measured 18–19 % on screen). The 620 ms curve `(0.3, 0.7, 0.2, 1)` still did 67–76 % of its
+  travel in the first quarter — that front-load, not the length, read as the snap. The Browse preview keeps
+  `PREVIEW_MORPH` (430 / 340 ms, not asked for). The duration row, the scene properties (`open.duration + 40`) and App's
+  `modal-open` gif freeze key off these numbers; the matrix's `keys:sliderHeld` waits 1400 ms for the landing (a real
+  press hit-tests). No reduced-motion branch (the app has none; noted, not added). probe-morph asserts the settings
+  flights move 780–1050 / 590–850 ms (measured 872–884 / 681–684) and the Browse one ≤ 520 ms (RED on the 620 ms UI: 8
+  cells — 532–567 / 461–485 ms, 67–76 % in the first quarter).
+  **PERF (measured 2026-10-28, `/tmp`-scratch probe on the matrix stack, 1920×1080 Xvfb, `--disable-gpu
+  --enable-unsafe-swiftshader` = main.js's NVIDIA branch, Chromium tracing):** the owner's UI is software-composited, so
+  every animated pixel is CPU work. Before: the ghost's left/top/width/height/border-radius (+ its 60 px shadow) and the
+  clip-path re-crops on the media + the body ran on the main thread (`compositeFailed` 8192/8224 = unsupported
+  property) and re-rastered every frame — a 4K video item's open: viz draw 5.0 ms + raster ≈ 7.4 ms + main 1.2 ms per
+  frame (≈ 13.6 ms of CPU a frame; raster 282 ms over the flight), plus the 4K preview video decoding from the first
+  frame. After: every flight animation composited (`compositeFailed` 0 — an element that paints nothing gets 131072
+  "no visible change", hence `.morph-pic`'s own background), viz draw 3.0 ms + raster ≈ 0.1 ms + main 0.7 ms per frame
+  (raster 8 ms over the flight). Both hold 60 fps on the 60 Hz Xvfb (rAF median 16.7, p90 16.7); uncapped
+  (`--disable-frame-rate-limit`) the compositor floor of this software path at 1080p is ~3.5–4 ms/frame for ANY
+  animation (a 40 px box costs 4.1 ms: it redraws the whole frame), so 144 Hz is in reach and 240 Hz (4.17 ms) is at
+  the floor — the remaining cost is the software compositor itself, not the morph. Keep it that way: no
+  size / radius / shadow / filter / clip-path animation in a flight, nothing heavy mounting mid-flight.
+
+## Hardware GL on NVIDIA (checked 2026-10-28 — default unchanged: software)
+`main.js` still puts NVIDIA on `disable-gpu` + SwiftShader (memory `nixos-electron-ozone-x11`: native Wayland → the
+surface via Vulkan, rejected; XWayland → GPU-process segfault). Hermetic check (no display: `--ozone-platform=headless`,
+an offscreen window animating + WebGL, 5 s) with the store's electron 42.11.18 (the flake's `electron_42`) and 44.9.3 on
+the RTX 3070 Ti (open module 595.84): the default backend's GPU process exits during init ("disabled due to frequent
+crashes" — headless has no default GL), but **`--use-angle=gles-egl` (NVIDIA's EGL, "OpenGL ES 3.2") and
+`--use-angle=vulkan` bring up full GPU compositing + raster + WebGL with no GPU-process exit** on both versions. That
+does not exercise the window's presentation path (Wayland surface / XWayland present — where both crashes were), which
+can't be driven hermetically (no headless Wayland compositor here; Xvfb has no NVIDIA GL), so it's not proof and the
+default stays. To try it: `LP_HWGL=1 LP_ANGLE=gles-egl livepaper-ui` (both env vars already exist in `main.js`; EGL, not
+Vulkan, for the surface); if the window shows and stays up, the GPU composites the UI and the CPU cost per frame measured above goes away.
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
 - **Settings**: every save posts the store's WHOLE `settings` → the store must hold what the backend
