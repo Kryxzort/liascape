@@ -480,6 +480,12 @@ raw source texture (image top already at row 0, R25) — `capture` of a source i
 too. **`Catalogue::empty()`** (Task 12): no effects (no `transitions/` resolved) — the
 runtime still serves cuts.
 
+**`write_png*` compress with fdeflate's `Compression::Fast`** (Task 13): `capture` writes on the
+loop, and the default `Balanced` held it 820–875 ms for a 3840×1080 scene frame (release) — every
+output froze; `Fast` 39–112 ms. Guard `tests/gfx_basic.rs::write_png_is_fast_enough_for_the_loop`
+(readback + encode < ½ of a `Balanced` encode alone on a noisy 1080p frame, pixels round-trip; RED
+with `Balanced`: 1845 vs 1923 ms in the debug build). Encoding off the loop is a TODO.
+
 **`write_png` orientation: top-down, flipped from GL's own order.** `Gfx::write_png` reads
 the whole texture (bottom-left origin, same as `read_rgba`) and flips rows before encoding,
 so row 0 of the PNG file is the *top* of the image — the standard convention every common

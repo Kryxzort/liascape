@@ -49,6 +49,86 @@ fn clear_readback() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// Phase 2 Task 13: `capture` writes its PNG on the player's loop, and the png crate's default
+/// (`Balanced`) compression held the loop 820–875 ms for a 3840×1080 scene frame (release
+/// build; every output froze for it). `write_png` uses fdeflate's `Fast` mode (39–112 ms). Guard
+/// without an absolute bound (debug builds encode far slower): on the same noisy 1920×1080
+/// frame, `write_png` (readback + encode) takes well under half of a `Balanced` encode alone
+/// and still decodes to the same pixels. RED with `Balanced`: ≥ 1×.
+#[test]
+fn write_png_is_fast_enough_for_the_loop() {
+    let Some(gfx) = headless_gl() else {
+        return;
+    };
+    let (w, h) = (1920u32, 1080u32);
+    // Deterministic noise with some structure (a gradient + an LCG), like a scene frame.
+    let mut seed = 0x2545_f491u32;
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    for (i, px) in pixels.chunks_mut(4).enumerate() {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let x = (i as u32 % w) as u8;
+        px[0] = x.wrapping_add((seed >> 24) as u8 & 0x1f);
+        px[1] = (seed >> 16) as u8;
+        px[2] = ((i as u32 / w) as u8).wrapping_add((seed >> 8) as u8 & 0x0f);
+        px[3] = 255;
+    }
+    let tex = gfx.tex(w, h);
+    unsafe {
+        gfx.gl.bind_texture(glow::TEXTURE_2D, Some(tex.id));
+        gfx.gl.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            0,
+            0,
+            w as i32,
+            h as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&pixels)),
+        );
+        gfx.gl.bind_texture(glow::TEXTURE_2D, None);
+    }
+    let dir = std::env::temp_dir();
+    let ours = dir.join(format!("lp_player_fast_png_{}.png", std::process::id()));
+    let reference = dir.join(format!("lp_player_balanced_png_{}.png", std::process::id()));
+    let balanced = || {
+        let t = std::time::Instant::now();
+        let file = std::fs::File::create(&reference).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_compression(png::Compression::Balanced);
+        let mut wr = enc.write_header().unwrap();
+        wr.write_image_data(&pixels).unwrap();
+        drop(wr);
+        t.elapsed().as_secs_f64()
+    };
+    let ours_t = || {
+        let t = std::time::Instant::now();
+        gfx.write_png_source(&tex, &ours).expect("write_png_source");
+        t.elapsed().as_secs_f64()
+    };
+    // Best of 3 each (scheduler noise on a shared machine).
+    let b = (0..3).map(|_| balanced()).fold(f64::MAX, f64::min);
+    let o = (0..3).map(|_| ours_t()).fold(f64::MAX, f64::min);
+    let decoded = {
+        let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&ours).unwrap()));
+        let mut reader = dec.read_info().unwrap();
+        let mut buf = vec![0u8; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut buf).unwrap();
+        buf
+    };
+    let _ = std::fs::remove_file(&ours);
+    let _ = std::fs::remove_file(&reference);
+    assert!(decoded == pixels, "the PNG decodes to the texture's pixels");
+    assert!(
+        o < 0.5 * b,
+        "write_png_source {:.1} ms vs a Balanced encode alone {:.1} ms",
+        o * 1e3,
+        b * 1e3
+    );
+}
+
 /// Task 10 fix round: every surfaceless `Gfx` in a process shares one `EGLDisplay`.
 /// Dropping one must not terminate that display under another: the survivor's context
 /// (not current at the time) must still be valid, re-currentable, and drawable.

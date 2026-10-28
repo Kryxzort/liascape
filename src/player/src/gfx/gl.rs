@@ -232,6 +232,9 @@ impl Gfx {
         let mut encoder = png::Encoder::new(BufWriter::new(file), w, h);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
+        // fdeflate's PNG-tuned mode: `capture` runs on the loop, and the default (`Balanced`)
+        // held it 820–875 ms for a 3840×1080 scene frame (Task 13).
+        encoder.set_compression(png::Compression::Fast);
         let mut writer = encoder.write_header().map_err(io::Error::other)?;
         writer.write_image_data(&out).map_err(io::Error::other)?;
         Ok(())
