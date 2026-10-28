@@ -96,6 +96,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process incl. auto-mute ≤ 100 ms; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
+  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 done
+    (`fcf9424`); 9 + 11 in progress; 10, 12–15, properties editor, loudness learning left.
+  - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
+        runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
+        a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
+        (cycles, or serialise the binary). Never just loosen it.
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
       `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
