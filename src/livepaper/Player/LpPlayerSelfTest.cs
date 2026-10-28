@@ -148,8 +148,62 @@ public static class LpPlayerSelfTest
                 fails.Add($"SourceProps(scene folder).gain.user = {gu}, want {MpvPropertyMap.VolumeDb(50):0.###} (Volume 50)");
             var vid = LpPlayerMedia.SourceProps(Path.Combine(dir, "x.mp4"), new AppSettings());
             if (vid["kind"] as string != "video" || vid.ContainsKey("preview")) fails.Add($"SourceProps(.mp4) = kind {vid["kind"]}, preview {(vid.ContainsKey("preview") ? "set" : "absent")}; want video, absent");
+            // scene loudness: an unlearned scene opens at gain.normalize 0; a video never carries the slot (its af does it)
+            if (P("gain.normalize") is var gn && (gn == "<absent>" || Math.Abs(Convert.ToDouble(props["gain.normalize"])) > 1e-9))
+                fails.Add($"SourceProps(unlearned scene).gain.normalize = {gn}, want 0");
+            if (vid.ContainsKey("gain.normalize")) fails.Add("SourceProps(.mp4) carries gain.normalize — a video normalizes through af");
         }
         finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
+        SceneLoudnessAssertions(fails);
+    }
+
+    // Scene loudness learned on first play (`scene.loudness` → LibMeta → `gain.normalize`): what's stored when, and
+    // the gain the resolver gives a scene.
+    private static void SceneLoudnessAssertions(List<string> fails)
+    {
+        // MergeSceneLoudness: learned once; a partial is replaced by a complete one or a longer partial only
+        var m = new LibMeta();
+        void Merge(double lufs, double? peak, double secs, bool complete, bool want, string what)
+        {
+            bool got = LibraryService.MergeSceneLoudness(m, lufs, peak, secs, complete);
+            if (got != want) fails.Add($"MergeSceneLoudness({what}) = {got}, want {want} (now I={m.LoudnessI}, s={m.LoudnessSeconds}, partial={m.LoudnessPartial})");
+        }
+        Merge(-30, -12, 25, false, true, "first partial on an empty entry");
+        if (m.LoudnessI != -30 || m.LoudnessTP != -12 || m.LoudnessPartial != true || m.LoudnessSeconds != 25 || m.LoudnessLRA != null)
+            fails.Add($"a partial stored as I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} partial={m.LoudnessPartial} LRA={m.LoudnessLRA}");
+        Merge(-31, -12, 22, false, false, "a shorter partial");
+        Merge(-28, -11, 40, false, true, "a longer partial");
+        Merge(-27, -10, 60, true, true, "a complete one over a partial");
+        if (m.LoudnessI != -27 || m.LoudnessPartial != null || m.LoudnessSeconds != 60) fails.Add($"complete stored as I={m.LoudnessI} partial={m.LoudnessPartial} s={m.LoudnessSeconds}");
+        Merge(-20, -5, 60, true, false, "a second complete one (learned once)");
+        Merge(-20, -5, 90, false, false, "a partial after a complete one");
+        Merge(double.NegativeInfinity, null, 60, true, false, "-inf (silence) on a fresh entry");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), double.NaN, null, 60, true)) fails.Add("MergeSceneLoudness(NaN) stored");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), -20, null, 0, true)) fails.Add("MergeSceneLoudness(0 s) stored");
+        // a video's ffmpeg measurement (all four fields) is never read as a scene's — and vice versa
+        var sceneOnly = new LibMeta { LoudnessI = -20, LoudnessTP = -10, LoudnessSeconds = 60 };
+        if (sceneOnly.LoudnessLRA != null) fails.Add("a scene measurement must not look like a video's (LRA set)");
+
+        // SceneNormalizeDb: target − I, never boosting the sample peak past −1.5 dBFS, clamped −60…+24; 0 when off / unlearned
+        var on = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };
+        (LibMeta? meta, AppSettings s, double want, string what)[] rows =
+        [
+            (new LibMeta { LoudnessI = -20, LoudnessTP = -20 }, on, 6.0, "−20 LUFS, peak −20 → +6"),
+            (new LibMeta { LoudnessI = -30, LoudnessTP = -6 }, on, 4.5, "boost capped by the peak: −1.5 − (−6)"),
+            (new LibMeta { LoudnessI = -10, LoudnessTP = -1 }, on, -4.0, "a loud scene is turned down (no cap)"),
+            (new LibMeta { LoudnessI = -30 }, on, 16.0, "no peak known → target − I"),
+            (new LibMeta { LoudnessI = -120, LoudnessTP = -100 }, on, 24.0, "clamped at +24"),
+            (new LibMeta { LoudnessI = 40, LoudnessTP = 0 }, on, -54.0, "turned down far"),
+            (new LibMeta { LoudnessI = -20, LoudnessTP = -20 }, new AppSettings { NormalizeAudio = false, NormalizeTargetLufs = -14 }, 0.0, "normalization off"),
+            (new LibMeta(), on, 0.0, "not learned yet"),
+            (null, on, 0.0, "no index entry"),
+            (new LibMeta { LoudnessI = -20, LoudnessTP = -20 }, new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -23, NoAudio = true }, -3.0, "NoAudio keeps it (silent anyway)"),
+        ];
+        foreach (var (meta, s, want, what) in rows)
+        {
+            double got = LpPlayerMedia.SceneNormalizeDb(meta, s);
+            if (Math.Abs(got - want) > 1e-6) fails.Add($"SceneNormalizeDb({what}) = {got}, want {want}");
+        }
     }
 
     // ---- scene user properties (SceneProperties): parsing, values, conditions, encodings ------
