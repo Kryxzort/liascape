@@ -97,7 +97,17 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
-    done (+ 9, 10, 12, 13, the Task 8 backend wiring, and the properties editor); 14–15, loudness learning left.
+    done (+ 9, 10, 12, 13, the Task 8 backend wiring, the properties editor and loudness learning); 14–15 left.
+  - [x] **Scene loudness learned on first play** (2026-10-28, player-core.md § Scene worker → "Scene loudness",
+        player-adapter.md § Scenes → "Loudness", library.md § Loudness): the worker K-weights what the scene really
+        plays (pre-gain; paused / `no_audio` / fallback excluded) into 100 ms segments (`PROTOCOL` 3), the compositor
+        gates + integrates them (BS.1770-4) over 60 s of AUDIBLE play → `scene.loudness` once (a partial from 20 s
+        when switched away early); the backend stores it in the index (learned once; a partial until a complete
+        one) and applies it as the scene's `gain.normalize` (target − I, sample peak ≤ −1.5 dBFS, ramped 500 ms
+        live, set at create). Silent scenes: never stored/normalized. Legacy LWE scenes: not normalized (unchanged).
+        Open: a matrix cell (the matrix player would need the short window knob — covered by the adapter IT
+        instead); the true peak isn't measured (sample peak, ≤ true peak by < 1 dB for most content); a scene
+        whose sound depends on its user properties keeps the loudness of the properties it was first learned with.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the item modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on

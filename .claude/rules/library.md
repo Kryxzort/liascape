@@ -34,7 +34,8 @@ library/
 One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local, `<name>` for web/imported). Saved atomically (`AtomicFile`: temp + rename) and read with a retried parse — written in place, a read mid-save got an EMPTY index (matrix `race:indexSaveLoad`). One `LibMeta` per item:
 
 ```
-SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, Crashed, Whitelist, SceneProps?,
+SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, LoudnessI/TP/LRA/Thresh?, LoudnessSkip?,
+LoudnessSeconds?, LoudnessPartial?, Crashed, Whitelist, SceneProps?,
 Resolution, AgeRating, YoutubeUrl, PageUrl, AuthorName, Description,
 FileSizeBytes?, Subscriptions?, Favorites?, Views?, Tags[]
 ```
@@ -53,6 +54,18 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 - `LibraryService.ReadVolumeOverride/ReadSpeedOverride/IsWhitelisted/HasCrashed` → `LibraryStore.GetMeta(path)?.X`. **`PlayerHelper`'s private `ReadVolumeOverride/ReadSpeedOverride` delegate to these** — so *every* playback path (initial launch, playlist advance, transitions, scene launch, option baking) reads the same index.
 - `SaveVolumeOverride/SaveSpeedOverride` **drop the key when it equals the global** (volume `== Settings.Volume`, speed within 1e-6) → "use global."
 - **Live apply** (no restart): `POST /library/volume|speed` → save → `PlayerHelper.ApplyOverrideLive(path)` (mpv `set_property` for video volume/speed; `pactl` for live LWE **scene volume**; scenes are 1× so speed is a no-op). Timed-playlist advances carry the effective volume/speed as **`loadfile` per-file options** (atomic — avoids the post-load reset race). A global settings change applies the *effective* value (`override ?? global`) so it never clobbers an active override.
+
+## Loudness (normalization between wallpapers)
+
+- **Videos:** `ffmpeg loudnorm` pass 1, once per item in the background (`LibraryService.EnsureLoudnessAsync` /
+  `BackfillLoudnessAsync`) → all four `loudnessI/TP/LRA/Thresh` (`ReadLoudness` requires all four) or
+  `loudnessSkip` (no audio track / silent); applied as mpv's `af` loudnorm (`LoudnormAf`).
+- **Scenes (lp-player only):** learned by the player over the first ~60 s of audible play (`scene.loudness`,
+  player-adapter.md § Scenes → "Loudness") → `loudnessI` (LUFS) + `loudnessTP` (its SAMPLE peak, dBFS) +
+  `loudnessSeconds` (audible seconds measured) + `loudnessPartial` (true = less than the window: switched away
+  early). No LRA/Thresh, so the video path never reads it. `MergeSceneLoudness`: learned once; a partial is
+  replaced by a complete one or a longer partial. Applied as the scene source's `gain.normalize`. Legacy LWE
+  scenes: not normalized.
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
 
