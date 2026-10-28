@@ -25,7 +25,8 @@ DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 for t in ffmpeg jq curl python3 timeout; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
 B=$ROOT/src/player/target/debug/lp-player
-DLL=$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll
+# LP_SM_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks)
+DLL=${LP_SM_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll}
 if [ $BUILD = 1 ]; then
   if command -v nix >/dev/null; then
     (cd "$ROOT" && env -u LD_LIBRARY_PATH nix develop -c cargo build -q --manifest-path src/player/Cargo.toml) || { echo "cargo build failed"; exit 2; }
@@ -154,6 +155,18 @@ for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"LweMonitors":
 done
 snap s7; same s6 s7 '[]' "the rejected bodies"
 
+echo "== the advance-on-end play-time limits: partial bodies, clamped 0…359999 s"
+snap l0; post /settings '{"GlobalMinPlaySeconds":30}' >/dev/null; snap l1
+[ "$(f .globalMinPlaySeconds l1)" = 30 ] && ok "{GlobalMinPlaySeconds:30} → 30" || bad "globalMinPlaySeconds → $(f .globalMinPlaySeconds l1)"
+same l0 l1 '["globalMinPlaySeconds"]' "{GlobalMinPlaySeconds:30}"
+post /settings '{"globalMaxPlaySeconds":-5}' >/dev/null; snap l2
+[ "$(f .globalMaxPlaySeconds l2)" = 0 ] && ok "{globalMaxPlaySeconds:-5} → clamped to 0 (off)" || bad "globalMaxPlaySeconds -5 → $(f .globalMaxPlaySeconds l2)"
+post /settings '{"GlobalMaxPlaySeconds":99999999}' >/dev/null; snap l3
+[ "$(f .globalMaxPlaySeconds l3)" = 359999 ] && ok "{GlobalMaxPlaySeconds:99999999} → clamped to 359999" || bad "globalMaxPlaySeconds 99999999 → $(f .globalMaxPlaySeconds l3)"
+same l2 l3 '["globalMaxPlaySeconds"]' "{GlobalMaxPlaySeconds:99999999}"
+post /settings '{"GlobalMinPlaySeconds":0,"GlobalMaxPlaySeconds":0}' >/dev/null; snap l4
+same l0 l4 '[]' "the limits back to 0"
+
 echo "== parallel partial bodies all land"
 # 8 rounds × 10 bodies released at once, each setting a different field: without one poster at a time, two
 # that load the same file each save it with only their own field changed → the other's change is lost
@@ -235,6 +248,20 @@ snap r0; post /settings '{"GlobalIntervalSeconds":3}' >/dev/null; snap r1
 same r0 r1 '["globalIntervalSeconds"]' "{GlobalIntervalSeconds:3}"
 for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 [ "$(cur path)" = "$C2" ] && ok "{GlobalIntervalSeconds:3} → switched to c2 within 6 s (no replay needed)" || bad "the rotation didn't retime: cur $(cur path)"
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== a partial body sets a maximum play time on a running advance-on-end rotation (live)"
+post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":600}' >/dev/null
+post /playlist/play "{\"paths\":[\"$C1\",\"$C2\"],\"settings\":{\"Order\":0}}" >/dev/null
+for _ in $(seq 1 40); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
+sleep 1; t_mx=$(date +%s%3N); p_mx=$(cur time_pos)
+# c1 ends (6 − its position) s from here: the 2 s maximum must switch well before that, and within ~1 s of the change
+lim_mx=$(python3 -c "print(int(min(2200, (6 - float('${p_mx:-0}')) * 1000 - 800)))")
+post /settings '{"GlobalMaxPlaySeconds":2}' >/dev/null
+for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
+d_mx=$(( $(date +%s%3N) - t_mx ))
+[ "$(cur path)" = "$C2" ] && [ "$d_mx" -lt "$lim_mx" ] && ok "{GlobalMaxPlaySeconds:2} → c1 (at ${p_mx} s of 6) left for c2 $d_mx ms after (< $lim_mx; no replay)" || bad "max 2 s live: cur $(cur path) $d_mx ms after (c1 was at ${p_mx} s; want < $lim_mx ms)"
+post /settings '{"GlobalMaxPlaySeconds":0,"GlobalAdvanceOnVideoEnd":false}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body switches the engine (nothing playing → nothing starts)"

@@ -28,6 +28,7 @@ public static class LpPlayerSelfTest
             SceneSkipAssertions(fails);
             SceneAdapterAssertions(fails);
             ScenePropertyAssertions(fails);
+            PlayLimitAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -35,6 +36,52 @@ public static class LpPlayerSelfTest
         if (fails.Count == 0) { Console.WriteLine("PASS"); return 0; }
         Console.WriteLine("FAIL " + string.Join("; ", fails));
         return 1;
+    }
+
+    // ---- advance-on-end play-time limits (PlayerHelper § play-time limits) -------------------
+    private static void PlayLimitAssertions(List<string> fails)
+    {
+        // effective: the playlist's own only when it overrides the global rotation
+        var g = new AppSettings { GlobalMinPlaySeconds = 30, GlobalMaxPlaySeconds = 600 };
+        var own = new PlaylistSettings { OverrideGlobalSettings = true, MinPlaySeconds = 5, MaxPlaySeconds = 0 };
+        var follows = new PlaylistSettings { OverrideGlobalSettings = false, MinPlaySeconds = 5, MaxPlaySeconds = 7 };
+        void Eff(PlaylistSettings? p, (int, int) want, string what)
+        {
+            var got = PlayerHelper.EffectivePlayLimits(g, p);
+            if (got != want) fails.Add($"EffectivePlayLimits({what}) = {got}, want {want}");
+        }
+        Eff(own, (5, 0), "override"); Eff(follows, (30, 600), "follows the globals"); Eff(null, (30, 600), "no playlist state");
+        // clamped 0…359999 (negative = off)
+        foreach (var (v, want) in new[] { (-5, 0), (0, 0), (90, 90), (359999, 359999), (400000, 359999) })
+        {
+            var s = new AppSettings { GlobalMaxPlaySeconds = v }; var p = new PlaylistSettings { MinPlaySeconds = v };
+            if (s.GlobalMaxPlaySeconds != want || p.MinPlaySeconds != want) fails.Add($"play limit {v} → {s.GlobalMaxPlaySeconds}/{p.MinPlaySeconds}, want {want}");
+        }
+        // the minimum is reached by the loop playing now: played + its remaining (+150 ms tolerance)
+        foreach (var (played, rem, min, want) in new (long, long?, long, bool)[] {
+                 (0, 2000, 0, true),          // off
+                 (0, 2000, 5000, false),      // a 2 s clip's 1st loop ends at 2 s
+                 (2000, 2000, 5000, false),   // 2nd loop: ends at 4 s
+                 (4000, 2000, 5000, true),    // 3rd loop: ends at 6 s ≥ 5 s → arm now, for its end
+                 (1900, 3000, 5000, true),    // within the tolerance (4.9 + 0.15)
+                 (1800, 3000, 5000, false),
+                 (0, 12000, 5000, true),      // a long clip: its 1st loop already reaches it (no hold)
+                 (2900, null, 3000, true),    // no end known (an image): the play time alone, + tolerance
+                 (2000, null, 3000, false),
+                 (100, -50, 200, true) })      // a negative remainder counts as 0
+            if (PlayerHelper.MinPlayReached(played, rem, min) != want) fails.Add($"MinPlayReached(played {played}, loop left {rem?.ToString() ?? "null"}, min {min}) != {want}");
+        // the maximum: only under advance-on-end, never for a one-item session, 0 = off
+        foreach (var (adv, rot, played, max, want) in new[] {
+                 (true, true, 3000L, 3000L, true), (true, true, 2999L, 3000L, false), (false, true, 9000L, 3000L, false),
+                 (true, false, 9000L, 3000L, false), (true, true, 9000L, 0L, false) })
+            if (PlayerHelper.MaxPlayReached(adv, rot, played, max) != want) fails.Add($"MaxPlayReached(advance {adv}, rotates {rot}, played {played}, max {max}) != {want}");
+        // the play time loaded from timed_state: + the time since its save (the player played on), unless paused
+        foreach (var (saved, at, paused, now, want) in new[] {
+                 (2000L, 10_000L, false, 13_000L, 5000L), (2000L, 10_000L, true, 13_000L, 2000L),
+                 (2000L, 0L, false, 13_000L, 2000L),     // an older state file: no save time
+                 (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
+                 (-7L, 10_000L, false, 10_000L, 0L) })
+            if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
     }
 
     // ---- MpvPropertyMap ----------------------------------------------------------------------

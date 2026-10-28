@@ -337,6 +337,10 @@ public static class AppOps
                 (c?.Settings.OverrideGlobalSettings ?? false)
                     ? (c!.Settings.IntervalSeconds, c.Settings.WaitForVideoEnd, c.Settings.AdvanceOnVideoEnd)
                     : (g.GlobalIntervalSeconds, g.GlobalWaitForVideoEnd, g.GlobalAdvanceOnVideoEnd);
+            // the advance-on-end play-time limits (min / max), diffed like the rotation: an unrelated save leaves the
+            // item's play time and an armed switch alone. Before the rotation, so a switch it arms takes the new minimum.
+            var lim = PlayerHelper.EffectivePlayLimits(g, p.Settings);
+            if (lim != PlayerHelper.EffectivePlayLimits(g, prevP?.Settings)) PlayerHelper.ApplyPlayLimitsLive(lim.Min, lim.Max);
             var now = Eff(p);
             if (now != Eff(prevP)) PlayerHelper.ApplyRotationLive(now.iv, now.wait, now.adv);
             // the playlist's transitions changed (on/off, effects, duration): an armed aligned switch takes them

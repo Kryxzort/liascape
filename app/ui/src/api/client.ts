@@ -89,6 +89,8 @@ export interface LibraryItem {
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
   advanceOnVideoEnd: boolean; waitForVideoEnd: boolean;
+  // advance-on-end play-time limits, wall-clock seconds, 0 = off (gated by overrideGlobalSettings too)
+  minPlaySeconds: number; maxPlaySeconds: number;
   // WE-style transitions (gated by overrideGlobalSettings; else the globalTransition* fallbacks).
   transitionEnabled: boolean; transitionEffectIds: string[];
   transitionDurationMs: number; transitionDurationMaxMs: number; transitionShuffle: boolean;

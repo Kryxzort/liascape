@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import type { PlaylistSettings } from "../api/client";
 import { TransitionPicker } from "./TransitionPicker";
+import { PlayTimeInput } from "./PlayTimeInput";
 
 // Playlist Settings overlay. Centered modal:
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
@@ -40,6 +41,13 @@ export function PlaylistSettingsModal({
 
               <div className={`ovr${ovr ? "" : " dim"}`}>
                 <label className="ck"><input type="checkbox" disabled={!ovr} checked={ps.advanceOnVideoEnd} onChange={(e) => setPS({ advanceOnVideoEnd: e.target.checked })} /> Switch when video ends</label>
+                {/* the advance-on-end play-time limits (wall-clock seconds, 0 = off) — only with "Switch when video ends" */}
+                <div className={`pl-playtime${ovr && ps.advanceOnVideoEnd ? "" : " dim"}`}>
+                  <label title="a shorter video loops until it, then switches at the end of that loop · 0 = off">Min play time
+                    <PlayTimeInput label="minimum play time (s)" value={ps.minPlaySeconds ?? 0} disabled={!ovr || !ps.advanceOnVideoEnd} onChange={(v) => setPS({ minPlaySeconds: v })} /></label>
+                  <label title="a longer video (or a scene) switches once it played this long · 0 = off">Max play time
+                    <PlayTimeInput label="maximum play time (s)" value={ps.maxPlaySeconds ?? 0} disabled={!ovr || !ps.advanceOnVideoEnd} onChange={(v) => setPS({ maxPlaySeconds: v })} /></label>
+                </div>
                 <label className="ck"><input type="checkbox" disabled={!ovr} checked={ps.waitForVideoEnd} onChange={(e) => setPS({ waitForVideoEnd: e.target.checked })} /> Wait for video to end after interval</label>
                 <div className="field-label">SWITCH EVERY</div>
                 <div className="hms">

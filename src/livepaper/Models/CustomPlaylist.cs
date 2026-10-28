@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace livepaper.Models;
@@ -11,6 +12,10 @@ public class PlaylistSettings
     public int IntervalSeconds { get; set; } = 1800;
     public bool AdvanceOnVideoEnd { get; set; } = true;
     public bool WaitForVideoEnd { get; set; } = false;
+    // advance-on-end play-time limits (wall-clock seconds, 0 = off) — gated by OverrideGlobalSettings like the rest
+    private int _minPlaySeconds, _maxPlaySeconds;
+    public int MinPlaySeconds { get => _minPlaySeconds; set => _minPlaySeconds = AppSettings.PlayLimit(value); }
+    public int MaxPlaySeconds { get => _maxPlaySeconds; set => _maxPlaySeconds = AppSettings.PlayLimit(value); }
 
     // Transitions (gated by OverrideGlobalSettings, like the rotation fields above; else the
     // AppSettings.GlobalTransition* fallbacks apply). TransitionEffectIds = manifest ids the user

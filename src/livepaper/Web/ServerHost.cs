@@ -384,6 +384,14 @@ public static class ServerHost
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
                 PlayerHelper.UpdateRestartTimer();
+            // the advance-on-end play-time limits → the running rotation, live (the effective ones: a playlist
+            // with its own override keeps its own — /playlist/state applies those). Before the rotation below, so
+            // a switch it arms (advance-on-end just turned on) is held by the new minimum.
+            if (prev.GlobalMinPlaySeconds != s.GlobalMinPlaySeconds || prev.GlobalMaxPlaySeconds != s.GlobalMaxPlaySeconds)
+            {
+                var (minS, maxS) = PlayerHelper.EffectivePlayLimits(s, PlaylistService.LoadCurrentState()?.Settings);
+                PlayerHelper.ApplyPlayLimitsLive(minS, maxS);
+            }
             // rotation (interval / advance-on-end / wait-for-video-end) changed → live-update a RUNNING
             // timed playlist that follows the GLOBAL settings (a playlist with its own override is
             // updated by /playlist/state instead). No replay needed.

@@ -13,7 +13,7 @@ paths:
 - `HwDec`: `"auto"` | `"nvdec"` | `"vaapi"` | `"no"`
 - `VideoScale`: `"fill"` (panscan=1.0) | `"fit"` (panscan=0.0); `VideoFps` (0 = native, else caps video playback fps — scenes/LWE unaffected). VideoScale applies **live** (mpv `panscan` via IPC, incl. on advance). **All playback settings apply live now** (`PlayerHelper.ApplyPlaybackSettingsLive`, diffed): `Loop` (loop-file, single video only — the timed machinery owns it under a playlist), `NoAudio` (mpv `aid` / scene LWE mute), `VideoFps` (mpv `vf=fps`), `DisableCache` (`cache`), `DemuxerMax*Bytes`, `HwDec`. Only `LweMonitors` (per-monitor fps/primary) is genuinely launch-only under legacy (LWE has no live reconfigure); under lp-player its fps applies live (`out:<name>.scene_fps`, `player-adapter.md` § Scenes) and primary has no meaning.
 - Auto-mute: `AutoMute` (false), `AutoMuteDelayMs` (200), `AutoUnmuteDelayMs` (2000), `AutoMuteThresholdDb` (-70.0), `AutoMuteOnlyIfMprisActive` (false)
-- Global rotation: `GlobalIntervalSeconds` (1800), `GlobalAdvanceOnVideoEnd` (false), `GlobalWaitForVideoEnd` (false)
+- Global rotation: `GlobalIntervalSeconds` (1800), `GlobalAdvanceOnVideoEnd` (false), `GlobalWaitForVideoEnd` (false); advance-on-end play-time limits `GlobalMinPlaySeconds` / `GlobalMaxPlaySeconds` (0 = off, wall-clock s, clamped 0…359999 — `player-adapter.md` § Play-time limits)
 - Restart: `RestartIntervalSeconds` (default 600, min 5, max 3600, clamped in setter; 0 = off); `RestartOnSwitchOnly` (false) — defer the mpvpaper leak-restart to the next playlist changeover (advanced)
 - Wallpaper Engine: `WallpaperEnginePath`, `WeCopyFiles`, `ResumeFromLast`, `AllowScenes` (false), `AutoImportWallpaperEngine` (false), `ReplaceDirectWithWorkshop` (false) — swap a direct-DL `workshop/` copy for a `local/` WE-dir symlink when it appears
 - Library automation: `AutoAddLibraryToPlaylist` (false) — auto-add new library items to active playlist strip
@@ -25,8 +25,8 @@ paths:
 
 `CustomPlaylist` (JSON at `~/.config/livepaper/playlist_state.json` for in-progress; named files in `~/.local/share/livepaper/playlists/`):
 - `VideoPaths`, `Name` (nullable; only set after Save or Load)
-- `Settings.Order` (Sequential/Shuffle), `Settings.OverrideGlobalSettings`, `Settings.IntervalSeconds`, `Settings.AdvanceOnVideoEnd`, `Settings.WaitForVideoEnd`
-- `IntervalSeconds`/`AdvanceOnVideoEnd`/`WaitForVideoEnd` only used when `OverrideGlobalSettings` is true.
+- `Settings.Order` (Sequential/Shuffle), `Settings.OverrideGlobalSettings`, `Settings.IntervalSeconds`, `Settings.AdvanceOnVideoEnd`, `Settings.WaitForVideoEnd`, `Settings.MinPlaySeconds` / `Settings.MaxPlaySeconds`
+- `IntervalSeconds`/`AdvanceOnVideoEnd`/`WaitForVideoEnd`/`Min|MaxPlaySeconds` only used when `OverrideGlobalSettings` is true. The play-time limits are NOT in `LastSession`: a session reads them from the current playlist state + settings at its start / restore / resume (like the transitions).
 
 `LastSession` model fields:
 - `IsPlaylist` — Play All session; `IsTimedPlaylist` — timed playlist; `IsRandom` — `--random` session
@@ -58,7 +58,7 @@ matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`, `seq:plP
 
 **Tick state sync**: each tick calls `RefreshSignals()` (re-reads only `TimerStopped`/`TimerPaused`). Owner's `_timedRemainingMs` / history untouched.
 
-**`TimedState` record** fields: `TimerStopped`, `TimerPaused`, `AdvanceOnVideoEnd`, `WaitingForVideoEnd`. On restore, `LoadTimedState` restores `_advanceOnVideoEnd`/`_waitingForVideoEnd`, then `RearmAdvanceOnVideoEnd()` re-arms `DoVideoEndWait`. When `_waitingForVideoEnd=true`, `_historyIndex` is pre-fetched one step ahead — `RestoreTimedPlaylist` adjusts back by one before `SwitchToFile`, then calls `RearmAdvanceOnVideoEnd()`.
+**`TimedState` record** fields: `TimerStopped`, `TimerPaused`, `AdvanceOnVideoEnd`, `WaitingForVideoEnd`. Also `ItemPlayedMs` + `PlayedSavedAtMs` (the playing item's play time for the play-time limits; loaded + the time since the save unless paused). On restore, `LoadTimedState` restores `_advanceOnVideoEnd`/`_waitingForVideoEnd`, then `RearmAdvanceOnVideoEnd()` re-arms `DoVideoEndWait`. When `_waitingForVideoEnd=true`, `_historyIndex` is pre-fetched one step ahead — `RestoreTimedPlaylist` adjusts back by one before `SwitchToFile`, then calls `RearmAdvanceOnVideoEnd()`.
 
 **Pending-action IPC** (`~/.config/livepaper/pending_action.txt`): atomic write+rename. Content: `next` / `prev` / `random` / `restart`. Timer owner's tick consumes (read+delete) → `AdvanceAndLaunch` / `StepBackAndLaunch` / `RandomAndLaunch` / `RestartCurrentAndLaunch`. `restart` cold-restarts current wallpaper without advancing and without resetting the countdown. All others call `LaunchAndReset` → kills mpvpaper, launches new, resets `_timedRemainingMs` to full interval.
 

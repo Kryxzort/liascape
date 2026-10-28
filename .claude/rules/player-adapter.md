@@ -239,6 +239,53 @@ PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/
 full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
 unmutes when it ends.
 
+## Play-time limits (advance-on-end minimum / maximum, 2026-10-28)
+Owner: "maximum minimum when end on wallpaper". Two settings per rotation, **wall-clock seconds, 0 = off** (both off
+by default): `AppSettings.GlobalMinPlaySeconds` / `GlobalMaxPlaySeconds` and `PlaylistSettings.MinPlaySeconds` /
+`MaxPlaySeconds` (gated by `OverrideGlobalSettings` like the other rotation fields — `PlayerHelper.EffectivePlayLimits`),
+clamped 0…359999 in the setters. **They only act under advance-on-end** ("Switch when video ends"); the UI greys them
+otherwise (pure timed and wait-for-video-end-only rotations ignore them).
+- **Minimum** — a clip shorter than it loops on and advances at the end of the loop that reaches it (never mid-loop):
+  `DoVideoEndWait` (lp-player) runs `HoldForMinPlay` before it requests the aligned switch — every ≤ 1 s and right
+  after each loop's wrap it reads A's remaining time (`LpPlayerMedia.TimeRemaining`, wall clock at A's speed) and
+  requests only once `played + remaining + 150 ms ≥ min` (`MinPlayReached`). The player's `align:end` makes A's
+  CURRENT loop its last (player-core.md § Align), so a request ~0.1 s into the crossing loop ends exactly there,
+  with B given that whole loop to get ready. A must loop meanwhile: with `Loop` off the hold turns A's loop on
+  (`SetLoop(true)`; align:end turns it off again). A clip already ≥ the minimum is never held (= today). A still
+  image (it never ends — `align:end` on a still is `Now`) shows for the minimum (today: it flashed by). A scene A is
+  never held. Legacy: not implemented (its video-end polling path is unchanged).
+- **Maximum** — once the playing item played that long the rotation advances **now** with its transition, like a
+  timed switch (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken —
+  `AdvanceAndLaunch`): the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. Shared by both engines.
+- **Play time** (`_itemPlayedMs`): counted by the tick in wall clock (never scaled by speed — a 2× clip with max 60 s
+  plays 60 real seconds) and **not while paused** (the paused tick returns before it); reset by `PostSwitch` (every
+  switch — under lp-player an aligned switch's B from its effect's start), `ApplyTimedPlaylist`, `RestoreTimedPlaylist`
+  (the item restarts, like the countdown). **Never reset by an edit.** Persisted in `timed_state.json`
+  (`ItemPlayedMs` + `PlayedSavedAtMs`); `LoadTimedState` adds the time since that save unless paused
+  (`PlayedAfterLoad`) — the player outlives the backend and played on while no process counted (a backend restart,
+  the `--timer-daemon` hand-over, which is SIGKILLed without saving).
+- **Scenes** never end. Under advance-on-end a scene plays until the **maximum** if set; else, as before, until the
+  interval (`GlobalIntervalSeconds` > 0: the tick's countdown — with wait-for-video-end then an `align:now` switch,
+  A being a scene) or, with interval 0, until a user switch. Both set → whichever first. The minimum doesn't hold a
+  scene.
+- **The interval keeps its own meaning** next to them: in a combined rotation (advance-on-end + interval > 0 +
+  wait off) it is a video-time cap (the old fallback) — the earliest of interval / maximum / the clip's (min-held)
+  end wins. A cap beats the minimum (max < min → the max fires; documented, not enforced).
+- **1-item playlist**: neither ever switches it to itself (`CanRotate`; no aligned switch is armed).
+- **User switches** (next / prev / random / restore / play-from): the new item's play time starts at 0 — limits apply
+  to it from there.
+- **Live**: `/settings` (the globals changed → the effective pair → `ApplyPlayLimitsLive`, before the rotation's own
+  live-apply) and `/playlist/state` (`AppOps.SavePlaylistState`: the effective pair diffed prev → now, so a reorder /
+  unrelated save does nothing). A new maximum is read by the next tick (already played past it → advances now); a
+  changed minimum re-arms an aligned switch already armed (`CancelVideoEndWait` + `ArmVideoEndWait`, same B — it was
+  requested for the end of A's current loop). A session (re)start / restore / resume reads them from the config
+  (`RefreshPlayLimits`: the current playlist state + settings, like `TransitionService.CurrentConfig`) — never from
+  `LastSession`.
+- Tests: self-test `PlayLimitAssertions` (effective/override, clamps, `MinPlayReached`, `MaxPlayReached`,
+  `PlayedAfterLoad`); IT § "advance-on-end play-time limits" + the scene and backend-restart checks;
+  `test-settings-merge.sh` (partial / clamped bodies, a live max); matrix `playlist:minPlay|maxPlay`,
+  `global:minPlay|maxPlay` (pendingGlobal), `global:maxPlay:own`.
+
 ## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
 A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:
 "scene"` source (player-core.md § Scene worker — one `lp-scene-worker` per scene, shared by every output).
