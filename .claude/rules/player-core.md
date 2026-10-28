@@ -1358,7 +1358,13 @@ already include it); a refused `apply` is logged (`source.rejected`) and queued 
 node goes). `update(gfx, graph)` updates every source, collects its events, then mirrors
 observed values (`kind` — MpvSource's inferred/corrected image|video —, `ready`,
 `duration`, `time_pos`, `width`, `height`, `paused`) with `Graph::set_observed`. **`sync` must precede `update`** each iteration, or the mirror would
-overwrite a command not yet forwarded. `events()` drains `(node id, event)`; `texture(id)`
+overwrite a command not yet forwarded. **Only changed values are written** (Phase 2 Task 14): each
+hosted source remembers what it last mirrored per prop and skips an unchanged one; the memory is
+cleared whenever a change is forwarded to that source (`sync`'s applies, `force_paused`, the R75
+recompute), so a `set` the source refuses is still mirrored back. A scene updates every frame, and
+nine `format!` + path-resolve + `set_observed`s per update were the largest share of the
+compositor's CPU per scene worker (perf, on-machine); measured two synthetic workers at 240 + 144
+fps, headless: process 19.2 / 19.6 % → 15.4 / 15.0 %. `events()` drains `(node id, event)`; `texture(id)`
 is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime polls; `get`/
 `ids` for probes/tests.
 
