@@ -4,10 +4,12 @@
 //! - [`server`] — socket binding (single instance, `0700`/`0600`), per-client
 //!   non-blocking I/O with bounded queues, the event tap behind `subscribe`.
 //! - [`handlers`] — the verbs.
+//! - [`capture`] — `capture`'s GPU readback, encode and write, off the loop.
 //!
 //! The loop that drives all of it is `crate::runtime`; the shell client is `crate::ctl`.
 //! Reference: `.claude/rules/player-core.md` § Command API.
 
+pub mod capture;
 pub mod handlers;
 pub mod proto;
 pub mod server;
