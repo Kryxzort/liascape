@@ -969,18 +969,36 @@ Full matrix (`--jobs 2`): first 744 pass / 3 fail / 29 skip (the two fixture ass
 **Files:** `src/player/tests/onmachine/scene_corpus.sh`, `src/player/tests/onmachine/scene_corpus_report.py`,
 `docs/player/reports/scene-corpus.{md,json}`
 
-- [ ] **Step 1:** The runner takes `--dir` (default the 431960 folder; **refuses any path under
+- [x] **Step 1:** The runner takes `--dir` (default the 431960 folder; **refuses any path under
   `~/.cache/livepaper/steamcmd_workshop`**), picks items whose `project.json` type is `scene`, runs one private
   `serve --headless --outputs 1920x1080@60 --clock real --ao null`, and per scene: cut to it, wait Ready ≤ 20 s,
   capture at +1 s and +4 s, classify `ok` | `static` (identical captures) | `blank` (luma stddev < 2 or ≥ 99 % one
   colour) | `load_failed` | `renderer_failed` | `crashed` | `broken` | `timeout`, and record `ready_ms`, native
   size, worker peak RSS, `gpu_ms_p50`. `--ab-legacy` (on-machine, takes over the session) also screenshots each with
   the installed `linux-wallpaperengine --screenshot` and lists scenes that start there but not here.
-- [ ] **Step 2:** Run it over the library (96 scenes, ≤ 15 min). **Acceptance (§11.5):** newly failing vs legacy
+- [x] **Step 2:** Run it over the library (96 scenes, ≤ 15 min). **Acceptance (§11.5):** newly failing vs legacy
   = 0, or each one listed with a Phase 6 TODO entry and its log tail.
-- [ ] **Step 3:** Commit `Add Scene Corpus Runner And First Report`.
+- [x] **Step 3:** Commit `Add Scene Corpus Runner And First Report`.
 
 **Size: M** (≈ 1 day).
+
+**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Scene corpus (Task 13)"):
+96 scenes in 481 s: **86 ok, 1 static (a still image + a sound — by design), 1 blank, 4 load_failed, 4 broken**,
+0 renderer_failed/crashed/timeout (`docs/player/reports/scene-corpus.md`). Every failure reproduces with
+`lp-scene-worker --lwe-smoke` (LWE's core alone, no worker/compositor) and is an LWE cause — 3D/perspective
+scenes (3), a text `padding` string → an uncaught JSON exception (2), a `CParticle` segfault on embedded leaves
+presets (2), a case-mismatched asset path (1), an object dropped when its packaged effect fails to compile (1) —
+each a Phase 6 entry in `docs/TODO.md` with its backtrace / log tail in the report. **`--ab-legacy` is implemented
+but not run** (it draws on a real output — owner-run: `scene_corpus.sh --ab-legacy --legacy-output DP-1 --reuse
+<results>`), so until then every non-ok scene is listed as possibly newly failing (the acceptance's second
+branch). Deviations: captures at +1 s, **+2.3 s** and +4 s — `static` needs all three identical (ticks run on a
+30 fps grid of scene time, so a loop whose period divides 3 s repeated its +1 s frame at +4 s: a false `static`
+in one run); the rates are read before the +4 s capture; no preview on the source (a crash can't pass for a
+picture); `ready_ms` = `worker.spawned` → `source.ready`. Three player fixes found by the runs, each with a test:
+`probe workers {"log_tail": true}` + `WorkerHost::stop` drains the pipe (a fatal error's own stderr line was lost,
+3/3), the worker's soft `RLIMIT_CORE` 1 (the first run's 16 LWE crashes each went through systemd-coredump and a
+desktop crash notification; 0 coredumps since), `write_png*` with fdeflate `Fast` (a capture held the loop
+820–875 ms for a 3840×1080 frame → 39–112 ms; the stall had made the GPU budget throttle two 4K scenes).
 
 ### Task 14: On-machine battery and Phase 2 report
 
