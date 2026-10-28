@@ -8641,3 +8641,116 @@ fn scene_loudness_survives_a_worker_restart() {
     let after_kill = ev["t_mono_ms"].as_f64().unwrap() - t_kill;
     assert!(after_kill < 2800.0, "learned {after_kill:.0} ms after the kill: {ev}");
 }
+
+// ---------------------------------------------------------------- the fps cap on stills
+
+/// An fps cap (`fps_cap`, the backend's `VideoFps`, sent to `srcs:*` and in every create) never
+/// stalls a still: a transition to an image B with the cap on readies and hands off, the image
+/// is on screen; a colour and a scene B with the cap behave as without it; a capped video still
+/// plays. Both clocks. RED before the fix: the image B stayed `ready: false` and the switch sat
+/// in `waiting_ready` (TODO "An fps cap stalls a still image").
+#[test]
+fn fps_cap_never_stalls_a_still_any_kind() {
+    let Some(mut srv) = scene_serve(&[]) else {
+        return;
+    };
+    let mut serial = srv._serial.take();
+    drop(srv);
+    let img = ensure_clip("fpscap_image", ClipSpec::Image { rgb: [0, 255, 0] });
+    let clip = ensure_clip("tr_red_3s", RED_3S);
+    let scene_dir = common::synthetic_scene(
+        "api-fpscap",
+        &SyntheticSpec {
+            pattern: Pattern::Solid,
+            rgb: [255, 0, 255],
+            ..SyntheticSpec::default()
+        },
+    );
+    for clock in ["stepped", "real"] {
+        let mut srv = scene_serve_in(&["--clock", clock], serial.take());
+        let mut c = srv.client();
+        let stepped = clock == "stepped";
+        let a = color(&mut c, [0, 0, 255]);
+        show_all(&mut c, &a);
+        // The global setting as the backend sends it (reaches what's shown).
+        c.ok("set", json!({"path": "srcs:*.fps_cap", "value": 30.0}));
+        let cases: [(&str, Value, [u8; 3]); 4] = [
+            (
+                "image",
+                json!({"path": s(&img), "fps_cap": 30.0}),
+                [0, 255, 0],
+            ),
+            (
+                "colour",
+                json!({"kind": "color", "color": [255, 255, 0], "fps_cap": 30.0}),
+                [255, 255, 0],
+            ),
+            (
+                "scene",
+                json!({"kind": "scene", "path": s(&scene_dir), "fps_cap": 30.0}),
+                [255, 0, 255],
+            ),
+            (
+                "video",
+                json!({"path": s(&clip), "loop": true, "fps_cap": 30.0}),
+                [255, 0, 0],
+            ),
+        ];
+        for (what, to, rgb) in cases {
+            let r = c.ok(
+                "transition",
+                json!({"outputs": "out:*", "to": to, "effect_id": "fade", "duration_ms": 100}),
+            );
+            let corr = r["corr"].as_str().unwrap().to_string();
+            let b = r["to"].as_str().unwrap().to_string();
+            let t = Instant::now();
+            let mut steps = 0;
+            loop {
+                let done = c.ok(
+                    "logs",
+                    json!({"corr": corr, "kind_prefix": "transition.done"}),
+                )["events"]
+                    .as_array()
+                    .is_some_and(|e| !e.is_empty());
+                if done {
+                    break;
+                }
+                assert!(
+                    steps < 150 && t.elapsed() < Duration::from_secs(10),
+                    "{clock} {what}: no transition.done; {}",
+                    c.ok("state", json!({}))
+                );
+                if stepped {
+                    c.step(16);
+                } else {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                steps += 1;
+            }
+            assert_eq!(
+                get(&mut c, &format!("{b}.ready"))["result"]["value"],
+                json!(true),
+                "{clock} {what}"
+            );
+            assert_eq!(
+                get(&mut c, &format!("{b}.fps_cap"))["result"]["value"],
+                json!(30.0),
+                "{clock} {what}: the node keeps the cap"
+            );
+            if stepped {
+                c.step(16);
+            } else {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let p = srv.path(&format!("fpscap-{clock}-{what}.png"));
+            c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
+            near(png_pixel(&p, 320, 180), rgb, 4, &format!("{clock} {what}"));
+        }
+        // The capped video plays (real clock: its time moves).
+        if !stepped {
+            let v = content(&mut c, "VIRTUAL-1");
+            wait_playing(&mut c, &v, 0.5);
+        }
+        serial = srv._serial.take();
+    }
+}

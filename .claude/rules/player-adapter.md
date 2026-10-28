@@ -646,8 +646,8 @@ settings.json with `PlayerEngine=lp-player`, own library, own lp-player socket +
 random backend port, display/compositor env unset; it aborts before any playback call unless
 `/player-engine` says `active: lp-player`, so it can't start or kill mpvpaper; an EXIT/INT/TERM/HUP trap
 SIGCONTs + stops the player and the backend and removes the temp dir. Covers: `/apply` + fade
-full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps,
-HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
+full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps
+(+ VideoFps 30 × an image item: it plays — the player never caps a still, player-core.md § Sources), HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
 (interval 20 s + Wait + Advance, 2 s clips → align:end advances); `/next` mid-wait; `/next` during an aligned switch's running effect (1.5 s fade on a 4 s clip: → the item AFTER its B, the running one committed — handoff, not cancelled; RED before: → the same B, cancelled); `/stop`;
 `/library/volume|speed` on the playing item; **final review**: a CLI `--action=toggle-pause` (a
 separate process) surviving a compositor kill -9 + the backend's reapply (I3), pause → `/stop` →

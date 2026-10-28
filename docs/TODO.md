@@ -106,10 +106,14 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       behaviour (min = old min, max = old max, toggle on, scenes after = the old interval). **Owner action:** run it on
       a copy of `~/.config/livepaper` + `~/.local/share/livepaper/playlists` (the app stopped), check the printed
       rotations, copy `out/` over the originals.
-  - [ ] **An fps cap stalls a still image** (found 2026-10-28 by `test-settings-merge.sh`, player side — not fixed
-        here, `src/player` is another agent's): with `VideoFps` > 0 (`fps_cap` 98) a `kind: image` source stays
-        `ready: false` (width 0) and its switch sits in `waiting_ready` forever — nothing shows; `VideoFps` 0 → it
-        loads. Likely mpv's `fps=` vf on a one-frame still never emitting a frame; the cap should skip images.
+  - [x] **An fps cap stalls a still image** (found 2026-10-28 by `test-settings-merge.sh`; fixed 2026-10-28): with
+        `VideoFps` > 0 (`fps_cap` 98) a `kind: image` source stayed `ready: false` (width 0) and its switch sat in
+        `waiting_ready` — nothing showed. Root cause: mpv's `fps` vf never emits the one frame of a still shown
+        with `image-display-duration=inf` (`filter input EOF` → `filter output EOF`). The player now never sends
+        the `vf` to a still (the extension's guess, corrected by mpv's image flag); the node keeps `fps_cap`.
+        Scenes/colours only store it. `player-core.md` § Sources "An fps cap never reaches a still"; guards
+        `tests/sources.rs::fps_cap_never_stalls_an_image`, `tests/api.rs::fps_cap_never_stalls_a_still_any_kind`,
+        the adapter IT's "VideoFps 30 × an image"; `test-settings-merge.sh` runs its image check with a cap again.
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
       table in web-backend.md — lp-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `lp-player health`; a warning
@@ -194,6 +198,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         source measured since its last report (≤ 60 s; the snapshot restores it with its create-time seed); two
         sources of one scene at once keep only the longer one's contribution; a `path` change on a live scene source
         drops the seed but the graph/snapshot still carry the old one (the backend never path-changes a scene).
+  - [ ] **A reopen right after a stop can seed with the previous report, not the end-of-play one** (found 2026-10-28
+        by the fps-cap fix's adapter-IT runs, 2 of 3 runs, on both the fixed and the pre-fix player — unrelated to
+        that fix): IT § scene loudness "reopened: seeded with the stored measurement" read `loudness_seed` 3.0 / 6.0 s
+        while the index already held 5.8 / 6.3 s. `stop_now` → `/apply` the same scene: the stopped source's
+        end-of-play `scene.loudness` (`finish`, ≥ 5 s new) is stored off the event thread AFTER the new source's
+        `SourceProps` read the index. Harmless for the measurement (the backend keeps the longer report; the new
+        source continues an older seed, so its play is counted once, the stretch between the two reports is lost), but
+        the IT check races. Fix candidates: the IT waits for the index to stop growing before the reopen, or the
+        backend waits briefly for a just-retired source's final report before seeding.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the item modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on

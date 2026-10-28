@@ -652,6 +652,13 @@ pub struct MpvSource {
     /// (`kind == "video" && !no_audio`) can't tell "disabled" apart from "never had
     /// one". Reset to `None` on every new load (`StartFile`); set from `on_prop`.
     has_audio: Option<bool>,
+    /// Whether the current load is a still (TODO "An fps cap stalls a still image"): the
+    /// `kind` at open, `infer_kind` of a new `path`, then mpv's `current-tracks/video/image`
+    /// flag. `fps_cap` maps to no `vf` on a still
+    /// ([`MpvSource::want_vf`]).
+    vf_still: bool,
+    /// The `vf` last sent to mpv (`None` = none yet) — a push is skipped when unchanged.
+    vf_sent: Option<String>,
 }
 
 /// Task 16c (R85 review fix round): the real time required *after* `audio-pts`'s first
@@ -997,6 +1004,8 @@ impl MpvSource {
             flowing_arm_pos: None,
             audio_pts_unavailable: false,
             has_audio: None,
+            vf_still: kind == "image",
+            vf_sent: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -1257,6 +1266,39 @@ impl MpvSource {
         Ok(())
     }
 
+    /// The `vf` for `fps_cap` on the current load: `fps=<n>` for a moving picture, empty for a
+    /// still or no cap. mpv's `fps` filter (libavfilter's) emits a frame only once it knows how
+    /// long it lasts — the next frame's timestamp or a timed EOF; a still shown with
+    /// `image-display-duration=inf` has neither, so its one frame went in and the chain
+    /// reported EOF with no frame out (mpv's `vf` log: `filter input EOF` → `filter output
+    /// EOF`): nothing to render, never `Ready`, a switch to it stuck in `waiting_ready` (TODO
+    /// "An fps cap stalls a still image"). A still has no frame rate to cap anyway.
+    fn want_vf(&self) -> String {
+        let n = self.props.get("fps_cap").map_or(0.0, num);
+        if n > 0.0 && !self.vf_still {
+            format!("fps={n}")
+        } else {
+            String::new()
+        }
+    }
+
+    /// Send [`Self::want_vf`] when it differs from what mpv runs. A rejection reverts
+    /// `fps_cap` (R45) — to the previous value for an `apply`, to the current one (a no-op)
+    /// for a push of our own (a load, the image flag).
+    fn push_vf(&mut self) -> Result<(), ApiError> {
+        let vf = self.want_vf();
+        if self.vf_sent.as_deref() != Some(vf.as_str()) {
+            if self.prev_value.is_none() {
+                self.prev_value = self.props.get("fps_cap").cloned();
+            }
+            self.set("fps_cap", "vf", &vf)?;
+            self.vf_sent = Some(vf);
+        }
+        // Consumed by `track` (async) or unused (synchronous / unchanged).
+        self.prev_value = None;
+        Ok(())
+    }
+
     /// Remember request `id` for `prop`. `apply` has already stored the new value, so the
     /// value to revert to on failure is the one recorded by `apply` before it (`prev`).
     fn track(&mut self, id: u64, what: String, prop: &str) {
@@ -1277,6 +1319,11 @@ impl MpvSource {
     /// Load `path` (async `loadfile replace`). Everything per-load resets; the front
     /// texture is kept until the new file's first frame is shown (`Ready`).
     fn load(&mut self, path: &str) -> Result<(), ApiError> {
+        // The filter chain this file starts with: no fps cap on a still (`vf_still`: the
+        // `kind` at open, the extension's guess on a `path` change; mpv's image flag corrects
+        // it after the load). Sent before the `loadfile` (mpv runs async requests in order).
+        self.prev_value = None;
+        self.push_vf()?;
         let id = self.req_id();
         self.core()
             .command_async(id, &["loadfile", path, "replace"])
@@ -1701,6 +1748,13 @@ impl MpvSource {
                 self.kind = if img { "image" } else { "video" };
                 self.props
                     .insert("kind".into(), PropValue::Str(self.kind.into()));
+                // The extension guessed wrong: a still loses its fps filter (mpv re-filters
+                // its frame, or `refetch_lost_frame` asks for it again); an animated
+                // "image" gets the cap.
+                if self.vf_still != img {
+                    self.vf_still = img;
+                    let _ = self.push_vf();
+                }
             }
             // R92: `aid` (the *resolved* audio track selection — "manpage: the special
             // value `no` means no track is selected") always has a real textual value
@@ -2214,6 +2268,8 @@ impl Source for MpvSource {
                 self.kind
             ))),
             "path" => {
+                // The new file's still-or-not guess (its fps cap, `load`).
+                self.vf_still = infer_kind(&s) == "image";
                 // A `start` left by an early `position` belongs to the previous load.
                 self.set("path", "start", "none")
                     .and_then(|()| self.load(&s))
@@ -2257,15 +2313,9 @@ impl Source for MpvSource {
             // Copy modes unless this render context loaded a GL interop (on the render
             // worker — `mpv_hwdec`, § Sources "Hardware decoding").
             "hwdec" => self.set(prop, "hwdec", &mpv_hwdec(&s, self.hwdec_interop)),
-            "fps_cap" => {
-                let n = num(v);
-                let vf = if n > 0.0 {
-                    format!("fps={n}")
-                } else {
-                    String::new()
-                };
-                self.set(prop, "vf", &vf)
-            }
+            // `vf` `fps=<n>` — never on a still (`want_vf`); the prop keeps the value, and it
+            // applies if the load turns out to move.
+            "fps_cap" => self.push_vf(),
             // `true` = mpv's normal caching policy (`auto`, what the legacy engine runs
             // with DisableCache=false); `false` = forced off (legacy DisableCache=true).
             "cache" => self.set(prop, "cache", if b { "auto" } else { "no" }),

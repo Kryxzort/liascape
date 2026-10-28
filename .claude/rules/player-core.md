@@ -934,7 +934,7 @@ reached mpv) is for probes/tests; `mpv_get_string`/`mpv_get_f64` are synchronous
 absolute exact` (or `start` before the current file has loaded; a `path` change resets
 `start` to `none`); `hwdec` → `sources::mpv::mpv_hwdec(v, interop)` (copy modes unless the
 source's render context loaded the render worker's GL interop — "Hardware decoding" below);
-`fps_cap` → `vf` `fps=<n>` / `""`; `cache` →
+`fps_cap` → `vf` `fps=<n>` / `""` — **never on a still** (`want_vf`/`push_vf`, below); `cache` →
 **`auto`** for `true` (mpv's normal policy — what the legacy engine runs with
 DisableCache=false; `yes` would RAM-cache every local wallpaper) and `no` for `false`;
 `demuxer_max_mib`/`demuxer_back_mib` → `demuxer-max-bytes`/`demuxer-max-back-bytes`
@@ -945,6 +945,23 @@ mpv's default 150/50 MiB, the legacy engine's convention); `af` → `sources::mp
 `audio-out-params` come up, `start_muted_then_unmute_live`; the `aid` *property* then
 reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`); `audio_delay` →
 `audio-delay`.
+
+**An fps cap never reaches a still (2026-10-28).** mpv's `fps` video filter (libavfilter's) emits a
+frame only once it knows how long it lasts — the next frame's pts or a timed EOF; an image shown with
+`image-display-duration=inf` gives neither, so its one frame went in and the chain reported EOF with
+no frame out (mpv `--msg-level=vf=v`: `filter input EOF` → `filter output EOF`, nothing rendered).
+With `VideoFps` > 0 every image item stayed `ready: false` (size 0) and its switch sat in
+`waiting_ready` until the 10 s failure. Now `MpvSource::want_vf` sends `fps=<n>` only when the
+current load isn't a still (`vf_still`: the `kind` at open, `infer_kind` of a new `path` — set before
+its `loadfile`, async requests run in order —, then mpv's `current-tracks/video/image` flag, which
+re-pushes the `vf` when the guess was wrong: a misnamed still loses the filter and its frame comes
+through, an animated "image" gets the cap); `push_vf` skips an unchanged value. The node keeps
+`fps_cap` (`read` = the cap). Player-side, so any client is safe. Scenes and colours only store
+`fps_cap` (unaffected). Guards: `tests/sources.rs::fps_cap_never_stalls_an_image` (open capped, live
+cap, image → video (capped, `vf` has `fps`) → image by `path`, a `.dat` still; RED: never Ready;
+the flag's re-push removed → the `.dat` case RED), `tests/api.rs::fps_cap_never_stalls_a_still_any_kind`
+(both clocks: `srcs:*.fps_cap` + capped image/colour/scene/video B's each hand off and show; RED:
+stepped `step: no frame within 2 s … waiting for ready`).
 
 **A tempo filter is always in the chain (speed storm).** `mpv_af` hands mpv the graph's `af`
 plus `@lp-tempo:scaletempo2` (left out when the chain already has `scaletempo*`/`rubberband`).
