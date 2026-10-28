@@ -91,8 +91,9 @@ export interface LibraryItem {
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
   // the rotation: advanceOnVideoEnd off → intervalSeconds is a timer; on → it is the minimum play time and
-  // maxPlaySeconds the maximum (wall-clock seconds, 0 = off) — player-adapter.md § Rotation
-  advanceOnVideoEnd: boolean; maxPlaySeconds: number;
+  // maxPlaySeconds the maximum, and separateSceneTiming gives scenes + still images their own
+  // switchScenesAfterSeconds (wall-clock seconds, 0 = off everywhere) — player-adapter.md § Rotation
+  advanceOnVideoEnd: boolean; maxPlaySeconds: number; separateSceneTiming: boolean; switchScenesAfterSeconds: number;
   // WE-style transitions (gated by overrideGlobalSettings; else the globalTransition* fallbacks).
   transitionEnabled: boolean; transitionEffectIds: string[];
   transitionDurationMs: number; transitionDurationMaxMs: number; transitionShuffle: boolean;

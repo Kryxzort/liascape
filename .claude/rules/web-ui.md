@@ -303,9 +303,15 @@ value under the other label) with **"Maximum play time"** (`globalMaxPlaySeconds
 "Wait for video to end after interval" row is gone. The playlist-settings modal mirrors it inside its override block
 (field labels SWITCH EVERY / MINIMUM PLAY TIME + MAXIMUM PLAY TIME). Every duration is `components/PlayTimeInput.tsx`:
 a thin h/m/s wrapper over the shared `NumInput` (3 fields, `aria-label` "<label> hours|minutes|seconds", the total
-clamped to 359999 s; "none" / "off" next to a 0 minimum / maximum); hints in its `ROT_HINT`. The status line reads
-"N wallpapers, on video end, at least X, at most Y". Semantics: `player-adapter.md` § Rotation. Matrix cells drive the
-seconds field (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`).
+clamped to 359999 s; **"off"** next to every 0 limit — emptying a field and leaving it = 0 = off, the NumInput rule);
+hints in its `ROT_HINT` (each says what its 0 does). Under the two fields (only while "Switch when video ends" is on):
+**"Separate timing for scenes"** (`globalSeparateSceneTiming`, default on; the modal: a checkbox in its override block)
+and, only while that's on, **"Switch scenes after"** (`globalSwitchScenesAfterSeconds`, default 1800; modal SWITCH
+SCENES AFTER) — a scene / still image switches after it, 0 = off (it stays), and the min / max hints drop their scene
+clause (`minScenes` / `maxScenes`). The status line reads "N wallpapers, on video end, at least X, at most Y, scenes
+after Z" (", scenes stay" for 0). Semantics: `player-adapter.md` § Rotation. Matrix cells drive the seconds field
+(`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`); `playlist:sceneTiming` /
+`global:sceneTiming` the toggle + "Switch scenes after".
 
 ## Settings page under lp-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;
