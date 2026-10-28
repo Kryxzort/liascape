@@ -202,11 +202,14 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed. Under lp-player an aligned switch's B counts as playing from its `transition.started` (its effect runs, `cur:*` = B) — `DoVideoEndWait` commits it then, not at the handoff, like legacy at its overlay's start (player-adapter.md, `DoVideoEndWait` row); a next/prev/random mid-effect steps from B.
 
-**`EnsureTimedTick(takeBack = true)`** — the only way to start the tick (`StartTimedTimer`): any timed session with
-> 1 item has one, whatever its interval (it takes the queued next/prev/random/restart — a pure advance-on-end session
-and a 1-item session grown back by an Undo had none, so every queued switch sat untaken). Call it wherever the list
-or rotation changes; `takeBack: false` for live edits (no restart after `ReleaseTimer`). Details: `session.md` §
-Timed Playlist.
+**`EnsureTimedTick(takeBack = true)`** — the only way to start the tick (`StartTimedTimer`): EVERY timed session has
+one, whatever its interval and whatever its length (it takes the queued next/prev/random/restart — a pure
+advance-on-end session, a 1-item session and one grown back by an Undo had none, so every queued switch sat untaken
+until a later tick's start threw it away). A 1-item session takes a next / random (a switch to its one item, with its
+transition) and legacy's leak `restart`, but **never rotates by itself** (`CanRotate` = > 1 item: its interval only
+starts over, `PostSwitch` arms no aligned switch to itself — as `ApplyTimedPlaylist`/`RearmAdvanceOnVideoEnd` already
+did). Shared by both engines. Call it wherever the list or rotation changes; `takeBack: false` for live edits (no
+restart after `ReleaseTimer`). Details: `session.md` § Timed Playlist.
 
 **`RandomAndLaunch`** (a timed session's `random`) — a switch OUTSIDE the rotation's order, so it re-seats both
 cursors: `_timedIndex` = the pick's index in `_timedPaths` (the rotation goes on from the pick: next / the re-armed

@@ -39,15 +39,21 @@ paths:
 `PlayerHelper.ApplyTimedPlaylist`: `System.Threading.Timer` ticks every 100ms. Decrement uses `DateTime.UtcNow` deltas (no jitter drift). On shuffle, `AdvanceToNext` re-randomizes at end of each cycle with do/while guarantee new cycle's first ≠ old cycle's last. State written to `~/.config/livepaper/timed_state.json` only on significant events (not every tick) — in-memory `_timedRemainingMs` is authoritative.
 
 **Tick lifetime (`EnsureTimedTick`)**: the tick runs the interval AND takes every queued user switch
-(pending-action IPC below), so a timed session with > 1 item always has one — **whatever its interval** (pure
-advance-on-end too; Tick ignores the countdown there) — and gets one when its list GROWS past one item
+(pending-action IPC below), so EVERY timed session has one — **whatever its interval** (pure advance-on-end too;
+Tick ignores the countdown there) **and whatever its length** — and a list edit that leaves it tickless gets one
 (`ReorderPlaylist` — Undo of a trash, a strip add — `AppendToActivePlaylist`, `UpdateTimedSettings`). Every start
 site goes through it (null-guarded: no second tick). A live list edit (`takeBack: false`) never restarts it in a
 process that `ReleaseTimer`ed. Before: started only at a session (re)start with > 1 item AND interval > 0 → a pure
 advance-on-end session never took a next/prev/random (keybind or UI), and a session that started with one item (a
-trash leaving one survivor) stayed tickless after Undo — `pending_action.txt` sat untaken while `/current` said
-timed. A 1-item session still has no tick. `RestartCurrentAndLaunch` relaunches `PlayingHistoryIndex` (not an
-advance-on-end session's pre-fetch). Guard: matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`.
+trash leaving one survivor, a one-item playlist played) took nothing — `pending_action.txt` sat untaken while
+`/current` said timed, and `StartTimedTimer` discarded it once the list grew (also legacy's leak `restart`).
+**A 1-item session** (decided 2026-10-28: a tick for it, not a second consumer of the queue — the tick IS the
+queue's one consumer, and only the timer owner may run a switch): a next / random switches to its one item (its
+transition included: the strip's "next" after it is itself, the random pool is it), a prev steps back through its
+history (the same item; nothing at the session's start), a `restart` relaunches it; it never rotates by itself (`CanRotate` = > 1 item: the interval only starts
+over and `PostSwitch` arms no aligned switch to itself, like `ApplyTimedPlaylist`/`RearmAdvanceOnVideoEnd`).
+`RestartCurrentAndLaunch` relaunches `PlayingHistoryIndex` (not an advance-on-end session's pre-fetch). Guard:
+matrix `seq3:stripRemove+trashUndo+next`, `seq:plPlayAdvanceOnly+next`, `seq:plPlayOne+next|random`.
 
 **Tick state sync**: each tick calls `RefreshSignals()` (re-reads only `TimerStopped`/`TimerPaused`). Owner's `_timedRemainingMs` / history untouched.
 
