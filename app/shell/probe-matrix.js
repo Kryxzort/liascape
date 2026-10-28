@@ -1420,7 +1420,7 @@ const rowLabels = `[...document.querySelectorAll(".settings .srow .slabel-row")]
 C["gAdvanceRelabel"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
     await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance"); await m.sleep(400);`));
     c.ui = await js(`(() => { const rows = ${rowLabels}; const v = (l) => [...(document.querySelector(".settings") && [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === l)?.querySelectorAll(".hms input") || [])].map((x) => x.value);
-      return { rows: rows.filter((r) => /switch|play time|wait|interval/i.test(r || "")), min: v("Minimum play time"), max: v("Maximum play time") }; })()`);
+      return { rows: rows.filter((r) => /^(switch every|switch when|minimum play|maximum play|wait for video|interval)/i.test(r || "")), min: v("Minimum play time"), max: v("Maximum play time") }; })()`);
     await ui(`${gIntervalTo(4, "Minimum play time")}`);
     c.armed = await waitFor(async () => armedTo(await ctl.call("state")).length > 0, 9000, 100);
     c.armedSt = await ctl.call("state");
