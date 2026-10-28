@@ -56,7 +56,7 @@ scene advances).
 1. Fork: OK — done.
 2. Model/effort: "whatever you think is best balance" → hard work (Phase 2 tracks, hunts) Opus high effort;
    chores (flakes, docs, merges, gate runs) Sonnet.
-3. Push/merge + re-pin: OK. `lp-player` is PUSHED to `Kryxzort/livepaper-pro` (remote `fork`; SSH has no key in the
+3. Push/merge + re-pin: OK. `lp-player` is PUSHED to `Kryxzort/livepaper-pro` (remote `origin` since 2026-10-28 — upstream is `upstream`, push disabled; SSH has no key in the
    agent shell → push with `git -c credential.helper= -c credential.helper='!gh auth git-credential' push
    https://github.com/Kryxzort/livepaper-pro.git lp-player`). **Merge into `main` only after a quiet full-matrix
    gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/livepaper.nix` re-pin to
