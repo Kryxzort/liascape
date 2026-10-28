@@ -8,6 +8,7 @@ import { Library } from "./views/Library";
 import { PlaylistStrip } from "./components/PlaylistStrip";
 import { PreviewModal } from "./components/PreviewModal";
 import { LibrarySettingsModal } from "./components/LibrarySettingsModal";
+import { SETTINGS_MORPH } from "./components/morph";
 import type { Wallpaper } from "./api/client";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
@@ -88,10 +89,11 @@ export default function App() {
 
   // PERF: while a modal is open, freeze the (invisible, behind the opaque backdrop) card gif overlays
   // via CSS — pure-waste animation that janks the morph. Class toggle = no 300-card re-render.
-  // Keep frozen through the close-morph too (~380ms) or the gifs resume mid-morph-back → jank.
+  // Keep frozen through the close-morph too (the slower settings one covers the preview's) or the gifs resume
+  // mid-morph-back → jank.
   useEffect(() => {
     if (s.settingsItem || preview) { document.body.classList.add("modal-open"); return; }
-    const t = setTimeout(() => document.body.classList.remove("modal-open"), 380);
+    const t = setTimeout(() => document.body.classList.remove("modal-open"), SETTINGS_MORPH.close.duration + 40);
     return () => clearTimeout(t);
   }, [s.settingsItem, preview]);
 

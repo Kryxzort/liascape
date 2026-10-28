@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
+import { SETTINGS_MORPH } from "./morph";
 
 // "Scene properties" in the item settings modal: a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (lp-player) and saved per item.
@@ -33,7 +34,7 @@ export function ScenePropsEditor({ path }: { path: string }) {
   useEffect(() => {
     alive.current = true; // a new item remounts (key={path} in the modal): its state starts empty
     // defer past the open-morph (its re-render mid-flight jumps the panel — like the duration row)
-    const t = setTimeout(() => { api.sceneProps(path).then((r) => alive.current && setData(r)).catch(() => {}); }, 380);
+    const t = setTimeout(() => { api.sceneProps(path).then((r) => alive.current && setData(r)).catch(() => {}); }, SETTINGS_MORPH.open.duration + 40);
     return () => {
       alive.current = false; clearTimeout(t);
       for (const d of Object.values(persistRef.current)) { clearTimeout(d.tm); d.fn(); }

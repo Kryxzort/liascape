@@ -87,6 +87,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
         polling path untouched — owner: lp-player only).
   - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
+- [x] **Slow down morph** (owner todo, 2026-10-28): the item settings modal's card → modal flight (and back) is
+      `SETTINGS_MORPH` (open 620 ms with an ease that spreads the travel, close 500 ms) instead of the Browse
+      preview's 430 / 340 ms; the Browse preview is unchanged. Guard: `--probe probe-morph.js` (moving time ≥ 520 /
+      420 ms; RED before 353–384 / 315–317). Not added: a reduced-motion branch (the app has none anywhere).
 - [x] **Auto-mute muted the wallpaper on our own switches** (owner, 2026-10-28: "auto mute is muting itself when
       transition is playing audio" — with both delays 0 a hitch, with a non-zero "unmute after" muted that long).
       Not a missing identity: every own stream (each switch's incoming mpv `lp-player` / scene worker
