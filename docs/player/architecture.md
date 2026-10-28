@@ -296,9 +296,9 @@ missed:
   history, `--restore` replay and auto-mute are still driven by the backend adapter
   (`.claude/rules/player-adapter.md`) over the Command API, not by an in-process `Program`/`Signal`. **Phase 3**
   moves them into the player (retiring the backend's timer/monitor/restart daemons,
-  `pending_action.txt`, pid-file ownership) and adds the auto-mute Signal that meters each foreign
-  PipeWire stream individually (never the mix) and excludes the player's own bus by *ownership*,
-  targeting **≤ 100 ms** reaction (§4.4; a probe-measured switch-over criterion).
+  `pending_action.txt`, pid-file ownership). The in-player auto-mute Signal (per-stream metering, the player's
+  own bus excluded by *ownership*, ≤ 100 ms) is **PARKED** (owner, 2026-10-28): auto-mute stays the backend's
+  `AudioMonitor` for both engines, and is not part of the switch-over bar while parked.
 - **Per-monitor is a player capability, not a user-facing feature yet.** The graph already
   supports independent per-output content (`out:<connector>`, its own main layer) and this is
   provable today via `ctl`/headless tests; nothing in the Electron UI exposes assigning different
@@ -306,8 +306,8 @@ missed:
   project, brainstormed on its own (`docs/TODO.md` → "Follow-up projects"), after switch-over.
 - **The switch-over bar itself (design spec §11) is not met and not attempted yet**: zero
   dropouts/seams across the full compose matrix for ≥ 50 consecutive switches per mode, full
-  parity with every setting verified live, proven crash isolation, an 8 h soak with flat RSS/VRAM,
-  auto-mute ≤ 100 ms, and a scene corpus no worse than today. **Task 20** (next) runs the Phase 1
+  parity with every setting verified live, proven crash isolation, an 8 h soak with flat RSS/VRAM
+  (auto-mute ≤ 100 ms parked), and a scene corpus no worse than today. **Task 20** (next) runs the Phase 1
   on-machine battery and soak for what Phase 1 *does* cover (video/image/colour, all transition
   methods, both outputs) and reports in `docs/player/reports/phase1.md`; the full bar can't be
   met until Phases 2–4 land.

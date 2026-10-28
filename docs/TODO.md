@@ -93,7 +93,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` — done: dropout
       0/0 everywhere, frame pacing/outputs/permonitor PASS, 4 product findings fixed (Tasks 20b–20e), final
       soak PASS (0.31 MiB/min).
-- [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process incl. auto-mute ≤ 100 ms; the web
+- [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal is PARKED; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
@@ -492,6 +492,9 @@ Two bug classes kept recurring; fix the class, not the instance:
       now taken). Matrix `seq:plPlayOne+next|random` RED 2/2 → GREEN (session.md § Timed Playlist).
 
 ## Follow-up projects (each gets its own brainstorm)
+- [ ] **PARKED (owner, 2026-10-28): in-player auto-mute rework** — the Phase 3 auto-mute Signal (per-stream
+      metering in the player, own bus excluded by ownership, ≤ 100 ms). Auto-mute stays `AudioMonitor` in the
+      backend for both engines until the owner un-parks it. Design: spec §4.4 / §11 4b.
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
