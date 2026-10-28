@@ -103,7 +103,9 @@ public static class TransitionService
 
     public static int PickDuration(Config c)
     {
-        int min = Math.Clamp(c.DurationMs, 50, 10000);
+        // 0 ms = a cut (Pick → null; TryStart → false) — the old floor was 50 ms (owner QOL: "lower than 50");
+        // 1–49 ms run the effect that fast (the player's gains still ramp ≥ 30 ms, R42)
+        int min = Math.Clamp(c.DurationMs, 0, 10000);
         if (c.DurationMaxMs > min) return _rng.Next(min, Math.Clamp(c.DurationMaxMs, min, 10000) + 1);
         return min;
     }
@@ -117,6 +119,7 @@ public static class TransitionService
         var effect = PickEffect(cfg);
         if (effect == null) return null;
         int durationMs = PickDuration(cfg);
+        if (durationMs <= 0) return null; // 0 ms = a cut (no effect at all, the player's 30 ms anticlick ramps)
         string method = (SettingsService.Load().TransitionMethod ?? "reveal").ToLowerInvariant();
         if (method != "frozen" && method != "full-live" && method != "reveal") method = "reveal";
         var uniforms = new Dictionary<string, double[]>();
@@ -183,6 +186,7 @@ public static class TransitionService
             var effect = PickEffect(cfg);
             if (effect == null) { TransLog("transition SKIPPED: no enabled effect resolves from the manifest"); return false; }
             int durationMs = PickDuration(cfg);
+            if (durationMs <= 0) { TransLog("transition SKIPPED: duration 0 ms = a cut"); return false; }
 
             var monitors = MonitorDetector.DetectAsync().GetAwaiter().GetResult();
             if (monitors.Count == 0) { TransLog("transition SKIPPED: MonitorDetector found 0 outputs (hyprctl/swaymsg/wlr-randr/lp-transition --list-outputs/xrandr all failed)"); return false; }

@@ -87,6 +87,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
         polling path untouched — owner: lp-player only).
   - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
+- [x] **Transition duration below 50 ms + free typing in every number field** (owner todo + follow-up, 2026-10-28):
+      the floor is 0 ms (0 = a cut, 1–49 ms = that fast an effect; UI, `TransitionService.PickDuration`); every numeric
+      settings field is `NumInput` — empty / out-of-range while focused, nothing saved until a valid value or the blur,
+      clamped to min/max on blur/Enter. Guards: matrix `num:*`, `plTrShort`/`plTrZero` (RED 12/12). The other agent's
+      new min/max play-time inputs (rotation) can adopt `NumInput` once merged.
 - [x] **F / any key while holding a slider** (owner todo, 2026-10-28: "make F not do yellow outline when holding
       slider"): no app shortcut is bound to F — any key flipped the held (mouse-focused) slider to keyboard focus →
       Chromium's focus ring. `hooks/rangeDrag.ts` swallows keys during a range drag (shortcuts, Escape, arrows) and

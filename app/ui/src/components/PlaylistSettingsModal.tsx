@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import type { PlaylistSettings } from "../api/client";
 import { TransitionPicker } from "./TransitionPicker";
 import { PlayTimeInput } from "./PlayTimeInput";
+import { NumInput } from "./NumInput";
 
 // Playlist Settings overlay. Centered modal:
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
@@ -51,9 +52,9 @@ export function PlaylistSettingsModal({
                 <label className="ck"><input type="checkbox" disabled={!ovr} checked={ps.waitForVideoEnd} onChange={(e) => setPS({ waitForVideoEnd: e.target.checked })} /> Wait for video to end after interval</label>
                 <div className="field-label">SWITCH EVERY</div>
                 <div className="hms">
-                  <input className="num" type="number" min={0} max={99} disabled={!ovr} value={H} onChange={(e) => setIv(+e.target.value, M, S)} /><span>h</span>
-                  <input className="num" type="number" min={0} max={59} disabled={!ovr} value={M} onChange={(e) => setIv(H, +e.target.value, S)} /><span>m</span>
-                  <input className="num" type="number" min={0} max={59} disabled={!ovr} value={S} onChange={(e) => setIv(H, M, +e.target.value)} /><span>s</span>
+                  <NumInput min={0} max={99} disabled={!ovr} value={H} onChange={(v) => setIv(v, M, S)} /><span>h</span>
+                  <NumInput min={0} max={59} disabled={!ovr} value={M} onChange={(v) => setIv(H, v, S)} /><span>m</span>
+                  <NumInput min={0} max={59} disabled={!ovr} value={S} onChange={(v) => setIv(H, M, v)} /><span>s</span>
                 </div>
 
                 <div className="field-label">TRANSITIONS</div>

@@ -295,6 +295,24 @@ cards selected, then f/F/Delete/Escape/Right: no outline/glow on the held slider
 doesn't step, nothing trashed, no keyboard ring after the release; RED on the base UI: the outline `auto` + Escape
 closed the modal).
 
+## Numeric fields (`components/NumInput.tsx`, owner todo 2026-10-28)
+Owner: "everything should let you empty out the field entirely and only snap back to minimum when you focus out".
+**Every numeric settings field is a `<NumInput value min max step onChange …>`** (Settings: restart interval, the
+rotation H/M/S, auto-mute delays + threshold, fps cap, demuxer MiB, VRAM limit MiB, scene transition delay, monitor
+fps, A-sync offset; the playlist modal's H/M/S; the transition picker's duration + range max; `Combo`'s field —
+normalization LUFS). While focused it shows exactly what was typed (empty, `-`, past min/max, partial) and only a
+complete in-range number is committed (`onChange` → still live while typing, like every setting); an empty /
+out-of-range draft is never saved. Blur or Enter → `clampNum` (empty → `emptyValue ?? min ?? 0`; integers unless the
+step has a fraction) → committed + shown. Set without focus (a script / the matrix's `setValue`) → committed clamped
+at once. Don't add a raw `<input type=number>` for a setting — use it (and its min/max are the backend's bounds).
+**Transition duration floor = 0 ms** (`TRANSITION_MIN_MS`; was 50): 0 = a plain cut (the backend sends no effect —
+`TransitionService.Pick` → null, legacy `TryStart` → false), 1–49 ms run the effect that fast (the player accepts any
+`duration_ms`; its gains still ramp ≥ 30 ms, R42); the UI preview clamps its own loop to ≥ 100 ms. Guards: matrix
+`num:clearToMin` (Demuxer max: emptied → stays empty and unsaved while focused → blur → 1 saved),
+`num:overToMax` (fps cap 999 → unsaved while focused → blur → 480), `plTrShort` / `plTrZero` (+ `seq:…+next`: a
+20 ms effect / 0 ms = a cut on the armed and the next switch); RED on the base UI: 12/12 (saved 0 / 999 at once; the
+duration clamped to 50).
+
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
 - `// COOL:` — motion/glow/UX intent.

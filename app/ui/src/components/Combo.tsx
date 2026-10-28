@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
+import { NumInput } from "./NumInput";
 
 export interface ComboOpt { value: number; label: string }
 
@@ -31,8 +32,7 @@ export function Combo({ value, options, onChange, min, max, step = 1, title }: {
   return (
     <>
       <div ref={wrap} className="combo" title={title}>
-        <input className="num combo-in" type="number" value={value} min={min} max={max} step={step}
-          onChange={(e) => { const v = e.target.value; if (v !== "") onChange(+v); }} />
+        <NumInput className="num combo-in" value={value} min={min} max={max} step={step} onChange={onChange} />
         <button type="button" className="combo-caret" title="Presets"
           onClick={(e) => { e.stopPropagation(); if (open) { setOpen(false); return; } place(); setOpen(true); }}>
           <ChevronDown size={14} />

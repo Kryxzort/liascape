@@ -512,6 +512,29 @@ setting("fps24", "videoFps", 24, `m.setValue(m.input("Video FPS cap"), 24, "fps"
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
 setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable cache"), true, "Disable cache");`);
 setting("demux64", "demuxerMaxBytes", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
+// numeric settings fields type freely and snap on blur (owner: "everything should let you empty out the field
+// entirely and only snap back to minimum when you focus out" — components/NumInput.tsx): focused, the field keeps
+// exactly what was typed (empty / past the max) and nothing is saved; blur → clamped to min / max, saved
+for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demuxer max (MiB)", "demuxerMaxBytes", 40, "", 1, true],
+  ["overToMax", "Video FPS cap", "videoFps", 24, "999", 480, false]]) {
+  C[`num:${name}`] = { states: ["idle", "single"], noSwitch: true,
+    async pre() { await post("/settings", { [key]: start, ...(adv ? { advancedSettings: true } : {}) }); },
+    async run(c) {
+      await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.input(${JSON.stringify(label)}); i++) await m.sleep(100);
+        const el = m.input(${JSON.stringify(label)}); el.focus(); m.setValue(el, ${JSON.stringify(typed)}, ${JSON.stringify(label)});`);
+      await sleep(900); // past the store's 250 ms save debounce
+      c.focused = { field: await ui(`return m.input(${JSON.stringify(label)}).value;`), saved: (await http("GET", "/settings")).json?.[key] };
+      await ui(`m.input(${JSON.stringify(label)}).blur();`); await sleep(900);
+      c.blurred = await ui(`return m.input(${JSON.stringify(label)}).value;`);
+    }, check(c) {
+      const v = [];
+      if (c.focused.field !== typed) v.push(`while focused the field shows ${JSON.stringify(c.focused.field)}, typed ${JSON.stringify(typed)}`);
+      if (c.focused.saved !== start) v.push(`while focused settings.${key} = ${c.focused.saved} (typed ${JSON.stringify(typed)}; nothing may be saved before the blur)`);
+      if (c.after.s[key] !== want) v.push(`after the blur settings.${key} = ${c.after.s[key]}, expected ${want}`);
+      if (c.blurred !== String(want)) v.push(`after the blur the field shows ${JSON.stringify(c.blurred)}, expected "${want}"`);
+      return v;
+    } };
+}
 // switches
 // (neither side of a running effect: a fuzz chain's incoming B can be k3)
 C["cardApply"] = { switch: true, async run(c) { c.target = [K[2], K[1], K[3]].find((p) => p !== c.shown && p !== c.before.cur?.path); await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".thumb-wrap"), "card");`); },
@@ -890,6 +913,11 @@ const TR = {
     saved: (s) => s?.transitionEnabled === false, want: (e) => e.effect_id == null, what: "a cut" },
   Duration: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 1200, "duration");`,
     saved: (s) => s?.transitionDurationMs === 1200, want: (e) => e.duration_ms === 1200, what: "1200 ms" },
+  // under the old 50 ms floor (owner QOL): a 20 ms effect runs as 20 ms; 0 ms is a plain cut (no effect requested)
+  Short: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 20, "duration");`,
+    saved: (s) => s?.transitionDurationMs === 20, want: (e) => e.effect_id != null && e.duration_ms === 20, what: "a 20 ms effect" },
+  Zero: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 0, "duration");`,
+    saved: (s) => s?.transitionDurationMs === 0, want: (e) => e.effect_id == null, what: "0 ms = a cut" },
   Effect: { drive: `m.click(m.byText(".tr-modal .tr-chip", "Crosswarp"), "Crosswarp"); await m.sleep(200); m.click(m.byText(".tr-modal .tr-chip", "Fade"), "Fade");`,
     saved: (s) => JSON.stringify(s?.transitionEffectIds) === JSON.stringify(["crosswarp"]), want: (e) => e.effect_id === "crosswarp", what: "crosswarp" },
 };

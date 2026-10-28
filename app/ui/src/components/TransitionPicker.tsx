@@ -4,6 +4,10 @@ import { Search, CheckCheck, Star, RefreshCw } from "lucide-react";
 import { api, media, type TransitionEffect, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { preview, type Source } from "./transitionPreview";
+import { NumInput } from "./NumInput";
+
+// API: the backend's bounds (TransitionService.PickDuration) — 0 = a cut, the old floor was 50 ms
+export const TRANSITION_MIN_MS = 0, TRANSITION_MAX_MS = 10000;
 
 // The transition config slice this picker edits (lives on PlaylistSettings or the global AppSettings).
 export interface TransitionValue {
@@ -132,17 +136,19 @@ export function TransitionPicker({
 
                 <div className="tr-row">
                   <span className="field-label">DURATION</span>
-                  <input className="num" type="number" min={50} max={10000} step={50} disabled={!en}
+                  {/* 0 ms = a plain cut (the backend sends no effect); 1–49 ms = the effect, that fast */}
+                  <NumInput min={TRANSITION_MIN_MS} max={TRANSITION_MAX_MS} step={50} disabled={!en}
+                    title="0 = a cut (no effect)"
                     value={value.transitionDurationMs}
-                    onChange={(e) => onChange({ transitionDurationMs: Math.max(50, +e.target.value || 0) })} /><span>ms</span>
+                    onChange={(v) => onChange(rangeOn && value.transitionDurationMaxMs < v ? { transitionDurationMs: v, transitionDurationMaxMs: v } : { transitionDurationMs: v })} /><span>ms</span>
                   <button type="button" className={`tr-toggle${rangeOn ? " on" : ""}`} disabled={!en}
                     onClick={() => onChange({ transitionDurationMaxMs: rangeOn ? 0 : value.transitionDurationMs + 400 })}>
                     Random range</button>
                   {rangeOn && (<>
                     <span>to</span>
-                    <input className="num" type="number" min={value.transitionDurationMs} max={10000} step={50} disabled={!en}
+                    <NumInput min={value.transitionDurationMs} max={TRANSITION_MAX_MS} step={50} disabled={!en}
                       value={value.transitionDurationMaxMs}
-                      onChange={(e) => onChange({ transitionDurationMaxMs: +e.target.value || 0 })} /><span>ms</span>
+                      onChange={(v) => onChange({ transitionDurationMaxMs: v })} /><span>ms</span>
                   </>)}
                 </div>
 
