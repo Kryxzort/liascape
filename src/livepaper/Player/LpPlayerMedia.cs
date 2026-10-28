@@ -274,6 +274,19 @@ public static class LpPlayerMedia
 
     private static void OnEvent(string kind, JsonElement e)
     {
+        if (kind == "scene.loudness")
+        {
+            // a scene's loudness learned on first play — no source changed; store + apply off this callback
+            var lp = Str(e, "path");
+            double? Num(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+            if (lp.Length > 0 && Num("lufs") is double lufs && Num("seconds") is double secs)
+            {
+                bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
+                var peak = Num("peak_dbfs");
+                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
+            }
+            return;
+        }
         // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         if (kind == "source.broken")
@@ -308,6 +321,17 @@ public static class LpPlayerMedia
         // Tell them what's really there; off this callback, which must never block on a request.
         if (kind == "transition.failed" && corr == _lastCorr)
             _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
+    }
+
+    // `scene.loudness`: store it (learned once; a partial until a complete one) and, with normalization on, ramp
+    // every live source of that scene to its new `gain.normalize` — the same worker keeps playing.
+    private static void OnSceneLoudness(string path, double lufs, double? peak, double seconds, bool complete)
+    {
+        bool stored = LibraryService.StoreSceneLoudness(path, lufs, peak, seconds, complete);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        LpPlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
+            + (complete ? "" : " (partial)") + (stored ? " — stored" : " — kept the stored one"));
+        if (stored) PlayerHelper.OnLoudnessMeasured(path);
     }
 
     private static int _eventOutcomes;
@@ -549,6 +573,23 @@ public static class LpPlayerMedia
     }
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
+
+    // A scene's `gain.normalize` (dB) under `s`: its learned loudness (LibMeta.LoudnessI, the player's
+    // `scene.loudness`) brought to NormalizeTargetLufs — like the video loudnorm's linear mode, never boosted past
+    // −1.5 dBFS at its sample peak (a plain gain has no limiter), clamped to −60…+24 dB. 0 = off / not learned
+    // yet. NoAudio doesn't zero it: the stream is silent anyway, and un-muting then comes back at the right level.
+    public const double NormalizePeakCeilingDb = -1.5;
+    public static double SceneNormalizeDb(LibMeta? meta, AppSettings s)
+    {
+        if (!s.NormalizeAudio || meta?.LoudnessI is not double i || !double.IsFinite(i)) return 0.0;
+        double g = s.NormalizeTargetLufs - i;
+        if (meta.LoudnessTP is double peak && double.IsFinite(peak)) g = Math.Min(g, NormalizePeakCeilingDb - peak);
+        return Math.Round(Math.Clamp(g, -60.0, 24.0), 3);
+    }
+
+    // `gain.normalize` changes as a ramp, never a step (a loudness landing mid-play, a target change) — long
+    // enough to be inaudible as a jump, short enough to read as "applied at once".
+    public const int NormalizeRampMs = 500;
 
     // Loudness normalization for `path` under `s` (mirrors PlayerHelper.NormalizeAf): unmeasured →
     // no filter now + a background measure for next time.
@@ -832,6 +873,8 @@ public static class LpPlayerMedia
     //   gain.user = VolumeDb(transient item ?? its override ?? transient global ?? Volume)
     //   speed     = clamp(transient item ?? its override ?? transient global ?? Speed, 0.1, 4)
     //   af        = its OWN item's loudnorm at the target ("" off / NoAudio / unmeasured — kicks a measure)
+    //   gain.normalize (scenes only) = SceneNormalizeDb(its learned loudness, the target) — 0 off / not
+    //               learned yet; sent as `animate` over NormalizeRampMs (a landing mid-play ramps, never steps)
     //   no_audio, hwdec, fps_cap, cache, demuxer_max_mib, demuxer_back_mib = the global settings
     //   gain.mute = −96 when muted, else 0
     //   + the layer: lay:*:main.fit = VideoScale (Fresh passes only; one `set` if any main layer differs)
@@ -968,6 +1011,8 @@ public static class LpPlayerMedia
         if (Want("speed"))
             d["speed"] = Math.Clamp((item ? r!.ItemSpeed : null) ?? Meta()?.Speed ?? r?.GlobalSpeed ?? settings().Speed, 0.1, 4.0);
         if (Want("af")) d["af"] = NormalizeAf(path, settings()) ?? "";
+        // a scene's loudness normalization: its learned loudness → a plain gain (0 until learned / when off)
+        if (Want("gain.normalize") && PlayerHelper.IsScenePath(path)) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
         if (Want("no_audio")) d["no_audio"] = settings().NoAudio;
         if (Want("hwdec")) d["hwdec"] = HwDec(settings());
         if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFps);
@@ -1054,6 +1099,8 @@ public static class LpPlayerMedia
         {
             if (prop == "gain.mute")
                 client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = 30 }, LpPlayerClient.QuickMs);
+            else if (prop == "gain.normalize")
+                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = NormalizeRampMs }, LpPlayerClient.QuickMs);
             else
                 client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
             return Sent.Ok;

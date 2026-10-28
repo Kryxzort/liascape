@@ -197,7 +197,7 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Disable cache" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>}
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}`} disabled={mute} rk="volume">
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
-        <Row label="Normalize audio" hint="match perceived loudness across videos (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." disabled={mute} rk="normalizeAudio">
+        <Row label="Normalize audio" hint={"match perceived loudness across wallpapers (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." + (lpActive ? " A scene learns its loudness over its first minute of play, then is matched from that moment on." : "")} disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
         {!mute && g("normalizeAudio", false) && <Row label="Target loudness" hint="LUFS (dB-referenced loudness); −14 = streaming standard, lower = quieter. Pick a preset or type your own. Every video is matched to this level." rk="normalizeTargetLufs">
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-100} max={0} step={1}

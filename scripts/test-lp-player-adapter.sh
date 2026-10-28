@@ -819,6 +819,80 @@ stop_now
 kill "$WSP" 2>/dev/null; WSP=""
 setting '.SceneVramLimitEnabled = false'
 
+echo "== Phase 2: scene loudness learned on first play (scene.loudness → the index → gain.normalize, live)"
+# A player whose learning window is 3 s of audible play (LP_PLAYER_LOUDNESS_WINDOW_S; 60 in production, a partial
+# from a third of it). S5: a stereo 1 kHz tone at −20 dBFS peak = −20 LUFS; S6: no sound; S7: −26 dBFS.
+restart_player 8c LP_PLAYER_LOUDNESS_WINDOW_S=3
+S5=$LIB/workshop/900000005; S6=$LIB/workshop/900000006; S7=$LIB/workshop/900000007
+mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-20}'
+mk_scene "$S6" '{"pattern":"solid","rgb":[0,255,255],"native":[640,360]}'
+mk_scene "$S7" '{"pattern":"solid","rgb":[255,0,255],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-26}'
+idx_loud() { jq -c --arg k "$1" '.[$k] | {i: .loudnessI, tp: .loudnessTP, s: .loudnessSeconds, partial: .loudnessPartial}' "$IDX" 2>/dev/null; }
+loud_i() { jq -r --arg k "$1" '.[$k].loudnessI // empty' "$IDX" 2>/dev/null; }
+wloud() { ctl probe '{"name":"workers"}' | jq -r --arg id "$1" ".workers[] | select(.id==\$id) | .loudness.$2"; }
+setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14 | .Volume = 100 | .NoAudio = false'
+post /apply "{\"path\":\"$S5\"}" >/dev/null
+waitfor 5000 scene_ready "$S5" || bad "/apply s5 → $(basename "$(cur path)") ready $(cur ready)"
+SID5=$(srcIdForPath "$S5"); WP5=$(wpid "$SID5")
+near "$(cur gain.normalize)" 0 0.001 && ok "an unlearned scene plays at gain.normalize 0" || bad "unlearned scene: gain.normalize $(cur gain.normalize)"
+t_l=$(ms_now)
+waitfor 15000 eval '[ -n "$(loud_i 900000005)" ]' && ok "learned after $(( $(ms_now) - t_l )) ms of play: index $(idx_loud 900000005)" || bad "no loudness in the index: $(idx_loud 900000005)"
+near "$(loud_i 900000005)" -20 1 && jq -e '."900000005" | .loudnessSeconds >= 3 and (.loudnessPartial // false | not)' "$IDX" >/dev/null \
+  && ok "…−20 LUFS ± 1 over ≥ 3 audible s, complete" || bad "stored $(idx_loud 900000005), want ≈ −20 LUFS, complete"
+waitfor $WAIT cur_near gain.normalize 6 0.1 && [ "$(wpid "$SID5")" = "$WP5" ] && [ "$(srcIdForPath "$S5")" = "$SID5" ] \
+  && ok "gain.normalize moved live to $(cur gain.normalize) dB (−14 − (−20)) — same source $SID5, same worker $WP5" || bad "normalize live: $(cur gain.normalize), src $SID5 → $(srcIdForPath "$S5"), worker $WP5 → $(wpid "$SID5")"
+ramp=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
+echo "$ramp" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp), never a step" || bad "normalize not ramped: $ramp"
+waitfor $WAIT eval 'near "$(waudio "$SID5" gain_db)" 6 0.1' && ok "…reaches the worker's stream (effective $(waudio "$SID5" gain_db) dB)" || bad "worker gain_db $(waudio "$SID5" gain_db)"
+setting '.NormalizeTargetLufs = -23'
+waitfor $WAIT cur_near gain.normalize -3 0.1 && ok "target −23 → gain.normalize $(cur gain.normalize) live" || bad "target −23 → $(cur gain.normalize)"
+setting '.NormalizeAudio = false'
+waitfor $WAIT cur_near gain.normalize 0 0.1 && ok "normalization off → gain.normalize $(cur gain.normalize) live" || bad "normalization off → $(cur gain.normalize)"
+setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14'
+waitfor $WAIT cur_near gain.normalize 6 0.1 || bad "normalization back on → $(cur gain.normalize)"
+post /library/volume "{\"path\":\"$S5\",\"intValue\":50}" >/dev/null
+waitfor $WAIT cur_near gain.user -18.0618 && cur_near gain.normalize 6 0.1 && ok "a per-item volume (50) stacks on it: gain.user $(cur gain.user), gain.normalize $(cur gain.normalize)" || bad "override: gain.user $(cur gain.user), normalize $(cur gain.normalize)"
+post /library/volume "{\"path\":\"$S5\",\"intValue\":100}" >/dev/null
+[ "$(wpid "$SID5")" = "$WP5" ] || bad "the worker changed while normalizing: $WP5 → $(wpid "$SID5")"
+# reopened: the new source opens at its normalization (create props), and a later play's measurement never replaces it
+I5=$(loud_i 900000005)
+stop_now
+post /apply "{\"path\":\"$S5\"}" >/dev/null
+waitfor 5000 scene_ready "$S5" || bad "re-apply s5 → $(basename "$(cur path)")"
+SID5b=$(srcIdForPath "$S5")
+W5=$(python3 -c "print(round(-14 - float('$I5'), 3))")
+G5b=$(ctl get "{\"path\":\"$SID5b.gain.normalize\"}" | jq -r .value)
+A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
+[ "$SID5b" != "$SID5" ] && near "$G5b" "$W5" 0.01 && [ "$A5b" = 0 ] \
+  && ok "reopened ($SID5b): gain.normalize $G5b from its first frame (its create props — no ramp)" || bad "reopened $SID5b: gain.normalize $G5b (want $W5), ramps $A5b"
+ns_l() { ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq --arg id "$1" '[.events[] | select(.id==$id)] | length'; }
+waitfor 15000 eval '[ "$(ns_l "$SID5b")" -ge 1 ]' && [ "$(loud_i 900000005)" = "$I5" ] && ok "a second play's measurement keeps the learned one ($I5)" || bad "second play: events $(ns_l "$SID5b"), index $(idx_loud 900000005) (was $I5)"
+grep -q "loudness .* kept the stored one" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" || bad "adapter log has no 'kept the stored one' line"
+# a scene without sound: nothing learned, never normalized
+post /apply "{\"path\":\"$S6\"}" >/dev/null
+waitfor 5000 scene_ready "$S6" || bad "/apply s6 → $(basename "$(cur path)")"
+SID6=$(srcIdForPath "$S6"); sleep 4.5
+[ -z "$(loud_i 900000006)" ] && near "$(cur gain.normalize)" 0 0.001 && [ "$(ns_l "$SID6")" = 0 ] \
+  && ok "a scene without sound: no scene.loudness, nothing stored, gain.normalize 0" || bad "silent scene: index $(idx_loud 900000006), events $(ns_l "$SID6"), normalize $(cur gain.normalize)"
+# switched away early: a partial (≥ a third of the window); a later play's complete one replaces it
+post /apply "{\"path\":\"$S7\"}" >/dev/null
+waitfor 5000 scene_ready "$S7" || bad "/apply s7 → $(basename "$(cur path)")"
+SID7=$(srcIdForPath "$S7")
+audible_ge() { local v; v=$(wloud "$1" seconds); python3 -c "import sys; sys.exit(0 if float('${v:-0}') >= $2 else 1)" 2>/dev/null; }
+waitfor 10000 audible_ge "$SID7" 1.2 || bad "s7 never reached 1.2 s audible: $(wloud "$SID7" seconds)"
+post /apply "{\"path\":\"$S6\"}" >/dev/null
+waitfor $WAIT eval '[ -n "$(loud_i 900000007)" ]' && jq -e '."900000007".loudnessPartial == true' "$IDX" >/dev/null && near "$(loud_i 900000007)" -26 1 \
+  && ok "switched away after ~1.2 s: a partial stored $(idx_loud 900000007)" || bad "partial: $(idx_loud 900000007)"
+post /apply "{\"path\":\"$S7\"}" >/dev/null
+waitfor 5000 scene_ready "$S7" || bad "re-apply s7 → $(basename "$(cur path)")"
+SID7b=$(srcIdForPath "$S7")
+waitfor $WAIT cur_near gain.normalize 12 0.2 && ok "reopened with a partial: gain.normalize $(cur gain.normalize) (−14 − (−26)) from it" || bad "s7 with a partial: gain.normalize $(cur gain.normalize), want 12 (applied from the partial)"
+waitfor 15000 eval 'jq -e ".\"900000007\" | (.loudnessPartial // false | not) and .loudnessSeconds >= 3" "$IDX" >/dev/null' && [ "$(wpid "$SID7b")" != "" ] \
+  && ok "the next play completed it: $(idx_loud 900000007), gain.normalize $(cur gain.normalize)" || bad "s7 never completed: $(idx_loud 900000007)"
+stop_now
+setting '.NormalizeAudio = false'
+mv "$S5" "$S6" "$S7" "$T/"   # out of the library: the sections below step through it
+
 restart_player 9 LP_SCENE_WORKER_BIN=/nonexistent
 ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose lp-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
 pe_off() { curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false and (.scenes.reason | type == "string" and length > 0)' >/dev/null; }

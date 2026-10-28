@@ -118,6 +118,36 @@ public static class LibraryService
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
     }
 
+    // ---- a WE scene's loudness, learned by lp-player on first play (`scene.loudness`) ----
+    // The player measures (BS.1770, pre-gain, over the first ~60 s of AUDIBLE play — player-core.md § Scene worker
+    // → "Scene loudness"); this stores it like a video's loudness*, and the resolver turns it into the scene
+    // source's `gain.normalize` (LpPlayerMedia.SceneNormalizeDb). Learned once: a complete measurement is never
+    // replaced; a partial one (switched away early) is replaced by a complete one or a longer partial.
+    // Returns whether `m` changed. Pure (the self-test drives it on a bare LibMeta).
+    public static bool MergeSceneLoudness(LibMeta m, double lufs, double? peakDbfs, double seconds, bool complete)
+    {
+        if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return false;
+        if (m.LoudnessI != null && m.LoudnessPartial != true) return false; // learned already
+        if (m.LoudnessI != null && !complete && (m.LoudnessSeconds ?? 0) >= seconds) return false; // not longer
+        m.LoudnessI = lufs;
+        m.LoudnessTP = peakDbfs is double p && double.IsFinite(p) ? p : null;
+        m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
+        m.LoudnessSeconds = seconds;
+        m.LoudnessPartial = complete ? null : true;
+        return true;
+    }
+
+    // Store a scene's learned loudness in its index entry (a scene folder in the library only). True = stored
+    // (normalization should follow it live — PlayerHelper.OnLoudnessMeasured).
+    public static bool StoreSceneLoudness(string scenePath, double lufs, double? peakDbfs, double seconds, bool complete)
+    {
+        // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `changed` stays false
+        if (!PlayerHelper.IsScenePath(scenePath)) return false;
+        bool changed = false;
+        LibraryStore.SetMeta(scenePath, m => changed = MergeSceneLoudness(m, lufs, peakDbfs, seconds, complete));
+        return changed;
+    }
+
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _measuring = new();
 
     // Measure once (if not cached) + store. Safe to fire-and-forget; de-dups concurrent calls per path.

@@ -25,6 +25,13 @@ public sealed class LibMeta
     public double? LoudnessLRA { get; set; }    // loudness range (LU)
     public double? LoudnessThresh { get; set; } // measurement threshold
     public bool? LoudnessSkip { get; set; }     // true = no audio track → nothing to normalize, don't retry
+    // A WE scene's loudness is learned by lp-player on first play (`scene.loudness`, BS.1770 over its first ~60 s
+    // of audible play): LoudnessI = integrated LUFS, LoudnessTP = its SAMPLE peak (dBFS, ≤ the true peak), no
+    // LRA/Thresh (so ReadLoudness — the video loudnorm path — never takes it). LoudnessSeconds = the audible
+    // seconds it covers; LoudnessPartial = measured over less than the window (the scene was switched away
+    // early) — replaced by a longer or complete measurement on a later play.
+    public double? LoudnessSeconds { get; set; }
+    public bool? LoudnessPartial { get; set; }
     public bool Crashed { get; set; }
     public bool Whitelist { get; set; }
     // A scene's user-property overrides (project.json general.properties → name → value in WE's encoding:
