@@ -297,8 +297,12 @@
           pkgs.clippy
           pkgs.rustfmt
           pkgs.rust-analyzer
+          pkgs.sccache
         ] ++ runtimeTools;
         DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
+        # Shared compile cache (~/.cache/sccache): every git worktree (one per agent) has its own
+        # target/, so without it each one recompiles all dependencies from scratch.
+        RUSTC_WRAPPER = "sccache";
         # `cargo build` links lp-scene-worker against the pinned core (feature `lwe`, default).
         # Patch work on LWE: `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build`, then
         # LP_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).
