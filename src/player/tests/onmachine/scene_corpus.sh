@@ -382,8 +382,8 @@ run_legacy() {
             --argjson ms "$(($(now_ms) - t0))" \
             --arg png "$([[ -s $png ]] && echo "$png")" \
             --argjson tail "$(tail -n 30 "$LEG/$wid.log" | jq -R . | jq -sc .)" \
-            '{id:$wid, status:$status, code:$code, ms:$ms, screenshot:($png | select(length > 0)),
-              log_tail:$tail}' >>"$RESULTS/legacy.jsonl"
+            '{id:$wid, status:$status, code:$code, ms:$ms,
+              screenshot:(if $png == "" then null else $png end), log_tail:$tail}' >>"$RESULTS/legacy.jsonl"
         echo "scene_corpus: legacy $wid → $status" >&2
     done
 }
