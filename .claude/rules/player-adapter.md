@@ -382,15 +382,26 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   line. Settings → "GPU / VRAM" (lp-player only). Known edge: a scene **pending B** (armed for A's end) stopped by the
   guard is that switch's `transition.failed`; the `DoVideoEndWait` fallback then switches to it now (it isn't
   skipped), it plays ~2 s and is stopped again → the rotation advances (bounded by the guard's hold, never a loop).
-- **Loudness (learned on first play; owner decision, plan "Loudness: learn on first play").** The player measures
-  (player-core.md § Scene worker → "Scene loudness": BS.1770 over the first ~60 s of AUDIBLE play, pre-gain) and
-  logs **`scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}`** (subscribed,
-  `Topics`) → `LpPlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
-  `MergeSceneLoudness` (pure): the index's `loudnessI` (LUFS), `loudnessTP` (the SAMPLE peak, dBFS),
-  `loudnessSeconds`, `loudnessPartial` (library.md); **learned once** — a complete measurement is never replaced, a
-  partial one (`complete: false`: the scene was switched away after ≥ a third of the window) is replaced by a
-  complete one or a longer partial; a scene outside the library or trashed meanwhile stores nothing. Stored →
-  `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver pass). **Applied as
+- **Loudness (learned on first play, refined on every play; owner decisions, plan "Loudness: learn on first play" +
+  2026-10-28 "keep measuring … a max cap").** The player measures (player-core.md § Scene worker → "Scene loudness":
+  BS.1770, AUDIBLE play, pre-gain — the first report after ~60 s, then each further 60 s, at the end of a play, and
+  once at its 30 min cap) and logs **`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
+  played_s, complete, capped, window_s, cap_s, state}`** (subscribed, `Topics`; each report cumulative over every
+  play) → `LpPlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
+  `MergeSceneLoudness` (pure): the index's `loudnessState` (the player's `state`: its block-loudness histogram +
+  peak, opaque here), `loudnessSeconds`, `loudnessPartial` and the APPLIED `loudnessI` (LUFS) / `loudnessTP` (the
+  SAMPLE peak, dBFS) (library.md). **The measurement** is replaced by any report covering MORE audible seconds (a
+  lost report is made up by the next; two sources of one scene at once — the longer stays; a duplicate is ignored);
+  **the applied value moves only by ≥ `ApplyHysteresisLu` (0.5 LU / dB)** — `loudnessI`/`loudnessTP` stay put
+  through a refinement smaller than that, so `gain.normalize` never twitches by tenths (drift accumulates: it's
+  compared with the APPLIED value). A scene outside the library or trashed meanwhile stores nothing. **Each new
+  source continues it:** `SourceProps` (create only) carries `loudness_seed` = the stored `loudnessState`
+  (`SceneLoudnessSeed`) — never a resolver value (a live source already holds that measurement plus its own play
+  since; re-seeding it would drop the latter). **Entries learned before 2026-10-28** (no `loudnessState`, decided —
+  no migration): applied as they are and never a seed; the next play measures from nothing and its first COMPLETE
+  report re-learns the entry (a partial doesn't replace it; the 0.5 LU rule applies against the old value).
+  Applied changed → `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver
+  pass); stored but not applied → nothing sent (adapter log `stored (< 0.5 LU: not applied)`). **Applied as
   the scene source's `gain.normalize`** (`LpPlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
   resolver for scene paths only): `NormalizeTargetLufs − loudnessI`, never boosting the sample peak past
   `NormalizePeakCeilingDb` −1.5 dBFS (a plain gain has no limiter — the video loudnorm's TP −1.5), clamped −60…+24
@@ -405,7 +416,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
   Volume —, gain.normalize 0 unlearned / absent on a video, `SceneLoudnessAssertions`: the `MergeSceneLoudness`
-  rules — learned once, partial → longer / complete — and the `SceneNormalizeDb` table — peak cap, clamps, off,
+  rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates, a state-less (pre-2026-10-28) entry is applied, never a seed, re-learned by a complete report — and the `SceneNormalizeDb` table — peak cap, clamps, off,
   unlearned, NoAudio —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
   private player runs `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
@@ -646,7 +657,7 @@ during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a 
 without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play the index gains `loudnessI` −20 ± 1
 (complete, ≥ 3 s) and `gain.normalize` ramps (`anim.start` ≥ 300 ms) to +6 live — same source, same worker — and
 reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
-on it; reopened → +6 from the first frame, and the second play's measurement keeps the learned one; the
+on it; reopened → +6 from the first frame, its `loudness_seed` = the stored measurement, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); a third play of the folder at −10 dBFS moves `loudnessI` ≥ 0.5 LU → `gain.normalize` ramps (≥ 300 ms) to its new value on the same source and worker; the
 soundless scene → no event, nothing stored, 0; switched away after ~1.2 s → a partial (`loudnessPartial`) stored,
 the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
 S→V in a playlist — each `fade full-live` handed off — and an aligned V→S at a 2 s clip's end; a scene crashing
