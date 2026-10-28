@@ -65,7 +65,9 @@ public class AppSettings
     public int LibrarySortIndex { get; set; } = 5;
     // The global rotation (PlayerHelper § Rotation): GlobalAdvanceOnVideoEnd ("Switch when video ends") off →
     // GlobalIntervalSeconds is a plain timer ("Switch every"); on → it is the minimum play time and
-    // GlobalMaxPlaySeconds the maximum (below). Defaults = the old default rotation (each video end, 30 min at most).
+    // GlobalMaxPlaySeconds the maximum (below), and GlobalSeparateSceneTiming gives scenes + still images (they never
+    // end) their own GlobalSwitchScenesAfterSeconds instead. Every limit is 0 = off. Defaults: a video plays to its
+    // end however long (no minimum, no maximum); a scene / still image switches after 30 min.
     public int GlobalIntervalSeconds { get; set; } = 0;
     public bool GlobalAdvanceOnVideoEnd { get; set; } = true;
     public string Theme { get; set; } = "Catppuccin Mocha";
@@ -76,9 +78,16 @@ public class AppSettings
         set => _restartIntervalSeconds = Math.Clamp(value, 0, 3600);
     }
     // The maximum play time under advance-on-end (wall-clock seconds, 0 = off): the playing item — a video mid-clip,
-    // a scene — advances once it played that long (a cap beats the minimum).
-    private int _globalMaxPlaySeconds = 1800;
+    // a scene / still image unless they have their own timing — advances once it played that long (a cap beats the
+    // minimum). Default off: a video plays to its end, even a 10 h one.
+    private int _globalMaxPlaySeconds = 0;
     public int GlobalMaxPlaySeconds { get => _globalMaxPlaySeconds; set => _globalMaxPlaySeconds = PlayLimit(value); }
+    // "Separate timing for scenes" (advance-on-end only): on → a scene or a still image ignores the minimum / maximum
+    // and switches after "Switch scenes after" (wall-clock seconds, 0 = off: it stays until a user switch); off → they
+    // follow the video rules (the minimum reached is their end, else the maximum, else they stay).
+    public bool GlobalSeparateSceneTiming { get; set; } = true;
+    private int _globalSwitchScenesAfterSeconds = 1800;
+    public int GlobalSwitchScenesAfterSeconds { get => _globalSwitchScenesAfterSeconds; set => _globalSwitchScenesAfterSeconds = PlayLimit(value); }
     public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
     public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields
 

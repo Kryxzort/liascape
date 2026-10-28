@@ -96,6 +96,20 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       + backend-restart (RED on the base backend: 26 fails incl. every new check), settings-merge (RED 6), self-test
       `PlayLimitAssertions`, matrix `plAdvanceRelabel` / `gAdvanceRelabel` / `gAdvanceOn` / `playlist|global:minPlay|maxPlay`.
   - [ ] A later task renames code identifiers to the UI labels (`IntervalSeconds` → switch-every / minimum, …).
+- [x] **0 = off + "Separate timing for scenes"** (owner, 2026-10-28 evening): minimum / maximum 0 = off strictly
+      (min 0 → a video switches at its end however short; max 0 → never cut, a 10 h video plays to its end), and a
+      toggle under them (global + playlist override, only with "Switch when video ends") → "Switch scenes after": a
+      scene / still image switches after it (0 = it stays), the min / max then apply to videos only; off = the old
+      rules. Defaults now max 0 (was 30 min) + toggle on, 30 min. Live (diffed), across a backend restart, 1-item never
+      self-switches. `player-adapter.md` § Rotation (`ItemPlayRule`). One-off migration v2
+      (`/tmp/rot-kryxzort/migrate-once.sh` + `test-migrate.sh`, 109 checks; RED on v1: 26): adv+wait → exactly the old
+      behaviour (min = old min, max = old max, toggle on, scenes after = the old interval). **Owner action:** run it on
+      a copy of `~/.config/livepaper` + `~/.local/share/livepaper/playlists` (the app stopped), check the printed
+      rotations, copy `out/` over the originals.
+  - [ ] **An fps cap stalls a still image** (found 2026-10-28 by `test-settings-merge.sh`, player side — not fixed
+        here, `src/player` is another agent's): with `VideoFps` > 0 (`fps_cap` 98) a `kind: image` source stays
+        `ready: false` (width 0) and its switch sits in `waiting_ready` forever — nothing shows; `VideoFps` 0 → it
+        loads. Likely mpv's `fps=` vf on a one-frame still never emitting a frame; the cap should skip images.
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
       table in web-backend.md — lp-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `lp-player health`; a warning

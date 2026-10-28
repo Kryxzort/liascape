@@ -327,11 +327,12 @@ public static class AppOps
 
             var g = SettingsService.Load();
             // the effective rotation, diffed prev → now: an unrelated save (a reorder, a transition) leaves the
-            // countdown, the item's play time and an armed switch alone. The maximum first, so a switch the rotation
-            // arms (advance-on-end just turned on) already reads it.
+            // countdown, the item's play time and an armed switch alone. The maximum + the scene timing first, so a
+            // switch the rotation arms (advance-on-end just turned on) already reads them.
             var now = PlayerHelper.EffectiveRotation(g, p.Settings);
             var was = PlayerHelper.EffectiveRotation(g, prevP?.Settings);
-            if (now.Max != was.Max) PlayerHelper.ApplyMaxPlayLive(now.Max);
+            if ((now.Max, now.SeparateScenes, now.ScenesAfter) != (was.Max, was.SeparateScenes, was.ScenesAfter))
+                PlayerHelper.ApplyPlayLimitsLive(now.Max, now.SeparateScenes, now.ScenesAfter);
             if ((now.Interval, now.Advance) != (was.Interval, was.Advance)) PlayerHelper.ApplyRotationLive(now.Interval, now.Advance);
             // the playlist's transitions changed (on/off, effects, duration): an armed aligned switch takes them
             if (!TransitionService.SameConfig(TransitionService.Effective(g, prevP?.Settings), TransitionService.Effective(g, p.Settings)))

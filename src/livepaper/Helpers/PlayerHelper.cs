@@ -45,11 +45,14 @@ public static class PlayerHelper
     // ── Rotation (player-adapter.md § Rotation). "Switch when video ends" off: `_timedInterval` is a plain timer.
     // On: `_timedInterval` IS the minimum play time (MinPlayMs — the one interval field, relabelled in the UI) and
     // `_maxPlayMs` the maximum (wall-clock ms, 0 = off — the playlist's own when it overrides the globals, else the
-    // global one: read from the config at a session's start / resume, live from /settings + /playlist/state). The
-    // playing item's play time (wall-clock ms since it became current, pauses excluded — the tick counts it;
-    // persisted in timed_state with the moment it was saved, so a backend restart counts the time the player played
-    // on meanwhile) is what both are measured against.
+    // global one: read from the config at a session's start / resume, live from /settings + /playlist/state), and
+    // with `_separateScenes` ("Separate timing for scenes") a scene / still image switches after `_scenesAfterMs`
+    // instead (0 = off; same source, same live path — ItemPlayRule). The playing item's play time (wall-clock ms since
+    // it became current, pauses excluded — the tick counts it; persisted in timed_state with the moment it was saved,
+    // so a backend restart counts the time the player played on meanwhile) is what all of them are measured against.
     private static long _maxPlayMs;
+    private static bool _separateScenes;
+    private static long _scenesAfterMs;
     private static long _itemPlayedMs;
     private static long MinPlayMs => _advanceOnVideoEnd ? (long)_timedInterval.TotalMilliseconds : 0;
     private static double _currentSpeed = 1.0;
@@ -868,7 +871,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
             _advanceOnVideoEnd = advanceOnVideoEnd;
-            RefreshMaxPlay();
+            RefreshPlayLimits();
             _itemPlayedMs = 0;
             // Pick up per-video speed override for the first item so tick scales interval
             // correctly from the first tick rather than after the next transition's SetSpeed.
@@ -956,7 +959,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedTimerPaused = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-            RefreshMaxPlay();
+            RefreshPlayLimits();
             _itemPlayedMs = 0; // the item starts over (SwitchToFile below), like the countdown
 
             // When WaitingForVideoEnd=true the saved _historyIndex is pre-fetched one step ahead;
@@ -986,7 +989,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedTimerPaused = false;
             // _timedRemainingMs is restored from state — preserves the countdown (and the item's play time)
-            RefreshMaxPlay();
+            RefreshPlayLimits();
 
             EnsureTimedTick();
 
@@ -1106,23 +1109,28 @@ public static class PlayerHelper
                 return;
             }
 
+            // what the playing item plays (ItemPlayRule: a video the minimum / maximum; a scene / still image its own
+            // "Switch scenes after" with separate timing on, else the video rules)
+            var rule = PlayingRule();
             // Maximum play time (advance-on-end): the item played that long → the next one now, with its
             // transition (align:now, like a timed switch; an armed end-of-video switch is cancelled — AdvanceAndLaunch
             // takes its pre-fetched B). A cap beats the minimum.
-            if (MaxPlayReached(_advanceOnVideoEnd, CanRotate, _itemPlayedMs, _maxPlayMs))
+            if (MaxPlayReached(_advanceOnVideoEnd, CanRotate, _itemPlayedMs, rule.MaxMs))
             {
-                LpPlayerClient.Log($"max play time: {_itemPlayedMs / 1000.0:0.0} s ≥ {_maxPlayMs / 1000.0:0.#} s → advancing");
+                LpPlayerClient.Log($"max play time: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MaxMs / 1000.0:0.#} s → advancing");
                 _itemPlayedMs = 0; // (PostSwitch resets it too — but not when there's nothing to advance to)
                 AdvanceAndLaunch();
                 _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
                 return;
             }
 
-            // A scene (it never ends) under advance-on-end: the minimum reached IS its end → the next one now
-            // (align:now). No minimum → it plays until the maximum (above), else until a user switch.
-            if (SceneMinReached(_advanceOnVideoEnd, CanRotate, PlayingIsScene, _itemPlayedMs, MinPlayMs))
+            // A scene (it never ends) under advance-on-end: its rule's minimum reached IS its end → the next one now
+            // (align:now) — "Switch scenes after" with separate timing on, else the minimum; none → it plays until the
+            // maximum (above; the video rules only), else until a user switch. (A still image's is DoVideoEndWait's
+            // hold: align:end on a still is now.)
+            if (SceneMinReached(_advanceOnVideoEnd, CanRotate, PlayingIsScene, _itemPlayedMs, rule.MinMs))
             {
-                LpPlayerClient.Log($"min play time on a scene: {_itemPlayedMs / 1000.0:0.0} s ≥ {MinPlayMs / 1000.0:0.#} s → advancing");
+                LpPlayerClient.Log($"{(_separateScenes ? "switch scenes after" : "min play time on a scene")}: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MinMs / 1000.0:0.#} s → advancing");
                 _itemPlayedMs = 0;
                 AdvanceAndLaunch();
                 _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1194,31 +1202,69 @@ public static class PlayerHelper
     // A one-item session never switches to itself.
 
     // A playlist's effective rotation: its own when it overrides the global one, else the globals'.
-    public static (int Interval, bool Advance, int Max) EffectiveRotation(AppSettings s, PlaylistSettings? p) =>
+    public static (int Interval, bool Advance, int Max, bool SeparateScenes, int ScenesAfter) EffectiveRotation(AppSettings s, PlaylistSettings? p) =>
         p?.OverrideGlobalSettings == true
-            ? (p.IntervalSeconds, p.AdvanceOnVideoEnd, p.MaxPlaySeconds)
-            : (s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd, s.GlobalMaxPlaySeconds);
+            ? (p.IntervalSeconds, p.AdvanceOnVideoEnd, p.MaxPlaySeconds, p.SeparateSceneTiming, p.SwitchScenesAfterSeconds)
+            : (s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd, s.GlobalMaxPlaySeconds, s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds);
+
+    // What a playing item plays under advance-on-end (2026-10-28, owner: "a toggle which when toggled lets you configure
+    // differently for scenes … 0 … just turns them off"). (MinMs, MaxMs), wall-clock ms; 0 = off everywhere:
+    // - MinMs: a VIDEO plays at least this long, then switches at its next end (0 → at its first end, however short);
+    //   for an item that never ends (a still image, a scene) reaching it IS its end. NeverMs = it stays until a user
+    //   switch (or the maximum, where one applies).
+    // - MaxMs: the cap, even mid-video (0 = none → a 10 h video plays to its end).
+    // Separate timing OFF (the old rules): a scene's end = the minimum (none → only the maximum moves it); a still image
+    // shows for the minimum (0 → it flashes by). ON: a scene AND a still image switch after "Switch scenes after"
+    // (0 → they stay) and the minimum / maximum don't apply to them — they have no end, so "at least … then at the next
+    // end" / "at most" mean nothing there; one number says it. A video is never touched by the scene timing.
+    public enum PlayKind { Video, Image, Scene }
+    public const long NeverMs = long.MaxValue / 4;   // never reached (and never overflows HoldForMinPlay's arithmetic)
+    public static PlayKind PlayKindOf(string path) =>
+        IsScenePath(path) ? PlayKind.Scene : LpPlayerMedia.IsImagePath(path) ? PlayKind.Image : PlayKind.Video;
+    public static (long MinMs, long MaxMs) ItemPlayRule(PlayKind kind, long minMs, long maxMs, bool separateScenes, long scenesAfterMs) =>
+        kind == PlayKind.Video ? (Math.Max(0, minMs), Math.Max(0, maxMs))
+        : separateScenes ? (scenesAfterMs > 0 ? scenesAfterMs : NeverMs, 0)
+        : kind == PlayKind.Scene ? (minMs > 0 ? minMs : NeverMs, Math.Max(0, maxMs))
+        : (Math.Max(0, minMs), Math.Max(0, maxMs));
+
+    // the playing item's rule (callers hold _lock)
+    private static (long MinMs, long MaxMs) PlayingRule()
+    {
+        var p = _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count ? _history[PlayingHistoryIndex] : null;
+        return ItemPlayRule(p == null ? PlayKind.Video : PlayKindOf(p), MinPlayMs, _maxPlayMs, _separateScenes, _scenesAfterMs);
+    }
 
     // The play-time limits a rotation acts on: only under advance-on-end (the interval is the minimum there); off,
     // the interval is the timer and neither applies.
     public static (int Min, int Max) PlayLimits(int intervalSeconds, bool advance, int maxSeconds) =>
         advance ? (Math.Max(0, intervalSeconds), AppSettings.PlayLimit(maxSeconds)) : (0, 0);
 
-    // the maximum from the config (like TransitionService.CurrentConfig: the current playlist state + the settings) —
-    // a session's start / restore / resume; live edits come through ApplyMaxPlayLive (the minimum is the session's
-    // own interval, which a session carries itself)
-    private static void RefreshMaxPlay()
+    // the maximum + the scene timing from the config (like TransitionService.CurrentConfig: the current playlist state +
+    // the settings) — a session's start / restore / resume; live edits come through ApplyPlayLimitsLive (the minimum is
+    // the session's own interval, which a session carries itself)
+    private static void RefreshPlayLimits()
     {
-        try { _maxPlayMs = EffectiveRotation(SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings).Max * 1000L; }
+        try
+        {
+            var r = EffectiveRotation(SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings);
+            SetPlayLimits(r.Max, r.SeparateScenes, r.ScenesAfter);
+        }
         catch { }
     }
-
-    // /settings (the global one) and /playlist/state (a playlist's own): the effective maximum changed — live on the
-    // running rotation. The item's play time keeps counting (an edit never resets it); the next tick compares it
-    // (already past it → it advances now).
-    public static void ApplyMaxPlayLive(int maxSeconds)
+    private static void SetPlayLimits(int maxSeconds, bool separateScenes, int scenesAfterSeconds)
     {
-        lock (_lock) { _maxPlayMs = AppSettings.PlayLimit(maxSeconds) * 1000L; }
+        _maxPlayMs = AppSettings.PlayLimit(maxSeconds) * 1000L;
+        _separateScenes = separateScenes;
+        _scenesAfterMs = AppSettings.PlayLimit(scenesAfterSeconds) * 1000L;
+    }
+
+    // /settings (the global one) and /playlist/state (a playlist's own): the effective maximum or scene timing changed
+    // — live on the running rotation. The item's play time keeps counting (an edit never resets it); the next tick
+    // compares it (already past it → it advances now), and a still image held for its time (HoldForMinPlay) re-reads it
+    // within a second.
+    public static void ApplyPlayLimitsLive(int maxSeconds, bool separateScenes, int scenesAfterSeconds)
+    {
+        lock (_lock) { SetPlayLimits(maxSeconds, separateScenes, scenesAfterSeconds); }
     }
 
     // the playing item is a scene (whatever the engine: under lp-player no LWE process exists)
@@ -1253,11 +1299,18 @@ public static class PlayerHelper
         bool held = false;
         while (true)
         {
-            long min, played; bool adv;
-            lock (_lock) { min = MinPlayMs; played = _itemPlayedMs; adv = _advanceOnVideoEnd; }
+            long min, played; bool adv, still;
+            lock (_lock)
+            {
+                // the playing item's own minimum (ItemPlayRule): a video's, or a still image's time — "Switch scenes
+                // after" with separate timing on (NeverMs = it stays: held until a user switch / a live edit)
+                min = PlayingRule().MinMs; played = _itemPlayedMs; adv = _advanceOnVideoEnd;
+                still = _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count
+                        && PlayKindOf(_history[PlayingHistoryIndex]) == PlayKind.Image;
+            }
             if (ct.IsCancellationRequested) return false;
             if (!adv || min <= 0) return true;
-            long? rem = LpPlayerMedia.TimeRemaining() is double r ? (long)(r * 1000) : null;
+            long? rem = still ? null : LpPlayerMedia.TimeRemaining() is double r ? (long)(r * 1000) : null;
             if (MinPlayReached(played, rem, min))
             {
                 if (held) LpPlayerClient.Log($"min play time {min / 1000.0:0.#} s: reached by this loop (played {played / 1000.0:0.0} s, {(rem ?? 0) / 1000.0:0.0} s left) → arming the switch for its end");
@@ -1266,8 +1319,8 @@ public static class PlayerHelper
             if (!held)
             {
                 held = true;
-                LpPlayerClient.Log($"min play time {min / 1000.0:0.#} s: holding {Path.GetFileName(LpPlayerMedia.CurrentPath() ?? "?")} (played {played / 1000.0:0.0} s, this loop ends in {(rem ?? 0) / 1000.0:0.0} s)");
-                if (!SettingsService.Load().Loop) LpPlayerMedia.SetLoop(true);
+                LpPlayerClient.Log($"{(min >= NeverMs ? "no time set" : $"min play time {min / 1000.0:0.#} s")}: holding {Path.GetFileName(LpPlayerMedia.CurrentPath() ?? "?")} (played {played / 1000.0:0.0} s{(still ? ", a still image" : $", this loop ends in {(rem ?? 0) / 1000.0:0.0} s")})");
+                if (!still && !SettingsService.Load().Loop) LpPlayerMedia.SetLoop(true);
             }
             var wait = (int)Math.Clamp((rem ?? (min - played)) + 60, 100, 1000);
             try { await Task.Delay(wait, ct).ConfigureAwait(false); }

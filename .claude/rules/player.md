@@ -26,7 +26,7 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 - Shuffle **pre-applied** to path array in `ApplyPlaylist()` (not via `--shuffle`) so order is known for `playlist_observer_paths.json`
 - Single video → `Launch(opts, path)` directly
 - Multi-video → `ApplyTimedPlaylist(intervalSeconds, advanceOnVideoEnd: true)` (the interval = the minimum play time) — livepaper-owned; **no `--playlist=file` or `--loop-playlist=inf`**
-- Scenes present + playable → the same (a scene moves on at the minimum, else the maximum, else a user switch — `player-adapter.md` § Rotation; the old fallback to `GlobalIntervalSeconds` is gone)
+- Scenes present + playable → the same (with "Separate timing for scenes" on — the default — a scene / still image moves on after "Switch scenes after", 0 = never; off: at the minimum, else the maximum, else a user switch — `player-adapter.md` § Rotation; the old fallback to `GlobalIntervalSeconds` is gone)
 - Multi-video playlists are livepaper-owned through the timed machinery (no `playlist.txt` / `--playlist=file`)
 
 **`AppendToActivePlaylist(IReadOnlyList<string> paths)`** — injects new paths into a running session:

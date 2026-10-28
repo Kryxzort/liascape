@@ -243,9 +243,11 @@ PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/
 full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
 unmutes when it ends.
 
-## Rotation (advance-on-end minimum / maximum; redesigned 2026-10-28)
-Owner-approved model (the play-time limits added the same day were folded into it). Per rotation (the globals, or a
-playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation`):
+## Rotation (advance-on-end minimum / maximum / separate scene timing; redesigned 2026-10-28)
+Owner-approved model (the play-time limits added the same day were folded into it; "Separate timing for scenes" + 0 =
+off everywhere added the same evening — owner: "minimum and maximum should both support '0' which then just turns them
+off … a toggle which … lets you configure differently for scenes"). Per rotation (the globals, or a playlist's own when
+`OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation` → `(Interval, Advance, Max, SeparateScenes, ScenesAfter)`):
 - **"Switch when video ends" OFF** (`AdvanceOnVideoEnd` false): `IntervalSeconds` is **"Switch every"** — a plain timer
   (the tick's countdown, speed-scaled as before, switches `align:now`, mid-video). Unchanged; the maximum doesn't apply.
 - **ON**: the SAME field is the **"Minimum play time"** (`IntervalSeconds`, relabelled in the UI — one value: toggling
@@ -261,8 +263,9 @@ playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation
     loop to get ready. A must loop meanwhile: with `Loop` off the hold turns A's loop on (`SetLoop(true)`; align:end
     turns it off again). While held, the player has **no** armed switch (nothing is requested until that loop) — a
     clip already ≥ the minimum is never held. Minimum 0 = switch at every end.
-  - **Still image** (it never ends — `align:end` on a still is `Now`): shows for the minimum (0 → it flashes by).
-  - **Scene** (never ends): **the minimum reached IS its end** — the tick's `SceneMinReached` advances it then
+  - **Still image** (it never ends — `align:end` on a still is `Now`): shows for the minimum (0 → it flashes by) —
+    with "Separate timing for scenes" off; on, see below.
+  - **Scene** (never ends), toggle off: **the minimum reached IS its end** — the tick's `SceneMinReached` advances it then
     (align:now, its transition), the same moment a still image moves on. No minimum → the maximum moves it; neither →
     it plays until a user switch (the Settings hint says so). Judgement call: "minimum then the next end" with no end
     to wait for = the minimum; holding a scene to the maximum instead would make the minimum meaningless for scenes.
@@ -274,13 +277,38 @@ playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation
     mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
     the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
     max fires; documented, not enforced).
+  - **0 = off, strictly, for both** (global + playlist): minimum 0 → a video switches at its first end however short
+    (a 1 s clip at 1 s); maximum 0 → never cut — a 10 h video plays to its end. IT § "0 = off for both limits".
+  - **"Separate timing for scenes"** (`GlobalSeparateSceneTiming` / `PlaylistSettings.SeparateSceneTiming`, the row
+    under the two fields, only with "Switch when video ends" on) + **"Switch scenes after"**
+    (`GlobalSwitchScenesAfterSeconds` / `SwitchScenesAfterSeconds`, wall-clock s, clamped 0…359999 like the max; its
+    own row only while the toggle is on). **On**: a scene AND a still image (neither ever ends) switch once they played
+    that long (align:now, their transition) — 0 = off: they stay until a user switch; the minimum / maximum apply to
+    videos only. **Off**: the rules above (scenes / images follow the video fields). Judgement calls: ONE field, not a
+    scene min/max — "at least … then at the next end" and "at most" mean nothing without an end, a single "after"
+    explains itself in one hint line; **images follow the scene rule** while it's on (they never end either — with a
+    minimum 0, the owner's model for videos, an image would otherwise flash by). A video is never touched by it.
+    `PlayerHelper.ItemPlayRule(kind, min, max, separate, scenesAfter)` → `(MinMs, MaxMs)` is the whole table (pure,
+    self-test): video `(min, max)`; toggle on → scene / image `(after or NeverMs, 0)`; off → scene `(min or NeverMs,
+    max)`, image `(min, max)`. `NeverMs` (= long.MaxValue/4) is never reached and never overflows the hold's
+    arithmetic. The tick reads the playing item's rule (`PlayingRule`, `PlayKindOf` — `LpPlayerMedia.IsImagePath`)
+    for its maximum and a scene's end (`SceneMinReached` with the rule's minimum); a still image's time is
+    `HoldForMinPlay` (its rule's minimum; NeverMs → held until a user switch or a live edit — it re-reads ≤ 1 s apart;
+    no loop toggling for a still).
+  - **Defaults** (2026-10-28, "off unless set"): minimum 0, **maximum 0** (was 1800 — a 30-min cut the owner would
+    not expect), **separate timing ON, scenes after 1800** — a video plays to its end, a scene / image switches after
+    30 min (with the toggle off and both 0 a scene would never move and an image would flash by). Only a file without
+    the keys sees them: the one-off migration writes them for every combo.
 - **Removed**: "Wait for video to end after interval" (`GlobalWaitForVideoEnd` / `PlaylistWaitForVideoEnd` /
   `PlaylistSettings.WaitForVideoEnd` / `LastSession.WaitForVideoEnd` / `TimedState.WaitForVideoEnd`, `_waitForVideoEnd`
   and its tick branches) and the separate `GlobalMinPlaySeconds` / `PlaylistSettings.MinPlaySeconds` (merged into the
   interval field). An old settings.json / playlist / session file's keys load as unknown ones — **no in-app
-  migration** (owner: nobody else uses the app); a one-off jq script converted the owner's files (old table: adv+wait
-  → min = interval; adv, no wait → min = old min, max = the old interval cap ∧ old max; timer + wait → advance-on-end
-  with min = interval; timer → unchanged). Dead `SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` removed.
+  migration** (owner: nobody else uses the app); a one-off jq script (v2, `/tmp/rot-kryxzort/migrate-once.sh`, never in
+  place) converts the owner's files: adv+wait → EXACTLY the old behaviour: min = the old min (0: every video end),
+  max = old max, separate scene timing ON with scenes after = the old interval (∧ the old max when both are set — the
+  old max moved scenes too); adv, no wait → min = old min, max = the old interval cap ∧ old max, separate off; timer +
+  wait → advance-on-end with min = interval, separate off; timer → unchanged, separate off; a v1-migrated file → + the
+  scene keys, off (= what it did). Dead `SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` removed.
 - **Play time** (`_itemPlayedMs`): counted by the tick in wall clock (never scaled by speed — a 2× clip with max 60 s
   plays 60 real seconds) and **not while paused** (the paused tick returns before it); reset by `PostSwitch` (every
   switch — under lp-player an aligned switch's B from its effect's start), `ApplyTimedPlaylist`, `RestoreTimedPlaylist`
@@ -288,24 +316,38 @@ playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation
   (`ItemPlayedMs` + `PlayedSavedAtMs`); `LoadTimedState` adds the time since that save unless paused
   (`PlayedAfterLoad`) — the player outlives the backend and played on while no process counted (a backend restart,
   the `--timer-daemon` hand-over, which is SIGKILLed without saving).
-- **1-item playlist**: never switches itself (`CanRotate`; no aligned switch is armed, neither limit fires).
+- **1-item playlist**: never switches itself (`CanRotate`; no aligned switch is armed, no limit fires — the scene
+  timing neither).
 - **User switches** (next / prev / random / restore / play-from): the new item's play time starts at 0.
-- **Live**: `/settings` (the global max changed → `ApplyMaxPlayLive`, before the rotation's own live-apply; interval /
-  advance → `ApplyRotationLive` when the playlist follows the globals) and `/playlist/state` (`AppOps.SavePlaylistState`:
-  the effective rotation diffed prev → now, so a reorder / unrelated save does nothing). A new maximum is read by the
-  next tick (already played past it → advances now); a new minimum (`UpdateTimedSettings`, advance unchanged) re-arms
+- **Live**: `/settings` (the global max / scene toggle / scenes-after changed → `ApplyPlayLimitsLive` with the
+  EFFECTIVE values, before the rotation's own live-apply; interval / advance → `ApplyRotationLive` when the playlist
+  follows the globals) and `/playlist/state` (`AppOps.SavePlaylistState`: the effective rotation diffed prev → now, so a
+  reorder / unrelated save does nothing). A new maximum / scene timing is read by the next tick (already played past it
+  → advances now; a held image within 1 s); a new minimum (`UpdateTimedSettings`, advance unchanged) re-arms
   an aligned switch already armed or held (`CancelVideoEndWait` + `ArmVideoEndWait`, same B). A session (re)start /
-  restore / resume reads the maximum from the config (`RefreshMaxPlay`: the current playlist state + settings) — the
-  minimum is the session's own interval (`ApplyTimedPlaylist`'s, `LastSession.TimedIntervalSeconds`, `timed_state`).
-- Tests: self-test `PlayLimitAssertions` (`EffectiveRotation` override/follows, `PlayLimits`, the defaults = the old
-  default rotation, the removed properties gone + an old-model JSON loads, the max clamp, `SceneMinReached`,
-  `MinPlayReached`, `MaxPlayReached`, `PlayedAfterLoad`); IT § "advance-on-end play-time limits" (min = the interval:
+  restore / resume reads the maximum + the scene timing from the config (`RefreshPlayLimits`: the current playlist
+  state + settings) — the minimum is the session's own interval (`ApplyTimedPlaylist`'s,
+  `LastSession.TimedIntervalSeconds`, `timed_state`).
+- Tests: self-test `PlayLimitAssertions` (`EffectiveRotation` override/follows incl. the scene timing, `PlayLimits`,
+  the defaults (0, on, 0, on, 1800) + a file without the scene keys, the removed properties gone + an old-model JSON
+  loads, the max / scenes-after clamps, the `ItemPlayRule` table (video / image / scene × toggle × 0-values),
+  `PlayKindOf`, `NeverMs` never reached, `SceneMinReached`, `MinPlayReached`, `MaxPlayReached`, `PlayedAfterLoad`); IT §
+  "0 = off for both limits" (p1 4 s then e1 12 s each to its end, align:end, no cut) + "separate timing for scenes ON"
+  (an image shows its 3 s at minimum 0; 0 = off + a 2 s max → it stays) + the scene section's "separate timing for
+  scenes" (3 s beats a 6 s minimum; a 3 s max still cuts e1 while s1 plays its own 5 s; 0 = off + max 2 → stays;
+  1-item; toggle off → the minimum again; OFF → ON live + a volume edit keep the play time; a playlist's own 0 → 4 s via
+  `/playlist/state` beats the globals' 2 s) + the restart section's scene-after-6 s across a backend restart (RED on the
+  base backend: 8 fails — every scene / image check; settings-merge RED 5; matrix RED on the base UI: both cells); IT § "advance-on-end play-time limits" (min = the interval:
   a 2 s clip loops to its 3rd loop end, set live while armed, a playlist's own, an image, pure timed ignores max + an
   old wait key, max mid-video / live / × pause / × speed / 1-item / override) + the scene (min 3 s moves it, none
   doesn't) and backend-restart (max and min across it) checks; `test-settings-merge.sh` (an old-model file loads, the
-  removed keys gone from GET and the next save, partial / clamped max bodies, a live max); matrix `playlist:minPlay|
+  removed keys gone from GET and the next save, partial / clamped max bodies, a live max; the scene keys' defaults on a
+  file without them, partial / clamped bodies, a live "Switch scenes after" on a held image); matrix `playlist:minPlay|
   maxPlay`, `global:minPlay|maxPlay` (pendingGlobal), `global:maxPlay:own`, `plAdvanceRelabel`, `gAdvanceRelabel`,
-  `gAdvanceOn` (the 600 s interval becomes a minimum that holds, then 0 arms).
+  `gAdvanceOn` (the 600 s interval becomes a minimum that holds, then 0 arms), `playlist:sceneTiming` (sceneS: the
+  toggle hidden under the timer, shown with advance on, 4 s → s1 moves on now with its fade) and `global:sceneTiming`
+  (the opt-in `sceneSGlobal`: the scene playlist following globals with no limits — the scene holds; the toggle row
+  shown, the seconds row only once it's on; 4 s → s1 moves on).
 
 ## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
 A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:

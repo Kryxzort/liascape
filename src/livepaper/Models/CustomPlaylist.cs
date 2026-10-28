@@ -11,12 +11,15 @@ public class PlaylistSettings
     public bool OverrideGlobalSettings { get; set; } = false;
     // The rotation (gated by OverrideGlobalSettings; PlayerHelper § Rotation): AdvanceOnVideoEnd ("Switch when video
     // ends") off → IntervalSeconds is a plain timer ("Switch every"); on → IntervalSeconds is the minimum play time and
-    // MaxPlaySeconds the maximum (wall-clock seconds, 0 = off). The defaults = the old default rotation (switch at
-    // each video end, 30 min at most).
+    // MaxPlaySeconds the maximum, and SeparateSceneTiming gives scenes + still images their own SwitchScenesAfterSeconds
+    // (wall-clock seconds, 0 = off). The defaults = the global ones (a video to its end, a scene / image 30 min).
     public int IntervalSeconds { get; set; } = 0;
     public bool AdvanceOnVideoEnd { get; set; } = true;
-    private int _maxPlaySeconds = 1800;
+    private int _maxPlaySeconds = 0;
     public int MaxPlaySeconds { get => _maxPlaySeconds; set => _maxPlaySeconds = AppSettings.PlayLimit(value); }
+    public bool SeparateSceneTiming { get; set; } = true;
+    private int _switchScenesAfterSeconds = 1800;
+    public int SwitchScenesAfterSeconds { get => _switchScenesAfterSeconds; set => _switchScenesAfterSeconds = AppSettings.PlayLimit(value); }
 
     // Transitions (gated by OverrideGlobalSettings, like the rotation fields above; else the
     // AppSettings.GlobalTransition* fallbacks apply). TransitionEffectIds = manifest ids the user

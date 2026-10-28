@@ -122,6 +122,11 @@ snap s0
 [ "$(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)" = '[600,false,0]' ] \
   && ok "the rotation fields that stay loaded from the old file as they were (interval 600, advance off, max 0)" \
   || bad "rotation fields after loading an old file: $(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)"
+# "Separate timing for scenes" (2026-10-28): a file written before it loads its defaults — on, 30 min (the one-off
+# migration script writes both keys into the owner's files, so this default never decides an existing rotation)
+[ "$(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)" = '[true,1800]' ] \
+  && ok "a file without the scene-timing keys: globalSeparateSceneTiming true, globalSwitchScenesAfterSeconds 1800 (the defaults)" \
+  || bad "scene-timing fields after loading a file without them: $(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)"
 
 echo "== a partial body changes only its own fields (nothing playing)"
 post /settings '{"Theme":"Nord"}' >/dev/null && ok "POST {\"Theme\":\"Nord\"} → 200" || bad "POST {\"Theme\":\"Nord\"} failed"
@@ -176,6 +181,16 @@ post /settings '{"GlobalMaxPlaySeconds":99999999}' >/dev/null; snap l3
 same l2 l3 '["globalMaxPlaySeconds"]' "{GlobalMaxPlaySeconds:99999999}"
 post /settings '{"GlobalMaxPlaySeconds":0}' >/dev/null; snap l4
 same l0 l4 '[]' "the limits back to 0"
+post /settings '{"GlobalSeparateSceneTiming":false}' >/dev/null; snap l5
+[ "$(f .globalSeparateSceneTiming l5)" = false ] && ok "{GlobalSeparateSceneTiming:false} → false" || bad "globalSeparateSceneTiming → $(f .globalSeparateSceneTiming l5)"
+same l4 l5 '["globalSeparateSceneTiming"]' "{GlobalSeparateSceneTiming:false}"
+post /settings '{"globalSwitchScenesAfterSeconds":-3}' >/dev/null; snap l6
+[ "$(f .globalSwitchScenesAfterSeconds l6)" = 0 ] && ok "{globalSwitchScenesAfterSeconds:-3} → clamped to 0 (off)" || bad "globalSwitchScenesAfterSeconds -3 → $(f .globalSwitchScenesAfterSeconds l6)"
+same l5 l6 '["globalSwitchScenesAfterSeconds"]' "{globalSwitchScenesAfterSeconds:-3}"
+post /settings '{"GlobalSwitchScenesAfterSeconds":99999999}' >/dev/null; snap l7
+[ "$(f .globalSwitchScenesAfterSeconds l7)" = 359999 ] && ok "{GlobalSwitchScenesAfterSeconds:99999999} → clamped to 359999" || bad "globalSwitchScenesAfterSeconds 99999999 → $(f .globalSwitchScenesAfterSeconds l7)"
+post /settings '{"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":1800}' >/dev/null; snap l8
+same l4 l8 '[]' "the scene timing back to on, 1800 s"
 
 echo "== parallel partial bodies all land"
 # 8 rounds × 10 bodies released at once, each setting a different field: without one poster at a time, two
@@ -272,6 +287,25 @@ for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 d_mx=$(( $(date +%s%3N) - t_mx ))
 [ "$(cur path)" = "$C2" ] && [ "$d_mx" -lt "$lim_mx" ] && ok "{GlobalMaxPlaySeconds:2} → c1 (at ${p_mx} s of 6) left for c2 $d_mx ms after (< $lim_mx; no replay)" || bad "max 2 s live: cur $(cur path) $d_mx ms after (c1 was at ${p_mx} s; want < $lim_mx ms)"
 post /settings '{"GlobalMaxPlaySeconds":0,"GlobalAdvanceOnVideoEnd":false,"GlobalIntervalSeconds":600}' >/dev/null
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== a partial body sets \"Switch scenes after\" on a running advance-on-end rotation holding a still image (live)"
+# separate timing on, 0 = off → the image (it never ends) stays; {GlobalSwitchScenesAfterSeconds:2} → it moves on
+I1=$T/i1.png; timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=320x180" -frames:v 1 "$I1"
+# VideoFps 0: the parallel section left 98, and an image source with an fps cap never gets ready (a player bug —
+# docs/TODO.md "an fps cap stalls a still image")
+post /settings '{"VideoFps":0}' >/dev/null
+post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":0}' >/dev/null
+post /playlist/play "{\"paths\":[\"$I1\",\"$C1\"],\"settings\":{\"Order\":0}}" >/dev/null
+for _ in $(seq 1 40); do [ "$(cur path)" = "$I1" ] && break; sleep 0.1; done
+sleep 2
+[ "$(cur path)" = "$I1" ] && ok "scenes after 0 = off: the image still shows after 2 s" || bad "scenes after 0 × image: cur $(cur path) after 2 s (want the image)"
+t_sc=$(date +%s%3N); post /settings '{"GlobalSwitchScenesAfterSeconds":3}' >/dev/null
+for _ in $(seq 1 50); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
+d_sc=$(( $(date +%s%3N) - t_sc ))
+[ "$(cur path)" = "$C1" ] && [ "$d_sc" -lt 2500 ] && ok "{GlobalSwitchScenesAfterSeconds:3} → the image (2 s in) left for c1 $d_sc ms after (no replay, the play time kept)" \
+  || bad "scenes after 3 s live × image: cur $(cur path) $d_sc ms after"
+post /settings '{"GlobalSwitchScenesAfterSeconds":1800,"GlobalAdvanceOnVideoEnd":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body switches the engine (nothing playing → nothing starts)"

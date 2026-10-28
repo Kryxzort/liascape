@@ -130,7 +130,8 @@ L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 {"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
- "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"RestartIntervalSeconds":600}
+ "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
+ "RestartIntervalSeconds":600}
 EOF
 
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
@@ -456,6 +457,34 @@ post /playlist/play "{\"paths\":[\"$I1\",\"$E1\"],\"settings\":{\"Order\":0}}" >
 swr=none; waitfor 15000 sw_seen "$m0" "$E1"
 between "$(sw_field 2)" 2400 4300 && ok "min 3 s: an image showed for it (handoff to e1 at +$(sw_field 2) ms)" || bad "min 3 s × image: $swr"
 setting '.GlobalIntervalSeconds = 0'
+stop_now
+
+echo "== 0 = off for both limits (minimum 0, maximum 0): a short clip switches at its end, a long one plays to its end"
+# p1 (4 s) → e1 (12 s) → e2: each switch at its clip's end (align:end), never cut by a limit
+m0=$(tev_n); nw0=$(nows)
+post /playlist/play "{\"paths\":[\"$P1\",\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 25000 sw_seen "$m0" "$E2"; sw_e2=$swr
+swr=$(sw_to "$m0" "$E1")
+between "$(sw_field 2)" 3200 4400 && [ "$(sw_field 3)" = end ] && ok "0/0: p1 (4 s) switched at its end (handoff +$(sw_field 2) ms, align end)" || bad "0/0 × a 4 s clip: $swr (want a handoff at +3.2…4.4 s, align end)"
+swr=$sw_e2
+between "$(sw_field 2)" 14800 16400 && [ "$(sw_field 3)" = end ] && ok "0/0: e1 (12 s) played to its end (handoff +$(sw_field 2) ms, align end)" || bad "0/0 × a 12 s clip: $swr (want a handoff at +14.8…16.4 s, align end)"
+[ $(( $(nows) - nw0 )) -le 1 ] && ok "…never cut (no align:now switch but the play's own)" || bad "0/0: $(( $(nows) - nw0 - 1 )) align:now switches besides the play's own"
+stop_now
+
+echo "== separate timing for scenes ON: a still image (it never ends) switches after \"Switch scenes after\", not at the minimum"
+setting '.GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 3'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$I1\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$E1"
+between "$(sw_field 2)" 2400 4300 && ok "scenes after 3 s (minimum 0): the image showed 3 s (handoff to e1 at +$(sw_field 2) ms)" || bad "scenes after 3 s × image: $swr (want a handoff at +2.4…4.3 s; minimum 0 would flash it by)"
+stop_now
+setting '.GlobalSwitchScenesAfterSeconds = 0 | .GlobalMaxPlaySeconds = 2'
+m0=$(nsched_all)
+post /playlist/play "{\"paths\":[\"$I1\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT cur_is path "$I1"; sleep 4
+[ "$(n_sched_to "$m0" "$E1")" = 0 ] && cur_is path "$I1" && ok "scenes after 0 = off (a 2 s maximum): the image still shows after 4 s (the maximum doesn't apply to it)" \
+  || bad "scenes after 0 × image: $(n_sched_to "$m0" "$E1") switches to e1, cur $(basename "$(cur path)")"
+setting '.GlobalSeparateSceneTiming = false | .GlobalSwitchScenesAfterSeconds = 0 | .GlobalMaxPlaySeconds = 0'
 
 echo "== /stop"
 post /stop '{}' >/dev/null
@@ -768,6 +797,71 @@ post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/
 swr=none; waitfor 15000 sw_seen "$m0" "$A"
 between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s on a scene: advanced 3 s in (+$(sw_field 1) ms, align $(sw_field 3))" || bad "max 3 s × scene: $swr (want align now at +2.3…3.9 s)"
 setting '.GlobalMaxPlaySeconds = 0'; stop_now
+
+echo "-- separate timing for scenes: ON → a scene switches after its own time (0 = off), the minimum / maximum don't apply to it; videos keep theirs"
+setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 3'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "scenes after 3 s (minimum 6 s): the scene advanced at its own 3 s (+$(sw_field 1) ms, align $(sw_field 3))" || bad "scenes after 3 s × min 6 × scene: $swr (want align now at +2.3…3.9 s)"
+stop_now
+# e1 → s1 → e2 with a 3 s maximum and scenes after 5 s: e1 is cut at 3 s (the maximum is a video's), s1 plays its own 5 s
+setting '.GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 3 | .GlobalSwitchScenesAfterSeconds = 5'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$E1\",\"$S1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 20000 sw_seen "$m0" "$E2"; sw_e2=$swr
+swr=$(sw_to "$m0" "$S1")
+between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s still cuts a video with the scene timing on (e1 → s1 at +$(sw_field 1) ms)" || bad "max 3 s × video × scene timing on: $swr"
+s1_at=$(sw_field 1); swr=$sw_e2
+d=$(( ${swr%% *} - ${s1_at:-0} ))
+between "$d" 4300 6000 && [ "$(sw_field 3)" = now ] && ok "…and s1 played its own 5 s, not the 3 s maximum (s1 → e2 $d ms after its switch)" || bad "scenes after 5 s × max 3 s × scene: $swr ($d ms after s1's switch; want 4.3…6.0 s)"
+stop_now
+# scenes after 0 = off: the scene stays, the maximum (2 s) doesn't move it
+setting '.GlobalMaxPlaySeconds = 2 | .GlobalSwitchScenesAfterSeconds = 0'
+m0=$(nsched_all)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$S1"; sleep 4
+[ "$(n_sched_to "$m0" "$A")" = 0 ] && ok "scenes after 0 = off (a 2 s maximum): the scene still plays after 4 s" || bad "scenes after 0 × max 2 × scene: $(n_sched_to "$m0" "$A") switches to a"
+stop_now
+# a one-item playlist never switches to itself
+setting '.GlobalMaxPlaySeconds = 0 | .GlobalSwitchScenesAfterSeconds = 2'
+m0=$(nsched_all)
+post /playlist/play "{\"paths\":[\"$S1\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$S1"; sleep 4
+[ "$(n_sched_to "$m0" "$S1")" = 1 ] && ok "scenes after 2 s on a one-item playlist: no switch to itself in 4 s" || bad "one-item scene playlist: $(n_sched_to "$m0" "$S1") switches to s1 (want only the play's own)"
+stop_now
+# OFF → the video rules (the minimum reached is a scene's end): "Switch scenes after" is ignored
+setting '.GlobalSeparateSceneTiming = false | .GlobalIntervalSeconds = 3 | .GlobalSwitchScenesAfterSeconds = 9'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "separate timing OFF: the scene moved at the minimum 3 s (+$(sw_field 1) ms), its own 9 s ignored" || bad "separate timing off × min 3 × scene: $swr"
+stop_now
+# live: OFF (min 0, max 0 → the scene stays) → ON with 4 s ~1.5 s in, then an unrelated edit: it advances 4 s after s1
+# showed — the play time kept counting, neither edit restarted it
+setting '.GlobalIntervalSeconds = 0 | .GlobalSwitchScenesAfterSeconds = 0'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$S1"; sleep 1.5
+setting '.GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 4'; t_set=$(ms_now); sleep 1; setting '.Volume = 90'
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+rel=$(( t_set - $(t0w) )); echo "     separate timing turned on ${rel} ms after s1 showed"
+between "$(sw_field 1)" 3300 5000 && [ "$(sw_field 3)" = now ] && ok "separate timing on + 4 s set live (+${rel} ms) + a volume edit: s1 advanced at +$(sw_field 1) ms of its play" \
+  || bad "scene timing live: $swr (want align now at +3.3…5.0 s of s1, set at +${rel} ms)"
+setting '.Volume = 100'; stop_now
+# a playlist's own (override): its 0 = off beats the globals' 2 s; a /playlist/state edit to 4 s ~1 s in (and an
+# unrelated transition edit after it) → it advances 4 s after s1 showed
+setting '.GlobalSwitchScenesAfterSeconds = 2'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"AdvanceOnVideoEnd\":true,\"IntervalSeconds\":0,\"MaxPlaySeconds\":0,\"SeparateSceneTiming\":true,\"SwitchScenesAfterSeconds\":0,\"TransitionEnabled\":true,\"TransitionEffectIds\":[\"fade\"],\"TransitionDurationMs\":300}}" >/dev/null
+waitfor $WAIT scene_ready "$S1"; sleep 1
+post /playlist/state '{"settings":{"switchScenesAfterSeconds":4}}' >/dev/null; t_set=$(ms_now); sleep 1
+post /playlist/state '{"settings":{"transitionDurationMs":350}}' >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+rel=$(( t_set - $(t0w) )); echo "     the playlist's own 4 s set ${rel} ms after s1 showed"
+between "$(sw_field 1)" 3300 5000 && [ "$(sw_field 3)" = now ] && ok "the playlist's own scene timing (0 → 4 s live via /playlist/state, the globals' 2 s ignored): advanced at +$(sw_field 1) ms" \
+  || bad "playlist override scene timing: $swr (want align now at +3.3…5.0 s; the globals' 2 s would land ≤ +2.9 s)"
+setting '.GlobalSeparateSceneTiming = false | .GlobalSwitchScenesAfterSeconds = 0 | .GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0'; stop_now
 
 echo "-- scene properties (project.json general.properties → the item's index → scene_props, live)"
 # scene 1 gets WE-style user properties: `color` (the synthetic renderer's WE-encoded colour — red by default),
@@ -1330,6 +1424,23 @@ echo "     the new backend answered $(( t_up - $(t0w) )) ms after p1 showed"
 between "$(sw_field 2)" 7200 8400 && [ "$(sw_field 3)" = end ] && ok "min 6 s across a backend restart: p1 advanced at its 2nd loop's end (handoff +$(sw_field 2) ms)" \
   || bad "min × backend restart: $swr (want a handoff at +7.2…8.4 s, align end)"
 setting '.GlobalIntervalSeconds = 0'; stop_now
+
+echo "== …and a scene's own time (separate timing for scenes, 6 s): counted across a backend restart"
+setting '.AllowScenes = true | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 6'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$S1"; sleep 1.5
+port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); old=$BP
+kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+sleep 1
+BLOG=$T/backend-limits3.log
+"$DOTNET" "$DLL" --serve > "$BLOG" 2>&1 & BP=$!
+new_backend_up "$port0"; t_up=$(ms_now)
+swr=none; waitfor 20000 sw_seen "$m0" "$E1"
+echo "     the new backend answered $(( t_up - $(t0w) )) ms after s1 showed"
+between "$(sw_field 1)" 5300 7300 && [ "$(sw_field 3)" = now ] && ok "scenes after 6 s across a backend restart: s1 advanced at +$(sw_field 1) ms" \
+  || bad "scene timing × backend restart: $swr (want align now at +5.3…7.3 s)"
+setting '.GlobalSeparateSceneTiming = false | .GlobalSwitchScenesAfterSeconds = 0 | .AllowScenes = false'; stop_now
 
 echo "== a second backend started while the first runs takes the playlist over (the first stops ticking)"
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null

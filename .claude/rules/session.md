@@ -25,8 +25,8 @@ paths:
 
 `CustomPlaylist` (JSON at `~/.config/livepaper/playlist_state.json` for in-progress; named files in `~/.local/share/livepaper/playlists/`):
 - `VideoPaths`, `Name` (nullable; only set after Save or Load)
-- `Settings.Order` (Sequential/Shuffle), `Settings.OverrideGlobalSettings`, `Settings.IntervalSeconds` (0; the timer, or the minimum play time under advance-on-end), `Settings.AdvanceOnVideoEnd` (true), `Settings.MaxPlaySeconds` (1800)
-- `IntervalSeconds`/`AdvanceOnVideoEnd`/`MaxPlaySeconds` only used when `OverrideGlobalSettings` is true. The maximum is NOT in `LastSession`: a session reads it from the current playlist state + settings at its start / restore / resume (like the transitions); the minimum is the session's own interval.
+- `Settings.Order` (Sequential/Shuffle), `Settings.OverrideGlobalSettings`, `Settings.IntervalSeconds` (0; the timer, or the minimum play time under advance-on-end), `Settings.AdvanceOnVideoEnd` (true), `Settings.MaxPlaySeconds` (0 = off), `Settings.SeparateSceneTiming` (true) + `Settings.SwitchScenesAfterSeconds` (1800) — "Separate timing for scenes" / "Switch scenes after" (player-adapter.md § Rotation)
+- `IntervalSeconds`/`AdvanceOnVideoEnd`/`MaxPlaySeconds`/`SeparateSceneTiming`/`SwitchScenesAfterSeconds` only used when `OverrideGlobalSettings` is true. The maximum and the scene timing are NOT in `LastSession`: a session reads it from the current playlist state + settings at its start / restore / resume (like the transitions); the minimum is the session's own interval.
 
 `LastSession` model fields:
 - `IsPlaylist` — Play All session; `IsTimedPlaylist` — timed playlist; `IsRandom` — `--random` session
