@@ -3,8 +3,14 @@
 //!
 //! One PipeWire playback stream per worker — F32 stereo 48 kHz, `node.latency 256/48000`,
 //! `node.name = lp-player-scene.<source id>`, `media.role = Wallpaper`, `target.object =
-//! lp-player-bus` when the route is the bus — on its own thread (`lp-scene-audio`, its own
-//! PipeWire main loop; the process callback runs there). The callback **pulls** the scene's mix
+//! lp-player-bus` when the route is the bus — run from its own thread (`lp-scene-audio`, its own
+//! PipeWire main loop) with **`RT_PROCESS`**: the process callback runs on PipeWire's data
+//! thread (real-time priority through the client's `module-rt`, as mpv's AO does) — on the
+//! main-loop thread it missed graph cycles under CPU load (1.3 ms of silence on the bus at a
+//! 64-frame quantum: `pw-top` ERR on `lp-player-scene.*`, the `scene_gain_ramp_reaches_the_bus`
+//! flake). The callback owns the [`Dsp`] (a mutex the main loop never takes while streaming) and
+//! hands the envelope + `AudioFlowing` to the main loop through [`Outbox`] (`try_lock` /
+//! atomics: never a wait on the main loop). The callback **pulls** the scene's mix
 //! (`wp_context_audio_pull`, or the synthetic tone) through the time stretch ([`Stretch`]: the
 //! scene clock's `speed`, pitch kept, bit-exact at 1×), then:
 //!
@@ -30,10 +36,11 @@
 //! and discarding; a PipeWire that can't be reached falls back to that timer (keeping the
 //! scene's sound in step with its picture, reporting no flow) and is retried every second.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::os::fd::{AsFd, OwnedFd};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -388,7 +395,7 @@ fn fill(
     t_ns: i64,
     real: bool,
     stop: bool,
-    outbox: &mut Outbox,
+    outbox: &Outbox,
 ) {
     let mut st = ctl.state();
     st.plays &= !stop;
@@ -401,21 +408,42 @@ fn fill(
         Err(_) => dsp.process(out, st, None, t_ns, real),
     };
     ctl.level.store(dsp.level().to_bits(), Ordering::SeqCst);
-    outbox.flowed |= flowed;
+    if flowed {
+        outbox.flowed.store(true, Ordering::SeqCst);
+    }
+    // Never wait on the main loop: a held lock leaves the blocks in `dsp.env` for next time.
+    if !dsp.env.is_empty()
+        && let Ok(mut e) = outbox.env.try_lock()
+    {
+        e.append(&mut dsp.env);
+    }
 }
 
+/// What the stream's callback hands the main loop (which sends it): `AudioFlowing` and the
+/// envelope's 1 ms blocks.
 #[derive(Default)]
 struct Outbox {
-    flowed: bool,
+    flowed: AtomicBool,
+    env: Mutex<Vec<(i64, f32)>>,
+}
+
+fn lock(dsp: &Mutex<Dsp>) -> MutexGuard<'_, Dsp> {
+    dsp.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Send what the callbacks queued: `AudioFlowing`, full `Envelope` batches.
-fn flush(sock: &OwnedFd, dsp: &mut Dsp, outbox: &mut Outbox) {
-    if std::mem::take(&mut outbox.flowed) {
+fn flush(sock: &OwnedFd, outbox: &Outbox) {
+    if outbox.flowed.swap(false, Ordering::SeqCst) {
         let _ = proto::send(sock.as_fd(), &FromWorker::AudioFlowing, &[]);
     }
-    while dsp.env.len() >= ENVELOPE_BLOCKS {
-        let batch: Vec<(i64, f32)> = dsp.env.drain(..ENVELOPE_BLOCKS).collect();
+    let mut batches = Vec::new();
+    {
+        let mut e = outbox.env.lock().unwrap_or_else(|e| e.into_inner());
+        while e.len() >= ENVELOPE_BLOCKS {
+            batches.push(e.drain(..ENVELOPE_BLOCKS).collect::<Vec<_>>());
+        }
+    }
+    for batch in batches {
         let m = FromWorker::Envelope {
             t0_ms: batch[0].0 as f64 / 1e6,
             dbfs_1ms: batch.iter().map(|b| b.1).collect(),
@@ -446,7 +474,8 @@ pub fn spawn(ctl: Arc<Control>, sock: OwnedFd) -> std::io::Result<()> {
 
 fn run(ctl: Arc<Control>, sock: OwnedFd) {
     pw::init();
-    let dsp = Rc::new(RefCell::new(Dsp::new()));
+    // Kept across streams and routes (the gate's and the gain's state continue).
+    let dsp = Arc::new(Mutex::new(Dsp::new()));
     // A scene without sound (or not loaded yet) has nothing to play: no stream, no timer —
     // a 64-frame graph would otherwise wake this thread 750×/s for silence.
     while !ctl.has_source() {
@@ -482,7 +511,7 @@ fn run(ctl: Arc<Control>, sock: OwnedFd) {
 /// the route changes or `until` passes.
 fn run_null(
     ctl: &Control,
-    dsp: &RefCell<Dsp>,
+    dsp: &Mutex<Dsp>,
     sock: &OwnedFd,
     rgen: u64,
     real: bool,
@@ -491,7 +520,7 @@ fn run_null(
     let t0 = Instant::now();
     let mut done: u64 = 0;
     let mut buf = Vec::new();
-    let mut outbox = Outbox::default();
+    let outbox = Outbox::default();
     while ctl.route_gen() == rgen && until.is_none_or(|u| Instant::now() < u) {
         std::thread::sleep(NULL_PERIOD);
         let due = (t0.elapsed().as_secs_f64() * RATE as f64) as u64;
@@ -502,9 +531,8 @@ fn run_null(
             continue;
         }
         buf.resize(n * CH, 0.0);
-        let mut d = dsp.borrow_mut();
-        fill(ctl, &mut d, &mut buf, mono_ns(), real, false, &mut outbox);
-        flush(sock, &mut d, &mut outbox);
+        fill(ctl, &mut lock(dsp), &mut buf, mono_ns(), real, false, &outbox);
+        flush(sock, &outbox);
     }
 }
 
@@ -512,7 +540,7 @@ fn run_null(
 /// audible stream on the gate) or the connection fails (`Err`).
 fn run_pw(
     ctl: &Arc<Control>,
-    dsp: &Rc<RefCell<Dsp>>,
+    dsp: &Arc<Mutex<Dsp>>,
     sock: &OwnedFd,
     rgen: u64,
     target: Option<&str>,
@@ -558,8 +586,9 @@ fn run_pw(
     }
     let stream =
         StreamRc::new(core.clone(), &name, props).map_err(|e| format!("stream {name}: {e}"))?;
-    let outbox = Rc::new(RefCell::new(Outbox::default()));
-    let closing = Rc::new(Cell::new(false));
+    // Shared with the callback, which runs on PipeWire's data thread (`RT_PROCESS`).
+    let outbox = Arc::new(Outbox::default());
+    let closing = Arc::new(AtomicBool::new(false));
     let _l = stream
         .add_local_listener_with_user_data(())
         .process({
@@ -588,12 +617,12 @@ fn run_pw(
                         // A route change closing this stream fades out on the gate first.
                         fill(
                             &ctl,
-                            &mut dsp.borrow_mut(),
+                            &mut lock(&dsp),
                             out,
                             t,
                             true,
-                            closing.get(),
-                            &mut outbox.borrow_mut(),
+                            closing.load(Ordering::SeqCst),
+                            &outbox,
                         );
                         let c = &mut *d.chunk;
                         c.offset = 0;
@@ -606,7 +635,13 @@ fn run_pw(
         })
         .register()
         .map_err(|e| format!("stream listener: {e}"))?;
-    lp_player::audio::bus::connect(&stream, spa::utils::Direction::Output)?;
+    lp_player::audio::bus::connect_with(
+        &stream,
+        spa::utils::Direction::Output,
+        pw::stream::StreamFlags::AUTOCONNECT
+            | pw::stream::StreamFlags::MAP_BUFFERS
+            | pw::stream::StreamFlags::RT_PROCESS,
+    )?;
     log(
         sock,
         "info",
@@ -618,15 +653,16 @@ fn run_pw(
     let mut close_by: Option<Instant> = None;
     loop {
         ml.loop_().iterate(pw::loop_::Timeout::Finite(ITERATE));
-        flush(sock, &mut dsp.borrow_mut(), &mut outbox.borrow_mut());
+        flush(sock, &outbox);
         if let Some(e) = core_error.borrow_mut().take() {
             return Err(format!("connection error: {e}"));
         }
         if ctl.route_gen() != rgen {
             // Fade out (≤ 30 ms of callbacks), bounded — a stalled graph never holds us.
             let by = *close_by.get_or_insert_with(|| Instant::now() + Duration::from_millis(100));
-            closing.set(true);
-            if dsp.borrow().level() == 0.0 || Instant::now() >= by {
+            closing.store(true, Ordering::SeqCst);
+            // The callback stores its level after every buffer (`fill`).
+            if ctl.level() == 0.0 || Instant::now() >= by {
                 return Ok(());
             }
         }
