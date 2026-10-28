@@ -5,11 +5,11 @@ import { api } from "../api/client";
 // Debug overlay + self-drive bridge (FPS/metrics HUD + a socket-driven self-test), web-native:
 //  • On-screen HUD (top-right): fps · true 1%/0.1% low · frametime · visible/total cards · anim layers
 //    · JS heap MB · long-task rate.
-//  • `window.lpdbg` control bridge — replaces the Unix socket; drive it headlessly from the Electron
-//    probe via webContents.executeJavaScript("lpdbg.metrics()"). No socat.
-// Enabled by `?debug` (or `localStorage.lpdbg=1`). Electron: launch with LP_DEBUG=1 (main.js adds it).
+//  • `window.liascapeDbg` control bridge — replaces the Unix socket; drive it headlessly from the Electron
+//    probe via webContents.executeJavaScript("liascapeDbg.metrics()"). No socat.
+// Enabled by `?debug` (or `localStorage.liascapeDbg=1`). Electron: launch with LIASCAPE_DEBUG=1 (main.js adds it).
 export const DEBUG_ON =
-  new URLSearchParams(location.search).has("debug") || localStorage.getItem("lpdbg") === "1";
+  new URLSearchParams(location.search).has("debug") || localStorage.getItem("liascapeDbg") === "1";
 
 interface Metrics { fps: number; low1: number; low01: number; ms: number; vis: number; cards: number; anim: number; heap: number; longs: number; }
 const ZERO: Metrics = { fps: 0, low1: 0, low01: 0, ms: 0, vis: 0, cards: 0, anim: 0, heap: 0, longs: 0 };
@@ -22,9 +22,9 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
   // App re-render (modal open, status tick, …).
   const cb = useRef({ setTab, getScroll });
   cb.current = { setTab, getScroll };
-  // BRIDGE (meter + lpdbg, fetchable) runs when the Settings toggle is on OR env/?debug (tooling/CDP).
+  // BRIDGE (meter + liascapeDbg, fetchable) runs when the Settings toggle is on OR env/?debug (tooling/CDP).
   // OVERLAY is only shown by the SETTINGS toggles — env/?debug never force the visual HUD (it just keeps
-  // values tracked + fetchable via lpdbg).
+  // values tracked + fetchable via liascapeDbg).
   const settingDebug = useStore((s) => !!s.settings?.debugMode);
   const overlayPref = useStore((s) => s.settings?.debugOverlay !== false);
   const bridgeOn = settingDebug || DEBUG_ON;
@@ -77,7 +77,7 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     return () => { cancelAnimationFrame(raf); po?.disconnect(); };
   }, [bridgeOn]); // eslint-disable-line
 
-  // ---- window.lpdbg bridge (registered once) ----
+  // ---- window.liascapeDbg bridge (registered once) ----
   useEffect(() => {
     if (!bridgeOn) return;
     const setTab = (t: string) => cb.current.setTab(t);
@@ -86,7 +86,7 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     const fmt = () => { const x = mRef.current; return `fps=${x.fps} low1%=${x.low1} low0.1%=${x.low01} ms=${x.ms} vis=${x.vis}/${x.cards} anim=${x.anim} heap=${x.heap}MB longs/s=${x.longs}`; };
     let autoRaf = 0;
     const stopScroll = () => { cancelAnimationFrame(autoRaf); autoRaf = 0; };
-    const lpdbg = {
+    const liascapeDbg = {
       help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
       metrics: () => fmt(),
       fps: () => `fps=${mRef.current.fps} low1%=${mRef.current.low1} ms=${mRef.current.ms}`,
@@ -124,9 +124,9 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
       },
       stopscroll: () => { stopScroll(); return "stopped"; },
     };
-    (window as unknown as { lpdbg: typeof lpdbg }).lpdbg = lpdbg;
-    console.log("[lpdbg] ready — lpdbg.help()");
-    return () => { stopScroll(); try { delete (window as unknown as { lpdbg?: unknown }).lpdbg; } catch { /* noop */ } };
+    (window as unknown as { liascapeDbg: typeof liascapeDbg }).liascapeDbg = liascapeDbg;
+    console.log("[liascapeDbg] ready — liascapeDbg.help()");
+    return () => { stopScroll(); try { delete (window as unknown as { liascapeDbg?: unknown }).liascapeDbg; } catch { /* noop */ } };
   }, [bridgeOn]); // eslint-disable-line
 
   if (!overlayOn) return null;

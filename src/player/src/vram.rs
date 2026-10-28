@@ -3,13 +3,13 @@
 //! VRAM (Task 8)").
 //!
 //! **Measuring ([`Probe`]).** System-wide total/free VRAM and per-process use, from (first that
-//! works, `LP_PLAYER_VRAM_PROBE=auto`): NVIDIA's NVML (`libnvidia-ml.so.1`, **dlopened** — never
+//! works, `LIASCAPE_PLAYER_VRAM_PROBE=auto`): NVIDIA's NVML (`libnvidia-ml.so.1`, **dlopened** — never
 //! a link dependency), AMD's `mem_info_vram_{total,used}` sysfs + `/proc/<pid>/fdinfo`
 //! `drm-*-vram`/`local` per process (AMD/Intel), else `nvidia-smi` (a process per sample, so
 //! every [`NVIDIA_SMI_INTERVAL`]). `none` disables it; `fake:<file>` reads a JSON file each
 //! sample — `{"total_mib", "free_mib", "procs": {"<pid>": mib}}` — so tests drive both rules
 //! deterministically (a missing or bad file = no sample). A [`Monitor`] runs the probe on its own
-//! thread (`lp-vram`), never the loop: NVML calls take ~1 ms, `nvidia-smi` ~50 ms.
+//! thread (`lia-vram`), never the loop: NVML calls take ~1 ms, `nvidia-smi` ~50 ms.
 //!
 //! **The per-scene limit** (`player.scene_vram_limit_mib`, 0 = off): the runtime stops a scene
 //! worker whose own VRAM stays above it for [`Timing::scene_hold`] (2 s — a load's transient
@@ -79,7 +79,7 @@ pub fn resume_mib(total_mib: f64) -> f64 {
 }
 
 /// The rule's timing. Production: [`Timing::default`]; tests shorten it with
-/// `LP_PLAYER_VRAM_TIMING=<interval_ms>,<enter_ms>,<resume_ms>,<settle_ms>,<scene_hold_ms>`.
+/// `LIASCAPE_PLAYER_VRAM_TIMING=<interval_ms>,<enter_ms>,<resume_ms>,<settle_ms>,<scene_hold_ms>`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Timing {
     /// Sampling period (a probe may ask for a longer one).
@@ -106,10 +106,10 @@ impl Default for Timing {
 }
 
 impl Timing {
-    /// The default, or `LP_PLAYER_VRAM_TIMING` (test knob; a bad value is ignored).
+    /// The default, or `LIASCAPE_PLAYER_VRAM_TIMING` (test knob; a bad value is ignored).
     pub fn from_env() -> Timing {
         let mut t = Timing::default();
-        if let Ok(v) = std::env::var("LP_PLAYER_VRAM_TIMING") {
+        if let Ok(v) = std::env::var("LIASCAPE_PLAYER_VRAM_TIMING") {
             let ms: Vec<u64> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             if ms.len() == 5 {
                 let d = Duration::from_millis;
@@ -161,7 +161,7 @@ pub trait Probe: Send {
     }
 }
 
-/// No measurement (`LP_PLAYER_VRAM_PROBE=none`, or nothing found): every sample is `Err`.
+/// No measurement (`LIASCAPE_PLAYER_VRAM_PROBE=none`, or nothing found): every sample is `Err`.
 pub struct NoProbe(pub String);
 
 impl Probe for NoProbe {
@@ -202,16 +202,16 @@ impl Probe for FakeProbe {
     }
 }
 
-/// The probe `LP_PLAYER_VRAM_PROBE` asks for (`auto` when unset): `none`, `fake:<file>`,
+/// The probe `LIASCAPE_PLAYER_VRAM_PROBE` asks for (`auto` when unset): `none`, `fake:<file>`,
 /// `nvml`, `drm`, `nvidia-smi`, or `auto` = the first of NVML, DRM sysfs, `nvidia-smi` that
 /// works here.
 pub fn probe_from_env() -> Box<dyn Probe> {
-    let want = std::env::var("LP_PLAYER_VRAM_PROBE").unwrap_or_else(|_| "auto".into());
+    let want = std::env::var("LIASCAPE_PLAYER_VRAM_PROBE").unwrap_or_else(|_| "auto".into());
     if let Some(f) = want.strip_prefix("fake:") {
         return Box::new(FakeProbe(PathBuf::from(f)));
     }
     match want.as_str() {
-        "none" | "off" => Box::new(NoProbe("disabled by LP_PLAYER_VRAM_PROBE=none".into())),
+        "none" | "off" => Box::new(NoProbe("disabled by LIASCAPE_PLAYER_VRAM_PROBE=none".into())),
         "nvml" => nvml::Nvml::open()
             .map(|n| Box::new(n) as Box<dyn Probe>)
             .unwrap_or_else(|e| Box::new(NoProbe(e))),
@@ -409,7 +409,7 @@ pub fn parse_nvidia_smi(text: &str) -> Option<Sample> {
             }
             continue;
         }
-        // `|    0   N/A  N/A   1774158    C+G   …/lp-player     194MiB |`
+        // `|    0   N/A  N/A   1774158    C+G   …/liascape-player     194MiB |`
         let cols: Vec<&str> = line
             .trim_matches(|c| c == '|' || c == ' ')
             .split_whitespace()
@@ -628,7 +628,7 @@ struct Shared {
     probe: &'static str,
 }
 
-/// The probe on its own thread (`lp-vram`): one sample per period with the latest pid list;
+/// The probe on its own thread (`lia-vram`): one sample per period with the latest pid list;
 /// [`Monitor::latest`] reads the newest. Dropping it stops the thread at its next wake (never
 /// joined on the caller's thread).
 pub struct Monitor {
@@ -650,7 +650,7 @@ impl Monitor {
         let sh = shared.clone();
         let period = interval.max(probe.min_interval());
         let _ = std::thread::Builder::new()
-            .name("lp-vram".into())
+            .name("lia-vram".into())
             .spawn(move || {
                 let (lock, cv) = &*sh;
                 loop {
@@ -1084,7 +1084,7 @@ mod tests {
 |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
 |=========================================================================================|
 |    0   N/A  N/A            2076      G   ...alia-qs-0.0.12/bin/quickshell        116MiB |
-|    0   N/A  N/A         1774158    C+G   ...player/target/debug/lp-player        194MiB |
+|    0   N/A  N/A         1774158    C+G   ...player/target/debug/liascape-player        194MiB |
 +-----------------------------------------------------------------------------------------+
 ";
         let s = parse_nvidia_smi(text).expect("parsed");
@@ -1096,7 +1096,7 @@ mod tests {
 
     #[test]
     fn fake_probe_reads_the_file_each_sample() {
-        let f = std::env::temp_dir().join(format!("lp-vram-fake-{}.json", std::process::id()));
+        let f = std::env::temp_dir().join(format!("liascape-vram-fake-{}.json", std::process::id()));
         let mut p = FakeProbe(f.clone());
         assert!(p.sample(&[]).is_err(), "no file: no sample");
         std::fs::write(&f, r#"{"total_mib": 8192, "free_mib": 300, "procs": {"12": 900, "13": 5}}"#)

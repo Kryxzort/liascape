@@ -1,5 +1,5 @@
 //! Phase 2 render worker (`.claude/rules/player-core.md` § Sources "Render worker"): one
-//! `lp-render` thread with its own EGL context in the compositor's share group owns every
+//! `lia-render` thread with its own EGL context in the compositor's share group owns every
 //! worker-mode `MpvSource`'s libmpv render context — its creation, its first render (shader
 //! compile, scaler LUTs, FBO setup: 6–20 ms on the loop before) and every later render into
 //! textures the loop adopts once complete — so the loop only composes finished textures.
@@ -62,7 +62,7 @@ const IDLE_POLL: Duration = Duration::from_millis(100);
 /// the loop's front, the newest frame, one to render into).
 const FREE_KEEP: usize = 2;
 
-/// How long an `lp-open` job waits for the worker to make a render context. The core travels
+/// How long an `lia-open` job waits for the worker to make a render context. The core travels
 /// with the request: a job that gives up fails its source (`source.error`) and the lane frees
 /// what it made and reaps the core itself. 10 s = the transition's own wait for B's first frame
 /// (`recipes::transition`): waiting longer can't help a switch. The hwdec interop's init runs in
@@ -74,7 +74,7 @@ const ATTACH_WAIT: Duration = Duration::from_secs(10);
 /// `.free {lane, ms}`), else at debug.
 const SLOW_JOB_MS: f64 = 100.0;
 
-/// Test-only fault injection, `LP_PLAYER_TEST_RENDER_WORKER_FAULT` (comma-separated, read once):
+/// Test-only fault injection, `LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT` (comma-separated, read once):
 /// - `slow-flush` — sleep [`SLOW_FLUSH`] between a render pass and its `glFlush`, so every frame
 ///   stays unsubmitted that long (a slow GPU submission; the fences must keep it out of sight);
 /// - `no-fence` — publish each frame right after its render, before the flush and without a
@@ -88,7 +88,7 @@ const SLOW_JOB_MS: f64 = 100.0;
 /// - `no-context` — the thread reports a failed start right after its context was made (what a
 ///   driver refusing the shared context looks like): `serve` must fall back to the loop
 ///   (`tests/api.rs::render_worker_unavailable_falls_back_to_the_loop`);
-/// - `panic` — panic at the first render (a bug or an allocation `expect` on `lp-render`): the
+/// - `panic` — panic at the first render (a bug or an allocation `expect` on `lia-render`): the
 ///   player must fail like a lost compositor, not freeze (`tests/api.rs::
 ///   render_worker_death_fails_the_player`).
 ///
@@ -109,7 +109,7 @@ const SLOW_FLUSH: Duration = Duration::from_millis(30);
 fn faults() -> Faults {
     static F: std::sync::OnceLock<Faults> = std::sync::OnceLock::new();
     *F.get_or_init(|| {
-        let v = std::env::var("LP_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
+        let v = std::env::var("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
         let has = |k: &str| v.split(',').any(|p| p.trim() == k);
         let f = Faults {
             slow_flush: has("slow-flush"),
@@ -137,7 +137,7 @@ fn faults() -> Faults {
 /// unset/`on` = the GPU's own interop ([`hwdec_interop_for`]), `off` = copy modes only (the
 /// Task 20d behaviour — the A/B and escape hatch), or an mpv `gpu-hwdec-interop` name
 /// (`cuda`, `vaapi`, `drmprime`, `all`) to force one.
-pub const HWDEC_INTEROP_ENV: &str = "LP_PLAYER_HWDEC_INTEROP";
+pub const HWDEC_INTEROP_ENV: &str = "LIASCAPE_PLAYER_HWDEC_INTEROP";
 
 /// Which mpv `gpu-hwdec-interop` a render context made on the worker loads, from the worker
 /// context's `GL_VENDOR` and [`HWDEC_INTEROP_ENV`]: NVIDIA → `cuda` (nvdec straight into GL
@@ -156,7 +156,7 @@ pub fn hwdec_interop_for(gl_vendor: &str, env: Option<&str>) -> Option<&'static 
         Some("all") => return Some("all"),
         Some("" | "on" | "1" | "true" | "yes") | None => {}
         Some(other) => eprintln!(
-            "lp-player: {HWDEC_INTEROP_ENV}={other:?} ignored (expected on|off|cuda|vaapi|drmprime|all)"
+            "liascape-player: {HWDEC_INTEROP_ENV}={other:?} ignored (expected on|off|cuda|vaapi|drmprime|all)"
         ),
     }
     let v = gl_vendor.to_ascii_lowercase();
@@ -405,7 +405,7 @@ impl Inner {
     }
 }
 
-/// How many lanes (`lp-render` threads, one EGL context each) the worker runs, unless
+/// How many lanes (`lia-render` threads, one EGL context each) the worker runs, unless
 /// [`RENDER_LANES_ENV`] says otherwise (1–[`MAX_LANES`]). A render context is created on — and
 /// for good bound to — one lane, and its creation blocks that lane: with the hwdec GL interop
 /// that is the interop's init (the CUDA context: 85–220 ms per attach measured) — on ONE thread, the playing wallpaper froze for it at every switch (measured: its
@@ -423,14 +423,14 @@ pub const RENDER_LANES: usize = 3;
 pub const MAX_LANES: usize = 6;
 
 /// The env knob for the lane count (`1`–[`MAX_LANES`]; measurement and troubleshooting).
-pub const RENDER_LANES_ENV: &str = "LP_PLAYER_RENDER_LANES";
+pub const RENDER_LANES_ENV: &str = "LIASCAPE_PLAYER_RENDER_LANES";
 
 fn lanes_wanted() -> usize {
     match std::env::var(RENDER_LANES_ENV) {
         Ok(v) if !v.trim().is_empty() => match v.trim().parse::<usize>() {
             Ok(n) if (1..=MAX_LANES).contains(&n) => n,
             _ => {
-                eprintln!("lp-player: {RENDER_LANES_ENV}={v:?} ignored (expected 1–{MAX_LANES})");
+                eprintln!("liascape-player: {RENDER_LANES_ENV}={v:?} ignored (expected 1–{MAX_LANES})");
                 RENDER_LANES
             }
         },
@@ -438,7 +438,7 @@ fn lanes_wanted() -> usize {
     }
 }
 
-/// The render worker (one per player): handles on its `lp-render` lanes. Every source it
+/// The render worker (one per player): handles on its `lia-render` lanes. Every source it
 /// renders holds one (`Attached`), so the threads outlive them all; when the last handle goes
 /// (the runtime's and every source's) each lane finishes its queued frees and exits by itself
 /// — [`RenderWorker::shutdown`] is the bounded wait for that at `quit`.
@@ -452,7 +452,7 @@ pub struct RenderWorker {
 
 impl Drop for RenderWorker {
     /// The last handle: every lane finishes its queued frees, destroys its context and exits
-    /// — waited for here (bounded), so no `lp-render` thread is still inside the driver when
+    /// — waited for here (bounded), so no `lia-render` thread is still inside the driver when
     /// the process exits (NVIDIA's atexit teardown under a live GL thread crashed a test
     /// binary at exit). In the player this is after [`RenderWorker::shutdown`] (a no-op then).
     fn drop(&mut self) {
@@ -506,7 +506,7 @@ impl RenderWorker {
 
     /// Give `core`'s rendering to the worker: the lane with the fewest live sources (ties: the
     /// first) creates the render context (its context current, update callback on its
-    /// eventfd) and a weak FILE_LOADED client. Called on an `lp-open` thread (it waits).
+    /// eventfd) and a weak FILE_LOADED client. Called on an `lia-open` thread (it waits).
     /// `Err(core)` = the worker can't (gone, failed — logged); the caller renders on the loop
     /// instead. `Err(None)`: the wait timed out and the core stays with the lane, which frees
     /// what it made and reaps it.
@@ -582,7 +582,7 @@ impl RenderWorker {
         }
     }
 
-    /// Why an `lp-render` lane died (it panicked), if one did — the runtime then fails like
+    /// Why an `lia-render` lane died (it panicked), if one did — the runtime then fails like
     /// a lost compositor (§ Sources "Render worker" → "Failure").
     pub fn died(&self) -> Option<String> {
         self.lanes.iter().find_map(|l| l.lock().died.clone())
@@ -675,7 +675,7 @@ impl RenderWorker {
     }
 }
 
-/// Start one lane: its shared context, eventfd and `lp-render` thread; returns once the thread
+/// Start one lane: its shared context, eventfd and `lia-render` thread; returns once the thread
 /// made the context current (with the hwdec interop it picked on it).
 fn spawn_lane(gfx: &Gfx, lane: usize) -> Result<(Arc<Inner>, Option<&'static str>), String> {
     let ctx = gfx.share_context()?;
@@ -705,7 +705,7 @@ fn spawn_lane(gfx: &Gfx, lane: usize) -> Result<(Arc<Inner>, Option<&'static str
     let (ok_tx, ok_rx) = mpsc::channel::<Result<Option<&'static str>, String>>();
     let me = Arc::clone(&inner);
     let thread = std::thread::Builder::new()
-        .name("lp-render".into())
+        .name("lia-render".into())
         .spawn(move || {
             // A panic here must never leave a silent, frozen lane behind: the slots' render
             // contexts are dropped by the unwind (this context still current), the lane is
@@ -741,7 +741,7 @@ fn spawn_lane(gfx: &Gfx, lane: usize) -> Result<(Arc<Inner>, Option<&'static str
         })
         .map_err(|e| {
             close_fd();
-            format!("spawn lp-render: {e}")
+            format!("spawn lia-render: {e}")
         })?;
     let interop = match ok_rx.recv() {
         Ok(Ok(interop)) => interop,
@@ -753,7 +753,7 @@ fn spawn_lane(gfx: &Gfx, lane: usize) -> Result<(Arc<Inner>, Option<&'static str
         Err(_) => {
             let _ = thread.join();
             close_fd();
-            return Err("lp-render exited during startup".into());
+            return Err("lia-render exited during startup".into());
         }
     };
     *inner.done.lock().unwrap_or_else(|e| e.into_inner()) = Some((rx, thread));
@@ -882,7 +882,7 @@ impl Inner {
                                 if let Err(mpsc::SendError((core, _))) =
                                     reply.send((core, Ok((id, ex))))
                                 {
-                                    // The `lp-open` job gave up: undo, reap the core here.
+                                    // The `lia-open` job gave up: undo, reap the core here.
                                     if let Some(s) = slots.remove(&id) {
                                         s.free(&gl);
                                     }
@@ -1082,7 +1082,7 @@ impl Slot {
             return None;
         }
         if faults().panic {
-            panic!("test fault panic: lp-render panicked in a render");
+            panic!("test fault panic: lia-render panicked in a render");
         }
         if let Some(w) = &self.weak {
             let ev = w.poll();

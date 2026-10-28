@@ -4,10 +4,10 @@
 //! stream, not one opaque monitor capture, so a per-app white/blacklist ([`admit`]) can plug in
 //! later. `.claude/rules/player-core.md` § Scene worker → "Real scenes".
 //!
-//! [`SysMon::start`] runs its own PipeWire thread (`lp-sysmon`): every node of class
+//! [`SysMon::start`] runs its own PipeWire thread (`lia-sysmon`): every node of class
 //! `Stream/Output/Audio` that [`admit`] lets through (by default: everything but loopback
 //! halves — `node.virtual`, which would count a stream twice, e.g. our bus's playback carrying
-//! every wallpaper source) gets a passive capture stream `lp-player-visualiser.<id>` linked to
+//! every wallpaper source) gets a passive capture stream `liascape-player-visualiser.<id>` linked to
 //! it (`target.object` = its serial; `node.dont-reconnect` + `node.dont-fallback`, so a target
 //! that goes away is never replaced by the default source — a microphone). Each capture keeps
 //! the last [`FRAME`] mono samples; [`SysMon::frame`] sums every stream that delivered within
@@ -45,7 +45,7 @@ pub const STALE: Duration = Duration::from_millis(150);
 /// Reconnect delay after a lost PipeWire connection.
 pub const RETRY: Duration = Duration::from_secs(1);
 /// Our capture streams' `node.name` prefix.
-pub const NAME_PREFIX: &str = "lp-player-visualiser.";
+pub const NAME_PREFIX: &str = "liascape-player-visualiser.";
 const TICK: Duration = Duration::from_millis(20);
 
 /// What a playback stream says about itself (the white/blacklist's input).
@@ -113,7 +113,7 @@ impl SysMon {
         });
         let sh = shared.clone();
         let thread = std::thread::Builder::new()
-            .name("lp-sysmon".into())
+            .name("lia-sysmon".into())
             .spawn(move || run(&sh))
             .ok();
         log::event(
@@ -352,7 +352,7 @@ fn tap_stream(
             "media.type" => "Audio",
             "media.category" => "Capture",
             "node.name" => name.as_str(),
-            "node.description" => "lp-player visualiser input",
+            "node.description" => "liascape-player visualiser input",
             "application.name" => APP_NAME,
             "target.object" => target.as_str(),
             "stream.capture.sink" => "false",

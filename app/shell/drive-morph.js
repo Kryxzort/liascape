@@ -14,9 +14,9 @@ function connect() {
 }
 (async () => {
   const ev = await connect();
-  // wait for lpdbg + library cards
-  for (let i = 0; i < 60; i++) { if (await ev("!!(window.lpdbg)")) break; await sleep(300); }
-  await ev(`lpdbg.tab('library')`); await sleep(800); await ev(`lpdbg.gifs(true)`); await sleep(2500);
+  // wait for liascapeDbg + library cards
+  for (let i = 0; i < 60; i++) { if (await ev("!!(window.liascapeDbg)")) break; await sleep(300); }
+  await ev(`liascapeDbg.tab('library')`); await sleep(800); await ev(`liascapeDbg.gifs(true)`); await sleep(2500);
   const log = (k, v) => console.log(k.padEnd(16), JSON.stringify(v));
   log("anim", await ev(`document.querySelectorAll('.thumb.anim').length`));
   log("idle_fps", await ev(FPS));

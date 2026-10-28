@@ -49,9 +49,9 @@ public static class ServerHost
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.Logging.ClearProviders();
-        // LP_PORT pins the port (dev: dotnet-watch restarts keep the same port → the open UI survives);
+        // LIASCAPE_PORT pins the port (dev: dotnet-watch restarts keep the same port → the open UI survives);
         // otherwise bind a random free port.
-        var fixedPort = int.TryParse(Environment.GetEnvironmentVariable("LP_PORT"), out var lp) ? lp : 0;
+        var fixedPort = int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_PORT"), out var lp) ? lp : 0;
         builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, fixedPort));
         builder.Services.AddCors(); // loopback-only; lets `vite dev` (other port) talk to us
         var app = builder.Build();
@@ -61,8 +61,8 @@ public static class ServerHost
         EventBus.WirePlayer();
 
         // Serve the built React UI same-origin (so the client uses relative paths, no CORS).
-        // LP_UI_DIR points at app/ui/dist (dev) or the bundled wwwroot (packaged).
-        var uiDir = Environment.GetEnvironmentVariable("LP_UI_DIR");
+        // LIASCAPE_UI_DIR points at app/ui/dist (dev) or the bundled wwwroot (packaged).
+        var uiDir = Environment.GetEnvironmentVariable("LIASCAPE_UI_DIR");
         if (!string.IsNullOrEmpty(uiDir) && Directory.Exists(uiDir))
         {
             var fp = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(uiDir));
@@ -90,9 +90,9 @@ public static class ServerHost
         PlayerHelper.KillTimerDaemon();
         PlayerHelper.WriteGuiTimerPid();
         // load the engine NOW (cached): /settings compares against what actually runs when it changes
-        _ = livepaper.Player.PlayerEngine.IsLpPlayer;
+        _ = livepaper.Player.PlayerEngine.IsLiascapePlayer;
         // a player left running by an older build (it outlives the backend) restarts onto the current one
-        livepaper.Player.LpPlayerMedia.StartUpgradeWatch();
+        livepaper.Player.LiascapePlayerMedia.StartUpgradeWatch();
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
         // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
         // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
@@ -333,7 +333,7 @@ public static class ServerHost
         // the UI posts its whole copy, a script or agent may post just {"Volume": 50}); a bad value → 400.
         app.MapPost("/settings", (JsonElement body) =>
         {
-            // phase timing: logged when the whole handler is slow (or always with LP_PROFILE_SETTINGS=1)
+            // phase timing: logged when the whole handler is slow (or always with LIASCAPE_PROFILE_SETTINGS=1)
             var psw = System.Diagnostics.Stopwatch.StartNew();
             var phases = new List<string>();
             long lastMs = 0;
@@ -350,18 +350,18 @@ public static class ServerHost
             // change never clobbers an active override (effective = override ?? new global).
             var curPlaying = PlayerHelper.QueryCurrentPath();
             Mark("current");
-            bool lp = livepaper.Player.PlayerEngine.IsLpPlayer;
-            if (lp)
+            bool onPlayer = livepaper.Player.PlayerEngine.IsLiascapePlayer;
+            if (onPlayer)
             {
-                // lp-player: ONE resolver pass for all of it — every live source its own effective volume/speed,
+                // liascape-player: ONE resolver pass for all of it — every live source its own effective volume/speed,
                 // af, mute and decode settings + the layer fit, diffed against what it runs (player-adapter.md
                 // § Targeting); covers the legacy calls below and ApplyPlaybackSettingsLive's
                 PlayerHelper.ApplyEffectiveLive(prev, s, curPlaying);
                 Mark("resolve");
                 // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
-                if (!SameMonitors(prev.LweMonitors, s.LweMonitors)) livepaper.Player.LpPlayerMedia.ApplySceneFps(prev.LweMonitors, s.LweMonitors);
+                if (!SameMonitors(prev.LweMonitors, s.LweMonitors)) livepaper.Player.LiascapePlayerMedia.ApplySceneFps(prev.LweMonitors, s.LweMonitors);
                 // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
-                livepaper.Player.LpPlayerMedia.ApplyGpuSettings(prev, s);
+                livepaper.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
             }
             else
             {
@@ -379,7 +379,7 @@ public static class ServerHost
             Mark("backfill");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFps, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
-            if (!lp) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
+            if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
             // restart-daemon interval/mode changed → re-arm the in-process leak-restart timer now
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
@@ -405,7 +405,7 @@ public static class ServerHost
                 PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd);
             }
             // the effective transition (the globals, when the playlist follows them) or the method changed → an
-            // aligned switch already armed for A's end takes it (lp-player requested it with the old one)
+            // aligned switch already armed for A's end takes it (liascape-player requested it with the old one)
             var plS = PlaylistService.LoadCurrentState()?.Settings;
             if (prev.TransitionMethod != s.TransitionMethod
                 || !TransitionService.SameConfig(TransitionService.Effective(prev, plS), TransitionService.Effective(s, plS)))
@@ -425,13 +425,13 @@ public static class ServerHost
                     AudioMonitor.Stop();
             }
             Mark("rest");
-            if (psw.ElapsedMilliseconds > 100 || Environment.GetEnvironmentVariable("LP_PROFILE_SETTINGS") == "1")
+            if (psw.ElapsedMilliseconds > 100 || Environment.GetEnvironmentVariable("LIASCAPE_PROFILE_SETTINGS") == "1")
                 Console.WriteLine($"/settings: {psw.ElapsedMilliseconds} ms ({string.Join(", ", phases)})");
             return Results.Ok();
         });
         app.MapGet("/themes", () => Results.Json(ThemeService.All));
         app.MapGet("/mpv-preview", () => Results.Text(SettingsService.Load().BuildMpvOptions()));
-        // the Player engine row: what's asked for / running, whether lp-player can run (+ why not)
+        // the Player engine row: what's asked for / running, whether liascape-player can run (+ why not)
         app.MapGet("/player-engine", () => Results.Json(livepaper.Player.PlayerEngine.Status()));
         // API: which features can't work here because a build piece / runtime tool is missing (FeatureHealth) — the
         // Settings page's warning icons (one quick player hello; CLI checks cached 30 s).
@@ -459,15 +459,15 @@ public static class ServerHost
             // the Settings page's global Volume/Speed drag: every live wallpaper that follows the global
             // (no override of its own for that field — override ?? global, R61); never an overridden one
             if (r.Global == true) { PlayerHelper.PreviewGlobal(r.Volume, r.Speed); return Results.Ok(); }
-            // lp-player: a per-item value → the EDITED item's source(s), not srcs:* (R61) — mid-transition
+            // liascape-player: a per-item value → the EDITED item's source(s), not srcs:* (R61) — mid-transition
             // `cur:*` is the incoming side, so "what's playing" would move the other wallpaper.
-            if (livepaper.Player.PlayerEngine.IsLpPlayer) { livepaper.Player.LpPlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
+            if (livepaper.Player.PlayerEngine.IsLiascapePlayer) { livepaper.Player.LiascapePlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
             if (r.Paths is { Count: > 0 } && !r.Paths.Contains(PlayerHelper.QueryCurrentPath() ?? "")) return Results.Ok();
             if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
         });
         app.MapPost("/library/whitelist", (WhitelistReq r) => { LibraryService.SetWhitelisted(r.Path, r.Value); return Results.Ok(); });
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
-        // item in its index, then live on its source(s) under lp-player), and the drag twin (live, nothing saved)
+        // item in its index, then live on its source(s) under liascape-player), and the drag twin (live, nothing saved)
         app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));
         app.MapPost("/library/scene-props", (ScenePropReq r) => AppOps.SetSceneProp(r) is string err
             ? Results.BadRequest(new { error = err }) : Results.Json(AppOps.SceneProps(r.Path)));

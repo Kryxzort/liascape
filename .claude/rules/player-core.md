@@ -3,10 +3,10 @@ paths:
   - "src/player/**"
 ---
 
-## lp-player (the "utopia player")
+## liascape-player (the "utopia player")
 
-`lp-player` is the Rust crate (binary + lib, edition 2024) that will replace mpvpaper +
-`lp-transition` + per-monitor LWE + `lp-audio` with one process that owns every wallpaper
+`liascape-player` is the Rust crate (binary + lib, edition 2024) that will replace mpvpaper +
+`liascape-transition` + per-monitor LWE + `liascape-audio` with one process that owns every wallpaper
 type, on every monitor, with every transition. Design: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 This file covers only what exists in the crate so far; later tasks append their own
 sections below as they add modules (clock, graph, gfx, mpv, sources, recipes, api,
@@ -27,10 +27,10 @@ happen regardless of timing.
 - `src/health.rs` — feature health (owner 2026-10-28, "make missing libraries fail loudly"): which optional
   pieces work here and why not, each `{ok, reason, …}` (`ok` null = not known): `effects` (the catalogue —
   none / empty / unloadable → every switch is a cut), `vram` (one sample of `vram::probe_from_env` — none →
-  the VRAM limit and low-VRAM rule can't act; run once at serve start on the `lp-health` thread, `hello`
+  the VRAM limit and low-VRAM rule can't act; run once at serve start on the `lia-health` thread, `hello`
   never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
   none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`). `hello.health` carries all four;
-  `lp-player health` prints `{effects, vram}` (no render worker without a GL context) for when no player runs —
+  `liascape-player health` prints `{effects, vram}` (no render worker without a GL context) for when no player runs —
   the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
@@ -69,16 +69,16 @@ happen regardless of timing.
   predicate (`has_audio`, `audible`). § Runtime "Onsets" (final review I6/M12).
 - `src/worker/` — Phase 2: the compositor side of the scene worker (`proto.rs` wire
   protocol, `mod.rs` `WorkerHost` lifecycle, `dmabuf.rs` `ImportedRing`/`Latch`).
-  `src/bin/lp-scene-worker/` — the worker binary (second `[[bin]]`; `ring.rs`,
+  `src/bin/liascape-scene-worker/` — the worker binary (second `[[bin]]`; `ring.rs`,
   `synthetic.rs`). `src/scene/` — pure scene helpers (`cover_size`, the synthetic spec,
   `assets.rs` WE's assets dir, `pointer.rs` output → scene coordinates).
   `src/sources/scene.rs` — `SceneSource`. `src/gfx/dmabuf.rs` — dmabuf export/import +
-  native fences on `Gfx`. `src/bin/lp-scene-worker/lwe.rs` — LWE's core (feature `lwe`);
+  native fences on `Gfx`. `src/bin/liascape-scene-worker/lwe.rs` — LWE's core (feature `lwe`);
   `render.rs` — a real scene in the worker (Task 7); `audio.rs` + `stretch.rs` — the scene's
   sound as a stream on the player bus, time-stretched (Task 6); `gputimer.rs` — per-frame
   `GL_TIME_ELAPSED` (Task 8). `src/scene/budget.rs` — the worker GPU budget (Task 8).
 - `src/vram.rs` — VRAM measurement (NVML dlopened / DRM sysfs+fdinfo / `nvidia-smi` / a fake) on
-  the `lp-vram` thread and the pure low-VRAM rule (Phase 2 Task 8); `src/probe/vram.rs` — the
+  the `lia-vram` thread and the pure low-VRAM rule (Phase 2 Task 8); `src/probe/vram.rs` — the
   `vram` probe.
   § Scene worker → "GPU budget and VRAM (Task 8)".
 
@@ -88,7 +88,7 @@ mpv 0.41 / API 2.5), allowlisting `mpv_.*` functions/types and `MPV_.*` vars. C 
 generated as **module consts** (`mpv_event_id::MPV_EVENT_FILE_LOADED`), never Rust
 `enum`s — a value a newer libmpv adds can't become UB. pkg-config also emits the
 `-lmpv` + `-L` that nixpkgs auto-rpaths (same mechanism as `khronos-egl`'s `static`
-feature, § GFX / EGL). The flake's `lp-player` derivation already carries
+feature, § GFX / EGL). The flake's `liascape-player` derivation already carries
 `rustPlatform.bindgenHook` (libclang) + `pkg-config` + `mpv-unwrapped`, and the devShell
 inherits them, so neither needed a change.
 
@@ -290,7 +290,7 @@ value to return.
 `std::error::Error`): `no_such_node`, `no_such_prop`, `bad_type`, `out_of_range`,
 `read_only`, `ambiguous`, `unsupported`, `io` (the last reserved for a future task's
 persistence/socket I/O; nothing in `graph/` produces it yet). `hint` always names either
-this doc section or the `lp-player ctl state`/`ctl ...` command to inspect. Order of checks
+this doc section or the `liascape-player ctl state`/`ctl ...` command to inspect. Order of checks
 on a `set`: `no_such_prop` (including `gain.*` on a non-`Source`, or an unparseable slot)
 beats `read_only` beats `bad_type`/`out_of_range` — a caller never learns their value's
 shape is wrong on a property they weren't allowed to touch in the first place.
@@ -462,7 +462,7 @@ instead runs `khronos-egl`'s `build.rs`, which calls the `pkg-config` crate's
 dependency tree — which *does* emit real `cargo:rustc-link-lib=EGL` +
 `cargo:rustc-link-search`, which *does* get auto-rpath'd. Net effect: `cargo test --test
 gfx_basic` under the exact documented command needs no extra environment variables, on
-this machine or (verified) inside `nix build .#lp-player`'s sandboxed check phase.
+this machine or (verified) inside `nix build .#liascape-player`'s sandboxed check phase.
 
 **No build-time linking means no runtime graceful-failure path for "library missing"** —
 with `static`, a system lacking `libEGL` entirely fails at the dynamic linker before
@@ -503,7 +503,7 @@ fence + `glFlush`; the GPU copies in command order, so the picture is the one at
 captures stay deterministic). `Runtime::pump_captures` polls the fence (`Gfx::map_read_back`,
 `client_wait_sync` timeout 0) after every dispatch and on a 1 ms calloop timer while one is on the
 GPU (a stepped loop has no tick), maps the buffer and hands the mapping (`MappedPixels`, `Send`:
-plain memory valid until unmapped) to the **`lp-capture`** thread (started with the first capture,
+plain memory valid until unmapped) to the **`lia-capture`** thread (started with the first capture,
 idle on its channel until shutdown), which flips/encodes/writes straight from it; the loop then
 unmaps the buffer (`Gfx::end_read_back`, its own context, after the thread dropped its view), keeps
 it as the **spare** for the next capture of that size (freed after `SPARE_IDLE` 10 s unused, or by a
@@ -513,7 +513,7 @@ is answered after it). A thread that can't start → the encode runs on the loop
 writes every capture in flight first (`Capturer::shutdown`: its GPU copy ≤ 1 s, then the encode).
 `loop` probe `bounds.captures_in_flight`. `write_png` / `write_png_source` (tests, `--lwe-smoke`)
 stay synchronous (`Gfx::read_back` + `Readback`). **Every GL call stays on the loop's context:** a
-GPU copy read back on `lp-capture`'s own shared context (tried) stalled the loop 29–47 ms — the
+GPU copy read back on `lia-capture`'s own shared context (tried) stalled the loop 29–47 ms — the
 NVIDIA driver's process-wide lock around a new context's first `eglMakeCurrent`. **Measured** (debug,
 `--clock real`, a playing 1080p clip on a 3840×1080 output; the capture request / the loop's max
 busy around it): before 810 ms; a synchronous readback alone 1.6–10 ms each time (the GPU wait + a
@@ -542,25 +542,25 @@ is sufficient. Don't reach for either env var to "fix" a `gfx` build/test proble
 GPU, that's a real `Gfx::new_offscreen` failure (check the error string it prints) — not a
 missing environment variable.
 
-**`LP_REQUIRE_GPU=1` — a run that must have a GPU fails instead of skipping (TODO
-"`LP_REQUIRE_GPU` test mode").** Every GPU-test precondition goes through one helper,
+**`LIASCAPE_REQUIRE_GPU=1` — a run that must have a GPU fails instead of skipping (TODO
+"`LIASCAPE_REQUIRE_GPU` test mode").** Every GPU-test precondition goes through one helper,
 `tests/common::skip_gpu(reason)`: unset (default — the `nix build` sandbox, a GPU-less dev box) it
 prints `SKIP: <reason>` and the test returns (passes); set to anything but empty/`0` it **panics**
-with `LP_REQUIRE_GPU is set but a GPU test would skip: <reason>`. Its callers: `headless_gl` (no EGL
+with `LIASCAPE_REQUIRE_GPU is set but a GPU test would skip: <reason>`. Its callers: `headless_gl` (no EGL
 device) and `catalogue_dir` (no `transitions/` — decided: covered too, because nearly every GPU test
 — `api`, `supervise`, `transition`, `compose`, `effects_all` — also needs the catalogue, so a GPU CI
 without it would still skip almost everything silently), i.e. `api`/`supervise`'s `can_run`, the
 transition `Harness`, `compose`/`effects_all`'s `setup`, `sources`, `gfx_basic`, and `t20e`'s catalogue
 check; the one lib unit test needing EGL (`gfx::egl` `shared_egl_state_outlives_gfx_…`) applies the same
 rule inline. **Not covered, on purpose** (not GPU preconditions): the opt-in Wayland test
-(`LP_PLAYER_TEST_WAYLAND`), `i7`'s private PipeWire binaries, `credits`' python3/repo, `dropout`'s
+(`LIASCAPE_PLAYER_TEST_WAYLAND`), `i7`'s private PipeWire binaries, `credits`' python3/repo, `dropout`'s
 ffmpeg-less unit test; `ensure_clip` already panics without ffmpeg. **Measured** (a GPU-less machine
 simulated with `__EGL_VENDOR_LIBRARY_FILENAMES=/nonexistent/…` — glvnd finds no driver, `new_offscreen`
 fails exactly like on one): the whole suite passed in ~3 s with 133 `SKIP: no EGL device` lines; with
-`LP_REQUIRE_GPU=1` the same 133 tests fail (8 targets), everything else passes. Guard:
+`LIASCAPE_REQUIRE_GPU=1` the same 133 tests fail (8 targets), everything else passes. Guard:
 `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (re-runs `clear_readback` in a
 child with the vendor hidden: unset/`0`/empty → passes with `SKIP`, `1` → fails naming the reason;
-RED with the pre-change binary: `LP_REQUIRE_GPU=1` passed, 2/2 tests ok).
+RED with the pre-change binary: `LIASCAPE_REQUIRE_GPU=1` passed, 2/2 tests ok).
 
 ## Effects
 
@@ -578,19 +578,19 @@ small compatibility prelude), never in `transitions/` itself.
 
 **Directory resolution** (`Catalogue::resolve_dir`), in order:
 
-1. `LP_TRANSITIONS_DIR` env var.
+1. `LIASCAPE_TRANSITIONS_DIR` env var.
 2. `~/.local/share/livepaper-web/transitions` (the Electron UI's installed copy).
 3. The repo's own `transitions/`, found by walking up from the current exe's path and,
    failing that, from `CARGO_MANIFEST_DIR` (a build-time constant — this is what makes
    `cargo test` find it even before any exe-relative candidate would resolve).
 
 Each candidate is only accepted if it actually contains a `manifest.json`. Returns `None`
-if nothing resolves — true inside `nix build .#lp-player`'s sandboxed check phase, where
+if nothing resolves — true inside `nix build .#liascape-player`'s sandboxed check phase, where
 `src/player` is built without its sibling `transitions/` directory present (the flake's
-`lp-player` derivation sets `src = ./src/player`, nothing wider). Every test in
+`liascape-player` derivation sets `src = ./src/player`, nothing wider). Every test in
 `tests/effects_all.rs` treats `None` the same way `tests/common::headless_gl` treats no
 EGL device: print `"SKIP: ..."` and return, never fail the build over it — unless
-`LP_REQUIRE_GPU=1` (§ GFX / EGL: `tests/common::catalogue_dir` then fails the test).
+`LIASCAPE_REQUIRE_GPU=1` (§ GFX / EGL: `tests/common::catalogue_dir` then fails the test).
 
 **A failing effect is cached (final review M3).** `Catalogue::program` caches a load/compile
 failure (`Catalogue::failed(id)`), logs `effects.compile_failed {id, error}` once and returns the
@@ -834,7 +834,7 @@ the final review (I5) it is two halves: **`MpvSource::prepare_core(opts)`** — 
 no node props; `Send` (`PreparedCore`, dropped unused = callback cleared + core to the reaper)
 — and **`MpvSource::open_with_core(gfx, path, opts, core)`** on the loop thread (render
 context, every property applied, `start`, `loadfile`). `SourceHost` runs the first half on an
-`lp-open` worker thread in the real-clock runtime (§ Sources "`SourceHost`"); `open` = both in a
+`lia-open` worker thread in the real-clock runtime (§ Sources "`SourceHost`"); `open` = both in a
 row (stepped mode, tests, the harness).
 Fixed options: `vo=libmpv`, `config=no`, `terminal=no`, `keep-open=yes` (an ended video
 holds its last frame) **with `keep-open-pause=no`** (keep-open's default also flips
@@ -843,7 +843,7 @@ after the end would stay frozen), `idle=yes` (the core survives a load error / w
 a `path` change), `volume=100`, `volume-gain-min=-96`, `image-display-duration=inf` (set
 always — it only affects single-frame images), `keepaspect=no` (the texture *is* the
 frame; fit is the compositor's), `opengl-pbo=no` (required by the fence stub, below),
-`osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=lp-player`,
+`osd-level=0`, `ytdl=no`, `input-default-bindings=no`, `audio-client-name=liascape-player`,
 **`dither=ordered`** (I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
 every new render context's first render — measured ~25–30 ms on the loop per switch; ordered
 dithering of the same 8-bit target is visually equivalent), **`gpu-hwdec-interop=no`** (Task 20d:
@@ -875,7 +875,7 @@ best-effort the same way).** mpv ≥ 0.40 starts a clipboard in every core at `m
 (default backends `wayland`, `x11`, `vo`): with `WAYLAND_DISPLAY` its own `ext-data-control`
 connection to the compositor + a thread (fed every clipboard change of the session — every test
 server inherited the owner's and so connected to the live Hyprland), without it and with a reachable
-`DISPLAY` its own **X connection** + a thread (named after its creator, `lp-open`). That one crashed
+`DISPLAY` its own **X connection** + a thread (named after its creator, `lia-open`). That one crashed
 the player (2026-10-26, rapid-switch repro, `--headless` without `WAYLAND_DISPLAY`): when the X
 connection drops, mpv's clipboard thread `XCloseDisplay`s it → `XSync` fails → Xlib's *default* I/O
 error handler `exit(1)`s from that thread → the atexit handlers tear NVIDIA's EGL down under the
@@ -964,7 +964,7 @@ the flag's re-push removed → the `.dat` case RED), `tests/api.rs::fps_cap_neve
 stepped `step: no frame within 2 s … waiting for ready`).
 
 **A tempo filter is always in the chain (speed storm).** `mpv_af` hands mpv the graph's `af`
-plus `@lp-tempo:scaletempo2` (left out when the chain already has `scaletempo*`/`rubberband`).
+plus `@liascape-tempo:scaletempo2` (left out when the chain already has `scaletempo*`/`rubberband`).
 With pitch correction on (mpv's default) mpv adds its own tempo filter only while `speed` ≠ 1 and
 drops it at exactly 1×, and each add/drop rebuilds the audio chain (its `userspeed` stage and a
 s16↔float `convert`, mpv's af log): **3–5 ms of digital silence each, ~200 ms later at the sink** —
@@ -1040,7 +1040,7 @@ RED before: 286, 91, 85, 88 ms), `tests/sources.rs::property_map_reaches_mpv`, u
 `hwdec_maps_to_copy_modes_only`.
 
 **Zero-copy on the render worker (2026-10-27; TODO "Zero-copy hwdec back").** A render context
-on an `lp-render` lane (§ "Render worker" below) loads the GPU's GL interop, so nvdec/vaapi frames
+on an `lia-render` lane (§ "Render worker" below) loads the GPU's GL interop, so nvdec/vaapi frames
 go straight into GL textures — the interop's init (a CUDA context per render context on NVIDIA)
 runs in `mpv_render_context_create` on the lane, which the loop never waits for.
 - **Which interop** (`render_worker::hwdec_interop_for`, on lane 0's own context at start, logged
@@ -1048,14 +1048,14 @@ runs in `mpv_render_context_create` on the lane, which the loop never waits for.
   AMD/Intel → `vaapi`, anything else (llvmpipe, nouveau) → none (copy modes, one lane). Never mpv's
   `auto`, which for the render API loads EVERY interop eagerly (no on-demand loading in libmpv) — on
   NVIDIA also `vaapi` via nvidia-vaapi-driver, a second CUDA context per source. Env
-  `LP_PLAYER_HWDEC_INTEROP`: unset/`on` = that, `off` = Task 20d's copy modes exactly (one lane, no
+  `LIASCAPE_PLAYER_HWDEC_INTEROP`: unset/`on` = that, `off` = Task 20d's copy modes exactly (one lane, no
   preload — the A/B and escape hatch), `cuda|vaapi|drmprime|all` to force one.
 - **libcuda.** The CUDA interop dlopens `libcuda.so.1` from libmpv, whose nixpkgs RUNPATH lacks
   `/run/opengl-driver/lib` (above), so lane 0 dlopens it first (by soname, else that path — a
   loaded soname satisfies every later lookup): the dev/install binary gets the interop from its
   first source on, like the flake wrapper; then `cuInit(0)` (`render_worker.cuda_init {result,
   ms}`, 20–32 ms measured) after the loop stopped waiting for the lane. No libcuda → no interop.
-- **Which sources.** Only an attach the loop doesn't wait for: the `lp-open` job
+- **Which sources.** Only an attach the loop doesn't wait for: the `lia-open` job
   (`PreparedCore::attach_render(worker, true)`) of a source whose node `hwdec` (when the open is
   submitted) would decode zero-copy through that interop and that isn't an image
   (`host::wants_hwdec_interop` — `""`/`no`, `-copy`, `auto-copy*` and stills skip the 85–220 ms
@@ -1093,12 +1093,12 @@ runs in `mpv_render_context_create` on the lane, which the loop never waits for.
   modes 34–66).
 - **Measured** (release, hermetic `serve --headless --clock real --ao null --outputs
   1920x1080@60`, no `DISPLAY`, synthetic testsrc2 h264 clips, the machine shared with other
-  agents' suites; `LP_PLAYER_HWDEC_INTEROP=off` vs on, alternated per run, 4 rounds at load
+  agents' suites; `LIASCAPE_PLAYER_HWDEC_INTEROP=off` vs on, alternated per run, 4 rounds at load
   10–20; `hwdec: auto`; median (range)):
 
   | | copy (`off`, Task 20d) | zero-copy (`on`) |
   |---|---|---|
-  | 4K60 CPU, % of one core: process / loop / `lp-render` | 49.4 (33.2–56.3) / 4.8 / 26.5 | **6.8 (5.6–8.9)** / 1.1 / 1.9 |
+  | 4K60 CPU, % of one core: process / loop / `lia-render` | 49.4 (33.2–56.3) / 4.8 / 26.5 | **6.8 (5.6–8.9)** / 1.1 / 1.9 |
   | 4K60 loop max busy, steady (ms) | 9.8 (3.8–16.9) | 1.4 (1.2–1.6) |
   | 1080p30 CPU, process | 7.8 (5.3–9.6) | **3.2 (2.4–4.1)** |
   | loop max busy per switch, warm (36) | 0.7 (0.2–6.3) | 0.3 (0.2–6.7) |
@@ -1254,7 +1254,7 @@ fd and nothing is lost. `update` uses `mpv_render_context_update` (level-trigger
 `UPDATE_FRAME`) and renders only when a frame is waiting, with
 `BLOCK_FOR_TARGET_TIME=0`; no `ADVANCED_CONTROL`.
 
-**Teardown with GL current (lp-transition gotcha).** `mpv_render_context_free` must run
+**Teardown with GL current (liascape-transition gotcha).** `mpv_render_context_free` must run
 with its GL context current and before `mpv_terminate_destroy`. Sources get no `&Gfx` in
 `Drop`, so they hold a `gfx::GlKeepAlive` (`Gfx::keep_alive()`): an `Rc<Shared>` clone
 (same pattern as `WindowTarget`) that keeps the EGL context alive past the `Gfx`, plus
@@ -1287,7 +1287,7 @@ shutdown"):** once shutdown has started no batch is trimmed (the process is exit
 already running when the wait ends doesn't count — `shutdown` reports `undestroyed`, while
 `pending()` (probes, t20b) still drops only after its batch's trim. Before, `PENDING` dropped after
 the trim, so a slow trim during `quit` read as a straggler (and the `_exit` path). The reaper is a
-generic `Reaper<T>` (one `lp-mpv-reaper` instance) so its rules are unit-tested with slow fakes:
+generic `Reaper<T>` (one `lia-mpv-reaper` instance) so its rules are unit-tested with slow fakes:
 `a_trim_in_flight_at_shutdown_is_no_straggler` (RED: 1 straggler), `no_trim_once_shutdown_started`
 (RED: waited 580 ms for a 200 ms destroy + a 400 ms trim), `a_destroy_slower_than_the_wait_is_a_straggler`,
 `batches_trim_once_and_reap_after_shutdown_is_synchronous`. `reaper::pending()`/`SourceHost::dying()` for probes. Pinned by
@@ -1369,7 +1369,7 @@ is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime poll
 `ids` for probes/tests.
 
 **Async opens (final review I5).** With `SourceHost::set_async_open(Some(waker))` (the
-real-clock runtime; its waker is a calloop ping) a new mpv node's core is made on an `lp-open`
+real-clock runtime; its waker is a calloop ping) a new mpv node's core is made on an `lia-open`
 thread (`MpvSource::prepare_core`, base opts only); the node is `opening` (not hosted: no
 texture, no events, `open_failed` false) until a later `sync` finds the worker's result and
 opens the source from the node's **current** props (so a change made meanwhile is never lost);
@@ -1377,9 +1377,9 @@ a worker error is the same `SourceEvent::Error` + `failed` as a synchronous one;
 meanwhile drops the result (`PreparedCore::drop` → reaper). `finish_teardown` waits (bounded)
 for outstanding workers; `host::opening_pending()` counts toward `mpv.reaper_stragglers`. R29
 `Ready` semantics are unchanged (still the first frame of the current load). Stepped mode and
-the harnesses open synchronously. **Bounded (TODO "No explicit cap on concurrent `lp-open`
+the harnesses open synchronously. **Bounded (TODO "No explicit cap on concurrent `lia-open`
 worker threads"):** the cores are made by `host::OpenPool` — a FIFO queue served by at most
-`MAX_OPEN_WORKERS` (2) `lp-open` threads, spawned on demand and gone once the queue is empty
+`MAX_OPEN_WORKERS` (2) `lia-open` threads, spawned on demand and gone once the queue is empty
 (an idle player has none); before, every create spawned its own thread (a burst of 16 = 16 at
 once). A queued job holds its slot **weakly**: a node destroyed before a worker gets to it is
 skipped (no core made — `open_pool.skipped`), so a switch storm's superseded B's cost nothing; a
@@ -1398,7 +1398,7 @@ with no straggler; RED before: 16 at once), unit `open_pool_caps_concurrency_in_
 `open_pool_survives_a_panicking_job_and_restarts_after_idle`.
 
 **Render worker (Phase 2, `sources/render_worker.rs`; `serve --render-worker on|off`, env
-`LP_PLAYER_RENDER_WORKER`; **default on** since 2026-10-26 — `off` renders every source on the loop as before).** `lp-render` threads (**lanes**, below) own
+`LIASCAPE_PLAYER_RENDER_WORKER`; **default on** since 2026-10-26 — `off` renders every source on the loop as before).** `lia-render` threads (**lanes**, below) own
 every *worker-mode* `MpvSource`'s render context — creation, the first render (shader compile,
 LUTs), every later render, the free — so the loop only adopts finished textures and composes.
 - **Context.** `Gfx::share_context` makes another context on the **same** `EGLDisplay` (one per
@@ -1411,14 +1411,14 @@ LUTs), every later render, the free — so the loop only adopts finished texture
   init (a CUDA context, 85–220 ms per attach measured). On ONE thread the playing wallpaper froze
   for it at every switch (A's longest frame interval while B opened: 34 → 66–74 ms at 30 fps).
   So with an interop the worker runs `render_worker::RENDER_LANES` (3; env
-  `LP_PLAYER_RENDER_LANES` 1–6) lanes, each its own thread + context + eventfd, and
+  `LIASCAPE_PLAYER_RENDER_LANES` 1–6) lanes, each its own thread + context + eventfd, and
   `RenderWorker::attach` puts a new source on the lane with the fewest live sources (`Inner::live`,
   counted by the callers — an attach on its way counts; ties → the first): B's attach and later A's
   free (`mpv_render_context_free` destroys the CUDA context too) run beside A, never in front of it
   (A's longest interval back to 34–54 ms, as in copy mode). Two lanes cover one wallpaper on
   every output (ping-pong), the third a switch while the previous A still fades out or a second
   wallpaper on another output; a source never moves. Without an interop (`hwdec_interop` null:
-  not NVIDIA/AMD/Intel, or `LP_PLAYER_HWDEC_INTEROP=off`) an attach costs < 1 ms and the worker
+  not NVIDIA/AMD/Intel, or `LIASCAPE_PLAYER_HWDEC_INTEROP=off`) an attach costs < 1 ms and the worker
   runs one lane, as before. Cost per extra lane: a thread, ~4.5 MiB RSS, 50–110 ms more at
   startup (its first `eglMakeCurrent`, before `player.started`). `Attached {id, lane, ex, worker}`
   frees/wakes on its own lane; `died`/`shutdown`/`stats` cover every lane (`stats` sums counts,
@@ -1427,7 +1427,7 @@ LUTs), every later render, the free — so the loop only adopts finished texture
   slot, ms}` (info from 100 ms, else debug); `ATTACH_WAIT` 10 s (was 3: the process's first interop attach once took > 3 s on a
   heavily loaded machine — the transition waits 10 s for B anyway).
 - **Split.** The loop keeps the core: event pump, async applies, `read`, load fencing, Ready, the
-  front/back textures it shows. The `lp-open` job hands its freshly prepared core to the worker
+  front/back textures it shows. The `lia-open` job hands its freshly prepared core to the worker
   (`RenderWorker::attach`, the job waits) which creates the render context with the update callback
   on the worker's eventfd, then the loop's `open_with_core` only applies props + `loadfile`.
 - **Hand-off (per source `Exchange`, a mutex never held across an mpv call).** Loop → worker: the
@@ -1711,10 +1711,10 @@ handoff) are unit-tested graph-only in `recipes/transition.rs` (synthetic events
 ## Runtime
 
 `src/runtime.rs` + `src/headless.rs` (spec §4.1/§4.2, §9 "headless deterministic mode";
-Task 12). `lp-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
+Task 12). `liascape-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
 [--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace] [--restore]
 [--no-supervise] [--redraw-policy content|every_tick]` — defaults `1920x1080@60`, `real`,
-mpv's lp-player default ao (`pipewire`), `info`. `serve` is **supervised** unless
+mpv's liascape-player default ao (`pipewire`), `info`. `serve` is **supervised** unless
 `--no-supervise` (§ Supervisor: the process you start is the supervisor, the compositor is
 its child); `--restore` recreates `<state>/snapshot.json` (§ Snapshot);
 `--redraw-policy content` (headless only) presents like Wayland — only when the picture
@@ -1733,14 +1733,14 @@ adds `audio_device` + `audio_delay_bias` to the base opts.
 Without `--headless` it draws on the compositor's outputs (§ Wayland); `--outputs` is
 then refused (exit 2).
 
-**Paths (`src/paths.rs`).** Socket `$LP_PLAYER_SOCKET`, else
-`$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (else `/run/user/<uid>/…`); the socket is
+**Paths (`src/paths.rs`).** Socket `$LIASCAPE_PLAYER_SOCKET`, else
+`$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (else `/run/user/<uid>/…`); the socket is
 made `0600`, its dir `0700` — **only** if we created that dir or it's the default
-`…/livepaper` (a `--socket`/`LP_PLAYER_SOCKET` in someone else's directory is never
-chmod-ed). State/event log `$XDG_STATE_HOME/livepaper/lp-player/` (default
-`~/.local/state/livepaper/lp-player/`). **Single instance = a lock file:** `<socket>.lock`
-(`lp-player.lock`, `0600`) is `flock(LOCK_EX|LOCK_NB)`-ed for the process lifetime and
-holds the owner's pid; the loser exits 1 with `lp-player is already running (pid N) on
+`…/livepaper` (a `--socket`/`LIASCAPE_PLAYER_SOCKET` in someone else's directory is never
+chmod-ed). State/event log `$XDG_STATE_HOME/livepaper/liascape-player/` (default
+`~/.local/state/livepaper/liascape-player/`). **Single instance = a lock file:** `<socket>.lock`
+(`liascape-player.lock`, `0600`) is `flock(LOCK_EX|LOCK_NB)`-ed for the process lifetime and
+holds the owner's pid; the loser exits 1 with `liascape-player is already running (pid N) on
 <socket>; stop it with ctl quit, or give this one another --socket` and never touches the
 socket. A lock taken on a file its previous owner unlinked meanwhile is detected (inode vs
 path) and retried. The winner (holding the lock, so any socket file is a dead owner's)
@@ -1950,7 +1950,7 @@ path.
 **Bounds (C1).** `probe loop` → `bounds`: the size of every per-source collection (graph nodes,
 `gain_history_tracks/samples`, animator entries, teardown ramps, pending destroys, onsets,
 fade-ins, dropout windows/due analyses, pause gates, `last_event`, `local`, wake registrations,
-warn keys, hosted/opening/dying sources, `open_queued` (opens waiting for an `lp-open` worker),
+warn keys, hosted/opening/dying sources, `open_queued` (opens waiting for an `lia-open` worker),
 transitions/graves/ended/restore onsets). `GainHistory`
 is run-length encoded (a steady source = two samples), drops a dead source's track
 `DEAD_LINGER` (30 s) after its last reading (its post-roll analysis needs it), and is capped at
@@ -1961,7 +1961,7 @@ samples, everything else ≤ 4), `probe::dropout` unit test (10 000 simulated cy
 **Switch cost and the Phase 2 render worker (final review I5).** Per switch, measured
 (`tests/api.rs::i5_switch_loop_busy`, a cut/fade to a fresh 1080p clip, 10 switches ×2 runs):
 **before** max loop busy 32–54 ms (median 36–44), synchronous open 3–14 ms; **after** (core on
-the `lp-open` worker, `dither=ordered`, the shader cache) 8–26 ms (median 17–19), open 1–8 ms.
+the `lia-open` worker, `dither=ordered`, the shader cache) 8–26 ms (median 17–19), open 1–8 ms.
 **Residual:** the render-context creation (+ props + `loadfile`, 1–8 ms) and the new context's
 first `render_into` (6–20 ms: shader compile/link — cached binaries help little on this
 NVIDIA driver, which already has its own disk cache — scaler LUTs, texture/FBO setup) still run
@@ -1977,7 +1977,7 @@ Until the render worker landed the loop counts the open share apart
 init in the render context — § Sources "Hardware decoding"; before, `hwdec=auto` cost 230–320 ms
 and a loadable libcuda 65–90 ms per switch). **Done since (2026-10-26/27):** the render worker
 owns every real-clock source's render context, and its hwdec GL interop init (the CUDA context)
-runs on an `lp-render` lane, never the loop — zero-copy hardware decoding with the loop's busy per
+runs on an `lia-render` lane, never the loop — zero-copy hardware decoding with the loop's busy per
 switch unchanged (§ Sources "Hardware decoding" → "Zero-copy on the render worker").
 
 **Retire = ramp, then destroy (item 10, core invariant).** `Runtime::retire(id)` — used by
@@ -2013,14 +2013,14 @@ can't run under the straggler and spoil the exit status.
 5 s with `suppressed: n`; tap overflow (`EventTap` dropped events) is logged as
 `api.tap_overflow {dropped_total}` likewise (from the loop — never from inside the tap).
 
-**Tests (`tests/api.rs`).** Spawn the real binary (`env!("CARGO_BIN_EXE_lp-player")`)
+**Tests (`tests/api.rs`).** Spawn the real binary (`env!("CARGO_BIN_EXE_liascape-player")`)
 with `serve --headless --outputs 640x360@60,320x180@60 --clock stepped --ao null` (some
 add `--clock real`), temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `std::env::temp_dir()`
 (never the real ones); the `Serve` guard kills the child on drop (also on panic), and
 every spawned `serve`/`ctl` child gets `PR_SET_PDEATHSIG(SIGKILL)` (`die_with_parent`) so
 an aborted/killed test run never leaves a stray server behind. One server at a time
 (process-wide lock, handed between the two servers of a two-run test). Skips only without
-EGL or a catalogue (fails instead under `LP_REQUIRE_GPU=1`, § GFX / EGL). **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
+EGL or a catalogue (fails instead under `LIASCAPE_REQUIRE_GPU=1`, § GFX / EGL). **Gotcha:** in `state.graph` a source node's `kind` is its *Source*
 kind (`video`/`image`/`color`/`snapshot` — the schema prop overwrites the node kind in the
 snapshot); recognise sources by `gain_effective_db`. And a log `fields` key named like a
 fixed key (`kind`, `corr`, …) overwrites it — `source.open`/`.teardown` say `source_kind`.
@@ -2040,10 +2040,10 @@ unix socket (§ Runtime → Paths):
   delivered **before** its reply on the same connection (the tap is flushed before every
   reply).
 
-**`ctl`:** `lp-player ctl [--timeout-ms N] <verb> ['<json args>']` prints the result as
+**`ctl`:** `liascape-player ctl [--timeout-ms N] <verb> ['<json args>']` prints the result as
 pretty JSON, exit 0 — or the error object (stdout), exit 1 (also for no player / bad JSON
 args / **no reply within `--timeout-ms`, default 10 000** → `timeout`, hint: pass a longer
-`--timeout-ms`; all with a hint). `lp-player ctl subscribe <prefix…>` prints events one
+`--timeout-ms`; all with a hint). `liascape-player ctl subscribe <prefix…>` prints events one
 JSON object per line until Ctrl-C, without a timeout; when the player exits it prints a
 note on stderr and exits 0 (or stdout closes).
 
@@ -2139,11 +2139,11 @@ total_ms}, max_busy_ms (longest synchronous stretch since the last
 the speed storm request handlers were left out), max_request_ms + max_request_cmd (the slowest single
 request handler and its verb, same reset), max_busy_excl_open_ms + max_open_ms (the same with the
 loop's share of source opens taken out / that share alone — render context + props +
-`loadfile`; the core itself is made on the `lp-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
+`loadfile`; the core itself is made on the `lia-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
 subscribed_topics, tap_dropped, reaper_pending, uptime_ms, gain_timer_armed, gain_ticks,
 gain_pushes, pause_gates, dropout_windows_open, bounds (§ Runtime "Bounds"),
 recent_gain_pushes}`; `sources` also has `mpv_current_ao` and top-level `opening` + `open_pool`
-`{cap, workers, running, queued, peak, skipped, pending}` (the `lp-open` pool, § Sources "Async
+`{cap, workers, running, queued, peak, skipped, pending}` (the `lia-open` pool, § Sources "Async
 opens"); `frames` (Task 13,
 `probe/frames.rs`) — `{backend, policy (content|every_tick), window_ms (2000),
 explicit_sync ({env, value, source: policy|env}, null headless — Task 20e),
@@ -2206,8 +2206,8 @@ worst reply stays < 500 ms during a 40 000-request flood).
 5. Reproduce deterministically: `serve --headless --clock stepped --ao null`, replay the
    commands, `step`, `capture`.
 6. What an mpv core itself did (a VO that gave up waiting for a render, a decoder that never opened):
-   `LP_PLAYER_MPV_LOG=v` in `serve`'s environment prints every core's mpv log to stderr
-   (`lp-player-serve.log` under the backend) as `[mpv <file> <t_mono s>] <level> <prefix>: <text>` — the
+   `LIASCAPE_PLAYER_MPV_LOG=v` in `serve`'s environment prints every core's mpv log to stderr
+   (`liascape-player-serve.log` under the backend) as `[mpv <file> <t_mono s>] <level> <prefix>: <text>` — the
    time is when the loop PUMPED the line, not when mpv logged it: a burst of lines at one instant means
    nothing pumped that source meanwhile. Without it only `error` lines are requested.
 7. Audio specifically (a dropout, a glitchy fade): `docs/player/debugging.md` — symptom →
@@ -2217,7 +2217,7 @@ worst reply stays < 500 ms during a 40 000-request flood).
 ## Wayland
 
 `src/wl.rs` + `src/redraw.rs` + `src/probe/frames.rs` (spec §4.2 "Output", §5.1
-"Graphics"; Task 13). `lp-player serve` without `--headless` draws the wallpaper on every
+"Graphics"; Task 13). `liascape-player serve` without `--headless` draws the wallpaper on every
 monitor of `$WAYLAND_DISPLAY` (a `wlr-layer-shell` compositor: Hyprland, Sway, …).
 
 **Backend.** `Wayland::connect()` (sctk 0.21, `default-features = false, features =
@@ -2238,7 +2238,7 @@ configures, frame callbacks, pointer); GPU work and graph changes run after the 
 
 | what | value |
 |---|---|
-| namespace | `lp-player` (`hyprctl layers`) |
+| namespace | `liascape-player` (`hyprctl layers`) |
 | layer | `out:<c>.layer` (`background` default, `bottom`, `top`, `overlay`) — **live**: `set_layer` + a bare commit (layer-shell v2+, surface mapped); on v1, or while the surface isn't mapped yet (no configure / no window target), the surface is **re-created** on the new layer — on Hyprland 0.56 a `set_layer` before mapping was lost (a re-plugged output's remembered layer stayed background; measured, Task 16) |
 | anchor / size | all four edges, size 0×0 → the compositor's configure size (× integer `wl_output` scale via `set_buffer_scale`) |
 | exclusive zone | −1 (covers the whole output, ignores bars' zones) |
@@ -2390,7 +2390,7 @@ compositor keeps whatever cursor it had. Axis events are ignored.
   `__NV_DISABLE_EXPLICIT_SYNC=0` brings explicit sync back leak-free. `wl.driver_env {env,
   value, source: policy|env}` (info) at startup; `frames` probe `explicit_sync` (same
   object) + `default_queue_dispatched`. Guard: `tests/api.rs::
-  t20e_wayland_present_heap_stays_flat` (opt-in `LP_PLAYER_TEST_WAYLAND=<socket>` — it draws
+  t20e_wayland_present_heap_stays_flat` (opt-in `LIASCAPE_PLAYER_TEST_WAYLAND=<socket>` — it draws
   on that compositor for ~25 s; SKIP otherwise): a 60 s colour fade on every output, heap
   growth per present over 10 s < 32 B (GREEN 2.3 ×2; RED with `__NV_DISABLE_EXPLICIT_SYNC=0`
   226.6 B/present). **Damage:** every present redraws the whole surface and `eglSwapBuffers`
@@ -2400,7 +2400,7 @@ compositor keeps whatever cursor it had. Axis events are ignored.
 
 **`tests/onmachine/outputs.sh` (run manually, exit 0 = pass; Hyprland + DP-1/DP-2 by
 default, `OUT_A`/`OUT_B`/`HZ_*`/`MEAN_*`/`TOL_MS` to adapt).** Builds the release binary
-(or `LP_PLAYER_BIN`), makes synthetic ffmpeg clips, stops the legacy wallpaper (`/stop`,
+(or `LIASCAPE_PLAYER_BIN`), makes synthetic ffmpeg clips, stops the legacy wallpaper (`/stop`,
 waits for no `mpvpaper`), then runs `serve --ao null` with a **private
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`** (its own socket + instance lock — lanes running
 `serve --headless` are unaffected) and an **absolute** `WAYLAND_DISPLAY`
@@ -2427,7 +2427,7 @@ under `prlimit --core=1:1`: RLIMIT_CORE 1 makes the kernel skip the piped core h
 (with 0, systemd-coredump still runs and DrKonqi pops a crash notification). Pixel checks
 fall back to the (¼ w, ¾ h) pixel if the centre is covered (the owner's shell put a
 notification popup over DP-2's centre on the overlay level). **Safety:**
-an `EXIT` trap restores the focused monitor + cursor, kills `serve` (no lp-player layer may
+an `EXIT` trap restores the focused monitor + cursor, kills `serve` (no liascape-player layer may
 remain — checked), re-applies any monitor that differs from the record with its exact
 values and verifies `hyprctl monitors -j` matches, and moves workspaces back to their
 recorded monitors. Socket paths must stay < 108 bytes: the script uses `mktemp` in
@@ -2442,34 +2442,34 @@ working); the **meter** captures the bus monitor: exactly what the wallpapers ou
 nothing else (the dropout detector, Task 15, and auto-mute's self-exclusion, Task 17).
 
 ```text
- mpv src1 (audio-device=pipewire/lp-player-bus) ─┐
- mpv src2 ─────────────────────────────────────┼─▶ lp-player-bus ──(same cycle)──▶ lp-player-bus.playback ──▶ default sink
+ mpv src1 (audio-device=pipewire/liascape-player-bus) ─┐
+ mpv src2 ─────────────────────────────────────┼─▶ liascape-player-bus ──(same cycle)──▶ liascape-player-bus.playback ──▶ default sink
     …                                          ─┘   Audio/Sink        loopback      Stream/Output/Audio          (re-targeted on
                                                         │                            node.target = default         default.audio.sink
-                                                        └─ monitor ──▶ lp-player-bus.meter (capture, the Meter)   changes)
+                                                        └─ monitor ──▶ liascape-player-bus.meter (capture, the Meter)   changes)
 ```
 
 **Identity contract (Task 17's auto-mute excludes the bus by it — verbatim):** playback
-stream `node.name = lp-player-bus.playback`, `application.name = lp-player`, `media.role =
-Wallpaper`; sink `node.name = lp-player-bus`, `node.description = "lp-player bus"`,
+stream `node.name = liascape-player-bus.playback`, `application.name = liascape-player`, `media.role =
+Wallpaper`; sink `node.name = liascape-player-bus`, `node.description = "liascape-player bus"`,
 `media.class = Audio/Sink`, `audio.position = [FL FR]`. Constants in `audio::bus`
 (`PLAYBACK_NAME`, `APP_NAME`, `MEDIA_ROLE`, `SINK_NAME`, `SINK_DESCRIPTION`). The meter is
-`lp-player-bus.meter` (a capture stream). Note mpv streams also carry `application.name =
-lp-player` (`audio-client-name`) — auto-mute must exclude by ownership/target, not that name
+`liascape-player-bus.meter` (a capture stream). Note mpv streams also carry `application.name =
+liascape-player` (`audio-client-name`) — auto-mute must exclude by ownership/target, not that name
 alone (spec §4.4).
 
 **`Bus::create()`** (serve startup only; measured ~0.2 s, `Err` after 10 s — the thread
-stops at its next wait): thread `lp-bus` runs its own
+stops at its next wait): thread `lia-bus` runs its own
 PipeWire main loop + context + core (nothing uses `RT_PROCESS`: every callback runs on that
 thread; capture buffers carry their cycle time, `pw_buffer.time`). Two roundtrips (globals,
 then the `default` metadata's properties) → `default.audio.sink` → `pw_context_load_module(
 "libpipewire-module-loopback", args)` (declared by hand — not in pipewire-sys's
-`wrapper.h`) with `capture.props = {media.class = Audio/Sink, node.name = lp-player-bus,
-node.description = "lp-player bus", audio.position = [FL FR]}` and `playback.props =
+`wrapper.h`) with `capture.props = {media.class = Audio/Sink, node.name = liascape-player-bus,
+node.description = "liascape-player bus", audio.position = [FL FR]}` and `playback.props =
 {node.target = target.object = <default>, identity…}` → waits until the playback is linked
-to a sink → **latency** → `Ok`. `Bus::device()` = `pipewire/lp-player-bus`;
+to a sink → **latency** → `Ok`. `Bus::device()` = `pipewire/liascape-player-bus`;
 `Bus::state()` = `Up | Retargeting | Down`; `Bus::info()` = everything the `bus` probe shows.
-`LP_PLAYER_BUS=off` disables it.
+`LIASCAPE_PLAYER_BUS=off` disables it.
 
 **Re-target.** The bus thread watches `default.audio.sink` (a default naming the bus itself
 is ignored — it would loop) and moves the playback the way pavucontrol does: default
@@ -2500,8 +2500,8 @@ of the bus may come out quiet then — `bus.sh` prints the count).
 
 **WirePlumber state opt-out (found in this task).** WirePlumber's `state-stream` keys
 saved volumes/targets by `application.name` — the same key (`Output/Audio:application.name:
-lp-player`) as every mpv source. Without care, our metadata re-targets were saved as a
-"user choice" target and would be restored onto any later lp-player stream without its own
+liascape-player`) as every mpv source. Without care, our metadata re-targets were saved as a
+"user choice" target and would be restored onto any later liascape-player stream without its own
 target (e.g. mpv in the fallback), pinning it to a stale sink. Every bus stream therefore
 carries `state.restore-props = false` + `state.restore-target = false` (the bus also
 always starts at 0 dB). `bus.sh` asserts no `target` gets saved. Don't set
@@ -2510,7 +2510,7 @@ always starts at 0 dB). `bus.sh` asserts no `target` gets saved. Don't set
 **Latency rule.** `Bus::latency()` = what the bus adds, measured once at creation with an
 impulse: a probe stream plays one −60 dBFS sample (inaudible) into the bus while two
 captures watch the bus monitor (`stream.capture.sink`) and the bus playback's *output*
-(`target.object = lp-player-bus.playback` — WirePlumber links stream→stream); both are
+(`target.object = liascape-player-bus.playback` — WirePlumber links stream→stream); both are
 checked wired correctly first (else both would see the same signal and read 0), the
 arrival-time difference (same graph cycles → same clock) over 3 shots, median kept;
 `audio.bus.latency_shots {shots_ms, quantum_frames}` (debug). **Measured on this machine
@@ -2530,11 +2530,11 @@ Ring: 4 min (240 000 entries) of `(t_mono, dbfs_1ms)`; `t_mono` is the **`t_mono
 (`log::mono_start()`; block time = its cycle's `pw_buffer.time` + its first frame's offset).
 The callback never blocks or allocates (staging buffer + `try_lock`) and runs on PipeWire's
 **real-time data thread** (`RT_PROCESS`, Phase 2 Task 14 — `data-loop.0`, `SCHED_RR` via
-rtkit): on the non-RT `lp-bus` main loop it missed whole graph cycles whenever a switch loaded
+rtkit): on the non-RT `lia-bus` main loop it missed whole graph cycles whenever a switch loaded
 the machine (a worker spawning, a source torn down) — measured in 245 of 301 on-machine
 switches, each a timestamp jump of 1–5 quanta plus silent blocks the dropout detector has to
 call `unmeasured`. Guard `tests/api.rs::meter_capture_runs_on_the_rt_data_thread` (RED:
-`lp-bus`, `other`). `Meter::window(from, to)`,
+`lia-bus`, `other`). `Meter::window(from, to)`,
 `Meter::available()` (streaming, newest sample ≤ 500 ms old, no error), `Meter::status()`.
 
 **Probes.** `bus` → `{state, device, latency_ms, latency_samples, quantum_ms, target,
@@ -2551,7 +2551,7 @@ the owner's session for nothing). `Bus::create` failing (PipeWire unreachable, m
 missing, never linked) → `audio.bus.down {reason}` (warn), sources keep mpv's default
 device (no `audio_device`, no bias), the meter is unavailable. Both are logged exactly
 once; `ctl probe '{"name":"bus"}'` says why. **A connection lost later is re-created (final
-review I7):** the `lp-bus` thread runs the bus as *sessions* (`bus::session`) — a core error ends
+review I7):** the `lia-bus` thread runs the bus as *sessions* (`bus::session`) — a core error ends
 one (`audio.bus.down {reason}`; the loopback module is *not* destroyed by us then: it unloads
 itself on a core error, and destroying it too was a measured double free), sources are re-routed
 to mpv's default device (`Bus::route()` = `(up, generation)`, polled by `Runtime::
@@ -2572,17 +2572,17 @@ silent), `ao_null_runs_without_bus`, **`i7_bus_reconnects_after_pipewire_restart
 D-Bus, WirePlumber's `policy` profile so no ALSA/Bluetooth/V4L2 monitor ever opens a device,
 one null sink; skipped without the binaries; the owner's PipeWire is never touched): tone on
 the bus → both daemons killed → `down` + sources on `auto` → restarted → `up {reconnected}` +
-sources back on `pipewire/lp-player-bus` with a live AO, the tone on the bus again, the ramp-in
+sources back on `pipewire/liascape-player-bus` with a live AO, the tone on the bus again, the ramp-in
 `onset.started {slot: pause, reason: flowed}`; unit tests in `meter.rs` (RMS/floor/max-channel/
 carry/ring/clock) and `bus.rs` (args, default parsing). **On-machine: `bash
 src/player/tests/onmachine/bus.sh`** (exit 0 = pass; real audio, R56): its own temp
-`XDG_RUNTIME_DIR`/`XDG_STATE_HOME` for the lp-player socket while PipeWire/Pulse reach the
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME` for the liascape-player socket while PipeWire/Pulse reach the
 real session (`PIPEWIRE_RUNTIME_DIR=/run/user/$UID`, `PULSE_SERVER=unix:/run/user/$UID/
 pulse/native`), `--headless`, `WAYLAND_DISPLAY` unset (R55); stops a legacy mpvpaper first;
-a `trap … EXIT` restores the default sink exactly and checks no `lp-player-bus` sink is left
+a `trap … EXIT` restores the default sink exactly and checks no `liascape-player-bus` sink is left
 (R57), deletes every `target.node`/`target.object` metadata entry on the nodes serve owned
 (live ones before quitting, dangling ones after — never an id another node reuses) and, if
-WirePlumber ever saved a `target` for lp-player, clears it (silent stream + `target.object
+WirePlumber ever saved a `target` for liascape-player, clears it (silent stream + `target.object
 -1`) — so a failed or interrupted run never leaves routing changed (verified with a SIGTERM
 mid-retarget). It checks the identity (pw-dump + `pactl list sink-inputs`), `pw-link -l`,
 the latency gate, a 440 Hz −20 dBFS clip's meter median (−23 ± 3; measured −22.98…−23.03),
@@ -2598,11 +2598,11 @@ default change (no fight), `audio.bus.up {requested}` ≤ 1 s, meter gap ≤ 50 
 
 ## Supervisor
 
-`src/supervise.rs` + `main.rs` (spec §4.1 "Supervision"; Task 16, R72/R73). `lp-player
+`src/supervise.rs` + `main.rs` (spec §4.1 "Supervision"; Task 16, R72/R73). `liascape-player
 serve …` **is the supervisor** unless `--no-supervise`: before any thread, GL context or
 PipeWire connection exists it fork+execs `/proc/self/exe serve --supervised [--restore]
 [--restarted <spec>] <the user's options>` (argv[0] kept; the child sets its comm back to
-`lp-player` — exec of `/proc/self/exe` would make it `exe`), then only waits and forwards
+`liascape-player` — exec of `/proc/self/exe` would make it `exe`), then only waits and forwards
 signals. It never binds the socket or takes the instance lock (the child does, as before),
 never touches EGL/PipeWire, has no socket. `/proc/self/exe` means a restart runs the same
 binary as the supervisor even after a rebuild replaced the file.
@@ -2618,10 +2618,10 @@ binary as the supervisor even after a rebuild replaced the file.
   5): the compositor/EGL genuinely isn't available *yet* — `wl::Wayland::connect`
   failing (no `WAYLAND_DISPLAY`, `wl_display` connect refused) or `Gfx::new_wayland`/
   `Gfx::new_offscreen` failing (EGL init before a GPU driver/device is ready). The two
-  can look identical from outside (`lp-player serve --ao null` on a session starting
+  can look identical from outside (`liascape-player serve --ao null` on a session starting
   before its compositor) but need opposite handling: "already running" burning the crash
   budget would just waste restarts on something a restart can't fix, while a hard exit 1
-  on "not ready yet" would mean `lp-player` loses every boot race against its own
+  on "not ready yet" would mean `liascape-player` loses every boot race against its own
   compositor coming up a moment later.
 - **Clean exits end supervision** (`classify`): child exit 0 (quit, SIGTERM/SIGINT), 1
   (`ServeError::Startup`, above), 2 (usage). The supervisor exits with the same code.
@@ -2630,7 +2630,7 @@ binary as the supervisor even after a rebuild replaced the file.
   4 s, … — logging `supervisor.waiting_for_compositor {pid, uptime_ms, delay_ms,
   waited_ms, budget_ms}` (warn) before each sleep, until the *next* delay would push the
   running total past `compositor_wait_budget()` (`COMPOSITOR_WAIT_BUDGET` 30 s in
-  production; the test-only env knob `LP_PLAYER_TEST_COMPOSITOR_WAIT_MS` shortens it so a
+  production; the test-only env knob `LIASCAPE_PLAYER_TEST_COMPOSITOR_WAIT_MS` shortens it so a
   test doesn't really wait 30 s) — then `supervisor.giving_up {reason: "no_compositor",
   pid, waited_ms, budget_ms, hint}` (error) and exit `EXIT_GAVE_UP` (4 — the same code the
   crash-loop budget gives up with, distinguished by `reason`). Never counted against
@@ -2677,7 +2677,7 @@ binary as the supervisor even after a rebuild replaced the file.
   (+ ~200 ms more when systemd-coredump takes a core: 232–259 ms measured with cores on)
   and the new child's startup (~50 ms headless). On Wayland the old surfaces vanish with the
   old process, so the desktop behind shows for that ~0.2 s.
-- **Test knob:** `LP_PLAYER_TEST_CRASH=startup` → every child logs `test.crash` and aborts
+- **Test knob:** `LIASCAPE_PLAYER_TEST_CRASH=startup` → every child logs `test.crash` and aborts
   right after `supervisor.restart` (`gives_up_after_5_in_60s`). Tests set `RLIMIT_CORE` 1
   for every spawned process: the kernel then skips a piped `core_pattern` entirely ("RLIMIT_CORE
   is set to 1, aborting core"); with 0, systemd-coredump still runs and the desktop's crash
@@ -2741,7 +2741,7 @@ same place.
   exit: `quit`/SIGTERM and the `loop.failed` path queue the **final** snapshot *before*
   `stop_all` empties the graph, then no more writes (`frozen`) — so a later `serve
   --restore` brings back what was on screen; `stop` itself is a change → an empty snapshot.
-- **Writing:** on the `lp-snapshot` thread (latest queued wins): `snapshot.json.tmp` +
+- **Writing:** on the `lia-snapshot` thread (latest queued wins): `snapshot.json.tmp` +
   `fsync`, rename, `fsync` the dir — a crash mid-write leaves the previous file. Failures:
   `snapshot.write_failed` once per streak (+ hint), `write_recovered`; `snapshot.saved
   {bytes, write_ms}` at debug. The writer is joined in `shutdown`. **The window is the
@@ -2749,7 +2749,7 @@ same place.
   I/O load), so a crash in it restores the wallpaper before the switch; a switch's reply can't
   wait for an fsync, so the adapter compares what a restarted player shows with what it last
   switched to and switches back (player-adapter.md § Reconnection, `ReconcileShown`).
-  **Test knob** `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=N`: every write takes N ms more (counted in
+  **Test knob** `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=N`: every write takes N ms more (counted in
   `write_ms` / the probe's `last_write_ms`) — a snapshot that lags and a slow clean quit,
   deterministically (the adapter IT).
 - **`--restore`:** missing file → `snapshot.none`; unreadable/corrupt JSON/unknown
@@ -2779,7 +2779,7 @@ same place.
 
 `src/mem.rs` + `src/probe/memory.rs` + the reaper (Task 20b). **The allocator policy**
 (`mem::apply_policy`, the first line of `runtime::serve`, before any mpv core exists; the outcome is
-logged as `mem.policy` right after `log::init`, Warn on an unknown `LP_PLAYER_MALLOC` value):
+logged as `mem.policy` right after `log::init`, Warn on an unknown `LIASCAPE_PLAYER_MALLOC` value):
 
 - **Fixed mmap threshold, `mem::MMAP_THRESHOLD` = 128 KiB** (`mallopt(M_MMAP_THRESHOLD)`,
   which also turns glibc's dynamic adjustment off). glibc starts at 128 KiB but raises the
@@ -2790,14 +2790,14 @@ logged as `mem.policy` right after `log::init`, Warn on an unknown `LP_PLAYER_MA
   gets its own mapping (fresh `mmap`, unmapped by `free`) instead of growing the arena. The caller's own choice wins (`MALLOC_MMAP_THRESHOLD_`, or
   `glibc.malloc.mmap_threshold` in `GLIBC_TUNABLES`).
 - **`malloc_trim(0)` after each reaper batch** (`mem::trim_after_reap`, on the
-  `lp-mpv-reaper` thread once its queue is empty — never the loop): the smaller chunks a
+  `lia-mpv-reaper` thread once its queue is empty — never the loop): the smaller chunks a
   destroyed core frees still fragment the arenas (+0.35 MiB retained per switch with the
   threshold alone); the trim returns those pages. Measured ≤ 2.4 ms (1.4 ms mean) per
   switch with the threshold in place; `mpv.trimmed {ms, released, rss_kib}` (debug). Skipped
   once `reaper::shutdown` has started (exiting — § Sources "Teardown").
 - **No arena cap.** `M_ARENA_MAX` 4 on top changed little (373 vs 380 MiB after 300
   switches) and adds lock contention across the ~30 decoder/demux/audio threads.
-- **`LP_PLAYER_MALLOC=glibc`** skips the whole policy (A/B; the regression test's RED run);
+- **`LIASCAPE_PLAYER_MALLOC=glibc`** skips the whole policy (A/B; the regression test's RED run);
   `memory` probe `policy.applied` says which is in effect.
 
 **Measured** (hermetic headless, 2 × 1080p outputs, `--ao null`, a fade to an alternating
@@ -2814,17 +2814,17 @@ with the `memory` probe: *live* (`in_use_bytes + mmap_bytes`) flat + `free_bytes
 minutes without a switch grow as fast — = an event queue nobody dispatches, § Wayland →
 NVIDIA notes, Task 20e). Guard: `tests/api.rs::t20b_switch_loop_rss_stays_flat` (20
 fades between two 1080p clips: RSS growth over the last 16 < 10 % and an on-demand trim
-gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaningful check; with `LP_PLAYER_MALLOC=glibc` 32 % / 13.6 % → fails).
+gives back < 5 % of RSS — near-vacuous under the policy, growth is the meaningful check; with `LIASCAPE_PLAYER_MALLOC=glibc` 32 % / 13.6 % → fails).
 `docs/player/debugging.md` row "RSS grows per switch".
 
 ## Scene worker
 
-Phase 2 (plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`, Tasks
+Phase 2 (plan `docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`, Tasks
 1–13 plus the scene-properties editor and loudness learning; spec §4.1, §5.2, §6.3; evidence
 `docs/player/spikes/dmabuf.md`; only the on-machine battery, Task 14, is still to run). A WE scene
-renders in its own `lp-scene-worker` process — **one per scene source, shared by every output
+renders in its own `liascape-scene-worker` process — **one per scene source, shared by every output
 showing it** (D1) — the compositor drives it over a socket and samples its frames.
-`src/worker/` is the compositor side, `src/bin/lp-scene-worker/` the worker. This section is
+`src/worker/` is the compositor side, `src/bin/liascape-scene-worker/` the worker. This section is
 organised by the task that built each part; the subsections below are the as-built source of
 truth where they disagree with the plan or with the Task 3 text directly under this paragraph.
 Map: protocol + lifecycle (here) · "Frame transport" · "LWE core" · "The `scene` Source kind" ·
@@ -2864,7 +2864,7 @@ Events: `Msg(FromWorker, fds)` (everything but `Pong`), `Exited {signal|code}` (
 process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {record}`.
 - **Spawn = `posix_spawn` on the calling thread** (glibc: `clone(CLONE_VM|CLONE_VFORK)`, no
   page-table copy of the compositor — measured 0.24–0.35 ms per `spawn()` in the test
-  binary), not `fork` on an `lp-open` pool thread as the plan had it: **`PR_SET_PDEATHSIG`
+  binary), not `fork` on an `lia-open` pool thread as the plan had it: **`PR_SET_PDEATHSIG`
   fires when the spawning *thread* exits** (`prctl(2)`), and the pool's threads exit when
   idle — every worker would die with them. So Task 5 spawns from the loop thread. The worker
   sets `PR_SET_PDEATHSIG(SIGKILL)` itself, first thing, then exits 3 unless `getppid()` ==
@@ -2889,7 +2889,7 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   (1 s), **shortened to `hang_timeout / 2`** so a hang is always seen within 1.5 ×
   `hang_timeout` (the plan's 1 s ping could not meet `hang_after_ms 100, hang_timeout 300 →
   Hung ≤ 600 ms`). No `Hello` within `HELLO_TIMEOUT` (5 s, or `hang_timeout` if longer) =
-  hung too. The worker keeps answering while LWE loads + builds (its `lp-scene-proto` thread
+  hung too. The worker keeps answering while LWE loads + builds (its `lia-scene-proto` thread
   answers pings during a load, bounded — § "Real scenes (Task 7)").
 - **`send` while not connected** (before `Hello`, `Restarting`, `Broken`, `Stopped`):
   `Start`/`Paused`/`Resize`/`Route`/`SetProperty` are **folded into the restart's `Start`**
@@ -2903,11 +2903,11 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   by the host) stays up, idle, until `quit`; the caller stops it. No restart loop, no crash
   record (plan Review Focus #1).
 - **`stop()` / `Drop` never block** (`stop_never_blocks`: < 5 ms): `quit` is sent, the
-  process goes to `worker::reap` — one `lp-worker-reap` thread, started on demand, gone when
+  process goes to `worker::reap` — one `lia-worker-reap` thread, started on demand, gone when
   nothing is dying — which reaps it and SIGKILLs it at `STOP_GRACE` (500 ms) if it's still
   there. `reap::pending()` for probes.
 - **Log tail:** the last `LOG_TAIL` (50) lines of worker output + `log` messages (as
-  `[level] line`), oldest first, across restarts (a `--- lp-player: worker …; restart N ---`
+  `[level] line`), oldest first, across restarts (a `--- liascape-player: worker …; restart N ---`
   marker between processes); a line is cut at 4 KiB; ≤ 256 KiB read per `poll`. stderr and
   `log` messages interleave arbitrarily. `stop()` drains the pipe first (non-blocking), so a fatal
   error's own stderr line — written just before the `error` that made the host stop it — stays in
@@ -2930,9 +2930,9 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   `.broken {reason, record, restarts}`, `.stopped`, `.bad_message`, `.spawn_failed`,
   `.record_failed`. `source.broken` is the source's view (§ "The `scene` Source kind" → Errors).
 
-**`lp-scene-worker --fd N --parent-pid P [--stub]`.** `--stub` (tests, no GPU): `hello
+**`liascape-scene-worker --fd N --parent-pid P [--stub]`.** `--stub` (tests, no GPU): `hello
 {features: [stub], sync: none}`, answers `ping`/`tick` (a slot-0 `frame` without fd), logs
-each `start`'s position (`stub: start position <p>`), scripted by `LP_SCENE_WORKER_TEST`
+each `start`'s position (`stub: start position <p>`), scripted by `LIASCAPE_SCENE_WORKER_TEST`
 (comma-separated): `crash_after_ms:N` (`stub: crashing` to stderr, `RLIMIT_CORE` 1 —
 no systemd-coredump/DrKonqi —, `abort()`), `hang_after_ms:N` (stops answering), `exit_code:N`
 (exit N at `crash_after_ms`, else right after `hello`), `ignore_quit` (ignores `quit` **and**
@@ -2940,14 +2940,14 @@ EOF — only SIGKILL ends it), `spam_stderr:N`. The worker sets its socket `CLOE
 (nothing it starts may hold it: EOF is the crash signal).
 
 **Build feature `lwe` — default ON** (Tasks 1–2; § "LWE core" below). `build.rs` emits
-`cargo::rustc-link-arg-bin=lp-scene-worker=` `-L$LP_LWE_CORE_DIR/lib
--llinux-wallpaperengine-core -Wl,-rpath,<$LP_LWE_RPATH or $LP_LWE_CORE_DIR/lib>` (the
+`cargo::rustc-link-arg-bin=liascape-scene-worker=` `-L$LIASCAPE_LWE_CORE_DIR/lib
+-llinux-wallpaperengine-core -Wl,-rpath,<$LIASCAPE_LWE_RPATH or $LIASCAPE_LWE_CORE_DIR/lib>` (the
 compositor binary never links LWE — `tests/lwe_build.rs::worker_links_the_core` checks both);
-without `LP_LWE_CORE_DIR`, or with one lacking the `.so`, the build fails naming the devShell,
+without `LIASCAPE_LWE_CORE_DIR`, or with one lacking the `.so`, the build fails naming the devShell,
 `scripts/lwe.sh` and `--no-default-features`. `--no-default-features`: the worker runs `--stub`
-and the synthetic renderer only (`install.sh --no-scenes`). **`paths::scene_worker_bin()`**: `$LP_SCENE_WORKER_BIN` (used only if
-it names a file) → `lp-scene-worker` next to `/proc/self/exe` (dev `target/<profile>/`, the
-flake's `$out/bin` — the wrapper's `.lp-player-wrapped` sits there too) → `PATH`; unit
+and the synthetic renderer only (`install.sh --no-scenes`). **`paths::scene_worker_bin()`**: `$LIASCAPE_SCENE_WORKER_BIN` (used only if
+it names a file) → `liascape-scene-worker` next to `/proc/self/exe` (dev `target/<profile>/`, the
+flake's `$out/bin` — the wrapper's `.liascape-player-wrapped` sits there too) → `PATH`; unit
 `scene_worker_resolution_order`.
 
 **Tests (`tests/worker.rs`, no GPU, stub only):** `proto_roundtrip_with_fds`,
@@ -2956,7 +2956,7 @@ flake's `$out/bin` — the wrapper's `.lp-player-wrapped` sits there too) → `P
 `hang_is_detected_by_heartbeat`, `restarts_three_times_then_broken`,
 `restart_resends_start_at_resume_position`, `stop_never_blocks`, `worker_dies_with_its_parent`
 (the test binary re-execs itself as the parent — `helper_spawn_and_wait`, env
-`LP_WORKER_TEST_HELPER` — with an `ignore_quit` stub so only PDEATHSIG can end it; RED with
+`LIASCAPE_WORKER_TEST_HELPER` — with an `ignore_quit` stub so only PDEATHSIG can end it; RED with
 the prctl removed: the worker outlived its SIGKILLed parent by 2 s),
 `log_tail_and_crash_records_are_bounded`. **Gotcha:** a sibling test's `posix_spawn` holds a
 copy of every fd for the µs between its clone and exec — `CLOEXEC` fds included — so a test
@@ -3000,12 +3000,12 @@ lowered (the ordering the spike wanted). `Gfx::context_priority()` = what was gr
 load-sensitive** (its distinct-capture bound failed once with the compositor exactly as on the
 base commit) — rerun it on a quiet machine before blaming a change.
 
-**The worker's renderer (`lp-scene-worker` without `--stub`).** `hello {features:
-[synthetic] (+ lwe), sync}` — `sync: fdpoll` when `LP_SCENE_SYNC=fdpoll` or the display
+**The worker's renderer (`liascape-scene-worker` without `--stub`).** `hello {features:
+[synthetic] (+ lwe), sync}` — `sync: fdpoll` when `LIASCAPE_SCENE_SYNC=fdpoll` or the display
 lacks `EGL_ANDROID_native_fence_sync`, else `fence`; then a log line with the granted
 priority. `start`: not `synthetic` → a real WE scene through LWE (§ "Real scenes (Task 7)";
-built without LWE → a **fatal** error); `synthetic` without `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its env → fatal;
-`<path>/lp-synthetic.json` unreadable or `fail: load` → fatal; `fail: build` → fatal; else
+built without LWE → a **fatal** error); `synthetic` without `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its env → fatal;
+`<path>/liascape-synthetic.json` unreadable or `fail: load` → fatal; `fail: build` → fatal; else
 ring of 3 at `scene::cover_size(native, max_size)` → three `buffer` messages → `ready
 {native, has_audio, wants_audio_input}`. A fatal error leaves it idle until `quit`. `tick`
 → the newest pending tick is rendered (older ones are answered by its `frame`: the host's
@@ -3060,14 +3060,14 @@ frame, never waited for (Task 8, § "GPU budget and VRAM"). Synthetic and env kn
 - `scene::cover_size(native, demand)` — aspect kept, smallest size covering `demand`
   (rounded; never under it on either axis), never above native, long edge ≤ 4096. Unit
   `cover_size_examples` (the plan's five + portrait, the cap, degenerate input).
-- `scene::synthetic::SyntheticSpec` (`lp-synthetic.json`, every field defaulted): `pattern`
+- `scene::synthetic::SyntheticSpec` (`liascape-synthetic.json`, every field defaulted): `pattern`
   `frame_index` (top-left 64² = `marker_rgb(seq)` = `(seq & 255, seq >> 8 & 255, 0)`, bottom-
   right 16² = `grad_rgb(x, y, seq)`, rest grey 32) | `solid` | `split_tb` (top `rgb`, bottom
   `rgb2`) | `pointer_dot` | `input_level`; `native`, `alpha` (drawn with it; the worker forces
   1), `gpu_work` (a pixel-neutral loop: 2500 ≈ 3 ms, 4000 ≈ 6 ms per 1080p frame here),
   `tone_*`/`has_audio` (Task 6), `crash_after_ms`, `hang_after_ms`, `fail: load|build`.
   `tests/common::synthetic_scene(name, &spec)` writes `target/test-media/scenes/<name>/`
-  (`project.json` type scene, 16-byte `scene.pkg`, 1×1 `preview.png`, `lp-synthetic.json`).
+  (`project.json` type scene, 16-byte `scene.pkg`, 1×1 `preview.png`, `liascape-synthetic.json`).
 
 **Measured** (`tests/scene.rs::transport_meets_the_spike_budget`, 5 s per config, 1920×1080,
 144 ticks/s, every latched frame read back and checked; RTX 3070 Ti / NVIDIA 595.84, the
@@ -3086,9 +3086,9 @@ E-core of this i9-12900K — unpinned runs land in between), **clock** (`powersa
 a light periodic load sit at 0.8–1.4 GHz on a quiet machine — 350 k user cycles a frame read 7.6 %
 at load 3, 3.0 % when other load kept the clocks up) and **memory contention** (12
 memory-streaming processes: the same 175 k instructions in 5.4 M user cycles, 25 %). Per-thread
-(P-core, debug, load ~4): renderer 2.0–2.3 %, `lp-scene-proto` 0.9 % (Task 7's protocol thread:
+(P-core, debug, load ~4): renderer 2.0–2.3 %, `lia-scene-proto` 0.9 % (Task 7's protocol thread:
 one extra hop per message — the bulk of the growth since Task 4's 1.6 %; it is what answers pings
-during a load), `lp-scene-audio` 0.06 % (now gone for a soundless scene, § "Scene audio").
+during a load), `lia-scene-audio` 0.06 % (now gone for a soundless scene, § "Scene audio").
 Feature A/B (P-core, 2 × 5 s each, instructions per frame): the `GL_TIME_ELAPSED` query 7 k
 (~11 µs, ≈ 0.15 %), `glGetGraphicsResetStatus` 0, the idle audio thread 0 instructions (0.06 %
 CPU); log-tail reading is the compositor's, loudness segments exist only for a stream. GPU
@@ -3132,16 +3132,16 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (`fetchFromGitHub` of the fork at `rev`, submodules, `nix_hash`) → `lwe-core` (CMake, the
   `linux-wallpaperengine-core` target only — `all` would build the GLFW dev-viewer/CEF
   webhelper objects; ~50 s at 8 jobs) = `lib/liblinux-wallpaperengine-core.so*` +
-  `include/linux-wallpaperengine/*.h` + `REV`. The `lp-player` package and the **devShell** set
-  `LP_LWE_CORE_DIR` to it (first entry into the devShell after a pin bump builds it). Outside
+  `include/linux-wallpaperengine/*.h` + `REV`. The `liascape-player` package and the **devShell** set
+  `LIASCAPE_LWE_CORE_DIR` to it (first entry into the devShell after a pin bump builds it). Outside
   Nix: `scripts/lwe.sh fetch prepare build` (clone into `~/.cache/livepaper/src/lwe-<rev>`,
   every submodule verified against the PIN; a copy without VCS dirs in `build/lwe-src-<rev>`;
   built in `build/lwe-build-<rev>`; installed to `build/lwe-core`, `-j${LWE_JOBS:-8}`).
   `install.sh` does that, copies the `.so*` into `~/.local/share/livepaper-web/lib/` and builds
-  the worker with `LP_LWE_RPATH='$ORIGIN/../lib'`.
+  the worker with `LIASCAPE_LWE_RPATH='$ORIGIN/../lib'`.
 - **Patch work.** `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test` builds a working
   tree in place (`build/lwe-build-dev`, incremental; `REV` = `dev:<dir>`, which
-  `core_is_the_pinned_one` skips), then `LP_LWE_CORE_DIR=$PWD/build/lwe-core cargo …`.
+  `core_is_the_pinned_one` skips), then `LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core cargo …`.
   `bash scripts/lwe.sh --nix …` runs any command inside the devShell.
 - **The patched API** (`patches/lwe/0003`): `wp_config_set_audio_output(cfg, {sample_rate,
   channels})` before `wp_context_create` → the context uses `HostAudioDriver`: no SDL audio
@@ -3178,7 +3178,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   clock, `wp_project_load_folder`; NULL → `Err("load failed")`), `first_render(scratch_fbo)` →
   native size or `Err` when ≤ 1, `render(t, fbo)` (native-sized FBO; no flip, alpha 0 — the caller
   forces 1), `pull_audio`, `audio_streams`, `audio_driver`. Task 7's `render.rs` builds on it.
-  **`lp-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S]`** renders a
+  **`liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S]`** renders a
   real scene offscreen (frames at 30 fps of scene time), writes `lwe-smoke-1s.png`/`-3s.png`
   (upright, opaque) and prints one JSON line (`native`, `load_ms`, `build_ms`, `frame_ms_*` with a
   `glFinish` per frame, `lit_pixels`, `changed_pixels_1s_to_end`, `gl_error`, `audio_driver`,
@@ -3191,14 +3191,14 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `assets/shaders/*`. `fail-scene` (an object whose parent doesn't exist) loads, then its build
   throws — the deterministic broken-build fixture.
 - **Tests.** `bash scripts/lwe.sh test` (`host_api_test.cpp`, `SDL_AUDIODRIVER=dummy`; EGL tests
-  SKIP without a surfaceless context; the audio-mix test needs `LP_WE_ASSETS_DIR`):
+  SKIP without a surfaceless context; the audio-mix test needs `LIASCAPE_WE_ASSETS_DIR`):
   `host_output_replaces_sdl`, `pull_without_streams_is_silence`,
   `render_after_failed_build_returns` (RED unpatched: SIGSEGV), `min_scene_renders_without_assets`,
   `host_pull_mixes_scene_sound_at_unity_gain` (a generated looping mono WAV: peak 0.354 on both
   channels, 5 blocks without a gap; RED before 0006: `double free or corruption`),
   `sdl_stays_default_without_host_output`, `pull_on_sdl_context_returns_zero`.
-  `tests/lwe_build.rs` (core tests SKIP without `LP_LWE_CORE_DIR`, FAIL then under
-  `LP_REQUIRE_SCENES=1`; repo tests SKIP in the flake's sandbox): `core_exports_only_wp_symbols`
+  `tests/lwe_build.rs` (core tests SKIP without `LIASCAPE_LWE_CORE_DIR`, FAIL then under
+  `LIASCAPE_REQUIRE_SCENES=1`; repo tests SKIP in the flake's sandbox): `core_exports_only_wp_symbols`
   (⊇ `tests/fixtures/lwe_exports.txt`, 70), `core_is_the_pinned_one` (`REV` = PIN.rev),
   `worker_links_the_core` (NEEDED + RUNPATH; the compositor binary links no LWE),
   `patch_headers_are_complete`, `pin_matches_flake` (the flake reads the PIN; the last patch is
@@ -3218,10 +3218,10 @@ hard-coded `kind == "video"` learned about `scene`.
   `onset::kind_has_audio(kind)` = `video | scene` (`has_audio`, `audible`, the restore fade,
   the snapshot's `playing` and the periodic refresh all go through it).
 - **`SourceHost`.** `kind: scene` → `SceneSource::open(gfx, id, node, base_opts)` on the loop
-  (never the `lp-open` pool: no core to make, and the worker's PDEATHSIG follows the spawning
+  (never the `lia-open` pool: no core to make, and the worker's PDEATHSIG follows the spawning
   thread). Base opts (`serve` fills them): `scene_worker` (`paths::scene_worker_bin()`; none →
   the open fails naming it), `allow_synthetic` (only when `serve` runs with
-  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: a folder with `lp-synthetic.json` plays the synthetic
+  `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: a folder with `liascape-synthetic.json` plays the synthetic
   renderer, and the worker gets the env too), `scene_crash_dir` (`<state>/crashes`),
   `scene_assets` (Task 7), `ao`/`audio_device` (the `Start.audio` route: `null` → `Null`, the
   bus device → `Device`, else `Default`), `stepped` (`MpvSource::open_with_core` skips the
@@ -3361,11 +3361,11 @@ LWE renders a real Workshop scene inside the worker; the compositor resolves WE'
 forwards the pointer, feeds the visualiser and passes user properties through.
 
 - **Assets dir (`scene/assets.rs`).** `resolve(explicit, home)` = the first dir holding
-  `shaders/genericimage2.vert` among: `player.scene_assets` (explicit) → `LP_WE_ASSETS_DIR` →
+  `shaders/genericimage2.vert` among: `player.scene_assets` (explicit) → `LIASCAPE_WE_ASSETS_DIR` →
   each Steam root (`~/.local/share/Steam`, `~/.steam/{steam,root}`, the two Flatpak paths) and
   every library its `steamapps/libraryfolders.vdf` (or `config/…`) lists →
   `<lib>/steamapps/common/wallpaper_engine/assets`. `Err` names every candidate tried + `HINT`
-  (`LP_WE_ASSETS_DIR` / `player.scene_assets`). This machine: workshop in the primary
+  (`LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`). This machine: workshop in the primary
   library, WE in `/mnt/Games/Steam/SteamLibrary`. `parse_libraryfolders(&str)` (KeyValues
   `"path"` values, comments and escapes handled), `steam_root_of_item(dir)` (canonicalized —
   a `local/<id>` symlink resolves — prefix before `steamapps/workshop/content/431960/<id>`;
@@ -3378,19 +3378,19 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   startup) re-resolves into the scene base opts `scene_assets` / `scene_assets_error` and the
   read-only `player.scene_assets_resolved` ("" = none); event `scene.assets {requested,
   resolved, error}`. `Runtime::scenes_available()` = the worker resolves **and** (assets or
-  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `hello`'s `scene` capability. **`lp-player
+  `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `hello`'s `scene` capability. **`liascape-player
   scene-check [--assets <dir>]`** prints `{worker, features, assets_dir, ok, reason}`, exit
-  0/1 — the same rule plus "the worker was built with LWE" (`lp-scene-worker --features`
+  0/1 — the same rule plus "the worker was built with LWE" (`liascape-scene-worker --features`
   prints its feature list).
 - **No assets (Review Focus #2).** `SceneSource::open` of a non-synthetic scene without
   `scene_assets` fails at once (`unsupported`, the resolver's error naming
-  `LP_WE_ASSETS_DIR` / `player.scene_assets`) → `source.error`, **no worker spawned** —
+  `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`) → `source.error`, **no worker spawned** —
   never a 1×1 render loop.
-- **The worker's two threads** (three since Task 6: + `lp-scene-audio`, § "Scene audio").
+- **The worker's two threads** (three since Task 6: + `lia-scene-audio`, § "Scene audio").
   The renderer (main thread: GL, ring, LWE) and
-  `lp-scene-proto`, which reads the socket and hands messages over a channel. While the
+  `lia-scene-proto`, which reads the socket and hands messages over a channel. While the
   renderer is inside a load + build (`LoadGate`: a cold LWE build took up to 2.8 s) the
-  protocol thread answers `Ping` itself — bounded by `LP_SCENE_LOAD_TIMEOUT_MS` (30 s), after
+  protocol thread answers `Ping` itself — bounded by `LIASCAPE_SCENE_LOAD_TIMEOUT_MS` (30 s), after
   which pings go to the stuck renderer and the host's heartbeat sees a hang; a `Quit`/EOF
   during a load `_exit(0)`s at once. Nothing is exported, sent or latched before the build
   finished (`Buffer`s + `Ready` come after it). Messages that arrive meanwhile (`Resize`,
@@ -3419,10 +3419,10 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   divides by its size; our button bits = `WP_MOUSE_INPUT_BUTTON_*`); the synthetic
   `pointer_dot` scales it to the ring. Unit `pointer_maps_through_fill_and_viewport`.
 - **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
-  `SysMon::start()` (thread `lp-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
+  `SysMon::start()` (thread `lia-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
   node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but
   loopback halves (`node.virtual`, which would double-count, e.g. our bus playback) — with a
-  passive capture `lp-player-visualiser.<id>` (`target.object` = its serial,
+  passive capture `liascape-player-visualiser.<id>` (`target.object` = its serial,
   `node.dont-reconnect` + `node.dont-fallback`: never the microphone), keeping its last 1024
   mono samples; `frame()` sums the streams that delivered within 150 ms → 1024 u8 (centre
   128). Read-only, no routing changes; a lost connection retries every 1 s. The runtime
@@ -3460,8 +3460,8 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   `renderer_build_failure_is_broken_not_a_segfault` (`fail-scene`: fatal, 0 restarts, no
   record, the worker exits after quit), `missing_or_half_downloaded_scene_fails_cleanly`
   (gone / no project.json / truncated scene.json), opt-in `real_scenes_render_and_animate`
-  (`LP_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under `LP_REQUIRE_SCENES=1`; frames to
-  `LP_PLAYER_TEST_SCENES_OUT`). `tests/api.rs`: `no_assets_dir_hides_scenes_and_errors_with_hint`
+  (`LIASCAPE_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under `LIASCAPE_REQUIRE_SCENES=1`; frames to
+  `LIASCAPE_PLAYER_TEST_SCENES_OUT`). `tests/api.rs`: `no_assets_dir_hides_scenes_and_errors_with_hint`
   (+ `scene-check` exit 1, `set player.scene_assets` live; RED with the open check removed: a
   worker spawned), `missing_scene_folder_fails_without_crash_record`,
   `pointer_reaches_scene_in_source_coords` (RED with the forwarding removed),
@@ -3472,7 +3472,7 @@ forwards the pointer, feeds the visualiser and passes user properties through.
 **For Tasks 9/11 and the properties editor.** (Task 6 is done — § "Scene audio (Task 6)"
 below.) Task 9: nothing
 scene-specific in the pointer/visualiser paths (both sides of a transition are fed). Task 11:
-`ScenesAvailable` = `hello.capabilities` `scene`, else `lp-player scene-check` (exit + JSON
+`ScenesAvailable` = `hello.capabilities` `scene`, else `liascape-player scene-check` (exit + JSON
 `reason`); set `player.scene_assets` from a setting if one is added; scenes `create` may carry
 `scene_props`. Editor (done, above): reads `general.properties`, persists per item, sends `set
 <src>.scene_props` (whole map); `scene.property` refusals are not subscribed (they log).
@@ -3481,7 +3481,7 @@ scene-specific in the pointer/visualiser paths (both sides of a transition are f
 
 A scene's sound is a PipeWire stream of its own worker on the player bus, driven by the
 compositor's dB gains exactly like a video's `volume-gain` — the invariants (#1–#8) hold for
-scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; compositor side
+scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`; compositor side
 `sources/scene.rs`; the dropout reference `probe/dropout.rs` (`SceneEnvelopes`).
 
 - **Protocol (`PROTOCOL` 2; 3 since scene loudness added `FromWorker::Loudness`, 4 since its cap added `Start.loudness` + `ToWorker::LoudnessMeter` — § "Scene loudness").** `Start` gained `id` (the source id), `gain_db` (default −96),
@@ -3491,14 +3491,14 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   `paused` now means *play no audio*: the effective pause, or always in stepped mode (a stepped
   scene never sends `Paused {false}`). `FromWorker::AudioFlowing`, `Envelope {t0_ms,
   dbfs_1ms}` (`t0_ms` on `CLOCK_MONOTONIC`).
-- **The stream** (thread `lp-scene-audio`, its own PipeWire main loop, which sends the
+- **The stream** (thread `lia-scene-audio`, its own PipeWire main loop, which sends the
   envelope/`AudioFlowing`; the process callback runs on PipeWire's **data thread with
   `RT_PROCESS`** — real-time priority through the client's `module-rt`, `SCHED_RR` measured on
   `data-loop.0` — 2026-10-28, see "RT process callback" below): playback, F32 stereo 48 kHz, `node.name =
-  lp-player-scene.<id>`, `node.description = "lp-player scene"`, `application.name =
-  lp-player`, `media.role = Wallpaper`, `node.latency = 256/48000` (requested — PipeWire
+  liascape-player-scene.<id>`, `node.description = "liascape-player scene"`, `application.name =
+  liascape-player`, `media.role = Wallpaper`, `node.latency = 256/48000` (requested — PipeWire
   rewrites the prop to the running quantum in `pw-dump`), `state.restore-props/target =
-  false`; the route: `Device("pipewire/lp-player-bus")` → `target.object = lp-player-bus` +
+  false`; the route: `Device("pipewire/liascape-player-bus")` → `target.object = liascape-player-bus` +
   `node.dont-reconnect` (the compositor re-routes us, never WirePlumber), `Default` → no target,
   `Null` (`--ao null`) → a real-time timer thread pulling and discarding (so `AudioFlowing`,
   envelopes and the scene's sound clock work in hermetic tests). The thread **starts only once a
@@ -3508,7 +3508,7 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   `transport_meets_the_spike_budget`: an always-on null timer took the worker from ~3.4–5.4 % to
   7.2 % CPU; until 2026-10-28 the thread still started at `Start` and polled for a sound 50×/s,
   0.06 % CPU for nothing — `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`, RED
-  before: `lp-scene-audio` in a soundless worker); a PipeWire that can't be reached →
+  before: `lia-scene-audio` in a soundless worker); a PipeWire that can't be reached →
   the same timer (keeps the sound in step with the picture, reports **no** flow), retried every
   1 s; a `Route` change fades the old stream out on the gate (≤ 100 ms bound), then rebuilds.
 - **The signal path per buffer (`audio::Dsp`, pure, unit-tested):** pull (LWE's
@@ -3574,9 +3574,9 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   (~2/10: one 10 ms bin −44.3 dB after the ramp settled at −43, failing the monotonic check) was a
   **real dropout on the bus**, not the meter: the 1 ms samples showed one block −45.4 and the next
   exact −96 (one 64-frame quantum of silence, contiguous timestamps) at a random time — not at the
-  ramp — and `pw-top` counted **ERR on `lp-player-scene.*` only** (bus, its playback and the meter
+  ramp — and `pw-top` counted **ERR on `liascape-player-scene.*` only** (bus, its playback and the meter
   0): the worker's stream missed graph cycles. Its process callback ran on the non-real-time
-  `lp-scene-audio` main-loop thread; at the 64-frame quantum this machine and the private
+  `lia-scene-audio` main-loop thread; at the 64-frame quantum this machine and the private
   PipeWire run (1.33 ms per cycle), a normal-priority thread scheduled late under load ~4 misses
   one. mpv's AO uses `RT_PROCESS` (why videos never showed it). Fix: `RT_PROCESS` (`bus::
   connect_with`); the callback owns the `Dsp` (`Arc<Mutex<Dsp>>`, never locked by the main loop
@@ -3586,7 +3586,7 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   same build with the flag toggled): without RT 7 xruns, 3 failing dips; with RT **0 xruns, 0
   dips**; the test 20/20 after. The Task 10 commit's base had the same code (`audio.rs` unchanged
   since Task 6). **A second, measurement-side hazard found with it:** the bus meter's own capture
-  (then on the non-RT `lp-bus` thread — RT since Phase 2 Task 14, § Audio bus → Meter) once missed a cycle — a 2.3 ms timestamp gap whose
+  (then on the non-RT `lia-bus` thread — RT since Phase 2 Task 14, § Audio bus → Meter) once missed a cycle — a 2.3 ms timestamp gap whose
   block joins two non-adjacent sine pieces (~1 dB off); the test now leaves out a 10 ms bin that
   isn't time-contiguous (≤ 2 allowed) — a dropout on the bus is contiguous −96 blocks and still
   fails.
@@ -3601,7 +3601,7 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   CPU 5.4 / 6.5 / 5.1 % of a core (the audio thread 1.5 / 2.5 / 1.9 %); a **debug** worker's
   WSOLA step (~0.35 ms) misses 64-frame cycles — 1–2 ms holes every 10–20 ms at ≠ 1× (none at
   1×; audio thread 5–14 %). Ship/measure release.
-- **Tests.** Worker units (`cargo test --bin lp-scene-worker`): `gain_change_ramps_across_one_buffer`,
+- **Tests.** Worker units (`cargo test --bin liascape-scene-worker`): `gain_change_ramps_across_one_buffer`,
   `silent_db_is_exact_zero`, `gain_matches_db_to_lin`, `envelope_of_full_scale_sine_is_minus_3_01`,
   `gate_declicks_only_an_audible_stream`, `audio_flowing_once_per_arming`,
   `time_stretch_is_bit_exact_at_1x`, `time_stretch_keeps_pitch_level_and_rate`,
@@ -3616,8 +3616,8 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   V→S, full-live S→S onto a scene with and without sound, unpark, reveal snap-back, R88 resume —
   each `onset.started {reason: flowed}` after the scene's own `source.audio_flowing`, no
   `onset_timeout`; RED with the worker's `AudioFlowing` suppressed: `reason: timeout`); opt-in
-  `real_scene_sound_on_the_bus` (`LP_PLAYER_TEST_SCENES`, 2371103399; set `LP_SCENE_WORKER_BIN`
-  to a release worker for the numbers above). Diagnostic: `lp-scene-worker --lwe-smoke …
+  `real_scene_sound_on_the_bus` (`LIASCAPE_PLAYER_TEST_SCENES`, 2371103399; set `LIASCAPE_SCENE_WORKER_BIN`
+  to a release worker for the numbers above). Diagnostic: `liascape-scene-worker --lwe-smoke …
   --audio-dump S` (real sound in, the stretch at 0.5×/1.5× out, raw F32 files + silent-block
   counts).
 - **For Tasks 8/9/10/11 + loudness.** Task 9: nothing audio-specific left — a scene B's onset
@@ -3669,7 +3669,7 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   backend only sets it at create); a `path` change drops it (the old folder's). A malformed seed is
   ignored (measured from nothing). Each session forms its own first block (its first 3 segments start
   none: 0.3 s less than one long run).
-- **The window = audible play.** `LP_PLAYER_LOUDNESS_WINDOW_S` (default 60; tests 1–6) seconds of
+- **The window = audible play.** `LIASCAPE_PLAYER_LOUDNESS_WINDOW_S` (default 60; tests 1–6) seconds of
   blocks **above the absolute gate** — a silent stretch doesn't count, a paused or muted one isn't
   even measured. **Reports** (`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
   played_s, complete, capped, window_s, cap_s, state}`, info, comp `scene` — each one cumulative over
@@ -3681,7 +3681,7 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   `played_s` = segments this source received (audible or not), `complete` = `seconds` ≥ the window
   (else a partial: switched away early on a first play), `peak_dbfs` = the sample peak over every play
   (≤ the true peak; null if none). So a first play normalizes after 60 s (as before) and keeps refining.
-- **The cap.** `LP_PLAYER_LOUDNESS_CAP_S` (default **1800** = 30 min of audible play over every play;
+- **The cap.** `LIASCAPE_PLAYER_LOUDNESS_CAP_S` (default **1800** = 30 min of audible play over every play;
   never below the window; tests 3): reached → one last report (`capped: true`) and measuring stops for
   good: the compositor sends **`ToWorker::LoudnessMeter {on: false}`** (folded into a restart's
   `Start.loudness`) and the worker stops K-weighting (`Dsp`: `st.meter`) — no `Loudness` message any
@@ -3778,7 +3778,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   `scene_at_the_refresh_is_paced_by_frame_callbacks_not_the_gate` (RED: `Some(6.944 ms)` for
   scene_fps 0 on 144 Hz); the presenting half is runtime-only (no hermetic Wayland) — guarded by the
   on-machine step.
-- **GPU time (`bin/lp-scene-worker/gputimer.rs`).** One `GL_TIME_ELAPSED` query around each
+- **GPU time (`bin/liascape-scene-worker/gputimer.rs`).** One `GL_TIME_ELAPSED` query around each
   frame's rendering (scene + blit into the slot), read back **only once `QUERY_RESULT_AVAILABLE`**
   — normally a frame or two later — never waited on; ≤ `MAX_QUERIES` 4 in flight (all busy → that
   frame goes untimed); a driver refusing queries turns the timer off (`gpu_ms` stays `None`, and the
@@ -3839,7 +3839,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   `path` change starts a new worker (clears it; its first latched frame drops the kept slot); raising
   the limit doesn't restart a stopped one. Guard-relevant pids: workers not stopped.
 - **Measuring (`vram.rs`).** `vram::Probe` — `sample(pids) -> Sample {total_mib, free_mib, procs:
-  Option<{pid: MiB}>}` — chosen by **`LP_PLAYER_VRAM_PROBE`**: `auto` (default: the first that
+  Option<{pid: MiB}>}` — chosen by **`LIASCAPE_PLAYER_VRAM_PROBE`**: `auto` (default: the first that
   works of) **NVML** (`libnvidia-ml.so.1` **dlopened** — tried by soname, then
   `/run/opengl-driver/lib`, `/usr/lib{,64}`, `/usr/lib/x86_64-linux-gnu`; never linked;
   `nvmlDeviceGetMemoryInfo` of the GPU our own pid runs on (else device 0) +
@@ -3852,7 +3852,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   `nvidia-smi` | `none` | **`fake:<file>`** (tests: a JSON `{total_mib, free_mib, procs: {"<pid>":
   MiB}}` read at every sample; a missing/bad file = no sample). An Intel GPU exposes no
   `mem_info_vram_*` sysfs, so it has no system total: no probe (`vram` probe `probe: none` + the
-  reason) and neither rule acts — a gap for Intel discrete cards, noted. `vram::Monitor` runs the probe on its own thread **`lp-vram`**
+  reason) and neither rule acts — a gap for Intel discrete cards, noted. `vram::Monitor` runs the probe on its own thread **`lia-vram`**
   (every `Timing::interval`, 1 s), never the loop (NVML ~1 ms, `nvidia-smi` ~50 ms); the loop
   hands it the pids (the compositor + live scene workers) and reads the newest sample each tick.
   It runs only while a rule needs it (low mode not `off`, or a limit with a scene, or a hold);
@@ -3870,7 +3870,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   `RESUME_HOLD_MAX` 160 s); `FLAP_RESET` 5 min without one resets it. No sample for
   `UNAVAILABLE_RELEASE` 30 s while engaged → release (a dead probe never keeps the wallpaper
   stopped); a pending dip with a failed sample starts over. 8 GiB card: low < 512 MiB free,
-  resume at ≥ 1536 MiB (+ reserve). Timing for tests: `LP_PLAYER_VRAM_TIMING=<interval>,<enter>,
+  resume at ≥ 1536 MiB (+ reserve). Timing for tests: `LIASCAPE_PLAYER_VRAM_TIMING=<interval>,<enter>,
   <resume>,<settle>,<scene_hold>` (ms). Units `low_vram_never_flaps_under_light_load`,
   `low_vram_engages_after_hold_and_resumes_with_hysteresis`,
   `low_vram_reserve_is_measured_without_per_process_numbers`, `low_vram_backs_off_when_it_flaps`,
@@ -3922,7 +3922,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   meanwhile waits unopened; free again → both reopen at their positions, a new worker,
   `pending: 0`; RED before the resume-position fix: the video restarted at 0.07 s instead of
   0.83), `low_vram_pause_mode_pauses_without_freeing` (same worker throughout; a user pause made
-  during the hold survives the release). Every test server runs `LP_PLAYER_VRAM_PROBE=none` unless
+  during the hold survives the release). Every test server runs `LIASCAPE_PLAYER_VRAM_PROBE=none` unless
   it sets a fake (`tests/api.rs::die_with_parent`, `tests/supervise.rs::guard`) — hermetic tests
   never see this machine's real VRAM.
 
@@ -4076,7 +4076,7 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
   `context_lost_after_ms: 600` — every worker reports it: frame held, restart 1 names it, broken
   after 3 with the record's reason). Real detection is on-machine only (a GPU reset can't be
   triggered hermetically); `workers` probe `context_losses`.
-- **Hang timeout knob `LP_SCENE_WORKER_HANG_MS`** (`sources::scene::HANG_ENV`, read at each
+- **Hang timeout knob `LIASCAPE_SCENE_WORKER_HANG_MS`** (`sources::scene::HANG_ENV`, read at each
   scene's open in the compositor's environment; a positive whole number of ms, else
   `HANG_TIMEOUT` 2 s — unit `hang_timeout_knob`). Tests run 300. `tests/api.rs::
   hang_is_killed_and_restarted` (`hang_after_ms` 1500: `worker.hung` after 304 ms — RED: 2005 —,
@@ -4114,7 +4114,7 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
   PDEATHSIG check (`skip_core_handler`, never above the hard limit): the kernel then skips a piped
   `core_pattern`, so a scene that crashes LWE never reaches systemd-coredump or pops a desktop crash
   notification (the corpus' first run: 16 of them for its 4 broken scenes — 4 crashes each). The
-  crash record + log tail are the diagnostics. `LP_SCENE_WORKER_COREDUMP=1` (in the compositor's
+  crash record + log tail are the diagnostics. `LIASCAPE_SCENE_WORKER_COREDUMP=1` (in the compositor's
   environment, inherited) keeps the inherited limit, for debugging LWE with a core. Test
   `tests/api.rs::scene_worker_crashes_skip_the_core_handler` (`/proc/<worker>/limits`: 1, and the
   inherited limit with the opt-out; RED before: unlimited, inherited from the test).
@@ -4126,7 +4126,7 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
 library; **refuses `~/.cache/livepaper/steamcmd_workshop`**, also after resolving each item's
 symlinks) on a **private** `serve --no-supervise --headless --outputs 1920x1080@60 --clock real
 --ao null` (own runtime/state/cache/config dirs + socket under the results dir, no Wayland/X,
-PipeWire/Pulse/D-Bus pointed at nothing, `LP_PLAYER_VRAM_PROBE=none`, `prlimit --core=1:1`), one
+PipeWire/Pulse/D-Bus pointed at nothing, `LIASCAPE_PLAYER_VRAM_PROBE=none`, `prlimit --core=1:1`), one
 scene at a time: destroy the previous one and wait for its worker pid to go, `create {kind: scene,
 path}` with **no preview** (a crash can't pass for a picture), `set lay:*:main.content` (a cut),
 poll `probe workers` until `ready` / `broken` / `last_error` / 20 s, capture the source at Ready
@@ -4138,7 +4138,7 @@ then `probe workers
 source. worker. scene.` gives `ready_ms` = `worker.spawned` → `source.ready`. Classes (first match):
 `load_failed` (fatal `load failed` / never opened), `renderer_failed`, `broken`, `timeout`, `crashed`
 (Ready but restarted), `blank` (+4 s luma stddev < 2 or ≥ 99 % one colour), `static`,
-`ok` (`static` = all three captures identical). Results (captures, records.jsonl, events.jsonl, serve.log) go to `/tmp/lp-scene-corpus-<stamp>`
+`ok` (`static` = all three captures identical). Results (captures, records.jsonl, events.jsonl, serve.log) go to `/tmp/liascape-scene-corpus-<stamp>`
 (never the repo — captures aren't committed); the report to `docs/player/reports/scene-corpus.{md,json}`
 (items by Workshop id only). `--only`, `--limit`, `--reuse <results>` (re-report / legacy only),
 `--no-build`, `--bin`, `--assets`. **`--ab-legacy --legacy-output <out>`** runs the installed
@@ -4153,7 +4153,7 @@ player fixes: the stopped worker's last stderr line (§ `WorkerHost` "Log tail")
 (above) and `capture`'s PNG compression (§ GFX / EGL `write_png`) — the 0.85 s capture stall had
 even made the GPU budget throttle two heavy 4K scenes (15–17 ms/frame) in an earlier run: the loop's
 stall read as missed frames; with `Fast` none is throttled. Diagnosing a
-scene LWE kills: `nix shell nixpkgs#gdb` + `lp-scene-worker --lwe-smoke <dir> --assets <dir> --out
+scene LWE kills: `nix shell nixpkgs#gdb` + `liascape-scene-worker --lwe-smoke <dir> --assets <dir> --out
 <dir>` under gdb (`catch throw` shows LWE's caught load failures; ignore the throws under
 `Configuration::detectSteamDir`, LWE's Steam-dir probe, which also prints the harmless `Cannot find
 appmanifest_431960.acf …` lines in every tail).

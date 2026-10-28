@@ -88,7 +88,7 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
     (
         "workers",
         workers::workers,
-        "per scene source: its lp-scene-worker (pid, state, restarts, sync, format, export \
+        "per scene source: its liascape-scene-worker (pid, state, restarts, sync, format, export \
          and native size, fps target/actual, latched, stale reuses, queued, last error)",
     ),
     (
@@ -106,7 +106,7 @@ pub fn run(rt: &mut Runtime, name: &str, args: &Value) -> Result<Value, ApiError
         None => Err(ApiError {
             code: "no_such_probe",
             message: format!("unknown probe {name:?}"),
-            hint: "`lp-player ctl probe '{\"name\":\"list\"}'` lists the probes".into(),
+            hint: "`liascape-player ctl probe '{\"name\":\"list\"}'` lists the probes".into(),
         }),
     }
 }

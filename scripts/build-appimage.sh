@@ -29,14 +29,14 @@ cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
 LIB="$HERE/usr/lib/livepaper"
-export LP_UI_DIR="$LIB/ui"
-export LP_TRANSITIONS_DIR="$LIB/transitions"
-[ -x "$LIB/lp-transition" ] && export LP_TRANSITION_BIN="$LIB/lp-transition"
-[ -x "$LIB/lp-audio" ] && export LP_AUDIO_BIN="$LIB/lp-audio"
-export LP_BACKEND="$LIB/backend/livepaper"
-export LP_ELECTRON="$HERE/usr/lib/electron/electron"
+export LIASCAPE_UI_DIR="$LIB/ui"
+export LIASCAPE_TRANSITIONS_DIR="$LIB/transitions"
+[ -x "$LIB/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIB/liascape-transition"
+[ -x "$LIB/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIB/liascape-audio"
+export LIASCAPE_BACKEND="$LIB/backend/livepaper"
+export LIASCAPE_ELECTRON="$HERE/usr/lib/electron/electron"
 # bare → GUI (electron shell); any flag → headless backend
-if [ $# -eq 0 ]; then exec "$LP_ELECTRON" "$LIB/shell"; fi
+if [ $# -eq 0 ]; then exec "$LIASCAPE_ELECTRON" "$LIB/shell"; fi
 exec "$LIB/backend/livepaper" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"

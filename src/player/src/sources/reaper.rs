@@ -31,7 +31,7 @@ struct Doomed {
 unsafe impl Send for Doomed {}
 
 /// The mpv cores' reaper (started on first use).
-static REAPER: Reaper<Doomed> = Reaper::new("lp-mpv-reaper", trim_batch);
+static REAPER: Reaper<Doomed> = Reaper::new("lia-mpv-reaper", trim_batch);
 
 /// Task 20b: give the pages a batch of destroyed cores freed back (`mem::apply_policy`).
 fn trim_batch() {
@@ -201,7 +201,7 @@ mod tests {
     }
 
     fn leak(after_batch: fn()) -> &'static Reaper<Slow> {
-        Box::leak(Box::new(Reaper::new("lp-reaper-test", after_batch)))
+        Box::leak(Box::new(Reaper::new("lia-reaper-test", after_batch)))
     }
 
     static TRIMS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);

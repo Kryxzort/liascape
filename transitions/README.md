@@ -1,7 +1,7 @@
 # transitions/
 
 Shared GLSL transition assets — the single source of truth consumed by **both** the
-native renderer (`src/native/lp-transition`) and the React UI's live previews
+native renderer (`src/native/liascape-transition`) and the React UI's live previews
 (`app/ui` `TransitionPicker`). Authoring an effect once works in both places.
 
 ## Layout

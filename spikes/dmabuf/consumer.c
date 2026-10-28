@@ -1,7 +1,7 @@
 // Spike (throwaway): the COMPOSITOR side of worker -> compositor GPU frame sharing.
 // A wlr-layer-shell surface on one output (default DP-2, layer BOTTOM: above the live wallpaper, below windows),
 // desktop-GL 3.3 core via EGL on the Wayland platform. Spawns ./producer over a SOCK_SEQPACKET socketpair (the way
-// lp-player will spawn a worker), imports each ring buffer ONCE (eglCreateImage(EGL_LINUX_DMA_BUF_EXT) +
+// liascape-player will spawn a worker), imports each ring buffer ONCE (eglCreateImage(EGL_LINUX_DMA_BUF_EXT) +
 // glEGLImageTargetTexture2DOES), then per frame: wait on the acquire fence (eglCreateSync(EGL_SYNC_NATIVE_FENCE_ANDROID)
 // + eglWaitSync, GPU-side), draw the texture fullscreen, read the 64x64 corner (and a 16x16 gradient probe) back
 // through a PBO, and check n against the message and for monotonicity. Present timing comes from wp_presentation.
@@ -9,12 +9,12 @@
 //   consumer --mode fence|finish|shm|nosync [--seconds 60] [--warmup 3] [--fps 144] [--output DP-2]
 //            [--redraw vblank|new] [--layer bottom|background] [--producer ./producer] [--out results.jsonl]
 //            [--label text] [--latch gpu-wait|signaled] [--verify on|off] [--kill-at SECONDS]
-//   --redraw vblank : redraw on EVERY frame callback (what lp-player does: present at the output's refresh)
+//   --redraw vblank : redraw on EVERY frame callback (what liascape-player does: present at the output's refresh)
 //   --redraw new    : draw only when a new worker frame arrived (throttled by frame callbacks)
 //   --latch gpu-wait: latch the newest frame at once, GPU waits on its fence (the brief's step 2)
 //   --latch signaled: latch only frames whose sync_file already polls signaled; else reuse the previous frame
 //   --kill-at S     : crash test, SIGKILL the worker S seconds into the window the moment a frame is in hand
-//   env LP_SPIKE_WORK=N (read by the producer): synthetic per-pixel GPU load, N loop iterations
+//   env LIASCAPE_SPIKE_WORK=N (read by the producer): synthetic per-pixel GPU load, N loop iterations
 #include "common.h"
 
 #include <fcntl.h>
@@ -248,7 +248,7 @@ static void egl_init(void) {
     EGLint ncfg = 0;
     if (!eglChooseConfig(g_dpy, cfgAttr, &cfg, 1, &ncfg) || !ncfg)
         die("eglChooseConfig");
-    const int prio = env_prio("LP_SPIKE_CONSUMER_PRIO"); // EGL_IMG_context_priority experiment
+    const int prio = env_prio("LIASCAPE_SPIKE_CONSUMER_PRIO"); // EGL_IMG_context_priority experiment
     EGLint ctxAttr[] = { EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
                          EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE, 0, EGL_NONE };
     if (prio)
@@ -839,7 +839,7 @@ int main(int argc, char **argv) {
     struct wl_region *empty = wl_compositor_create_region(g_comp);
     wl_surface_set_input_region(g_surf, empty); // click-through
     wl_region_destroy(empty);
-    g_ls = zwlr_layer_shell_v1_get_layer_surface(g_layerShell, g_surf, out, o_layer, "lp-dmabuf-spike");
+    g_ls = zwlr_layer_shell_v1_get_layer_surface(g_layerShell, g_surf, out, o_layer, "liascape-dmabuf-spike");
     zwlr_layer_surface_v1_add_listener(g_ls, &ls_listener, NULL);
     zwlr_layer_surface_v1_set_anchor(g_ls, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
                                                | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
@@ -1058,7 +1058,7 @@ started:
         FILE *j = fopen(o_out, "a");
         if (j) {
             fprintf(j, "{\"latch\":\"%s\",\"not_ready_vblanks\":%llu,\"work\":%d,", o_latch == LATCH_SIGNALED ? "signaled" : "gpu-wait",
-                    (unsigned long long)c_notReady, getenv("LP_SPIKE_WORK") ? atoi(getenv("LP_SPIKE_WORK")) : 0);
+                    (unsigned long long)c_notReady, getenv("LIASCAPE_SPIKE_WORK") ? atoi(getenv("LIASCAPE_SPIKE_WORK")) : 0);
             fprintf(j, "\"label\":\"%s\",\"mode\":\"%s\",\"redraw\":\"%s\",\"output\":\"%s\",\"output_hz\":%.3f,"
                        "\"fps_target\":%.1f,\"seconds\":%.1f,\"delivered_fps\":%.3f,\"received\":%llu,\"latched\":%llu,"
                        "\"superseded\":%llu,\"presented\":%llu,\"discarded_only\":%llu,\"readbacks\":%llu,"

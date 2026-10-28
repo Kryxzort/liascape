@@ -39,16 +39,16 @@ public static class MonitorDetector
         var wlr = await TryAsync("wlr-randr", "--json", ParseWlrRandr);
         if (wlr != null) return wlr;
 
-        // lp-transition --list-outputs: plain wl_output enumeration (name + current mode + layout origin),
+        // liascape-transition --list-outputs: plain wl_output enumeration (name + current mode + layout origin),
         // hyprctl-shaped JSON. Compositor-agnostic and needs only WAYLAND_DISPLAY — the safety net when
         // every compositor CLI above is missing or its env (instance signature, DISPLAY/Xauthority) isn't
         // there. An empty result here used to silently disable every transition (TryStart: 0 monitors) and
         // the un-covered timed advance then storm-switched (see PlayerHelper.DoVideoEndWait).
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))
-            && TransitionService.ResolveBinary() is { } lpBin)
+            && TransitionService.ResolveBinary() is { } transitionBin)
         {
-            var lp = await TryAsync(lpBin, "--list-outputs", ParseMonitors);
-            if (lp != null) return lp;
+            var listed = await TryAsync(transitionBin, "--list-outputs", ParseMonitors);
+            if (listed != null) return listed;
         }
 
         // xrandr: universal X11 + XWayland fallback (covers GNOME/KDE/XFCE/etc. on X11, and most Wayland

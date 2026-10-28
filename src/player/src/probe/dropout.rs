@@ -1,5 +1,5 @@
 //! The reference-based dropout detector (Task 15; spec §5.3, §9 "debug mode"): a port of
-//! the proven `scripts/lp_audiowatch.py` monitor (2026-10-20, found the cubic-volume-sag,
+//! the proven `scripts/liascape_audiowatch.py` monitor (2026-10-20, found the cubic-volume-sag,
 //! speed-step micro-gap and ready-timeout-silence bugs documented in
 //! `docs/player/debugging.md`). It compares what the player's audio bus actually output
 //! (the 1 ms [`crate::audio::meter::Meter`] window, Task 14) against what it SHOULD have
@@ -40,7 +40,7 @@
 //! **R76 — mean, not median, dB error.** The brief's text says the lag search minimises
 //! the *median* absolute dB error; [`DropoutReport::fit_db`] has always been, and stays,
 //! the **mean** (power-domain-correct arithmetic mean of `|observed − expected − offset|`
-//! over the qualifying bins) — exact parity with the proven `lp_audiowatch.py` reference
+//! over the qualifying bins) — exact parity with the proven `liascape_audiowatch.py` reference
 //! (`refcheck`'s `err = sum(...) / len(pairs)`), which the brief's own text misdescribes.
 //! `offset_db` is the one place a *median* is used (robust against one outlier bin). Kept
 //! deliberately; flagged here rather than "fixed" to match a brief that was itself wrong.
@@ -164,7 +164,7 @@
 //!    is still flagged (`ramp_in_that_never_comes_is_still_a_drop`; RED before:
 //!    `ramp_in_a_few_ms_late_is_not_a_drop`, a drop at 1560 len 10).
 //! 2. **The meter's missed cycles** ([`drop_meter_discontinuities`]): the bus meter's
-//!    capture, while it ran on the non-real-time `lp-bus` thread, skipped graph cycles under
+//!    capture, while it ran on the non-real-time `lia-bus` thread, skipped graph cycles under
 //!    load — a timestamp jump followed by −96 blocks (since then RT, `audio::meter`; this
 //!    stays the safety net for a meter without RT scheduling). Those samples are left out and reported as
 //!    `unmeasured`, never as a gap (`meter_discontinuity_is_unmeasured_not_a_gap`; RED
@@ -251,7 +251,7 @@ pub struct DropoutReport {
     pub lag_ms: u32,
     /// Mean absolute dB error at that lag, after `offset_db` — how good the fit is. R76
     /// (review fix round): the brief's text says "median" here; this has always been,
-    /// and stays, the **mean** — exact parity with `lp_audiowatch.py`'s `refcheck`, which
+    /// and stays, the **mean** — exact parity with `liascape_audiowatch.py`'s `refcheck`, which
     /// the brief's text misdescribed. See the module docs.
     pub fit_db: f64,
     /// Median `observed − expected` at the chosen lag (a level mismatch, e.g. a
@@ -293,7 +293,7 @@ fn offset_ms(t: Duration, ms: i64) -> Option<Duration> {
     }
 }
 
-/// Port of `lp_audiowatch.py`'s `refcheck` (the reference-based half): aligns `observed`
+/// Port of `liascape_audiowatch.py`'s `refcheck` (the reference-based half): aligns `observed`
 /// (raw, ~1 ms-resolution bus-meter samples) against `expected` (10 ms power bins, e.g.
 /// from [`expected_envelope`]) by searching a 0–250 ms lag, then flags both coarse
 /// (10 ms-bin) drops and fine (sub-bin) micro-gaps against that same coarse `expected` —
@@ -326,7 +326,7 @@ pub const UNMEASURED_TAIL_MS: u64 = 4;
 
 /// Phase 2 Task 14: splits `observed` into the samples the meter really captured in
 /// sequence and the stretches it didn't. A bus meter capture that isn't real-time (it ran
-/// on the `lp-bus` main loop until Task 14; a session without rtkit still has no RT) misses
+/// on the `lia-bus` main loop until Task 14; a session without rtkit still has no RT) misses
 /// graph cycles under load — its timestamps jump
 /// (measured 2.3–22 ms) and the blocks right after read −96 (what PipeWire hands a stream
 /// that missed its cycles), and the block before the jump joins two non-adjacent pieces.
@@ -811,7 +811,7 @@ fn gain_lin_interp_at(track: Option<&GainTrack>, t: Duration) -> f64 {
 }
 
 /// `ffmpeg` resolved from `PATH` (never a hard-coded store path — same rule as
-/// `scripts/lp_audiowatch.py`).
+/// `scripts/liascape_audiowatch.py`).
 const FFMPEG: &str = "ffmpeg";
 
 /// R79 (review fix round): ffmpeg children this module has spawned and not yet reaped —
@@ -1139,7 +1139,7 @@ pub fn expected_envelope(
 /// Decodes each source once (`ffmpeg -ss <pos> -t <len>`; R78: `<pos>`/`<len>` are
 /// FILE-time, scaled by the source's own `speed` and wrapped at `duration` when
 /// `looped`), multiplies each by `db_to_lin(gain)²` per source per bin and sums — same
-/// as `lp_audiowatch.py`'s `refcheck` — and returns BOTH the coarse (10 ms; lag search +
+/// as `liascape_audiowatch.py`'s `refcheck` — and returns BOTH the coarse (10 ms; lag search +
 /// `drops`) and fine (1 ms; R80's micro-gap pass) expected envelopes from that one
 /// decode.
 pub fn expected_envelopes(
@@ -2040,7 +2040,7 @@ mod tests {
             println!("SKIP: no ffmpeg");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("lp-dropout-fifo-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("liascape-dropout-fifo-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fifo = dir.join("never.wav");
         let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();

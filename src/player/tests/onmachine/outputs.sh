@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# On-machine check for lp-player's Wayland backend (Task 13): one wlr-layer-shell surface
+# On-machine check for liascape-player's Wayland backend (Task 13): one wlr-layer-shell surface
 # per wl_output, the frame-timing probe, and hotplug through Hyprland. Task 16 adds: the
 # mixed-content check (a video on one output, a static colour on the other → that one stays
 # idle, also while the first animates), output props surviving a replug, and a crash →
@@ -16,13 +16,13 @@
 #   EXACT recorded mode/position/scale (never `preferred,auto`); a trap restores the recorded
 #   layout on any exit (failure, Ctrl-C) and verifies `hyprctl monitors -j` matches it;
 # - stops the legacy wallpaper (mpvpaper) first and leaves it stopped;
-# - runs its own `lp-player serve` (supervised: SERVE_PID is the supervisor, PLAYER_PID the
+# - runs its own `liascape-player serve` (supervised: SERVE_PID is the supervisor, PLAYER_PID the
 #   compositor child that owns the surfaces) with a private XDG_RUNTIME_DIR (socket +
 #   instance lock — other lanes' headless servers are unaffected) and RLIMIT_CORE 1 (the
 #   deliberate SIGSEGV reaches no core dump handler / crash notification), and stops it on
 #   exit, so no layer surface stays on screen.
 #
-# Env: LP_PLAYER_BIN (default: build target/release/lp-player via the flake devShell),
+# Env: LIASCAPE_PLAYER_BIN (default: build target/release/liascape-player via the flake devShell),
 # OUT_A / OUT_B (default DP-1 / DP-2), HZ_A / HZ_B (144 / 240),
 # MEAN_A / MEAN_B (6.9 / 4.2 ms), TOL_MS (0.5).
 set -u -o pipefail
@@ -38,7 +38,7 @@ MEAN_A=${MEAN_A:-6.9}
 MEAN_B=${MEAN_B:-4.2}
 TOL_MS=${TOL_MS:-0.5}
 
-SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/lp-outputs.XXXXXX")
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/liascape-outputs.XXXXXX")
 RT=$SCRATCH/run
 STATE=$SCRATCH/state
 mkdir -m 700 "$RT" "$STATE"
@@ -62,7 +62,7 @@ fail() {
 NORM='[.[] | {name, width, height, refreshRate, x, y, scale, transform}] | sort_by(.name)'
 WSNORM='{ws: ([.[] | {id, monitor}] | sort_by(.id))}'
 
-# lp-player with its private runtime dir; the real compositor through an absolute socket.
+# liascape-player with its private runtime dir; the real compositor through an absolute socket.
 lp() {
     env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$STATE" WAYLAND_DISPLAY="$WL" \
         "$BIN" "$@"
@@ -158,9 +158,9 @@ cleanup() {
     restore_cursor
     stop_serve
     restore_layout
-    # No lp-player surface existed before we started (checked): none may be left.
-    if hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "lp-player")] | length > 0' >/dev/null; then
-        say "WARNING: an lp-player layer surface is still mapped"
+    # No liascape-player surface existed before we started (checked): none may be left.
+    if hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "liascape-player")] | length > 0' >/dev/null; then
+        say "WARNING: an liascape-player layer surface is still mapped"
         FAILED=1
     fi
     if [[ $FAILED != 0 || $rc != 0 ]]; then
@@ -188,8 +188,8 @@ for o in "$OUT_A" "$OUT_B"; do
     jq -e --arg n "$o" 'any(.[]; .name == $n)' "$LAYOUT" >/dev/null || fail "monitor $o not present"
 done
 
-OTHER=$(hyprctl layers -j | jq -c '[.. | objects | select(.namespace? == "lp-player") | .pid] | unique')
-[[ $OTHER == "[]" ]] || fail "another lp-player (pid $OTHER) already draws on this session; quit it first (ctl quit)"
+OTHER=$(hyprctl layers -j | jq -c '[.. | objects | select(.namespace? == "liascape-player") | .pid] | unique')
+[[ $OTHER == "[]" ]] || fail "another liascape-player (pid $OTHER) already draws on this session; quit it first (ctl quit)"
 
 if pgrep -x mpvpaper >/dev/null; then
     say "stopping the legacy wallpaper (mpvpaper)"
@@ -198,15 +198,15 @@ if pgrep -x mpvpaper >/dev/null; then
     pgrep -x mpvpaper >/dev/null && fail "mpvpaper still running after /stop"
 fi
 
-if [[ -z ${LP_PLAYER_BIN:-} ]]; then
-    say "building lp-player (release)"
+if [[ -z ${LIASCAPE_PLAYER_BIN:-} ]]; then
+    say "building liascape-player (release)"
     (cd "$REPO" && env -u LD_LIBRARY_PATH nix develop -c cargo build -q --release \
         --manifest-path src/player/Cargo.toml) || fail "cargo build failed"
-    BIN=$CRATE/target/release/lp-player
+    BIN=$CRATE/target/release/liascape-player
 else
-    BIN=$LP_PLAYER_BIN
+    BIN=$LIASCAPE_PLAYER_BIN
 fi
-[[ -x $BIN ]] || fail "no lp-player binary at $BIN"
+[[ -x $BIN ]] || fail "no liascape-player binary at $BIN"
 
 # Test media: synthetic clips (content doesn't matter).
 CLIP240=$SCRATCH/clip240.mp4
@@ -256,7 +256,7 @@ centre_is() { # <output> <r> <g> <b> → the centre pixel, else the one at (¼ w
 }
 layer_level() { # <output> → hyprctl level of OUR player's surface on it ("" if none)
     hyprctl layers -j | jq -r --arg o "$1" --argjson pid "${PLAYER_PID:-0}" \
-        '.[$o].levels // {} | to_entries[] | select(any(.value[]; .namespace == "lp-player" and .pid == $pid)) | .key' | head -n1
+        '.[$o].levels // {} | to_entries[] | select(any(.value[]; .namespace == "liascape-player" and .pid == $pid)) | .key' | head -n1
 }
 wait_level() { # <output> <level>
     for _ in $(seq 1 30); do [[ $(layer_level "$1") == "$2" ]] && return 0; sleep 0.1; done
@@ -292,7 +292,7 @@ wait_ready() { # <source id>
 
 # ------------------------------------------------------------------ 1. serve on Wayland
 # Not through `lp` (a function call in the background would fork a subshell): `env` execs
-# lp-player, so $! is lp-player's own pid — the supervisor, which the trap stops; the
+# liascape-player, so $! is liascape-player's own pid — the supervisor, which the trap stops; the
 # compositor child (PLAYER_PID, from hello) owns the surfaces hyprctl reports.
 # The crash in section 7 is deliberate: RLIMIT_CORE 1 makes the kernel skip the core dump
 # handler (systemd-coredump → the desktop's crash notification) — `prlimit` execs, so $!
@@ -301,11 +301,11 @@ prlimit --core=1:1 env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="
     WAYLAND_DISPLAY="$WL" "$BIN" serve --ao null --log-level debug >"$SCRATCH/serve.log" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 100); do
-    [[ -S $RT/livepaper/lp-player.sock ]] && break
-    kill -0 "$SERVE_PID" 2>/dev/null || fail "lp-player serve exited early"
+    [[ -S $RT/livepaper/liascape-player.sock ]] && break
+    kill -0 "$SERVE_PID" 2>/dev/null || fail "liascape-player serve exited early"
     sleep 0.1
 done
-[[ -S $RT/livepaper/lp-player.sock ]] || fail "no lp-player socket after 10 s"
+[[ -S $RT/livepaper/liascape-player.sock ]] || fail "no liascape-player socket after 10 s"
 HELLO=$(ctl hello) || fail "ctl hello: $HELLO"
 [[ $(jq -r .backend <<<"$HELLO") == wayland ]] || fail "backend is $(jq -r .backend <<<"$HELLO"), want wayland"
 PLAYER_PID=$(jq -r .pid <<<"$HELLO")
@@ -320,7 +320,7 @@ for pair in "$OUT_A:$HZ_A" "$OUT_B:$HZ_B"; do
     got=$(jq -r --arg id "out:$o" '.graph[$id].refresh_hz' <<<"$STATE_JSON")
     [[ $got == "$hz" ]] || fail "out:$o refresh_hz = $got, want $hz"
     say "out:$o refresh_hz $got, $(jq -r --arg id "out:$o" '.graph[$id] | "\(.width)x\(.height)"' <<<"$STATE_JSON")"
-    wait_level "$o" 0 || fail "no lp-player layer surface on the background level of $o"
+    wait_level "$o" 0 || fail "no liascape-player layer surface on the background level of $o"
 done
 say "layer surfaces mapped on the background level (hyprctl layers)"
 
@@ -464,7 +464,7 @@ for _ in $(seq 1 50); do
     sleep 0.1
 done
 [[ $gone == 1 ]] || fail "out:$OUT_A still in the graph after disabling it"
-kill -0 "$SERVE_PID" 2>/dev/null || fail "lp-player died when $OUT_A went away"
+kill -0 "$SERVE_PID" 2>/dev/null || fail "liascape-player died when $OUT_A went away"
 H=$(ctl hello) || fail "player unresponsive after $OUT_A went away"
 [[ $(jq -r .pid <<<"$H") == "$PLAYER_PID" ]] || fail "the compositor restarted when $OUT_A went away (pid $(jq -r .pid <<<"$H"))"
 S2=$(ctl state)
@@ -499,7 +499,7 @@ NOW=$(layout_now)
 [[ $NOW == "$(jq -c "$NORM" "$LAYOUT")" ]] || fail "layout after replug differs: $NOW"
 say "layout after replug identical to the record"
 jq -r 'select(.kind == "output.added" or .kind == "output.removed") | "  \(.kind) \(.output) content=\(.content // "-")"' \
-    "$STATE"/livepaper/lp-player/events.jsonl 2>/dev/null
+    "$STATE"/livepaper/liascape-player/events.jsonl 2>/dev/null
 
 # ------------------------------------------------------------------ 7. crash → restart → restore
 # Both outputs show BLUE now. SIGSEGV the compositor: the supervisor restarts it with
@@ -535,15 +535,15 @@ say "restored centre pixels: $OUT_A = $PA, $OUT_B = $PB"
 ctl set '{"path":"out:*.layer","value":"background"}' >/dev/null
 for o in "$OUT_A" "$OUT_B"; do wait_level "$o" 0 || fail "$o not back on background"; done
 jq -r 'select(.kind | startswith("supervisor.") or startswith("snapshot.restored")) | "  \(.kind) \(del(.t_wall, .t_mono_ms, .comp, .level, .kind, .corr) | tostring)"' \
-    "$STATE"/livepaper/lp-player/events.jsonl 2>/dev/null
+    "$STATE"/livepaper/liascape-player/events.jsonl 2>/dev/null
 
 # ------------------------------------------------------------------ 8. quit
 ctl quit >/dev/null || fail "ctl quit"
 for _ in $(seq 1 50); do kill -0 "$SERVE_PID" 2>/dev/null || break; sleep 0.1; done
-kill -0 "$SERVE_PID" 2>/dev/null && fail "lp-player still running 5 s after quit"
+kill -0 "$SERVE_PID" 2>/dev/null && fail "liascape-player still running 5 s after quit"
 wait "$SERVE_PID"
 st=$?
 SERVE_PID=
-[[ $st == 0 ]] || fail "lp-player exited $st after quit"
+[[ $st == 0 ]] || fail "liascape-player exited $st after quit"
 say "quit: exit 0"
 exit 0

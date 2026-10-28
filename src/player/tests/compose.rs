@@ -9,11 +9,11 @@
 //!
 //! Skips cleanly (prints `SKIP: ...`, returns) when either precondition is missing — same
 //! two conditions `tests/effects_all.rs` already skips on: no EGL device at all, or no
-//! `transitions/` directory resolves (true inside `nix build .#lp-player`'s sandboxed
+//! `transitions/` directory resolves (true inside `nix build .#liascape-player`'s sandboxed
 //! check phase). Every test here needs a `Catalogue` even when it never actually draws an
 //! effect, because `Composer::compose_output`'s signature always takes one (R20) — so a
 //! missing `transitions/` skips every test in this file, not just the effect ones. Under
-//! `LP_REQUIRE_GPU=1` either missing precondition fails instead (`common::skip_gpu`).
+//! `LIASCAPE_REQUIRE_GPU=1` either missing precondition fails instead (`common::skip_gpu`).
 
 mod common;
 
@@ -21,9 +21,9 @@ use std::collections::HashMap;
 
 use common::{headless_gl, read_rgba};
 use glow::HasContext;
-use lp_player::anim::PropPath;
-use lp_player::gfx::{Catalogue, Composer, Gfx, Tex, fit_rect};
-use lp_player::graph::{Fit, Graph, NodeKind, PropValue};
+use liascape_player::anim::PropPath;
+use liascape_player::gfx::{Catalogue, Composer, Gfx, Tex, fit_rect};
+use liascape_player::graph::{Fit, Graph, NodeKind, PropValue};
 use serde_json::{Map, json};
 
 fn setup() -> Option<(Gfx, Catalogue)> {
@@ -513,7 +513,7 @@ fn y_axis_orientation_matches_image_top() {
     // human would actually look at).
     {
         let path = std::env::temp_dir().join(format!(
-            "lp_player_compose_y_axis_{}.png",
+            "liascape_player_compose_y_axis_{}.png",
             std::process::id()
         ));
         gfx.write_png(&out, &path).expect("write_png failed");
@@ -719,7 +719,7 @@ fn uncompilable_effect_draws_a_cut_not_black() {
     };
     let src = Catalogue::resolve_dir().expect("setup() already proved this resolves");
     // A catalogue copy whose `fade` body is broken GLSL (the shared assets stay untouched).
-    let dir = std::env::temp_dir().join(format!("lp-broken-cat-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("liascape-broken-cat-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("glsl")).unwrap();
     for f in ["manifest.json", "wrap.vert", "wrap.frag.template"] {
         std::fs::copy(src.join(f), dir.join(f)).unwrap();

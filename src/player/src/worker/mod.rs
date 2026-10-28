@@ -1,5 +1,5 @@
 //! Compositor side of the scene worker (Phase 2 Tasks 3–4; `.claude/rules/player-core.md`
-//! § Scene worker): [`WorkerHost`] spawns and supervises one `lp-scene-worker` process over a
+//! § Scene worker): [`WorkerHost`] spawns and supervises one `liascape-scene-worker` process over a
 //! `SOCK_SEQPACKET` socketpair ([`proto`]), [`dmabuf`] imports its frames.
 //!
 //! **Lifecycle.** `spawn` → `Starting` (no `Hello` yet) → `Running` (the host answers `Hello`
@@ -8,7 +8,7 @@
 //! restart (`Restarting {attempt}` → `Running`, the new process gets the last `Start` at
 //! [`WorkerHost::set_resume_position`]) while the [`RestartBudget`] allows (3 per 60 s),
 //! else `Broken` + a crash record. `stop` (and `Drop`) never block: `Quit`, then the
-//! process goes to the reaper thread (`lp-worker-reap`), SIGKILLed after [`STOP_GRACE`].
+//! process goes to the reaper thread (`lia-worker-reap`), SIGKILLed after [`STOP_GRACE`].
 //!
 //! **Spawn = `posix_spawn`** (glibc: `clone(CLONE_VM|CLONE_VFORK)`), never `fork`: no
 //! page-table copy of the compositor, so it is cheap enough to run on the loop thread — and it
@@ -801,7 +801,7 @@ impl WorkerHost {
                     self.total_restarts += 1;
                     self.state = WorkerState::Restarting { attempt };
                     self.push_line(format!(
-                        "--- lp-player: worker {how}; restart {attempt} ---"
+                        "--- liascape-player: worker {how}; restart {attempt} ---"
                     ));
                     log::event(
                         "worker",
@@ -1019,7 +1019,7 @@ fn epoll_del(ep: RawFd, fd: RawFd) {
     unsafe { libc::epoll_ctl(ep, libc::EPOLL_CTL_DEL, fd, std::ptr::null_mut()) };
 }
 
-/// Stopped workers' last moments: one `lp-worker-reap` thread (started on demand, gone once
+/// Stopped workers' last moments: one `lia-worker-reap` thread (started on demand, gone once
 /// nothing is dying) reaps them and SIGKILLs any still alive at its deadline — so `stop` and
 /// `Drop` never wait for a process.
 pub mod reap {
@@ -1055,7 +1055,7 @@ pub mod reap {
         });
         if !s.running {
             let spawned = std::thread::Builder::new()
-                .name("lp-worker-reap".into())
+                .name("lia-worker-reap".into())
                 .spawn(run);
             match spawned {
                 Ok(_) => s.running = true,
@@ -1157,7 +1157,7 @@ mod tests {
             speed: 1.0,
             loudness: true,
         };
-        let mut spec = WorkerSpec::new("src1", "/nonexistent/lp-scene-worker", start);
+        let mut spec = WorkerSpec::new("src1", "/nonexistent/liascape-scene-worker", start);
         spec.crash_dir = std::env::temp_dir();
         // A host that never managed to spawn still folds (no process needed for this).
         let epoll = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };

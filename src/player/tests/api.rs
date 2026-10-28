@@ -1,11 +1,11 @@
 //! Task 12: the runtime + command API end to end. Every test spawns the real binary —
-//! `lp-player serve --no-supervise --headless --outputs 640x360@60,320x180@60 --clock
+//! `liascape-player serve --no-supervise --headless --outputs 640x360@60,320x180@60 --clock
 //! stepped --ao null` — with a temp `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` (never the real
 //! ones), talks JSON lines over its socket, and kills the child on drop (also on panic).
 //! `--no-supervise` (Task 16): the spawned process *is* the compositor (pid checks, lock
 //! owner, SIGTERM); supervision has its own suite (`tests/supervise.rs`). Skips (prints
 //! `SKIP: …`) only without an EGL device or a `transitions/` catalogue — fails instead
-//! under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
+//! under `LIASCAPE_REQUIRE_GPU=1` (`common::skip_gpu`).
 //!
 //! One server at a time (a process-wide lock): parallel 1080p decoders starve each other
 //! and the teardown-timing test measures the loop itself.
@@ -24,10 +24,10 @@ use common::pw::PrivatePw;
 use common::{ClipSpec, ensure_clip, headless_gl};
 use serde_json::{Value, json};
 
-const BIN: &str = env!("CARGO_BIN_EXE_lp-player");
+const BIN: &str = env!("CARGO_BIN_EXE_liascape-player");
 static SERIAL: Mutex<()> = Mutex::new(());
 static N: AtomicU32 = AtomicU32::new(0);
-/// `lp_player::supervise::EXIT_NO_COMPOSITOR` (black-box: spelled out).
+/// `liascape_player::supervise::EXIT_NO_COMPOSITOR` (black-box: spelled out).
 const EXIT_NO_COMPOSITOR: i32 = 5;
 
 // ---------------------------------------------------------------- server + client
@@ -39,14 +39,14 @@ struct Serve {
     _serial: Option<MutexGuard<'static, ()>>,
 }
 
-/// `LP_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
+/// `LIASCAPE_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
 fn can_run() -> bool {
     headless_gl().is_some() && common::catalogue_dir().is_some()
 }
 
 fn new_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "lp-api-{}-{}",
+        "liascape-api-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ));
@@ -62,7 +62,7 @@ fn die_with_parent(c: &mut Command) {
     use std::os::unix::process::CommandExt;
     // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
     // that drives it sets `fake:<file>` after this).
-    c.env("LP_PLAYER_VRAM_PROBE", "none");
+    c.env("LIASCAPE_PLAYER_VRAM_PROBE", "none");
     unsafe {
         c.pre_exec(|| {
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
@@ -142,8 +142,8 @@ impl Serve {
         for k in unset {
             cmd.env_remove(k);
         }
-        let child = cmd.spawn().expect("spawn lp-player serve");
-        let sock = root.join("run/livepaper/lp-player.sock");
+        let child = cmd.spawn().expect("spawn liascape-player serve");
+        let sock = root.join("run/livepaper/liascape-player.sock");
         let mut s = Serve {
             child: Some(child),
             root,
@@ -2761,7 +2761,7 @@ fn pipelined_step_then_capture() {
 
 /// `capture` never stalls the loop (TODO "`ctl capture` still encodes on the loop"): the loop
 /// only starts the GPU readback into a pixel-pack buffer; the PNG encode and the write run on
-/// `lp-capture` straight from the mapped buffer, the reply comes once the file is complete,
+/// `lia-capture` straight from the mapped buffer, the reply comes once the file is complete,
 /// and a request pipelined behind the capture is answered after it (per-client FIFO, like
 /// `step`). Both targets (a 3840×1080 output, a 1920×1080 source), twice each: the first
 /// capture at a size makes its buffer (the driver pins its memory: < 10 ms, once), a repeat's
@@ -2908,7 +2908,7 @@ fn concurrent_starts_one_serves() {
             .read_to_string(&mut err)
             .unwrap();
         assert!(!lst.success(), "round {round}: loser exit {lst}");
-        let sock = root.join("run/livepaper/lp-player.sock");
+        let sock = root.join("run/livepaper/liascape-player.sock");
         let t = Instant::now();
         let mut c = loop {
             if let Ok(s) = UnixStream::connect(&sock) {
@@ -3056,7 +3056,7 @@ fn ctl_times_out() {
     let t = Instant::now();
     let out = Command::new(BIN)
         .args(["ctl", "--timeout-ms", "300", "hello"])
-        .env("LP_PLAYER_SOCKET", &sock)
+        .env("LIASCAPE_PLAYER_SOCKET", &sock)
         .output()
         .unwrap();
     assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
@@ -3224,7 +3224,7 @@ fn wayland_serve_args_and_missing_compositor() {
             .env_remove("WAYLAND_SOCKET")
             .stdin(Stdio::null())
             .output()
-            .expect("run lp-player")
+            .expect("run liascape-player")
     };
     let out = run(&["serve", "--outputs", "640x360@60"]);
     let err = String::from_utf8_lossy(&out.stderr);
@@ -3247,7 +3247,7 @@ fn wayland_serve_args_and_missing_compositor() {
         "the hint names the alternative: {err}"
     );
     assert!(t.elapsed() < Duration::from_secs(10), "no hang");
-    let sock = root.join("run/livepaper/lp-player.sock");
+    let sock = root.join("run/livepaper/liascape-player.sock");
     assert!(!sock.exists(), "socket left behind");
     assert!(!sock.with_extension("lock").exists(), "lock left behind");
 }
@@ -3277,7 +3277,7 @@ fn bus_down_falls_back_to_default_device() {
             ("PIPEWIRE_RUNTIME_DIR", no_pw.as_path()),
             (
                 "PIPEWIRE_REMOTE",
-                Path::new("lp-player-test-no-such-socket"),
+                Path::new("liascape-player-test-no-such-socket"),
             ),
         ],
         Some(serial),
@@ -4222,7 +4222,7 @@ fn i5_switch_loop_busy() {
         warm[warm.len() / 2],
         warm[warm.len() - 1]
     );
-    if std::env::var("LP_I5_BASELINE").is_err() {
+    if std::env::var("LIASCAPE_I5_BASELINE").is_err() {
         // Before (sync open, fruit dither): opens 3–14 ms, per-switch busy 32–54 ms
         // (median 36–44). After: the core is made on a worker (opens 1–8 ms: render
         // context + applies + loadfile) and the first render is cheaper.
@@ -4280,15 +4280,15 @@ fn switch_loop_busy(c: &mut Client) -> (Vec<f64>, Vec<f64>) {
     (busy, open)
 }
 
-/// `lp_player::sources::host::MAX_OPEN_WORKERS` (black-box: spelled out).
+/// `liascape_player::sources::host::MAX_OPEN_WORKERS` (black-box: spelled out).
 const OPEN_WORKERS_CAP: u64 = 2;
 
-/// TODO "No explicit cap on concurrent `lp-open` worker threads" (final review I5): a burst
+/// TODO "No explicit cap on concurrent `lia-open` worker threads" (final review I5): a burst
 /// of creates starts at most [`OPEN_WORKERS_CAP`] core-making workers at once, the rest
 /// wait in order and none is lost; a node destroyed while queued never opens (its job is
 /// skipped — no core made), a prop changed while queued still reaches the source it opens
 /// (opened from the node's CURRENT props); quit with a burst still queued stays bounded and
-/// clean (no `mpv.reaper_stragglers`). RED before the cap: 16 `lp-open` threads at once.
+/// clean (no `mpv.reaper_stragglers`). RED before the cap: 16 `lia-open` threads at once.
 #[test]
 fn i5_open_burst_is_capped_and_none_lost() {
     let Some(mut srv) = real_serve(&[]) else {
@@ -4340,7 +4340,7 @@ fn i5_open_burst_is_capped_and_none_lost() {
     let peak = pool["peak"].as_u64().unwrap();
     assert!(
         (1..=OPEN_WORKERS_CAP).contains(&peak),
-        "lp-open workers at once: {peak} (cap {OPEN_WORKERS_CAP}): {pool}"
+        "lia-open workers at once: {peak} (cap {OPEN_WORKERS_CAP}): {pool}"
     );
     assert_eq!(
         pool["workers"],
@@ -4395,7 +4395,7 @@ fn i5_open_burst_is_capped_and_none_lost() {
         .expect("quit with opens queued must exit");
     println!("I5 quit with a burst queued: exit after {:?}", t.elapsed());
     assert!(st.success(), "{st}");
-    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
     assert!(
         !log.contains("mpv.reaper_stragglers"),
         "straggler at quit: {}",
@@ -4420,9 +4420,9 @@ fn i5_open_burst_is_capped_and_none_lost() {
 /// stretch, and what mpv really decodes with: a LOOP-rendered source never a GL interop mode
 /// (`no` or a `-copy` mode, `sources::mpv::mpv_hwdec`); a source on the render worker with the
 /// worker's interop loaded (`hwdec_interop`, § Sources "Hardware decoding") decodes zero-copy
-/// — the interop's init (a CUDA context) runs on an `lp-render` lane, so the same bound must
+/// — the interop's init (a CUDA context) runs on an `lia-render` lane, so the same bound must
 /// hold — and still asks for the copy twin as its fallback. Runs in both render modes
-/// (`LP_PLAYER_RENDER_WORKER`).
+/// (`LIASCAPE_PLAYER_RENDER_WORKER`).
 #[test]
 fn t20d_hwdec_switch_never_stalls_the_loop() {
     // SKIP (no EGL / no catalogue — e.g. the nix build sandbox, which has no ffmpeg either)
@@ -4565,7 +4565,7 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
 /// (`probe memory {trim: true}`) must find little to give back — glibc keeping freed
 /// frame buffers resident in its arenas is exactly the bug (`mem::apply_policy`). Both
 /// checks are ratios of the process's own RSS, not absolute sizes. Old behaviour on
-/// demand: `LP_PLAYER_MALLOC=glibc cargo test --test api t20b` (RED).
+/// demand: `LIASCAPE_PLAYER_MALLOC=glibc cargo test --test api t20b` (RED).
 #[test]
 fn t20b_switch_loop_rss_stays_flat() {
     const WARM: usize = 4;
@@ -4632,7 +4632,7 @@ fn t20b_switch_loop_rss_stays_flat() {
         m1["policy"],
     );
     // Near-vacuous under the policy (the reaper already trimmed); it is the RED detector for
-    // `LP_PLAYER_MALLOC=glibc`. The growth check below is the meaningful one.
+    // `LIASCAPE_PLAYER_MALLOC=glibc`. The growth check below is the meaningful one.
     assert!(
         retained < 0.05,
         "malloc keeps {:.0} MiB of freed memory resident ({:.1} % of RSS) after {} switches — \
@@ -4658,14 +4658,14 @@ fn t20b_switch_loop_rss_stays_flat() {
 /// colour fade on every output (each output redraws every refresh, no decoder in the heap)
 /// must leave the heap flat per present (`wl::apply_driver_env` + the default-queue drain in
 /// `Wayland::process`). Opt-in — it draws on a real compositor's outputs for ~25 s:
-/// `LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> cargo test --test api t20e` (absolute: the
+/// `LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path> cargo test --test api t20e` (absolute: the
 /// test runs with its own `XDG_RUNTIME_DIR`). Old behaviour on demand:
 /// add `__NV_DISABLE_EXPLICIT_SYNC=0` (RED on egl-wayland2 ≤ 1.0.2).
 #[test]
 fn t20e_wayland_present_heap_stays_flat() {
-    let Some(display) = std::env::var_os("LP_PLAYER_TEST_WAYLAND") else {
+    let Some(display) = std::env::var_os("LIASCAPE_PLAYER_TEST_WAYLAND") else {
         println!(
-            "SKIP: set LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run (draws on that \
+            "SKIP: set LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run (draws on that \
              compositor's outputs for ~25 s)"
         );
         return;
@@ -4687,8 +4687,8 @@ fn t20e_wayland_present_heap_stays_flat() {
             std::fs::File::create(root.join("stderr-wayland.log")).unwrap(),
         ));
     let mut srv = Serve {
-        child: Some(cmd.spawn().expect("spawn lp-player serve (wayland)")),
-        sock: root.join("run/livepaper/lp-player.sock"),
+        child: Some(cmd.spawn().expect("spawn liascape-player serve (wayland)")),
+        sock: root.join("run/livepaper/liascape-player.sock"),
         root,
         _serial: Some(serial),
     };
@@ -4818,7 +4818,7 @@ fn i7_bus_reconnects_after_pipewire_restart() {
     });
     wait_for(Duration::from_secs(3), "re-routed to the bus", || {
         let d = device(&mut c, &id)?;
-        (d.0 == json!("pipewire/lp-player-bus") && d.1 == json!("pipewire")).then_some(())
+        (d.0 == json!("pipewire/liascape-player-bus") && d.1 == json!("pipewire")).then_some(())
     });
     wait_for(Duration::from_secs(5), "the tone on the bus again", || {
         loud(&mut c).then_some(())
@@ -4897,7 +4897,7 @@ fn source_probe(c: &mut Client, id: &str) -> Value {
 }
 
 /// Phase 2 (§ Sources "Render worker"): `serve --render-worker on|off` (else
-/// `LP_PLAYER_RENDER_WORKER`) decides where a real-clock player's mpv sources render — the
+/// `LIASCAPE_PLAYER_RENDER_WORKER`) decides where a real-clock player's mpv sources render — the
 /// flag wins over the environment —, a stepped player always renders on the loop (its
 /// captures stay deterministic), and the `sources` probe says which (`render_mode`, the
 /// per-source `render` stats, top-level `render_worker`). The picture is the same either way.
@@ -4994,7 +4994,7 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
 /// uninitialised texture isn't) and never older than the one before it on that target (a
 /// stale, recycled texture is). Runs twice: as is, and with the worker's `slow-flush` test
 /// fault — every frame stays unfinished on the GPU for 30 ms, so only the fences keep it out
-/// of sight. RED: `LP_PLAYER_TEST_RENDER_WORKER_FAULT=publish-early` (each target handed to the
+/// of sight. RED: `LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT=publish-early` (each target handed to the
 /// loop before the worker renders into it). `no-fence` (frames published unfenced, before
 /// their flush) stays GREEN on NVIDIA 595: the driver serializes shared-texture access itself.
 /// Each case also with `hwdec: auto` — zero-copy through the worker's GL interop (§ Sources
@@ -5004,7 +5004,7 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
 fn render_worker_never_composes_a_torn_frame() {
     let a_clip = s(&ensure_clip("flash_128x72_30", FLASH_A)).to_string();
     let b_clip = s(&ensure_clip("flash_192x108_24", FLASH_B)).to_string();
-    let inherited = std::env::var("LP_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
+    let inherited = std::env::var("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT").unwrap_or_default();
     for (extra, hw) in [
         ("", ""),
         ("slow-flush", ""),
@@ -5018,7 +5018,7 @@ fn render_worker_never_composes_a_torn_frame() {
         let fault = fault.join(",");
         let Some(srv) = real_serve_env(
             &["--render-worker", "on"],
-            &[("LP_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new(&fault))],
+            &[("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new(&fault))],
         ) else {
             return;
         };
@@ -5126,11 +5126,11 @@ fn render_worker_never_composes_a_torn_frame() {
 /// Phase 2: with the render worker on, a switch costs the loop about a frame. The render
 /// context's creation and its first render (shader compile, scaler LUTs, FBO setup) — 6–20 ms
 /// on the loop before, the bulk of `i5_switch_loop_busy`'s per-switch busy — run on the
-/// worker; the loop only adopts finished textures. Same 10 switches as I5. `LP_RW_SWITCH=off`
+/// worker; the loop only adopts finished textures. Same 10 switches as I5. `LIASCAPE_RW_SWITCH=off`
 /// runs it with the worker off (the A/B and the RED run).
 #[test]
 fn render_worker_switch_keeps_the_loop_free() {
-    let flag = std::env::var("LP_RW_SWITCH").unwrap_or_else(|_| "on".into());
+    let flag = std::env::var("LIASCAPE_RW_SWITCH").unwrap_or_else(|_| "on".into());
     let Some(srv) = real_serve(&["--render-worker", &flag]) else {
         return;
     };
@@ -5194,7 +5194,7 @@ fn render_worker_quit_is_bounded() {
     println!("render worker quit: exit after {took:?}");
     assert!(st.success(), "{st}");
     assert!(took < Duration::from_secs(3), "quit took {took:?}");
-    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
     let stopped: Vec<&str> = log
         .lines()
         .filter(|l| l.contains("render_worker.stopped"))
@@ -5214,7 +5214,7 @@ fn render_worker_quit_is_bounded() {
 }
 
 /// Phase 2: a render worker that can't start (its shared context fails — test fault
-/// `no-context`: the `lp-render` thread reports a failed start after creating it) never takes
+/// `no-context`: the `lia-render` thread reports a failed start after creating it) never takes
 /// the player down: `render_worker.unavailable` is logged, every mpv source renders on the
 /// loop (`render_mode: loop`, no `render_worker` in the probe) and the picture is right.
 #[test]
@@ -5222,7 +5222,7 @@ fn render_worker_unavailable_falls_back_to_the_loop() {
     let Some(srv) = real_serve_env(
         &["--render-worker", "on"],
         &[(
-            "LP_PLAYER_TEST_RENDER_WORKER_FAULT",
+            "LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT",
             Path::new("no-context"),
         )],
     ) else {
@@ -5251,7 +5251,7 @@ fn render_worker_unavailable_falls_back_to_the_loop() {
     near(png_pixel(&png, 320, 180), [255, 0, 0], 3, "red on screen");
 }
 
-/// Phase 2: the render worker dying (a panic on `lp-render` — test fault `panic`, at its first
+/// Phase 2: the render worker dying (a panic on `lia-render` — test fault `panic`, at its first
 /// render) is a runtime failure like a lost compositor, never a silent freeze: before, the
 /// thread just ended — every picture froze on its last frame, each new open waited out the 3 s
 /// attach timeout, freed cores leaked — and the player kept serving. Now the loop sees it
@@ -5262,7 +5262,7 @@ fn render_worker_unavailable_falls_back_to_the_loop() {
 fn render_worker_death_fails_the_player() {
     let Some(mut srv) = real_serve_env(
         &["--render-worker", "on"],
-        &[("LP_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new("panic"))],
+        &[("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new("panic"))],
     ) else {
         return;
     };
@@ -5274,7 +5274,7 @@ fn render_worker_death_fails_the_player() {
         .wait_exit(Duration::from_secs(8))
         .expect("a dead render worker must fail the player");
     assert_eq!(st.code(), Some(3), "{st}: {}", srv.stderr());
-    let log = std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+    let log = std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
     let died: Vec<&str> = log
         .lines()
         .filter(|l| l.contains("\"render_worker.died\""))
@@ -5291,7 +5291,7 @@ fn render_worker_death_fails_the_player() {
         "the leaked core isn't a straggler: {log}"
     );
     assert!(
-        !srv.path("run/livepaper/lp-player.sock").exists(),
+        !srv.path("run/livepaper/liascape-player.sock").exists(),
         "socket left behind"
     );
 }
@@ -5341,7 +5341,7 @@ fn thread_ticks(pid: u32) -> std::collections::BTreeMap<u32, (String, u64)> {
     out
 }
 
-/// CPU over `secs` as % of one core: (the loop thread, `lp-render`, the whole process).
+/// CPU over `secs` as % of one core: (the loop thread, `lia-render`, the whole process).
 fn cpu_split(pid: u32, secs: f64) -> (f64, f64, f64) {
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
     let a = thread_ticks(pid);
@@ -5354,7 +5354,7 @@ fn cpu_split(pid: u32, secs: f64) -> (f64, f64, f64) {
         total += d;
         if *tid == pid {
             main += d;
-        } else if comm == "lp-render" {
+        } else if comm == "lia-render" {
             render += d;
         }
     }
@@ -5369,24 +5369,24 @@ fn frames_all(c: &mut Client) -> Value {
 }
 
 /// Phase 2 measurement (not a check — `cargo test --release --test api -- --ignored
-/// bench_render_worker_ab --nocapture`; rounds `LP_BENCH_ROUNDS`, default 3): the render
+/// bench_render_worker_ab --nocapture`; rounds `LIASCAPE_BENCH_ROUNDS`, default 3): the render
 /// worker off vs on, interleaved (off/on, then on/off, …), each run on a fresh server.
 /// Prints one `BENCH {json}` line per run:
 /// - `switch`: the I5 switch loop (`switch_loop_busy`, 640×360 + 320×180): per-switch
 ///   `max_busy_ms` (warm median, worst), `max_open_ms` (worst);
 /// - `cpu`: steady state on two 1920×1080@60 outputs, % of one core for the loop thread,
-///   `lp-render` and the process — a 1080p30 clip (`hwdec` no) and a 4K60 one (`nvdec-copy`);
+///   `lia-render` and the process — a 1080p30 clip (`hwdec` no) and a 4K60 one (`nvdec-copy`);
 /// - `pace`: one 1920×1080@240 output, `--redraw-policy content`, a 1080p120 clip at 2× (240
 ///   fps content), then 2× ± 0.05 every 90 ms, then a random 1.6–2.4× every 90 ms (192–288
 ///   fps: every content interval < 1.5 refresh periods, so each `missed` is a hitch, never a
 ///   slow frame rate): the `frames` probe's `all` window per 2 s (`missed` = intervals > 1.5
 ///   refresh periods, `fps`, p95, max) and the loop's `max_busy_ms`.
 ///
-/// `LP_BENCH_ONLY=switch,cpu,pace` runs a subset.
+/// `LIASCAPE_BENCH_ONLY=switch,cpu,pace` runs a subset.
 #[test]
 #[ignore]
 fn bench_render_worker_ab() {
-    let rounds: usize = std::env::var("LP_BENCH_ROUNDS")
+    let rounds: usize = std::env::var("LIASCAPE_BENCH_ROUNDS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
@@ -5399,7 +5399,7 @@ fn bench_render_worker_ab() {
         } else {
             ["on", "off"]
         };
-        let only = std::env::var("LP_BENCH_ONLY").unwrap_or_default();
+        let only = std::env::var("LIASCAPE_BENCH_ONLY").unwrap_or_default();
         let run = |k: &str| only.is_empty() || only.split(',').any(|o| o == k);
         for mode in order {
             // 1. Switch cost.
@@ -5530,7 +5530,7 @@ fn bench_render_worker_ab() {
 }
 
 /// Phase 2 on a real compositor (opt-in like t20e — it draws on that compositor's outputs for
-/// ~10 s: `LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path>`; a nested headless sway is
+/// ~10 s: `LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path>`; a nested headless sway is
 /// enough): with the render worker off and on, a video plays on every output (`render_mode`
 /// as asked, the right picture in `capture`, frame callbacks keep presents going), a fade to
 /// another clip completes, and quit exits 0 with every render context freed. The worker's
@@ -5538,8 +5538,8 @@ fn bench_render_worker_ab() {
 /// surfaceless one).
 #[test]
 fn wayland_render_worker_plays_video() {
-    let Some(display) = std::env::var_os("LP_PLAYER_TEST_WAYLAND") else {
-        println!("SKIP: set LP_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run");
+    let Some(display) = std::env::var_os("LIASCAPE_PLAYER_TEST_WAYLAND") else {
+        println!("SKIP: set LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path> to run");
         return;
     };
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -5565,8 +5565,8 @@ fn wayland_render_worker_plays_video() {
                 std::fs::File::create(root.join("stderr-wayland.log")).unwrap(),
             ));
         let mut srv = Serve {
-            child: Some(cmd.spawn().expect("spawn lp-player serve (wayland)")),
-            sock: root.join("run/livepaper/lp-player.sock"),
+            child: Some(cmd.spawn().expect("spawn liascape-player serve (wayland)")),
+            sock: root.join("run/livepaper/liascape-player.sock"),
             root,
             _serial: serial.take(),
         };
@@ -5627,7 +5627,7 @@ fn wayland_render_worker_plays_video() {
         let st = srv.wait_exit(Duration::from_secs(5)).expect("quit exits");
         assert!(st.success(), "{st}: {}", srv.stderr());
         let log =
-            std::fs::read_to_string(srv.path("state/livepaper/lp-player/events.jsonl")).unwrap();
+            std::fs::read_to_string(srv.path("state/livepaper/liascape-player/events.jsonl")).unwrap();
         assert!(log.contains("\"wl.connected\""), "not on Wayland?");
         if mode == "on" {
             assert!(
@@ -5803,10 +5803,10 @@ fn losing_the_x_server_never_kills_the_player() {
 
 // ---------------------------------------------------------------- Phase 2 Task 5: scenes
 
-use lp_player::scene::synthetic::{Pattern, SyntheticSpec, marker_rgb};
+use liascape_player::scene::synthetic::{Pattern, SyntheticSpec, marker_rgb};
 
 /// A server whose scene sources may play the synthetic renderer (D7:
-/// `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`, test-only).
+/// `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`, test-only).
 fn scene_serve(extra: &[&str]) -> Option<Serve> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
@@ -5819,7 +5819,7 @@ fn scene_serve_in(extra: &[&str], serial: Option<MutexGuard<'static, ()>>) -> Se
     Serve::spawn_env(
         new_root(),
         extra,
-        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))],
+        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))],
         serial,
     )
 }
@@ -5922,7 +5922,7 @@ fn core_limit_of(pid: u64) -> u64 {
 /// Task 13 (the corpus: 4 broken LWE scenes = 16 real crashes, each one through
 /// systemd-coredump and a desktop crash notification): a scene worker runs with a soft
 /// `RLIMIT_CORE` of 1 — the kernel then skips a piped `core_pattern` — unless
-/// `LP_SCENE_WORKER_COREDUMP=1` keeps the inherited limit for debugging. A crash is already
+/// `LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the inherited limit for debugging. A crash is already
 /// recorded (crash record + log tail); it's an expected, handled event, not a desktop alert.
 #[test]
 fn scene_worker_crashes_skip_the_core_handler() {
@@ -5956,8 +5956,8 @@ fn scene_worker_crashes_skip_the_core_handler() {
         new_root(),
         &[],
         &[
-            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
-            ("LP_SCENE_WORKER_COREDUMP", Path::new("1")),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_SCENE_WORKER_COREDUMP", Path::new("1")),
         ],
         serial,
     );
@@ -6202,14 +6202,14 @@ fn logs_of(c: &mut Client, kind_prefix: &str) -> Vec<Value> {
 }
 
 fn crash_files(srv: &Serve) -> usize {
-    std::fs::read_dir(srv.path("state/livepaper/lp-player/crashes"))
+    std::fs::read_dir(srv.path("state/livepaper/liascape-player/crashes"))
         .map(|r| r.flatten().count())
         .unwrap_or(0)
 }
 
-/// Review Focus #2: no WE assets (no Steam under `$HOME`, no `LP_WE_ASSETS_DIR`) → no `scene`
+/// Review Focus #2: no WE assets (no Steam under `$HOME`, no `LIASCAPE_WE_ASSETS_DIR`) → no `scene`
 /// capability, `scene-check` exits 1 with the reason, and a scene created anyway errors with a
-/// hint naming `LP_WE_ASSETS_DIR` / `player.scene_assets` — no worker, no 1×1 render loop.
+/// hint naming `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets` — no worker, no 1×1 render loop.
 /// Setting `player.scene_assets` brings scenes back live.
 #[test]
 fn no_assets_dir_hides_scenes_and_errors_with_hint() {
@@ -6220,7 +6220,7 @@ fn no_assets_dir_hides_scenes_and_errors_with_hint() {
     let root = new_root();
     let home = root.join("home");
     std::fs::create_dir_all(&home).unwrap();
-    let unset = ["LP_WE_ASSETS_DIR", "LP_PLAYER_ALLOW_SYNTHETIC_SCENES"];
+    let unset = ["LIASCAPE_WE_ASSETS_DIR", "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES"];
     let srv = Serve::spawn_env_without(
         root.clone(),
         &[],
@@ -6238,19 +6238,19 @@ fn no_assets_dir_hides_scenes_and_errors_with_hint() {
         get(&mut c, "player.scene_assets_resolved")["result"]["value"],
         json!("")
     );
-    // `lp-player scene-check` says the same, exit 1.
+    // `liascape-player scene-check` says the same, exit 1.
     let out = Command::new(BIN)
         .arg("scene-check")
         .env("HOME", &home)
-        .env_remove("LP_WE_ASSETS_DIR")
-        .env_remove("LP_PLAYER_ALLOW_SYNTHETIC_SCENES")
+        .env_remove("LIASCAPE_WE_ASSETS_DIR")
+        .env_remove("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES")
         .output()
         .unwrap();
     let j: Value = serde_json::from_slice(&out.stdout).expect("one JSON line");
     assert_eq!(out.status.code(), Some(1), "{j}");
     assert_eq!(j["ok"], json!(false));
     assert!(
-        j["reason"].as_str().unwrap().contains("LP_WE_ASSETS_DIR"),
+        j["reason"].as_str().unwrap().contains("LIASCAPE_WE_ASSETS_DIR"),
         "{j}"
     );
     // A scene anyway: an error with the hint, no worker.
@@ -6270,7 +6270,7 @@ fn no_assets_dir_hides_scenes_and_errors_with_hint() {
         .unwrap_or_else(|| panic!("no source.error for {id}"))
         .to_string();
     assert!(
-        reason.contains("LP_WE_ASSETS_DIR") && reason.contains("player.scene_assets"),
+        reason.contains("LIASCAPE_WE_ASSETS_DIR") && reason.contains("player.scene_assets"),
         "{reason}"
     );
     let st = c.ok("state", json!({}));
@@ -6307,7 +6307,7 @@ fn missing_scene_folder_fails_without_crash_record() {
     let srv = Serve::spawn_env(
         root.clone(),
         &[],
-        &[("LP_WE_ASSETS_DIR", assets.as_path())],
+        &[("LIASCAPE_WE_ASSETS_DIR", assets.as_path())],
         Some(serial),
     );
     let mut c = srv.client();
@@ -6395,7 +6395,7 @@ fn scene_serve_real_env(extra: &[&str], envs: &[(&str, &Path)]) -> Option<Serve>
     let mut srv = scene_serve(&[])?;
     let serial = srv._serial.take();
     drop(srv);
-    let mut env = vec![("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))];
+    let mut env = vec![("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))];
     env.extend_from_slice(envs);
     let mut args = vec!["--clock", "real"];
     args.extend_from_slice(extra);
@@ -6548,12 +6548,12 @@ fn crash_never_touches_other_outputs() {
     assert!(touched.is_empty(), "events about VIRTUAL-1's source: {touched:?}");
 }
 
-/// The hang timeout is the `LP_SCENE_WORKER_HANG_MS` knob (300 here; else 2 s): a worker that
+/// The hang timeout is the `LIASCAPE_SCENE_WORKER_HANG_MS` knob (300 here; else 2 s): a worker that
 /// stops answering (`hang_after_ms`) is seen as hung within it, SIGKILLed, gone, and restarted
 /// — the frame held, then playing on from it. RED before the knob: `waited_ms` ≈ 2000.
 #[test]
 fn hang_is_killed_and_restarted() {
-    let Some(srv) = scene_serve_real_env(&[], &[("LP_SCENE_WORKER_HANG_MS", Path::new("300"))])
+    let Some(srv) = scene_serve_real_env(&[], &[("LIASCAPE_SCENE_WORKER_HANG_MS", Path::new("300"))])
     else {
         return;
     };
@@ -6576,7 +6576,7 @@ fn hang_is_killed_and_restarted() {
     assert_eq!(hung["pid"], json!(pid), "{hung}");
     assert!(
         (300.0..600.0).contains(&waited),
-        "hang seen after {waited} ms (LP_SCENE_WORKER_HANG_MS=300)"
+        "hang seen after {waited} ms (LIASCAPE_SCENE_WORKER_HANG_MS=300)"
     );
     let restart = wait_for(Duration::from_secs(5), "worker.restart", || {
         logs_of(&mut c, "worker.restart")
@@ -6883,7 +6883,7 @@ fn visualiser_input_reaches_only_scenes_that_want_it() {
         &["--clock", "real"],
         &[
             ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
-            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
         ],
         Some(serial),
     );
@@ -6891,7 +6891,7 @@ fn visualiser_input_reaches_only_scenes_that_want_it() {
     let has_capture = |pw: &PrivatePw| {
         pw_nodes(pw)
             .iter()
-            .any(|n| n.starts_with("lp-player-visualiser."))
+            .any(|n| n.starts_with("liascape-player-visualiser."))
     };
     let b = create_scene(&mut c, "api-vis-b", &synth(Pattern::Solid), json!({}));
     c.ok(
@@ -6966,7 +6966,7 @@ fn scene_audio_serve(pw: &PrivatePw, root: PathBuf, serial: MutexGuard<'static, 
         ],
         &[
             ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
-            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
         ],
         Some(serial),
     );
@@ -7049,7 +7049,7 @@ fn playing_tone_scene(c: &mut Client, name: &str, hz: f64) -> String {
 }
 
 /// Plan Task 6: a scene's sound is a PipeWire stream on the player bus — opened with the
-/// identity the plan names, linked to `lp-player-bus`, at the scene's level (a −20 dBFS tone
+/// identity the plan names, linked to `liascape-player-bus`, at the scene's level (a −20 dBFS tone
 /// reads −23 on the meter).
 #[test]
 fn scene_audio_on_bus_with_identity() {
@@ -7069,16 +7069,16 @@ fn scene_audio_on_bus_with_identity() {
     );
     let dump = pw.dump();
     let objs = dump.as_array().unwrap();
-    let name = format!("lp-player-scene.{id}");
+    let name = format!("liascape-player-scene.{id}");
     let node = objs
         .iter()
         .find(|o| o["info"]["props"]["node.name"] == json!(name))
         .unwrap_or_else(|| panic!("no {name} node"));
     let props = &node["info"]["props"];
     println!("scene stream props: {props}");
-    assert_eq!(props["application.name"], json!("lp-player"));
+    assert_eq!(props["application.name"], json!("liascape-player"));
     assert_eq!(props["media.role"], json!("Wallpaper"));
-    assert_eq!(props["target.object"], json!("lp-player-bus"));
+    assert_eq!(props["target.object"], json!("liascape-player-bus"));
     // We request 256/48000; PipeWire rewrites the prop to the quantum the graph runs at
     // (every stream here reads the same, the bus's own included).
     assert!(
@@ -7091,14 +7091,14 @@ fn scene_audio_on_bus_with_identity() {
     assert_eq!(props["state.restore-target"], json!(false));
     let bus = objs
         .iter()
-        .find(|o| o["info"]["props"]["node.name"] == json!("lp-player-bus"))
+        .find(|o| o["info"]["props"]["node.name"] == json!("liascape-player-bus"))
         .expect("bus sink");
     let linked = objs.iter().any(|o| {
         o["type"] == json!("PipeWire:Interface:Link")
             && o["info"]["output-node-id"] == node["id"]
             && o["info"]["input-node-id"] == bus["id"]
     });
-    assert!(linked, "the scene stream is linked to lp-player-bus");
+    assert!(linked, "the scene stream is linked to liascape-player-bus");
     let w = worker_of(&mut c, &id);
     println!("worker audio: {}", w["audio"]);
     assert!(w["audio"]["envelope_blocks"].as_u64().unwrap() > 100);
@@ -7106,7 +7106,7 @@ fn scene_audio_on_bus_with_identity() {
 }
 
 /// Phase 2 Task 14: the bus meter's capture callback runs on PipeWire's real-time data
-/// thread (`RT_PROCESS`), never the non-RT `lp-bus` main loop. On `lp-bus` it missed whole
+/// thread (`RT_PROCESS`), never the non-RT `lia-bus` main loop. On `lia-bus` it missed whole
 /// graph cycles under load — a timestamp jump, then silent blocks — at exactly the instants
 /// a switch loads the machine (a worker spawning, a source torn down): the on-machine matrix
 /// saw it in 245 of 301 switches, every one an unmeasured stretch for the dropout detector.
@@ -7122,7 +7122,7 @@ fn meter_capture_runs_on_the_rt_data_thread() {
         m["callback_thread"].is_string().then_some(m)
     });
     println!("meter: {meter}");
-    assert_ne!(meter["callback_thread"], json!("lp-bus"), "{meter}");
+    assert_ne!(meter["callback_thread"], json!("lia-bus"), "{meter}");
 }
 
 /// A gain ramp (`animate gain.user` 0 → −20 dB over 300 ms) reaches the bus smoothly:
@@ -7488,7 +7488,7 @@ fn scene_pause_park_and_destroy_on_the_bus() {
         "a cut, not a ramp: silent {:.0} ms after it started falling",
         silent - fall
     );
-    let name = format!("lp-player-scene.{id}");
+    let name = format!("liascape-player-scene.{id}");
     wait_for(Duration::from_secs(2), "the stream gone", || {
         (!pw_nodes(&pw).contains(&name)).then_some(())
     });
@@ -7524,7 +7524,7 @@ fn scene_reroutes_after_pipewire_restart() {
         "the scene's tone on the bus again",
         || (bus_db(&mut c, 200.0) > -26.0).then_some(()),
     );
-    let name = format!("lp-player-scene.{id}");
+    let name = format!("liascape-player-scene.{id}");
     assert!(pw_nodes(&pw).contains(&name), "the stream is back");
     onset_after_flow(&mut c, &id, "pause", t_down);
     assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
@@ -7548,24 +7548,24 @@ fn cpu_of_thread(pid: u32, comm: &str, secs: f64) -> (f64, f64) {
     (pct(total), pct(named))
 }
 
-/// On-machine (opt-in, `LP_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under
-/// `LP_REQUIRE_SCENES=1`): a real Workshop scene with a sound stream (2371103399) plays its
+/// On-machine (opt-in, `LIASCAPE_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under
+/// `LIASCAPE_REQUIRE_SCENES=1`): a real Workshop scene with a sound stream (2371103399) plays its
 /// sound through LWE's host driver into the worker's stream on a PRIVATE PipeWire's bus —
 /// never the owner's speakers — at 1×, 1.5× and 0.5× (time-stretched, pitch kept); the bus
 /// level matches the worker's own envelope (gain 0 dB) and the worker's CPU is reported.
 #[test]
 fn real_scene_sound_on_the_bus() {
-    let require = std::env::var("LP_REQUIRE_SCENES").is_ok_and(|v| v == "1");
-    let Some(root) = std::env::var_os("LP_PLAYER_TEST_SCENES").map(PathBuf::from) else {
+    let require = std::env::var("LIASCAPE_REQUIRE_SCENES").is_ok_and(|v| v == "1");
+    let Some(root) = std::env::var_os("LIASCAPE_PLAYER_TEST_SCENES").map(PathBuf::from) else {
         assert!(
             !require,
-            "LP_REQUIRE_SCENES=1 but LP_PLAYER_TEST_SCENES is not set"
+            "LIASCAPE_REQUIRE_SCENES=1 but LIASCAPE_PLAYER_TEST_SCENES is not set"
         );
-        println!("SKIP: LP_PLAYER_TEST_SCENES is not set");
+        println!("SKIP: LIASCAPE_PLAYER_TEST_SCENES is not set");
         return;
     };
     let Some((serial, sroot, pw)) = private_pw() else {
-        assert!(!require, "LP_REQUIRE_SCENES=1 but no private PipeWire");
+        assert!(!require, "LIASCAPE_REQUIRE_SCENES=1 but no private PipeWire");
         return;
     };
     let srv = scene_audio_serve(&pw, sroot, serial);
@@ -7596,7 +7596,7 @@ fn real_scene_sound_on_the_bus() {
         std::thread::sleep(Duration::from_millis(500));
         let t0 = bus_now(&mut c);
         let secs = 5.0;
-        let (cpu, audio_cpu) = cpu_of_thread(pid, "lp-scene-audio", secs);
+        let (cpu, audio_cpu) = cpu_of_thread(pid, "lia-scene-audio", secs);
         let s = meter_samples(&mut c, t0, t0 + secs * 1000.0);
         let bus = power_mean_db(&s);
         let env = worker_of(&mut c, &id)["audio"].clone();
@@ -7735,8 +7735,8 @@ fn scene_fps_change_is_live_same_pid() {
 // ---------------------------------------------------------------- Phase 2 Task 8: VRAM
 
 /// A real-clock synthetic-scene server whose VRAM sampler reads `vram.json` in its root
-/// (`LP_PLAYER_VRAM_PROBE=fake:…`), sampled every 50 ms with short holds
-/// (`LP_PLAYER_VRAM_TIMING` = interval 50, enter 300, resume 600, settle 200, scene 1000 ms).
+/// (`LIASCAPE_PLAYER_VRAM_PROBE=fake:…`), sampled every 50 ms with short holds
+/// (`LIASCAPE_PLAYER_VRAM_TIMING` = interval 50, enter 300, resume 600, settle 200, scene 1000 ms).
 /// The file starts at 8 GiB with 6000 MiB free.
 fn vram_serve() -> Option<(Serve, PathBuf)> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -7751,9 +7751,9 @@ fn vram_serve() -> Option<(Serve, PathBuf)> {
         root,
         &["--clock", "real"],
         &[
-            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
-            ("LP_PLAYER_VRAM_PROBE", &probe),
-            ("LP_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
+            ("LIASCAPE_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
         ],
         Some(serial),
     );
@@ -8311,13 +8311,13 @@ fn parked_scene_align_end_hands_off_at_once() {
 // ------------------------------------------- Phase 2: scene loudness learned on first play
 
 /// A real-clock `--ao null` server (the worker's real-time pull timer is the stream) whose scene
-/// loudness window is `window_s` seconds of audible play (`LP_PLAYER_LOUDNESS_WINDOW_S`).
+/// loudness window is `window_s` seconds of audible play (`LIASCAPE_PLAYER_LOUDNESS_WINDOW_S`).
 fn loudness_serve(window_s: &str) -> Option<Serve> {
     loudness_serve_capped(window_s, "1800")
 }
 
 /// … and whose cap (total audible seconds measured over every play) is `cap_s`
-/// (`LP_PLAYER_LOUDNESS_CAP_S`).
+/// (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`).
 fn loudness_serve_capped(window_s: &str, cap_s: &str) -> Option<Serve> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
@@ -8327,9 +8327,9 @@ fn loudness_serve_capped(window_s: &str, cap_s: &str) -> Option<Serve> {
         new_root(),
         &["--clock", "real", "--log-level", "debug"],
         &[
-            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
-            ("LP_PLAYER_LOUDNESS_WINDOW_S", Path::new(window_s)),
-            ("LP_PLAYER_LOUDNESS_CAP_S", Path::new(cap_s)),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_LOUDNESS_WINDOW_S", Path::new(window_s)),
+            ("LIASCAPE_PLAYER_LOUDNESS_CAP_S", Path::new(cap_s)),
         ],
         Some(serial),
     ))
@@ -8477,7 +8477,7 @@ fn scene_loudness_accumulates_over_two_plays() {
 }
 
 /// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once
-/// the audible play over every session reaches it (`LP_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
+/// the audible play over every session reaches it (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
 /// last report (`capped`) and the worker stops metering — no segment arrives any more, nothing
 /// at the end. A source seeded at the cap measures nothing from its start.
 #[test]

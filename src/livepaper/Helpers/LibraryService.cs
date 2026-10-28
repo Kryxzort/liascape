@@ -107,7 +107,7 @@ public static class LibraryService
 
     // The loudnorm audio-filter string to gain-match a measured item to targetLufs (linear, true-peak
     // limited at -1.5 dBTP). Null if the item isn't measured yet. Used by both mpvpaper (PlayerHelper)
-    // and the transition overlay (TransitionService → lp-transition --from-af/--to-af) so both level.
+    // and the transition overlay (TransitionService → liascape-transition --from-af/--to-af) so both level.
     public static string? LoudnormAf(string mediaPath, double targetLufs)
     {
         var m = ReadLoudness(mediaPath);
@@ -118,12 +118,12 @@ public static class LibraryService
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
     }
 
-    // ---- a WE scene's loudness, learned by lp-player and refined on every play (`scene.loudness`) ----
+    // ---- a WE scene's loudness, learned by liascape-player and refined on every play (`scene.loudness`) ----
     // The player measures (BS.1770, pre-gain, AUDIBLE play — player-core.md § Scene worker → "Scene loudness"):
     // the first report after ~60 s, then one per further 60 s and at the end of each play, each covering EVERY
-    // play so far (the source was seeded with the stored `state` — LpPlayerMedia.SourceProps), until its cap
+    // play so far (the source was seeded with the stored `state` — LiascapePlayerMedia.SourceProps), until its cap
     // (30 min). This stores it like a video's loudness*, and the resolver turns it into the scene source's
-    // `gain.normalize` (LpPlayerMedia.SceneNormalizeDb).
+    // `gain.normalize` (LiascapePlayerMedia.SceneNormalizeDb).
     // - The measurement (`state`, LoudnessSeconds, LoudnessPartial) is replaced by any report covering MORE audible
     //   seconds (reports are cumulative: a lost one is made up by the next; two sources of one scene at once keep
     //   the longer), or by a complete report over an entry without a state (one learned before 2026-10-28 — kept
@@ -416,7 +416,7 @@ public static class LibraryService
         };
     }
 
-    // A scene item's preview image (its folder IS its play path) — lp-player shows it while no frame exists.
+    // A scene item's preview image (its folder IS its play path) — liascape-player shows it while no frame exists.
     // Many WE scenes ship only a preview.gif (mpv shows that too).
     public static string? PreviewImageOf(string sceneDir)
     {

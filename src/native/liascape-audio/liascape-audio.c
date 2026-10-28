@@ -1,4 +1,4 @@
-// lp-audio — libpulse helper for gapless scene-audio crossfades in livepaper.
+// liascape-audio — libpulse helper for gapless scene-audio crossfades in livepaper.
 //
 // Shelling `pactl` per stream is too slow (~10-40ms list/spawn latency) to beat PulseAudio's
 // default-volume-on-stream-create and the connect/disconnect volume resets that LWE triggers when a
@@ -30,7 +30,7 @@ struct group { pid_t pids[MAX_PIDS]; int npids; int vol; int mute; };
 
 static pa_mainloop *g_m;     // single-threaded mainloop (stdin is a PA IO event → no locking needed)
 static pa_context *g_ctx;
-static FILE *g_log = NULL;   // LP_AUDIO_DEBUG=<path> → diagnostic log (states, commands, applies)
+static FILE *g_log = NULL;   // LIASCAPE_AUDIO_DEBUG=<path> → diagnostic log (states, commands, applies)
 #define LOG(...) do { if (g_log) { fprintf(g_log, __VA_ARGS__); fflush(g_log); } } while (0)
 static struct group g_groups[MAX_GROUPS];
 static int g_ngroups = 0;
@@ -187,14 +187,14 @@ static void stdin_cb(pa_mainloop_api *a, pa_io_event *e, int fd, pa_io_event_fla
 }
 
 int main(void) {
-    const char *dbg = getenv("LP_AUDIO_DEBUG");
+    const char *dbg = getenv("LIASCAPE_AUDIO_DEBUG");
     if (dbg && *dbg) g_log = (dbg[0] == '/' ) ? fopen(dbg, "w") : stderr;
     g_m = pa_mainloop_new();
     pa_mainloop_api *api = pa_mainloop_get_api(g_m);
-    g_ctx = pa_context_new(api, "lp-audio");
+    g_ctx = pa_context_new(api, "liascape-audio");
     pa_context_set_state_callback(g_ctx, ctx_state_cb, NULL);
     if (pa_context_connect(g_ctx, NULL, 0, NULL) < 0) {
-        fprintf(stderr, "lp-audio: connect failed: %s\n", pa_strerror(pa_context_errno(g_ctx)));
+        fprintf(stderr, "liascape-audio: connect failed: %s\n", pa_strerror(pa_context_errno(g_ctx)));
         return 1;
     }
     api->io_new(api, 0 /*stdin*/, PA_IO_EVENT_INPUT, stdin_cb, NULL);

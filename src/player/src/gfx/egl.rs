@@ -310,7 +310,7 @@ impl Gfx {
     ///
     /// Returns `Err` (never panics) for every failure mode, including "no GPU/EGL device
     /// available at all" — the case `tests/common::headless_gl` turns into a clean test
-    /// skip, and the case that must not fail `nix build .#lp-player`'s sandboxed check
+    /// skip, and the case that must not fail `nix build .#liascape-player`'s sandboxed check
     /// phase (no `/dev/dri` there).
     pub fn new_offscreen() -> Result<Gfx, String> {
         Gfx::new_offscreen_with(OffscreenOpts::default())
@@ -612,7 +612,7 @@ impl Drop for WindowTarget {
 /// context current and delete GL objects in it. Built by [`Gfx::keep_alive`].
 ///
 /// Exists for Task 10's libmpv sources: `mpv_render_context_free` must run with the GL
-/// context it was created on current (lp-transition gotcha, spec §5.1), and the source's
+/// context it was created on current (liascape-transition gotcha, spec §5.1), and the source's
 /// FBO/texture must be deleted in that context too — regardless of whether the owning
 /// `Gfx` was dropped first. Holding this makes the drop order irrelevant: the EGL context
 /// can't be torn down while a source still owns objects in it.
@@ -1264,13 +1264,13 @@ mod tests {
     fn shared_egl_state_outlives_gfx_when_another_clone_exists() {
         let gfx = match Gfx::new_offscreen() {
             Ok(gfx) => gfx,
-            // `LP_REQUIRE_GPU` (same rule as `tests/common::skip_gpu`): a run that must
+            // `LIASCAPE_REQUIRE_GPU` (same rule as `tests/common::skip_gpu`): a run that must
             // have a GPU fails instead of skipping.
             Err(e)
-                if std::env::var_os("LP_REQUIRE_GPU")
+                if std::env::var_os("LIASCAPE_REQUIRE_GPU")
                     .is_some_and(|v| !v.is_empty() && v != "0") =>
             {
-                panic!("LP_REQUIRE_GPU is set but a GPU test would skip: no EGL device ({e})")
+                panic!("LIASCAPE_REQUIRE_GPU is set but a GPU test would skip: no EGL device ({e})")
             }
             Err(_) => {
                 println!("SKIP: no EGL device");

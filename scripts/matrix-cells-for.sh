@@ -8,7 +8,7 @@
 #   <rev>:  everything since it (e.g. the commit the last full run passed on).
 #
 # Conservative on purpose: a file this table doesn't know, or one most of the app runs through (PlayerHelper,
-# LpPlayerMedia, ServerHost, AppOps, the UI store/API/App, the whole Rust player, the transitions, the
+# LiascapePlayerMedia, ServerHost, AppOps, the UI store/API/App, the whole Rust player, the transitions, the
 # matrix's own runner/oracle), means FULL — the matrix exists to catch seams, and a narrow guess that misses
 # one is worse than 20 minutes. The full run stays the gate before a merge or a release build.
 set -euo pipefail
@@ -51,7 +51,7 @@ for f in $FILES; do
     src/livepaper/Helpers/Workshop*|src/livepaper/Helpers/DownloadHelper.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
-    src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/lp-scene-worker/*|\
+    src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM" "$f" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;

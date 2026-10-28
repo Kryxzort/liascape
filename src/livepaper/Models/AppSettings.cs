@@ -57,7 +57,7 @@ public class AppSettings
     public bool AutoPlayGifs { get; set; } = false;
     public bool AdvancedSettings { get; set; } = false;      // UI: reveal power-user settings rows
     public bool WallpaperBgAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
-    public bool DebugMode { get; set; } = false;             // UI: enable the lpdbg bridge + metrics
+    public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
     public bool RestartOnSwitchOnly { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
     public bool KeepPauseOnSwitch { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
@@ -106,7 +106,7 @@ public class AppSettings
     // cover, to cancel the per-machine settling drift (negative = aim slightly ahead). The renderer
     // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
     public int TransitionLagOffsetMs { get; set; } = -30;
-    // Which player drives the wallpaper: "legacy" (mpvpaper + lp-transition + LWE) or "lp-player" (the
+    // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE) or "liascape-player" (the
     // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
     // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/player-adapter.md.
     public string PlayerEngine { get; set; } = "legacy";
@@ -115,7 +115,7 @@ public class AppSettings
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own
     // volume doesn't move). PlayerHelper.AdjustVolume.
     public string VolumeKeyTarget { get; set; } = "auto";
-    // lp-player GPU / VRAM (Phase 2 Task 8 — all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
+    // liascape-player GPU / VRAM (Phase 2 Task 8 — all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
     // SceneThrottle: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
     // scene at its fixed fps) → `player.scene_throttle`.
     public bool SceneThrottle { get; set; } = true;

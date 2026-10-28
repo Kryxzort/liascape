@@ -60,7 +60,7 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 - **Videos:** `ffmpeg loudnorm` pass 1, once per item in the background (`LibraryService.EnsureLoudnessAsync` /
   `BackfillLoudnessAsync`) → all four `loudnessI/TP/LRA/Thresh` (`ReadLoudness` requires all four) or
   `loudnessSkip` (no audio track / silent); applied as mpv's `af` loudnorm (`LoudnormAf`).
-- **Scenes (lp-player only):** learned by the player over the first ~60 s of audible play and refined on every
+- **Scenes (liascape-player only):** learned by the player over the first ~60 s of audible play and refined on every
   later play up to 30 min of audible play in all (`scene.loudness`, player-adapter.md § Scenes → "Loudness") →
   `loudnessState` (the player's measurement: a BS.1770 block-loudness histogram + peak, opaque — the next play's
   source continues it as its `loudness_seed`) + `loudnessSeconds` (audible seconds it covers, every play) +
@@ -94,7 +94,7 @@ it with the rest of the `LibMeta`.
   stray `x.value=true` (a JS assignment → its value); JS loose equality (`"2" == 2`, `true == 1`). Anything it can't
   evaluate (a syntax error, a bare identifier — a ReferenceError in JS) → **shown**. Every one of the corpus's 868
   conditions parses (self-test).
-- **Playback.** lp-player: `SceneProperties.PlayerMap` (overrides that name an editable property, encoded for the
+- **Playback.** liascape-player: `SceneProperties.PlayerMap` (overrides that name an editable property, encoded for the
   player — a colour as `[r,g,b]`) is the source's `scene_props` at every open and live (player-adapter.md § Scenes).
   Legacy: `--set-property name=value` per override at LWE's launch (`CliArgs`) — **launch-only** (LWE has no live
   property IPC), so a change shows at the scene's next start; the modal says so.

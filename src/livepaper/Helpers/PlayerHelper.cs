@@ -65,7 +65,7 @@ public static class PlayerHelper
     private static volatile TaskCompletionSource<bool>? _speedChangeTcs;
     public static CancellationToken DaemonToken => _daemonCts?.Token ?? CancellationToken.None;
 
-    public static bool IsPlaying => PlayerEngine.IsLpPlayer ? LpPlayerMedia.IsPlaying() : (
+    public static bool IsPlaying => PlayerEngine.IsLiascapePlayer ? LiascapePlayerMedia.IsPlaying() : (
         (File.Exists(IpcSocket) && MpvpaperProcs().Length > 0) ||
         IsLweRunning);
 
@@ -159,11 +159,11 @@ public static class PlayerHelper
         Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(),
         "livepaper", "mpv.sock");
 
-    // Control socket for a running full-live transition overlay (lp-transition binds it). Lets a keybind
+    // Control socket for a running full-live transition overlay (liascape-transition binds it). Lets a keybind
     // during the effect reach the overlay's OWN audio (it decodes A/B itself; mpvpaper isn't audible then).
     private static string OverlayCtlSocket => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? Path.GetTempPath(),
-        "livepaper", "lp-transition.ctl");
+        "livepaper", "liascape-transition.ctl");
 
     // Best-effort live command (mute/volume) to a transition overlay if one is listening (DGRAM, no-op
     // otherwise). So toggle-mute / volume± mid-effect take hold immediately instead of post-teardown.
@@ -179,46 +179,46 @@ public static class PlayerHelper
         catch { }
     }
 
-    // ── lp-audio: libpulse helper for gapless scene-audio crossfades ───────────────────────────────
+    // ── liascape-audio: libpulse helper for gapless scene-audio crossfades ───────────────────────────────
     // A persistent process holding a PulseAudio context that applies per-PID sink-input volume/mute
     // IN-PROCESS on every stream new/change event — so a stream PA (re)creates at the wrong volume
     // (default-on-create / LWE connect-disconnect reset) is corrected in ~1ms, which shelling `pactl`
     // (~10-40ms) can't. Driven over stdin: "set <pidcsv> <vol> <mute>", "clear", "quit".
-    private static Process? _lpAudio;
-    private static readonly object _lpAudioLock = new();
+    private static Process? _liascapeAudio;
+    private static readonly object _liascapeAudioLock = new();
 
-    private static string? ResolveLpAudioBin()
+    private static string? ResolveLiascapeAudioBin()
     {
-        var env = Environment.GetEnvironmentVariable("LP_AUDIO_BIN");
+        var env = Environment.GetEnvironmentVariable("LIASCAPE_AUDIO_BIN");
         if (env != null && File.Exists(env)) return env;
         foreach (var c in new[] {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "lp-audio"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "native", "lp-audio", "lp-audio"),
-            Path.Combine(Directory.GetCurrentDirectory(), "src", "native", "lp-audio", "lp-audio") })
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "liascape-audio"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "native", "liascape-audio", "liascape-audio"),
+            Path.Combine(Directory.GetCurrentDirectory(), "src", "native", "liascape-audio", "liascape-audio") })
             try { var f = Path.GetFullPath(c); if (File.Exists(f)) return f; } catch { }
         return null;
     }
 
-    // Send one command to the persistent lp-audio (spawned lazily, respawned if dead). No-op if the
+    // Send one command to the persistent liascape-audio (spawned lazily, respawned if dead). No-op if the
     // helper isn't built (→ scene audio just isn't crossfaded, falls back to the plain switch).
     private static void AudioCtl(string line)
     {
         try
         {
-            lock (_lpAudioLock)
+            lock (_liascapeAudioLock)
             {
-                if (_lpAudio == null || _lpAudio.HasExited)
+                if (_liascapeAudio == null || _liascapeAudio.HasExited)
                 {
-                    var bin = ResolveLpAudioBin();
-                    if (bin == null) { TransitionService.TransLog($"AudioCtl: NO lp-audio binary found"); return; }
+                    var bin = ResolveLiascapeAudioBin();
+                    if (bin == null) { TransitionService.TransLog($"AudioCtl: NO liascape-audio binary found"); return; }
                     var psi = new ProcessStartInfo(bin) { UseShellExecute = false, RedirectStandardInput = true };
-                    _lpAudio = Process.Start(psi);
+                    _liascapeAudio = Process.Start(psi);
                 }
-                _lpAudio?.StandardInput.WriteLine(line);
-                _lpAudio?.StandardInput.Flush();
+                _liascapeAudio?.StandardInput.WriteLine(line);
+                _liascapeAudio?.StandardInput.Flush();
             }
         }
-        catch { try { lock (_lpAudioLock) { _lpAudio = null; } } catch { } }
+        catch { try { lock (_liascapeAudioLock) { _liascapeAudio = null; } } catch { } }
     }
     private static string PidCsv(IEnumerable<int> pids) => string.Join(",", pids);
 
@@ -227,7 +227,7 @@ public static class PlayerHelper
     // scene launch (first playlist item / --restore / --random) — which has no crossfade to set the right
     // level → it comes up silent/quiet. LWE forces its own application.name and pipewire ignores
     // module-stream-restore.id, so we can't change the restore key. Instead, correct reactively: hold the
-    // just-launched scene at `target` via lp-audio (event-driven → overrides the restored value the instant
+    // just-launched scene at `target` via liascape-audio (event-driven → overrides the restored value the instant
     // the stream appears) for ~holdMs, then release so manual volume control governs the steady state.
     private static void CorrectSceneVolume(HashSet<int> beforePids, int target, bool muted, int holdMs)
     {
@@ -474,7 +474,7 @@ public static class PlayerHelper
         // in-process restart timer, so don't spawn a competing daemon.
         if (IsGuiTimerAlive()) return;
         if (SettingsService.Load().RestartIntervalSeconds <= 0) return;
-        if (PlayerEngine.IsLpPlayer) return; // mpvpaper leak workaround — legacy only
+        if (PlayerEngine.IsLiascapePlayer) return; // mpvpaper leak workaround — legacy only
 
         KillRestartDaemon();
         try
@@ -506,7 +506,7 @@ public static class PlayerHelper
         _restartTimer?.Dispose();
         _restartTimer = null;
         if (_daemonMode) return;
-        if (PlayerEngine.IsLpPlayer) return; // the leak-restart is an mpvpaper workaround — legacy only
+        if (PlayerEngine.IsLiascapePlayer) return; // the leak-restart is an mpvpaper workaround — legacy only
         var settings = SettingsService.Load();
         if (settings.RestartIntervalSeconds <= 0) return;
         int intervalMs = settings.RestartIntervalSeconds * 1000;
@@ -558,7 +558,7 @@ public static class PlayerHelper
     // consumes a "restart" pending action.
     private static void RestartCurrentAndLaunch()
     {
-        if (PlayerEngine.IsLpPlayer) return; // a stale "restart" pending action — nothing leaks under lp-player
+        if (PlayerEngine.IsLiascapePlayer) return; // a stale "restart" pending action — nothing leaks under liascape-player
         // what PLAYS: an advance-on-end session's _historyIndex is its pre-fetched next (a restart relaunched
         // that — reachable in every advance-on-end session now that pure advance-on-end ticks too)
         int playing = PlayingHistoryIndex;
@@ -609,7 +609,7 @@ public static class PlayerHelper
                 int intervalMs = settings.RestartIntervalSeconds * 1000;
                 Thread.Sleep(intervalMs);
                 settings = SettingsService.Load();
-                if (PlayerEngine.WouldBeLpPlayer(settings)) continue; // mpvpaper leak workaround — legacy only
+                if (PlayerEngine.WouldBeLiascapePlayer(settings)) continue; // mpvpaper leak workaround — legacy only
                 if (IsTimedPlaylistActive() && !IsTimedPlaylistPaused())
                 {
                     var (count, cur) = ReadTimedSnapshot();
@@ -638,7 +638,7 @@ public static class PlayerHelper
 
     public static Action? OnTimedPlaylistStopped;
     public static Action<string>? OnSceneCrashed;
-    // lp-player Task 8: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
+    // liascape-player Task 8: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
     public static Action<string, double, double, string>? OnSceneVramStoppedCb;
     public static Action<string?>? OnWallpaperChanged;
 
@@ -772,9 +772,9 @@ public static class PlayerHelper
         {
             if (IsScenePath(videoPath))
             {
-                if (PlayerEngine.IsLpPlayer)
+                if (PlayerEngine.IsLiascapePlayer)
                 {
-                    // Phase 2: lp-player plays scenes when they're on and the player can (its worker +
+                    // Phase 2: liascape-player plays scenes when they're on and the player can (its worker +
                     // WE's assets) — else the reason; a crashed one only when whitelisted (D6)
                     if (PlayerEngine.SceneUnavailableReason(SettingsService.Load()) is string why) throw new InvalidOperationException(why);
                     if (LibraryService.HasCrashed(videoPath) && !LibraryService.IsWhitelisted(videoPath))
@@ -792,7 +792,7 @@ public static class PlayerHelper
             TeardownTimer();
             ClearTimedStateFile();
             // I1: a new session plays — unless it's a user next/prev/random keeping the pause
-            if (PlayerEngine.IsLpPlayer && !_keepPauseNextSwitch) LpPlayerMedia.QueueNewSession();
+            if (PlayerEngine.IsLiascapePlayer && !_keepPauseNextSwitch) LiascapePlayerMedia.QueueNewSession();
             SwitchToFile(videoPath, mpvOptions);
             // Track the single item so QueryCurrentPath works for scenes (no mpv socket to query) and a
             // live override can identify what's playing. _timedPaths stays null → no timed-playlist logic.
@@ -852,10 +852,10 @@ public static class PlayerHelper
             if (paths.Count == 0) { KillCurrentProcess(); return; }
 
             var ordered = new List<string>(paths); // caller is responsible for initial order; shuffle flag only controls cycle-end reshuffle
-            // lp-player: start at the first item that can play — a scene marked crashed (D6) first in the
+            // liascape-player: start at the first item that can play — a scene marked crashed (D6) first in the
             // list used to reach SwitchToFile, which stops playback for an unplayable scene (legacy unchanged)
             int first = 0;
-            if (PlayerEngine.IsLpPlayer && IsSkippedPath(ordered[0]))
+            if (PlayerEngine.IsLiascapePlayer && IsSkippedPath(ordered[0]))
             {
                 bool ok = PlayerEngine.ScenesPlayable(SettingsService.Load());
                 first = ordered.FindIndex(p => !IsSkippedPath(p, ok));
@@ -881,7 +881,7 @@ public static class PlayerHelper
                 : (ReadSpeedOverride(ordered[first]) ?? SettingsService.Load().Speed);
             _history = [ordered[first]];
             _historyIndex = 0;
-            if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // I1: a new playlist session plays (Play / play-from while paused stayed paused)
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerMedia.QueueNewSession(); // I1: a new playlist session plays (Play / play-from while paused stayed paused)
             SwitchToFile(ordered[first], mpvOptions);
 
             if (_advanceOnVideoEnd && !IsScenePath(ordered[first]) && ordered.Count > 1)
@@ -1056,9 +1056,9 @@ public static class PlayerHelper
             // Skip while _waitingForVideoEnd: in advance-on-end mode history is pre-fetched
             // one step ahead, so _history[_historyIndex] may point to a scene that isn't
             // playing yet — checking it here would be a false positive.
-            // Legacy only: lp-player runs no LWE process (IsLweRunning is always false there) — a broken
+            // Legacy only: liascape-player runs no LWE process (IsLweRunning is always false there) — a broken
             // scene arrives as its `source.broken` event instead (OnSceneBroken).
-            if (!_waitingForVideoEnd && !PlayerEngine.IsLpPlayer &&
+            if (!_waitingForVideoEnd && !PlayerEngine.IsLiascapePlayer &&
                 _history != null && _historyIndex >= 0 && _historyIndex < _history.Count &&
                 IsScenePath(_history[_historyIndex]) && !IsSkippedPath(_history[_historyIndex]) && !IsLweRunning)
             {
@@ -1117,7 +1117,7 @@ public static class PlayerHelper
             // takes its pre-fetched B). A cap beats the minimum.
             if (MaxPlayReached(_advanceOnVideoEnd, CanRotate, _itemPlayedMs, rule.MaxMs))
             {
-                LpPlayerClient.Log($"max play time: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MaxMs / 1000.0:0.#} s → advancing");
+                LiascapePlayerClient.Log($"max play time: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MaxMs / 1000.0:0.#} s → advancing");
                 _itemPlayedMs = 0; // (PostSwitch resets it too — but not when there's nothing to advance to)
                 AdvanceAndLaunch();
                 _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1130,7 +1130,7 @@ public static class PlayerHelper
             // hold: align:end on a still is now.)
             if (SceneMinReached(_advanceOnVideoEnd, CanRotate, PlayingIsScene, _itemPlayedMs, rule.MinMs))
             {
-                LpPlayerClient.Log($"{(_separateScenes ? "switch scenes after" : "min play time on a scene")}: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MinMs / 1000.0:0.#} s → advancing");
+                LiascapePlayerClient.Log($"{(_separateScenes ? "switch scenes after" : "min play time on a scene")}: {_itemPlayedMs / 1000.0:0.0} s ≥ {rule.MinMs / 1000.0:0.#} s → advancing");
                 _itemPlayedMs = 0;
                 AdvanceAndLaunch();
                 _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1164,7 +1164,7 @@ public static class PlayerHelper
                     var cur = _history != null && _historyIndex >= 0 && _historyIndex < _history.Count ? _history[_historyIndex] : null;
                     var nxt = PeekNextTimed();
                     if (cur != null && !IsScenePath(cur) && nxt != null && IsScenePath(nxt)
-                        && !PlayerEngine.IsLpPlayer && SettingsService.Load().AllowScenes && TransitionService.CurrentConfig().Enabled)
+                        && !PlayerEngine.IsLiascapePlayer && SettingsService.Load().AllowScenes && TransitionService.CurrentConfig().Enabled)
                     {
                         AdvanceAndLaunch();
                         _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
@@ -1220,7 +1220,7 @@ public static class PlayerHelper
     public enum PlayKind { Video, Image, Scene }
     public const long NeverMs = long.MaxValue / 4;   // never reached (and never overflows HoldForMinPlay's arithmetic)
     public static PlayKind PlayKindOf(string path) =>
-        IsScenePath(path) ? PlayKind.Scene : LpPlayerMedia.IsImagePath(path) ? PlayKind.Image : PlayKind.Video;
+        IsScenePath(path) ? PlayKind.Scene : LiascapePlayerMedia.IsImagePath(path) ? PlayKind.Image : PlayKind.Video;
     public static (long MinMs, long MaxMs) ItemPlayRule(PlayKind kind, long minMs, long maxMs, bool separateScenes, long scenesAfterMs) =>
         kind == PlayKind.Video ? (Math.Max(0, minMs), Math.Max(0, maxMs))
         : separateScenes ? (scenesAfterMs > 0 ? scenesAfterMs : NeverMs, 0)
@@ -1267,7 +1267,7 @@ public static class PlayerHelper
         lock (_lock) { SetPlayLimits(maxSeconds, separateScenes, scenesAfterSeconds); }
     }
 
-    // the playing item is a scene (whatever the engine: under lp-player no LWE process exists)
+    // the playing item is a scene (whatever the engine: under liascape-player no LWE process exists)
     private static bool PlayingIsScene =>
         _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count && IsScenePath(_history[PlayingHistoryIndex]);
 
@@ -1289,7 +1289,7 @@ public static class PlayerHelper
     public static long PlayedAfterLoad(long savedPlayedMs, long savedAtMs, bool paused, long nowMs) =>
         Math.Max(0, savedPlayedMs) + (paused || savedAtMs <= 0 ? 0 : Math.Max(0, nowMs - savedAtMs));
 
-    // lp-player DoVideoEndWait, before it requests the aligned switch: wait while A's current loop doesn't reach the
+    // liascape-player DoVideoEndWait, before it requests the aligned switch: wait while A's current loop doesn't reach the
     // minimum. True = request it now; false = this wait was cancelled. Polls A's remaining time ≤ 1 s apart and right
     // after each loop's end — the switch is requested ~0.1 s into the loop that reaches the minimum, so B has (almost)
     // that whole loop to get ready. A must loop meanwhile: with Loop off it would end and hold its last frame, so its
@@ -1310,17 +1310,17 @@ public static class PlayerHelper
             }
             if (ct.IsCancellationRequested) return false;
             if (!adv || min <= 0) return true;
-            long? rem = still ? null : LpPlayerMedia.TimeRemaining() is double r ? (long)(r * 1000) : null;
+            long? rem = still ? null : LiascapePlayerMedia.TimeRemaining() is double r ? (long)(r * 1000) : null;
             if (MinPlayReached(played, rem, min))
             {
-                if (held) LpPlayerClient.Log($"min play time {min / 1000.0:0.#} s: reached by this loop (played {played / 1000.0:0.0} s, {(rem ?? 0) / 1000.0:0.0} s left) → arming the switch for its end");
+                if (held) LiascapePlayerClient.Log($"min play time {min / 1000.0:0.#} s: reached by this loop (played {played / 1000.0:0.0} s, {(rem ?? 0) / 1000.0:0.0} s left) → arming the switch for its end");
                 return true;
             }
             if (!held)
             {
                 held = true;
-                LpPlayerClient.Log($"{(min >= NeverMs ? "no time set" : $"min play time {min / 1000.0:0.#} s")}: holding {Path.GetFileName(LpPlayerMedia.CurrentPath() ?? "?")} (played {played / 1000.0:0.0} s{(still ? ", a still image" : $", this loop ends in {(rem ?? 0) / 1000.0:0.0} s")})");
-                if (!still && !SettingsService.Load().Loop) LpPlayerMedia.SetLoop(true);
+                LiascapePlayerClient.Log($"{(min >= NeverMs ? "no time set" : $"min play time {min / 1000.0:0.#} s")}: holding {Path.GetFileName(LiascapePlayerMedia.CurrentPath() ?? "?")} (played {played / 1000.0:0.0} s{(still ? ", a still image" : $", this loop ends in {(rem ?? 0) / 1000.0:0.0} s")})");
+                if (!still && !SettingsService.Load().Loop) LiascapePlayerMedia.SetLoop(true);
             }
             var wait = (int)Math.Clamp((rem ?? (min - played)) + 60, 100, 1000);
             try { await Task.Delay(wait, ct).ConfigureAwait(false); }
@@ -1344,19 +1344,19 @@ public static class PlayerHelper
     // readiness (mpvpaper: AV: line; LWE: SceneTransitionDelayMs).
     private static void SwitchToFile(string path, string mpvOptions)
     {
-        // lp-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
+        // liascape-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
         // no pre-launch crossover, no overlay, no IPC loadfile — for a scene too (Phase 2: `kind: scene`,
         // kind-agnostic in the player; no V→S lead, no SceneTransitionDelayMs). A scene that can't play
         // stops playback here, exactly like legacy with AllowScenes=false (the pickers never hand one over).
         bool keepPause = _keepPauseNextSwitch; // a user switch staying paused: a cut (KeepPauseOnSwitch)
         _keepPauseNextSwitch = false;
-        if (PlayerEngine.IsLpPlayer)
+        if (PlayerEngine.IsLiascapePlayer)
         {
             if (IsScenePath(path) && !PlayerEngine.ScenesPlayable(SettingsService.Load())) { KillCurrentProcess(); return; }
-            var lpSettings = SettingsService.Load();
-            var lpCfg = TransitionService.CurrentConfig();
-            LpPlayerMedia.QueueSwitch(path, lpSettings, lpCfg.Enabled && !keepPause ? lpCfg : null, alignEnd: false); // queued: we may hold _lock
-            _currentSpeed = ReadSpeedOverride(path) ?? lpSettings.Speed;
+            var liascapeSettings = SettingsService.Load();
+            var liascapeCfg = TransitionService.CurrentConfig();
+            LiascapePlayerMedia.QueueSwitch(path, liascapeSettings, liascapeCfg.Enabled && !keepPause ? liascapeCfg : null, alignEnd: false); // queued: we may hold _lock
+            _currentSpeed = ReadSpeedOverride(path) ?? liascapeSettings.Speed;
             OnWallpaperChanged?.Invoke(path);
             return;
         }
@@ -1478,22 +1478,22 @@ public static class PlayerHelper
                 {
                     // the new scene's PID(s) = LWE processes that appeared after the launch (≠ the old set)
                     HashSet<int> NewPids() { var p = GetLweProcPids(); p.ExceptWith(oldPids); return p; }
-                    // lp-audio holds these targets event-driven (instant on any stream create/reset). We only
+                    // liascape-audio holds these targets event-driven (instant on any stream create/reset). We only
                     // push the ramp values over stdin; the helper keeps them glued across LWE's re-inits.
                     string oldCsv = PidCsv(oldPids);
                     var newScenePids = new HashSet<int>();
                     try
                     {
                         // Crossfade ONLY when a visual transition is active. Transitions off → instant cut:
-                        // new is already launched at target, just wait the load delay, then reap (no lp-audio).
+                        // new is already launched at target, just wait the load delay, then reap (no liascape-audio).
                         if (transitionActive && newPids.Length > 0)
                         {
-                            // Wipe any stale lp-audio groups FIRST — a prior transition's `clear` tail can be
+                            // Wipe any stale liascape-audio groups FIRST — a prior transition's `clear` tail can be
                             // cancelled by this advance, and Linux REUSES PIDs, so a lingering "[dead pid]→0"
                             // group can pin a freshly-launched scene at 0 forever. Clearing at the START of
                             // every transition guarantees a clean slate (no accumulation, no PID-reuse poison).
                             AudioCtl("clear");
-                            // PHASE 1 — cover: new muted+0, old held at target (lp-audio applies on stream events).
+                            // PHASE 1 — cover: new muted+0, old held at target (liascape-audio applies on stream events).
                             if (!oldIsMpv && oldPids.Count > 0) AudioCtl($"set {oldCsv} {targetVol} {oldMuteI}");
                             var coverUntil = DateTime.UtcNow.AddMilliseconds(hasOld ? coverMs : 0);
                             do
@@ -1504,7 +1504,7 @@ public static class PlayerHelper
                                 await Task.Delay(50, cts.Token);
                             } while (DateTime.UtcNow < coverUntil || newScenePids.Count < 1);
                             string newCsv = PidCsv(newScenePids);
-                            TransitionService.TransLog($"scene xfade(lp-audio): new={newScenePids.Count} old={oldPids.Count} oldIsMpv={oldIsMpv} target={targetVol} muted={muted0} hasOld={hasOld} fadeMs={fadeMs}");
+                            TransitionService.TransLog($"scene xfade(liascape-audio): new={newScenePids.Count} old={oldPids.Count} oldIsMpv={oldIsMpv} target={targetVol} muted={muted0} hasOld={hasOld} fadeMs={fadeMs}");
 
                             // PHASE 2 — reveal: ramp new 0→target (unmuted) + old target→0. No fade on first.
                             if (!hasOld) { AudioCtl($"set {newCsv} {targetVol} {oldMuteI}"); }
@@ -1512,7 +1512,7 @@ public static class PlayerHelper
                             {
                                 // EQUAL-POWER crossfade, corrected for a CUBIC volume curve. BOTH volume
                                 // paths here cube the percent: mpv's `volume` (measured: 50% → -18.07 dB,
-                                // not -6) and PulseAudio software volume (lp-audio's pa_volume_t, whose
+                                // not -6) and PulseAudio software volume (liascape-audio's pa_volume_t, whose
                                 // mapping to gain is the cube of the fraction). A linear percent ramp
                                 // therefore sags ~18 dB at the midpoint — measured as a ~22 dB hole lasting
                                 // ~3s in the MIDDLE of a transition. So: pick the wanted GAIN with cos/sin
@@ -1540,7 +1540,7 @@ public static class PlayerHelper
                         {
                             // No crossfade (transitions off / first wallpaper). No fade sets the level, and
                             // stream-restore may have poisoned the launch volume → correct the new scene to
-                            // target via lp-audio (event-driven, survives the reap re-init) while we wait the
+                            // target via liascape-audio (event-driven, survives the reap re-init) while we wait the
                             // load delay before reaping the old.
                             CorrectSceneVolume(oldPids, targetVol, muted0, 3000);
                             await Task.Delay(SettingsService.Load().SceneTransitionDelayMs, cts.Token);
@@ -1560,7 +1560,7 @@ public static class PlayerHelper
                     }
                     KillPids(capturedLwePids);
 
-                    // The reap re-inits the NEW stream → reset; lp-audio holds it (it keeps the group set,
+                    // The reap re-inits the NEW stream → reset; liascape-audio holds it (it keeps the group set,
                     // applying on the 'change' event in ~1ms). Re-assert target, hold ~3s, then release so
                     // normal volume control (ApplyLweVolume) governs steady state. (Crossfade only.)
                     if (transitionActive && newScenePids.Count > 0)
@@ -1624,7 +1624,7 @@ public static class PlayerHelper
                 _ = Task.Run(async () =>
                 {
                     // reveal-a: the overlay (already covering, spawned by TryStart) reveals B's frozen frame0
-                    // over the live scene-A. We fade the live scene-A OUT via lp-audio over the effect, then —
+                    // over the live scene-A. We fade the live scene-A OUT via liascape-audio over the effect, then —
                     // once the effect completes and the overlay holds opaque-B (--hold-end-ms) — launch
                     // mpvpaper-B UNDER that cover PAUSED at frame0; the renderer unpauses it (--mpv-unpause)
                     // at teardown → frame0→frame0 handoff with the overlay-B, no seek, no repeat.
@@ -1720,7 +1720,7 @@ public static class PlayerHelper
         // and auto-mute never corrects it ("mute state doesn't carry over").
         var fileOpts = $"volume={volume},speed={speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)},mute={(_isMuted ? "yes" : "no")}";
         // Transition handoff: load B paused at frame 0 (hidden under the opaque overlay); the
-        // lp-transition renderer unpauses it (--mpv-unpause) the instant it tears down → seamless.
+        // liascape-transition renderer unpauses it (--mpv-unpause) the instant it tears down → seamless.
         if (pauseAtStart) fileOpts += ",pause=yes";
         // Between-video loudness normalization for the incoming file (or "" to clear) — set the `af`
         // before loadfile so the new file plays normalized; the volume in fileOpts stacks on top.
@@ -1735,7 +1735,7 @@ public static class PlayerHelper
     // whether the IPC succeeded so they can fall back to a fresh launch.
     private static bool TrySendCommand(params object[] args)
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.Mpv(args);
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.Mpv(args);
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return false;
         try
@@ -1783,7 +1783,7 @@ public static class PlayerHelper
 
     private static string? TryQueryCurrentPath()
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.CurrentPath();
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.CurrentPath();
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -2052,7 +2052,7 @@ public static class PlayerHelper
 
     private static double? TryQueryProperty(string prop)
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.QueryMpv(prop);
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.QueryMpv(prop);
         return QueryMpvData(prop) is { ValueKind: JsonValueKind.Number } d ? d.GetDouble() : null;
     }
 
@@ -2088,7 +2088,7 @@ public static class PlayerHelper
 
     private static double? TryQueryTimePos()
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.Query("time_pos");
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.Query("time_pos");
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -2111,7 +2111,7 @@ public static class PlayerHelper
 
     private static double? TryQueryTimeRemaining()
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.TimeRemaining();
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.TimeRemaining();
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return null;
         try
@@ -2155,7 +2155,7 @@ public static class PlayerHelper
         bool prevIsScene = !prevIsVideo && IsLweRunning;
         TransitionService.TransLog($"DoVideoEndWait: next={System.IO.Path.GetFileName(next)} nextIsScene={nextIsScene} prevIsVideo={prevIsVideo} IsLweRunning={IsLweRunning} → prevIsScene={prevIsScene}");
 
-        // ── lp-player V→V (transitions on AND the transitions-off gapless branch): the PLAYER times the
+        // ── liascape-player V→V (transitions on AND the transitions-off gapless branch): the PLAYER times the
         //    switch — align:"end" makes full-live END at A's end and a cut/reveal/frozen START there — so
         //    no playtime polling and no `_lastSwitchTarget` settle gate (legacy-only): the previous
         //    switch's transition.handoff is the gate (a new request would supersede a pre-Running one).
@@ -2163,15 +2163,15 @@ public static class PlayerHelper
         //    Phase 2: a scene on either side too (kind-agnostic in the player). A scene A never ends, so
         //    a switch away from one (a restore re-arming onto a scene — the tick moves scenes on itself) is
         //    align:"now" — legacy's "prevIsScene → switch now".
-        if (PlayerEngine.IsLpPlayer)
+        if (PlayerEngine.IsLiascapePlayer)
         {
-            await LpPlayerMedia.WaitLastHandoff(ct).ConfigureAwait(false);
+            await LiascapePlayerMedia.WaitLastHandoff(ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested) return;
-            bool aIsScene = !prevIsVideo && LpPlayerMedia.CurrentPath() is string aPath && IsScenePath(aPath);
+            bool aIsScene = !prevIsVideo && LiascapePlayerMedia.CurrentPath() is string aPath && IsScenePath(aPath);
             // a minimum play time: A loops on until the loop that reaches it, and only then is the aligned switch
             // requested — align:end makes A's CURRENT loop its last, so it lands on a loop's end, never mid-loop
             if (!aIsScene && !await HoldForMinPlay(ct).ConfigureAwait(false)) return;
-            var lpCfg = TransitionService.CurrentConfig();
+            var liascapeCfg = TransitionService.CurrentConfig();
             // B is the session's current item from the moment its effect RUNS, not from its handoff: the
             // player shows it (`cur:*` = B) and a new request commits it. Counted only at the handoff, a
             // next/prev/random in that window (the effect's duration) read the pre-fetched B as "what
@@ -2193,7 +2193,7 @@ public static class PlayerHelper
                 PostSwitch(next);
                 return true;
             }
-            var outcome = await LpPlayerMedia.SwitchAndWait(next, SettingsService.Load(), lpCfg.Enabled ? lpCfg : null, alignEnd: !aIsScene, ct,
+            var outcome = await LiascapePlayerMedia.SwitchAndWait(next, SettingsService.Load(), liascapeCfg.Enabled ? liascapeCfg : null, alignEnd: !aIsScene, ct,
                 onStarted: () => { lock (_lock) Commit(); }).ConfigureAwait(false);
             lock (_lock)
             {
@@ -2201,8 +2201,8 @@ public static class PlayerHelper
                 {
                     // committed at its start: the player resolves a Running switch itself (handoff, or one
                     // committed by the next request) — only a B failing mid-effect snaps back to A
-                    if (outcome == "handoff") LpPlayerMedia.ResetFailureBackoff();
-                    else LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)} ended {outcome} after its effect started (already counted as current then)");
+                    if (outcome == "handoff") LiascapePlayerMedia.ResetFailureBackoff();
+                    else LiascapePlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)} ended {outcome} after its effect started (already counted as current then)");
                     return;
                 }
             }
@@ -2218,10 +2218,10 @@ public static class PlayerHelper
             {
                 // The player crashed (or was restarted) while this switch was armed: the request died with it. Its
                 // snapshot brings A back where it played (an armed align:end switch is saved as A), and the adapter
-                // puts back what the backend last showed (LpPlayerMedia.ReconcileShown, queued ahead of this) — so
+                // puts back what the backend last showed (LiascapePlayerMedia.ReconcileShown, queued ahead of this) — so
                 // arm it again for A's end on the new player. Switching now (the failure path below) cut A short
                 // and, with a snapshot saved as B, showed B twice.
-                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: the player restarted → re-arming it for A's end");
+                LiascapePlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: the player restarted → re-arming it for A's end");
                 lock (_lock)
                 {
                     if (!_waitingForVideoEnd || ct.IsCancellationRequested || _timerReleased) return;
@@ -2234,8 +2234,8 @@ public static class PlayerHelper
                 // another requester replaced it — never this process (its own switches cancel the wait
                 // first): a second backend before it yields, a daemon. Wait for A's end again, never
                 // "switch now": two owners each switching now on the other's supersede was the storm.
-                var backoff = LpPlayerMedia.NextFailureBackoff();
-                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: superseded by another request → re-arming in {backoff.TotalSeconds:0} s");
+                var backoff = LiascapePlayerMedia.NextFailureBackoff();
+                LiascapePlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: superseded by another request → re-arming in {backoff.TotalSeconds:0} s");
                 try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
                 lock (_lock)
@@ -2250,12 +2250,12 @@ public static class PlayerHelper
                 // failed / player unreachable / timed out: back off — 1 s,
                 // doubling to ≤ 30 s while it keeps failing (I4: never a storm, whatever the player's
                 // reason) — then switch now, the legacy "mpv gone → switch immediately" fallback.
-                var backoff = LpPlayerMedia.NextFailureBackoff();
-                LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: {outcome} → switching in {backoff.TotalSeconds:0} s");
+                var backoff = LiascapePlayerMedia.NextFailureBackoff();
+                LiascapePlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: {outcome} → switching in {backoff.TotalSeconds:0} s");
                 try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
             }
-            else LpPlayerMedia.ResetFailureBackoff();
+            else LiascapePlayerMedia.ResetFailureBackoff();
             lock (_lock)
             {
                 // `committed`: a started callback queued just before a fast terminal outcome ran meanwhile
@@ -2270,7 +2270,7 @@ public static class PlayerHelper
                 if (IsScenePath(next) && IsSkippedPath(next))
                 {
                     to = AdvanceToNext();
-                    LpPlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: it can't play (crashed / unplayable) → {(to != null ? System.IO.Path.GetFileName(to) : "nothing else to play")}");
+                    LiascapePlayerClient.Log($"aligned switch to {System.IO.Path.GetFileName(next)}: it can't play (crashed / unplayable) → {(to != null ? System.IO.Path.GetFileName(to) : "nothing else to play")}");
                     if (to == null) { _timedRemainingMs = (long)_timedInterval.TotalMilliseconds; SaveTimedState(); return; }
                 }
                 SwitchToFile(to, SettingsService.Load().BuildMpvOptions());
@@ -2522,12 +2522,12 @@ public static class PlayerHelper
     }
 
     // The transition (effect / duration / on-off / method) changed while an aligned switch is armed for A's
-    // end. lp-player: that switch was REQUESTED at arm time with the old effect + duration (the player
+    // end. liascape-player: that switch was REQUESTED at arm time with the old effect + duration (the player
     // times it), so re-request it with the new config — the next switch must use what the user just set
     // (legacy picks the effect when its overlay starts, near A's end: already live). Same `next`.
     public static void RearmAlignedSwitch()
     {
-        if (!PlayerEngine.IsLpPlayer) return;
+        if (!PlayerEngine.IsLiascapePlayer) return;
         lock (_lock)
         {
             if (!_waitingForVideoEnd || _timerReleased || _waitCts == null || _history == null
@@ -2566,7 +2566,7 @@ public static class PlayerHelper
     private static void PostSwitch(string path)
     {
         _lastSwitchTarget = path;
-        _itemPlayedMs = 0; // `path` became the playing item (lp-player: when its effect started)
+        _itemPlayedMs = 0; // `path` became the playing item (liascape-player: when its effect started)
         _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
         if (_advanceOnVideoEnd && !IsScenePath(path) && CanRotate)
         {
@@ -2612,7 +2612,7 @@ public static class PlayerHelper
             ? _history[playingIdx]
             : null;
         // Same IsSkippedPath contract as AdvanceToNext/TryStepLibrary/ApplyRandom — _timedPaths is
-        // normally already scene-filtered under lp-player (ApplyPlaylist), but a stale cross-engine
+        // normally already scene-filtered under liascape-player (ApplyPlaylist), but a stale cross-engine
         // session (SwitchEngineLive replaying a legacy LastSession) can still carry one through; skip
         // it here too rather than randomizing onto a path that just stops playback.
         bool scenesOk = PlayerEngine.ScenesPlayable(SettingsService.Load());
@@ -2678,7 +2678,7 @@ public static class PlayerHelper
     // KeepPauseOnSwitch off (default): a switch made while paused resumes playback first, so it
     // switches with its transition and plays — single and playlist alike (a paused playlist's tick
     // used to hold the action until the resume, then switch; a single one already unpaused). On: the
-    // pause stays — the switch is a cut (an effect can't run with playback stopped: lp-player's clock
+    // pause stays — the switch is a cut (an effect can't run with playback stopped: liascape-player's clock
     // is frozen) to the new wallpaper's first frame, paused, and a paused playlist's tick runs it at
     // once (its countdown stays paused). A rotation never switches while paused.
     private static bool _keepPauseNextSwitch; // consumed by the next SwitchToFile (and Apply)
@@ -2686,14 +2686,14 @@ public static class PlayerHelper
     private static bool KeepsPause() => SettingsService.Load().KeepPauseOnSwitch && IsPausedNow();
 
     public static bool IsPausedNow() =>
-        PlayerEngine.IsLpPlayer ? LpPlayerMedia.IsPlayerPaused() : QueryMpvData("pause") is { ValueKind: JsonValueKind.True };
+        PlayerEngine.IsLiascapePlayer ? LiascapePlayerMedia.IsPlayerPaused() : QueryMpvData("pause") is { ValueKind: JsonValueKind.True };
 
     // Before a user switch: resume (default) — or leave the pause for the switch to keep (true)
     private static bool BeforeUserSwitch()
     {
         if (!IsPausedNow()) return false;
         if (SettingsService.Load().KeepPauseOnSwitch) return true;
-        if (PlayerEngine.IsLpPlayer) LpPlayerMedia.QueueNewSession(); // `set player.paused false`, queued ahead of the switch
+        if (PlayerEngine.IsLiascapePlayer) LiascapePlayerMedia.QueueNewSession(); // `set player.paused false`, queued ahead of the switch
         else TrySendCommand("set_property", "pause", false);
         SetTimerPaused(false); // the tick owner (maybe another process) counts again and runs the action
         return false;
@@ -2808,7 +2808,7 @@ public static class PlayerHelper
                         ArmVideoEndWait(next);
                 }
             }
-            else if (MinPlayMs != oldMin && PlayerEngine.IsLpPlayer && _advanceOnVideoEnd && _waitingForVideoEnd && !_timerReleased
+            else if (MinPlayMs != oldMin && PlayerEngine.IsLiascapePlayer && _advanceOnVideoEnd && _waitingForVideoEnd && !_timerReleased
                      && _waitCts != null && !ScenePlaying && _history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
             {
                 // a new minimum under advance-on-end: the end-of-video switch already armed was requested for the
@@ -2839,26 +2839,26 @@ public static class PlayerHelper
     // Nothing playing → nothing started. Unchanged engine → just refresh the cached engine/binary.
     public static void SwitchEngineLive(AppSettings prev, AppSettings cur)
     {
-        bool wasLp = PlayerEngine.IsLpPlayer;          // what actually runs (cached since serve start)
-        bool nowLp = PlayerEngine.WouldBeLpPlayer(cur);
-        if (wasLp == nowLp) { PlayerEngine.Refresh(cur); return; }
-        bool timed, playing = IsPlaying;                // (an lp-player query → outside _lock)
+        bool wasPlayer = PlayerEngine.IsLiascapePlayer;          // what actually runs (cached since serve start)
+        bool nowPlayer = PlayerEngine.WouldBeLiascapePlayer(cur);
+        if (wasPlayer == nowPlayer) { PlayerEngine.Refresh(cur); return; }
+        bool timed, playing = IsPlaying;                // (an liascape-player query → outside _lock)
         lock (_lock)
         {
             timed = _timedPaths != null && !_timedTimerStopped;
             playing |= timed;
             SaveTimedState();       // the playlist position for the replay (no-op without a timed session)
             TeardownTimer();        // state only — timed_state.json is kept; the tick can't switch any more
-            if (!wasLp) KillCurrentProcess();             // legacy media: process kills, no socket waits
+            if (!wasPlayer) KillCurrentProcess();             // legacy media: process kills, no socket waits
             else { StopPlaylistObserver(); _current = null; }
         }
-        // lp-player OUTSIDE _lock, synchronously: the old engine is fully gone (stop → quit → TERM/KILL)
+        // liascape-player OUTSIDE _lock, synchronously: the old engine is fully gone (stop → quit → TERM/KILL)
         // before the new one starts — never both on screen
-        if (wasLp) LpPlayerMedia.StopAndQuit();
+        if (wasPlayer) LiascapePlayerMedia.StopAndQuit();
         PlayerEngine.Refresh(cur);
         KillRestartDaemon();
         TransitionService.ClearInProgress();
-        LpPlayerClient.Log($"PlayerEngine {(wasLp ? "lp-player" : "legacy")} → {(nowLp ? "lp-player" : "legacy")}: " +
+        LiascapePlayerClient.Log($"PlayerEngine {(wasPlayer ? "liascape-player" : "legacy")} → {(nowPlayer ? "liascape-player" : "legacy")}: " +
             (!playing ? "nothing was playing" : timed ? "resuming the timed playlist" : "replaying the last session"));
         if (!playing) return;
         try
@@ -2874,7 +2874,7 @@ public static class PlayerHelper
             else if (session.IsPlaylist) ApplyPlaylist(session.Paths, cur.BuildMpvPlaylistOptions(), session.Shuffle);
             else Apply(session.Paths[0], cur.BuildMpvOptions());
         }
-        catch (Exception e) { LpPlayerClient.Log($"replaying the session on {(nowLp ? "lp-player" : "legacy")} failed: {e.Message}"); }
+        catch (Exception e) { LiascapePlayerClient.Log($"replaying the session on {(nowPlayer ? "liascape-player" : "legacy")} failed: {e.Message}"); }
     }
 
     public static void Stop()
@@ -2922,7 +2922,7 @@ public static class PlayerHelper
     //
     // Excludes items unplayable under the current engine (IsSkippedPath — same contract as
     // TryStepLibrary/AdvanceToNext) from the pool so a random pick never lands Apply() on a
-    // scene under lp-player. An empty library is still a silent no-op (nothing to play, not an
+    // scene under liascape-player. An empty library is still a silent no-op (nothing to play, not an
     // error); a non-empty library with NO playable item throws so the caller can surface it
     // instead of letting Apply() 500.
     public static void ApplyRandom()
@@ -3018,7 +3018,7 @@ public static class PlayerHelper
         // During a transition the visible/audible wallpaper IS the overlay (it decodes A/B itself;
         // mpvpaper-B is parked at frame 0 for the handoff). Toggle the overlay's freeze instead of
         // cycling mpvpaper — the renderer owns the pause state (stateless here → can't desync).
-        if (Process.GetProcessesByName("lp-transition").Length > 0)
+        if (Process.GetProcessesByName("liascape-transition").Length > 0)
         {
             SendOverlayCtl("pause");
             return;
@@ -3058,7 +3058,7 @@ public static class PlayerHelper
 
     public static void SendCommand(params object[] args)
     {
-        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.Mpv(args); return; }
+        if (PlayerEngine.IsLiascapePlayer) { LiascapePlayerMedia.Mpv(args); return; }
         var socketPath = IpcSocket;
         if (!File.Exists(socketPath)) return;
         try
@@ -3117,7 +3117,7 @@ public static class PlayerHelper
     // takes the dragged value (effective = override ?? global, R61); an overridden one never moves.
     public static void PreviewGlobal(int? volume, double? speed)
     {
-        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.PreviewGlobal(volume, speed); return; }
+        if (PlayerEngine.IsLiascapePlayer) { LiascapePlayerMedia.PreviewGlobal(volume, speed); return; }
         var cur = QueryCurrentPath();
         if (cur == null) return;
         if (volume is int v && ReadVolumeOverride(cur) == null) SetVolume(v);
@@ -3138,11 +3138,11 @@ public static class PlayerHelper
     // the timed-playlist cache (_currentSpeed) in sync, so later ticks/advances use the new value too.
     public static void ApplyOverrideLive(string path)
     {
-        // lp-player: the resolver, on the source(s) showing THAT item (may be an in-flight transition's
+        // liascape-player: the resolver, on the source(s) showing THAT item (may be an in-flight transition's
         // pending B); coalescible — it re-reads the override when it runs
-        if (PlayerEngine.IsLpPlayer)
+        if (PlayerEngine.IsLiascapePlayer)
         {
-            LpPlayerMedia.ApplyOverride(path, lpSpd => { lock (_lock) { _currentSpeed = lpSpd; } _speedChangeTcs?.TrySetResult(true); });
+            LiascapePlayerMedia.ApplyOverride(path, liascapeSpd => { lock (_lock) { _currentSpeed = liascapeSpd; } _speedChangeTcs?.TrySetResult(true); });
             return;
         }
         var cur = QueryCurrentPath();
@@ -3153,16 +3153,16 @@ public static class PlayerHelper
         if (!IsLweRunning) SetSpeed(LibraryService.ReadSpeedOverride(path) ?? s.Speed);
     }
 
-    // A scene item's user properties changed (`/library/scene-props`, saved first): lp-player → its live
+    // A scene item's user properties changed (`/library/scene-props`, saved first): liascape-player → its live
     // source(s) get the new `scene_props` (the worker sets each changed one on the running scene — live, same
     // worker); `preview` = a drag's unsaved values (`/library/scene-props/preview`). Legacy: nothing live —
     // LWE takes properties only at launch (`--set-property`, SpawnLweProcesses), so a change shows at the
     // scene's next start (the one genuine launch-only case there, like LweMonitors).
     public static void ApplyScenePropsLive(string path, IReadOnlyDictionary<string, System.Text.Json.JsonElement>? preview = null)
     {
-        if (!PlayerEngine.IsLpPlayer || !IsScenePath(path)) return;
-        if (preview != null) LpPlayerMedia.PreviewSceneProps(path, preview);
-        else LpPlayerMedia.ApplySceneProps(path);
+        if (!PlayerEngine.IsLiascapePlayer || !IsScenePath(path)) return;
+        if (preview != null) LiascapePlayerMedia.PreviewSceneProps(path, preview);
+        else LiascapePlayerMedia.ApplySceneProps(path);
     }
 
     public static void SetLoop(bool loop) =>
@@ -3177,7 +3177,7 @@ public static class PlayerHelper
         SendCommand("set_property", "panscan", panscan);
     }
 
-    // lp-player's `/settings` live-apply: ONE resolver pass (LpPlayerMedia.ApplyEffective) — every live
+    // liascape-player's `/settings` live-apply: ONE resolver pass (LiascapePlayerMedia.ApplyEffective) — every live
     // source gets its own effective volume/speed (override ?? global), af, mute and decode/buffer settings,
     // and the layer its fit, each diffed against what it runs (only what differs is sent; a no-op save
     // sends nothing). It replaces SetVolume/SetSpeed/SetVideoScale/ApplyNormalizationLive/
@@ -3185,8 +3185,8 @@ public static class PlayerHelper
     // the timed tick's speed factor follows the playing item's effective speed, as SetSpeed keeps it.
     public static void ApplyEffectiveLive(AppSettings prev, AppSettings cur, string? playingPath)
     {
-        LpPlayerMedia.ApplyEffective();
-        if (prev.Loop != cur.Loop && !_waitingForVideoEnd && !IsTimedPlaylistActive()) LpPlayerMedia.SetLoop(cur.Loop);
+        LiascapePlayerMedia.ApplyEffective();
+        if (prev.Loop != cur.Loop && !_waitingForVideoEnd && !IsTimedPlaylistActive()) LiascapePlayerMedia.SetLoop(cur.Loop);
         var speed = (playingPath != null ? ReadSpeedOverride(playingPath) : null) ?? cur.Speed;
         lock (_lock) { _currentSpeed = speed; }
         _speedChangeTcs?.TrySetResult(true);
@@ -3197,7 +3197,7 @@ public static class PlayerHelper
     // cache re-inits the decoder → a visible stall). Volume/Speed/VideoScale/Normalization/AutoMute are
     // applied by the /settings handler; this covers Loop, NoAudio, VideoFps, DisableCache, Demuxer*, HwDec
     // (video, via mpv IPC properties) + NoAudio (scene, via LWE mute). All of these were formerly
-    // launch-only (needed a stop/replay to take effect). Legacy only — lp-player: ApplyEffectiveLive.
+    // launch-only (needed a stop/replay to take effect). Legacy only — liascape-player: ApplyEffectiveLive.
     public static void ApplyPlaybackSettingsLive(AppSettings prev, AppSettings cur, string? playingPath)
     {
         bool scene = IsLweRunning;
@@ -3209,11 +3209,11 @@ public static class PlayerHelper
             if (scene)
             {
                 // Scenes launch with the audio device OPEN (primary at --volume 0 when NoAudio, never
-                // --silent) so this toggles LIVE. Hold the new mute/volume via lp-audio (event-driven →
+                // --silent) so this toggles LIVE. Hold the new mute/volume via liascape-audio (event-driven →
                 // survives LWE's constant stream RE-CREATION, which resets a one-shot pactl — the whole
-                // reason lp-audio exists). Muting keeps the hold (persists until the next switch's
+                // reason liascape-audio exists). Muting keeps the hold (persists until the next switch's
                 // AudioCtl("clear")); unmuting holds briefly then releases so steady-state / later volume
-                // changes aren't pinned. pactl too, as the lp-audio-absent fallback.
+                // changes aren't pinned. pactl too, as the liascape-audio-absent fallback.
                 bool m = cur.NoAudio || _isMuted || AudioMonitor.IsMuted;
                 int vol = (playingPath != null ? ReadVolumeOverride(playingPath) : null) ?? cur.Volume;
                 var pids = GetLweProcPids();
@@ -3358,8 +3358,8 @@ public static class PlayerHelper
         int prevVolume = 0;
         var saved = SettingsService.Update(s => { prevVolume = s.Volume; s.Volume = Math.Clamp(s.Volume + delta, 0, 100); });
         if (saved.Volume == prevVolume) return null;
-        // lp-player: the resolver — every live source its own effective volume (an overridden one keeps it)
-        if (PlayerEngine.IsLpPlayer) LpPlayerMedia.ApplyEffective();
+        // liascape-player: the resolver — every live source its own effective volume (an overridden one keeps it)
+        if (PlayerEngine.IsLiascapePlayer) LiascapePlayerMedia.ApplyEffective();
         else SetVolume(own ?? saved.Volume);
         return null;
     }
@@ -3380,12 +3380,12 @@ public static class PlayerHelper
 
     private static string? AdvanceToNext()
     {
-        // forward through the history (a next after a previous) — under lp-player past an item skipped
+        // forward through the history (a next after a previous) — under liascape-player past an item skipped
         // since it played (a scene marked crashed, D6); legacy unchanged
         while (_history != null && _historyIndex < _history.Count - 1)
         {
             _historyIndex++;
-            if (!PlayerEngine.IsLpPlayer || !IsSkippedPath(_history[_historyIndex])) return _history[_historyIndex];
+            if (!PlayerEngine.IsLiascapePlayer || !IsSkippedPath(_history[_historyIndex])) return _history[_historyIndex];
         }
 
         var p = _timedPaths;
@@ -3424,12 +3424,12 @@ public static class PlayerHelper
 
     private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
     {
-        // lp-player: a cold launch = a cut to `file` (whatever was on screen was just stopped)
-        if (PlayerEngine.IsLpPlayer)
+        // liascape-player: a cold launch = a cut to `file` (whatever was on screen was just stopped)
+        if (PlayerEngine.IsLiascapePlayer)
         {
             _lastSwitchTarget = file;
-            LpPlayerMedia.QueueNewSession(); // I1: a cold launch is a new session — it plays
-            LpPlayerMedia.QueueSwitch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
+            LiascapePlayerMedia.QueueNewSession(); // I1: a cold launch is a new session — it plays
+            LiascapePlayerMedia.QueueSwitch(file, SettingsService.Load(), tcfg: null, alignEnd: false);
             readyTcs?.TrySetResult(true);
             return null;
         }
@@ -3497,7 +3497,7 @@ public static class PlayerHelper
     // the only cross-process way to find it. Used by the shutdown reaper below.
     private static void ReapAllWallpaperProcs()
     {
-        foreach (var needle in new[] { "mpvpaper", "lp-transition", "lp-audio" })
+        foreach (var needle in new[] { "mpvpaper", "liascape-transition", "liascape-audio" })
             foreach (var p in ProcsByCmdline(needle))
                 using (p) { try { p.Kill(entireProcessTree: true); } catch { } }
     }
@@ -3539,9 +3539,9 @@ public static class PlayerHelper
 
     private static void KillCurrentProcess()
     {
-        // lp-player: `stop` (every source ramped out and retired), queued — callers hold _lock (Stop/KillAll);
+        // liascape-player: `stop` (every source ramped out and retired), queued — callers hold _lock (Stop/KillAll);
         // the player process stays up
-        if (PlayerEngine.IsLpPlayer) { StopPlaylistObserver(); LpPlayerMedia.QueueStop(); _current = null; return; }
+        if (PlayerEngine.IsLiascapePlayer) { StopPlaylistObserver(); LiascapePlayerMedia.QueueStop(); _current = null; return; }
         StopPlaylistObserver();
         foreach (var proc in MpvpaperProcs())
         {
@@ -3550,11 +3550,11 @@ public static class PlayerHelper
                 try { proc.Kill(entireProcessTree: true); } catch { }
             }
         }
-        // Kill any running transition overlay — it's a separate process (lp-transition) that decodes
+        // Kill any running transition overlay — it's a separate process (liascape-transition) that decodes
         // A/B itself, so without this a Stop/Apply during a transition leaves the effect playing.
         // The video→video transition uses the IPC switch path (no KillCurrentProcess), so this never
         // kills an in-progress transition's own overlay — only Stop / Apply / cold-launch / scene do.
-        foreach (var proc in Process.GetProcessesByName("lp-transition"))
+        foreach (var proc in Process.GetProcessesByName("liascape-transition"))
             using (proc) { try { proc.Kill(entireProcessTree: true); } catch { } }
         KillLweProcess();
         _current = null;
@@ -3670,7 +3670,7 @@ public static class PlayerHelper
     // Is this item skipped by the pickers (next/prev/random, a rotation's advance)? A scene when scenes
     // can't play, or (D6, Phase 2) when it is marked crashed and not whitelisted — what the item settings
     // modal promises ("Scene crashed — won't be played"). Pure — the self-test's truth table. Marking
-    // happens only under lp-player (OnSceneBroken), so it is inert for legacy unless lp-player marked one.
+    // happens only under liascape-player (OnSceneBroken), so it is inert for legacy unless liascape-player marked one.
     public static bool SkipScene(bool isScene, bool playable, bool crashed, bool whitelisted) =>
         isScene && (!playable || (crashed && !whitelisted));
 
@@ -3680,13 +3680,13 @@ public static class PlayerHelper
         return IsSkippedPath(path, PlayerEngine.ScenesPlayable(SettingsService.Load()));
     }
 
-    // a scene is what plays now: legacy = an LWE process runs; lp-player = the session's playing item is a
+    // a scene is what plays now: legacy = an LWE process runs; liascape-player = the session's playing item is a
     // scene folder (no LWE process exists there — every `IsLweRunning` check is legacy-only)
-    private static bool ScenePlaying => PlayerEngine.IsLpPlayer
+    private static bool ScenePlaying => PlayerEngine.IsLiascapePlayer
         ? _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count && IsScenePath(_history[PlayingHistoryIndex])
         : IsLweRunning;
 
-    // lp-player Phase 2: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
+    // liascape-player Phase 2: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
     // marked crashed in its index entry (skipped from now on unless whitelisted, D6), the UI told
     // (WS `scene-crashed`), and — the owner's call — a rotation PLAYING it advances at once (the tick's
     // own advance: its owner check, pause and mode rules apply). A single wallpaper keeps what the player
@@ -3700,7 +3700,7 @@ public static class PlayerHelper
         AdvanceIfPlaying(path, "scene broken while playing");
     }
 
-    // lp-player Task 8: `scene.vram_exceeded` — the player's VRAM guard stopped this scene's worker (it used more
+    // liascape-player Task 8: `scene.vram_exceeded` — the player's VRAM guard stopped this scene's worker (it used more
     // than `player.scene_vram_limit_mib`). For playback exactly like a broken scene — a rotation playing it
     // advances at once, a single wallpaper keeps what the player shows (its last frame) — but it is NOT marked
     // crashed (it isn't broken; with a higher limit or less on the GPU it plays): the UI is told why instead
@@ -3739,8 +3739,8 @@ public static class PlayerHelper
         try { return Path.GetFullPath(a).TrimEnd('/') == Path.GetFullPath(b).TrimEnd('/'); } catch { return a == b; }
     }
 
-    private static string NoPlayableMessage() => PlayerEngine.IsLpPlayer
-        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Allow scene support\" + Wallpaper Engine's assets (lp-player), and a crashed scene plays only when whitelisted"
+    private static string NoPlayableMessage() => PlayerEngine.IsLiascapePlayer
+        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Allow scene support\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted"
         : "No playable wallpaper in the library — every item is a scene, and scenes need \"Allow scene support\" + linux-wallpaperengine";
 
     // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which` / the
@@ -3764,7 +3764,7 @@ public static class PlayerHelper
     internal static string SceneShotPath(string output) => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache"),
-        "livepaper", $"lpscene-{output.Replace('/', '_').Replace(' ', '_')}.png");
+        "livepaper", $"liascape-scene-{output.Replace('/', '_').Replace(' ', '_')}.png");
 
     private static string[] SpawnLweProcesses(string workshopId, AppSettings settings, int audioVolumePercent = 100, string? scenePath = null)
     {
@@ -3794,7 +3794,7 @@ public static class PlayerHelper
             {
                 // Always OPEN the audio device on the primary — even when NoAudio — so NoAudio toggles
                 // LIVE (--silent would give no sink-input to unmute → a relaunch). NoAudio → launch at
-                // volume 0 (silent from frame 0, no lp-audio/pactl dependency); ApplyLweVolume brings it
+                // volume 0 (silent from frame 0, no liascape-audio/pactl dependency); ApplyLweVolume brings it
                 // back with no relaunch.
                 psi.ArgumentList.Add("--volume");
                 psi.ArgumentList.Add((settings.NoAudio ? 0 : audioVolumePercent).ToString());
@@ -3859,7 +3859,7 @@ public static class PlayerHelper
         var before = GetLweProcPids();
         int n = SpawnLweProcesses(workshopId, settings).Length;
         // direct (non-transition) scene launch — hold the new scene at its target (muted when NoAudio /
-        // user / auto mute) via lp-audio, countering the stream-restore poison. NoAudio → target 0 (the
+        // user / auto mute) via liascape-audio, countering the stream-restore poison. NoAudio → target 0 (the
         // device is open, just silent) so NoAudio can be toggled back on LIVE.
         CorrectSceneVolume(before, settings.NoAudio ? 0 : settings.Volume,
             settings.NoAudio || _isMuted || AudioMonitor.IsMuted, 3000);
@@ -4078,15 +4078,15 @@ public static class PlayerHelper
     // switch). null/scene/no-socket → no-op. Unmeasured → clears the filter + kicks a background measure.
     public static void ApplyNormalizationLive(string? path)
     {
-        // lp-player: the resolver — EVERY live source its own item's af: the playing one, an effect's outgoing
+        // liascape-player: the resolver — EVERY live source its own item's af: the playing one, an effect's outgoing
         // A, a pending B, any source while no output shows one (`path` = cur:* reached only the first)
-        if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyEffective(); return; }
+        if (PlayerEngine.IsLiascapePlayer) { LiascapePlayerMedia.ApplyEffective(); return; }
         if (path == null || IsScenePath(path) || !File.Exists(IpcSocket)) return;
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
 
     // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync — or, for a scene under
-    // lp-player, the player's own `scene.loudness` learned on first play): with normalization on, the item may be
+    // liascape-player, the player's own `scene.loudness` learned on first play): with normalization on, the item may be
     // playing right now — unmeasured when it started (or when normalization was switched on), so it ran without
     // the filter / `gain.normalize` and nothing applied it once measured (until its next switch).
     public static void OnLoudnessMeasured(string path)
@@ -4094,8 +4094,8 @@ public static class PlayerHelper
         try
         {
             if (!SettingsService.Load().NormalizeAudio) return;
-            // lp-player: every live source its own item's value — a scene's `gain.normalize` ramps to it
-            if (PlayerEngine.IsLpPlayer) { LpPlayerMedia.ApplyEffective(); return; }
+            // liascape-player: every live source its own item's value — a scene's `gain.normalize` ramps to it
+            if (PlayerEngine.IsLiascapePlayer) { LiascapePlayerMedia.ApplyEffective(); return; }
             if (IsScenePath(path)) return; // legacy: LWE scenes aren't normalized (player-adapter.md § Scenes)
             var cur = QueryCurrentPath();
             if (cur != null && Path.GetFullPath(cur) == Path.GetFullPath(path)) ApplyNormalizationLive(cur);

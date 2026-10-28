@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Hermetic latency check of the Settings page's hot paths under PlayerEngine=lp-player, with a library the
+# Hermetic latency check of the Settings page's hot paths under PlayerEngine=liascape-player, with a library the
 # size of a real one (300 items, every one loudness-measured, NormalizeAudio on): a no-op POST /settings
 # (what every debounced slider save costs) and /preview {global:true} (the slider's live drag preview).
 # Speed storm leftover: a no-op /settings cost ~150 ms on the owner's machine (330–550 ms here) — the
 # loudness backfill scanned the whole library on the request thread, parsing index.json twice per item.
 #
-# Hermetic like scripts/test-lp-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
-# player socket), a private `lp-player serve --headless --clock real --ao null`, its own backend port;
+# Hermetic like scripts/test-liascape-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
+# player socket), a private `liascape-player serve --headless --clock real --ao null`, its own backend port;
 # never touches another backend, the real library or the real player. Everything is stopped on exit.
 #
 # Usage: scripts/test-settings-latency.sh [--no-build]   (env N = library size, default 300)
@@ -17,7 +17,7 @@ BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 for t in ffmpeg jq curl python3; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
-B=$ROOT/src/player/target/debug/lp-player
+B=$ROOT/src/player/target/debug/liascape-player
 DLL=$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll
 if [ $BUILD = 1 ]; then
   (cd "$ROOT" && env -u LD_LIBRARY_PATH cargo build -q --manifest-path src/player/Cargo.toml) || { echo "cargo build failed"; exit 2; }
@@ -26,20 +26,20 @@ if [ $BUILD = 1 ]; then
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 N=${N:-300}
-T=$(mktemp -d /tmp/lplat-XXXXXX)   # short: a unix socket path must be < 108 bytes
+T=$(mktemp -d /tmp/liascape-lat-XXXXXX)   # short: a unix socket path must be < 108 bytes
 LIB=$T/home/.local/share/livepaper/library/imported
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$LIB" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
-export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions
-export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LP_PROFILE_SETTINGS=1
-unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
+export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_PROFILE_SETTINGS=1
+unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 SP=""; BP=""
 cleanup() {
   trap - EXIT INT TERM HUP
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
-  case "$T" in /tmp/lplat-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
+  case "$T" in /tmp/liascape-lat-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
@@ -69,7 +69,7 @@ json.dump(idx, open(f"{lib}/index.json", "w"), indent=2)
 EOF
 echo "library: $N items, index.json $(stat -c %s "$LIB/index.json") bytes"
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
-{"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
+{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
  "GlobalTransitionEnabled":false,"RestartIntervalSeconds":600}
 EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
@@ -79,7 +79,7 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] && brea
 [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-[ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = lp-player ] || { echo "ABORT: backend not on lp-player — refusing to touch any legacy player"; exit 1; }
+[ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = liascape-player ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
 post_ms() { curl -s -m 10 -o /dev/null -w '%{time_total}' -X POST -H 'Content-Type: application/json' -d "$2" "$U$1" | python3 -c "import sys; print(int(float(sys.stdin.read())*1000))"; }
 I0=$LIB/item000/item000.mp4
 curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$I0\"}" "$U/apply" >/dev/null; sleep 2

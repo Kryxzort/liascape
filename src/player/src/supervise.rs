@@ -1,4 +1,4 @@
-//! The supervisor (spec §4.1 "Supervision"; Task 16, R72/R73): `lp-player serve` keeps the
+//! The supervisor (spec §4.1 "Supervision"; Task 16, R72/R73): `liascape-player serve` keeps the
 //! compositor alive. It runs **before any thread, GL context or PipeWire connection
 //! exists** and only ever does three things: spawn the compositor (fork + exec of its own
 //! binary, `/proc/self/exe serve --supervised …`), wait for it, and forward SIGINT/SIGTERM
@@ -19,7 +19,7 @@
 //! **Startup-failure classes, why they're split:** "already running" can never be fixed
 //! by waiting — the other instance owns the lock until *it* exits — so retrying would
 //! only ever burn the crash budget on something a restart never helps. "No compositor
-//! yet" is the opposite: on a session starting at boot, `lp-player` can easily win the
+//! yet" is the opposite: on a session starting at boot, `liascape-player` can easily win the
 //! race against the compositor (or the GPU driver) coming up, and *will* succeed a moment
 //! later with no code change at all. [`EXIT_NO_COMPOSITOR`] gets its own backoff instead
 //! of either extreme (treating it as instantly fatal, or feeding the 5-per-60s crash
@@ -92,14 +92,14 @@ pub const EXIT_NO_COMPOSITOR: u8 = 5;
 /// Child exit codes that end supervision (not restarted).
 pub const CLEAN_CODES: [i32; 3] = [0, 1, 2];
 /// Test-only: `startup` → every child aborts right after its first events.
-pub const TEST_CRASH_ENV: &str = "LP_PLAYER_TEST_CRASH";
+pub const TEST_CRASH_ENV: &str = "LIASCAPE_PLAYER_TEST_CRASH";
 /// The real total backoff budget for [`EXIT_NO_COMPOSITOR`] retries, before giving up.
 pub const COMPOSITOR_WAIT_BUDGET: Duration = Duration::from_secs(30);
 /// The first retry delay; each later one doubles it.
 pub const COMPOSITOR_WAIT_INITIAL_DELAY: Duration = Duration::from_millis(500);
 /// Test-only: overrides [`COMPOSITOR_WAIT_BUDGET`] (milliseconds) so a test doesn't really
 /// wait 30 s for the give-up. Never set it outside tests.
-pub const TEST_COMPOSITOR_WAIT_ENV: &str = "LP_PLAYER_TEST_COMPOSITOR_WAIT_MS";
+pub const TEST_COMPOSITOR_WAIT_ENV: &str = "LIASCAPE_PLAYER_TEST_COMPOSITOR_WAIT_MS";
 
 /// [`COMPOSITOR_WAIT_BUDGET`], unless [`TEST_COMPOSITOR_WAIT_ENV`] overrides it.
 fn compositor_wait_budget() -> Duration {
@@ -369,7 +369,7 @@ impl Sup {
         if let Err(e) = log::append_detached(&self.state_dir, t, "supervisor", level, kind, fields)
         {
             eprintln!(
-                "lp-player supervisor: can't write {kind} to the event log in {}: {e}",
+                "liascape-player supervisor: can't write {kind} to the event log in {}: {e}",
                 self.state_dir.display()
             );
         }
@@ -379,7 +379,7 @@ impl Sup {
         let sup = std::process::id() as libc::pid_t;
         let argv0 = std::env::args_os()
             .next()
-            .unwrap_or_else(|| "lp-player".into());
+            .unwrap_or_else(|| "liascape-player".into());
         let mut cmd = Command::new("/proc/self/exe");
         cmd.arg0(argv0).args(args);
         unsafe {
@@ -505,7 +505,7 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
         let mut child = match sup.spawn(&args) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("lp-player supervisor: can't start the player: {e}");
+                eprintln!("liascape-player supervisor: can't start the player: {e}");
                 sup.event(
                     Level::Error,
                     "supervisor.spawn_failed",
@@ -534,12 +534,12 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
                             "budget_ms": compositor_budget.as_secs_f64() * 1000.0,
                             "hint": "the compositor/EGL never became available; check \
                                      WAYLAND_DISPLAY and the GPU driver, then run \
-                                     `lp-player serve --no-supervise` to see the error \
+                                     `liascape-player serve --no-supervise` to see the error \
                                      directly",
                         }),
                     );
                     eprintln!(
-                        "lp-player supervisor: giving up after waiting {:?} for the \
+                        "liascape-player supervisor: giving up after waiting {:?} for the \
                          compositor/EGL to become available",
                         compositor_waited
                     );
@@ -596,15 +596,15 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
                 fields.insert(
                     "hint".into(),
                     json!(
-                        "the player keeps crashing: `lp-player ctl` can't reach it; read \
+                        "the player keeps crashing: `liascape-player ctl` can't reach it; read \
                            events.jsonl in the state dir (kind_prefix supervisor. / the last \
-                           error-level events) and run `lp-player serve --no-supervise` to see \
+                           error-level events) and run `liascape-player serve --no-supervise` to see \
                            it fail"
                     ),
                 );
                 sup.event(Level::Error, "supervisor.giving_up", Value::Object(fields));
                 eprintln!(
-                    "lp-player supervisor: the player died ({}) after {restarts} restarts in {} s; \
+                    "liascape-player supervisor: the player died ({}) after {restarts} restarts in {} s; \
                      giving up",
                     reason.describe(),
                     WINDOW.as_secs()
@@ -617,7 +617,7 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
                 restore: r,
             } => {
                 eprintln!(
-                    "lp-player supervisor: the player (pid {pid}) died ({}); restarting \
+                    "liascape-player supervisor: the player (pid {pid}) died ({}); restarting \
                      ({count} of {MAX_RESTARTS} in {} s{})",
                     reason.describe(),
                     WINDOW.as_secs(),

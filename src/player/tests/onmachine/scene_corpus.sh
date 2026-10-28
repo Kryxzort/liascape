@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Phase 2 Task 13: the scene corpus runner. Plays every Wallpaper Engine scene of a Workshop
-# folder through lp-player's scene worker, one after another, on a PRIVATE headless player, and
+# folder through liascape-player's scene worker, one after another, on a PRIVATE headless player, and
 # classifies each: ok | static | blank | load_failed | renderer_failed | crashed | broken | timeout
 # (+ ready_ms, native size, worker peak RSS, gpu_ms_p50). The report (scene_corpus_report.py)
 # goes to docs/player/reports/scene-corpus.{md,json}.
@@ -8,7 +8,7 @@
 #   bash src/player/tests/onmachine/scene_corpus.sh                 # the whole 431960 folder
 #   bash src/player/tests/onmachine/scene_corpus.sh --only 2371103399,1726902114
 #   bash src/player/tests/onmachine/scene_corpus.sh --ab-legacy --legacy-output DP-1 \
-#        --reuse /tmp/lp-scene-corpus-<stamp>                        # owner-run, see below
+#        --reuse /tmp/liascape-scene-corpus-<stamp>                        # owner-run, see below
 #
 # Options:
 #   --dir DIR            Workshop content folder (default
@@ -18,15 +18,15 @@
 #   --only ID[,ID…]      only these workshop ids
 #   --limit N            only the first N scenes (sorted by id)
 #   --ready-timeout S    seconds to wait for Ready (default 20)
-#   --results DIR        where captures/records/logs go (default /tmp/lp-scene-corpus-<stamp>;
+#   --results DIR        where captures/records/logs go (default /tmp/liascape-scene-corpus-<stamp>;
 #                        never the repo — captures of scenes are not committed)
 #   --report-dir DIR     where scene-corpus.{md,json} go (default <repo>/docs/player/reports;
 #                        "-" = only into the results dir)
-#   --assets DIR         WE's assets dir (default: lp-player's own resolution)
-#   --bin DIR            dir holding lp-player + lp-scene-worker (default: build
+#   --assets DIR         WE's assets dir (default: liascape-player's own resolution)
+#   --bin DIR            dir holding liascape-player + liascape-scene-worker (default: build
 #                        <crate>/target/release with `cargo build --release` in the devShell)
 #   --no-build           use --bin / target/release as is
-#   --reuse DIR          skip lp-player's run; reuse DIR's records (for --ab-legacy / re-reports)
+#   --reuse DIR          skip liascape-player's run; reuse DIR's records (for --ab-legacy / re-reports)
 #   --ab-legacy          ALSO run the installed `linux-wallpaperengine` on each scene and screenshot
 #                        it (`--screenshot`), then list the scenes that start there but not here.
 #                        THIS DRAWS ON THE REAL OUTPUT NAMED BY --legacy-output (it takes over the
@@ -36,11 +36,11 @@
 #   --legacy-output NAME the output LWE draws on (required with --ab-legacy, e.g. DP-1)
 #   --legacy-delay N     LWE's --screenshot-delay in frames (default 120 = 4 s at 30 fps)
 #
-# Isolation (lp-player's run): its own XDG_RUNTIME_DIR / XDG_STATE_HOME / XDG_CACHE_HOME /
+# Isolation (liascape-player's run): its own XDG_RUNTIME_DIR / XDG_STATE_HOME / XDG_CACHE_HOME /
 # socket under the results dir, `serve --no-supervise --headless --outputs 1920x1080@60 --clock
 # real --ao null`, no WAYLAND_DISPLAY / DISPLAY, PipeWire/Pulse pointed at nothing (the
 # visualiser tap of a scene that wants audio input can't reach the owner's session),
-# LP_PLAYER_VRAM_PROBE=none (the low-VRAM rule never acts on the shared GPU). Nothing it starts
+# LIASCAPE_PLAYER_VRAM_PROBE=none (the low-VRAM rule never acts on the shared GPU). Nothing it starts
 # outlives it (the EXIT trap kills only the pids it started). HOME stays real: WE's assets are
 # found through ~/.local/share/Steam.
 #
@@ -144,7 +144,7 @@ done
 if [[ -n $REUSE ]]; then
     RESULTS=$(realpath -- "$REUSE")
 else
-    RESULTS=${RESULTS:-/tmp/lp-scene-corpus-$(date +%Y%m%d-%H%M%S)}
+    RESULTS=${RESULTS:-/tmp/liascape-scene-corpus-$(date +%Y%m%d-%H%M%S)}
     mkdir -p "$RESULTS" || die "can't create $RESULTS"
     RESULTS=$(realpath -- "$RESULTS")
     case "$RESULTS/" in "$REPO"/*) die "--results must be outside the repo (captures are never committed)" ;; esac
@@ -165,7 +165,7 @@ cleanup() {
         kill "$p" 2>/dev/null
     done
     if [[ -n $SERVE_PID ]] && kill -0 "$SERVE_PID" 2>/dev/null; then
-        LP_PLAYER_SOCKET=$SOCK "$LP" ctl --timeout-ms 3000 quit >/dev/null 2>&1
+        LIASCAPE_PLAYER_SOCKET=$SOCK "$PLAYER" ctl --timeout-ms 3000 quit >/dev/null 2>&1
         for _ in $(seq 50); do kill -0 "$SERVE_PID" 2>/dev/null || break; sleep 0.1; done
         kill -KILL "$SERVE_PID" 2>/dev/null
     fi
@@ -176,49 +176,49 @@ trap 'exit 130' INT TERM
 
 now_ms() { date +%s%3N; }
 
-# ---------------------------------------------------------------- lp-player's run
+# ---------------------------------------------------------------- liascape-player's run
 run_player() {
     if [[ -z $BIN ]]; then
         BIN=$CRATE/target/release
         if ((BUILD)); then
-            echo "scene_corpus: building release (lp-player + lp-scene-worker)…" >&2
+            echo "scene_corpus: building release (liascape-player + liascape-scene-worker)…" >&2
             (cd "$CRATE" && nix develop -c cargo build --release --bins) >"$RESULTS/build.log" 2>&1 ||
                 die "release build failed: $RESULTS/build.log"
         fi
     fi
-    LP=$BIN/lp-player
-    [[ -x $LP && -x $BIN/lp-scene-worker ]] || die "no lp-player/lp-scene-worker in $BIN"
-    "$BIN/lp-scene-worker" --features | jq -e 'index("lwe")' >/dev/null ||
-        die "$BIN/lp-scene-worker was built without LWE (feature lwe)"
+    PLAYER=$BIN/liascape-player
+    [[ -x $PLAYER && -x $BIN/liascape-scene-worker ]] || die "no liascape-player/liascape-scene-worker in $BIN"
+    "$BIN/liascape-scene-worker" --features | jq -e 'index("lwe")' >/dev/null ||
+        die "$BIN/liascape-scene-worker was built without LWE (feature lwe)"
 
     local priv=$RESULTS/priv
     mkdir -p "$priv/run" "$priv/state" "$priv/cache" "$priv/config"
     chmod 700 "$priv/run"
     SOCK=$priv/run/lp.sock
-    export LP_PLAYER_SOCKET=$SOCK XDG_RUNTIME_DIR=$priv/run XDG_STATE_HOME=$priv/state
+    export LIASCAPE_PLAYER_SOCKET=$SOCK XDG_RUNTIME_DIR=$priv/run XDG_STATE_HOME=$priv/state
     export XDG_CACHE_HOME=$priv/cache XDG_CONFIG_HOME=$priv/config
-    export PIPEWIRE_RUNTIME_DIR=$priv/run PIPEWIRE_REMOTE=lp-scene-corpus-none
+    export PIPEWIRE_RUNTIME_DIR=$priv/run PIPEWIRE_REMOTE=liascape-scene-corpus-none
     export PULSE_SERVER=unix:$priv/run/no-pulse DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
-    export LP_PLAYER_VRAM_PROBE=none LP_SCENE_WORKER_BIN=$BIN/lp-scene-worker
-    unset WAYLAND_DISPLAY DISPLAY LP_PLAYER_ALLOW_SYNTHETIC_SCENES
-    [[ -n $ASSETS ]] && export LP_WE_ASSETS_DIR=$ASSETS
+    export LIASCAPE_PLAYER_VRAM_PROBE=none LIASCAPE_SCENE_WORKER_BIN=$BIN/liascape-scene-worker
+    unset WAYLAND_DISPLAY DISPLAY LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES
+    [[ -n $ASSETS ]] && export LIASCAPE_WE_ASSETS_DIR=$ASSETS
 
-    "$LP" scene-check >"$RESULTS/scene-check.json" 2>&1 ||
+    "$PLAYER" scene-check >"$RESULTS/scene-check.json" 2>&1 ||
         die "scene-check failed: $(cat "$RESULTS/scene-check.json")"
     # RLIMIT_CORE 1: a crash (the player's own) skips systemd-coredump and its desktop popup —
     # 0 would not (a piped core_pattern still runs). The workers set it themselves too.
-    prlimit --core=1:1 "$LP" serve --no-supervise --headless --outputs 1920x1080@60 \
+    prlimit --core=1:1 "$PLAYER" serve --no-supervise --headless --outputs 1920x1080@60 \
         --clock real --ao null --log-level info >"$RESULTS/serve.log" 2>&1 &
     SERVE_PID=$!
     for _ in $(seq 150); do
-        "$LP" ctl --timeout-ms 1000 hello >/dev/null 2>&1 && break
+        "$PLAYER" ctl --timeout-ms 1000 hello >/dev/null 2>&1 && break
         kill -0 "$SERVE_PID" 2>/dev/null || die "serve exited: $(tail -5 "$RESULTS/serve.log")"
         sleep 0.1
     done
-    "$LP" ctl hello >"$RESULTS/hello.json" || die "serve never answered"
+    "$PLAYER" ctl hello >"$RESULTS/hello.json" || die "serve never answered"
     jq -e '.capabilities | index("scene")' "$RESULTS/hello.json" >/dev/null ||
         die "the player offers no scene capability: $(cat "$RESULTS/scene-check.json")"
-    "$LP" ctl subscribe source. worker. scene. >"$RESULTS/events.jsonl" 2>/dev/null &
+    "$PLAYER" ctl subscribe source. worker. scene. >"$RESULTS/events.jsonl" 2>/dev/null &
     SUB_PID=$!
     sleep 0.3
 
@@ -229,7 +229,7 @@ run_player() {
         n=$((n + 1))
         # The previous scene goes first, its worker reaped: no two workers measure each other.
         if [[ -n $prev ]]; then
-            "$LP" ctl destroy "{\"id\":\"$prev\"}" >/dev/null 2>&1
+            "$PLAYER" ctl destroy "{\"id\":\"$prev\"}" >/dev/null 2>&1
             if [[ -n $prev_pid ]]; then
                 for _ in $(seq 50); do kill -0 "$prev_pid" 2>/dev/null || break; sleep 0.1; done
             fi
@@ -237,10 +237,10 @@ run_player() {
         play_one "$wid"
         echo "scene_corpus: [$n/${#ITEMS[@]}] $wid → $OUTCOME (${WALL_READY_MS:-–} ms)" >&2
     done
-    [[ -n $prev ]] && "$LP" ctl destroy "{\"id\":\"$prev\"}" >/dev/null 2>&1
-    echo "scene_corpus: lp-player run took $(( ($(now_ms) - t_start) / 1000 )) s" >&2
-    "$LP" ctl logs '{"min_level":"warn","limit":10000}' >"$RESULTS/warnings.json" 2>/dev/null
-    "$LP" ctl --timeout-ms 5000 quit >/dev/null 2>&1
+    [[ -n $prev ]] && "$PLAYER" ctl destroy "{\"id\":\"$prev\"}" >/dev/null 2>&1
+    echo "scene_corpus: liascape-player run took $(( ($(now_ms) - t_start) / 1000 )) s" >&2
+    "$PLAYER" ctl logs '{"min_level":"warn","limit":10000}' >"$RESULTS/warnings.json" 2>/dev/null
+    "$PLAYER" ctl --timeout-ms 5000 quit >/dev/null 2>&1
     for _ in $(seq 100); do kill -0 "$SERVE_PID" 2>/dev/null || break; sleep 0.1; done
     sleep 0.3
     kill "$SUB_PID" 2>/dev/null
@@ -250,7 +250,7 @@ run_player() {
 worker_entry() { # $1 = source id, $2 = probe args (json, default {}) → the entry (or null)
     local args=${2:-}
     [[ -n $args ]] || args='{}'
-    "$LP" ctl probe "{\"name\":\"workers\",\"args\":$args}" 2>/dev/null |
+    "$PLAYER" ctl probe "{\"name\":\"workers\",\"args\":$args}" 2>/dev/null |
         jq -c --arg id "$1" '[.workers[]? | select(.id == $id)][0]'
 }
 
@@ -259,7 +259,7 @@ play_one() {
     OUTCOME=
     WALL_READY_MS=
     t0=$(now_ms)
-    src=$("$LP" ctl create "$(jq -nc --arg p "$path" '{kind:"source",props:{kind:"scene",path:$p}}')" |
+    src=$("$PLAYER" ctl create "$(jq -nc --arg p "$path" '{kind:"source",props:{kind:"scene",path:$p}}')" |
         jq -r '.id // empty')
     if [[ -z $src ]]; then
         OUTCOME=create_failed
@@ -268,7 +268,7 @@ play_one() {
         prev_pid=
         return
     fi
-    "$LP" ctl set "{\"path\":\"lay:*:main.content\",\"value\":\"$src\"}" >/dev/null
+    "$PLAYER" ctl set "{\"path\":\"lay:*:main.content\",\"value\":\"$src\"}" >/dev/null
     prev=$src
     prev_pid=
     while :; do
@@ -308,7 +308,7 @@ play_one() {
             # window is clean.
             [[ $at == 4 ]] && metrics=$(worker_entry "$src")
             local f=$CAPS/$wid-${at}s.png out
-            out=$("$LP" ctl capture "{\"target\":\"$src\",\"path\":\"$f\"}" 2>&1)
+            out=$("$PLAYER" ctl capture "{\"target\":\"$src\",\"path\":\"$f\"}" 2>&1)
             if jq -e '.path' <<<"$out" >/dev/null 2>&1; then caps+=("$f"); else cerr+=("+${at}s: $(jq -r '.message // .' <<<"$out" | head -c 300)"); fi
         done
     fi

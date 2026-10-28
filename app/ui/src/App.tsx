@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react"
 import { LayoutGroup } from "framer-motion";
 import { RefreshCw, Square, Undo2, Upload } from "lucide-react";
 import { useStore } from "./store";
-import { useEvents, type LpEvent } from "./api/events";
+import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
 import { PlaylistStrip } from "./components/PlaylistStrip";
@@ -38,7 +38,7 @@ export default function App() {
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/livepaper/freeze.log (catches the wedge)
 
   // backend push events → targeted store updates
-  const onEvent = useCallback((e: LpEvent) => {
+  const onEvent = useCallback((e: LiascapeEvent) => {
     if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value);
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
@@ -49,12 +49,12 @@ export default function App() {
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
     else if (e.type === "library-synced") s.loadLibrary();
     else if (e.type === "library-item-changed") s.itemChangedByBackend(e.payload.path, { volumeOverride: e.payload.volumeOverride });
-    // lp-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
+    // liascape-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
     else if (e.type === "scene-vram-stopped") {
       const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();
       s.setStatus(`${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
     }
-    // a scene broke for good (lp-player: past its restart budget) — the backend marked it crashed in its index:
+    // a scene broke for good (liascape-player: past its restart budget) — the backend marked it crashed in its index:
     // its card shows it at once (it used to wait for the next library reload)
     else if (e.type === "scene-crashed") s.itemChangedByBackend(e.payload.path, { hasCrashed: true });
     // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
@@ -80,9 +80,9 @@ export default function App() {
     const sync = () => useStore.setState({ appActive: document.visibilityState === "visible" && document.hasFocus() });
     sync();
     for (const ev of ["visibilitychange", "focus", "blur"] as const) addEventListener(ev, sync, true);
-    // authoritative WM signal from the Electron main process (preload window.lp.onActiveChange) — fires
+    // authoritative WM signal from the Electron main process (preload window.liascape.onActiveChange) — fires
     // on real focus changes even when X11 occlusion keeps the DOM reporting "visible".
-    (window as unknown as { lp?: { onActiveChange?: (cb: (v: boolean) => void) => void } }).lp?.onActiveChange?.(
+    (window as unknown as { liascape?: { onActiveChange?: (cb: (v: boolean) => void) => void } }).liascape?.onActiveChange?.(
       (v) => useStore.setState({ appActive: v }));
     return () => { for (const ev of ["visibilitychange", "focus", "blur"] as const) removeEventListener(ev, sync, true); };
   }, []);

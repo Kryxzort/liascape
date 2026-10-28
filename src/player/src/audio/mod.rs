@@ -28,7 +28,7 @@ pub struct Audio {
 }
 
 impl Audio {
-    /// Create the bus for sources playing through mpv's `ao` (`None` = lp-player's default,
+    /// Create the bus for sources playing through mpv's `ao` (`None` = liascape-player's default,
     /// `pipewire`). Any other AO never reaches the bus (`--ao null` in tests — R26 — would
     /// only add a sink to the owner's session for nothing), so none is created for it.
     pub fn start(ao: Option<&str>) -> Audio {
@@ -122,7 +122,7 @@ impl Audio {
     /// Stop the meter, unload the bus (`audio.bus.down {reason: "shutdown"}`). Run after
     /// every source is gone, so no stream is left targeting a vanished sink. Idempotent.
     pub fn close(&mut self) {
-        // The meter's capture stream lives on the bus's own `lp-bus` thread and borrows its
+        // The meter's capture stream lives on the bus's own `lia-bus` thread and borrows its
         // core (`bus.rs`'s module doc) — stop it first, so no capture callback can still be
         // running against a connection that's about to go away.
         self.meter = None;

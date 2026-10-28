@@ -1,4 +1,4 @@
-// lp-transition — livepaper's wallpaper-transition renderer.
+// liascape-transition — livepaper's wallpaper-transition renderer.
 //
 // Draws a gl-transitions effect from one frame (`from`) to another (`to`) on a
 // per-output wlr-layer-shell surface on the BOTTOM layer (above the wallpaper,
@@ -18,7 +18,7 @@
 // teardown — so no --mpv-unpause is needed in the live path.
 //
 // Usage (repeat the --output block once per monitor):
-//   lp-transition --duration-ms 600 --vert WRAP.vert --frag COMPOSED.frag
+//   liascape-transition --duration-ms 600 --vert WRAP.vert --frag COMPOSED.frag
 //     [--uniform NAME TYPE V...] ...
 //     [--from-video A.mp4 --from-start 12.3] [--to-video B.mp4 --to-start 0]
 //     --output DP-1 --from a.raw --to b.raw --width 1920 --height 1080
@@ -231,7 +231,7 @@ static double lag_target = -0.03;
 // then, so the hole plays out masked. Aligned switches already hold 400ms+ in the A-END gate → unchanged.
 // (Holding BAND_HOLD itself this long instead made the tracker limit-cycle and blow its 4s budget.)
 #define AUDIO_SETTLE 0.300
-static long frame_count = 0;       // for fps reporting (LP_TRANSITION_FPS=1)
+static long frame_count = 0;       // for fps reporting (LIASCAPE_TRANSITION_FPS=1)
 // FULL_LIVE: ONE shared decoder pair (decode A/B once into the shared GL context; every output samples
 // these textures → halves the decode on multi-monitor + one audio stream). Created on the first output.
 static struct vid_src g_vfrom, g_vto;
@@ -313,7 +313,7 @@ static double smoothstep01(double x) {
 // ---- file + GL helpers -----------------------------------------------------
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "lp-transition: cannot open %s\n", path); return NULL; }
+    if (!f) { fprintf(stderr, "liascape-transition: cannot open %s\n", path); return NULL; }
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
     char *b = malloc(n + 1);
     if (fread(b, 1, n, f) != (size_t)n) { fclose(f); free(b); return NULL; }
@@ -321,11 +321,11 @@ static char *read_file(const char *path) {
 }
 static uint8_t *read_raw(const char *path, int w, int h) {
     FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "lp-transition: cannot open raw %s\n", path); return NULL; }
+    if (!f) { fprintf(stderr, "liascape-transition: cannot open raw %s\n", path); return NULL; }
     size_t need = (size_t)w * h * 4;
     uint8_t *b = malloc(need);
     size_t got = fread(b, 1, need, f); fclose(f);
-    if (got != need) { fprintf(stderr, "lp-transition: %s: got %zu want %zu\n", path, got, need); free(b); return NULL; }
+    if (got != need) { fprintf(stderr, "liascape-transition: %s: got %zu want %zu\n", path, got, need); free(b); return NULL; }
     return b;
 }
 static GLuint compile(GLenum type, const char *src) {
@@ -333,7 +333,7 @@ static GLuint compile(GLenum type, const char *src) {
     glShaderSource(s, 1, &src, NULL); glCompileShader(s);
     GLint ok = 0; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) { char log[2048]; glGetShaderInfoLog(s, sizeof log, NULL, log);
-        fprintf(stderr, "lp-transition: shader compile failed:\n%s\n", log); return 0; }
+        fprintf(stderr, "liascape-transition: shader compile failed:\n%s\n", log); return 0; }
     return s;
 }
 static GLuint upload_tex(const char *path, int w, int h) {
@@ -396,7 +396,7 @@ static bool vidsrc_init(struct vid_src *v, const char *path, double start, int w
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, v->tex, 0);
     GLenum fb = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (fb != GL_FRAMEBUFFER_COMPLETE) { fprintf(stderr, "lp-transition: FBO incomplete 0x%x\n", fb); return false; }
+    if (fb != GL_FRAMEBUFFER_COMPLETE) { fprintf(stderr, "liascape-transition: FBO incomplete 0x%x\n", fb); return false; }
 
     v->mpv = mpv_create();
     if (!v->mpv) return false;
@@ -450,7 +450,7 @@ static bool vidsrc_init(struct vid_src *v, const char *path, double start, int w
         { 0, NULL },
     };
     if (mpv_render_context_create(&v->rc, v->mpv, params) < 0) {
-        fprintf(stderr, "lp-transition: mpv render context create failed\n");
+        fprintf(stderr, "liascape-transition: mpv render context create failed\n");
         logt("decoder %s: render_context_create FAILED", tag);
         mpv_destroy(v->mpv); v->mpv = NULL; return false;
     }
@@ -528,7 +528,7 @@ static bool surface_init_gl(struct surface *s, const char *vsrc, const char *fsr
     s->egl_window = wl_egl_window_create(s->wl_surface, s->w, s->h);
     s->egl_surface = eglCreateWindowSurface(egl_dpy, egl_cfg,
                         (EGLNativeWindowType)s->egl_window, NULL);
-    if (s->egl_surface == EGL_NO_SURFACE) { fprintf(stderr, "lp-transition: eglCreateWindowSurface failed\n"); return false; }
+    if (s->egl_surface == EGL_NO_SURFACE) { fprintf(stderr, "liascape-transition: eglCreateWindowSurface failed\n"); return false; }
     eglMakeCurrent(egl_dpy, s->egl_surface, s->egl_surface, egl_ctx);
 
     GLuint vs = compile(GL_VERTEX_SHADER, vsrc), fs = compile(GL_FRAGMENT_SHADER, fsrc);
@@ -537,7 +537,7 @@ static bool surface_init_gl(struct surface *s, const char *vsrc, const char *fsr
     glAttachShader(s->prog, vs); glAttachShader(s->prog, fs); glLinkProgram(s->prog);
     GLint ok = 0; glGetProgramiv(s->prog, GL_LINK_STATUS, &ok);
     if (!ok) { char log[2048]; glGetProgramInfoLog(s->prog, sizeof log, NULL, log);
-        fprintf(stderr, "lp-transition: link failed:\n%s\n", log); return false; }
+        fprintf(stderr, "liascape-transition: link failed:\n%s\n", log); return false; }
     glGenVertexArrays(1, &s->vao);
     s->u_progress = glGetUniformLocation(s->prog, "progress");
     s->u_ratio = glGetUniformLocation(s->prog, "ratio");
@@ -925,7 +925,7 @@ static void render(struct surface *s) {
             g_last_av = audio_volume;
         }
         // reveal_a has ONLY B in the overlay (A is the live scene underneath) → B fades in on its own
-        // and the backend's lp-audio fades scene-A out on the matching cos leg.
+        // and the backend's liascape-audio fades scene-A out on the matching cos leg.
         if (g_vfrom.mpv) {
             snprintf(vb, sizeof vb, "%.2f", a_silent ? XFADE_SILENT_DB : xfade_db(cos(x * XFADE_HALF_PI)));
             mpv_set_property_string(g_vfrom.mpv, "volume-gain", vb);   // A: 0 dB → silent
@@ -1002,7 +1002,7 @@ static void ls_configure(void *data, struct zwlr_layer_surface_v1 *ls,
     logt("surface '%s' configured %dx%d at +%.0fms", s->cfg->name, s->w, s->h, (now_s() - proc_t0) * 1000.0);
     // shaders are read once by caller path; stashed on first surface via globals
     extern char *g_vsrc, *g_fsrc;
-    if (!surface_init_gl(s, g_vsrc, g_fsrc)) { fprintf(stderr, "lp-transition: GL init failed\n"); exit(1); }
+    if (!surface_init_gl(s, g_vsrc, g_fsrc)) { fprintf(stderr, "liascape-transition: GL init failed\n"); exit(1); }
     logt("surface '%s' GL ready (shader linked, stills uploaded%s)", s->cfg->name, method == M_FULL_LIVE ? ", decoders up" : "");
     render(s);
 }
@@ -1132,7 +1132,7 @@ static void parse_args(int argc, char **argv) {
 // daemon. A detection miss there silently disabled every transition (TryStart: 0 monitors).
 static int do_list_outputs(void) {
     display = wl_display_connect(NULL);
-    if (!display) { fprintf(stderr, "lp-transition: no Wayland display\n"); return 1; }
+    if (!display) { fprintf(stderr, "liascape-transition: no Wayland display\n"); return 1; }
     struct wl_registry *reg = wl_display_get_registry(display);
     wl_registry_add_listener(reg, &reg_listener, NULL);
     wl_display_roundtrip(display);   // globals
@@ -1155,7 +1155,7 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
     if (list_outputs) return do_list_outputs();
     if (!vert_path || !frag_path || !n_out_cfgs) {
-        fprintf(stderr, "lp-transition: need --vert --frag and at least one --output\n");
+        fprintf(stderr, "liascape-transition: need --vert --frag and at least one --output\n");
         return 2;
     }
     logt("start: method=%s dur=%.2fs scale=%s outputs=%d", method == M_REVEAL ? "reveal" :
@@ -1176,12 +1176,12 @@ int main(int argc, char **argv) {
     }
 
     display = wl_display_connect(NULL);
-    if (!display) { fprintf(stderr, "lp-transition: no Wayland display\n"); return 1; }
+    if (!display) { fprintf(stderr, "liascape-transition: no Wayland display\n"); return 1; }
     struct wl_registry *reg = wl_display_get_registry(display);
     wl_registry_add_listener(reg, &reg_listener, NULL);
     wl_display_roundtrip(display);   // globals
     wl_display_roundtrip(display);   // output name/geometry events
-    if (!compositor || !layer_shell) { fprintf(stderr, "lp-transition: missing compositor/layer-shell\n"); return 1; }
+    if (!compositor || !layer_shell) { fprintf(stderr, "liascape-transition: missing compositor/layer-shell\n"); return 1; }
     logt("wayland ready at +%.0fms (compositor+layer-shell ok, %d outputs discovered)", (now_s() - proc_t0) * 1000.0, n_wl_outs);
 
     // EGL init (shared display/config/context)
@@ -1195,16 +1195,16 @@ int main(int argc, char **argv) {
         EGL_NONE };
     EGLint ncfg = 0;
     eglChooseConfig(egl_dpy, cfg_attr, &egl_cfg, 1, &ncfg);
-    if (ncfg < 1) { fprintf(stderr, "lp-transition: no EGL config\n"); return 1; }
+    if (ncfg < 1) { fprintf(stderr, "liascape-transition: no EGL config\n"); return 1; }
     EGLint ctx_attr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
     egl_ctx = eglCreateContext(egl_dpy, egl_cfg, EGL_NO_CONTEXT, ctx_attr);
-    if (egl_ctx == EGL_NO_CONTEXT) { fprintf(stderr, "lp-transition: no EGL ES3 context\n"); return 1; }
+    if (egl_ctx == EGL_NO_CONTEXT) { fprintf(stderr, "liascape-transition: no EGL ES3 context\n"); return 1; }
     logt("EGL ready at +%.0fms (GLES3 context)", (now_s() - proc_t0) * 1000.0);
 
     // build one layer surface per --output that maps to a live wl_output
     for (int i = 0; i < n_out_cfgs; i++) {
         struct wl_output *o = find_output(out_cfgs[i].name);
-        if (!o) { fprintf(stderr, "lp-transition: output %s not found, skipping\n", out_cfgs[i].name); continue; }
+        if (!o) { fprintf(stderr, "liascape-transition: output %s not found, skipping\n", out_cfgs[i].name); continue; }
         struct surface *s = &surfaces[n_surfaces++];
         s->cfg = &out_cfgs[i];
         s->wl_surface = wl_compositor_create_surface(compositor);
@@ -1222,7 +1222,7 @@ int main(int argc, char **argv) {
         zwlr_layer_surface_v1_set_keyboard_interactivity(s->layer_surface, 0);
         wl_surface_commit(s->wl_surface);
     }
-    if (!n_surfaces) { fprintf(stderr, "lp-transition: no matching outputs\n"); return 1; }
+    if (!n_surfaces) { fprintf(stderr, "liascape-transition: no matching outputs\n"); return 1; }
 
     // event loop until every surface finishes (+ a hard safety timeout that covers decoder warm-up
     // and, when align-a-end gates the start on A's remaining, the backend's early-fire slack)
@@ -1284,9 +1284,9 @@ int main(int argc, char **argv) {
     wl_display_flush(display);
     wl_display_roundtrip(display);
 
-    if (getenv("LP_TRANSITION_FPS")) {
+    if (getenv("LIASCAPE_TRANSITION_FPS")) {
         double el = now_s() - start_time;
-        fprintf(stderr, "lp-transition: %ld frames / %d surface(s) / %.2fs = %.1f fps/surface\n",
+        fprintf(stderr, "liascape-transition: %ld frames / %d surface(s) / %.2fs = %.1f fps/surface\n",
                 frame_count, n_surfaces, el, frame_count / (double)n_surfaces / (el > 0 ? el : 1));
     }
     // tear down the shared decoders (GL context must be current for the render-context cleanup)

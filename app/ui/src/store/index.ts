@@ -9,8 +9,8 @@ const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, type: "", 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
 // (survives in Electron) rather than the backend settings.json.
 const LS = {
-  get<T>(k: string, d: T): T { try { const v = localStorage.getItem("lp." + k); return v == null ? d : (JSON.parse(v) as T); } catch { return d; } },
-  set(k: string, v: unknown) { try { localStorage.setItem("lp." + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  get<T>(k: string, d: T): T { try { const v = localStorage.getItem("liascape." + k); return v == null ? d : (JSON.parse(v) as T); } catch { return d; } },
+  set(k: string, v: unknown) { try { localStorage.setItem("liascape." + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
 // Applies a theme's 16 colors to :root as CSS vars (ThemeService color keys).

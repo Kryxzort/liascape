@@ -23,8 +23,8 @@ function connect() {
 (async () => {
   const c = await connect();
   const log = (k, v) => console.log(k.padEnd(14), JSON.stringify(v));
-  log("tab", await c.eval("lpdbg.tab('library')")); await sleep(1500);
-  log("gifs_on", await c.eval("lpdbg.gifs(true)")); await sleep(2500);
+  log("tab", await c.eval("liascapeDbg.tab('library')")); await sleep(1500);
+  log("gifs_on", await c.eval("liascapeDbg.gifs(true)")); await sleep(2500);
   log("anim", await c.eval("document.querySelectorAll('.thumb.anim').length"));
   log("fps_idle", await c.eval(FPS));
   await c.eval("(()=>{const card=document.querySelector('.card.lib .thumb-wrap');const r=card.getBoundingClientRect();card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+20,clientY:r.top+20}));})()");
@@ -33,7 +33,7 @@ function connect() {
   await sleep(700);
   log("modalOpen", await c.eval("!!document.querySelector('.modal')"));
   log("fps_modal", await c.eval(FPS));
-  log("autoscroll_fps", await (async () => { await c.eval("document.querySelector('.modal-backdrop')?.click()"); await sleep(300); await c.eval("lpdbg.autoscroll(3000,4)"); return c.eval(FPS); })());
-  log("metrics", await c.eval("lpdbg.metrics()"));
+  log("autoscroll_fps", await (async () => { await c.eval("document.querySelector('.modal-backdrop')?.click()"); await sleep(300); await c.eval("liascapeDbg.autoscroll(3000,4)"); return c.eval(FPS); })());
+  log("metrics", await c.eval("liascapeDbg.metrics()"));
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

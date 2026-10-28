@@ -1,14 +1,14 @@
-# lp-player — Phase 2 (scene worker) Implementation Plan
+# liascape-player — Phase 2 (scene worker) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** WE scenes play under `PlayerEngine=lp-player`: LWE's `next-v2` core runs in an isolated worker process
+**Goal:** WE scenes play under `PlayerEngine=liascape-player`: LWE's `next-v2` core runs in an isolated worker process
 per scene source, hands the compositor GPU frames over dmabuf + `sync_file`, owns its audio as a dB gain on a
 stream that keeps running, survives crashes without touching anything else, and composes with every transition
 method and switch combo (V↔S, S↔S).
 
 **Architecture:** A `scene` kind joins the graph's `Source` schema. `SourceHost` opens it as a `SceneSource`, which
-drives one `lp-scene-worker` child over a `SOCK_SEQPACKET` socketpair: the compositor sends `Tick {t}` frame
+drives one `liascape-scene-worker` child over a `SOCK_SEQPACKET` socketpair: the compositor sends `Tick {t}` frame
 requests (its own scene clock, so pause and stepped mode are exact), the worker renders the LWE project into a
 3-slot ring of exported `GL_RGBA8` textures and answers `Frame {slot}` + an acquire fence. The compositor latches
 only frames whose fence already signalled, samples them like any other source texture, and returns a release
@@ -16,7 +16,7 @@ fence. Scene audio leaves the worker on its own PipeWire stream to the player bu
 compositor's `Gain` pushes. The transition recipe, aliases, snapshot and adapter stay kind-agnostic; only the
 places that hard-code `kind == "video"` learn about `scene`.
 
-**Tech Stack:** Rust 1.96 (edition 2024, the existing `lp-player` crate + a second binary `lp-scene-worker`) ·
+**Tech Stack:** Rust 1.96 (edition 2024, the existing `liascape-player` crate + a second binary `liascape-scene-worker`) ·
 LWE `next-v2` core (C++20, CMake, its C API `include/linux-wallpaperengine/*.h`) · EGL
 `EGL_MESA_image_dma_buf_export` / `EGL_EXT_image_dma_buf_import_modifiers` / `EGL_ANDROID_native_fence_sync` ·
 pipewire-rs 0.10 · C# .NET 10 (adapter) · Nix flake + `scripts/install.sh`.
@@ -71,10 +71,10 @@ task text where they differ:
   properties, 868 conditions — RED first: 9 failures, the order rule, a default below its slider's min, conditions
   with `a. value` and `ds+media.value`), adapter IT § scene properties (RED on the base backend: 15 failing, the rest
   175 pass; GREEN 189/0), matrix `sceneProp:set|switch|restart|reset` (RED on the base backend + UI: 2 fail + 2
-  error; GREEN 4/4). Full matrix (`--changed lp-player`, every cell — central files changed, `--jobs 2`, 33 min, load
+  error; GREEN 4/4). Full matrix (`--changed liascape-player`, every cell — central files changed, `--jobs 2`, 33 min, load
   5–9 with other agents' runs): 748 pass / 1 fail / 2 error / 29 skip — `playlist × stripVol:other`,
   `globalDragVol`, `globalDragSpd` (a Settings slider "not found" / an override not saved in time), each passing 2/2
-  alone (load). `test-settings-merge.sh` 53/0, `--lp-player-selftest` PASS.
+  alone (load). `test-settings-merge.sh` 53/0, `--liascape-player-selftest` PASS.
 - **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
 - **GPU budget = a setting, default auto-throttle**: on missed compositor frames attributable to a scene, lower that
   scene's fps stepwise, restore when it recovers (logged; `probe`); the setting turns it off (fixed fps).
@@ -92,7 +92,7 @@ task text where they differ:
   fallback) → `FromWorker::Loudness {segments}` per 100 ms (`PROTOCOL` 3). Compositor: a `Learner` per
   `SceneSource` (kept across worker restarts) — BS.1770-4 400 ms blocks, absolute −70 / relative −10 gates —
   emits `scene.loudness {id, path, lufs, peak_dbfs, seconds, played_s, complete, window_s}` once 60 s of AUDIBLE
-  play are in (`LP_PLAYER_LOUDNESS_WINDOW_S`), or at the source's end with ≥ a third of the window (`complete:
+  play are in (`LIASCAPE_PLAYER_LOUDNESS_WINDOW_S`), or at the source's end with ≥ a third of the window (`complete:
   false`). Backend: subscribed; `LibraryService.MergeSceneLoudness` → `loudnessI`/`loudnessTP` (sample peak)/
   `loudnessSeconds`/`loudnessPartial`, learned once (a partial until a complete one or a longer partial); the
   resolver's per-source `gain.normalize` = `NormalizeTargetLufs − I`, the sample peak kept ≤ −1.5 dBFS, clamped
@@ -108,8 +108,8 @@ task text where they differ:
   worker `loudness_segments_count_only_played_sound`, api ×5 (RED: 5/5 fail before), self-test
   `SceneLoudnessAssertions`, adapter IT § scene loudness (RED on the base backend: 13 failing, the rest 193 pass;
   GREEN 204/0). Crate suite: default 1 fail (`transport_meets_the_spike_budget`, worker CPU 7.6 % at load ~10 — a
-  soundless scene, no loudness code runs; passes alone), `LP_PLAYER_RENDER_WORKER=off` all pass;
-  `test-settings-merge.sh` 53/0; `--lp-player-selftest` PASS; matrix (`--changed` → full, `--jobs 2`, 32 min)
+  soundless scene, no loudness code runs; passes alone), `LIASCAPE_PLAYER_RENDER_WORKER=off` all pass;
+  `test-settings-merge.sh` 53/0; `--liascape-player-selftest` PASS; matrix (`--changed` → full, `--jobs 2`, 32 min)
   751 pass / 0 fail / 0 error / 29 skip.
 - **Broken scene while playing in a rotation: advance to the next item at once** (single wallpaper: keep its last
   frame / preview, silent).
@@ -126,7 +126,7 @@ Revised size: the original 15 tasks + 4 (speed, properties, VRAM guard/budget se
 The original recommendations follow for reference.
 
 1. **D1 — Same scene on several outputs:** one worker per scene source, shared by every output showing it (like videos). **Recommend this.** Spec §4.3 says one worker per output; that doubles GPU/VRAM and needs per-output plumbing (+1 L task) for little isolation gain.
-2. **D2 — Worker language:** Rust binary `lp-scene-worker` in the lp-player crate, calling LWE's C API. **Recommend this.** Alternative: C++ (spec §13's note).
+2. **D2 — Worker language:** Rust binary `liascape-scene-worker` in the liascape-player crate, calling LWE's C API. **Recommend this.** Alternative: C++ (spec §13's note).
 3. **D3 — LWE source:** pin + fetch at build (`third_party/lwe/PIN`, patches in `patches/lwe/`). **Recommend this.** Alternative: the spec's verbatim `third_party/lwe/` tree (~125 MB with submodules).
 4. **D4 — Visualiser input:** the default sink's monitor (system audio, as LWE's frontend and WE do). **Recommend this.** Alternative: the player bus (wallpaper audio only, spike §6).
 5. **D5 — Scene fps for an output with no `LweMonitors` entry:** 30 (LWE's default). **Recommend this.** Alternative: the output's refresh.
@@ -175,14 +175,14 @@ The original recommendations follow for reference.
   alpha is 0 in every core pixel → the worker forces alpha = 1.
 - **Build (spec §3):** the scene worker builds by default; `install.sh` hard-fails with per-distro package lines when
   its dependencies are missing unless `--no-scenes`, which hides scenes like `AllowScenes=false`. The flake builds it.
-- **Settings apply live:** `LweMonitors` fps becomes the live `out:<c>.scene_fps`; under lp-player it is no longer
+- **Settings apply live:** `LweMonitors` fps becomes the live `out:<c>.scene_fps`; under liascape-player it is no longer
   the launch-only exception. Scenes are 1×: `speed`/`loop` and the video-only props are accepted, stored, ignored;
   a scene never emits `Ended`.
 - `PlayerEngine` stays `legacy` by default; legacy behaviour must not change.
 - **Test media:** synthetic scenes (worker synthetic renderer, D7) and ffmpeg clips, or the SFW Workshop folder
   `~/.local/share/Steam/steamapps/workshop/content/431960`. **Never** the steamcmd cache
   (`~/.cache/livepaper/steamcmd_workshop/…`). Every hermetic test runs `--ao null` or a private PipeWire.
-- The synthetic renderer is honoured only when `serve` runs with `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`; production
+- The synthetic renderer is honoured only when `serve` runs with `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`; production
   never sets it.
 - The owner approved taking over the live wallpaper session for on-machine batteries; never restart/kill their
   Electron UI or backend; leave the session as the tests end it; never print `/settings` (Steam token).
@@ -198,7 +198,7 @@ The original recommendations follow for reference.
    switch fails cleanly back to A, no crash record, no restart loop, the item is not marked crashed. → Task 7
    `missing_scene_folder_fails_without_crash_record`, Task 11 IT step "missing folder".
 2. **WE isn't installed / its library moved** (no `assets/`). Scenes are hidden like `AllowScenes=false`; a scene
-   requested anyway errors with a hint naming `LP_WE_ASSETS_DIR` / `player.scene_assets`, never a 1×1 render loop.
+   requested anyway errors with a hint naming `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`, never a 1×1 render loop.
    → Task 7 `no_assets_dir_hides_scenes_and_errors_with_hint`.
 3. **A 4K or 7467×4200 scene** (43 of 93 library scenes are 3840×2160). The export ring is sized to cover the
    largest output showing it, never the native size. → Task 4 `huge_native_scene_exports_at_cover_size`.
@@ -225,16 +225,16 @@ src/player/src/scene/{mod,assets,pointer,budget}.rs  pure helpers: cover size, a
 src/player/src/sources/scene.rs             SceneSource (Source impl)
 src/player/src/audio/sysmon.rs              default-sink monitor tap for visualisers (D4)
 src/player/src/probe/workers.rs             `workers` probe
-src/player/src/bin/lp-scene-worker/{main,ring,synthetic,audio,lwe,render}.rs   the worker binary
+src/player/src/bin/liascape-scene-worker/{main,ring,synthetic,audio,lwe,render}.rs   the worker binary
 src/player/tests/{worker,scene,lwe_build}.rs   new test targets; tests/common gains synthetic_scene + PrivatePw
 src/player/tests/onmachine/scene_corpus.sh  corpus runner
 src/livepaper/Player/*.cs, Helpers/PlayerHelper.cs, Web/ServerHost.cs, app/ui/src/views/Settings.tsx   adapter
 ```
 
 **Render worker interplay (decided):** dmabuf imports, latching and release fences run on the **loop's own
-context**, not on the `lp-render` thread. Import is a one-off 0.04–0.4 ms per ring slot, latching is an fd poll,
+context**, not on the `lia-render` thread. Import is a one-off 0.04–0.4 ms per ring slot, latching is an fd poll,
 and the release fence is created on the context that sampled the texture, so the share-group rebind rule and an
-extra cross-thread hop (a frame of latency) never arise. `lp-render` keeps owning mpv render contexts only.
+extra cross-thread hop (a frame of latency) never arise. `lia-render` keeps owning mpv render contexts only.
 
 **Order:** 1 → 2 → 4 → 5 → {6, 7} → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15. Task 3 needs no LWE and can run in
 parallel with 1–2.
@@ -251,12 +251,12 @@ Task 14 will find (Phase 1's battery produced four).
   {path → commit} for the 10 submodules in `.gitmodules`)
 - Create: `patches/lwe/0001-cmake-version-override.patch`, `patches/lwe/0002-build-drop-gmpxx-add-glm-include.patch`
 - Create: `scripts/lwe.sh`, `src/player/tests/lwe_build.rs`
-- Modify: `flake.nix` (new `lwe-src`, `lwe-core`; `lp-player` buildInputs + env; devShell env; `packages`),
+- Modify: `flake.nix` (new `lwe-src`, `lwe-core`; `liascape-player` buildInputs + env; devShell env; `packages`),
   `scripts/install.sh`, `.gitignore` (`/build/`), `UPSTREAM.md` (LWE section), `CREDITS.md` (regenerated)
 
 **Interfaces:**
-- Produces: `$LP_LWE_CORE_DIR/{lib/liblinux-wallpaperengine-core.so*, include/linux-wallpaperengine/*.h}` — set by
-  the flake (lp-player derivation and devShell) and by `install.sh`; dev default `$(pwd -P)/build/lwe-core`.
+- Produces: `$LIASCAPE_LWE_CORE_DIR/{lib/liblinux-wallpaperengine-core.so*, include/linux-wallpaperengine/*.h}` — set by
+  the flake (liascape-player derivation and devShell) and by `install.sh`; dev default `$(pwd -P)/build/lwe-core`.
 - `scripts/lwe.sh fetch` → `${LWE_SRC_CACHE:-$HOME/.cache/livepaper/src}/lwe-<rev>` (clone, checkout `rev`,
   submodules at the PIN's commits, each verified); `prepare` → `build/lwe-src-<rev>` (copy without VCS dirs,
   every patch `--check`ed, then applied in filename order); `build` → CMake with the spike flags
@@ -265,8 +265,8 @@ Task 14 will find (Phase 1's battery produced four).
   `rebase <rev>` → re-applies every patch onto `<rev>` in a scratch copy, prints ok/conflict per patch, changes
   nothing on failure.
 
-- [x] **Step 1: Write failing tests** (`tests/lwe_build.rs`; SKIP when `LP_LWE_CORE_DIR` is unset, FAIL then under
-  `LP_REQUIRE_SCENES=1`):
+- [x] **Step 1: Write failing tests** (`tests/lwe_build.rs`; SKIP when `LIASCAPE_LWE_CORE_DIR` is unset, FAIL then under
+  `LIASCAPE_REQUIRE_SCENES=1`):
   - `core_exports_only_wp_symbols`: `nm -D --defined-only` of the `.so` → every symbol starts `wp_`; the set ⊇ the
     66 of the pin (fixture list `tests/fixtures/lwe_exports_ddea3b4.txt`).
   - `patch_headers_are_complete`: every `patches/lwe/*.patch` has `From:`, `Subject:`, `Origin:` ∈ {ours,
@@ -308,9 +308,9 @@ work in place). Export fixture: `tests/fixtures/lwe_exports.txt` (70 = 66 + 0003
 tests: `core_is_the_pinned_one`, `worker_links_the_core`. Build: `lwe.sh` 54–56 s at `-j8`, the
 flake's `lwe-core` 49 s. Step 6 (D7): a clear-colour-only scene renders without assets —
 recorded in `docs/player/spikes/lwe-core.md` §8 (§7 was taken). `install.sh` also installs
-`lp-scene-worker` (+ the core in `livepaper-web/lib`, worker RUNPATH `$ORIGIN/../lib`), and a
+`liascape-scene-worker` (+ the core in `livepaper-web/lib`, worker RUNPATH `$ORIGIN/../lib`), and a
 DESTDIR install no longer exits 1 (its last line). The `lwe` feature is **on by default**: the
-devShell and the `lp-player` package set `LP_LWE_CORE_DIR`.
+devShell and the `liascape-player` package set `LIASCAPE_LWE_CORE_DIR`.
 
 **Size: L** (1.5–2 days; nix hash + CMake quirks + three distros' package names).
 
@@ -355,12 +355,12 @@ WPENGINE_API const char* wp_context_audio_driver_name (wp_context* ctx);        
 headers are C++-only) with two committed fixtures (`min-scene`, `fail-scene` — the failed build
 needs no missing assets: an object with a missing parent) and three extra cases
 (`min_scene_renders_without_assets`, `host_pull_mixes_scene_sound_at_unity_gain` with
-`LP_WE_ASSETS_DIR`, `pull_on_sdl_context_returns_zero`). The audio-mix test found a heap overflow
+`LIASCAPE_WE_ASSETS_DIR`, `pull_on_sdl_context_returns_zero`). The audio-mix test found a heap overflow
 for mono sounds on a stereo output → **patch 0006** (resample buffer sized by the output's
 channels). 0003's pull never waits for decoding (safe in a PipeWire RT callback) and the frames
 pulled per host second set the speed — the hook for the owner's pitch-corrected scene speed
 (Task 6's time-stretch). RED seen: compile failure (no symbols), SIGSEGV on the 2nd render
-(before 0004), `double free or corruption` (before 0006). Real-scene smoke: `lp-scene-worker
+(before 0004), `double free or corruption` (before 0006). Real-scene smoke: `liascape-scene-worker
 --lwe-smoke` (`lwe.rs`, the seed of Task 7's renderer). `.claude/rules/player-core.md` § Scene
 worker → "LWE core".
 
@@ -369,12 +369,12 @@ worker → "LWE core".
 ### Task 3: Worker protocol and process lifecycle
 
 **Files:**
-- Create: `src/player/src/worker/{mod.rs,proto.rs}`, `src/player/src/bin/lp-scene-worker/main.rs` (`--fd N
+- Create: `src/player/src/worker/{mod.rs,proto.rs}`, `src/player/src/bin/liascape-scene-worker/main.rs` (`--fd N
   --parent-pid P [--stub]`), `src/player/tests/worker.rs`
 - Modify: `src/player/src/lib.rs`, `Cargo.toml` (feature `lwe`, default on; the bin), `build.rs` (feature `lwe` →
-  `cargo::rustc-link-arg-bin=lp-scene-worker=-L$LP_LWE_CORE_DIR/lib -llinux-wallpaperengine-core
-  -Wl,-rpath,$LP_LWE_CORE_DIR/lib`; missing env → build error naming `scripts/lwe.sh build` and
-  `--no-default-features`), `src/player/src/paths.rs` (`scene_worker_bin()`: `LP_SCENE_WORKER_BIN` → sibling of
+  `cargo::rustc-link-arg-bin=liascape-scene-worker=-L$LIASCAPE_LWE_CORE_DIR/lib -llinux-wallpaperengine-core
+  -Wl,-rpath,$LIASCAPE_LWE_CORE_DIR/lib`; missing env → build error naming `scripts/lwe.sh build` and
+  `--no-default-features`), `src/player/src/paths.rs` (`scene_worker_bin()`: `LIASCAPE_SCENE_WORKER_BIN` → sibling of
   `/proc/self/exe` → `PATH`; `crash_dir()` = `<state>/crashes/`)
 
 **Interfaces:**
@@ -425,7 +425,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   uptime_ms, t_wall, log_tail}`; oldest dropped past 20. Events `worker.spawned|ready|exited|hung|restart` +
   `source.broken` (Task 10 wires it to the source).
 - Spawn runs off the loop (the `host::OpenPool`, like mpv cores) — forking the compositor costs page-table copies.
-- `--stub` mode: answers `Hello`/`Ping`; knobs in `LP_SCENE_WORKER_TEST` (comma-separated): `crash_after_ms:N`
+- `--stub` mode: answers `Hello`/`Ping`; knobs in `LIASCAPE_SCENE_WORKER_TEST` (comma-separated): `crash_after_ms:N`
   (prints "stub: crashing" to stderr, then `abort()`), `hang_after_ms:N` (stops answering), `exit_code:N`,
   `ignore_quit`, `spam_stderr:N`.
 
@@ -456,14 +456,14 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   `native_fence() -> Result<OwnedFd, String>` (`EGL_SYNC_NATIVE_FENCE_ANDROID` + `glFlush` + dup — flush before the
   dup), `gpu_wait_fence(OwnedFd)`; `glEGLImageTargetTexture2DOES` fetched by name
 - Create: `src/player/src/worker/dmabuf.rs` (`ImportedRing`, `Latch`), `src/player/src/scene/mod.rs`
-  (`cover_size`), `src/player/src/bin/lp-scene-worker/{ring.rs,synthetic.rs}`, `src/player/src/sources/scene.rs`
+  (`cover_size`), `src/player/src/bin/liascape-scene-worker/{ring.rs,synthetic.rs}`, `src/player/src/sources/scene.rs`
   (texture path), `src/player/tests/scene.rs`
 - Modify: `tests/common/mod.rs` — `synthetic_scene(name, SyntheticSpec) -> PathBuf` writes
   `target/test-media/scenes/<name>/{project.json (type scene), scene.pkg (16-byte placeholder), preview.png,
-  lp-synthetic.json}`
+  liascape-synthetic.json}`
 
 **Interfaces:**
-- `lp-synthetic.json` = `SyntheticSpec { pattern: frame_index|solid|split_tb|pointer_dot|input_level, rgb, native:
+- `liascape-synthetic.json` = `SyntheticSpec { pattern: frame_index|solid|split_tb|pointer_dot|input_level, rgb, native:
   [w,h], alpha: f32 (to prove the worker forces 1), gpu_work: u32, tone_hz, tone_dbfs, has_audio, crash_after_ms,
   hang_after_ms, fail: Option<load|build> }`. `frame_index` = the spike's top-left 64×64 = `seq mod 256` + a 16×16
   gradient probe at the far corner.
@@ -475,7 +475,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   draw that sampled it); `gpu_wait_fence` on the newly latched acquire fd is kept as a free safety net.
 - `SceneSource::texture()` = the latched slot's texture; it survives worker death (spike §6); a restart's new
   `Buffer` set replaces the old `ImportedRing` only once the new worker's first frame latched.
-- fdpoll: `LP_SCENE_SYNC=fdpoll`, or a worker lacking `EGL_ANDROID_native_fence_sync` → `Hello.sync = "fdpoll"`.
+- fdpoll: `LIASCAPE_SCENE_SYNC=fdpoll`, or a worker lacking `EGL_ANDROID_native_fence_sync` → `Hello.sync = "fdpoll"`.
 - In this task `SceneSource` ticks at a fixed `opts.tick_hz` (tests pass 144) with `max_size` from opts; Task 5
   replaces both with the graph's demand.
 
@@ -487,7 +487,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   - `killed_worker_keeps_last_frame` (SIGKILL the worker: readbacks every 100 ms for 2 s identical, texture never None)
   - `restart_replaces_ring_after_first_new_frame`
   - unit `external_only_modifier_is_refused` (fake modifier table: LINEAR external-only → error naming dmabuf.md §1)
-  - `fdpoll_fallback_is_equally_correct` (`LP_SCENE_SYNC=fdpoll`, the first test at 300 frames)
+  - `fdpoll_fallback_is_equally_correct` (`LIASCAPE_SCENE_SYNC=fdpoll`, the first test at 300 frames)
   - `scene_texture_holds_image_top_at_t0` (split_tb red/blue: low y red — R25, no flip)
   - `scene_frame_is_opaque` (alpha 0 in the pattern → alpha 255 sampled)
   - `huge_native_scene_exports_at_cover_size` (native 7467×4200, demand 1920×1080 → `Buffer` 1920×1080)
@@ -558,7 +558,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   - api `demand_change_reexports_without_black` (add a 2560×1440 virtual output → one `Resize`, a new `Buffer` set
     at the new cover size, the texture never None in between)
 - [x] **Step 2:** run the new tests → FAIL. **Step 3:** implement. **Step 4:** full suite → PASS (render worker on
-  and off: `LP_PLAYER_RENDER_WORKER=off cargo test -q`).
+  and off: `LIASCAPE_PLAYER_RENDER_WORKER=off cargo test -q`).
 - [x] **Step 5:** Commit `Add Scene Source Kind`.
 
 **Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "The
@@ -576,7 +576,7 @@ and the supervise test's new-worker checks.
 ### Task 6: Scene audio — a dB-gained stream on the bus
 
 **Files:**
-- Create: `src/player/src/bin/lp-scene-worker/audio.rs`
+- Create: `src/player/src/bin/liascape-scene-worker/audio.rs`
 - Modify: `sources/scene.rs` (effective-dB `Gain` on every gain change incl. the 1 kHz `push_gain` path;
   `NoAudio`; `Route`; `AudioFlowing`/`HasAudio` → `SourceEvent::AudioFlowing` / observed `has_audio`; `Envelope`
   → `probe::dropout`), `audio/meter.rs` (`pub fn dbfs_block(&[f32], channels) -> f32` shared with the worker),
@@ -585,8 +585,8 @@ and the supervise test's new-worker checks.
 
 **Interfaces:**
 - Worker stream: PipeWire playback, F32 stereo 48 kHz, `node.latency 256/48000`, props `node.name =
-  lp-player-scene.<source id>`, `application.name = lp-player`, `media.role = Wallpaper`, `target.object =
-  lp-player-bus` when `Route` is the bus, `state.restore-props = false`, `state.restore-target = false`. Opened at
+  liascape-player-scene.<source id>`, `application.name = liascape-player`, `media.role = Wallpaper`, `target.object =
+  liascape-player-bus` when `Route` is the bus, `state.restore-props = false`, `state.restore-target = false`. Opened at
   Start (silent at −96 dB until a `Gain` arrives), closed only at `Quit` after the compositor's retire ramp.
 - Process callback: pull `frames` from `wp_context_audio_pull` (synthetic: the tone; paused / `no_audio`: nothing
   pulled, silence written), multiply by a gain interpolated **linearly in amplitude** from the previous to the
@@ -598,12 +598,12 @@ and the supervise test's new-worker checks.
 - `Envelope`: 1 ms max-channel RMS dBFS of the **pre-gain** samples, batched every 50 ms.
 
 - [x] **Step 1: Write failing tests:**
-  - worker unit (`cargo test --bin lp-scene-worker`): `gain_change_ramps_across_one_buffer` (0 → −96 within a
+  - worker unit (`cargo test --bin liascape-scene-worker`): `gain_change_ramps_across_one_buffer` (0 → −96 within a
     480-frame buffer of 1.0: first ≈ 1.0, last = 0.0, monotonic, max step ≤ 1/479 + 1e-6),
     `silent_db_is_exact_zero`, `gain_matches_db_to_lin` (−6.0206 dB → 0.5 ± 1e-6),
     `envelope_of_full_scale_sine_is_minus_3_01` (± 0.05)
   - api (PrivatePw; SKIP without the binaries): `scene_audio_on_bus_with_identity` (synthetic 440 Hz −20 dBFS:
-    the stream's props as above, linked to `lp-player-bus`; `meter.window` median −23 ± 3 dB),
+    the stream's props as above, linked to `liascape-player-bus`; `meter.window` median −23 ± 3 dB),
     `scene_gain_ramp_reaches_the_bus` (animate `gain.user` 0 → −20 over 300 ms: end −43 ± 3, monotonic),
     `scene_no_audio_toggle_is_live` (on → ≤ −90 within 100 ms; off → `source.audio_flowing` then −23 ± 3; same pid),
     `scene_audio_flowing_gates_onset` (frozen V→S: B's `onset.started {reason: flowed}` after its flowing event),
@@ -637,16 +637,16 @@ quantum). `PrivatePw` lives in `tests/common/pw.rs`.
 ### Task 7: Real scenes — LWE in the worker, assets dir, pointer, visualiser input
 
 **Files:**
-- Create: `src/player/src/bin/lp-scene-worker/{lwe.rs (extern "C" decls + safe wrapper), render.rs}`,
+- Create: `src/player/src/bin/liascape-scene-worker/{lwe.rs (extern "C" decls + safe wrapper), render.rs}`,
   `src/player/src/scene/{assets.rs,pointer.rs}`, `src/player/src/audio/sysmon.rs`
 - Modify: `graph/props.rs` (Player `scene_assets: Str` default "" = auto; read-only `scene_assets_resolved`),
-  `main.rs` (`lp-player scene-check` → JSON `{worker, features, assets_dir, ok, reason}`, exit 0/1),
+  `main.rs` (`liascape-player scene-check` → JSON `{worker, features, assets_dir, ok, reason}`, exit 0/1),
   `runtime.rs` (forward `out:<c>.pointer` to every scene source shown on `<c>`, both sides mid-transition; feed
   visualiser windows), `api/handlers.rs` (`headless.pointer {output, x, y, buttons}`)
 
 **Interfaces:**
 - `scene::assets::resolve(explicit: Option<&Path>, home: &Path) -> Result<PathBuf, String>`: explicit →
-  `LP_WE_ASSETS_DIR` → each Steam root (`~/.local/share/Steam`, `~/.steam/steam`, Flatpak) and each
+  `LIASCAPE_WE_ASSETS_DIR` → each Steam root (`~/.local/share/Steam`, `~/.steam/steam`, Flatpak) and each
   `libraryfolders.vdf` `"path"` → `<root>/steamapps/common/wallpaper_engine/assets` containing
   `shaders/genericimage2.vert` (this machine: workshop in the primary library, WE in
   `/mnt/Games/Steam/SteamLibrary`). `parse_libraryfolders(&str) -> Vec<PathBuf>`;
@@ -654,7 +654,7 @@ quantum). `PrivatePw` lives in `tests/common/pw.rs`.
   passed as `Start.steam_dir` so dependencies resolve). The scene path is the folder itself
   (`wp_project_load_folder`); `local/<id>` symlinks resolve.
 - From this task on, `hello.capabilities` has `scene` only when the worker resolves **and** an assets dir resolves
-  (with `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` the assets dir is optional, so hermetic stacks still get it);
+  (with `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` the assets dir is optional, so hermetic stacks still get it);
   `scene-check` applies the same rule.
 - `render.rs`: `LweScene::load(dir, assets, steam_dir, audio) -> Result<LweScene, String>` (NULL → `"load failed:
   <stderr tail>"`); `first_render() -> Result<(u32,u32), String>` (frame 0 into a 1×1 scratch FBO; size ≤ 1 →
@@ -677,8 +677,8 @@ quantum). `PrivatePw` lives in `tests/common/pw.rs`.
   - api `missing_scene_folder_fails_without_crash_record` (Review 1: `source.error` "load failed", no file under
     `crashes/`, no `worker.restart`)
   - api `no_assets_dir_hides_scenes_and_errors_with_hint` (Review 2: no `scene` capability, `scene-check` exit 1
-    with a reason; a create anyway → Error naming `LP_WE_ASSETS_DIR` / `player.scene_assets`)
-  - opt-in on-machine (`LP_PLAYER_TEST_SCENES=<431960 dir>`, else SKIP; FAIL under `LP_REQUIRE_SCENES=1`):
+    with a reason; a create anyway → Error naming `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`)
+  - opt-in on-machine (`LIASCAPE_PLAYER_TEST_SCENES=<431960 dir>`, else SKIP; FAIL under `LIASCAPE_REQUIRE_SCENES=1`):
     `real_scenes_render_and_animate` (1726902114, 2371103399, 2134765860: Ready ≤ 3 s, non-blank, the frames at
     1 s and 3 s differ, 0 GL errors in the worker log), `renderer_build_failure_is_broken_not_a_segfault` (empty
     assets dir → fatal Error, worker exit 0)
@@ -686,9 +686,9 @@ quantum). `PrivatePw` lives in `tests/common/pw.rs`.
 - [x] **Step 5:** Commit `Render WE Scenes In The Scene Worker`.
 
 **Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Real scenes
-(Task 7)"): the load runs on the renderer thread while a second worker thread (`lp-scene-proto`)
+(Task 7)"): the load runs on the renderer thread while a second worker thread (`lia-scene-proto`)
 answers pings (LWE's GL objects must be built and rendered on one context — a loader thread with
-its own context can't share VAOs/FBOs), bounded by `LP_SCENE_LOAD_TIMEOUT_MS`; no assets → the
+its own context can't share VAOs/FBOs), bounded by `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`; no assets → the
 open fails before any worker is spawned; the visualiser mixes every app playback stream except
 loopback halves (D4's stream mix; streams on non-default sinks count too), `admit()` is the
 white/blacklist plug point; user properties ride a new `scene_props` Source prop (Map) →
@@ -749,7 +749,7 @@ time (three far-apart ticks don't move particles).
   "stopped: used X MiB > limit Y MiB of VRAM (vram_exceeded)", no restart, no crash record.
   Measured per process: NVML dlopened (never linked) → AMD sysfs + `/proc/<pid>/fdinfo` →
   `nvidia-smi` (its plain process table: `--query-compute-apps` lists compute processes only, never
-  a GL client), on the `lp-vram` thread; `LP_PLAYER_VRAM_PROBE=none|fake:<file>|…` (tests).
+  a GL client), on the `lia-vram` thread; `LIASCAPE_PLAYER_VRAM_PROBE=none|fake:<file>|…` (tests).
 - **Low-VRAM rule:** `player.vram_low_mode` `stop` (default) | `pause` | `off`; low = free <
   max(512 MiB, 5 %) for 3 s; free again = free − reserve ≥ low + max(1 GiB, 10 %) for 10 s (doubling
   on a re-trigger within 60 s, ≤ 160 s; reserve = what our resumed sources take back); applied as a
@@ -762,7 +762,7 @@ time (three far-apart ticks don't move particles).
   `tests/api.rs::scene_over_vram_limit_is_stopped_not_crashed`,
   `low_vram_stop_frees_and_resumes_every_source`, `low_vram_pause_mode_pauses_without_freeing`;
   units in `redraw.rs` and `vram.rs` (rule, parsers, fake probe). Every test server runs
-  `LP_PLAYER_VRAM_PROBE=none` unless it drives a fake.
+  `LIASCAPE_PLAYER_VRAM_PROBE=none` unless it drives a fake.
 - **For Task 11:** the property/event table in player-core § "GPU budget and VRAM (Task 8)" → "For
   Task 11" (also listed under Task 11 below).
 
@@ -834,7 +834,7 @@ broken worker is already a `SourceEvent::Error`).
   - api `crash_never_touches_other_outputs` (VIRTUAL-1 frame_index video, VIRTUAL-2 scene; 5 kills: VIRTUAL-1's
     markers keep advancing with no repeat > 2 ticks, its gains/paused untouched, `loop` max_busy ≤ 5 ms)
   - `hang_is_killed_and_restarted` (hang knob; `SceneSource` fills `WorkerSpec.hang_timeout` from
-    `LP_SCENE_WORKER_HANG_MS` — 300 in tests — else `HANG_TIMEOUT` 2 s)
+    `LIASCAPE_SCENE_WORKER_HANG_MS` — 300 in tests — else `HANG_TIMEOUT` 2 s)
   - api `broken_after_three_restarts_in_60s` (`source.broken {restarts: 3}`; the record JSON's fields; Error event)
   - supervise `broken_scene_restores_as_preview`; `context_lost_is_a_restart`
 - [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
@@ -858,7 +858,7 @@ call: the protocol has no reset kind, so an innocent reset counts too — one su
 restart); hermetic test via a synthetic `context_lost_after_ms` knob, real detection on-machine only.
 **Snapshot**: `SourceSnap.broken` (only when true), restored with no worker ever spawned; a source
 `Error` now marks the snapshot dirty (a scene that never readied isn't refreshed by the 2 s rule).
-**Hang knob** `LP_SCENE_WORKER_HANG_MS` read at each scene's open (unit `hang_timeout_knob`).
+**Hang knob** `LIASCAPE_SCENE_WORKER_HANG_MS` read at each scene's open (unit `hang_timeout_knob`).
 Test changes: `hang_is_killed_and_restarted` is an api test (it tests the env knob through `serve`);
 `crash_before_first_frame_shows_preview` runs in the harness (not on a restored scene — the restore
 is `broken_scene_restores_as_preview`); `context_lost_is_a_restart` is a harness test, not supervise;
@@ -871,24 +871,24 @@ GPU context losses (the record's `reason` starts "GL context lost").
 
 **Size: M** (≈ 1 day).
 
-### Task 11: Backend adapter — scenes playable under lp-player
+### Task 11: Backend adapter — scenes playable under liascape-player
 
 **Files:**
-- Modify: `src/livepaper/Player/PlayerEngine.cs` (`ScenesPlayable(s) = s.AllowScenes && (IsLpPlayer ?
-  LpPlayerClient.Shared.ScenesAvailable : PlayerHelper.IsLweAvailable())`), `LpPlayerClient.cs` (capabilities
-  from `hello`; `ScenesAvailable` = `scene` capability when connected, else `lp-player scene-check` cached 30 s;
-  `Topics` += `source.broken`), `LpPlayerMedia.cs` (`SourceProps`: a scene folder → `kind: "scene"` + `preview` =
-  the item's `ThumbnailPath`, `af` ""; `OwnStreamFilter` also matches `node.name` prefix `lp-player-`;
+- Modify: `src/livepaper/Player/PlayerEngine.cs` (`ScenesPlayable(s) = s.AllowScenes && (IsLiascapePlayer ?
+  LiascapePlayerClient.Shared.ScenesAvailable : PlayerHelper.IsLweAvailable())`), `LiascapePlayerClient.cs` (capabilities
+  from `hello`; `ScenesAvailable` = `scene` capability when connected, else `liascape-player scene-check` cached 30 s;
+  `Topics` += `source.broken`), `LiascapePlayerMedia.cs` (`SourceProps`: a scene folder → `kind: "scene"` + `preview` =
+  the item's `ThumbnailPath`, `af` ""; `OwnStreamFilter` also matches `node.name` prefix `liascape-player-`;
   `ApplySceneFps(LweMonitors)` → `set out:<name>.scene_fps` per entry, queued coalescible `scene_fps:<name>`;
   `OnEvent("source.broken")` → `PlayerHelper.OnSceneBroken(path)`), `Helpers/PlayerHelper.cs` (`Apply(scene)` goes
-  through `ScenesPlayable` with lp-player reasons — no WE assets / built `--no-scenes` / scene support off — instead
+  through `ScenesPlayable` with liascape-player reasons — no WE assets / built `--no-scenes` / scene support off — instead
   of always throwing; `IsSkippedPath` = scene && (!playable || (`HasCrashed` && !`IsWhitelisted`)) (D6);
   `OnSceneBroken(path)`: `LibraryService.MarkCrashed`, `OnSceneCrashed`, and if it is the playing item of a timed
   playlist, advance now (the legacy tick's crash branch); the V→S lead and `SceneTransitionDelayMs` stay
   legacy-only), `Web/ServerHost.cs` (`/settings`: a `LweMonitors` diff → `ApplySceneFps` live; `/player-engine` +
-  `scenes {available, reason, assets_dir}`), `app/ui/src/views/Settings.tsx` (under lp-player: hide "Scene
-  transition delay" and the primary radio, label the fps "fps (live)"), `Player/LpPlayerSelfTest.cs`,
-  `scripts/test-lp-player-adapter.sh`, `.claude/rules/player-adapter.md`
+  `scenes {available, reason, assets_dir}`), `app/ui/src/views/Settings.tsx` (under liascape-player: hide "Scene
+  transition delay" and the primary radio, label the fps "fps (live)"), `Player/LiascapePlayerSelfTest.cs`,
+  `scripts/test-liascape-player-adapter.sh`, `.claude/rules/player-adapter.md`
 
 `LweVolume` is read by neither engine (scenes follow Volume / the item override), so there is nothing to port.
 
@@ -901,15 +901,15 @@ stop|pause|off` (default `stop`); per-monitor fps stays `out:<c>.scene_fps` (abo
 MiB > limit Y" (also the `source.error` reason, suffix `(vram_exceeded)`). Optional status:
 `vram.low` / `vram.resumed`, observed `player.vram_low_active`; the low-VRAM pause is not a user
 pause (`player.paused` stays false — don't mirror it into the UI's pause state). Adapter IT: each
-setting → `get player.<prop>` live; with `LP_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
+setting → `get player.<prop>` live; with `LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
 advances the rotation without a crash mark.
 
 - [x] **Done (2026-10-28), commit `Wire Scene GPU Budget And VRAM Settings`** (`.claude/rules/player-adapter.md` §
   Scenes → "GPU / VRAM settings"): `AppSettings.SceneThrottle` (true), `SceneVramLimitEnabled` (false) +
   `SceneVramLimitMib` (1536, 64–1048576, kept while off), `VramLowMode` (`stop`); `/settings` diff →
-  `LpPlayerMedia.ApplyGpuSettings` (coalescible `player:<prop>`), re-asserted per player process with the scene fps;
+  `LiascapePlayerMedia.ApplyGpuSettings` (coalescible `player:<prop>`), re-asserted per player process with the scene fps;
   `scene.vram_exceeded` subscribed → `PlayerHelper.OnSceneVramStopped` (WS `scene-vram-stopped`, the shared
-  `AdvanceIfPlaying`, no `MarkCrashed`); `/player-engine.vram {low_active, mode}`; Settings "GPU / VRAM" (lp-player
+  `AdvanceIfPlaying`, no `MarkCrashed`); `/player-engine.vram {low_active, mode}`; Settings "GPU / VRAM" (liascape-player
   only) + a status-bar line for the WS event. Deviations: the VRAM limit is two settings (a toggle + the MiB value,
   so the toggle keeps the number) rather than one MiB field with 0 = off; the optional `vram.low`/`vram.resumed`
   events are not subscribed — the Settings group polls `/player-engine` (`player.vram_low_active`) every 5 s while
@@ -917,39 +917,39 @@ advances the rotation without a crash mark.
 
 - [x] **Step 1: Write failing checks:**
   - self-test: `SourceProps` of a scene folder (kind, preview, no af); `OwnStreamFilter` excludes a synthetic
-    `pactl` block with `node.name = lp-player-scene.src4`; the `ScenesPlayable` truth table (AllowScenes ×
+    `pactl` block with `node.name = liascape-player-scene.src4`; the `ScenesPlayable` truth table (AllowScenes ×
     capability × engine)
-  - adapter IT (hermetic, synthetic scenes, `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `/apply` a scene →
+  - adapter IT (hermetic, synthetic scenes, `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `/apply` a scene →
     `cur:*.kind == scene`, ready ≤ 3 s; `/next` V→S and S→V full-live fades → `transition.handoff`; Volume 50 →
     the scene's `gain.user` −18.06; `/library/volume` on the playing scene moves that source only; NoAudio toggles
     its `no_audio` live, same worker pid; a `LweMonitors` fps change → `out:<c>.scene_fps`, same pid; a crashing
     scene in a timed playlist → WS `scene-crashed`, index `Crashed: true`, advanced ≤ 2 s, skipped by `/next`,
     whitelisted → plays again; missing folder → `transition.failed`, not marked crashed; `AllowScenes=false` →
-    `/next` skips scenes; `LP_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
+    `/next` skips scenes; `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
     == false` with a reason; `/stop` → the worker pid gone ≤ 1 s; the legacy section starts/kills no mpvpaper
-- [x] **Step 2:** `bash scripts/test-lp-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
-- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/livepaper -- --lp-player-selftest` → PASS;
+- [x] **Step 2:** `bash scripts/test-liascape-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
+- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/livepaper -- --liascape-player-selftest` → PASS;
   `cd app/ui && npm run build` ok.
-- [x] **Step 5:** Commit `Play Scenes Under lp-player In The Backend`.
+- [x] **Step 5:** Commit `Play Scenes Under liascape-player In The Backend`.
 
 **Done (2026-10-28) — deviations** (`.claude/rules/player-adapter.md` § Scenes): every player-side name the
 task assumed matched the code (`hello.capabilities` `scene`, `kind: "scene"`, `preview`, `out:<c>.scene_fps`,
-`lp-player scene-check` `{worker, features, assets_dir, ok, reason}`, worker streams `lp-player-scene.<id>`)
+`liascape-player scene-check` `{worker, features, assets_dir, ok, reason}`, worker streams `liascape-player-scene.<id>`)
 except **`source.broken`, which didn't exist** (Task 10 isn't done): the player now logs it — the minimal
 event half of Task 10 (`sources/scene.rs` `log_broken`, `{id, path, scene_id, reason, restarts, record,
 signal|code}` from the crash record; `tests/api.rs::source_broken_event_names_the_scene`); Task 10 keeps the
 preview fallback, the snapshot's `broken` and the rest. `ScenesAvailable` = the capability from the CURRENT
 connection's `hello` (a dropped connection re-greets — a player restarted with another environment), else
 `scene-check` cached 30 s. Extra, found while wiring: the tick's LWE crash branch and `UpdateTimedSettings`'s
-"scene plays" were `IsLweRunning` checks (always false under lp-player → a scene would have counted as
-crashed every tick) — gated / `ScenePlaying`; `DoVideoEndWait`'s lp-player branch now takes scene sides
+"scene plays" were `IsLweRunning` checks (always false under liascape-player → a scene would have counted as
+crashed every tick) — gated / `ScenePlaying`; `DoVideoEndWait`'s liascape-player branch now takes scene sides
 (`align:"now"` when A is a scene — it never ends); its failure fallback, `ApplyTimedPlaylist`'s first item and
-`AdvanceToNext`'s history walk skip a crashed scene (lp-player only — legacy unchanged); `Apply` refuses a
+`AdvanceToNext`'s history walk skip a crashed scene (liascape-player only — legacy unchanged); `Apply` refuses a
 crashed non-whitelisted scene with a message; a scene's `preview` falls back to `preview.gif|webp`. The
 plan's `/next V→S and S→V` became V→S, S→S, S→V through `/next` + an aligned V→S at a clip's end; `/library/
 volume` "moves that source only" is checked mid-fade between two scenes; the IT exports
-`LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LP_SCENE_WORKER_BIN` for every player (the upgrade test copies the
-binary away from its worker) and gained `LP_IT_DLL` (the RED run: the base commit's backend failed every scene
+`LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LIASCAPE_SCENE_WORKER_BIN` for every player (the upgrade test copies the
+binary away from its worker) and gained `LIASCAPE_IT_DLL` (the RED run: the base commit's backend failed every scene
 check). Settings also shows `/player-engine.scenes.reason` when scenes can't play.
 
 **Size: L** (≈ 2 days incl. the IT).
@@ -958,8 +958,8 @@ check). Settings also shows `/player-engine.scenes.reason` when scenes can't pla
 
 **Files:** `scripts/test-ui-matrix.sh` (seed `library/workshop/900000000{1,2,3}/` synthetic scenes into the private
 library before the backend starts: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashing; `AllowScenes=true`;
-`LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` for the private player), `app/shell/probe-matrix.js`,
-`scripts/matrix-cells-for.sh` (`sources/scene.rs`, `worker/`, `scene/`, `bin/lp-scene-worker/` → the scene family)
+`LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` for the private player), `app/shell/probe-matrix.js`,
+`scripts/matrix-cells-for.sh` (`sources/scene.rs`, `worker/`, `scene/`, `bin/liascape-scene-worker/` → the scene family)
 
 - [x] **Step 1:** Add cells, each with a `ctl`/probe oracle: `apply:scene` (idle/single/playlist), `next:v→s`,
   `next:s→v`, `next:s→s` × TransitionMethod, `pause:scene` (two captures 500 ms apart equal, `gain.pause` −96),
@@ -978,10 +978,10 @@ library-stepping / random cells landed on scenes nondeterministically, s3 includ
 (`scene`, `sceneV`/`sceneS`/`sceneS2` = the playlist [k1, s1, s2, k2] at each) and each scene control turn it on; s3
 crashes 1.5 s after every start (not 400 ms: the strip-click switch's 1.2 s fade must hand off first); the interval
 cell uses 4 s (3 s raced the checks' settle); `restore:scene` restarts the backend on the same port from the probe
-(`LP_PORT`, recorded for the cleanup) — the scene stays on the same worker. **Bugs found + fixed (UI):** a crashed
+(`LIASCAPE_PORT`, recorded for the cleanup) — the scene stays on the same worker. **Bugs found + fixed (UI):** a crashed
 scene's card wasn't marked until a library reload (WS `scene-crashed` unhandled → now `hasCrashed`); the VRAM stop's
 status line was overwritten at once by the now-playing line of the switch it caused (→ a held status); the item
-modal hid the speed slider for every scene (legacy's 1× rule) though lp-player plays scenes at speed. Fixture:
+modal hid the speed slider for every scene (legacy's 1× rule) though liascape-player plays scenes at speed. Fixture:
 previews are 320×180 (a 1×1 PNG made `/still` 502 — ffmpeg can't scale it; real previews never are). Two existing
 cells assumed the library held k1–k4 only (`selAll+Delete+undo`'s count, `selRange+Delete`'s neighbour → a title
 mapping). RED (scene cells against the base UI): crash card, `itemSpd` slider "not found", the status line;
@@ -1011,7 +1011,7 @@ Full matrix (`--jobs 2`): first 744 pass / 3 fail / 29 skip (the two fixture ass
 **Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Scene corpus (Task 13)"):
 96 scenes in 481 s: **86 ok, 1 static (a still image + a sound — by design), 1 blank, 4 load_failed, 4 broken**,
 0 renderer_failed/crashed/timeout (`docs/player/reports/scene-corpus.md`). Every failure reproduces with
-`lp-scene-worker --lwe-smoke` (LWE's core alone, no worker/compositor) and is an LWE cause — 3D/perspective
+`liascape-scene-worker --lwe-smoke` (LWE's core alone, no worker/compositor) and is an LWE cause — 3D/perspective
 scenes (3), a text `padding` string → an uncaught JSON exception (2), a `CParticle` segfault on embedded leaves
 presets (2), a case-mismatched asset path (1), an object dropped when its packaged effect fails to compile (1) —
 each a Phase 6 entry in `docs/TODO.md` with its backtrace / log tail in the report. **`--ab-legacy` is implemented
@@ -1074,7 +1074,7 @@ corpus-runner fix; open findings in `docs/TODO.md` → "Phase 2 battery findings
 `docs/player/debugging.md` (rows: scene black → `probe workers`/`source.error`; scene frozen → `latched` vs
 `stale_reuses`; scene silent → bus links + `has_audio`; crash loop → `crashes/*.json`; throttled →
 `scene.throttled`), `.claude/rules/player-core.md` (§ Scene worker, § Sources scene rows — each earlier task already
-added its own), `CLAUDE.md` (scenes play under lp-player; `LweMonitors` is no longer launch-only there; the new
+added its own), `CLAUDE.md` (scenes play under liascape-player; `LweMonitors` is no longer launch-only there; the new
 build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items and the deferred items below)
 
 - [x] **Step 1:** Update the files; `cargo test -q --test credits` PASS.
@@ -1084,8 +1084,8 @@ build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items 
 **#11** (worker audio is a gain on a stream that keeps running) — #9 was taken by Task 10's crash policy. The
 architecture doc's "one worker per output" text became "one per scene source, shared by outputs" (D1); the
 `player-core.md` Scene worker section got its header/`PROTOCOL` 3 note and the stale "dmabuf imports land on the
-`lp-render` thread" sentence corrected (they run on the loop's context). No `CLAUDE.md` claim was wrong; it gained
-the Rust/`libclang`/PipeWire build line, the WE `assets/` requirement for lp-player scenes and `--no-scenes`.
+`lia-render` thread" sentence corrected (they run on the loop's context). No `CLAUDE.md` claim was wrong; it gained
+the Rust/`libclang`/PipeWire build line, the WE `assets/` requirement for liascape-player scenes and `--no-scenes`.
 
 **Size: S.**
 

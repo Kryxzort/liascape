@@ -4,7 +4,7 @@
 
 Usage: scripts/measure-automute-latency.py [trials]   (default 6; needs pactl, paplay, parec)
 
-It touches no real stream: it loads a private module-null-sink (`lp_lat_test`, unloaded at the end),
+It touches no real stream: it loads a private module-null-sink (`liascape_lat_test`, unloaded at the end),
 plays 60 s of digital SILENCE into it with paplay (inaudible, below every auto-mute threshold, and
 named `mpv` so a running livepaper auto-mute ignores it), times parec's first byte / first 20 ms
 chunk on that stream, then stops it. Measured 2026-10-25: default 2023 ms → 65 ms (first chunk 76 ms)."""
@@ -16,12 +16,12 @@ CHUNK = 160 * 4  # AudioMonitor's ChunkBytes (160 float32 samples @ 8 kHz = 20 m
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True, timeout=20)
 
-mod = sh("pactl", "load-module", "module-null-sink", "sink_name=lp_lat_test",
-         "sink_properties=device.description=lp-latency-test").stdout.strip()
+mod = sh("pactl", "load-module", "module-null-sink", "sink_name=liascape_lat_test",
+         "sink_properties=device.description=liascape-latency-test").stdout.strip()
 if not mod.isdigit():
     sys.exit(f"could not load a null sink: {mod!r}")
 play = None
-tmp = tempfile.mkdtemp(prefix="lplat-")
+tmp = tempfile.mkdtemp(prefix="liascape-lat-")
 try:
     wav = os.path.join(tmp, "sine.wav")
     with wave.open(wav, "wb") as w:  # 60 s of digital silence, mono 48 kHz — bounded; below any auto-mute threshold
@@ -30,7 +30,7 @@ try:
         for i in range(48000 * 60):
             frames += struct.pack("<h", 0)
         w.writeframes(bytes(frames))
-    play = subprocess.Popen(["paplay", "--device=lp_lat_test", "--property=application.name=mpv", "--property=media.name=lp-latency-test", wav],
+    play = subprocess.Popen(["paplay", "--device=liascape_lat_test", "--property=application.name=mpv", "--property=media.name=liascape-latency-test", wav],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     sid = None
     for _ in range(50):
@@ -39,14 +39,14 @@ try:
         for line in out.splitlines():
             if line.startswith("Sink Input #"):
                 cur = line.split("#")[1].strip()
-            if 'media.name = "lp-latency-test"' in line:
+            if 'media.name = "liascape-latency-test"' in line:
                 sid = cur
         if sid:
             break
         time.sleep(0.1)
     if not sid:
         sys.exit("test stream not found")
-    print(f"test stream: sink-input #{sid} on the null sink lp_lat_test")
+    print(f"test stream: sink-input #{sid} on the null sink liascape_lat_test")
     time.sleep(0.5)
 
     def first_data(extra):

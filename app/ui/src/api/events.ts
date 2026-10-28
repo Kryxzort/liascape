@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { API } from "./client";
 
-export type LpEvent =
+export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
   | { type: "settings-changed"; payload: Record<string, unknown> }
   | { type: "scene-crashed"; payload: { path: string } }
@@ -23,7 +23,7 @@ export type LpEvent =
 // download progress, Steam sign-in).
 // `onReconnect`: every open after the first — the backend restarted (or the socket dropped): whatever changed in the
 // gap was never pushed, so the page re-reads what it mirrors (store.resync).
-export function useEvents(onEvent: (e: LpEvent) => void, onReconnect?: () => void) {
+export function useEvents(onEvent: (e: LiascapeEvent) => void, onReconnect?: () => void) {
   useEffect(() => {
     const base = (API || location.origin).replace(/^http/, "ws");
     let ws: WebSocket | null = null;

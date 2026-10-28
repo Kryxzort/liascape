@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Catch the recurring main-thread wedge. Samples the Electron renderer's instantaneous CPU + RSS +
-# thread/fd count every ~12s, logs to /tmp/lp-monitor.log. When CPU stays pegged (>140% twice) it
+# thread/fd count every ~12s, logs to /tmp/liascape-monitor.log. When CPU stays pegged (>140% twice) it
 # captures an OS-level snapshot (RSS/threads/fds — these work even when the main thread is wedged and
 # CDP can't respond) and exits, so the trajectory leading up to the wedge is preserved for diagnosis.
-LOG=/tmp/lp-monitor.log
+LOG=/tmp/liascape-monitor.log
 HZ=$(getconf CLK_TCK)
 : > "$LOG"
 echo "$(date '+%H:%M:%S') monitor start (HZ=$HZ)" >> "$LOG"

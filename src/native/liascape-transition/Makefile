@@ -1,4 +1,4 @@
-# lp-transition — wlr-layer-shell + EGL/GLES3 transition renderer for livepaper.
+# liascape-transition — wlr-layer-shell + EGL/GLES3 transition renderer for livepaper.
 CC      ?= cc
 # mpv = libmpv render API → both transition sides decode live (full-live transitions)
 PKGS     = wayland-client wayland-egl egl glesv2 mpv
@@ -12,8 +12,8 @@ GEN = xdg-shell-protocol.h xdg-shell-protocol.c \
 
 PREFIX ?= $(HOME)/.local
 
-lp-transition: lp-transition.c $(GEN)
-	$(CC) $(CFLAGS) -o $@ lp-transition.c \
+liascape-transition: liascape-transition.c $(GEN)
+	$(CC) $(CFLAGS) -o $@ liascape-transition.c \
 	  xdg-shell-protocol.c wlr-layer-shell-unstable-v1-protocol.c $(LDFLAGS)
 
 %-protocol.h: $(PROTODIR)/%.xml
@@ -21,10 +21,10 @@ lp-transition: lp-transition.c $(GEN)
 %-protocol.c: $(PROTODIR)/%.xml
 	$(SCANNER) private-code $< $@
 
-install: lp-transition
-	install -Dm755 lp-transition $(DESTDIR)$(PREFIX)/bin/lp-transition
+install: liascape-transition
+	install -Dm755 liascape-transition $(DESTDIR)$(PREFIX)/bin/liascape-transition
 
 clean:
-	rm -f lp-transition $(GEN)
+	rm -f liascape-transition $(GEN)
 
 .PHONY: install clean

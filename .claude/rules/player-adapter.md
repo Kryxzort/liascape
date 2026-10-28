@@ -3,22 +3,22 @@ paths:
   - "src/livepaper/Player/**"
 ---
 
-# lp-player adapter (`PlayerEngine` setting, Task 17)
+# liascape-player adapter (`PlayerEngine` setting, Task 17)
 
-`src/livepaper/Player/` lets the C# backend drive the Rust `lp-player` (`.claude/rules/player-core.md`)
-instead of mpvpaper + lp-transition + LWE. `AppSettings.PlayerEngine` = `"legacy"` (default) |
-`"lp-player"` (experimental; videos/images/colours, and since Phase 2 Task 11 **WE scenes** when the
+`src/livepaper/Player/` lets the C# backend drive the Rust `liascape-player` (`.claude/rules/player-core.md`)
+instead of mpvpaper + liascape-transition + LWE. `AppSettings.PlayerEngine` = `"legacy"` (default) |
+`"liascape-player"` (experimental; videos/images/colours, and since Phase 2 Task 11 **WE scenes** when the
 player can play them — § Scenes). Settings → Advanced → "Player engine". The switch is live.
 
 ## Files
-- **`PlayerEngine.cs`** — `IsLpPlayer` (cached; lazy from settings.json, refreshed by `/settings`
+- **`PlayerEngine.cs`** — `IsLiascapePlayer` (cached; lazy from settings.json, refreshed by `/settings`
   via `PlayerHelper.SwitchEngineLive`, loaded at `--serve` start so a change compares against what
-  actually runs), `WouldBeLpPlayer(s)`, `ScenesPlayable(s) = AllowScenes && (IsLpPlayer ?
-  LpPlayerClient.Shared.ScenesAvailable : IsLweAvailable())` (the pure rule `ScenesPlayableFor`, lazy —
+  actually runs), `WouldBeLiascapePlayer(s)`, `ScenesPlayable(s) = AllowScenes && (IsLiascapePlayer ?
+  LiascapePlayerClient.Shared.ScenesAvailable : IsLweAvailable())` (the pure rule `ScenesPlayableFor`, lazy —
   only the running engine is asked), `SceneStatus(s)` / `SceneUnavailableReason(s)` (§ Scenes),
   `ResolveBinary()`, `Status()` (→ `GET /player-engine`, + `scenes`).
-- **`LpPlayerClient.cs`** — the Command API client (JSON Lines on the unix socket): `Call(cmd, args,
-  timeoutMs=2000)` throws `LpPlayerException {Code, Message, Hint}` (the player's error object, or
+- **`LiascapePlayerClient.cs`** — the Command API client (JSON Lines on the unix socket): `Call(cmd, args,
+  timeoutMs=2000)` throws `LiascapePlayerException {Code, Message, Hint}` (the player's error object, or
   `io`/`timeout` with a hint); `TryCall` logs instead. One persistent request connection (serialized,
   reconnects after any error/timeout; a stale reply is skipped by `id`) + one subscribed event
   connection on a background thread — **only the kinds it consumes** (final review M11):
@@ -47,44 +47,44 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   unrelated) is never signalled as if it were still ours.
   **`Capabilities`** = the last `hello.capabilities` (§ Scenes: `ScenesAvailable`, `SceneStatus`).
   **`Health()`** (`/health/features`, `Helpers/FeatureHealth.cs`): the running player's `hello.health` (one quick
-  `hello`, never spawns; `FromRunning`), else `lp-player health` in the backend's environment (cached 30 s) — a
+  `hello`, never spawns; `FromRunning`), else `liascape-player health` in the backend's environment (cached 30 s) — a
   player older than this build has no `health` and falls back to the CLI of the new binary.
-- **`LpPlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
-- **`MpvPropertyMap.cs`** — mpv IPC property sets → lp-player properties.
-- **`LpPlayerSelfTest.cs`** — `livepaper --lp-player-selftest`.
-- **`scripts/test-lp-player-adapter.sh`** — the hermetic HTTP integration test (§ Integration test).
+- **`LiascapePlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
+- **`MpvPropertyMap.cs`** — mpv IPC property sets → liascape-player properties.
+- **`LiascapePlayerSelfTest.cs`** — `livepaper --liascape-player-selftest`.
+- **`scripts/test-liascape-player-adapter.sh`** — the hermetic HTTP integration test (§ Integration test).
 
 ## Threading: nothing waits on the player under PlayerHelper's `_lock`
 PlayerHelper calls its primitives while holding `_lock` (Stop/KillAll, Apply, the tick, the
 video-end lock block…). A stalled player must never stall volume/speed/pause/tick, so:
-- **Every mutation is queued** — `LpPlayerMedia.Queue(…)`: ONE ordered worker (FIFO task chain on the
+- **Every mutation is queued** — `LiascapePlayerMedia.Queue(…)`: ONE ordered worker (FIFO task chain on the
   thread pool, never faults). `SwitchToFile`/`Launch` → `QueueSwitch`, `KillCurrentProcess` →
   `QueueStop`, every `SendCommand`/`TrySendCommand` property set and `cycle pause`, every resolver pass
   (`/settings`, `ApplyOverrideLive`, normalization, `/preview`, mute — § Targeting) — all return at once. `SwitchAndWait` switches through
   the same queue (ordered after a queued stop/set) and `WaitLastHandoff` first drains it (a still-queued
   switch is "the last switch").
-- **Queries stay synchronous but quick**: `LpPlayerClient.QuickMs` = 300 ms (`cur:*` gets, `IsPlaying`,
+- **Queries stay synchronous but quick**: `LiascapePlayerClient.QuickMs` = 300 ms (`cur:*` gets, `IsPlaying`,
   time-pos/remaining) — the only player I/O that may still happen inside `_lock`
   (`AppendToActivePlaylist`, `SwitchFromAdvanceOnEndToTimed`, the non-timed reorder paths).
 - **The request connection is waited for with the call's own timeout** (`Monitor.TryEnter`), so a
   query never sits behind a queued switch that waits out its 2 s on a stalled player.
 - **Stall breaker**: a request that times out opens a 3 s window in which every request fails fast
-  (`timeout`, "lp-player is not responding") — a SIGSTOPped player costs one 300 ms timeout, not one per
+  (`timeout`, "liascape-player is not responding") — a SIGSTOPped player costs one 300 ms timeout, not one per
   caller. The trip itself is logged with its cause (`no reply to `<cmd>` within N ms (waited …; gen2 GCs
   meanwhile …, thread-pool queue …, threads …)`) — the requests after it only say "not responding" and
   most callers swallow those. The speed storm tripped it 6× in ~25 min with the player answering < 3 ms
   per request and never > 50 ms in 6860 direct pings; cause not reproduced since the log line went in
   (docs/TODO.md). The first request after the window tries for real. `EnsureRunning` never spawns a second
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged) — and
-  **R81** catches up: the breaker closing fires `LpPlayerClient.Recovered` → `LpPlayerMedia.OnRecovered`
+  **R81** catches up: the breaker closing fires `LiascapePlayerClient.Recovered` → `LiascapePlayerMedia.OnRecovered`
   → `ReapplyAll()` (below), so a dropped set isn't lost for good.
-- **Every queued command's own `Call` uses `LpPlayerClient.QuickMs`** (item 6) — a queued property set
+- **Every queued command's own `Call` uses `LiascapePlayerClient.QuickMs`** (item 6) — a queued property set
   (or a `transition`'s `fit` pre-assertion, or a per-item `set`) is never worth the 2000 ms default; a
   backlog behind a stalled player then drains in ≤ 300 ms per item instead of up to 2000 ms. `Switch`'s
   own `transition`/`cancel` request keeps the default (opening a new source is itself ms-scale under
   `player-core.md` § Runtime, but a switch is a heavier, rarer operation than a plain set — no reason to
   shave its margin).
-- **The queue coalesces; its depth is capped** (`LpPlayerMedia.MaxQueueDepth` = 256, `QueueDepth`,
+- **The queue coalesces; its depth is capped** (`LiascapePlayerMedia.MaxQueueDepth` = 256, `QueueDepth`,
   `Coalesced`). The worker is a pending list (`LinkedList`) + one worker loop on the thread pool, so a
   pending command can be removed. Three kinds:
   - **essential** (`QueueEssential` — switch, stop, `QueueNewSession`, `cycle pause` → `TogglePause`,
@@ -110,23 +110,23 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   after a stall). Before (speed storm): admission was refused for every set past 256, the NEWEST
   included — the storm's own final restore sets were dropped.
 - `SwitchEngineLive` reads `IsPlaying` before taking `_lock`, tears the session state down under it,
-  and talks to lp-player only AFTER releasing it: `StopAndQuit()` (drain the queue ≤ 3 s, `stop`, `quit`,
+  and talks to liascape-player only AFTER releasing it: `StopAndQuit()` (drain the queue ≤ 3 s, `stop`, `quit`,
   then escalate against the **supervisor** — SIGCONT+SIGTERM, then SIGKILL, each waiting ≤ 1.5 s for the
-  process to go; see `LpPlayerClient.QuitOrKill` below) runs synchronously before the new engine starts,
-  so legacy and lp-player are never both on screen.
+  process to go; see `LiascapePlayerClient.QuitOrKill` below) runs synchronously before the new engine starts,
+  so legacy and liascape-player are never both on screen.
 
 ## Binary resolution (`PlayerEngine.ResolveBinary`)
-env `LP_PLAYER_BIN` → next to the running livepaper executable (`Environment.ProcessPath` dir, then
-`AppContext.BaseDirectory`) → the repo dev tree `src/player/target/{release,debug}/lp-player` (walk up
+env `LIASCAPE_PLAYER_BIN` → next to the running livepaper executable (`Environment.ProcessPath` dir, then
+`AppContext.BaseDirectory`) → the repo dev tree `src/player/target/{release,debug}/liascape-player` (walk up
 from the assembly; **release first** — debug is `opt-level 0` and the player mixes audio itself, so a
-player change reaches the dev session only once `cargo build --release` ran) → `PATH`. **Missing → `IsLpPlayer` is false** (legacy keeps working), one log line,
+player change reaches the dev session only once `cargo build --release` ran) → `PATH`. **Missing → `IsLiascapePlayer` is false** (legacy keeps working), one log line,
 and `/player-engine` reports `available:false` + the reason → the UI row is disabled with it (switching
 back to Legacy always stays possible).
 
 ## Lifecycle
 - `EnsureRunning()` (only a **switch** calls it — queries/sets never spawn): connect, else
-  `setsid sh -c 'exec lp-player serve …'` (no `--headless`; session env inherited — `WAYLAND_DISPLAY`
-  etc.; stdio → `~/.cache/livepaper/lp-player-serve.log`, never a pipe: the player outlives the
+  `setsid sh -c 'exec liascape-player serve …'` (no `--headless`; session env inherited — `WAYLAND_DISPLAY`
+  etc.; stdio → `~/.cache/livepaper/liascape-player-serve.log`, never a pipe: the player outlives the
   backend) and wait ≤ 3 s for the socket. **Arguments:** the first start runs `serve` (`--socket` when not
   the default); once this client has talked to a player, it runs **that player's own arguments + `--restore`**
   (`_serveArgs`, read from its supervisor's cmdline when a new player pid answers `hello`, minus
@@ -146,14 +146,14 @@ back to Legacy always stays possible).
   from EnsureRunning means that backoff hasn't succeeded within our 3 s wait, not that it gave up) — all
   surfaced via `LastError` → `/player-engine` `reason` + one log line; EnsureRunning never crashes on any
   of them, only reports `false`.
-- **In-place upgrade** (`LpPlayerClient.StaleReason` / `UpgradeInPlace`, `LpPlayerMedia.StartUpgradeWatch`).
+- **In-place upgrade** (`LiascapePlayerClient.StaleReason` / `UpgradeInPlace`, `LiascapePlayerMedia.StartUpgradeWatch`).
   The player outlives the backend and the app on purpose, so a rebuilt or reinstalled binary never reached
   a running one: fixes "persisted" for hours (a 13:26 build still running at 19:00). **Stale** = the
   running compositor isn't the build this backend starts — compared as FILES, never path strings (one
   checkout is `/home/…` and `/mnt/…/@home/…`): size + mtime through open handles, `/proc/<pid>/exe`
   opening the running binary even after a rebuild replaced it (`… (deleted)`); Nix by store root
-  (`/nix/store/<hash>-name` — every store file has mtime 1, and `LP_PLAYER_BIN` is the `wrapProgram`
-  wrapper while the process runs `.lp-player-wrapped`); a binary written < 2 s ago isn't started yet.
+  (`/nix/store/<hash>-name` — every store file has mtime 1, and `LIASCAPE_PLAYER_BIN` is the `wrapProgram`
+  wrapper while the process runs `.liascape-player-wrapped`); a binary written < 2 s ago isn't started yet.
   **Upgrade** = `QuitOrKill` (the player writes its final snapshot) → the supervisor's own `serve`
   arguments (from its cmdline, minus `--supervised/--restore/--restarted`) + `--restore` → the same
   wallpaper at the same place, paused stays paused, ~0.2 s; then events resubscribe and the `Restarted`
@@ -171,65 +171,65 @@ back to Legacy always stays possible).
   armed align:end switch would be dropped by the restart and the rotation would switch early (failure
   path), so an advance-on-end playlist upgrades at its next switch. `AutoSpawn=false` (self-test) never
   upgrades. `/player-engine` → `running {pid, supervisor, exe, started, stale}`.
-- Socket: `$LP_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (mirrors `paths.rs`).
-- `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from lp-player =
+- Socket: `$LIASCAPE_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (mirrors `paths.rs`).
+- `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from liascape-player =
   `StopAndQuit` (stop → quit → TERM → KILL, synchronous, outside `_lock`).
-- **`LpPlayerClient.QuitOrKill` targets the SUPERVISOR, never the compositor alone.** Order: `quit`
+- **`LiascapePlayerClient.QuitOrKill` targets the SUPERVISOR, never the compositor alone.** Order: `quit`
   over the socket (the compositor exits 0 → the supervisor classifies that as a clean exit and exits
   too — no restart) → else SIGCONT+SIGTERM the **supervisor pid** (`SupervisorPid ?? PlayerPid` —
   unsupervised falls back to the compositor, same as before Task 16) → else SIGKILL the supervisor
   (its child dies via `PR_SET_PDEATHSIG`; if the compositor pid is somehow still alive a moment later,
   SIGKILL it directly too). **Never SIGTERM/SIGKILL the compositor pid while its supervisor is still
   alive** — the supervisor treats a dead/signalled child as a crash and restarts it with `--restore`,
-  which is exactly what an engine switch away from lp-player must not leave running.
+  which is exactly what an engine switch away from liascape-player must not leave running.
 - `SwitchEngineLive(prev, cur)`: `IsPlaying` (outside `_lock`); under `_lock` — `SaveTimedState`,
   `TeardownTimer` (state only), and for a LEGACY old engine `KillCurrentProcess` (process kills only);
-  after `_lock` — for an lp-player old engine `StopAndQuit`; then `Refresh`, then replay on the new
+  after `_lock` — for an liascape-player old engine `StopAndQuit`; then `Refresh`, then replay on the new
   engine: a running timed playlist via `RestoreTimedPlaylist` (resumes at the item it was on), else
   `LastSession` (timed / playlist / single). Nothing playing → nothing started.
 
-## Dispatch points (`PlayerHelper`, each `if (PlayerEngine.IsLpPlayer) { … }` at the top; legacy
+## Dispatch points (`PlayerHelper`, each `if (PlayerEngine.IsLiascapePlayer) { … }` at the top; legacy
 code below it is unchanged)
 
-| method | under lp-player |
+| method | under liascape-player |
 |---|---|
-| `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}` — a scene folder too (`kind: scene`, § Scenes); a scene when `!ScenesPlayable` → `KillCurrentProcess` (AllowScenes=false parity; the pickers never hand one over) |
+| `SwitchToFile` | `LiascapePlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}` — a scene folder too (`kind: scene`, § Scenes); a scene when `!ScenesPlayable` → `KillCurrentProcess` (AllowScenes=false parity; the pickers never hand one over) |
 | (duration) | `TransitionService.PickDuration` clamps 0–10000 ms (the floor was 50; owner QOL 2026-10-28); a picked **0 = a cut** — `Pick` returns null, so the request carries `effect_id: null` (the player's 30 ms anticlick swap), never a 0 ms effect; 1–49 ms go as that `duration_ms` (gains still ≥ 30 ms, R42). Self-test `TransitionDurationAssertions`; matrix `plTrShort` / `plTrZero` |
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
-| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append; since Phase 2 any switch incl. a scene side — a scene A never ends, so with A a scene (a restore re-arming onto one; the tick moves scenes on itself) it is `align:"now"`, legacy's "prevIsScene → switch now"; the failure fallback switches to the item AFTER a B that is skipped by then, e.g. a scene that broke before its handoff) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
+| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append; since Phase 2 any switch incl. a scene side — a scene A never ends, so with A a scene (a restore re-arming onto one; the tick moves scenes on itself) it is `align:"now"`, legacy's "prevIsScene → switch now"; the failure fallback switches to the item AFTER a B that is skipped by then, e.g. a scene that broke before its handoff) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LiascapePlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `RearmAlignedSwitch` (from `/playlist/state` when the playlist's transitions change, `/settings` when the global ones or `TransitionMethod` do) | the armed aligned switch was **requested at arm time** with the effect + duration of then (the player times it for A's end — legacy picks its effect when the overlay starts, near A's end), so a transition change while one is armed (advance-on-end: for the whole clip) ran the OLD effect at A's end: cancel the wait and re-arm it to the same `next` (`CancelVideoEndWait` + `ArmVideoEndWait`) → a fresh request with the new config. No-op under legacy / with nothing armed. Guard: matrix `pending × plTrOff/plTrDuration/plTrEffect` |
-| `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → a volume/speed literal (`/volume {value}`) = a resolver pass with it as the PLAYING item's transient value (every other source keeps its own), `mute` (SetMute / SetUserMute) = a forced resolver pass of `gain.mute` from `PlayerHelper.IsMuted`, the rest → `Set` (layer props → `lay:*:main`, `pause` → `player.paused`, else `srcs:*`); `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
+| `SendCommand` / `TrySendCommand` | `LiascapePlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → a volume/speed literal (`/volume {value}`) = a resolver pass with it as the PLAYING item's transient value (every other source keeps its own), `mute` (SetMute / SetUserMute) = a forced resolver pass of `gain.mute` from `PlayerHelper.IsMuted`, the rest → `Set` (layer props → `lay:*:main`, `pause` → `player.paused`, else `srcs:*`); `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
 | `KillCurrentProcess` (→ `KillAll`, `Stop`) | a queued `stop` (callers hold `_lock`) |
 | `IsPlaying` | something is on screen (`cur:*.path`) |
 | `/settings` (ServerHost) | `PlayerHelper.ApplyEffectiveLive(prev, cur, playing)` instead of SetVolume/SetSpeed/SetVideoScale/ApplyNormalizationLive/ApplyPlaybackSettingsLive: ONE resolver pass (`ApplyEffective`, Fresh — every live source its own value of every resolved setting + the layer fit, diffed against one `state` read: a no-op save, e.g. a theme change, sends nothing), Loop via `SetLoop` (`srcs:*`) only when it changed and the wallpaper is a single non-timed one (the legacy guard: under rotation the recipe owns A's loop), and the timed tick's speed factor (`_currentSpeed`) = the playing item's effective speed |
-| `ApplyPlaybackSettingsLive` | legacy only (`/settings` → `ApplyEffectiveLive` under lp-player) |
+| `ApplyPlaybackSettingsLive` | legacy only (`/settings` → `ApplyEffectiveLive` under liascape-player) |
 | `AdjustVolume` (the volume keys) | on an item's own volume → `ApplyOverrideLive` (below); on the global → `ApplyEffective` (every source its own effective volume — an overridden one keeps it) |
 | `ApplyOverrideLive` | `ApplyOverride(path)`: a resolver pass on that item's own source(s) (may be a pending B) — `gain.user` + `speed`, diffed against the cached values; reports the effective speed back when it's what `cur:*` shows (`_currentSpeed`) |
 | `ApplyNormalizationLive` / `PlayerHelper.OnLoudnessMeasured` (from `LibraryService.EnsureLoudnessAsync`, once a measurement is stored) | `ApplyEffective` → **every** live media source gets ITS OWN item's `af` (`NormalizeAf(its path)`: loudnorm at the target, "" when off / NoAudio / unmeasured — that one kicks a measure), diffed. It used to set `cur:*`'s item only: an effect's outgoing A, a pending B (armed for A's end — it then played its whole clip with the old filter) and every source while no output shows one (no `cur:*`) kept the old `af`; and an item that started unmeasured (or was playing when normalization was switched on) played un-normalized until its next switch — now it gets its loudnorm the moment it's measured (normalization on). Legacy: `set af` when it's mpv's current file. Guard: matrix `set:normalizeOn/Off/Target/Fresh` × effect / pending / pausedEffect / noOutput |
-| `/preview` (ServerHost) | `LpPlayerMedia.Preview(volume, speed, paths)` → a resolver pass on the source(s) of `paths` only (the modal's edited item(s) — on screen, either side of an effect, a pending B), the dragged value as their transient (nothing persisted), the dragged prop only, diffed against the cached values: ONE `set` per source per value, no `state` read while the map is cached; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: a pass over every source with the dragged value as the transient GLOBAL — an item with its own override for that field keeps it (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
-| scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)` (§ Scenes); `IsSkippedPath` = scene && (!playable \|\| (crashed && !whitelisted)) — D6, `PlayerHelper.SkipScene`; the V→S lead in `Tick` and the tick's LWE crash branch (`!IsLweRunning`) get `!IsLpPlayer`; `UpdateTimedSettings`'s "a scene plays" = `ScenePlaying` (lp-player: the playing history item is a scene folder) |
-| `Apply(scene)` | lp-player: `SceneUnavailableReason(s)` → its message (scene support off / the player can't: no worker, built `--no-scenes`, no WE assets — `scene-check`'s reason), a crashed non-whitelisted scene → "This scene crashed and won't be played — tick Whitelist…"; legacy's own AllowScenes / LWE-missing messages unchanged |
-| `ApplyTimedPlaylist` (lp-player) | starts at the first item that isn't skipped (a crashed scene first in the list used to stop playback in `SwitchToFile`); `AdvanceToNext`'s history walk (a next after a previous) steps past a skipped one too |
+| `/preview` (ServerHost) | `LiascapePlayerMedia.Preview(volume, speed, paths)` → a resolver pass on the source(s) of `paths` only (the modal's edited item(s) — on screen, either side of an effect, a pending B), the dragged value as their transient (nothing persisted), the dragged prop only, diffed against the cached values: ONE `set` per source per value, no `state` read while the map is cached; queued coalescible per selection + property; no `paths` → the playing item (`cur:*`, mid-transition the INCOMING side — why the modal always sends paths). Legacy: applied only when the current file is in `paths`. **`global: true`** (the Settings page's sliders) → `PreviewGlobal`: a pass over every source with the dragged value as the transient GLOBAL — an item with its own override for that field keeps it (override ?? global, R61) — coalescible per property (`preview-global:<prop>`) |
+| scene checks (`ApplyPlaylist`, scene launch, `IsSkippedPath`) | `PlayerEngine.ScenesPlayable(s)` (§ Scenes); `IsSkippedPath` = scene && (!playable \|\| (crashed && !whitelisted)) — D6, `PlayerHelper.SkipScene`; the V→S lead in `Tick` and the tick's LWE crash branch (`!IsLweRunning`) get `!IsLiascapePlayer`; `UpdateTimedSettings`'s "a scene plays" = `ScenePlaying` (liascape-player: the playing history item is a scene folder) |
+| `Apply(scene)` | liascape-player: `SceneUnavailableReason(s)` → its message (scene support off / the player can't: no worker, built `--no-scenes`, no WE assets — `scene-check`'s reason), a crashed non-whitelisted scene → "This scene crashed and won't be played — tick Whitelist…"; legacy's own AllowScenes / LWE-missing messages unchanged |
+| `ApplyTimedPlaylist` (liascape-player) | starts at the first item that isn't skipped (a crashed scene first in the list used to stop playback in `SwitchToFile`); `AdvanceToNext`'s history walk (a next after a previous) steps past a skipped one too |
 | `OnSceneBroken(path)` (from `source.broken`) | § Scenes |
 | `/next` `/prev` `/random` (+ `--action=next-wallpaper\|previous-wallpaper\|random`, `--random`) | `TryStepLibrary` steps past `IsSkippedPath` items (bounded to one library pass), `ApplyRandom`/`RandomAndLaunch` drop them from the pool — so the picker never hands `Apply` a scene. An all-unplayable library throws `InvalidOperationException("No playable wallpaper…")` → the routes return **409** `{error}` (never a 500) and the CLI prints it + exits 1; the playing wallpaper is untouched. Same rule under legacy + `AllowScenes=false` (it 500'd there too). |
 | `ApplyTimedPlaylist` (Play / play-from / a timed restore) | `QueueNewSession` before its first switch (I1 — it was missing: Play and play-from while paused stayed paused; Apply/Launch already had it) |
 | `StepBackAndLaunch` (timed `prev`) | the item before `PlayingHistoryIndex`; none (a fresh session's first item) → nothing at all. With an advance-on-end pre-fetch it used to undo only the pre-fetch and relaunch the playing item — restarted, its armed switch cancelled |
-| `AppOps.Trash` | `LpPlayerMedia.ShownOrIncomingPaths()` (one `state` read after a bounded `Drain`): every layer's content (an effect's `to`, never its leaving `from`) + each requested switch's B unless it's an aligned one in `waiting_start` — so trashing an item whose switch was requested but not yet running still stops/advances (web-backend.md § Trash) |
+| `AppOps.Trash` | `LiascapePlayerMedia.ShownOrIncomingPaths()` (one `state` read after a bounded `Drain`): every layer's content (an effect's `to`, never its leaving `from`) + each requested switch's B unless it's an aligned one in `waiting_start` — so trashing an item whose switch was requested but not yet running still stops/advances (web-backend.md § Trash) |
 | restart daemon / timer (`UpdateRestartTimer`, `SpawnRestartDaemon`, `RunRestartDaemon`, `RestartCurrentAndLaunch`) | no-op — the leak-restart is an mpvpaper workaround |
 
-`AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under lp-player
-`LpPlayerMedia.OwnStreamFilter()` excludes the player's own streams **by ownership (R69)** —
+`AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under liascape-player
+`LiascapePlayerMedia.OwnStreamFilter()` excludes the player's own streams **by ownership (R69)** —
 `application.process.id` == `PlayerPid`, the **compositor's** pid (from `hello.pid` — libmpv runs
 in-process inside the compositor, never the supervisor, so this is the right pid unchanged by Task 16),
-`node.name` starting `lp-player-` (the bus `lp-player-bus*`, and Phase 2's scene worker streams
-`lp-player-scene.<source id>` — their own process, so the pid check misses them),
-`target.object`/`Sink:` = the `lp-player-bus` sink (index via `pactl list short sinks`), or
-`application.name == "lp-player"` (an extra match, not the only one). Legacy: unchanged.
+`node.name` starting `liascape-player-` (the bus `liascape-player-bus*`, and Phase 2's scene worker streams
+`liascape-player-scene.<source id>` — their own process, so the pid check misses them),
+`target.object`/`Sink:` = the `liascape-player-bus` sink (index via `pactl list short sinks`), or
+`application.name == "liascape-player"` (an extra match, not the only one). Legacy: unchanged.
 **Timing, not just identity (owner report 2026-10-28: "auto mute is muting itself when a transition plays").**
 Every own stream carries those properties from its first `new` event on (measured on a private PipeWire: mpv's
-`node.name = "lp-player"`, `application.name = "lp-player"`, `target.object = "lp-player-bus"`, pid = the
-compositor; a scene worker's `lp-player-scene.<id>`; the bus playback; no event ever lacked them) — the filter
+`node.name = "liascape-player"`, `application.name = "liascape-player"`, `target.object = "liascape-player-bus"`, pid = the
+compositor; a scene worker's `liascape-player-scene.<id>`; the bus playback; no event ever lacked them) — the filter
 was right every time, but `AudioMonitor` COUNTED a new stream's level at once and classified it ~120 ms later
 (100 ms delay + the listing), and every `change` event (the uncork ~200 ms after `new`) re-added an already-
 excluded stream for another window. Each switch's incoming B (a video's mpv stream, or a scene's worker stream —
@@ -255,9 +255,9 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
   below it. Both **wall-clock seconds, 0 = off** (`PlayerHelper.PlayLimits`; `MinPlayMs` = the interval while advance is on).
   The tick has **no countdown** under advance-on-end.
   - **Video**: plays at least the minimum, then switches at its next end (align:end). A clip shorter than the minimum
-    loops on and advances at the end of the loop that reaches it, never mid-loop: `DoVideoEndWait` (lp-player) runs
+    loops on and advances at the end of the loop that reaches it, never mid-loop: `DoVideoEndWait` (liascape-player) runs
     `HoldForMinPlay` before it requests the aligned switch — every ≤ 1 s and right after each loop's wrap it reads A's
-    remaining time (`LpPlayerMedia.TimeRemaining`, wall clock at A's speed) and requests only once
+    remaining time (`LiascapePlayerMedia.TimeRemaining`, wall clock at A's speed) and requests only once
     `played + remaining + 150 ms ≥ min` (`MinPlayReached`). The player's `align:end` makes A's CURRENT loop its last
     (player-core.md § Align), so a request ~0.1 s into the crossing loop ends exactly there, with B given that whole
     loop to get ready. A must loop meanwhile: with `Loop` off the hold turns A's loop on (`SetLoop(true)`; align:end
@@ -291,7 +291,7 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     `PlayerHelper.ItemPlayRule(kind, min, max, separate, scenesAfter)` → `(MinMs, MaxMs)` is the whole table (pure,
     self-test): video `(min, max)`; toggle on → scene / image `(after or NeverMs, 0)`; off → scene `(min or NeverMs,
     max)`, image `(min, max)`. `NeverMs` (= long.MaxValue/4) is never reached and never overflows the hold's
-    arithmetic. The tick reads the playing item's rule (`PlayingRule`, `PlayKindOf` — `LpPlayerMedia.IsImagePath`)
+    arithmetic. The tick reads the playing item's rule (`PlayingRule`, `PlayKindOf` — `LiascapePlayerMedia.IsImagePath`)
     for its maximum and a scene's end (`SceneMinReached` with the rule's minimum); a still image's time is
     `HoldForMinPlay` (its rule's minimum; NeverMs → held until a user switch or a live edit — it re-reads ≤ 1 s apart;
     no loop toggling for a still).
@@ -311,7 +311,7 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
   scene keys, off (= what it did). Dead `SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` removed.
 - **Play time** (`_itemPlayedMs`): counted by the tick in wall clock (never scaled by speed — a 2× clip with max 60 s
   plays 60 real seconds) and **not while paused** (the paused tick returns before it); reset by `PostSwitch` (every
-  switch — under lp-player an aligned switch's B from its effect's start), `ApplyTimedPlaylist`, `RestoreTimedPlaylist`
+  switch — under liascape-player an aligned switch's B from its effect's start), `ApplyTimedPlaylist`, `RestoreTimedPlaylist`
   (the item restarts, like the countdown). **Never reset by an edit.** Persisted in `timed_state.json`
   (`ItemPlayedMs` + `PlayedSavedAtMs`); `LoadTimedState` adds the time since that save unless paused
   (`PlayedAfterLoad`) — the player outlives the backend and played on while no process counted (a backend restart,
@@ -349,20 +349,20 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
   (the opt-in `sceneSGlobal`: the scene playlist following globals with no limits — the scene holds; the toggle row
   shown, the seconds row only once it's on; 4 s → s1 moves on).
 
-## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
-A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:
-"scene"` source (player-core.md § Scene worker — one `lp-scene-worker` per scene, shared by every output).
+## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`)
+A WE scene item's play path is its **folder** (`IsScenePath`, library.md); liascape-player plays it as a `kind:
+"scene"` source (player-core.md § Scene worker — one `liascape-scene-worker` per scene, shared by every output).
 Everything kind-agnostic stays so: the resolver (§ Targeting) gives a scene the same per-source values as a
 video — `gain.user`/`gain.mute`/`no_audio`/`speed` drive its worker's stream and clock live (`speed` scales a
 scene's animation AND its pitch-kept sound, owner decision), the video-only props (`hwdec`, `fps_cap`,
 `cache`, `demuxer_*`, `loop`) are stored, no effect, and `af` is always "" (no loudnorm on a scene — a scene
 normalizes through `gain.normalize`, "Loudness" below). Pause,
 transitions (every method, every switch combo), the snapshot/restore and R81 need nothing scene-specific.
-- **Can a scene play?** `ScenesPlayable(s)` = `AllowScenes` && `LpPlayerClient.ScenesAvailable`: the running
+- **Can a scene play?** `ScenesPlayable(s)` = `AllowScenes` && `LiascapePlayerClient.ScenesAvailable`: the running
   player's `scene` capability (its worker AND WE's assets dir resolve — or synthetic scenes are allowed) from
   the current request connection's `hello` (a dropped connection forgets it: the next ask greets whatever
   answers — twice, the first request after a quit fails on the dead connection; a stalled player → its last
-  word); no player on the socket → `lp-player scene-check` in the backend's environment (`{worker, features,
+  word); no player on the socket → `liascape-player scene-check` in the backend's environment (`{worker, features,
   assets_dir, ok, reason}`), cached 30 s. Hot path: `IsSkippedPath` per next/prev/random (once per pass in a
   library scan). `GET /player-engine` → `scenes {available, reason, assets_dir}` (`SceneStatus`: scene support
   off → that; the player without the capability → `scene-check`'s reason, else a hint at `ctl get
@@ -384,18 +384,18 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   (`PropertySet`) is the player's `scene.property` event / `workers.properties` (not subscribed — a refused name only
   logs there). Legacy: launch-only (`--set-property`). Live on the same worker, every switch combo, across a
   switch-away-and-back and a player restart (IT + matrix `sceneProp:*`).
-- **Per-monitor scene fps — live** (`LpPlayerMedia.ApplySceneFps(prev, cur)`): `LweMonitors[].Fps` →
+- **Per-monitor scene fps — live** (`LiascapePlayerMedia.ApplySceneFps(prev, cur)`): `LweMonitors[].Fps` →
   `set out:<name>.scene_fps` (name mapped like the player's `output_name`: `.`/`:`/`*`/whitespace → `-`;
   0–480, 0 = the output's refresh), queued coalescible per output (`scene_fps:<name>`); `/settings` diffs prev
   → cur (a removed entry → back to the default 30, D5). Every entry is re-asserted once per player process
   (`Switch` when `Generation` moved, and R81's `ReapplyAllNow`). An entry naming no output is a logged
-  `no_such_node`. `IsPrimary` has no lp-player meaning (one worker, its sound one stream on the bus), and the
+  `no_such_node`. `IsPrimary` has no liascape-player meaning (one worker, its sound one stream on the bus), and the
   V→S lead / `SceneTransitionDelayMs` stay legacy-only (the player switches once B's first frame is in) —
-  Settings hides both under lp-player and labels the fps "fps (live)". Under lp-player `LweMonitors` is no
+  Settings hides both under liascape-player and labels the fps "fps (live)". Under liascape-player `LweMonitors` is no
   longer the launch-only exception.
 - **Broken scenes (D6 + the owner's call).** The player logs `source.broken {id, path, scene_id, reason,
   signal|code, restarts, record}` once when a scene's worker crashed past its budget (3 restarts in 60 s;
-  player-core.md § Scene worker → Errors). `LpPlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
+  player-core.md § Scene worker → Errors). `LiascapePlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
   the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the item modal's "Scene
   crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
   (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
@@ -410,7 +410,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   `player.scene_throttle`; `SceneVramLimitEnabled` (default false) + `SceneVramLimitMib` (default 1536, clamped
   64–1048576, kept while the toggle is off) → `player.scene_vram_limit_mib` = the MiB while enabled, else **0 = off**;
   `VramLowMode` `stop` (default) | `pause` | `off` (an unknown value reads as `stop`) → `player.vram_low_mode`.
-  `LpPlayerMedia.GpuProps(s)` is the mapping (self-test table), `ApplyGpuSettings(prev, cur)` the `/settings` diff
+  `LiascapePlayerMedia.GpuProps(s)` is the mapping (self-test table), `ApplyGpuSettings(prev, cur)` the `/settings` diff
   (coalescible per prop, `player:<prop>`), and `AssertSceneFps` — once per player process (`Switch` when
   `Generation` moved, R81's `ReapplyAllNow`) — asserts them with the scene fps, so a fresh or restarted player (its own
   defaults) gets them back. **`scene.vram_exceeded {id, path, pid, used_mib, limit_mib}`** (subscribed, `Topics`) →
@@ -421,7 +421,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   and is stopped again 2 s later while it still uses too much). The low-VRAM hold is the player's own pause composition
   (`player.paused` stays false — nothing here mirrors it into the UI's pause state, nothing re-asserts anything when it
   ends); `GET /player-engine` → `vram {low_active, mode}` (`player.vram_low_active`, null = no player) for a status
-  line. Settings → "GPU / VRAM" (lp-player only). Known edge: a scene **pending B** (armed for A's end) stopped by the
+  line. Settings → "GPU / VRAM" (liascape-player only). Known edge: a scene **pending B** (armed for A's end) stopped by the
   guard is that switch's `transition.failed`; the `DoVideoEndWait` fallback then switches to it now (it isn't
   skipped), it plays ~2 s and is stopped again → the rotation advances (bounded by the guard's hold, never a loop).
 - **Loudness (learned on first play, refined on every play; owner decisions, plan "Loudness: learn on first play" +
@@ -429,7 +429,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   BS.1770, AUDIBLE play, pre-gain — the first report after ~60 s, then each further 60 s, at the end of a play, and
   once at its 30 min cap) and logs **`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
   played_s, complete, capped, window_s, cap_s, state}`** (subscribed, `Topics`; each report cumulative over every
-  play) → `LpPlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
+  play) → `LiascapePlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
   `MergeSceneLoudness` (pure): the index's `loudnessState` (the player's `state`: its block-loudness histogram +
   peak, opaque here), `loudnessSeconds`, `loudnessPartial` and the APPLIED `loudnessI` (LUFS) / `loudnessTP` (the
   SAMPLE peak, dBFS) (library.md). **The measurement** is replaced by any report covering MORE audible seconds (a
@@ -444,7 +444,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   report re-learns the entry (a partial doesn't replace it; the 0.5 LU rule applies against the old value).
   Applied changed → `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver
   pass); stored but not applied → nothing sent (adapter log `stored (< 0.5 LU: not applied)`). **Applied as
-  the scene source's `gain.normalize`** (`LpPlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
+  the scene source's `gain.normalize`** (`LiascapePlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
   resolver for scene paths only): `NormalizeTargetLufs − loudnessI`, never boosting the sample peak past
   `NormalizePeakCeilingDb` −1.5 dBFS (a plain gain has no limiter — the video loudnorm's TP −1.5), clamped −60…+24
   dB, rounded to 0.001; **0** while normalization is off or nothing is learned. NoAudio doesn't zero it (silent
@@ -459,13 +459,13 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
   Volume —, gain.normalize 0 unlearned / absent on a video, `SceneLoudnessAssertions`: the `MergeSceneLoudness`
   rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates, a state-less (pre-2026-10-28) entry is applied, never a seed, re-learned by a complete report — and the `SceneNormalizeDb` table — peak cap, clamps, off,
-  unlearned, NoAudio —, the ownership filter on a `lp-player-scene.src4` block, the `GpuProps` table) + the round trip (its
-  private player runs `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
+  unlearned, NoAudio —, the ownership filter on a `liascape-player-scene.src4` block, the `GpuProps` table) + the round trip (its
+  private player runs `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
   `ApplyGpuSettings` there and back; scene → clip cut); the IT's § "Phase 2: scenes" (Integration test, below); the UI matrix's scene cells (`scripts/test-ui-matrix.sh`, web-ui.md).
 
 ## Targeting (R61): ONE effective-settings resolver
-Every setting reaches the live sources through **`LpPlayerMedia.ResolveNow`** (design note at the top of
+Every setting reaches the live sources through **`LiascapePlayerMedia.ResolveNow`** (design note at the top of
 its code): the live sources (the cached source map: source id → item path — every live media source: on
 screen, either side of an effect, a pending B, a parked one) × (the global settings, each item's overrides
 + loudness, the mute, a request's transient values) → each source's desired values, **diffed against what
@@ -505,21 +505,21 @@ computed for the playing item at request time landed on whatever played when it 
 
   So a drag value is ONE `set` per source (no `state` while the map is cached, nothing persisted) and a
   no-op `/settings` save sends nothing but its one `state` read.
-- **The live-source cache** (`LpPlayerMedia.CachedLive`/`ReadLive`, speed storm: every
+- **The live-source cache** (`LiascapePlayerMedia.CachedLive`/`ReadLive`, speed storm: every
   `/preview` cost a full `state` + the `set`s — 2 round trips per value with paths, 3 without — and
   saturated the one worker at ~50/s). One `state` read builds `full path → [ids]` for every live media
   source (no snapshot/colour), each source's values and the main layers' `fit`; it's reused until the graph's SOURCES change. Ids are never reused within
   a player process and a source's path never changes, so only these change it, and each **invalidates**
   it (`InvalidateSources`): our own `Switch` (finally), `Stop`, `StopAndQuit`, a `cancel`, the in-place
   upgrade — synchronously, on the queue's worker where every reader runs; the player's own changes and
-  other clients' through the subscribed events (`LpPlayerClient.Topics` = `transition.` — scheduled
+  other clients' through the subscribed events (`LiascapePlayerClient.Topics` = `transition.` — scheduled
   creates a B, handoff drops A, cancelled/failed drop B, output_adopted/done — + `player.stopped` +
   `source.retire`, a handful per switch; `source.position` is still never subscribed); a new compositor
   (`Generation`, `OnRestarted`). It is **only trusted while the event connection is live**
   (`EventsLive`; every (re)subscription invalidates — a reconnect gap loses events), a map read while an
   invalidation happened is never stored (epoch), and a pass that hits `no_such_node` (an id retired
   meanwhile) invalidates and re-reads once. Self-test evidence:
-  `SourceMapReads`, `SourceEpoch`, `LpPlayerClient.RequestCount`.
+  `SourceMapReads`, `SourceEpoch`, `LiascapePlayerClient.RequestCount`.
 - **Layer settings** (`fit` ← VideoScale) → `lay:*:main` (the resolver's Fresh passes; also re-asserted
   on every switch, so a hotplugged output matches).
 - **Mute** (`gain.mute`, user + auto combined like legacy `_isMuted`) → the resolver: `animate
@@ -531,7 +531,7 @@ computed for the playing item at request time landed on whatever played when it 
   `--action=toggle-pause` CLI process and the serve backend always agree), and R81's reapply
   reads it (logged) but never re-asserts it. A pause belongs to its **session**: `stop` clears it
   on the player side, and a new session — `Apply`, `ApplyPlaylist`, a cold `Launch` — queues `set
-  player.paused false` (`LpPlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
+  player.paused false` (`LiascapePlayerMedia.QueueNewSession`) ahead of its switch, as legacy starts a
   fresh, playing mpvpaper; a rotation keeps it. **A user switch while paused** (next / previous /
   random — keybind, CLI, `/next` `/prev` `/random`; owner's call 2026-10-25): `KeepPauseOnSwitch` off
   (default) → `BeforeUserSwitch` resumes first (`QueueNewSession` + the timed countdown via
@@ -569,10 +569,10 @@ Anything else → `null` + a log line.
 A fresh graph (a new compositor pid, supervised or not; a snapshot that wasn't restored — from the
 4th restart in a 60 s window, player-core.md § Supervisor "Budget" — or was stale, saved before the
 crash caught up) must not show stale values just because the backend's MODEL of what should be
-playing didn't change. Two triggers, both `LpPlayerMedia.ReapplyAll()` (fire-and-forget `Queue(...)` —
+playing didn't change. Two triggers, both `LiascapePlayerMedia.ReapplyAll()` (fire-and-forget `Queue(...)` —
 never `Drain().Wait()` inside the handler, which runs on the client's own callback):
-- **`LpPlayerClient.Restarted`** (`OnRestarted`) — the compositor pid changed.
-- **`LpPlayerClient.Recovered`** (`OnRecovered`) — the stall breaker just closed (a mutation made while
+- **`LiascapePlayerClient.Restarted`** (`OnRestarted`) — the compositor pid changed.
+- **`LiascapePlayerClient.Recovered`** (`OnRecovered`) — the stall breaker just closed (a mutation made while
   it was open was dropped, never replayed on its own otherwise — the "New concern" from the first
   review round).
 
@@ -583,7 +583,7 @@ included — its own effective `gain.user`/`speed`/`af`/`no_audio`/`hwdec`/`fps_
 (after a restart: what the snapshot restored; after a stall: what the dropped mutations left) — and **not** `player.paused` (I3: the player is its
 authority and restores it from its snapshot; re-asserting a backend copy flipped the pause after a
 crash/stall when the toggle came from a keybind's CLI process or a restarted backend). The reapply
-logs the player's value (`… (player.paused = true, kept)`). `LpPlayerMedia.ReapplyCount` counts how many times it's
+logs the player's value (`… (player.paused = true, kept)`). `LiascapePlayerMedia.ReapplyCount` counts how many times it's
 actually run (self-test/IT evidence).
 
 **The wallpaper too (`ReconcileShown`, 2026-10-28).** A restarted player shows what its snapshot holds, and every
@@ -617,34 +617,34 @@ ready) leaves A on screen, but every client was told B when it was requested (`w
 `apply:broken` (a garbage `.mp4`; RED: the UI kept marking the file that never showed).
 
 ## Debugging
-- Adapter log: `~/.cache/livepaper/lp-player-adapter.log` (+ stderr → the serve unit's journal),
+- Adapter log: `~/.cache/livepaper/liascape-player-adapter.log` (+ stderr → the serve unit's journal),
   rate-limited (an identical line ≤ once / 10 s): every refused request with its **hint**, start
   failures, untranslated mpv commands, engine switches, in-place upgrades (`out of date (…)` → `upgraded
-  in place: pid A → B`). Player stdout/stderr: `~/.cache/livepaper/lp-player-serve.log`.
+  in place: pid A → B`). Player stdout/stderr: `~/.cache/livepaper/liascape-player-serve.log`.
   `GET /player-engine` = `{engine, active, available, binary, reason, running}` — `running.stale` names
   why the running player is out of date (null = current).
-- `lp-player ctl state` — what each output shows (`lay:<c>:main.content`, `cur:`), every source's
+- `liascape-player ctl state` — what each output shows (`lay:<c>:main.content`, `cur:`), every source's
   `path/ready/paused/gain/gain_effective_db`, live `transitions` (phase, held).
-- `lp-player ctl logs '{"corr":"tr-12"}'` — one switch's whole story (scheduled → started → handoff →
-  done, or cancelled/failed + reason); `LpPlayerMedia.LastCorr` / the adapter log name the corr.
+- `liascape-player ctl logs '{"corr":"tr-12"}'` — one switch's whole story (scheduled → started → handoff →
+  done, or cancelled/failed + reason); `LiascapePlayerMedia.LastCorr` / the adapter log name the corr.
   `ctl logs '{"min_level":"warn"}'` for everything that went wrong.
-- `lp-player ctl probe '{"name":"sources"}'` — what each source really runs (mpv volume-gain, pause, …).
+- `liascape-player ctl probe '{"name":"sources"}'` — what each source really runs (mpv volume-gain, pause, …).
 - **Never print or log settings.json wholesale** — it holds `SteamRefreshToken`.
 
-## Integration test (`scripts/test-lp-player-adapter.sh`)
-`scripts/test-lp-player-adapter.sh [--no-build]` (needs `dotnet` or `DOTNET=…`, ffmpeg, jq, curl,
-python3; builds lp-player via the flake devShell + `dotnet build` unless `--no-build`; ~50 s; last line
-`RESULT pass=N fail=M`, exit 0 = all pass; `LP_IT_KEEP=1` keeps its temp dir). **Load-proof by construction
+## Integration test (`scripts/test-liascape-player-adapter.sh`)
+`scripts/test-liascape-player-adapter.sh [--no-build]` (needs `dotnet` or `DOTNET=…`, ffmpeg, jq, curl,
+python3; builds liascape-player via the flake devShell + `dotnet build` unless `--no-build`; ~50 s; last line
+`RESULT pass=N fail=M`, exit 0 = all pass; `LIASCAPE_IT_KEEP=1` keeps its temp dir). **Load-proof by construction
 (2026-10-27):** a converging state is polled to a real deadline (`waitfor <ms> <cond>`), never read after a fixed
 sleep; a window is measured from the clip's own position; "what had happened by t" is judged by the events'
 own `t_mono_ms`/`t_wall` (reads after a window took seconds under load); fixed windows remain only where the
 window is the check (no switch in N s) and the latency bounds (< 500 ms SIGSTOPped, < 100 ms) keep theirs —
 docs/TODO.md "Load-sensitive test flakes". The REAL `livepaper --serve` (from this tree's
-`bin/Debug`) against a private `lp-player serve --headless --outputs 640x360@60,320x180@60 --clock real
---ao null`, all over HTTP, checked with `lp-player ctl`. **Hermetic**: temp HOME + every XDG dir (own
-settings.json with `PlayerEngine=lp-player`, own library, own lp-player socket + event log), its own
+`bin/Debug`) against a private `liascape-player serve --headless --outputs 640x360@60,320x180@60 --clock real
+--ao null`, all over HTTP, checked with `liascape-player ctl`. **Hermetic**: temp HOME + every XDG dir (own
+settings.json with `PlayerEngine=liascape-player`, own library, own liascape-player socket + event log), its own
 random backend port, display/compositor env unset; it aborts before any playback call unless
-`/player-engine` says `active: lp-player`, so it can't start or kill mpvpaper; an EXIT/INT/TERM/HUP trap
+`/player-engine` says `active: liascape-player`, so it can't start or kill mpvpaper; an EXIT/INT/TERM/HUP trap
 SIGCONTs + stops the player and the backend and removes the temp dir. Covers: `/apply` + fade
 full-live, `/current`; every live setting (Volume −18.06, Speed, VideoScale → layer fit, VideoFps
 (+ VideoFps 30 × an image item: it plays — the player never caps a still, player-core.md § Sources), HwDec, DisableCache, Demuxer, NoAudio, Loop); mute; pause; `/volume`; `/preview`; timed rotation
@@ -659,14 +659,14 @@ survives an 8 s pause (no cancel, no forced switch, no backstop log line), each 
 end; `/preview {paths:[A]}` during a running 8 s fade moves A only and `{paths:[B]}` B only (RED before:
 A's values landed on B); `/preview {global:true}` during a running 8 s fade from a library item that
 follows the global to one with its own override 30 / 0.8× moves A only, persists nothing, answers < 100 ms
-and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LP_PLAYER_BIN` is a link into `$T/bin`, replaced by a
+and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LIASCAPE_PLAYER_BIN` is a link into `$T/bin`, replaced by a
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
 a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
 owns `gui_timer.pid`, no `--timer-daemon` left (RED before: 7 superseded switches); a second backend
 started while the first runs → the first yields ("stops ticking"); **a crash while an aligned switch is
 armed** (E1 → E2): E1 comes back at its position (not E2), the switch is re-armed `align:end`, no `align:now`,
 one handoff at E1's end (RED before: E2 restored at once + an `align:now` switch after the 1 s back-off); **a crash
-whose snapshot lags the last switch** (a player restarted with `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000` — every
+whose snapshot lags the last switch** (a player restarted with `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000` — every
 write takes 4 s, an fsync under I/O load; precondition: the snapshot still shows a after the switch to c) → c on
 screen again, `/current` c (RED before: a stayed); a rebuilt binary → an idle paused
 player — its old player restarted with 4 s snapshot writes, so its clean quit takes seconds — is upgraded within
@@ -676,7 +676,7 @@ player — its old player restarted with 4 s snapshot writes, so its clean quit 
 next switch starts the player again with its own arguments + `--restore` and shows (RED before: a plain `serve`,
 no Wayland here → never came up), and an advance-on-end playlist is **not**
 upgraded while its switch is armed (stale > 15 s) but at its next switch, the following switch armed
-on the new player (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
+on the new player (`LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
 while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
 pending B — `cur:*.paused`/a source's own raw `paused` never changes, by design); a SIGSTOPped player
@@ -685,17 +685,17 @@ SIGCONT target the COMPOSITOR pid (`ctl hello | jq .pid`), never the spawned sup
 feel nothing and prove nothing; a `kill -9` + restart **of the compositor pid** (the supervisor stays
 up throughout, `SP` unchanged — this is the supervised-restart path, not a brand-new `serve`; rotation
 resumes, no switch storm) — **R81**: a distinctive Volume set just before the kill is still in effect
-after the restart, and the adapter log shows a reapply; lp-player → legacy with nothing playing (the
+after the restart, and the adapter log shows a reapply; liascape-player → legacy with nothing playing (the
 player quits — **cleanup kills the supervisor `SP` / uses `ctl quit`, never just the old compositor
 pid**, so nothing restarts after the test — no mpvpaper started/killed); no settings dump in the logs.
-**Phase 2 scenes** (every player it runs or the backend starts has `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` +
-`LP_SCENE_WORKER_BIN` = this build's worker — the upgrade test's copied binary has none next to it; synthetic
+**Phase 2 scenes** (every player it runs or the backend starts has `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` +
+`LIASCAPE_SCENE_WORKER_BIN` = this build's worker — the upgrade test's copied binary has none next to it; synthetic
 scene items `library/workshop/90000000{1..4}`): `/player-engine.scenes.available`; `/apply` a scene →
 `cur:*.kind == scene`, ready ≤ 3 s, its preview; Volume 50 → the scene's `gain.user` −18.06 and the worker's
 stream gain; NoAudio on/off live on the source and the worker, same worker pid; `LweMonitors` fps 45 →
 `out:VIRTUAL-1.scene_fps` 45 + the worker's `fps_target`, same pid, `[]` → 30; `/library/volume` on scene 1
 during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a player with
-`LP_PLAYER_LOUDNESS_WINDOW_S=3`, NormalizeAudio on, target −14; synthetic 1 kHz scenes at −20 / −26 dBFS + one
+`LIASCAPE_PLAYER_LOUDNESS_WINDOW_S=3`, NormalizeAudio on, target −14; synthetic 1 kHz scenes at −20 / −26 dBFS + one
 without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play the index gains `loudnessI` −20 ± 1
 (complete, ≥ 3 s) and `gain.normalize` ramps (`anim.start` ≥ 300 ms) to +6 live — same source, same worker — and
 reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
@@ -706,9 +706,9 @@ S→V in a playlist — each `fade full-live` handed off — and an aligned V→
 every 400 ms in a timed playlist → one `source.broken`, WS `scene-crashed`, index `crashed: true`, the rotation
 advanced ≤ 2 s after the break (event clocks), `/next` ×3 skips it, whitelisted → `/next` plays it again; a
 missing scene folder → `transition.failed`, not marked crashed; `AllowScenes=false` → 8 × `/next` never a
-scene; a player restarted with `LP_SCENE_WORKER_BIN=/nonexistent` → no `scene` capability,
+scene; a player restarted with `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → no `scene` capability,
 `/player-engine.scenes` unavailable with a reason, 8 × `/next` never a scene. **Task 8 settings** (a player with
-`LP_PLAYER_VRAM_PROBE=fake:$T/vram.json` + short `LP_PLAYER_VRAM_TIMING` — the probe file the test writes, never this
+`LIASCAPE_PLAYER_VRAM_PROBE=fake:$T/vram.json` + short `LIASCAPE_PLAYER_VRAM_TIMING` — the probe file the test writes, never this
 machine's GPU): a fresh player's defaults; `SceneThrottle` / the VRAM limit toggle + MiB / `VramLowMode` each →
 `get player.<prop>` live, the playing scene on the same worker, `player.paused` untouched; set, then a fresh player
 (not restored) → all re-applied; a scene whose worker the fake reports at 2000 MiB > 1536 in a timed playlist →
@@ -727,11 +727,11 @@ wireplumber / pactl / paplay / parec): the only section with real audio — a pr
 one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR`; the whole IT
 exports `PULSE_SERVER` at that socket (libpulse can't fall back to another server or autospawn one); a player WITHOUT
 `--ao null` (its bus on the private PipeWire), then back to the `--ao null` one. Checks § Auto-mute above.
-`LP_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
+`LIASCAPE_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
-`LP_PLAYER_BIN=<repo>/src/player/target/debug/lp-player dotnet run --project src/livepaper --
---lp-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
+`LIASCAPE_PLAYER_BIN=<repo>/src/player/target/debug/liascape-player dotnet run --project src/livepaper --
+--liascape-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
 assertions on synthetic `pactl` blocks, **`ScenePropertyAssertions`** (a project.json with the corpus's odd cases —
 BOM, untyped / `"Text"` HTML labels, `ui_*` keys, numeric combo values, `fraction: false`, a 0–255 colour, conditions
 with `|| ( ) !` and a stray `=`, usershortcut / scenetexture, `order` vs `index` —: order, types, labels, defaults;
@@ -745,7 +745,7 @@ cap; draining afterward must bring it back to 0) **+ the coalescing assertions**
 newer `QueueSet` of a key replaces the pending one and the rest keep their order — `b1 a2 E1 a4`;
 nothing merges across an essential command; at the cap a pending key's newest set still lands, an
 essential command is admitted and runs last, a new key is refused), then a round-trip against a **private, supervised**
-`lp-player serve --headless --outputs 640x360@60 --clock stepped --ao null` (temp
+`liascape-player serve --headless --outputs 640x360@60 --clock stepped --ao null` (temp
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `/tmp` — a unix socket path must be < 108 bytes — own
 `--socket`, `LD_LIBRARY_PATH` removed, `quit` + kill at the end; the shared client is swapped to it
 with `AutoSpawn=false`, so a real player is never touched). **The spawned `.NET Process` is the
@@ -766,7 +766,7 @@ preview once its `transition.scheduled` event bumped `SourceEpoch`; a cancelled 
 SIGSTOPped **compositor** (never the supervisor — it would feel nothing): the first query returns in
 ≤ 450 ms (QuickMs), the next in ≤ 50 ms (stall breaker), a property set returns at once (queued), and
 it recovers after SIGCONT — **R81**: that recovery (`Recovered`) must have bumped
-`LpPlayerMedia.ReapplyCount` (waited for via `Drain()` before checking, since `Queue(...)` from an
+`LiascapePlayerMedia.ReapplyCount` (waited for via `Drain()` before checking, since `Queue(...)` from an
 event handler is fire-and-forget by design); a SIGKILLed **compositor** yields a NEW `hello.pid`
 within 1.5 s with the SAME `supervisor_pid` (the supervised restart, Task 16 § Supervisor; polled with
 a FRESH client per attempt — a hello reaching the new compositor before it serves times out, and the
@@ -774,7 +774,7 @@ shared client's breaker then failed every later attempt for 3 s: under load that
 check; the shared client must then see the new pid within 4 s) — **R81**
 again: `OnRestarted` must also have bumped `ReapplyCount`; **I3**: a pause set just before by a
 second, independent client (another process's toggle) is still on after the restart + reapply,
-and one `TogglePause` then resumes; then `LpPlayerMedia.StopAndQuit()` must
-leave NO lp-player process — neither the new compositor nor the supervisor (the regression this fixes:
+and one `TogglePause` then resumes; then `LiascapePlayerMedia.StopAndQuit()` must
+leave NO liascape-player process — neither the new compositor nor the supervisor (the regression this fixes:
 killing only the compositor while its supervisor lived just made the supervisor restart it again). A
 pump steps the stepped clock (40 ms) on its own connection. ~16 s.

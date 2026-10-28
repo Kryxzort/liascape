@@ -1,18 +1,18 @@
-//! `lp-player ctl` — every verb from a shell (spec §9 "CLI"). Prints the reply's result as
+//! `liascape-player ctl` — every verb from a shell (spec §9 "CLI"). Prints the reply's result as
 //! pretty JSON and exits 0, or the error object (`{code, message, hint}`) and exits 1 —
 //! errors keep their hint, so the output always says what to do next.
 //!
 //! ```text
-//! lp-player ctl [--timeout-ms N] <verb> ['<json args>']   e.g. lp-player ctl set '{"path":"srcs:*.gain.user","value":-6}'
-//! lp-player ctl subscribe <prefix…>                       events, one JSON object per line, until Ctrl-C
+//! liascape-player ctl [--timeout-ms N] <verb> ['<json args>']   e.g. liascape-player ctl set '{"path":"srcs:*.gain.user","value":-6}'
+//! liascape-player ctl subscribe <prefix…>                       events, one JSON object per line, until Ctrl-C
 //! ```
 //!
 //! A reply is waited for at most `--timeout-ms` (default [`DEFAULT_TIMEOUT_MS`]) → a
 //! `timeout` error; `subscribe` streams without a timeout and exits 0 (with a note on
 //! stderr) when the player goes away.
 //!
-//! The socket is `paths::socket()` (`$LP_PLAYER_SOCKET` or
-//! `$XDG_RUNTIME_DIR/livepaper/lp-player.sock`).
+//! The socket is `paths::socket()` (`$LIASCAPE_PLAYER_SOCKET` or
+//! `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock`).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -26,8 +26,8 @@ fn fail(code: &str, message: String, hint: &str) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: lp-player ctl [--timeout-ms N] <verb> ['<json args>'] | \
-                     lp-player ctl subscribe <prefix…>; `lp-player ctl hello` lists the verbs";
+const USAGE: &str = "usage: liascape-player ctl [--timeout-ms N] <verb> ['<json args>'] | \
+                     liascape-player ctl subscribe <prefix…>; `liascape-player ctl hello` lists the verbs";
 
 /// How long `ctl` waits for a reply by default.
 pub const DEFAULT_TIMEOUT_MS: u64 = 10_000;
@@ -63,8 +63,8 @@ pub fn main(args: &[String]) -> ExitCode {
             return fail(
                 "io",
                 format!("can't connect to {}: {e}", path.display()),
-                "is the player running? start it with `lp-player serve` (or check \
-                 $XDG_RUNTIME_DIR / $LP_PLAYER_SOCKET)",
+                "is the player running? start it with `liascape-player serve` (or check \
+                 $XDG_RUNTIME_DIR / $LIASCAPE_PLAYER_SOCKET)",
             );
         }
     };
@@ -74,7 +74,7 @@ pub fn main(args: &[String]) -> ExitCode {
             return fail(
                 "bad_request",
                 "subscribe needs at least one kind prefix".into(),
-                "e.g. `lp-player ctl subscribe transition. source.` (\"\" = everything)",
+                "e.g. `liascape-player ctl subscribe transition. source.` (\"\" = everything)",
             );
         }
         ("subscribe", json!({ "topics": topics }), true)
@@ -87,14 +87,14 @@ pub fn main(args: &[String]) -> ExitCode {
                     return fail(
                         "bad_request",
                         format!("args must be a JSON object, got {other}"),
-                        "pass one JSON object, e.g. lp-player ctl get '{\"path\":\"src1.speed\"}'",
+                        "pass one JSON object, e.g. liascape-player ctl get '{\"path\":\"src1.speed\"}'",
                     );
                 }
                 Err(e) => {
                     return fail(
                         "bad_request",
                         format!("args are not JSON: {e}"),
-                        "pass one JSON object (quote it for the shell), e.g. lp-player ctl \
+                        "pass one JSON object (quote it for the shell), e.g. liascape-player ctl \
                          set '{\"path\":\"src1.speed\",\"value\":1.5}'",
                     );
                 }
@@ -118,14 +118,14 @@ pub fn main(args: &[String]) -> ExitCode {
         line.clear();
         match rd.read_line(&mut line) {
             Ok(0) if replied => {
-                eprintln!("lp-player ctl: the player closed the connection (it exited)");
+                eprintln!("liascape-player ctl: the player closed the connection (it exited)");
                 return ExitCode::SUCCESS;
             }
             Ok(0) => {
                 return fail(
                     "io",
                     "the player closed the connection before replying".into(),
-                    "`lp-player ctl logs '{\"kind_prefix\":\"api.\"}'` (if it's still up)",
+                    "`liascape-player ctl logs '{\"kind_prefix\":\"api.\"}'` (if it's still up)",
                 );
             }
             Ok(_) => {}
@@ -140,12 +140,12 @@ pub fn main(args: &[String]) -> ExitCode {
                     "timeout",
                     format!("no reply to {cmd} within {timeout_ms} ms"),
                     "pass `--timeout-ms <ms>` to wait longer (a stepped `step` waits for every \
-                     video frame); `lp-player ctl probe '{\"name\":\"loop\"}'` shows whether \
+                     video frame); `liascape-player ctl probe '{\"name\":\"loop\"}'` shows whether \
                      the loop is busy",
                 );
             }
             Err(e) if replied => {
-                eprintln!("lp-player ctl: the connection to the player failed: {e}");
+                eprintln!("liascape-player ctl: the connection to the player failed: {e}");
                 return ExitCode::SUCCESS;
             }
             Err(e) => return fail("io", format!("read: {e}"), "the player went away"),

@@ -100,4 +100,4 @@ After acquire: `DownloadHelper.DownloadAsync` with the workshop dir as `Download
 
 **Preview thumbnails / animation:** the scraper still exposes the resized `preview_url + ?imw=384&imh=216&letterbox=true` (static) and the raw full-res `preview_url` (animated). In the web UI these animate via `MotionThumb` — a gif/webp `<img>` the browser decodes off-thread (see `web-ui.md`). Remote bytes go through the `/img` proxy + browser cache.
 
-**Debug:** the `DebugMode` setting enables `DebugHud` (`app/ui/src/debug/`) — an on-screen FPS/metrics overlay (toggled by `DebugOverlay`) plus a socket-driven self-drive bridge for scripted UI tests. For CDP inspection, launch the Electron shell with `LP_DEBUG=1` and drive `:9222` via `node app/shell/cdp.js "<expr>"`.
+**Debug:** the `DebugMode` setting enables `DebugHud` (`app/ui/src/debug/`) — an on-screen FPS/metrics overlay (toggled by `DebugOverlay`) plus a socket-driven self-drive bridge for scripted UI tests. For CDP inspection, launch the Electron shell with `LIASCAPE_DEBUG=1` and drive `:9222` via `node app/shell/cdp.js "<expr>"`.

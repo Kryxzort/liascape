@@ -8,7 +8,7 @@ set -u
 cd "$(dirname "$0")"
 OUTPUT=${OUTPUT:-DP-2}
 SECS=${SECONDS_PER_RUN:-60}
-WORK=2500 # LP_SPIKE_WORK for the "load" runs: ~3.7 ms of GPU per frame on an RTX 3070 Ti
+WORK=2500 # LIASCAPE_SPIKE_WORK for the "load" runs: ~3.7 ms of GPU per frame on an RTX 3070 Ti
 mkdir -p out
 
 # label | env | consumer args (window length appended unless the args set --seconds)
@@ -24,19 +24,19 @@ battery=(
     "nosync-vblank||--mode nosync --redraw vblank"
     "local-vblank||--mode local --redraw vblank"
     "fence-signaled-vblank-noverify||--mode fence --latch signaled --redraw vblank --verify off"
-    "load-fence-gpuwait-vblank|LP_SPIKE_WORK=$WORK|--mode fence --latch gpu-wait --redraw vblank"
-    "load-fence-signaled-vblank|LP_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw vblank"
-    "load-fence-signaled-new|LP_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw new"
-    "load-finish-vblank|LP_SPIKE_WORK=$WORK|--mode finish --redraw vblank"
-    "load-finish-vblank-glyield-usleep|LP_SPIKE_WORK=$WORK __GL_YIELD=USLEEP|--mode finish --redraw vblank --seconds 30"
-    "load-fence-signaled-vblank-prio|LP_SPIKE_WORK=$WORK LP_SPIKE_CONSUMER_PRIO=high LP_SPIKE_PRODUCER_PRIO=low|--mode fence --latch signaled --redraw vblank"
+    "load-fence-gpuwait-vblank|LIASCAPE_SPIKE_WORK=$WORK|--mode fence --latch gpu-wait --redraw vblank"
+    "load-fence-signaled-vblank|LIASCAPE_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw vblank"
+    "load-fence-signaled-new|LIASCAPE_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw new"
+    "load-finish-vblank|LIASCAPE_SPIKE_WORK=$WORK|--mode finish --redraw vblank"
+    "load-finish-vblank-glyield-usleep|LIASCAPE_SPIKE_WORK=$WORK __GL_YIELD=USLEEP|--mode finish --redraw vblank --seconds 30"
+    "load-fence-signaled-vblank-prio|LIASCAPE_SPIKE_WORK=$WORK LIASCAPE_SPIKE_CONSUMER_PRIO=high LIASCAPE_SPIKE_PRODUCER_PRIO=low|--mode fence --latch signaled --redraw vblank"
     "fdpoll-vblank||--mode fdpoll --redraw vblank"
-    "load-fdpoll-vblank|LP_SPIKE_WORK=$WORK|--mode fdpoll --redraw vblank"
-    "sat-fence-gpuwait-vblank|LP_SPIKE_WORK=4000|--mode fence --latch gpu-wait --redraw vblank --seconds 20"
-    "sat-fence-signaled-vblank|LP_SPIKE_WORK=4000|--mode fence --latch signaled --redraw vblank --seconds 20"
+    "load-fdpoll-vblank|LIASCAPE_SPIKE_WORK=$WORK|--mode fdpoll --redraw vblank"
+    "sat-fence-gpuwait-vblank|LIASCAPE_SPIKE_WORK=4000|--mode fence --latch gpu-wait --redraw vblank --seconds 20"
+    "sat-fence-signaled-vblank|LIASCAPE_SPIKE_WORK=4000|--mode fence --latch signaled --redraw vblank --seconds 20"
     "crash-idle-signaled||--mode fence --latch signaled --redraw vblank --seconds 15 --kill-at 5.1"
-    "crash-load-gpuwait|LP_SPIKE_WORK=$WORK|--mode fence --latch gpu-wait --redraw vblank --seconds 15 --kill-at 5.1"
-    "crash-load-signaled|LP_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw vblank --seconds 15 --kill-at 5.2"
+    "crash-load-gpuwait|LIASCAPE_SPIKE_WORK=$WORK|--mode fence --latch gpu-wait --redraw vblank --seconds 15 --kill-at 5.1"
+    "crash-load-signaled|LIASCAPE_SPIKE_WORK=$WORK|--mode fence --latch signaled --redraw vblank --seconds 15 --kill-at 5.2"
 )
 
 want=("$@")

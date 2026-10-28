@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# lp-player Phase 1 on-machine battery (Task 20, docs/superpowers/sdd/2026-10-20-lp-player-phase0-1/
-# task-20-brief.md). Drives the REAL C# backend (`livepaper --serve`, PlayerEngine=lp-player) over
-# HTTP exactly like the owner's UI would, and inspects the result with `lp-player ctl` directly —
-# same split as `scripts/test-lp-player-adapter.sh` (§ Integration test) and
+# liascape-player Phase 1 on-machine battery (Task 20, docs/superpowers/sdd/2026-10-20-liascape-player-phase0-1/
+# task-20-brief.md). Drives the REAL C# backend (`livepaper --serve`, PlayerEngine=liascape-player) over
+# HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
+# same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
 # `src/player/tests/onmachine/bus.sh`, whose patterns this reuses (temp dirs for --hermetic, a
 # cleanup trap that always restores owner state, `pactl`/`nvidia-smi` for live measurements).
 #
@@ -13,7 +13,7 @@
 #   battery.sh scenes <step…> [opts]  -- Phase 2 Task 14, the scene-worker battery (scenes.sh)
 #
 # Options (run):
-#   --hermetic            private backend + private headless lp-player (own HOME/XDG/port, --ao null,
+#   --hermetic            private backend + private headless liascape-player (own HOME/XDG/port, --ao null,
 #                         synthetic ffmpeg media) -- never touches the owner's session. Use this for
 #                         stage-1 verification; stage 2 drops it to run on the owner's live session.
 #   --smoke               2 switches per cell instead of >= 50 (plumbing check, not a real battery)
@@ -39,7 +39,7 @@
 #                         entry in cell-failures.jsonl, and re-runs (cleanly, discarding any
 #                         partial records first) any cell that was cut off mid-way. switches.jsonl
 #                         is never truncated when resuming.
-#   --build               rebuild lp-player (cargo) + the backend (dotnet) first (hermetic only;
+#   --build               rebuild liascape-player (cargo) + the backend (dotnet) first (hermetic only;
 #                         default: use whatever is already built, like `--no-build` elsewhere)
 #   -h / --help           this text
 #
@@ -91,7 +91,7 @@
 # globalTransitionDurationMs before running and leaves EFFECT_DURATION_MS as the main matrix's
 # own value afterward -- owner settings are still restored once, at script exit, as usual.
 #
-# Dropout detector availability: this worktree (lp-player-laneC, HEAD cbf6451) predates lane B's
+# Dropout detector availability: this worktree (liascape-player-laneC, HEAD cbf6451) predates lane B's
 # audio work, which adds the `dropout` probe / `probe.dropout` events / `player.debug`'s consumer.
 # `ctl probe '{"name":"dropout",...}'` on this branch replies `no_such_probe` -- probe_dropout()
 # below detects that exactly once, logs it, and every switch's `dropout` field becomes
@@ -101,7 +101,7 @@
 #
 # Owner-environment safety (brief, owner-approved -- only active without --hermetic):
 #   - Legacy wallpaper is stopped first (global-constraints.md) and left stopped at the end.
-#   - The lp-player bus playback stream (sink-input node.name=lp-player-bus.playback) is held at
+#   - The liascape-player bus playback stream (sink-input node.name=liascape-player-bus.playback) is held at
 #     0% volume throughout (re-applied if PipeWire recreates it) and restored on exit -- audio is
 #     silenced for the owner but the bus's own meter (what the dropout detector reads) sits
 #     upstream of that stream, so measurement is unaffected. The claim itself is checked in the
@@ -122,7 +122,7 @@
 #     report for the controller's awareness, not fixed here -- fixing it would mean writing
 #     settings.json directly, fighting a deliberate backend protection.
 #   - Any library item we imported for /next//prev/-random navigation is deleted again at the end.
-#   - A `trap` on EXIT/INT/TERM/HUP always runs the restore + kills any lp-player left running
+#   - A `trap` on EXIT/INT/TERM/HUP always runs the restore + kills any liascape-player left running
 #     (quit over the socket, else the supervisor pid we observed via `ctl hello`), regardless of
 #     where the script stopped.
 #
@@ -193,13 +193,13 @@ done
 
 for t in curl jq python3 ffmpeg; do command -v "$t" >/dev/null || { echo "missing: $t" >&2; exit 2; }; done
 
-BIN=${LP_PLAYER_BIN:-}
+BIN=${LIASCAPE_PLAYER_BIN:-}
 if [ -z "$BIN" ]; then
-  if [ -x "$REPO/src/player/target/release/lp-player" ]; then BIN=$REPO/src/player/target/release/lp-player
-  elif [ -x "$REPO/src/player/target/debug/lp-player" ]; then BIN=$REPO/src/player/target/debug/lp-player
-  else BIN=$(command -v lp-player || true); fi
+  if [ -x "$REPO/src/player/target/release/liascape-player" ]; then BIN=$REPO/src/player/target/release/liascape-player
+  elif [ -x "$REPO/src/player/target/debug/liascape-player" ]; then BIN=$REPO/src/player/target/debug/liascape-player
+  else BIN=$(command -v liascape-player || true); fi
 fi
-[ -n "$BIN" ] && [ -x "$BIN" ] || { echo "no lp-player binary found (set LP_PLAYER_BIN, or build src/player)" >&2; exit 2; }
+[ -n "$BIN" ] && [ -x "$BIN" ] || { echo "no liascape-player binary found (set LIASCAPE_PLAYER_BIN, or build src/player)" >&2; exit 2; }
 
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || DOTNET=/nix/store/a9ml93kizcwff3yakmqw4qs3w4llpbf2-dotnet-sdk-wrapped-10.0.301/bin/dotnet
@@ -250,7 +250,7 @@ get()  { curl -sf -m 10 "$API$1"; }
 settings_get() { get /settings; }   # NEVER echo this directly anywhere -- it carries SteamRefreshToken
 
 # GET -> modify with a jq filter -> POST the FULL object back. Same pattern as
-# scripts/test-lp-player-adapter.sh's setting(); global-constraints.md: POST /settings replaces the
+# scripts/test-liascape-player-adapter.sh's setting(); global-constraints.md: POST /settings replaces the
 # whole object, so every write must round-trip through the live object, never a hand-built partial one.
 setting_set() {
   local body prog="$1"; shift   # extra args go to jq (--arg …): never interpolate values into the program
@@ -539,7 +539,7 @@ import_target() {
   echo "$item" | jq -r '.videoPath // .VideoPath // empty'
 }
 
-BUS_STREAM_NODE_NAME="lp-player-bus.playback"
+BUS_STREAM_NODE_NAME="liascape-player-bus.playback"
 bus_stream_id() {
   pactl -f json list sink-inputs 2>/dev/null \
     | jq -r --arg n "$BUS_STREAM_NODE_NAME" '.[] | select(.properties["node.name"]==$n) | .index' 2>/dev/null | head -1
@@ -609,7 +609,7 @@ cleanup() {
   fi
   restore_owner_settings
   assert_default_sink_unchanged
-  # No lp-player process left, in either mode: quit over the socket first (clean), else the
+  # No liascape-player process left, in either mode: quit over the socket first (clean), else the
   # supervisor pid we last observed (never a bare compositor pid -- that would just restart it).
   ctl quit >/dev/null 2>&1
   if [ -n "$PLAYER_SP" ]; then
@@ -621,7 +621,7 @@ cleanup() {
     [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
     if [ -n "$HERMETIC_T" ]; then
       case "$HERMETIC_T" in
-        /tmp/lp-battery-*) command -v trash >/dev/null && trash "$HERMETIC_T" 2>/dev/null || rm -rf -- "$HERMETIC_T" ;;
+        /tmp/liascape-battery-*) command -v trash >/dev/null && trash "$HERMETIC_T" 2>/dev/null || rm -rf -- "$HERMETIC_T" ;;
       esac
     fi
   fi
@@ -646,9 +646,9 @@ setup_live_backend() {
   API="http://127.0.0.1:$(cat "$portfile")"
   curl -sf -m 5 "$API/health" >/dev/null || { err "backend at $API not responding"; exit 1; }
   snapshot_owner_settings
-  setting_set ".playerEngine = \"lp-player\" | .autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
+  setting_set ".playerEngine = \"liascape-player\" | .autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
   sleep 1
-  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "lp-player" ] || { err "backend did not switch to lp-player -- aborting before touching any playback"; exit 1; }
+  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "liascape-player" ] || { err "backend did not switch to liascape-player -- aborting before touching any playback"; exit 1; }
   PLAYER_SP=$(sup_pid)
   start_bus_mute_watcher
   sleep 1.5
@@ -667,16 +667,16 @@ setup_hermetic_backend() {
     fi
     "$DOTNET" build "$REPO/src/livepaper" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   fi
-  HERMETIC_T=$(mktemp -d /tmp/lp-battery-XXXXXX)   # short: a unix socket path must be < 108 bytes
+  HERMETIC_T=$(mktemp -d /tmp/liascape-battery-XXXXXX)   # short: a unix socket path must be < 108 bytes
   mkdir -p "$HERMETIC_T/home/.config/livepaper" "$HERMETIC_T/home/.cache" "$HERMETIC_T/home/.local/share" "$HERMETIC_T/rt" "$HERMETIC_T/st"
   export HOME=$HERMETIC_T/home XDG_CONFIG_HOME=$HERMETIC_T/home/.config XDG_CACHE_HOME=$HERMETIC_T/home/.cache
   export XDG_DATA_HOME=$HERMETIC_T/home/.local/share XDG_RUNTIME_DIR=$HERMETIC_T/rt XDG_STATE_HOME=$HERMETIC_T/st
-  export LP_PLAYER_BIN=$BIN LP_TRANSITIONS_DIR=$REPO/transitions
+  export LIASCAPE_PLAYER_BIN=$BIN LIASCAPE_TRANSITIONS_DIR=$REPO/transitions
   export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
-  unset LP_PLAYER_SOCKET WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
+  unset LIASCAPE_PLAYER_SOCKET WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 
   cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
-{"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
+{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["$EFFECT_ID"],"GlobalTransitionDurationMs":$EFFECT_DURATION_MS,"TransitionMethod":"full-live",
  "GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,"GlobalIntervalSeconds":1800,"RestartIntervalSeconds":600,"AutoMute":false}
 EOF
@@ -685,7 +685,7 @@ EOF
   ( cd /tmp && exec "$BIN" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null \
       > "$HERMETIC_T/serve.log" 2>&1 ) & PLAYER_SP=$!
   for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
-  ctl hello >/dev/null 2>&1 || { err "hermetic lp-player did not start, see $HERMETIC_T/serve.log"; exit 1; }
+  ctl hello >/dev/null 2>&1 || { err "hermetic liascape-player did not start, see $HERMETIC_T/serve.log"; exit 1; }
   PLAYER_SP=$(sup_pid)
 
   "$DOTNET" "$DLL" --serve > "$HERMETIC_T/backend.log" 2>&1 & BP=$!
@@ -693,7 +693,7 @@ EOF
   [ -s "$XDG_CONFIG_HOME/livepaper/serve.port" ] || { err "hermetic backend did not start, see $HERMETIC_T/backend.log"; tail -5 "$HERMETIC_T/backend.log" >&2; exit 1; }
   API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/livepaper/serve.port")"
   for _ in $(seq 1 50); do curl -sf -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
-  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "lp-player" ] || { err "hermetic backend not on lp-player"; exit 1; }
+  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "liascape-player" ] || { err "hermetic backend not on liascape-player"; exit 1; }
   log "hermetic: player pid $(comp_pid) (supervisor $PLAYER_SP), backend $API"
 }
 
@@ -704,9 +704,9 @@ EOF
 # ==================================================================
 VIDEOS=(); IMAGES=(); SHORT_VIDEOS=()
 # battery-script fix (found analysing task20-final-run, all 3 wait-for-end cells: tr-136/324/515,
-# every one "scheduled" with align:end then "cancelled" by LpPlayerMedia.SwitchAndWait's own
+# every one "scheduled" with align:end then "cancelled" by LiascapePlayerMedia.SwitchAndWait's own
 # AlignBackstopSlackSec=15s backstop ~15.5-16s later -- see player-adapter.md's `DoVideoEndWait`
-# row and LpPlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
+# row and LiascapePlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
 # which bounds a plain cut/effect switch fine but has NOTHING to do with how long an align:"end"
 # wait-for-the-video's-real-end switch can legitimately take -- that's bounded by the CLIP's own
 # remaining play time (+ the player's own 10 s align_fallback, behind which sits the adapter's own
@@ -839,15 +839,15 @@ restore_cli_invoke() {
     # battery-script fix (task20-final-run: restore-replay failed its FIRST switch in all 3
     # methods, "no new transition corr observed", every time). Root cause confirmed live, in two
     # steps: first, `strace`'d the owner's INSTALLED `livepaper` (what `command -v livepaper`
-    # resolves to, what this used to invoke) running `LP_PLAYER_BIN=<repo lp-player> livepaper
+    # resolves to, what this used to invoke) running `LIASCAPE_PLAYER_BIN=<repo liascape-player> livepaper
     # --restore` -- the env var DID reach the final managed process (verified: present in that
     # exact execve's own environ via `strace -v`), yet it still ran the legacy path (`Apply()` ->
     # `SwitchToFile` -> `setsid mpvpaper ...`). That ruled out a missing-env-var/PATH problem, so
     # second: `strings -el` (UTF-16, .NET string literals) on the installed package's
-    # `livepaper.dll` for "LP_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
+    # `livepaper.dll` for "LIASCAPE_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
     # on this worktree's own dev build (`$DLL`, what `livepaper-watch`/dotnet watch actually runs)
-    # finds both -- the NixOS-packaged `livepaper` is a STALE BUILD that predates lp-player/
-    # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LP_PLAYER_BIN`
+    # finds both -- the NixOS-packaged `livepaper` is a STALE BUILD that predates liascape-player/
+    # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LIASCAPE_PLAYER_BIN`
     # could ever have fixed. Confirmed the actual fix: priming the SAME session then invoking
     # `$DOTNET $DLL --restore` (the current dev build, what --serve itself runs) produces a real
     # new transition.scheduled corr immediately. This is a packaging/deployment gap (the owner's
@@ -937,7 +937,7 @@ run_cell() {
       # battery-script fix (task20-final-run: full-live/reveal/frozen wait-for-end ALL failed their
       # very first switch, "transition did not reach a terminal state", tr-136/324/515 -- confirmed
       # via events.jsonl: each was scheduled align:"end" then genuinely CANCELLED ~15.5-16s later by
-      # LpPlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop (player-adapter.md's
+      # LiascapePlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop (player-adapter.md's
       # `DoVideoEndWait` row), not by this script's own /stop -- i.e. the switch was still correctly
       # in flight, this script just stopped watching too early). wait-for-end's countdown freezes
       # while _waitingForVideoEnd (PlayerHelper.cs ~line 992), so its real per-switch bound is the
@@ -1158,7 +1158,7 @@ OUTA=""; OUTB=""   # set by setup_*_backend (hermetic: VIRTUAL-1/2) or hardcoded
 # ==================================================================
 # permonitor (brief step 3): a different clip on each output, a transition on ONE output alone ->
 # the other's frames+audio unaffected, and a span of one source across both. "Via `ctl` only" means
-# the ASSERTIONS below are plain graph/probe reads -- HTTP is used only to get PlayerEngine=lp-player
+# the ASSERTIONS below are plain graph/probe reads -- HTTP is used only to get PlayerEngine=liascape-player
 # running in the first place, same as every other subcommand.
 # ==================================================================
 run_permonitor() {
@@ -1171,18 +1171,18 @@ run_permonitor() {
   # battery-script fix (found running this live -- first real exercise per Stage 1's own notes):
   # `setup_live_backend` only flips the `PlayerEngine` SETTING; player-adapter.md's
   # `EnsureRunning()` is explicit that "only a switch calls it -- queries/sets never spawn" --
-  # so without an actual HTTP switch first, no `lp-player serve` process (and no socket) exists
+  # so without an actual HTTP switch first, no `liascape-player serve` process (and no socket) exists
   # yet when the raw `ctl` calls below run, and every one of them failed with `io`/"can't
-  # connect to .../lp-player.sock: No such file or directory". `run_battery`'s own cells never
+  # connect to .../liascape-player.sock: No such file or directory". `run_battery`'s own cells never
   # hit this because every one of them starts with a real `/apply`/`/playlist/play` HTTP call
   # before touching `ctl`. Prime it here the same way (drained, not evaluated) for live mode
-  # only (hermetic's `setup_hermetic_backend` already starts `lp-player serve` itself directly).
+  # only (hermetic's `setup_hermetic_backend` already starts `liascape-player serve` itself directly).
   if [ "$HERMETIC" = 0 ]; then
     local prime_prev prime_corr
     prime_prev=$(last_corr)
     post /apply "$(jq -nc --arg p "$tA" '{path:$p}')" >/dev/null
     for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
-    ctl hello >/dev/null 2>&1 || warn "permonitor: lp-player socket still not up after priming apply -- the ctl calls below will likely fail"
+    ctl hello >/dev/null 2>&1 || warn "permonitor: liascape-player socket still not up after priming apply -- the ctl calls below will likely fail"
     # The priming apply is itself a full-live `out:*` transition (default duration/effect) --
     # found running this live: without waiting for IT to hand off first, the raw `ctl create`/
     # `ctl set lay:<out>:main.content` calls below raced it, landing mid-effect (both layers'
@@ -1256,12 +1256,12 @@ run_soak() {
   if [ "$HERMETIC" = 1 ]; then setup_hermetic_backend; setup_hermetic_media
   else setup_live_backend; setup_live_media; fi
   # battery-script fix (found running permonitor live, same root cause applies here): `ctl
-  # hello`/`comp_pid` needs the lp-player SOCKET, which only exists once something actually
+  # hello`/`comp_pid` needs the liascape-player SOCKET, which only exists once something actually
   # switches (player-adapter.md: "EnsureRunning()... only a switch calls it -- queries/sets
   # never spawn"). setup_live_backend only flips the PlayerEngine SETTING, so checking comp_pid
   # THIS early (before the playlist below ever issues its first real switch) failed every time
   # live. Moved past the `/playlist/play` call, which is this subcommand's own first real switch
-  # (hermetic's setup_hermetic_backend starts `lp-player serve` directly, so it never had this
+  # (hermetic's setup_hermetic_backend starts `liascape-player serve` directly, so it never had this
   # problem either way).
   local pid
 
@@ -1330,7 +1330,7 @@ run_soak() {
   # transition holds two cores); trust it only on long (>= 1 h) soaks.
   # Linear-regression slope over samples taken >= 5 min in (the brief excludes warmup); < 1 MiB/min
   # on both RSS and VRAM is a pass. python3 for the same reason the rest of the repo's test scripts
-  # reach for it over awk/bc (global-constraints.md / test-lp-player-adapter.sh's dB()/near()).
+  # reach for it over awk/bc (global-constraints.md / test-liascape-player-adapter.sh's dB()/near()).
   python3 - "$samples" "$t0" <<'PYEOF' > "$RESULTS_DIR/soak-summary.json"
 import json, sys
 path, t0 = sys.argv[1], int(sys.argv[2])

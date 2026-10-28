@@ -232,7 +232,7 @@ never blocks on them:
 Column meanings:
 
 - **redraw**:
-  - `vblank` redraws on every frame callback, which is what lp-player will do: present at the output's refresh.
+  - `vblank` redraws on every frame callback, which is what liascape-player will do: present at the output's refresh.
   - `new` draws only when a new frame arrived, throttled by frame callbacks.
 - **dropped**: frames delivered by the worker but never shown, because a newer one superseded them within one
   vblank.
@@ -263,9 +263,9 @@ Column meanings:
 - With the signaled latch at trivial load, a queued frame was not yet complete at 409 of about 14,400 vblanks
   (2.8 %), and the previous frame was reused. The run still delivered 8639 of 8640 frames.
 
-## 4. Measurements: under GPU load (`LP_SPIKE_WORK`)
+## 4. Measurements: under GPU load (`LIASCAPE_SPIKE_WORK`)
 
-The trivial gradient frame takes about 0.1 ms of GPU. Real LWE scenes take milliseconds. `LP_SPIKE_WORK` adds a
+The trivial gradient frame takes about 0.1 ms of GPU. Real LWE scenes take milliseconds. `LIASCAPE_SPIKE_WORK` adds a
 per-pixel loop that never changes the pixels:
 
 - `2500` gives **3.7–3.9 ms of GPU per frame**, a heavy scene at 144 fps, using about 55 % of the GPU.
@@ -383,7 +383,7 @@ Plus 7 earlier runs with mpvpaper playing: 3 at idle with the kill landing betwe
 
 - **The transport costs the compositor about 0.54 % of a core**, about 37 µs per received frame at 144 fps. That
   covers fence poll, import, `eglWaitSync`, release fence and socket.
-- Most of the compositor's CPU is **presenting at 240 Hz itself**, which lp-player pays regardless of workers.
+- Most of the compositor's CPU is **presenting at 240 Hz itself**, which liascape-player pays regardless of workers.
 - With redraw on new frames only, the same transport costs 3.2 % in total.
 
 **Latency** (`fence-signaled-vblank`, trivial):
@@ -395,7 +395,7 @@ Plus 7 earlier runs with mpvpaper playing: 3 at idle with the kill landing betwe
 | → scanout | 10.2 ms | 12.3 ms |
 
 - The swap-to-scanout part, about 7.7 ms, is Hyprland's pipeline of about 2 vblanks at 240 Hz. Every client pays
-  it, including lp-player's own output.
+  it, including liascape-player's own output.
 - With redraw on new frames (render on arrival), scanout comes at 5.0 ms p50.
 - The transport's share of the latency is negligible.
 - The compositor's render timing within the vblank interval is a Phase 1/2 latency knob, not a transport

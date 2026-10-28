@@ -1,9 +1,9 @@
-# lp-player — Phase 0 (spikes) + Phase 1 (core player) Implementation Plan
+# liascape-player — Phase 0 (spikes) + Phase 1 (core player) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prove the two riskiest mechanisms (LWE `next-v2` core rendering into a host framebuffer; GPU frame sharing
-between processes on NVIDIA), then build `lp-player`: a single Rust compositor that plays videos, images and colours
+between processes on NVIDIA), then build `liascape-player`: a single Rust compositor that plays videos, images and colours
 on every monitor, with all three transition methods, a generic command API, AI-optimised debug/headless modes, a
 player audio bus with a built-in dropout detector, and a backend adapter behind a `PlayerEngine` setting.
 
@@ -38,13 +38,13 @@ written after this one lands and informed by the Task 1–2 findings.
 - No reveal-capable-effects gate: every effect works with every method.
 - A source frame not ready never blocks presentation; the previous texture is reused.
 - **Every setting is a live property** (project rule "settings apply live").
-- `PlayerEngine` setting: `"legacy"` (default) | `"lp-player"`. Legacy behaviour must not change.
-- Under `lp-player` in Phase 1, **scene items are skipped** exactly like `AllowScenes=false` (scenes arrive in Phase 2).
-- Socket: `$XDG_RUNTIME_DIR/livepaper/lp-player.sock`. State: `$XDG_STATE_HOME/livepaper/lp-player/`
-  (default `~/.local/state/livepaper/lp-player/`).
-- Binary resolution: env `LP_PLAYER_BIN` → `PATH` (`lp-player`) → repo `src/player/target/release/lp-player`.
+- `PlayerEngine` setting: `"legacy"` (default) | `"liascape-player"`. Legacy behaviour must not change.
+- Under `liascape-player` in Phase 1, **scene items are skipped** exactly like `AllowScenes=false` (scenes arrive in Phase 2).
+- Socket: `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock`. State: `$XDG_STATE_HOME/livepaper/liascape-player/`
+  (default `~/.local/state/livepaper/liascape-player/`).
+- Binary resolution: env `LIASCAPE_PLAYER_BIN` → `PATH` (`liascape-player`) → repo `src/player/target/release/liascape-player`.
 - Event log: JSON Lines, `events.jsonl` in the state dir, rotated at 20 MiB × 3 files.
-- Crate licence: `GPL-3.0-or-later` (lp-player inherits GPL-3.0 from mpvpaper/LWE; the repo-wide LICENSE is still the owner's open item).
+- Crate licence: `GPL-3.0-or-later` (liascape-player inherits GPL-3.0 from mpvpaper/LWE; the repo-wide LICENSE is still the owner's open item).
 - Test media:
   - synthetic clips generated with `ffmpeg` (on PATH), or the SFW Workshop folder
     `~/.local/share/Steam/steamapps/workshop/content/431960`
@@ -133,7 +133,7 @@ written after this one lands and informed by the Task 1–2 findings.
 
 ---
 
-## Phase 1 — lp-player core
+## Phase 1 — liascape-player core
 
 ### File map (Rust crate `src/player/`, one responsibility per file)
 
@@ -165,7 +165,7 @@ written after this one lands and informed by the Task 1–2 findings.
 | `tests/common/mod.rs` | headless harness + synthetic media (`ensure_clip`) |
 | `tests/*.rs` | integration tests named per task |
 
-C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,LpPlayerMedia.cs,MpvPropertyMap.cs}`.
+C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LiascapePlayerClient.cs,LiascapePlayerMedia.cs,MpvPropertyMap.cs}`.
 
 ---
 
@@ -173,7 +173,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 
 **Files:**
 - Create: `src/player/Cargo.toml`, `src/player/build.rs`, `src/player/src/{main.rs,lib.rs,log.rs}`, `src/player/.gitignore` (`target/`)
-- Modify: `flake.nix`: new `lp-player` package (`rustPlatform.buildRustPackage`, `cargoLock.lockFile = ./src/player/Cargo.lock`, `nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ]`, `buildInputs = [ mpv-unwrapped wayland libGL libxkbcommon pipewire ]`); add it to `packages`; add `cargo rustc clippy rustfmt rust-analyzer` and `inputsFrom = [ … lp-player ]` to the devShell
+- Modify: `flake.nix`: new `liascape-player` package (`rustPlatform.buildRustPackage`, `cargoLock.lockFile = ./src/player/Cargo.lock`, `nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ]`, `buildInputs = [ mpv-unwrapped wayland libGL libxkbcommon pipewire ]`); add it to `packages`; add `cargo rustc clippy rustfmt rust-analyzer` and `inputsFrom = [ … liascape-player ]` to the devShell
 - Modify: `scripts/dev.sh`: `cargo build --release --manifest-path src/player/Cargo.toml` next to the native `make`s
 - Create: `.claude/rules/player-core.md` (frontmatter `paths: ["src/player/**"]`): purpose, the invariant, module map; later tasks append their sections
 
@@ -193,8 +193,8 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `rotates_at_20_mib`: writing 21 MiB yields `events.jsonl` + `events.1.jsonl`, and at most 3 files exist
 - [ ] **Step 2:** Run `cd src/player && cargo test log::` → FAIL (module missing).
 - [ ] **Step 3:** Implement `log.rs`: a buffered writer behind a `Mutex`, a ring of the last 10 000 events in memory, and size-checked rotation.
-- [ ] **Step 4:** Run `cargo test log::` → PASS. Run `env -u LD_LIBRARY_PATH nix build .#lp-player` → builds (binary prints `--version`).
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Scaffold Crate, Flake Package, Event Log"`.
+- [ ] **Step 4:** Run `cargo test log::` → PASS. Run `env -u LD_LIBRARY_PATH nix build .#liascape-player` → builds (binary prints `--version`).
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Scaffold Crate, Flake Package, Event Log"`.
 
 ### Task 4: Units — dB, equal-power, gain slots, edge conversions
 
@@ -223,7 +223,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test units::` → FAIL.
 - [ ] **Step 3:** Implement `units.rs`.
 - [ ] **Step 4:** `cargo test units::` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: dB Units, Equal-Power Gains, Edge Conversions"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: dB Units, Equal-Power Gains, Edge Conversions"`.
 
 ### Task 5: Clocks and Animator
 
@@ -255,7 +255,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test clock:: anim::` → FAIL.
 - [ ] **Step 3:** Implement both.
 - [ ] **Step 4:** `cargo test clock:: anim::` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Clocks and Animator"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Clocks and Animator"`.
 
 ### Task 6: Node graph, property schema, errors, state snapshot
 
@@ -298,7 +298,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test graph::` → FAIL.
 - [ ] **Step 3:** Implement. Property application to live sources is a hook the source registers (Task 10); here schema + storage only.
 - [ ] **Step 4:** `cargo test graph::` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Node Graph, Property Schema, State Snapshot"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Node Graph, Property Schema, State Snapshot"`.
 
 ### Task 7: EGL/GL core and offscreen targets
 
@@ -321,7 +321,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test gfx_basic` → FAIL.
 - [ ] **Step 3:** Implement. Set `GL_TEXTURE_MIN_FILTER/MAG_FILTER = LINEAR`, `WRAP = CLAMP_TO_EDGE` on all textures.
 - [ ] **Step 4:** `cargo test --test gfx_basic` → PASS on the owner's machine (NVIDIA).
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: EGL Desktop-GL Core + Offscreen Targets"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: EGL Desktop-GL Core + Offscreen Targets"`.
 
 ### Task 8: Effect catalogue (all 122 effects under desktop GL)
 
@@ -333,7 +333,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - Produces:
   - `pub struct Catalogue { … }`
   - `Catalogue::load(dir: &Path) -> Result<Catalogue, String>`
-    - dir = `LP_TRANSITIONS_DIR` → `~/.local/share/livepaper-web/transitions` → repo `transitions/`
+    - dir = `LIASCAPE_TRANSITIONS_DIR` → `~/.local/share/livepaper-web/transitions` → repo `transitions/`
   - `Catalogue::ids() -> Vec<String>`
   - `Catalogue::program(&Gfx, id) -> Result<&EffectProgram, String>` (lazy compile + cache)
   - `EffectProgram::draw(&Gfx, from: &Tex, to: &Tex, progress: f64, ratio: f64, params: &serde_json::Map)`
@@ -353,7 +353,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test effects_all` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `cargo test --test effects_all` → PASS (122/122).
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Effect Catalogue on Desktop GL"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Effect Catalogue on Desktop GL"`.
 
 ### Task 9: Composition — layer transforms, opacity, effect pass
 
@@ -384,7 +384,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test compose` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `cargo test --test compose` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Layer Transforms, Opacity, Effect Pass"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Layer Transforms, Opacity, Effect Pass"`.
 
 ### Task 10: Sources — libmpv video/image, colour
 
@@ -428,7 +428,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
     - `af` → `af`
     - `no_audio` → `aid` (`no` / `auto`; `auto` re-inits the AO even after a no-audio start)
     - `audio_delay` → `audio-delay`
-  - Free the render context with its GL context current (lp-transition gotcha).
+  - Free the render context with its GL context current (liascape-transition gotcha).
   - **Fence-leak mitigation (adopted from mpvpaper 1.9, PR #132, credited in Task 19):** the `get_proc_address`
     handed to `mpv_render_context_create` returns a stub for `glFenceSync` that returns 0, so libmpv never
     accumulates sync objects. This is safe here: the frame is sampled in the same context that rendered it.
@@ -445,7 +445,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `build.rs`: bindgen with `allowlist_function("mpv_.*")`, `allowlist_type("mpv_.*")`.
   - Wakeups: `mpv_set_wakeup_callback` writes to an eventfd that the runtime polls (Task 12); tests poll directly.
 - [ ] **Step 4:** `cargo test --test sources` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: libmpv Video/Image Sources + Colour Source"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: libmpv Video/Image Sources + Colour Source"`.
 
 ### Task 11: Transition recipe (three methods, align, interrupt, failures)
 
@@ -503,7 +503,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test transition` → FAIL.
 - [ ] **Step 3:** Implement `recipes/transition.rs` as a state machine (`Scheduled → WaitingReady → WaitingStart → Running → Handoff → Done`) that only issues graph `set`/`animate`/`create`/`destroy`; no special-case rendering.
 - [ ] **Step 4:** `cargo test --test transition` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Transition Recipe — Three Methods, Align, Interrupt"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Transition Recipe — Three Methods, Align, Interrupt"`.
 
 ### Task 12: Runtime, command API, `ctl`, headless serve
 
@@ -526,14 +526,14 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
     - `stop` (destroy all sources, unmap surfaces), `quit`, `step {ms}` (headless + stepped clock only)
     - headless only: `headless.add_output {name,width,height,hz}`, `headless.remove_output {name}`
     - headless outputs are named `VIRTUAL-1`, `VIRTUAL-2`, … in `--outputs` order
-  - `ctl`: `lp-player ctl <verb> ['<json args>']` prints the JSON result; `ctl subscribe <prefix…>` streams events until interrupted.
+  - `ctl`: `liascape-player ctl <verb> ['<json args>']` prints the JSON result; `ctl subscribe <prefix…>` streams events until interrupted.
   - Runtime: one calloop loop.
     - sources: the Wayland fd, the listening socket + clients, mpv wakeup eventfds, a timer at the max output refresh driving `Animator::tick` + `Transitions::tick`
     - per-output render on its frame callback (headless: on `step`)
   - Headless: `serve --headless --outputs 1920x1080@60[,…] --clock real|stepped`.
     - Stepped mode: before rendering each step, every video source is paused and `seek <clock_t> absolute exact`-ed, so frames are deterministic.
 
-- [ ] **Step 1: Write failing tests** (spawn `lp-player serve --headless --outputs 640x360@60,320x180@60 --clock stepped` with a temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`):
+- [ ] **Step 1: Write failing tests** (spawn `liascape-player serve --headless --outputs 640x360@60,320x180@60 --clock stepped` with a temp `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`):
   - `hello_and_state`: `hello.capabilities` ⊇ {video, image, color, transition, headless}; `state` lists both outputs
   - `error_shape`: `set nope.x 1` → `ok:false`, `code:"no_such_node"`, non-empty hint
   - `color_capture`: create colour (0,255,0) → set `lay:*:main.content` → `step 16` → `capture out:VIRTUAL-1 /tmp/x.png` → centre pixel green
@@ -543,7 +543,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test api` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `cargo test --test api` → PASS; `cargo clippy -- -D warnings` clean.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Runtime, Command API, ctl, Headless Serve"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Runtime, Command API, ctl, Headless Serve"`.
 
 ### Task 13: Wayland outputs (on-machine)
 
@@ -561,7 +561,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - Present on each output's frame callback, at its own refresh. Output names come from `wl_output` v4 `name`.
 
 - [ ] **Step 1: Write the failing check** (shell script `src/player/tests/onmachine/outputs.sh`, run manually):
-  - `lp-player serve &`
+  - `liascape-player serve &`
   - `ctl state` lists `out:DP-1` (refresh_hz 144) and `out:DP-2` (240)
   - set a red colour on DP-1 and blue on DP-2 via `lay:<c>:main.content`
   - `grim -o DP-1 -` / `-o DP-2 -` centre pixels = red / blue
@@ -570,7 +570,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** Run it → FAIL (no Wayland outputs yet).
 - [ ] **Step 3:** Implement `wl.rs` (sctk `LayerShell`, `OutputState`, `SeatState` pointer) and the frame-timing probe `src/probe/frames.rs` (rolling present intervals per output; `probe {name:"frames"}`).
 - [ ] **Step 4:** Run `outputs.sh` → PASS. Also verify on-machine: unplugging is not practical, so use Hyprland `hyprctl keyword monitor DP-1,disable` then `…,preferred,auto,1` → the output disappears and reappears without a player crash and comes back showing the current wallpaper.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Wayland Layer-Shell Outputs, Hotplug, Frame Probe"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Wayland Layer-Shell Outputs, Hotplug, Frame Probe"`.
 
 ### Task 14: Player audio bus + bus meter
 
@@ -582,11 +582,11 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - Produces:
   - `Bus::create() -> Result<Bus, String>`:
     - via pipewire-rs, load `libpipewire-module-loopback` in-process with
-      `capture.props = { media.class = Audio/Sink, node.name = lp-player-bus, node.description = "lp-player bus", audio.position = [FL FR] }`
+      `capture.props = { media.class = Audio/Sink, node.name = liascape-player-bus, node.description = "liascape-player bus", audio.position = [FL FR] }`
       and `playback.props = { node.target = <current default sink> }`
     - watch `default.audio.sink` metadata and re-target playback on change
-    - the loopback's playback stream gets an unmistakable identity: `node.name = lp-player-bus.playback`,
-      `application.name = lp-player`, `media.role = Wallpaper`. Today's `AudioMonitor` must exclude it (Task 17),
+    - the loopback's playback stream gets an unmistakable identity: `node.name = liascape-player-bus.playback`,
+      `application.name = liascape-player`, `media.role = Wallpaper`. Today's `AudioMonitor` must exclude it (Task 17),
       otherwise auto-mute hears the wallpaper's own audio and oscillates.
   - `Bus::device() -> String` (mpv `audio-device` value)
   - `Bus::latency() -> Duration` (measured once at creation with an impulse; logged)
@@ -597,20 +597,20 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 
 - [ ] **Step 1: Write the failing check** `bus.sh`:
   - start `serve`; play Solid 440 Hz −20 dBFS
-  - `pactl list sinks short` contains `lp-player-bus`
+  - `pactl list sinks short` contains `liascape-player-bus`
   - `pw-link -l` shows the bus playback port linked to the default sink
   - `probe {name:"meter.window", args:{last_ms:1000}}` median within −23 ± 3 dBFS (sine RMS = peak − 3 dB)
   - `default_sink_change_retargets`: `pactl set-default-sink <other sink>` → within 1 s the bus links to the new sink, the meter keeps producing (no gap > 50 ms), and `audio.bus.retargeting` → `audio.bus.up` events appear; set the default back
 - [ ] **Step 2:** Run `bus.sh` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `bus.sh` → PASS. Record `Bus::latency()` in the commit message; it must be ≤ 1 PipeWire quantum + 5 ms, otherwise stop and raise it before continuing.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Player Audio Bus + Bus Meter"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Player Audio Bus + Bus Meter"`.
 
 ### Task 15: Reference-based dropout detector
 
 **Files:**
 - Create: `src/player/src/probe/dropout.rs`, `src/player/tests/dropout.rs`
-- Create: `scripts/lp_audiowatch.py` (the proven external monitor from 2026-10-20, moved from the session scratchpad, with ffmpeg resolved from PATH; reference implementation and legacy-engine monitor)
+- Create: `scripts/liascape_audiowatch.py` (the proven external monitor from 2026-10-20, moved from the session scratchpad, with ffmpeg resolved from PATH; reference implementation and legacy-engine monitor)
 - Modify: `docs/player/debugging.md` (create; symptom → probe/log query → likely cause, seeded with the 2026-10-20 findings: cubic sag, speed-step hiccup, ready-timeout silence, parked pause)
 
 **Interfaces:**
@@ -622,7 +622,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `pub fn expected_envelope(src_paths_and_positions, gain_schedule, window) -> Vec<(Duration,f64)>`
     - decode with `ffmpeg -ss <pos> -t <len> -i <path> -vn -ac 1 -ar 48000 -f f32le -` into 10 ms power bins
     - multiply by db_to_lin(gain)² per source per bin and sum
-  - Algorithm (port of `lp_audiowatch.py`):
+  - Algorithm (port of `liascape_audiowatch.py`):
     - 10 ms bins
     - lag search 0–250 ms in 10 ms steps, minimising the median absolute dB error over bins where expected > −60 dB
     - offset = median(observed − expected)
@@ -639,7 +639,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test dropout` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `cargo test --test dropout` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Reference-Based Dropout Detector"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Reference-Based Dropout Detector"`.
 
 ### Task 16: Supervisor + state snapshot/restore
 
@@ -667,12 +667,12 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - [ ] **Step 2:** `cargo test --test supervise` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `cargo test --test supervise` → PASS.
-- [ ] **Step 5:** Commit: `git commit -m "lp-player: Supervisor Restart + Snapshot Restore"`.
+- [ ] **Step 5:** Commit: `git commit -m "liascape-player: Supervisor Restart + Snapshot Restore"`.
 
 ### Task 17: Backend adapter behind `PlayerEngine` (C#)
 
 **Files:**
-- Create: `src/livepaper/Player/PlayerEngine.cs`, `LpPlayerClient.cs`, `LpPlayerMedia.cs`, `MpvPropertyMap.cs`
+- Create: `src/livepaper/Player/PlayerEngine.cs`, `LiascapePlayerClient.cs`, `LiascapePlayerMedia.cs`, `MpvPropertyMap.cs`
 - Modify: `src/livepaper/Models/AppSettings.cs` (`public string PlayerEngine { get; set; } = "legacy";`)
 - Modify: `src/livepaper/Helpers/PlayerHelper.cs` — dispatch at the media primitives only:
   - `SwitchToFile` (l. 1070), `Launch` (l. 2826), `SendCommand` (l. 2542), `TrySendCommand`
@@ -680,22 +680,22 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `KillCurrentProcess` (l. 2944), `KillAll` (l. 3042), `TogglePause` (l. 2515)
   - the V→V transitions-on branch of `DoVideoEndWait`
   - scene checks at l. 705, 736, 1011, 1149 and `IsSkippedPath` (l. 3071) → `PlayerEngine.ScenesPlayable(settings)`
-- Modify: `src/livepaper/Helpers/AudioMonitor.cs` (`GetNonMpvStreamIdsAsync`: exclude the lp-player bus playback stream)
+- Modify: `src/livepaper/Helpers/AudioMonitor.cs` (`GetNonMpvStreamIdsAsync`: exclude the liascape-player bus playback stream)
 - Modify: `src/livepaper/Helpers/TransitionService.cs`: extract `public static (string effectId, Dictionary<string,double[]> uniforms, int durationMs, string method)? Pick(Config cfg)` from `TryStart` (reuses `PickEffect`/`PickDuration`; no capture work)
 - Modify: `src/livepaper/Web/ServerHost.cs` (`/settings`: a `PlayerEngine` change → `PlayerHelper.SwitchEngineLive(prev, cur)` = stop the old engine, replay `LastSession` on the new one)
-- Modify: `src/livepaper/Program.cs`: hidden `--lp-player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `lp-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
-- Modify: `app/ui/src/views/Settings.tsx` (advanced row "Player engine": Legacy / lp-player (experimental)), `app/ui/src/store/index.ts` (default `playerEngine: "legacy"`)
+- Modify: `src/livepaper/Program.cs`: hidden `--liascape-player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
+- Modify: `app/ui/src/views/Settings.tsx` (advanced row "Player engine": Legacy / liascape-player (experimental)), `app/ui/src/store/index.ts` (default `playerEngine: "legacy"`)
 - Create: `.claude/rules/player-adapter.md` (`paths: ["src/livepaper/Player/**"]`): the dispatch points, the property map, the event flow
 
 **Interfaces:**
-- Consumes: lp-player wire protocol (Task 12), `TransitionReq` fields (Task 11)
+- Consumes: liascape-player wire protocol (Task 12), `TransitionReq` fields (Task 11)
 - Produces:
-  - `PlayerEngine.IsLpPlayer` (from settings, cached and refreshed on `/settings`), `PlayerEngine.ScenesPlayable(AppSettings s) => s.AllowScenes && PlayerHelper.IsLweAvailable() && !IsLpPlayer`, `PlayerEngine.ResolveBinary()`
-  - `LpPlayerClient`:
-    - `EnsureRunning()`: connect, or `setsid lp-player serve` and wait ≤ 3 s for the socket
+  - `PlayerEngine.IsLiascapePlayer` (from settings, cached and refreshed on `/settings`), `PlayerEngine.ScenesPlayable(AppSettings s) => s.AllowScenes && PlayerHelper.IsLweAvailable() && !IsLiascapePlayer`, `PlayerEngine.ResolveBinary()`
+  - `LiascapePlayerClient`:
+    - `EnsureRunning()`: connect, or `setsid liascape-player serve` and wait ≤ 3 s for the socket
     - `Task<JsonElement> Call(string cmd, object args, int timeoutMs = 2000)`
     - `event Action<string kind, JsonElement e> Event` (background reader on a subscribed connection to `transition.`, `source.`, `supervisor.`)
-  - `LpPlayerMedia`:
+  - `LiascapePlayerMedia`:
     - `Switch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)` → `transition { outputs:"out:*", to:{path, props from s + per-item overrides}, effect from Pick(tcfg) or null, method, align }`
     - `Task<bool> SwitchAndWaitHandoff(…, CancellationToken)` (completes on `transition.handoff` / false on cancel/fail)
     - `Stop()`, `Set(string prop, object value)` (targets `cur:*`), `double? Query(string prop)`, `string? CurrentPath()`
@@ -703,21 +703,21 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
     - volume / speed / mute / pause / loop-file / panscan (→ layer `fit`) / vf fps / hwdec / cache / demuxer-max-bytes / demuxer-max-back-bytes / af / aid (→ `no_audio`)
     - **volume N → `gain.user` = 60·log10(N/100) dB** (= the cubic curve users are used to; N = 50 → −18.06 dB); N = 0 → −96
     - unknown → `null` + a log line
-  - `DoVideoEndWait` under lp-player:
+  - `DoVideoEndWait` under liascape-player:
     - **both** V→V branches (transitions on, and the transitions-off gapless-append branch) become
-      `await LpPlayerMedia.SwitchAndWaitHandoff(next, …, tcfg: transitionsOn ? cfg : null, alignEnd:true, ct)`, then
+      `await LiascapePlayerMedia.SwitchAndWaitHandoff(next, …, tcfg: transitionsOn ? cfg : null, alignEnd:true, ct)`, then
       the existing `lock { … PostSwitch(next); }`
     - Cancel → `cancel {corr}`.
-    - The `_lastSwitchTarget` settle gate (commit `27b9591`) is legacy-only; under lp-player the handoff event replaces it.
+    - The `_lastSwitchTarget` settle gate (commit `27b9591`) is legacy-only; under liascape-player the handoff event replaces it.
   - `AudioMonitor` (legacy auto-mute, still used in Phase 1): `GetNonMpvStreamIdsAsync` also skips streams whose
-    `node.name` starts with `lp-player-bus` or whose `application.name` is `lp-player`.
+    `node.name` starts with `liascape-player-bus` or whose `application.name` is `liascape-player`.
 
-- [ ] **Step 1: Write the failing self-test** (`--lp-player-selftest`):
+- [ ] **Step 1: Write the failing self-test** (`--liascape-player-selftest`):
   - `MpvPropertyMap` assertions: `volume 50` → `gain.user = −18.0618 ± 1e-3`; `volume 100` → 0; `panscan 0.0` → `fit:"fit"`; `aid no` → `no_audio:true`
   - round-trip: `hello`; a `transition` colour→clip with `align:now` receives `transition.handoff`
-- [ ] **Step 2:** Run `dotnet run --project src/livepaper -- --lp-player-selftest` → FAIL.
-- [ ] **Step 3:** Implement the four classes + dispatch + UI row. Legacy branches stay byte-for-byte when `!IsLpPlayer`.
-- [ ] **Step 4:** Self-test → PASS. Then on-machine with `PlayerEngine=lp-player` via `curl -X POST /settings`:
+- [ ] **Step 2:** Run `dotnet run --project src/livepaper -- --liascape-player-selftest` → FAIL.
+- [ ] **Step 3:** Implement the four classes + dispatch + UI row. Legacy branches stay byte-for-byte when `!IsLiascapePlayer`.
+- [ ] **Step 4:** Self-test → PASS. Then on-machine with `PlayerEngine=liascape-player` via `curl -X POST /settings`:
   - `/apply` a clip; `/next` in the owner's `dp` playlist
   - timed interval 20 s with `WaitForVideoEnd` + `AdvanceOnVideoEnd` (the owner's settings)
   - live `/settings` changes of Volume, Speed, Loop, VideoScale, VideoFps, HwDec, NoAudio, NormalizeAudio; mute toggle; pause toggle; `--action=volume-up`
@@ -726,7 +726,7 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - `automute_ignores_own_bus`: `AutoMute=true`, delay 0, a clip playing for 30 s → no `SetMute(true)`, and the
     wallpaper stays audible on the meter; then `paplay` a 1 kHz tone (another app) → the wallpaper is muted, and
     unmutes after `AutoUnmuteDelayMs` once it stops
-- [ ] **Step 5:** Commit: `git commit -m "Backend: lp-player Adapter Behind PlayerEngine Setting"`.
+- [ ] **Step 5:** Commit: `git commit -m "Backend: liascape-player Adapter Behind PlayerEngine Setting"`.
 
 ### Task 18: Packaging — install.sh + flake wrappers
 
@@ -734,22 +734,22 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - Modify: `scripts/install.sh`:
   - preflight requires `cargo`/`rustc` (per-distro install hint, hard fail)
   - `cargo build --release --locked --manifest-path src/player/Cargo.toml`
-  - install `lp-player` to `~/.local/share/livepaper-web/bin/` and export `LP_PLAYER_BIN` in both wrappers
-- Modify: `flake.nix`: `--set LP_PLAYER_BIN ${lp-player}/bin/lp-player` in the `livepaper-ui` and `livepaper-cli` wrappers
-- Modify: `.claude/rules/distribution.md` (lp-player build + resolution order)
+  - install `liascape-player` to `~/.local/share/livepaper-web/bin/` and export `LIASCAPE_PLAYER_BIN` in both wrappers
+- Modify: `flake.nix`: `--set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player` in the `livepaper-ui` and `livepaper-cli` wrappers
+- Modify: `.claude/rules/distribution.md` (liascape-player build + resolution order)
 
 **Interfaces:**
 - Consumes: Task 3 package.
 
-- [ ] **Step 1: Write the failing check:** `nix build .#default` then `grep LP_PLAYER_BIN result/bin/livepaper-ui` → no match (FAIL).
+- [ ] **Step 1: Write the failing check:** `nix build .#default` then `grep LIASCAPE_PLAYER_BIN result/bin/livepaper-ui` → no match (FAIL).
 - [ ] **Step 2:** Implement both files.
 - [ ] **Step 3:** Verify:
   - `env -u LD_LIBRARY_PATH nix build .#default` succeeds
-  - the grep finds `LP_PLAYER_BIN` in both wrappers
-  - `result/bin/livepaper-cli --lp-player-selftest` prints `PASS`
+  - the grep finds `LIASCAPE_PLAYER_BIN` in both wrappers
+  - `result/bin/livepaper-cli --liascape-player-selftest` prints `PASS`
   - `bash -n scripts/install.sh` passes
   - with `PATH` lacking cargo, `install.sh` exits non-zero with the hint
-- [ ] **Step 4:** Commit: `git commit -m "Packaging: Build and Wire lp-player"`.
+- [ ] **Step 4:** Commit: `git commit -m "Packaging: Build and Wire liascape-player"`.
 
 ### Task 19: Documentation + generated credits
 
@@ -761,17 +761,17 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
 - Create: `scripts/gen-credits.py`: reads `patches/*/*.patch` headers (`From:`, `Upstream-PR:`/`Upstream-Commit:`, `Origin:`, subject) and the `UPSTREAM.md` "adopted techniques" tables → writes `CREDITS.md`; `--check` exits 1 when `CREDITS.md` differs
 - Create: `CREDITS.md` (generated; currently the mpvpaper techniques section only)
 - Modify: `CLAUDE.md`: architecture tree gains `src/player/` + `docs/player/`; the CLI/engine note; a pointer to `docs/TODO.md`
-- Modify: `docs/TODO.md`: tick "Approve the lp-player design"; tick "Commit lp_audiowatch.py" (done in Task 15)
+- Modify: `docs/TODO.md`: tick "Approve the liascape-player design"; tick "Commit liascape_audiowatch.py" (done in Task 15)
 
 - [ ] **Step 1: Write the failing check:** `python3 scripts/gen-credits.py --check` → exit 1 (no CREDITS.md yet).
 - [ ] **Step 2:** Write the docs + generator + generate `CREDITS.md`.
 - [ ] **Step 3:** Verify: `gen-credits.py --check` exits 0; every `paths:` glob in `.claude/rules/player-*.md` matches at least one file (`python3 -c` glob check); `docs/player/*.md` link targets exist.
-- [ ] **Step 4:** Commit: `git commit -m "Docs: lp-player Architecture, Upstream, Generated Credits"`.
+- [ ] **Step 4:** Commit: `git commit -m "Docs: liascape-player Architecture, Upstream, Generated Credits"`.
 
 ### Task 20: Phase 1 on-machine battery + report
 
 **Files:**
-- Create: `src/player/tests/onmachine/battery.sh` (drives the backend over HTTP with `PlayerEngine=lp-player`; collects `probe.dropout` events and frame probes)
+- Create: `src/player/tests/onmachine/battery.sh` (drives the backend over HTTP with `PlayerEngine=liascape-player`; collects `probe.dropout` events and frame probes)
 - Create: `docs/player/reports/phase1.md`
 
 **Interfaces:**
@@ -787,4 +787,4 @@ C# adapter (backend): `src/livepaper/Player/{PlayerEngine.cs,LpPlayerClient.cs,L
   - no `transition.failed` except injected ones
 - [ ] **Step 3:** Per-monitor capability check via `ctl` only: a different clip on DP-1 and DP-2, a transition on `out:DP-1` alone → DP-2's frames and audio unaffected (frame probe + meter), and a span of one clip across both.
 - [ ] **Step 4:** 1-hour soak with the owner's playlist: RSS and VRAM sampled every 60 s, slope < 1 MiB/min after the first 5 min. (The 8 h soak is the Phase 5 switch-over bar.)
-- [ ] **Step 5:** Write `docs/player/reports/phase1.md` (tables per method × mode, failures found and fixed, soak curve). Tick the Phase 1 items in `docs/TODO.md`. Commit: `git commit -m "lp-player: Phase 1 Battery Report"`.
+- [ ] **Step 5:** Write `docs/player/reports/phase1.md` (tables per method × mode, failures found and fixed, soak curve). Tick the Phase 1 items in `docs/TODO.md`. Commit: `git commit -m "liascape-player: Phase 1 Battery Report"`.

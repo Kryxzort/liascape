@@ -21,14 +21,14 @@ if [ $BUILD = 1 ]; then
 fi
 [ -f "$DLL" ] || { echo "not built: $DLL (drop --no-build)"; exit 2; }
 
-T=$(mktemp -d /tmp/lpxp-XXXXXX)
+T=$(mktemp -d /tmp/liascape-xp-XXXXXX)
 mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
 DLL=$T/backend/livepaper.dll
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
-unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
-cleanup() { case "$T" in /tmp/lpxp-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac; }
+unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
+cleanup() { case "$T" in /tmp/liascape-xp-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac; }
 trap cleanup EXIT
 pass=0; fail=0
 ok()  { echo "  ok   $*"; pass=$((pass+1)); }

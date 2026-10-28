@@ -10,7 +10,7 @@
 //!   none → hardware decoding copies every frame through the CPU.
 //! - `scenes` — the `scene` capability's rule (`Runtime::scenes_available` / `scene-check`).
 //!
-//! `hello.health` carries them for a running player; `lp-player health` prints the same (minus the
+//! `hello.health` carries them for a running player; `liascape-player health` prints the same (minus the
 //! interop, which needs the render worker's GL context) when none runs.
 
 use std::path::Path;
@@ -25,7 +25,7 @@ pub fn effects_json(dir: Option<&Path>, count: usize) -> Value {
         Some(d) => json!({ "ok": false, "dir": d, "count": 0,
             "reason": format!("the transitions catalogue at {} has no effects — every switch is a cut", d.display()) }),
         None => json!({ "ok": false, "dir": null, "count": 0,
-            "reason": "no transitions catalogue found (LP_TRANSITIONS_DIR, ~/.local/share/livepaper-web/transitions, \
+            "reason": "no transitions catalogue found (LIASCAPE_TRANSITIONS_DIR, ~/.local/share/livepaper-web/transitions, \
                        the repo) — every switch is a cut" }),
     }
 }
@@ -51,7 +51,7 @@ pub fn vram_json(probe: &str, sample: Result<(), String>) -> Value {
     }
 }
 
-/// One sample from the probe `LP_PLAYER_VRAM_PROBE` picks (blocking: nvidia-smi may be spawned).
+/// One sample from the probe `LIASCAPE_PLAYER_VRAM_PROBE` picks (blocking: nvidia-smi may be spawned).
 pub fn vram_here() -> Value {
     let mut p = crate::vram::probe_from_env();
     let name = p.name();
@@ -63,7 +63,7 @@ static VRAM: OnceLock<Value> = OnceLock::new();
 /// Start the VRAM check on its own thread (serve start): `hello` must never wait for it.
 pub fn warm() {
     let _ = std::thread::Builder::new()
-        .name("lp-health".into())
+        .name("lia-health".into())
         .spawn(|| {
             VRAM.get_or_init(vram_here);
         });
@@ -110,10 +110,10 @@ mod tests {
     #[test]
     fn vram_cases() {
         assert_eq!(vram_json("nvml", Ok(()))["ok"], true);
-        let no = vram_json("none", Err("disabled by LP_PLAYER_VRAM_PROBE=none".into()));
+        let no = vram_json("none", Err("disabled by LIASCAPE_PLAYER_VRAM_PROBE=none".into()));
         assert_eq!(no["ok"], false);
         assert_eq!(no["probe"], "none");
-        assert!(no["reason"].as_str().unwrap().contains("LP_PLAYER_VRAM_PROBE=none"));
+        assert!(no["reason"].as_str().unwrap().contains("LIASCAPE_PLAYER_VRAM_PROBE=none"));
     }
 
     #[test]

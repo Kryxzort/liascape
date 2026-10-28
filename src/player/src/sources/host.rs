@@ -103,7 +103,7 @@ static OPEN_SKIPPED: AtomicUsize = AtomicUsize::new(0);
 /// submitted) would decode zero-copy through it — not `no`/unset, not a `-copy` mode or
 /// `auto-copy`, not a decoder this interop can't show — and it isn't an image (mpv decodes
 /// stills in software). The interop's init (a CUDA context per render context on NVIDIA:
-/// 85–220 ms of an `lp-render` lane, ~60 MiB of VRAM) is paid for nothing otherwise. A later
+/// 85–220 ms of an `lia-render` lane, ~60 MiB of VRAM) is paid for nothing otherwise. A later
 /// live `hwdec` change keeps working either way: without the interop `mpv_hwdec` asks for the
 /// copy modes.
 fn wants_hwdec_interop(node: &[(String, PropValue)], interop: &str) -> bool {
@@ -123,7 +123,7 @@ pub fn opening_pending() -> usize {
     OPENING.load(Ordering::SeqCst)
 }
 
-/// TODO "No explicit cap on concurrent `lp-open` worker threads": at most this many mpv
+/// TODO "No explicit cap on concurrent `lia-open` worker threads": at most this many mpv
 /// cores are made at once; the rest of a burst waits in submission order — before, a burst
 /// spun up one thread per create (16 at once, measured). Measured (release, hermetic
 /// headless, a burst of 16 paused 1080p creates, 3 rounds per cap): every core made and
@@ -132,8 +132,8 @@ pub fn opening_pending() -> usize {
 /// stretch 3–5, **2–8**, 11–24, 13–29 ms — fewer finished cores land in the same `sync`.
 pub const MAX_OPEN_WORKERS: usize = 2;
 
-/// The async opens' pool (`lp-open` threads).
-static OPEN_POOL: OpenPool = OpenPool::new("lp-open", MAX_OPEN_WORKERS);
+/// The async opens' pool (`lia-open` threads).
+static OPEN_POOL: OpenPool = OpenPool::new("lia-open", MAX_OPEN_WORKERS);
 
 /// The async-open pool (`sources` probe `open_pool`): `cap`, live `workers`, jobs
 /// `running`/`queued`, `peak` (most workers alive at once, process lifetime), `skipped`
@@ -150,7 +150,7 @@ pub(crate) type PoolJob = Box<dyn FnOnce() + Send>;
 
 /// A bounded FIFO executor: jobs start in submission order on at most `cap` threads named
 /// `name`, spawned on demand; a worker exits as soon as the queue is empty, so an idle
-/// player keeps no `lp-open` thread. A job that panics doesn't take its worker down.
+/// player keeps no `lia-open` thread. A job that panics doesn't take its worker down.
 pub(crate) struct OpenPool {
     name: &'static str,
     cap: usize,
@@ -241,7 +241,7 @@ impl OpenPool {
     }
 }
 
-/// Async opens waiting for an `lp-open` worker (`loop` probe `bounds.open_queued`).
+/// Async opens waiting for an `lia-open` worker (`loop` probe `bounds.open_queued`).
 pub fn open_queued() -> usize {
     OPEN_POOL.queued()
 }
@@ -470,7 +470,7 @@ impl SourceHost {
     }
 
     /// Phase 2 (§ Sources "Render worker"): render every mpv source opened asynchronously
-    /// from now on on `worker` (its `lp-open` job attaches the core there). Synchronous opens
+    /// from now on on `worker` (its `lia-open` job attaches the core there). Synchronous opens
     /// (stepped mode, the harnesses, a pool that can't start a thread) keep rendering on the
     /// loop. `None` = off.
     pub fn set_render_worker(&mut self, worker: Option<Arc<RenderWorker>>) {
@@ -1329,7 +1329,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn leak(cap: usize) -> &'static OpenPool {
-        Box::leak(Box::new(OpenPool::new("lp-open-test", cap)))
+        Box::leak(Box::new(OpenPool::new("lia-open-test", cap)))
     }
 
     fn wait_idle(pool: &OpenPool) {
@@ -1340,7 +1340,7 @@ mod tests {
         }
     }
 
-    /// TODO "No explicit cap on concurrent `lp-open` worker threads": a burst of 20 jobs
+    /// TODO "No explicit cap on concurrent `lia-open` worker threads": a burst of 20 jobs
     /// (each 5 ms) never runs more than `cap` at once, starts them in submission order,
     /// loses none, and leaves no worker behind once the queue is empty.
     #[test]

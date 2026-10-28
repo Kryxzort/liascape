@@ -122,8 +122,8 @@ unsafe extern "C" {
 /// waiting on it (no `glClientWaitSync` on 0), and `glDeleteSync(0)` is a GL no-op. What
 /// mpv's GL fences actually guard is *buffer reuse*: (a) direct rendering (`vd-lavc-dr`,
 /// decoder frames in GL-mapped buffers) — on the render API that needs
-/// `MPV_RENDER_PARAM_ADVANCED_CONTROL`, which lp-player never passes; (b) `opengl-pbo`
-/// uploads, where a PBO could be rewritten while the GPU still reads it — lp-player pins
+/// `MPV_RENDER_PARAM_ADVANCED_CONTROL`, which liascape-player never passes; (b) `opengl-pbo`
+/// uploads, where a PBO could be rewritten while the GPU still reads it — liascape-player pins
 /// `opengl-pbo=no` (mpv's default) in `open`. **Neither may be enabled while this stub is in
 /// place.**
 unsafe extern "C" fn stub_fence_sync(_condition: u32, _flags: u32) -> *mut c_void {
@@ -236,7 +236,7 @@ fn zero_copy_decoders(interop: Option<&str>) -> &'static [&'static str] {
 /// know — mpv rejects it and the prop reverts, R45) passes through unchanged.
 ///
 /// **`interop: Some(i)` — zero-copy on the render worker.** The render context lives on the
-/// `lp-render` thread, so the interop's init costs that thread, not the loop. A decoder the
+/// `lia-render` thread, so the interop's init costs that thread, not the loop. A decoder the
 /// interop can show ([`zero_copy_decoders`]) is asked for as itself, **followed by its copy
 /// twin** (an interop that failed to load — no libcuda yet — or a codec the GPU can't do in
 /// zero-copy falls back to the copy, never to software); `auto`, `auto-safe`, `yes`,
@@ -292,7 +292,7 @@ pub fn mpv_hwdec(value: &str, interop: Option<&str>) -> String {
 }
 
 /// The `af` chain mpv runs for graph `af` (the user's chain, e.g. the backend's loudnorm): that
-/// chain plus a permanent `scaletempo2` (label `@lp-tempo`). With pitch correction on (mpv's
+/// chain plus a permanent `scaletempo2` (label `@liascape-tempo`). With pitch correction on (mpv's
 /// default) mpv adds its own tempo filter only while `speed` ≠ 1 and drops it at exactly 1× —
 /// and every add/drop rebuilds the audio chain (its `userspeed` + format `convert` stages): 3–5 ms
 /// of digital silence each, ~200 ms later at the sink (speed storm: 22 holes in 40 s of 0.9↔1.0
@@ -322,7 +322,7 @@ pub fn mpv_af(value: &str) -> String {
 }
 
 /// The tempo filter [`mpv_af`] keeps in every chain.
-const TEMPO_AF: &str = "@lp-tempo:scaletempo2";
+const TEMPO_AF: &str = "@liascape-tempo:scaletempo2";
 
 /// What an in-flight async request was, so its reply can be reported/reverted.
 struct Request {
@@ -409,14 +409,14 @@ unsafe impl Send for PreparedCore {}
 impl PreparedCore {
     /// Phase 2 (render worker): give this core's rendering to `worker` — it creates the render
     /// context on its own context (`RenderWorker::attach`, which this waits for — call it on
-    /// an `lp-open` thread, never the loop). A worker that can't leaves the core as it was:
+    /// an `lia-open` thread, never the loop). A worker that can't leaves the core as it was:
     /// the source then renders on the loop. Only a timed-out attach (the core stayed with
     /// the worker, which reaps it) is an error.
     ///
     /// `interop`: load the worker's hwdec GL interop (`RenderWorker::hwdec_interop`) into
     /// the render context — zero-copy hardware decoding (§ Sources "Hardware decoding"). Its
     /// init (a CUDA context on NVIDIA, 85–220 ms) runs in `mpv_render_context_create`, i.e. on
-    /// the worker; so only an attach the LOOP doesn't wait for may ask (the `lp-open` job —
+    /// the worker; so only an attach the LOOP doesn't wait for may ask (the `lia-open` job —
     /// never a synchronous open, which waits for this reply on the loop), and only for a
     /// source that will decode in hardware (the caller knows its `hwdec` and kind).
     pub fn attach_render(
@@ -764,7 +764,7 @@ impl MpvSource {
             ("osd-level", "0"),
             ("ytdl", "no"),
             ("input-default-bindings", "no"),
-            ("audio-client-name", "lp-player"),
+            ("audio-client-name", "liascape-player"),
             // I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
             // the first render of every render context — measured ~25–30 ms on the loop
             // per switch (with it: first `update` 33–65 ms; `ordered`: 6–19 ms). Ordered
@@ -809,9 +809,9 @@ impl MpvSource {
                 .map_err(api_err)?;
         }
         handle.initialize().map_err(api_err)?;
-        // Debug: LP_PLAYER_MPV_LOG=<mpv level, e.g. v> prints every core's mpv log to stderr (serve: its log
+        // Debug: LIASCAPE_PLAYER_MPV_LOG=<mpv level, e.g. v> prints every core's mpv log to stderr (serve: its log
         // file) — what the core was doing, e.g. a VO that gave up waiting for a render.
-        let diag = std::env::var("LP_PLAYER_MPV_LOG").ok();
+        let diag = std::env::var("LIASCAPE_PLAYER_MPV_LOG").ok();
         handle
             .request_log_messages(diag.as_deref().unwrap_or("error"))
             .map_err(api_err)?;
@@ -1635,7 +1635,7 @@ impl MpvSource {
                     level,
                     ..
                 } => {
-                    if std::env::var_os("LP_PLAYER_MPV_LOG").is_some() {
+                    if std::env::var_os("LIASCAPE_PLAYER_MPV_LOG").is_some() {
                         // [mpv <file> <t_mono s, when pumped — not when mpv logged it>] <level> <prefix>: <text>
                         eprintln!(
                             "[mpv {} {:.3}] {level} {prefix}: {}",
@@ -2444,7 +2444,7 @@ impl Drop for MpvSource {
             return;
         }
         // 1. Render context + our FBOs/textures, with the GL context current
-        //    (lp-transition gotcha). `gl` keeps the EGL context alive even if the Gfx is
+        //    (liascape-transition gotcha). `gl` keeps the EGL context alive even if the Gfx is
         //    already gone, and the guard restores whatever was current before.
         let cur = self.gl.make_current();
         if cur.is_current() {
@@ -2523,12 +2523,12 @@ mod tests {
     #[test]
     fn af_always_carries_a_tempo_filter() {
         for (graph, mpv) in [
-            ("", "@lp-tempo:scaletempo2"),
-            ("  ", "@lp-tempo:scaletempo2"),
-            ("lavfi=[anull]", "lavfi=[anull],@lp-tempo:scaletempo2"),
+            ("", "@liascape-tempo:scaletempo2"),
+            ("  ", "@liascape-tempo:scaletempo2"),
+            ("lavfi=[anull]", "lavfi=[anull],@liascape-tempo:scaletempo2"),
             (
                 "lavfi=[loudnorm=I=-16]",
-                "lavfi=[loudnorm=I=-16],@lp-tempo:scaletempo2",
+                "lavfi=[loudnorm=I=-16],@liascape-tempo:scaletempo2",
             ),
             ("scaletempo2", "scaletempo2"),
             ("scaletempo=stride=30", "scaletempo=stride=30"),

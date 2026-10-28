@@ -20,13 +20,13 @@ use std::sync::{Mutex, MutexGuard};
 use std::os::fd::RawFd;
 use std::time::{Duration, Instant};
 
-use lp_player::anim::{Animator, PropPath};
-use lp_player::clock::{Clock, SteppedClock};
-use lp_player::gfx::{Catalogue, Composer, Fbo, Gfx, Tex};
-use lp_player::graph::{Graph, NodeKind, PropValue};
-use lp_player::log::CorrId;
-use lp_player::recipes::{TransitionEvent, TransitionEventKind, TransitionReq, Transitions};
-use lp_player::sources::{RenderWorker, SourceEvent, SourceHost};
+use liascape_player::anim::{Animator, PropPath};
+use liascape_player::clock::{Clock, SteppedClock};
+use liascape_player::gfx::{Catalogue, Composer, Fbo, Gfx, Tex};
+use liascape_player::graph::{Graph, NodeKind, PropValue};
+use liascape_player::log::CorrId;
+use liascape_player::recipes::{TransitionEvent, TransitionEventKind, TransitionReq, Transitions};
+use liascape_player::sources::{RenderWorker, SourceEvent, SourceHost};
 use serde_json::{Map, Value, json};
 
 use super::{headless_gl, read_rgba};
@@ -117,16 +117,16 @@ impl Harness {
         // this crate's worker binary; crash records stay in a private dir.
         base.insert(
             "scene_worker".into(),
-            json!(env!("CARGO_BIN_EXE_lp-scene-worker")),
+            json!(env!("CARGO_BIN_EXE_liascape-scene-worker")),
         );
         base.insert("allow_synthetic".into(), json!(true));
         let crashes =
-            std::env::temp_dir().join(format!("lp-harness-crashes-{}", std::process::id()));
+            std::env::temp_dir().join(format!("liascape-harness-crashes-{}", std::process::id()));
         base.insert("scene_crash_dir".into(), json!(crashes));
         let mut host = SourceHost::new(base);
-        // `LP_PLAYER_RENDER_WORKER=on` (the switch `serve` reads): every source renders on a
+        // `LIASCAPE_PLAYER_RENDER_WORKER=on` (the switch `serve` reads): every source renders on a
         // worker sharing this context, as in the real-clock runtime (§ Sources "Render worker").
-        if lp_player::runtime::render_worker_enabled(None) {
+        if liascape_player::runtime::render_worker_enabled(None) {
             host.set_render_worker(Some(RenderWorker::start(&gfx).expect("render worker")));
         }
         Some(Harness {
@@ -264,7 +264,7 @@ impl Harness {
     pub fn scene(
         &mut self,
         name: &str,
-        spec: &lp_player::scene::synthetic::SyntheticSpec,
+        spec: &liascape_player::scene::synthetic::SyntheticSpec,
         extra: Value,
     ) -> String {
         let dir = super::synthetic_scene(name, spec);
@@ -275,7 +275,7 @@ impl Harness {
     }
 
     /// The live scene source of node `id`.
-    pub fn scene_src(&self, id: &str) -> &lp_player::sources::scene::SceneSource {
+    pub fn scene_src(&self, id: &str) -> &liascape_player::sources::scene::SceneSource {
         self.host.scene(id).expect("a hosted scene source")
     }
 

@@ -1,6 +1,6 @@
 # Upstream tracking
 
-`lp-player` (`src/player/`, `docs/player/architecture.md`) absorbs techniques from other GPL-3.0
+`liascape-player` (`src/player/`, `docs/player/architecture.md`) absorbs techniques from other GPL-3.0
 Wayland wallpaper tools and compiles the MIT `gl-transitions` GLSL catalogue. This file is the
 single source of truth for what came from where, how recently it was reviewed, and how to catch
 up — `scripts/gen-credits.py` reads it (plus `patches/*/*.patch` headers, once any exist) to
@@ -53,7 +53,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 - **License**: GPL-3.0
 - **Relationship**: **forked + pinned, built from source** (Phase 2, owner decision D3). The core
   library (`linux-wallpaperengine-core`, its C API `include/linux-wallpaperengine/*.h`) is what
-  `lp-scene-worker` links (`.claude/rules/player-core.md` § Scene worker → "LWE core"); the
+  `liascape-scene-worker` links (`.claude/rules/player-core.md` § Scene worker → "LWE core"); the
   frontend, dev-viewer and CEF webhelper are not built. Evidence: `docs/player/spikes/lwe-core.md`.
   - **Fork**: <https://github.com/Kryxzort/linux-wallpaperengine>, branch **`livepaper/next-v2`** =
     upstream `next-v2` at the base commit + our patches as commits. The build fetches the fork **by
@@ -98,7 +98,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and
-lp-player plays videos itself), `96da7d9` #643 (X11 fullscreen detector — not in next-v2), `cc31c51` #639 (CEF
+liascape-player plays videos itself), `96da7d9` #643 (X11 fullscreen detector — not in next-v2), `cc31c51` #639 (CEF
 paint bound to the FBO id — next-v2's webhelper already uploads into the wallpaper *texture* through shared
 memory), `14f5b9b` / `38a5d60` (formatting: the second reverts the first except #674's indentation, folded into
 0011).
@@ -123,7 +123,7 @@ it inside this repo's devShell). The source cache is `~/.cache/livepaper/src/lwe
    (`git -c credential.helper= -c credential.helper='!gh auth git-credential' push
    https://github.com/Kryxzort/linux-wallpaperengine.git livepaper/next-v2`; `--force-with-lease`
    for a rebase of that branch only). Patch work builds in place with
-   `LWE_DEV_SRC=<checkout> bash scripts/lwe.sh build test` (then `LP_LWE_CORE_DIR=$PWD/build/lwe-core`
+   `LWE_DEV_SRC=<checkout> bash scripts/lwe.sh build test` (then `LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core`
    for cargo).
 3. Update `third_party/lwe/PIN`: `rev` (new branch head), `base`, `date`, `version` (upstream's
    tag), `submodules` (`git submodule status` of the new rev), and `nix_hash` (set a fake hash,
@@ -131,8 +131,8 @@ it inside this repo's devShell). The source cache is `~/.cache/livepaper/src/lwe
 4. `bash scripts/lwe.sh fetch patches verify` (regenerates `patches/lwe/`), then
    `python3 scripts/gen-credits.py`; `nm` the new core into
    `src/player/tests/fixtures/lwe_exports.txt` if the API changed.
-5. `bash scripts/lwe.sh build check test` (with `LP_WE_ASSETS_DIR=<WE assets>` for the audio-mix
-   test), `cargo test --test lwe_build --test credits`, `nix build .#lp-player`, then the scene
+5. `bash scripts/lwe.sh build check test` (with `LIASCAPE_WE_ASSETS_DIR=<WE assets>` for the audio-mix
+   test), `cargo test --test lwe_build --test credits`, `nix build .#liascape-player`, then the scene
    corpus runner (Phase 2 Task 13) over the owner's Workshop folder `431960` — the same set of
    scenes must start, none newly blank.
 6. Re-check upstream `main` (`gh api repos/Almamu/linux-wallpaperengine/compare/<last checked>...main`)
@@ -154,7 +154,7 @@ it inside this repo's devShell). The source cache is `~/.cache/livepaper/src/lwe
   GLSL effect catalogue (122 of 125 upstream effects), regenerated from a gl-transitions checkout
   by `scripts/generate_transitions.py` (strips headers into `transitions/manifest.json`, rewrites each
   `uniform` into a `const` with its parsed default, wraps with the shared GLES/WebGL2 template,
-  validates with `glslangValidator`). `lp-player` is a second consumer of that same bundle
+  validates with `glslangValidator`). `liascape-player` is a second consumer of that same bundle
   (`transitions/` is shared with the Electron UI's live previews) — it never edits `transitions/`
   itself, only adapts the bundle at load time.
 

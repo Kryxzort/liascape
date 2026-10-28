@@ -324,7 +324,7 @@ fn write_line(state: &mut LoggerState, value: &Value) {
             state.current_size += bytes;
             if state.write_failure_streak {
                 eprintln!(
-                    "lp-player: log writes to disk recovered after {} failure(s) so far",
+                    "liascape-player: log writes to disk recovered after {} failure(s) so far",
                     state.write_failures
                 );
                 state.write_failure_streak = false;
@@ -344,7 +344,7 @@ fn note_write_failure(state: &mut LoggerState, msg: &str) {
     state.write_failures += 1;
     if !state.write_failure_streak {
         eprintln!(
-            "lp-player: {msg} (event kept in the in-memory ring only; {} disk write failure(s) so far)",
+            "liascape-player: {msg} (event kept in the in-memory ring only; {} disk write failure(s) so far)",
             state.write_failures
         );
         state.write_failure_streak = true;
@@ -529,7 +529,7 @@ mod tests {
     fn unique_dir(tag: &str) -> PathBuf {
         let n = DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!(
-            "lp-player-log-test-{}-{tag}-{n}",
+            "liascape-player-log-test-{}-{tag}-{n}",
             std::process::id()
         ));
         let _ = fs::create_dir_all(&dir);

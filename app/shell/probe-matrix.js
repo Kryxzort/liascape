@@ -1,5 +1,5 @@
 // UI × player-state matrix driver (run by scripts/test-ui-matrix.sh, which builds the hermetic stack:
-// a private backend + headless lp-player + the UI bundle served by that backend). For every cell
+// a private backend + headless liascape-player + the UI bundle served by that backend). For every cell
 // (state × control): reset everything to a baseline, reload the UI, bring the player into the state
 // through the backend, operate the control through the real DOM (or a `--action=` keybind), then check
 // with the ORACLE what every live source of the player runs:
@@ -9,7 +9,7 @@
 //   every main layer's fit = VideoScale; player.paused = what the cell expects
 //   the backend's /current, the screen (cur:*) and the UI's "playing" marker agree (when settled)
 //   no transition.failed / source.error / source.rejected; no unexpected cancel; no HTTP error
-// plus each control's own expectation. Output: <LP_OUT>/cells.jsonl + a summary; exit 1 on any FAIL.
+// plus each control's own expectation. Output: <LIASCAPE_OUT>/cells.jsonl + a summary; exit 1 on any FAIL.
 const { app, BrowserWindow, session } = require("electron");
 const net = require("net");
 const fs = require("fs");
@@ -17,16 +17,16 @@ const path = require("path");
 const cp = require("child_process");
 
 const E = process.env;
-const U = E.LP_URL;
-const K = JSON.parse(E.LP_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
-const OUT = E.LP_OUT;
-const ONLY = E.LP_ONLY ? new RegExp(E.LP_ONLY) : null;
+const U = E.LIASCAPE_URL;
+const K = JSON.parse(E.LIASCAPE_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
+const OUT = E.LIASCAPE_OUT;
+const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 // `i/N` (test-ui-matrix.sh --jobs N runs N hermetic stacks in parallel): this instance runs the cells whose
 // index in the (--only filtered) cell list is ≡ i mod N — state-major order, so every shard gets a slice of
 // every state
-const SHARD = E.LP_SHARD ? E.LP_SHARD.split("/").map(Number) : null;
+const SHARD = E.LIASCAPE_SHARD ? E.LIASCAPE_SHARD.split("/").map(Number) : null;
 // synthetic WE scene items (test-ui-matrix.sh seeds them, titled s1..s3): s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashes
-const SC = JSON.parse(E.LP_SCENES || "[]");
+const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
 const TITLE = (p) => (K.indexOf(p) >= 0 ? `k${K.indexOf(p) + 1}` : SC.indexOf(p) >= 0 ? `s${SC.indexOf(p) + 1}` : String(p));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (test-ui-matrix.sh runs it on a private Xvfb: --ozone-platform=x11 --disable-gpu)
@@ -37,7 +37,7 @@ function ctlClient() {
   let sock = null, buf = "", id = 0;
   const pend = new Map();
   const connect = () => new Promise((res, rej) => {
-    const s = net.createConnection(E.LP_PLAYER_SOCKET, () => { sock = s; res(); });
+    const s = net.createConnection(E.LIASCAPE_PLAYER_SOCKET, () => { sock = s; res(); });
     s.setEncoding("utf8");
     s.on("error", (e) => { if (!sock) rej(e); });
     s.on("close", () => { if (sock === s) sock = null; for (const p of pend.values()) p.rej(new Error("ctl closed")); pend.clear(); });
@@ -65,7 +65,7 @@ function ctlClient() {
 const ctl = ctlClient();
 const events = [];
 function subscribe() {
-  const s = net.createConnection(E.LP_PLAYER_SOCKET);
+  const s = net.createConnection(E.LIASCAPE_PLAYER_SOCKET);
   s.setEncoding("utf8"); let buf = "";
   s.on("connect", () => s.write(JSON.stringify({ id: 1, cmd: "subscribe", args: { topics: [
     "transition.", "source.error", "source.rejected", "anim.dropped", "output.", "supervisor.", "player.", "snapshot.invalid"] } }) + "\n"));
@@ -89,7 +89,7 @@ const post = (p, b = {}) => http("POST", p, b);
 const getSettings = async () => (await http("GET", "/settings")).json;
 function cli(action) {
   const t0 = Date.now();
-  return new Promise((res) => cp.execFile(E.LP_DOTNET, [E.LP_DLL, `--action=${action}`], { timeout: 40000 }, (err, out, errOut) =>
+  return new Promise((res) => cp.execFile(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, `--action=${action}`], { timeout: 40000 }, (err, out, errOut) =>
     res({ code: err ? err.code ?? (err.killed ? `killed (${err.signal}) after ${Date.now() - t0} ms` : 1) : 0, out: String(out) + String(errOut), ms: Date.now() - t0 })));
 }
 
@@ -124,7 +124,7 @@ const near = (a, b, eps = 0.02) => typeof a === "number" && typeof b === "number
 async function snapshot() {
   const [st, s, lib, cur, ps] = [await ctl.call("state"), await getSettings(), (await http("GET", "/library")).json,
     (await http("GET", "/current")).json, (await http("GET", "/playlist/state")).json];
-  return { st, s, lib, cur, ps, muted: fs.existsSync(E.LP_USER_MUTE), idx: readIndex() };
+  return { st, s, lib, cur, ps, muted: fs.existsSync(E.LIASCAPE_USER_MUTE), idx: readIndex() };
 }
 const sourcesOf = (st) => Object.entries(st.graph).filter(([, n]) => n && n.gain_effective_db !== undefined && n.kind !== "snapshot" && n.kind !== "color");
 // What's on screen per output: the main layer's content, through an effect to its `to`.
@@ -222,7 +222,7 @@ async function loadUi() {
 const ui = (code) => js(`(async () => { const m = window.__mx; ${code} })()`);
 
 // per-cell log excerpts (backend + adapter + the backend's transition/rotation log), attached to a FAIL
-const LOGS = [E.LP_BACKEND_LOG, E.LP_ADAPTER_LOG, E.LP_ADAPTER_LOG && path.join(path.dirname(E.LP_ADAPTER_LOG), "lp-transition.log")].filter(Boolean);
+const LOGS = [E.LIASCAPE_BACKEND_LOG, E.LIASCAPE_ADAPTER_LOG, E.LIASCAPE_ADAPTER_LOG && path.join(path.dirname(E.LIASCAPE_ADAPTER_LOG), "liascape-transition.log")].filter(Boolean);
 const logSizes = () => LOGS.map((f) => { try { return fs.statSync(f).size; } catch { return 0; } });
 function logsSince(at) {
   return LOGS.map((f, i) => { try { const b = fs.readFileSync(f); return b.subarray(at[i]).toString().split("\n").filter((l) => l.trim() && !/SteamRefreshToken/.test(l)).slice(-25); } catch { return []; } }).flat();
@@ -260,7 +260,7 @@ const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSecond
 // those. The fade-in from nothing at 2500 ms was ~40 % of a run (phases: enter 2.76 s/cell).
 const ENTRY_MS = 250;
 async function withGlobalMs(ms, fn) {
-  const s = await getSettings(), was = s.globalTransitionDurationMs; // full bodies: an older backend (LP_MATRIX_DLL) replaced the whole settings
+  const s = await getSettings(), was = s.globalTransitionDurationMs; // full bodies: an older backend (LIASCAPE_MATRIX_DLL) replaced the whole settings
   await post("/settings", { ...s, globalTransitionDurationMs: ms });
   try { return await fn(); } finally { await post("/settings", { ...(await getSettings()), globalTransitionDurationMs: was }); }
 }
@@ -288,13 +288,13 @@ async function reset(pl) {
 // The scene items live in the library's `workshop` source (index.json there: their titles). Scene support is OFF in the
 // baseline settings (library stepping / random would otherwise land on them — s3 crashes); every scene state and
 // scene control turns it on before the UI loads. Each cell starts with the items as seeded: no crash mark, no
-// whitelist, no overrides, and a healthy fake VRAM sample (test-ui-matrix.sh: LP_PLAYER_VRAM_PROBE=fake:<file>).
+// whitelist, no overrides, and a healthy fake VRAM sample (test-ui-matrix.sh: LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>).
 const SC_INDEX = SC.length ? path.join(path.dirname(SC[0]), "index.json") : null;
 const SC_KEY = (p) => path.basename(p);
 function vramFake(procs = {}) {
-  if (!E.LP_VRAM_FAKE) return;
-  fs.writeFileSync(E.LP_VRAM_FAKE + ".mx", JSON.stringify({ total_mib: 8192, free_mib: 6000, procs }));
-  fs.renameSync(E.LP_VRAM_FAKE + ".mx", E.LP_VRAM_FAKE);
+  if (!E.LIASCAPE_VRAM_FAKE) return;
+  fs.writeFileSync(E.LIASCAPE_VRAM_FAKE + ".mx", JSON.stringify({ total_mib: 8192, free_mib: 6000, procs }));
+  fs.renameSync(E.LIASCAPE_VRAM_FAKE + ".mx", E.LIASCAPE_VRAM_FAKE);
 }
 function resetScenes() {
   vramFake();
@@ -466,7 +466,7 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6
     }
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.[field];
     if (ov !== to) v.push(`${TITLE(c.target)} ${field} ${ov}, expected ${to}`);
-    if (v.length) v.push(`preview bodies: ${JSON.stringify((c.previewBodies || []).slice(0, 3).map((b) => String(b).replace(/\/tmp\/lpmx-[^/]+\/home\/.local\/share\/livepaper\/library\/imported\/[^/]+\//g, "")))}`);
+    if (v.length) v.push(`preview bodies: ${JSON.stringify((c.previewBodies || []).slice(0, 3).map((b) => String(b).replace(/\/tmp\/liascape-mx-[^/]+\/home\/.local\/share\/livepaper\/library\/imported\/[^/]+\//g, "")))}`);
     return [...new Set(v)].slice(0, 4).concat(v.slice(-1));
   } };
 }
@@ -1566,7 +1566,7 @@ const APPEAR = {
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
   "appear:gifs": { drive: () => `m.setCheck(m.input("Autoplay GIF thumbnails"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
   "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.wallpaperBgAllTabs === true },
-  // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under lp-player —
+  // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
   // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
   "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartIntervalSeconds === 2 },
   "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
@@ -1586,7 +1586,7 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
 // parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.
-const PULSE = E.LP_PULSE === "1";
+const PULSE = E.LIASCAPE_PULSE === "1";
 let TONE = null;
 const tones = new Set();
 function toneWav() { // 12 s of a 440 Hz sine at −12 dBFS, mono 48 kHz (bounded; written once)
@@ -1661,7 +1661,7 @@ C["seq:autoMute+toggleMute×3"] = { states: ["single", "playlist"], async run(c)
     tone(12000); c.s = [];
     c.s.push(["auto-muted by the stream", await waitFor(() => muteNow(true), 3000, 40)]);
     await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute while auto-muted: unmuted now", await waitFor(() => muteNow(false), 2000, 40)]);
-    await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute again: muted (the user's)", (await waitFor(() => muteNow(true), 2000, 40)) && fs.existsSync(E.LP_USER_MUTE)]);
+    await cliStep(c, "toggle-mute"); c.s.push(["toggle-mute again: muted (the user's)", (await waitFor(() => muteNow(true), 2000, 40)) && fs.existsSync(E.LIASCAPE_USER_MUTE)]);
     c.s.push(["the stream still played through all that", tones.size > 0]);
     await stopTones(); await sleep(3000);
     c.s.push(["the stream ended + the unmute delay: still muted (user)", await muteNow(true)]);
@@ -2105,7 +2105,7 @@ C["volume:scene"] = { states: ["scene"], async run(c) {
   } };
 
 // the scene's own volume / speed (its settings modal): its source only, persisted, live on the same worker — a
-// scene's speed scales its animation and its pitch-kept sound under lp-player (owner decision), so the slider shows
+// scene's speed scales its animation and its pitch-kept sound under liascape-player (owner decision), so the slider shows
 for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["itemSpd", 1, 1.7, "speedOverride"]]) {
   C[`${k}:scene`] = { states: ["scene"], async run(c) {
       await ui(`await m.cardMenu("s1", "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
@@ -2193,7 +2193,7 @@ C["settings:sceneFps"] = { states: ["scene"], async run(c) {
     return [...v, ...samePid(c, SC[0])];
   } };
 
-// the GPU / VRAM group (lp-player): each control → its player prop, live, the scene on the same worker
+// the GPU / VRAM group (liascape-player): each control → its player prop, live, the scene on the same worker
 for (const [name, prop, want, drive, saved] of [
   ["sceneThrottle", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.sceneThrottle === false],
   ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Limit VRAM per scene")} m.setCheck(m.input("Limit VRAM per scene"), true, "VRAM limit"); await m.sleep(300);
@@ -2386,7 +2386,7 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
 
 // the backend restarted (dotnet watch, an app relaunch) while a scene plays: the same scene stays — no switch, the same
 // worker — and the new backend says so (/current, the UI's playing mark)
-let backendPid = Number(E.LP_BACKEND_PID || 0);
+let backendPid = Number(E.LIASCAPE_BACKEND_PID || 0);
 const procAlive = (pid) => { try { return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return false; } };
 // SIGTERM, SIGKILL after `graceMs` (0: SIGKILL at once — the restart landing mid-request). An open page's WebSocket
 // holds a graceful shutdown open (Kestrel's 30 s), as under `dotnet watch`, whose restart then kills it.
@@ -2401,14 +2401,14 @@ async function restartBackend() {
   await stopBackend();
   return startBackend();
 }
-// a new backend on the same port (LP_PORT), recorded for test-ui-matrix.sh's cleanup; true once it answers /health
+// a new backend on the same port (LIASCAPE_PORT), recorded for test-ui-matrix.sh's cleanup; true once it answers /health
 async function startBackend() {
-  const env = { ...process.env, LP_PORT: new URL(U).port };
-  for (const k of ["DISPLAY", "LP_URL", "LP_CLIPS", "LP_OUT", "LP_ONLY", "LP_SHARD"]) delete env[k];
-  const log = fs.openSync(E.LP_BACKEND_LOG, "a");
-  const ch = cp.spawn(E.LP_DOTNET, [E.LP_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
+  const env = { ...process.env, LIASCAPE_PORT: new URL(U).port };
+  for (const k of ["DISPLAY", "LIASCAPE_URL", "LIASCAPE_CLIPS", "LIASCAPE_OUT", "LIASCAPE_ONLY", "LIASCAPE_SHARD"]) delete env[k];
+  const log = fs.openSync(E.LIASCAPE_BACKEND_LOG, "a");
+  const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
   fs.closeSync(log);
-  backendPid = ch.pid; if (E.LP_BACKEND_PID_FILE) fs.writeFileSync(E.LP_BACKEND_PID_FILE, String(ch.pid));
+  backendPid = ch.pid; if (E.LIASCAPE_BACKEND_PID_FILE) fs.writeFileSync(E.LIASCAPE_BACKEND_PID_FILE, String(ch.pid));
   return waitFor(async () => (await http("GET", "/health")).json?.ok === true, 40000, 200);
 }
 C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
@@ -2426,7 +2426,7 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
 // the Library tab said "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
 // up everything it mirrors from the backend by itself — no reload: the library (cards), the strip, the settings
 // (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
-const CFG = path.dirname(E.LP_USER_MUTE); // the stack's ~/.config/livepaper (settings.json, playlist_state.json)
+const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/livepaper (settings.json, playlist_state.json)
 const K5 = () => path.join(path.dirname(path.dirname(K[0])), "k5", "k5.mp4");
 const ASPECT_CSS = { "1:1": "1 / 1", "16:9": "16 / 9" };
 function editJson(file, fn) {
@@ -2502,7 +2502,7 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     c.want = { cards: wantTitles, strip: (ps?.videoPaths || []).map(TITLE), aspect: ASPECT_CSS[BASE_SETTINGS.thumbnailAspect ?? "1:1"] };
     await win.loadURL("about:blank");
     await stopBackend();
-    await win.loadURL(`file://${E.LP_UI_DIR}/index.html?api=${new URL(U).port}`);
+    await win.loadURL(`file://${E.LIASCAPE_UI_DIR}/index.html?api=${new URL(U).port}`);
     await sleep(2500);
     c.during = await pageData();
     c.up = await startBackend();
@@ -2723,8 +2723,8 @@ function rotatedDuring(before, evs) {
 
 // ================================================================ fuzz: random chains of controls (test-ui-matrix.sh --fuzz)
 // A cell runs ONE control from a fresh state; bugs keep turning up at combinations nobody listed. A fuzz run enters a
-// random start state (the matrix's own, minus the opt-in ones), then applies LP_FUZZ_STEPS controls picked at random —
-// a seeded PRNG (LP_FUZZ_SEED + the run's index → the same picks) — from the ones eligible in the state the stack is in
+// random start state (the matrix's own, minus the opt-in ones), then applies LIASCAPE_FUZZ_STEPS controls picked at random —
+// a seeded PRNG (LIASCAPE_FUZZ_SEED + the run's index → the same picks) — from the ones eligible in the state the stack is in
 // NOW, and after EACH step runs every check a cell runs (afterControl). A run stops at its first failing step.
 //   - The state a step sees is DERIVED from what runs (fuzzContext): its label (a STATES name, by precedence idle >
 //     noOutput > pausedEffect > effect > paused > muted > pending(Global) > playlist(Global) > single — a control's
@@ -2739,9 +2739,9 @@ function rotatedDuring(before, evs) {
 //     in a cell) runs right before its step, then the UI reloads: the backend pushes none of those writes to the page.
 //   - Between steps the page goes back to the Library tab with no selection: a cell starts on a fresh page, and a
 //     leftover Ctrl+click selection makes a later card action repeat to every selected card.
-// LP_FUZZ_REPLAY='<state>:<c1>,<c2>,…' reruns exactly that sequence (what a failure prints), eligibility unchecked.
+// LIASCAPE_FUZZ_REPLAY='<state>:<c1>,<c2>,…' reruns exactly that sequence (what a failure prints), eligibility unchecked.
 // The seed reproduces a run's picks while the states it passes through derive the same (a natural advance-on-end switch
-// can land a step earlier or later under load); the replay is exact. Results: <LP_OUT>/fuzz.jsonl, one record per run.
+// can land a step earlier or later under load); the replay is exact. Results: <LIASCAPE_OUT>/fuzz.jsonl, one record per run.
 //
 // Which controls a chain may use, and when — the first matching rule wins; every other control: any step its `states`
 // allow.  exclude: never.  last: only as a run's LAST step — what it leaves behind, the later controls' expectations
@@ -2807,8 +2807,8 @@ function fuzzEligible(n, x, last) {
 }
 
 // what runs now, as a control sees it (see above)
-const TIMED = path.join(path.dirname(E.LP_USER_MUTE), "timed_state.json"); // the backend's timed-playlist session (history, mode)
-const PENDING_ACTION = path.join(path.dirname(E.LP_USER_MUTE), "pending_action.txt"); // a next/prev/random the tick hasn't taken
+const TIMED = path.join(path.dirname(E.LIASCAPE_USER_MUTE), "timed_state.json"); // the backend's timed-playlist session (history, mode)
+const PENDING_ACTION = path.join(path.dirname(E.LIASCAPE_USER_MUTE), "pending_action.txt"); // a next/prev/random the tick hasn't taken
 const readTimed = () => { try { return JSON.parse(fs.readFileSync(TIMED, "utf8")); } catch { return null; } };
 function fuzzContext(snap, fz) {
   const { st } = snap, trs = st.transitions || [];
@@ -2889,7 +2889,7 @@ async function fuzzRun({ run, seed, steps, replay }) {
   const rng = replay ? null : runRng(seed, run);
   const start = replay ? replay.state : pickOf(rng, FUZZ_STARTS);
   const S = STATES[start];
-  const rec = { seed, run, shard: E.LP_SHARD || undefined, start, sequence: [], steps: [] };
+  const rec = { seed, run, shard: E.LIASCAPE_SHARD || undefined, start, sequence: [], steps: [] };
   const t0 = Date.now();
   const c0 = { state: start, exp: { ...S.exp } };
   [c0.shown, c0.other] = S.roles();
@@ -2927,8 +2927,8 @@ async function fuzzRun({ run, seed, steps, replay }) {
 }
 
 async function fuzzMain() {
-  const seed = Number(E.LP_FUZZ_SEED || 0) >>> 0, steps = Number(E.LP_FUZZ_STEPS || 0), runs = Number(E.LP_FUZZ_RUNS || 1);
-  const replay = E.LP_FUZZ_REPLAY ? parseReplay(E.LP_FUZZ_REPLAY) : null;
+  const seed = Number(E.LIASCAPE_FUZZ_SEED || 0) >>> 0, steps = Number(E.LIASCAPE_FUZZ_STEPS || 0), runs = Number(E.LIASCAPE_FUZZ_RUNS || 1);
+  const replay = E.LIASCAPE_FUZZ_REPLAY ? parseReplay(E.LIASCAPE_FUZZ_REPLAY) : null;
   const out = fs.createWriteStream(path.join(OUT, "fuzz.jsonl"));
   // normalization's controls find every clip measured (their `pre` is then instant)
   if (!(await measureAll())) console.log("(the clips weren't measured in 30 s — the normalization steps report it)");
@@ -2958,11 +2958,11 @@ app.whenReady().then(async () => {
   // hidden window renders no frames — requestAnimationFrame never fires, so framer-motion/WAAPI animations
   // never finish (an exiting modal stayed in the DOM), dnd-kit's drop never lands (pointermoves are
   // rAF-aligned: they coalesced and the drop saw a stale target) and gifs/the live bg stayed paused (unfocused)
-  win = new BrowserWindow({ show: !E.LP_MATRIX_HIDDEN, x: 0, y: 0, width: 1400, height: 900, useContentSize: true, webPreferences: { backgroundThrottling: false } });
+  win = new BrowserWindow({ show: !E.LIASCAPE_MATRIX_HIDDEN, x: 0, y: 0, width: 1400, height: 900, useContentSize: true, webPreferences: { backgroundThrottling: false } });
   win.focus();
   subscribe();
   BASE_SETTINGS = await getSettings();
-  if (E.LP_FUZZ_STEPS || E.LP_FUZZ_REPLAY) return fuzzMain();
+  if (E.LIASCAPE_FUZZ_STEPS || E.LIASCAPE_FUZZ_REPLAY) return fuzzMain();
   const out = fs.createWriteStream(path.join(OUT, "cells.jsonl"));
   const results = [];
   let idx = -1;

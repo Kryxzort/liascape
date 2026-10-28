@@ -11,7 +11,7 @@ namespace livepaper.Helpers;
 
 // WE-style wallpaper transitions: freeze the outgoing wallpaper (`from`) and the incoming one's
 // first frame (`to`), then run a gl-transitions GLSL effect between them on an opaque per-output
-// wlr-layer-shell surface (the `lp-transition` native renderer), and hand off to the live wallpaper
+// wlr-layer-shell surface (the `liascape-transition` native renderer), and hand off to the live wallpaper
 // underneath. The overlay covers only the wallpaper region (real windows stay on top), exactly like
 // Wallpaper Engine. See .claude/rules/player.md + transitions/README.md.
 //
@@ -110,9 +110,9 @@ public static class TransitionService
         return min;
     }
 
-    // lp-player (PlayerEngine=lp-player): the effect/params/duration/method for ONE switch — the same
+    // liascape-player (PlayerEngine=liascape-player): the effect/params/duration/method for ONE switch — the same
     // PickEffect/PickDuration as TryStart, no capture work, and no reveal-capable gate (every effect
-    // works with every method in lp-player). params = the manifest's uniform defaults. null = cut.
+    // works with every method in liascape-player). params = the manifest's uniform defaults. null = cut.
     public static (string effectId, Dictionary<string, double[]> uniforms, int durationMs, string method)? Pick(Config cfg)
     {
         if (!cfg.Enabled) return null;
@@ -158,7 +158,7 @@ public static class TransitionService
 
     // ---- the entry SwitchToFile calls ----------------------------------------------------------
     // Captures both frames per output (warmup/scene fallback), composes the shader, and spawns
-    // lp-transition detached. FULL-LIVE: for a video side it also hands the renderer the actual file
+    // liascape-transition detached. FULL-LIVE: for a video side it also hands the renderer the actual file
     // (`--from-video`/`--to-video` + start offset) so the renderer decodes it with libmpv and BOTH
     // sides keep PLAYING through the effect. The incoming video B is played LIVE underneath the
     // opaque overlay (the caller loads it unpaused) and is revealed at teardown at a matching position.
@@ -175,7 +175,7 @@ public static class TransitionService
             // Kill any prior overlay before starting a new one — a transition the user PAUSED is frozen
             // and never tears itself down, and rapid switches could otherwise stack overlays.
             bool killedPrior = false;
-            foreach (var p in Process.GetProcessesByName("lp-transition"))
+            foreach (var p in Process.GetProcessesByName("liascape-transition"))
                 using (p) { try { p.Kill(true); killedPrior = true; } catch { } }
             // A prior overlay killed MID-HANDOFF (next pressed during an effect) leaves mpvpaper-B PAUSED —
             // it was parked for that overlay's teardown to unpause — so the wallpaper sat silent + frozen
@@ -189,7 +189,7 @@ public static class TransitionService
             if (durationMs <= 0) { TransLog("transition SKIPPED: duration 0 ms = a cut"); return false; }
 
             var monitors = MonitorDetector.DetectAsync().GetAwaiter().GetResult();
-            if (monitors.Count == 0) { TransLog("transition SKIPPED: MonitorDetector found 0 outputs (hyprctl/swaymsg/wlr-randr/lp-transition --list-outputs/xrandr all failed)"); return false; }
+            if (monitors.Count == 0) { TransLog("transition SKIPPED: MonitorDetector found 0 outputs (hyprctl/swaymsg/wlr-randr/liascape-transition --list-outputs/xrandr all failed)"); return false; }
 
             // per-transition scratch dir (cleaned up after the run)
             string work = Path.Combine(RuntimeDir(), "transition", DateTime.UtcNow.Ticks.ToString());
@@ -254,7 +254,7 @@ public static class TransitionService
                                           "--method", method, "--ready-file", readyFile, "--scale", _captureScale };
             // diagnostic timing log (decoder warm-up, first-frame latency, decode fps) → easy to share
             try {
-                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-transition.log");
+                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-transition.log");
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
                 args.Add("--log"); args.Add(logPath);
             } catch { }
@@ -301,7 +301,7 @@ public static class TransitionService
                 }
                 // control socket → a keybind (toggle-mute / volume±) during the effect reaches the
                 // overlay's own audio live (mpvpaper isn't audible during full-live).
-                args.Add("--control-sock"); args.Add(Path.Combine(RuntimeDir(), "lp-transition.ctl"));
+                args.Add("--control-sock"); args.Add(Path.Combine(RuntimeDir(), "liascape-transition.ctl"));
                 // mirror the wallpaper's playback options so the LIVE effect matches mpvpaper: per-side
                 // effective speed (the A-sync is speed-aware), the fps cap, and the hwdec mode.
                 if (!fromScene) { args.Add("--from-speed"); args.Add((LibraryService.ReadSpeedOverride(fromPath!) ?? aset.Speed).ToString(inv)); }
@@ -604,7 +604,7 @@ public static class TransitionService
     public static string? ResolveDir()
     {
         if (_dir != null) return _dir.Length == 0 ? null : _dir;
-        var env = Environment.GetEnvironmentVariable("LP_TRANSITIONS_DIR");
+        var env = Environment.GetEnvironmentVariable("LIASCAPE_TRANSITIONS_DIR");
         foreach (var cand in Candidates(env, installed: "transitions", repoTail: "transitions"))
             if (cand != null && File.Exists(Path.Combine(cand, "manifest.json"))) { _dir = cand; return cand; }
         _dir = ""; return null;
@@ -612,12 +612,12 @@ public static class TransitionService
     public static string? ResolveBinary()
     {
         if (_bin != null) return _bin.Length == 0 ? null : _bin;
-        var env = Environment.GetEnvironmentVariable("LP_TRANSITION_BIN");
+        var env = Environment.GetEnvironmentVariable("LIASCAPE_TRANSITION_BIN");
         if (env != null && File.Exists(env)) { _bin = env; return env; }
         // installed on PATH (~/.local/bin) or the repo build
         foreach (var cand in new[] {
-            PathLookup("lp-transition"),
-            RepoPath("src/native/lp-transition/lp-transition") })
+            PathLookup("liascape-transition"),
+            RepoPath("src/native/liascape-transition/liascape-transition") })
             if (cand != null && File.Exists(cand)) { _bin = cand; return cand; }
         _bin = ""; return null;
     }
@@ -677,9 +677,9 @@ public static class TransitionService
         RunFfmpeg($"-nostdin -y -i \"{png}\" -vf {ScaleVf(w, h)} -pix_fmt rgba -f rawvideo \"{outRaw}\"") && FileNonEmpty(outRaw);
 
     // ---- misc ------------------------------------------------------------------------------------
-    // append to the same diagnostic log the renderer writes (lp-transition.log), tagged [backend]
+    // append to the same diagnostic log the renderer writes (liascape-transition.log), tagged [backend]
     private static readonly string _logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-transition.log");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-transition.log");
     public static void TransLog(string msg) { try { File.AppendAllText(_logPath, $"[backend {DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { } }
 
     private static bool FileNonEmpty(string p) { try { return new FileInfo(p).Length > 0; } catch { return false; } }

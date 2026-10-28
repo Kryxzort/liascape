@@ -132,7 +132,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("pid", def(PropType::I64, true, PropValue::I64(0))),
-            // Phase 2 Task 7: WE's `assets/` dir for scenes ("" = auto: `LP_WE_ASSETS_DIR`,
+            // Phase 2 Task 7: WE's `assets/` dir for scenes ("" = auto: `LIASCAPE_WE_ASSETS_DIR`,
             // then every Steam library — `scene::assets`); live (the next scene opened uses
             // it). `scene_assets_resolved` = what is in use ("" = none found: no `scene`
             // capability, a scene source errors with the hint).
@@ -570,7 +570,7 @@ fn read_only(prop: &str) -> ApiError {
     ApiError {
         code: "read_only",
         message: format!("{prop} is read-only"),
-        hint: format!("{prop} is read-only; see `lp-player ctl state` for its current value"),
+        hint: format!("{prop} is read-only; see `liascape-player ctl state` for its current value"),
     }
 }
 

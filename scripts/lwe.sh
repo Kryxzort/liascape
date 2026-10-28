@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LWE (linux-wallpaperengine) `next-v2` core for lp-player's scene worker — fetch, build, check.
+# LWE (linux-wallpaperengine) `next-v2` core for liascape-player's scene worker — fetch, build, check.
 #
 # Source of truth: third_party/lwe/PIN (JSON). The core comes from the owner's fork
 # (Kryxzort/linux-wallpaperengine, branch `livepaper/next-v2`): upstream's pinned `next-v2` commit
@@ -9,7 +9,7 @@
 #
 #   bash scripts/lwe.sh fetch            # clone PIN.repo at PIN.rev (+ submodules, each verified) into the cache
 #   bash scripts/lwe.sh prepare          # copy it, without VCS dirs, to build/lwe-src-<rev>
-#   bash scripts/lwe.sh build            # CMake: the core target only → $LP_LWE_CORE_DIR (default build/lwe-core)
+#   bash scripts/lwe.sh build            # CMake: the core target only → $LIASCAPE_LWE_CORE_DIR (default build/lwe-core)
 #   bash scripts/lwe.sh check            # the built core exports only wp_* and ships its headers
 #   bash scripts/lwe.sh test             # compile + run patches/lwe/tests/host_api_test.c against the built core
 #   bash scripts/lwe.sh verify           # base + patches/lwe/*.patch == PIN.rev's tree
@@ -21,7 +21,7 @@
 # Commands chain: `bash scripts/lwe.sh fetch prepare build check`.
 # Knobs (env): LWE_SRC_CACHE (default ~/.cache/livepaper/src), LWE_REPO (clone this instead of
 # PIN.repo — e.g. a local clone of the fork while developing a patch), LWE_JOBS (default 8),
-# LP_LWE_CORE_DIR (install dir of `build`; default <repo>/build/lwe-core).
+# LIASCAPE_LWE_CORE_DIR (install dir of `build`; default <repo>/build/lwe-core).
 #
 # `--nix` first: run inside this repo's flake devShell (cmake + every dep), minus the stray
 # LD_LIBRARY_PATH some shells carry (it breaks native links — .claude/rules/player-core.md).
@@ -54,7 +54,7 @@ CACHE="${LWE_SRC_CACHE:-$HOME/.cache/livepaper/src}"
 SRC="$CACHE/lwe-$REV"
 PREP="$ROOT/build/lwe-src-$REV"
 BUILD="$ROOT/build/lwe-build-$REV"
-CORE="${LP_LWE_CORE_DIR:-$ROOT/build/lwe-core}"
+CORE="${LIASCAPE_LWE_CORE_DIR:-$ROOT/build/lwe-core}"
 JOBS="${LWE_JOBS:-8}"
 # patch work: LWE_DEV_SRC=<a checkout of the fork branch> builds that tree in place (incremental,
 # build/lwe-build-dev) instead of the prepared copy of PIN.rev
@@ -133,7 +133,7 @@ cmd_fetch() {
 
 cmd_prepare() {
     [ -d "$SRC/.git" ] || die "no source at $SRC — run fetch first"
-    if [ -f "$PREP/.lp-prepared" ] && [ "$(cat "$PREP/.lp-prepared")" = "$REV" ]; then
+    if [ -f "$PREP/.liascape-prepared" ] && [ "$(cat "$PREP/.liascape-prepared")" = "$REV" ]; then
         echo "==> lwe: $PREP already prepared"
         return
     fi
@@ -142,14 +142,14 @@ cmd_prepare() {
     # a copy without .git/ (and without submodules' .git files) — what a release tarball or the
     # Nix fetch looks like; the CMake version then comes from WPBUILD_VERSION_OVERRIDE
     tar -C "$SRC" --exclude-vcs --exclude=./src/External/quickjs/test262 -cf - . | tar -C "$tmp" -xf -
-    echo "$REV" > "$tmp/.lp-prepared"
+    echo "$REV" > "$tmp/.liascape-prepared"
     [ -e "$PREP" ] && mv "$PREP" "$PREP.old-$$"
     mv "$tmp" "$PREP"
     echo "==> lwe: prepared $PREP"
 }
 
 cmd_build() {
-    [ -f "$PREP/.lp-prepared" ] || [ -n "${LWE_DEV_SRC:-}" ] || die "no prepared source at $PREP — run prepare first"
+    [ -f "$PREP/.liascape-prepared" ] || [ -n "${LWE_DEV_SRC:-}" ] || die "no prepared source at $PREP — run prepare first"
     cmd_deps
     local t0=$SECONDS
     if [ ! -f "$BUILD/CMakeCache.txt" ]; then
@@ -168,7 +168,7 @@ cmd_build() {
     cp "$BUILD/generated/version.h" "$CORE/include/linux-wallpaperengine/"
     if [ -n "${LWE_DEV_SRC:-}" ]; then echo "dev:$PREP" > "$CORE/REV"; else echo "$REV" > "$CORE/REV"; fi
     echo "==> lwe: core built in $((SECONDS - t0)) s → $CORE"
-    echo "LP_LWE_CORE_DIR=$CORE"
+    echo "LIASCAPE_LWE_CORE_DIR=$CORE"
 }
 
 cmd_check() {
@@ -195,8 +195,8 @@ cmd_test() {
         $(pkg-config --cflags --libs sdl2 egl) -o "$out"
     local empty rc=0
     empty="$(mktemp -d)"
-    # LP_WE_ASSETS_DIR (WE's assets/, proprietary) enables the audio-mix test; SKIPped without
-    SDL_AUDIODRIVER=dummy "$out" "$PATCH_DIR/tests/fixtures" "$empty" ${LP_WE_ASSETS_DIR:+"$LP_WE_ASSETS_DIR"} || rc=$?
+    # LIASCAPE_WE_ASSETS_DIR (WE's assets/, proprietary) enables the audio-mix test; SKIPped without
+    SDL_AUDIODRIVER=dummy "$out" "$PATCH_DIR/tests/fixtures" "$empty" ${LIASCAPE_WE_ASSETS_DIR:+"$LIASCAPE_WE_ASSETS_DIR"} || rc=$?
     rmdir "$empty"
     return "$rc"
 }

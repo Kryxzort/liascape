@@ -43,7 +43,7 @@ pub const ABS_GATE_LUFS: f64 = -70.0;
 pub const REL_GATE_LU: f64 = -10.0;
 /// The learning window in seconds of audible play (tests shorten it); default
 /// [`DEFAULT_WINDOW_S`].
-pub const WINDOW_ENV: &str = "LP_PLAYER_LOUDNESS_WINDOW_S";
+pub const WINDOW_ENV: &str = "LIASCAPE_PLAYER_LOUDNESS_WINDOW_S";
 pub const DEFAULT_WINDOW_S: f64 = 60.0;
 
 /// The window for the value of [`WINDOW_ENV`]: a positive number of seconds, else 60.
@@ -56,7 +56,7 @@ pub fn window_s(v: Option<&str>) -> f64 {
 /// The cap: total audible seconds measured over every play of a scene, after which nothing
 /// more is measured (owner: "probably add a max cap for people who will never change
 /// wallpaper") — 30 min; tests shorten it. Never below the window.
-pub const CAP_ENV: &str = "LP_PLAYER_LOUDNESS_CAP_S";
+pub const CAP_ENV: &str = "LIASCAPE_PLAYER_LOUDNESS_CAP_S";
 pub const DEFAULT_CAP_S: f64 = 1800.0;
 
 /// The cap for the value of [`CAP_ENV`]: a positive number of seconds, else 1800.

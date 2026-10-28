@@ -11,48 +11,48 @@ using System.Threading;
 
 namespace livepaper.Player;
 
-// An lp-player API error object ({code, message, hint}) — every one carries a hint saying what to do next.
-public sealed class LpPlayerException(string code, string message, string hint) : Exception(message)
+// An liascape-player API error object ({code, message, hint}) — every one carries a hint saying what to do next.
+public sealed class LiascapePlayerException(string code, string message, string hint) : Exception(message)
 {
     public string Code { get; } = code;
     public string Hint { get; } = hint;
     public override string ToString() => $"{Code}: {Message} (hint: {Hint})";
 }
 
-// The lp-player Command API client: JSON Lines over the unix socket (.claude/rules/player-core.md
+// The liascape-player Command API client: JSON Lines over the unix socket (.claude/rules/player-core.md
 // § Command API). One persistent request connection (serialized; reconnects after any error/timeout)
 // + one subscribed event connection read on a background thread (reconnects with backoff when the
 // player restarts).
-public sealed class LpPlayerClient
+public sealed class LiascapePlayerClient
 {
-    private static LpPlayerClient? _shared;
+    private static LiascapePlayerClient? _shared;
     private static readonly object _sharedLock = new();
 
     // The process-wide client on the default socket. The self-test swaps in a private one.
-    public static LpPlayerClient Shared
+    public static LiascapePlayerClient Shared
     {
-        get { lock (_sharedLock) return _shared ??= new LpPlayerClient(DefaultSocketPath()); }
+        get { lock (_sharedLock) return _shared ??= new LiascapePlayerClient(DefaultSocketPath()); }
         set { lock (_sharedLock) _shared = value; }
     }
     public static void ResetShared() { lock (_sharedLock) { _shared?.StopEvents(); _shared = null; } }
 
     [DllImport("libc")] private static extern uint getuid();
 
-    // Mirrors src/player/src/paths.rs: $LP_PLAYER_SOCKET, else $XDG_RUNTIME_DIR/livepaper/lp-player.sock
-    // (else /run/user/<uid>/livepaper/lp-player.sock).
+    // Mirrors src/player/src/paths.rs: $LIASCAPE_PLAYER_SOCKET, else $XDG_RUNTIME_DIR/livepaper/liascape-player.sock
+    // (else /run/user/<uid>/livepaper/liascape-player.sock).
     public static string DefaultSocketPath()
     {
-        var env = Environment.GetEnvironmentVariable("LP_PLAYER_SOCKET");
+        var env = Environment.GetEnvironmentVariable("LIASCAPE_PLAYER_SOCKET");
         if (!string.IsNullOrEmpty(env)) return env;
         var rt = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         if (string.IsNullOrEmpty(rt)) { try { rt = $"/run/user/{getuid()}"; } catch { rt = Path.GetTempPath(); } }
-        return Path.Combine(rt, "livepaper", "lp-player.sock");
+        return Path.Combine(rt, "livepaper", "liascape-player.sock");
     }
 
-    public LpPlayerClient(string socketPath) { SocketPath = socketPath; }
+    public LiascapePlayerClient(string socketPath) { SocketPath = socketPath; }
 
     public string SocketPath { get; }
-    // EnsureRunning may `setsid lp-player serve` when nothing answers. Off for the self-test.
+    // EnsureRunning may `setsid liascape-player serve` when nothing answers. Off for the self-test.
     public bool AutoSpawn { get; set; } = true;
     // The COMPOSITOR's pid from `hello` (refreshed on every new connection) — auto-mute ownership (R69).
     // Under a supervisor this is the supervisor's CHILD, not the process EnsureRunning/the self-test
@@ -69,14 +69,14 @@ public sealed class LpPlayerClient
     // Last start/request failure, for /player-engine (null = fine).
     public string? LastError { get; private set; }
     // `hello.capabilities` of the player this client last greeted (empty before the first hello) —
-    // `scene` when its lp-scene-worker AND WE's assets dir resolve (player-core.md § Scene worker).
+    // `scene` when its liascape-scene-worker AND WE's assets dir resolve (player-core.md § Scene worker).
     public IReadOnlySet<string> Capabilities { get; private set; } = new HashSet<string>();
     // the capabilities are from the CURRENT request connection's `hello` (a dropped connection — the player
     // quit, crashed, was restarted with another environment — may lead to another process: greet it first)
     private volatile bool _capsKnown, _capsEver;
 
-    // Phase 2 Task 11: can lp-player play a scene here? The running player's own word (its `scene`
-    // capability) when one answers; else `lp-player scene-check` (the same rule, run with this backend's
+    // Phase 2 Task 11: can liascape-player play a scene here? The running player's own word (its `scene`
+    // capability) when one answers; else `liascape-player scene-check` (the same rule, run with this backend's
     // environment), cached 30 s. Hot path (every next/prev/random's skip check, sometimes under
     // PlayerHelper's lock): at most one quick `hello` per connection; a stalled player → its last word.
     public bool ScenesAvailable => FromPlayer() ?? SceneCheck().Available;
@@ -86,7 +86,7 @@ public sealed class LpPlayerClient
         if (!SocketExists) return null;
         // twice: the first request after the player went away fails on the dead connection (EPIPE), the
         // second greets whatever answers on the socket now
-        for (int i = 0; i < 2 && !_capsKnown && !IsStalled; i++) { try { Call("hello", null, QuickMs); } catch (LpPlayerException) { } }
+        for (int i = 0; i < 2 && !_capsKnown && !IsStalled; i++) { try { Call("hello", null, QuickMs); } catch (LiascapePlayerException) { } }
         return _capsKnown || (IsStalled && _capsEver) ? Capabilities.Contains("scene") : null;
     }
 
@@ -98,18 +98,18 @@ public sealed class LpPlayerClient
         string? assets = null;
         if (withAssets)
             try { assets = Call("get", new Dictionary<string, object?> { ["path"] = "player.scene_assets_resolved" }, QuickMs).GetProperty("value").GetString() is { Length: > 0 } a ? a : null; }
-            catch (LpPlayerException) { }
+            catch (LiascapePlayerException) { }
         if (can) return (true, null, assets);
         var chk = SceneCheck(); // the same rule in this backend's environment — usually the same reason
-        return (false, "the running lp-player can't play scenes" + (chk.Reason != null ? $": {chk.Reason}"
-            : " (its lp-scene-worker or WE's assets dir didn't resolve in its environment — `lp-player ctl get '{\"path\":\"player.scene_assets_resolved\"}'`)"),
+        return (false, "the running liascape-player can't play scenes" + (chk.Reason != null ? $": {chk.Reason}"
+            : " (its liascape-scene-worker or WE's assets dir didn't resolve in its environment — `liascape-player ctl get '{\"path\":\"player.scene_assets_resolved\"}'`)"),
             assets ?? chk.AssetsDir);
     }
 
     private (long At, bool Available, string? Reason, string? AssetsDir)? _sceneCheck;
     private readonly object _sceneCheckLock = new();
 
-    // `lp-player scene-check` → `{worker, features, assets_dir, ok, reason}`, exit 0/1; cached 30 s.
+    // `liascape-player scene-check` → `{worker, features, assets_dir, ok, reason}`, exit 0/1; cached 30 s.
     private (bool Available, string? Reason, string? AssetsDir) SceneCheck()
     {
         lock (_sceneCheckLock)
@@ -127,16 +127,16 @@ public sealed class LpPlayerClient
                     using var p = Process.Start(psi)!;
                     var outTask = p.StandardOutput.ReadToEndAsync();
                     _ = p.StandardError.ReadToEndAsync();
-                    if (!p.WaitForExit(5000)) { try { p.Kill(true); } catch { } r = (false, "`lp-player scene-check` did not answer within 5 s", null); }
+                    if (!p.WaitForExit(5000)) { try { p.Kill(true); } catch { } r = (false, "`liascape-player scene-check` did not answer within 5 s", null); }
                     else
                     {
                         using var doc = JsonDocument.Parse(outTask.Result);
                         var root = doc.RootElement;
                         bool ok = root.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True;
-                        r = (ok, ok ? null : Prop(root, "reason") ?? $"`lp-player scene-check` exited {p.ExitCode}", Prop(root, "assets_dir"));
+                        r = (ok, ok ? null : Prop(root, "reason") ?? $"`liascape-player scene-check` exited {p.ExitCode}", Prop(root, "assets_dir"));
                     }
                 }
-                catch (Exception e) { r = (false, $"`lp-player scene-check` failed: {e.Message}", null); }
+                catch (Exception e) { r = (false, $"`liascape-player scene-check` failed: {e.Message}", null); }
             }
             _sceneCheck = (Environment.TickCount64, r.Item1, r.Item2, r.Item3);
             return r;
@@ -144,7 +144,7 @@ public sealed class LpPlayerClient
     }
 
     // `/health/features` (FeatureHealth): the running player's `hello.health` ({effects, vram, hwdec_interop, scenes},
-    // each {ok, reason, …}) — one quick `hello`, never spawns —; no player answering → `lp-player health` (effects +
+    // each {ok, reason, …}) — one quick `hello`, never spawns —; no player answering → `liascape-player health` (effects +
     // vram in this backend's environment, what a player it starts would see), cached 30 s. null = no binary / no answer.
     public (JsonElement? Health, bool FromRunning) Health()
     {
@@ -155,7 +155,7 @@ public sealed class LpPlayerClient
                 if (h.ValueKind == JsonValueKind.Object && h.TryGetProperty("health", out var he) && he.ValueKind == JsonValueKind.Object)
                     return (he.Clone(), true);
             }
-            catch (LpPlayerException) { }
+            catch (LiascapePlayerException) { }
         return (HealthCheck(), false);
     }
 
@@ -181,7 +181,7 @@ public sealed class LpPlayerClient
                         r = doc.RootElement.Clone();
                     }
                 }
-                catch (Exception e) { Log($"`lp-player health` failed: {e.Message}"); }
+                catch (Exception e) { Log($"`liascape-player health` failed: {e.Message}"); }
             _healthCheck = (Environment.TickCount64, r);
             return r;
         }
@@ -190,7 +190,7 @@ public sealed class LpPlayerClient
     // ---- logging (rate-limited: an identical line at most once per 10 s) ------------------------
     private static readonly Dictionary<string, long> _logSeen = new();
     private static readonly string _logPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-player-adapter.log");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-player-adapter.log");
     public static void Log(string msg)
     {
         long now = Environment.TickCount64;
@@ -200,7 +200,7 @@ public sealed class LpPlayerClient
             _logSeen[msg] = now;
             if (_logSeen.Count > 512) _logSeen.Clear();
         }
-        var line = $"[lp-player {DateTime.Now:HH:mm:ss.fff}] {msg}";
+        var line = $"[liascape-player {DateTime.Now:HH:mm:ss.fff}] {msg}";
         try { Console.Error.WriteLine(line); } catch { }
         try { Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!); File.AppendAllText(_logPath, line + "\n"); } catch { }
     }
@@ -261,7 +261,7 @@ public sealed class LpPlayerClient
     }
     public event Action? Recovered;
 
-    // One request → its reply's `result`. Throws LpPlayerException: the player's error object, or
+    // One request → its reply's `result`. Throws LiascapePlayerException: the player's error object, or
     // `io` (no player / connection lost) / `timeout` (no reply within timeoutMs, the request connection
     // busy for longer than that, or the stall breaker open), each with a hint.
     public JsonElement Call(string cmd, object? args, int timeoutMs = 2000)
@@ -269,21 +269,21 @@ public sealed class LpPlayerClient
         // waiting for the connection counts against the same timeout (a query must not sit behind a
         // switch that waits out its own 2 s on a stalled player)
         if (!Monitor.TryEnter(_cmdLock, Math.Max(1, timeoutMs)))
-            throw new LpPlayerException("timeout", $"`{cmd}`: the request connection stayed busy for {timeoutMs} ms",
-                "another request is waiting on a slow player — `lp-player ctl probe '{\"name\":\"loop\"}'`");
+            throw new LiascapePlayerException("timeout", $"`{cmd}`: the request connection stayed busy for {timeoutMs} ms",
+                "another request is waiting on a slow player — `liascape-player ctl probe '{\"name\":\"loop\"}'`");
         try
         {
             if (IsStalled)
-                throw new LpPlayerException("timeout", $"`{cmd}`: lp-player is not responding (a request timed out < {StallMs / 1000} s ago)",
-                    "is it stopped or stalled? `lp-player ctl probe '{\"name\":\"loop\"}'` — requests resume on their own once it answers");
+                throw new LiascapePlayerException("timeout", $"`{cmd}`: liascape-player is not responding (a request timed out < {StallMs / 1000} s ago)",
+                    "is it stopped or stalled? `liascape-player ctl probe '{\"name\":\"loop\"}'` — requests resume on their own once it answers");
             if (!EnsureConnected())
-                throw new LpPlayerException("io", $"no lp-player answering on {SocketPath}",
-                    "select Player engine = lp-player (livepaper starts it) or run `lp-player serve`");
+                throw new LiascapePlayerException("io", $"no liascape-player answering on {SocketPath}",
+                    "select Player engine = liascape-player (livepaper starts it) or run `liascape-player serve`");
             if (_helloPending && cmd != "hello")
             {
                 _helloPending = false;
-                try { Call("hello", null, timeoutMs); } catch (LpPlayerException) { }
-                if (!EnsureConnected()) throw new LpPlayerException("io", "lp-player closed the connection", "check `lp-player ctl logs '{\"min_level\":\"warn\"}'`");
+                try { Call("hello", null, timeoutMs); } catch (LiascapePlayerException) { }
+                if (!EnsureConnected()) throw new LiascapePlayerException("io", "liascape-player closed the connection", "check `liascape-player ctl logs '{\"min_level\":\"warn\"}'`");
             }
             long id = Interlocked.Increment(ref _nextId);
             var req = new Dictionary<string, object?> { ["id"] = id, ["cmd"] = cmd };
@@ -302,7 +302,7 @@ public sealed class LpPlayerClient
                     Disconnect();
                     if (!EnsureConnected()) throw;
                     _helloPending = false;
-                    try { Call("hello", null, timeoutMs); } catch (LpPlayerException) { }
+                    try { Call("hello", null, timeoutMs); } catch (LiascapePlayerException) { }
                     if (!EnsureConnected()) throw;
                     _sock!.SendTimeout = Math.Max(1, timeoutMs);
                     _sock.Send(bytes);
@@ -313,7 +313,7 @@ public sealed class LpPlayerClient
                     int left = (int)(deadline - Environment.TickCount64);
                     if (left <= 0) throw new TimeoutException();
                     _sock.ReceiveTimeout = left;
-                    var line = _rd!.ReadLine() ?? throw new IOException("lp-player closed the connection");
+                    var line = _rd!.ReadLine() ?? throw new IOException("liascape-player closed the connection");
                     using var doc = JsonDocument.Parse(line);
                     var root = doc.RootElement;
                     // a stale reply (an earlier timed-out request) or an event → not ours
@@ -349,7 +349,7 @@ public sealed class LpPlayerClient
                                     {
                                         string info = result.TryGetProperty("restart", out var ri) && ri.ValueKind == JsonValueKind.Object
                                             ? ri.GetRawText() : "null";
-                                        Log($"lp-player supervised restart: compositor {prevPid} -> {p} (supervisor {sup}) restart={info}");
+                                        Log($"liascape-player supervised restart: compositor {prevPid} -> {p} (supervisor {sup}) restart={info}");
                                     }
                                     try { Restarted?.Invoke(); } catch (Exception ex) { Log($"restart handler threw: {ex.Message}"); }
                                 }
@@ -367,10 +367,10 @@ public sealed class LpPlayerClient
                     }
                     MarkAnswered(); // an error reply is still an answer
                     var e = root.GetProperty("error");
-                    throw new LpPlayerException(Prop(e, "code") ?? "error", Prop(e, "message") ?? "", Prop(e, "hint") ?? "");
+                    throw new LiascapePlayerException(Prop(e, "code") ?? "error", Prop(e, "message") ?? "", Prop(e, "hint") ?? "");
                 }
             }
-            catch (LpPlayerException) { throw; }
+            catch (LiascapePlayerException) { throw; }
             catch (Exception ex)
             {
                 Disconnect();
@@ -382,10 +382,10 @@ public sealed class LpPlayerClient
                     Log($"no reply to `{cmd}` within {timeoutMs} ms (waited {Environment.TickCount64 - sentAt} ms; "
                         + $"gen2 GCs meanwhile {GC.CollectionCount(2) - gen2At}, thread-pool queue {ThreadPool.PendingWorkItemCount}, "
                         + $"threads {ThreadPool.ThreadCount}) — failing requests fast for {StallMs / 1000} s");
-                    throw new LpPlayerException("timeout", $"no reply to `{cmd}` within {timeoutMs} ms",
-                        "pass a longer timeout; is the loop stalled? `lp-player ctl probe '{\"name\":\"loop\"}'`");
+                    throw new LiascapePlayerException("timeout", $"no reply to `{cmd}` within {timeoutMs} ms",
+                        "pass a longer timeout; is the loop stalled? `liascape-player ctl probe '{\"name\":\"loop\"}'`");
                 }
-                throw new LpPlayerException("io", $"`{cmd}`: {ex.Message}", "the player went away — `lp-player ctl hello` to check, livepaper restarts it on the next switch");
+                throw new LiascapePlayerException("io", $"`{cmd}`: {ex.Message}", "the player went away — `liascape-player ctl hello` to check, livepaper restarts it on the next switch");
             }
         }
         finally { Monitor.Exit(_cmdLock); }
@@ -395,7 +395,7 @@ public sealed class LpPlayerClient
     public JsonElement? TryCall(string cmd, object? args, int timeoutMs = 2000)
     {
         try { return Call(cmd, args, timeoutMs); }
-        catch (LpPlayerException e) { Log($"`{cmd}` failed — {e}"); return null; }
+        catch (LiascapePlayerException e) { Log($"`{cmd}` failed — {e}"); return null; }
     }
 
     public bool SocketExists => File.Exists(SocketPath);
@@ -404,7 +404,7 @@ public sealed class LpPlayerClient
     public bool Reachable()
     {
         if (!File.Exists(SocketPath)) return false;
-        try { Call("hello", null, 1000); return true; } catch (LpPlayerException) { return false; }
+        try { Call("hello", null, 1000); return true; } catch (LiascapePlayerException) { return false; }
     }
 
     [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int sig);
@@ -413,7 +413,7 @@ public sealed class LpPlayerClient
     // attacker/third-party-controlled text and proves nothing) + its `/proc/<pid>/stat` start-time
     // field (22nd, 0-based index 19 after the `)` that closes `comm`). Captured once, at the moment a
     // `hello` tells us a pid (above); re-read and compared before every signal in QuitOrKill below, so a
-    // recycled pid (the lp-player process died and the kernel handed its number to something unrelated)
+    // recycled pid (the liascape-player process died and the kernel handed its number to something unrelated)
     // is never signalled as if it were still ours.
     private readonly record struct ProcIdentity(string? Exe, string Start)
     {
@@ -438,20 +438,20 @@ public sealed class LpPlayerClient
     private ProcIdentity? _playerIdentity;     // the compositor's identity, captured at its `hello`
     private ProcIdentity? _supervisorIdentity; // the supervisor's, captured when its pid first appears
 
-    // Is `pid` CURRENTLY some lp-player process? (no prior identity to compare against — a liveness +
+    // Is `pid` CURRENTLY some liascape-player process? (no prior identity to compare against — a liveness +
     // name check via `/proc/<pid>/exe`, never a cmdline substring.)
-    // A rebuilt binary leaves the running one as "lp-player (deleted)" — still the player.
+    // A rebuilt binary leaves the running one as "liascape-player (deleted)" — still the player.
     private static bool IsPlayerProcess(int pid)
     {
-        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget)?.Replace(" (deleted)", "") is "lp-player" or ".lp-player-wrapped"; }
+        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget)?.Replace(" (deleted)", "") is "liascape-player" or ".liascape-player-wrapped"; }
         catch { return false; }
     }
 
-    // Make sure the player is GONE — supervisor AND compositor (engine switch away from lp-player):
+    // Make sure the player is GONE — supervisor AND compositor (engine switch away from liascape-player):
     // `quit` over the socket first (the compositor exits 0, the supervisor classifies that as a clean
     // exit and exits too, no restart). If that didn't work, escalate against the SUPERVISOR (never the
     // compositor alone — a supervisor that's still alive treats a dead/signalled child as a crash and
-    // RESTARTS it with `--restore`, which is exactly what an engine switch away from lp-player must not
+    // RESTARTS it with `--restore`, which is exactly what an engine switch away from liascape-player must not
     // leave behind): SIGCONT+SIGTERM it (it forwards the TERM to its child and exits cleanly), then
     // SIGKILL it (its child dies via PR_SET_PDEATHSIG) — and if the compositor pid is somehow still
     // alive a short moment later (PDEATHSIG race / unsupervised), SIGKILL it directly too. Unsupervised
@@ -466,7 +466,7 @@ public sealed class LpPlayerClient
         var compositorId = _playerIdentity;
         var targetId = supervisor != null ? _supervisorIdentity : compositorId;
         int? target = supervisor ?? compositor; // the supervisor when one exists, else the compositor itself
-        if (SocketExists) { try { Call("quit", null, QuickMs); } catch (LpPlayerException) { } }
+        if (SocketExists) { try { Call("quit", null, QuickMs); } catch (LiascapePlayerException) { } }
         StopEvents();
         if (target is not int t) return;
         // item 5: re-check identity, not just liveness-by-name, before trusting `t` still means what it
@@ -484,10 +484,10 @@ public sealed class LpPlayerClient
             while (sw.ElapsedMilliseconds < 500 && (compositorId is { } cid2 ? cid2.StillIs(c) : IsPlayerProcess(c))) Thread.Sleep(25);
         }
         if (Gone(quitWaitMs ?? waitMs)) { FinishCompositor(); return; }
-        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit within {quitWaitMs ?? waitMs} ms — SIGTERM");
+        Log($"liascape-player ({(supervisor != null ? "supervisor " : "")}pid {t}) did not quit within {quitWaitMs ?? waitMs} ms — SIGTERM");
         if (StillTarget()) { kill(t, 18); kill(t, 15); } // SIGCONT, SIGTERM
         if (Gone(waitMs)) { FinishCompositor(); return; }
-        Log($"lp-player ({(supervisor != null ? "supervisor " : "")}pid {t}) ignored SIGTERM — SIGKILL");
+        Log($"liascape-player ({(supervisor != null ? "supervisor " : "")}pid {t}) ignored SIGTERM — SIGKILL");
         if (StillTarget()) kill(t, 9);
         Gone(waitMs);
         FinishCompositor();
@@ -510,8 +510,8 @@ public sealed class LpPlayerClient
     // build still running at 19:00). Stale = the running compositor isn't the build this backend starts:
     // a different file by size + mtime, read through open handles — `/proc/<pid>/exe` opens the running
     // binary even after a rebuild replaced it, and path strings can't tell (one checkout is reachable as
-    // /home/… and /mnt/…/@home/…). Nix: by store path — every store file has mtime 1, and LP_PLAYER_BIN
-    // is the wrapProgram wrapper while the process runs `.lp-player-wrapped` (two files, one build).
+    // /home/… and /mnt/…/@home/…). Nix: by store path — every store file has mtime 1, and LIASCAPE_PLAYER_BIN
+    // is the wrapProgram wrapper while the process runs `.liascape-player-wrapped` (two files, one build).
     // null = current, or unknown.
     public string? StaleReason()
     {
@@ -583,14 +583,14 @@ public sealed class LpPlayerClient
             if (!AutoSpawn) return false;
             var bin = PlayerEngine.ResolveBinary(fresh: true);
             if (bin == null || (SupervisorPid ?? PlayerPid) is not int src) return false;
-            if ((ServeArgs(src) ?? _serveArgs?.ToList()) is not { } args) { Log($"lp-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
+            if ((ServeArgs(src) ?? _serveArgs?.ToList()) is not { } args) { Log($"liascape-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
             _serveArgs = [.. args];
             var target = $"{bin} {BuildOf(bin)}";
-            if (target == _upgradedTo) { Log($"lp-player still reads as out of date after upgrading it onto {bin} ({why}) — not restarting it again for this build"); return false; }
+            if (target == _upgradedTo) { Log($"liascape-player still reads as out of date after upgrading it onto {bin} ({why}) — not restarting it again for this build"); return false; }
             _upgradedTo = target;
             int? old = PlayerPid;
             int quitWait = QuitWaitMs(LastSnapshotWriteMs());
-            Log($"lp-player is out of date ({why}) — restarting it onto {bin} with --restore (its clean quit may take {quitWait / 1000} s)");
+            Log($"liascape-player is out of date ({why}) — restarting it onto {bin} with --restore (its clean quit may take {quitWait / 1000} s)");
             var evThread = _evThread;
             QuitOrKill(waitMs: SupervisorStopWaitMs, quitWaitMs: quitWait); // also stops the event thread
             args.Add("--restore");
@@ -609,9 +609,9 @@ public sealed class LpPlayerClient
             evThread?.Join(1000);
             if (ok) { StartEvents(); WaitSubscribed(1000); }
             string failure = p is { HasExited: true } ? $"exited {p.ExitCode}{ExitHint(p.ExitCode)}" : $"didn't answer within {StartWaitMs / 1000} s";
-            Log(ok ? $"lp-player upgraded in place: pid {old} → {PlayerPid} ({sw.ElapsedMilliseconds} ms to answer)"
-                   : $"lp-player upgrade: the new player {failure} (see ~/.cache/livepaper/lp-player-serve.log) — the next switch starts `{string.Join(" ", _serveArgs)} --restore`");
-            if (!ok) Fail($"lp-player did not come back after an in-place upgrade: it {failure}");
+            Log(ok ? $"liascape-player upgraded in place: pid {old} → {PlayerPid} ({sw.ElapsedMilliseconds} ms to answer)"
+                   : $"liascape-player upgrade: the new player {failure} (see ~/.cache/livepaper/liascape-player-serve.log) — the next switch starts `{string.Join(" ", _serveArgs)} --restore`");
+            if (!ok) Fail($"liascape-player did not come back after an in-place upgrade: it {failure}");
             return ok;
         }
     }
@@ -633,7 +633,7 @@ public sealed class LpPlayerClient
             var r = Call("probe", new Dictionary<string, object?> { ["name"] = "snapshot" }, QuickMs);
             return r.TryGetProperty("last_write_ms", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
         }
-        catch (LpPlayerException) { return null; }
+        catch (LiascapePlayerException) { return null; }
     }
 
     // The `serve` arguments of the player this client last talked to (its supervisor's, minus the restart
@@ -642,7 +642,7 @@ public sealed class LpPlayerClient
     private List<string>? _serveArgs;
     private int? _serveArgsOf; // the pid they were read from
 
-    // The `serve` arguments `pid` (a verified lp-player process) was started with, minus the restart
+    // The `serve` arguments `pid` (a verified liascape-player process) was started with, minus the restart
     // plumbing the supervisor adds to its child — what an upgrade starts the new player with.
     private static List<string>? ServeArgs(int pid)
     {
@@ -667,15 +667,15 @@ public sealed class LpPlayerClient
     // a dead pipe would turn its next stderr write into an error).
     private static Process? Spawn(string bin, List<string> args)
     {
-        var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "lp-player-serve.log");
+        var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "livepaper", "liascape-player-serve.log");
         Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
         var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
         psi.ArgumentList.Add("sh");
         psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >\"$LP_SERVE_LOG\" 2>&1");
+        psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >\"$LIASCAPE_SERVE_LOG\" 2>&1");
         psi.ArgumentList.Add(bin);
         foreach (var a in args) psi.ArgumentList.Add(a);
-        psi.Environment["LP_SERVE_LOG"] = outLog;
+        psi.Environment["LIASCAPE_SERVE_LOG"] = outLog;
         var p = Process.Start(psi);
         Log($"started `{bin} {string.Join(" ", args)}` (pid {p?.Id})");
         return p;
@@ -684,7 +684,7 @@ public sealed class LpPlayerClient
     // ---- lifecycle ---------------------------------------------------------------------------------
     private readonly object _spawnLock = new();
 
-    // Connect, or `setsid lp-player serve` (no --headless: real outputs, inheriting the session env —
+    // Connect, or `setsid liascape-player serve` (no --headless: real outputs, inheriting the session env —
     // WAYLAND_DISPLAY etc.) and wait ≤ 3 s for its socket. "Already running" counts as success: a
     // second `serve` exits 1 on the instance lock and we connect to the winner.
     public bool EnsureRunning()
@@ -704,13 +704,13 @@ public sealed class LpPlayerClient
             if (SupervisorPid is int sup0 && (_supervisorIdentity?.StillIs(sup0) ?? IsPlayerProcess(sup0)))
             {
                 if (WaitForSocket(2000)) { LastError = null; return true; }
-                Log($"lp-player supervisor (pid {sup0}) is alive but no child answered within 2 s — falling back to a fresh spawn");
+                Log($"liascape-player supervisor (pid {sup0}) is alive but no child answered within 2 s — falling back to a fresh spawn");
             }
             // a start that just failed isn't retried for 10 s — a broken player must not be respawned
             // on every switch attempt (the rotation's fallback retries once a second)
             if (_lastSpawnFail != 0 && Environment.TickCount64 - _lastSpawnFail < 10_000) return false;
             // alive but not answering (stopped/stalled): a second `serve` would only lose the instance lock
-            if (IsStalled && SocketExists) { LastError = "lp-player is not responding"; return false; }
+            if (IsStalled && SocketExists) { LastError = "liascape-player is not responding"; return false; }
             var bin = PlayerEngine.ResolveBinary();
             if (bin == null) { Fail(PlayerEngine.UnavailableReason); return false; }
             Process? p;
@@ -730,14 +730,14 @@ public sealed class LpPlayerClient
             }
             if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
             string why = p is { HasExited: true }
-                ? $"`lp-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
-                : "`lp-player serve` did not open its socket within 3 s";
-            Fail($"{why} — see ~/.cache/livepaper/lp-player-serve.log, or run `{bin} serve` in a terminal");
+                ? $"`liascape-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
+                : "`liascape-player serve` did not open its socket within 3 s";
+            Fail($"{why} — see ~/.cache/livepaper/liascape-player-serve.log, or run `{bin} serve` in a terminal");
             return false;
         }
     }
 
-    // item 3: lp-player's own exit codes (.claude/rules/player-core.md § Supervisor / § Runtime) — a
+    // item 3: liascape-player's own exit codes (.claude/rules/player-core.md § Supervisor / § Runtime) — a
     // giving-up/unavailable state must be SURFACED (this string ends up in LastError → `/player-engine`
     // `reason` + this log line), never crash the backend.
     private static string ExitHint(int code) => code switch
@@ -754,15 +754,15 @@ public sealed class LpPlayerClient
     private void Fail(string why) { LastError = why; _lastSpawnFail = Environment.TickCount64; Log(why); }
 
     // ---- events --------------------------------------------------------------------------------
-    // M11 (final review): only the kinds the adapter consumes (LpPlayerMedia.OnEvent) — a switch's
+    // M11 (final review): only the kinds the adapter consumes (LiascapePlayerMedia.OnEvent) — a switch's
     // terminal outcomes, and every event that changes which sources show which file (the path →
     // source-id cache: a transition scheduled/started/handed off/done/cancelled/failed/adopting an
     // output, a stop, an output's sources retired) — a handful per switch. `source.` as a whole
     // would stream every debug-level `source.position` (~10 Hz per source) to be discarded;
     // restarts are detected by `hello.pid`, not events. Phase 2: `source.broken` — a scene whose worker
-    // crashed past its restart budget (LpPlayerMedia.OnEvent → PlayerHelper.OnSceneBroken); Task 8:
+    // crashed past its restart budget (LiascapePlayerMedia.OnEvent → PlayerHelper.OnSceneBroken); Task 8:
     // `scene.vram_exceeded` — the VRAM guard stopped a scene (→ PlayerHelper.OnSceneVramStopped);
-    // `scene.loudness` — a scene's loudness learned on first play (→ LpPlayerMedia.OnSceneLoudness: stored in
+    // `scene.loudness` — a scene's loudness learned on first play (→ LiascapePlayerMedia.OnSceneLoudness: stored in
     // the index, normalization applied live). Once per scene play at most.
     public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness"];
     public event Action<string, JsonElement>? Event;
@@ -785,7 +785,7 @@ public sealed class LpPlayerClient
         {
             if (_evThread is { IsAlive: true }) return;
             _evStop = false;
-            _evThread = new Thread(EventLoop) { IsBackground = true, Name = "lp-player-events" };
+            _evThread = new Thread(EventLoop) { IsBackground = true, Name = "liascape-player-events" };
             _evThread.Start();
         }
     }
@@ -831,7 +831,7 @@ public sealed class LpPlayerClient
                             try { Subscribed?.Invoke(); } catch (Exception e) { Log($"subscribed handler threw: {e.Message}"); }
                             _subscribed.Set();
                             // pid / Generation after a restart — off this thread (it may wait behind a long request)
-                            _ = System.Threading.Tasks.Task.Run(() => { try { Call("hello", null, 1000); } catch (LpPlayerException) { } });
+                            _ = System.Threading.Tasks.Task.Run(() => { try { Call("hello", null, 1000); } catch (LiascapePlayerException) { } });
                         }
                     }
                 }

@@ -5,7 +5,7 @@
 //! Gain/progress assertions sample at exact virtual instants (`tick_to`) and are exact;
 //! playback-coupled ones (align End, frame-index corners) allow ± 1 frame (33 ms) / ± 1
 //! marker step. Skips (prints `SKIP: …`) only without an EGL device or a catalogue — fails
-//! instead under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
+//! instead under `LIASCAPE_REQUIRE_GPU=1` (`common::skip_gpu`).
 
 mod common;
 
@@ -15,9 +15,9 @@ use std::time::Duration;
 
 use common::harness::{FRAME, Harness, from_ms, ms, start_of};
 use common::{ClipSpec, ensure_clip};
-use lp_player::recipes::TransitionEventKind;
-use lp_player::sources::SourceEvent;
-use lp_player::units::SILENT_DB;
+use liascape_player::recipes::TransitionEventKind;
+use liascape_player::sources::SourceEvent;
+use liascape_player::units::SILENT_DB;
 use serde_json::json;
 
 const RED_10S: ClipSpec = ClipSpec::Solid {
@@ -466,7 +466,7 @@ fn bad_target_keeps_a() {
     std::fs::write(&empty, b"").unwrap();
 
     for (path, align) in [
-        ("/nonexistent/lp-player-tr-missing.mkv".to_string(), "now"),
+        ("/nonexistent/liascape-player-tr-missing.mkv".to_string(), "now"),
         (s(&empty).to_string(), "end"),
     ] {
         let corr = h.start(json!({
@@ -1158,11 +1158,11 @@ fn b_error_mid_effect_snaps_back() {
         h.tick_to(t0 + MS(200));
         let fx = h.content("VIRTUAL-1");
         let from = h.str(&format!("{fx}.from"));
-        let missing = "/nonexistent/lp-player-tr-mid-effect.mkv";
+        let missing = "/nonexistent/liascape-player-tr-mid-effect.mkv";
         h.graph
             .set(
-                &lp_player::anim::PropPath(format!("{b}.path")),
-                lp_player::graph::PropValue::Str(missing.into()),
+                &liascape_player::anim::PropPath(format!("{b}.path")),
+                liascape_player::graph::PropValue::Str(missing.into()),
             )
             .unwrap();
         let failed = h.wait_event(&t, "transition.failed", MS(3000));
@@ -1279,7 +1279,7 @@ fn zero_duration_gains_still_ramp_30ms() {
             h.tick_to(next);
             for (id, v) in &mut series {
                 if h.exists(id) {
-                    v.push((ms(h.now()), lp_player::units::db_to_lin(h.gain(id))));
+                    v.push((ms(h.now()), liascape_player::units::db_to_lin(h.gain(id))));
                 }
             }
         }
@@ -1305,8 +1305,8 @@ fn zero_duration_gains_still_ramp_30ms() {
 /// not a failure — the transition completes.
 #[test]
 fn rejected_prop_on_b_keeps_transition() {
-    use lp_player::anim::PropPath;
-    use lp_player::graph::PropValue;
+    use liascape_player::anim::PropPath;
+    use liascape_player::graph::PropValue;
     let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
         return;
     };
@@ -1356,10 +1356,10 @@ fn rejected_prop_on_b_keeps_transition() {
 // the videos are frame-index clips without audio: no B onset waits, so every gain is exact.
 
 use glow::HasContext;
-use lp_player::anim::PropPath;
-use lp_player::gfx::{Catalogue, Composer, Gfx, Tex};
-use lp_player::graph::{Graph, NodeKind, PropValue};
-use lp_player::scene::synthetic::{Fail, Pattern, SyntheticSpec};
+use liascape_player::anim::PropPath;
+use liascape_player::gfx::{Catalogue, Composer, Gfx, Tex};
+use liascape_player::graph::{Graph, NodeKind, PropValue};
+use liascape_player::scene::synthetic::{Fail, Pattern, SyntheticSpec};
 use serde_json::{Map, Value};
 
 use common::harness::{OUT_H, OUT_W};
@@ -1968,7 +1968,7 @@ fn shared_scene_a_is_untouched() {
 
 /// Crash records the harness's scene workers wrote (a private dir, `Harness::new`).
 fn harness_crash_records() -> usize {
-    let d = std::env::temp_dir().join(format!("lp-harness-crashes-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("liascape-harness-crashes-{}", std::process::id()));
     std::fs::read_dir(d)
         .map(|r| r.flatten().count())
         .unwrap_or(0)
@@ -1985,7 +1985,7 @@ fn scene_b_load_error_keeps_a() {
     };
     // A real scene needs an assets dir to be started at all (else the open is refused —
     // `no_assets_dir_hides_scenes…`): an empty one, the folder check comes first.
-    let assets = std::env::temp_dir().join(format!("lp-t9-assets-{}", std::process::id()));
+    let assets = std::env::temp_dir().join(format!("liascape-t9-assets-{}", std::process::id()));
     std::fs::create_dir_all(&assets).unwrap();
     h.host.set_base_opt("scene_assets", Some(json!(s(&assets))));
     let a = h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
@@ -1997,7 +1997,7 @@ fn scene_b_load_error_keeps_a() {
     fail_build.fail = Some(Fail::Build);
     let cases = [
         (
-            "/nonexistent/lp-player-t9-missing-scene".to_string(),
+            "/nonexistent/liascape-player-t9-missing-scene".to_string(),
             "does not exist",
             "now",
         ),

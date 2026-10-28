@@ -357,7 +357,7 @@ mod tests {
     /// cancels (the classic "flutter") shows as a dip.
     fn block_db(x: &[f32]) -> Vec<f32> {
         x.chunks_exact(1200 * CH)
-            .map(|b| lp_player::audio::meter::dbfs_block(b, CH))
+            .map(|b| liascape_player::audio::meter::dbfs_block(b, CH))
             .collect()
     }
 

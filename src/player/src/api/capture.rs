@@ -3,13 +3,13 @@
 //! `glReadPixels` into a pixel-pack buffer + a fence — the picture as of the request, GL runs
 //! commands in order), polls the fence on later iterations ([`Capturer::pump`]: after every
 //! dispatch, and on a 1 ms timer while one is on the GPU) and, once the copy is done, maps the
-//! buffer and hands the mapping to one `lp-capture` thread, which encodes and writes the PNG
+//! buffer and hands the mapping to one `lia-capture` thread, which encodes and writes the PNG
 //! straight from it. The loop then unmaps the buffer (kept for the next capture of that size,
 //! freed after [`SPARE_IDLE`]) and sends the reply — deferred until the file is complete (like
 //! `step`'s: the client's later requests wait behind it, per-client FIFO).
 //!
 //! Every GL call stays on the loop's context: a second context on another thread (tried: a
-//! GPU copy read back on `lp-capture`'s own shared context) stalled the loop 29–47 ms — the
+//! GPU copy read back on `lia-capture`'s own shared context) stalled the loop 29–47 ms — the
 //! NVIDIA driver's process-wide lock around the new context's first `eglMakeCurrent`.
 //!
 //! Before (Task 13): readback + encode on the loop — 39–112 ms (release, fdeflate `Fast`) /
@@ -37,13 +37,13 @@ struct Entry {
     id: Value,
     path: PathBuf,
     readback: PendingReadback,
-    /// Mapped and handed to `lp-capture`.
+    /// Mapped and handed to `lia-capture`.
     sent: bool,
     /// Written (the result), waiting for the loop to unmap the buffer and reply.
     result: Option<Result<Value, ApiError>>,
 }
 
-/// A mapped readback for `lp-capture` to encode.
+/// A mapped readback for `lia-capture` to encode.
 struct Job {
     key: u64,
     path: PathBuf,
@@ -59,7 +59,7 @@ pub struct Done {
 
 type Results = Arc<Mutex<Vec<(u64, Result<Value, ApiError>)>>>;
 
-/// The `lp-capture` thread + the captures in flight.
+/// The `lia-capture` thread + the captures in flight.
 pub struct Capturer {
     wake: Arc<dyn Fn() + Send + Sync>,
     tx: Option<mpsc::Sender<Job>>,
@@ -75,7 +75,7 @@ pub struct Capturer {
 }
 
 impl Capturer {
-    /// `wake` is called (from `lp-capture`) whenever a file was written.
+    /// `wake` is called (from `lia-capture`) whenever a file was written.
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Capturer {
         Capturer {
             wake,
@@ -126,7 +126,7 @@ impl Capturer {
         self.entries.iter().any(|e| !e.sent)
     }
 
-    /// Hand every readback whose GPU copy is done to `lp-capture` (never waits; `wait` only
+    /// Hand every readback whose GPU copy is done to `lia-capture` (never waits; `wait` only
     /// at shutdown).
     pub fn pump(&mut self, gfx: &Gfx, wait: Option<Duration>) {
         for i in 0..self.entries.len() {
@@ -147,7 +147,7 @@ impl Capturer {
         }
     }
 
-    /// Send `job` to `lp-capture` (started on first use); `Some(job)` back = no thread.
+    /// Send `job` to `lia-capture` (started on first use); `Some(job)` back = no thread.
     fn send(&mut self, job: Job) -> Option<Job> {
         if self.inline {
             return Some(job);
@@ -156,7 +156,7 @@ impl Capturer {
             let (tx, rx) = mpsc::channel::<Job>();
             let (results, wake) = (self.results.clone(), self.wake.clone());
             match std::thread::Builder::new()
-                .name("lp-capture".into())
+                .name("lia-capture".into())
                 .spawn(move || run(rx, results, wake))
             {
                 Ok(t) => {
@@ -180,7 +180,7 @@ impl Capturer {
     }
 
     /// Every capture whose file is written — its buffer unmapped (on the loop's context,
-    /// after `lp-capture` dropped its view) and kept as the spare — in completion order.
+    /// after `lia-capture` dropped its view) and kept as the spare — in completion order.
     pub fn take_done(&mut self, gfx: &Gfx) -> Vec<Done> {
         let finished = std::mem::take(&mut *self.results.lock().unwrap_or_else(|e| e.into_inner()));
         for (key, r) in finished {

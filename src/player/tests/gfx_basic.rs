@@ -2,7 +2,7 @@
 //! a decodable PNG. This is the one test that must run on the real GPU (not skipped) on
 //! the owner's NVIDIA 595.84 machine — see `tests/common::headless_gl` for the one
 //! condition under which it legitimately skips instead (no EGL device at all) — and
-//! `LP_REQUIRE_GPU=1`, which turns that skip into a failure (last test here).
+//! `LIASCAPE_REQUIRE_GPU=1`, which turns that skip into a failure (last test here).
 
 mod common;
 
@@ -34,7 +34,7 @@ fn clear_readback() {
     );
 
     let out = std::env::temp_dir().join(format!(
-        "lp_player_gfx_basic_clear_readback_{}.png",
+        "liascape_player_gfx_basic_clear_readback_{}.png",
         std::process::id()
     ));
     gfx.write_png(&tex, &out).expect("write_png failed");
@@ -89,8 +89,8 @@ fn write_png_is_fast_enough_for_the_loop() {
         gfx.gl.bind_texture(glow::TEXTURE_2D, None);
     }
     let dir = std::env::temp_dir();
-    let ours = dir.join(format!("lp_player_fast_png_{}.png", std::process::id()));
-    let reference = dir.join(format!("lp_player_balanced_png_{}.png", std::process::id()));
+    let ours = dir.join(format!("liascape_player_fast_png_{}.png", std::process::id()));
+    let reference = dir.join(format!("liascape_player_balanced_png_{}.png", std::process::id()));
     let balanced = || {
         let t = std::time::Instant::now();
         let file = std::fs::File::create(&reference).unwrap();
@@ -157,11 +157,11 @@ fn two_gfx_on_one_display_survive_each_others_drop() {
     assert_eq!(read_rgba(&a, &tex, 1, 1), [0, 255, 0, 255]);
 }
 
-/// TODO "`LP_REQUIRE_GPU` test mode": the same GPU test, re-run as a child of this binary
+/// TODO "`LIASCAPE_REQUIRE_GPU` test mode": the same GPU test, re-run as a child of this binary
 /// with every EGL vendor hidden (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no file — glvnd
 /// then has no driver, so `Gfx::new_offscreen` fails as on a GPU-less machine): without
-/// `LP_REQUIRE_GPU` it passes with a `SKIP` line (the sandbox case), with
-/// `LP_REQUIRE_GPU=1` it fails and says why; `0`/empty = off.
+/// `LIASCAPE_REQUIRE_GPU` it passes with a `SKIP` line (the sandbox case), with
+/// `LIASCAPE_REQUIRE_GPU=1` it fails and says why; `0`/empty = off.
 #[test]
 fn require_gpu_turns_a_missing_gpu_into_a_failure() {
     let run = |require: Option<&str>| {
@@ -174,7 +174,7 @@ fn require_gpu_turns_a_missing_gpu_into_a_failure() {
         ])
         .env(
             "__EGL_VENDOR_LIBRARY_FILENAMES",
-            "/nonexistent/lp-no-egl-vendor.json",
+            "/nonexistent/liascape-no-egl-vendor.json",
         )
         .env_remove(common::REQUIRE_GPU_ENV);
         if let Some(v) = require {
@@ -199,7 +199,7 @@ fn require_gpu_turns_a_missing_gpu_into_a_failure() {
         common::REQUIRE_GPU_ENV
     );
     assert!(
-        text.contains("LP_REQUIRE_GPU is set but a GPU test would skip: no EGL device"),
+        text.contains("LIASCAPE_REQUIRE_GPU is set but a GPU test would skip: no EGL device"),
         "{text}"
     );
 }

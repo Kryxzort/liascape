@@ -6,16 +6,16 @@ pub mod harness;
 pub mod pw;
 
 use glow::HasContext;
-use lp_player::gfx::{Gfx, Tex};
+use liascape_player::gfx::{Gfx, Tex};
 
-/// `LP_REQUIRE_GPU` (TODO "`LP_REQUIRE_GPU` test mode"): set (any value but empty or `0`)
+/// `LIASCAPE_REQUIRE_GPU` (TODO "`LIASCAPE_REQUIRE_GPU` test mode"): set (any value but empty or `0`)
 /// for a run that is *supposed* to have a GPU — a missing GPU-test precondition (no EGL
 /// device, no `transitions/` catalogue) then fails the test loudly instead of printing
 /// `SKIP` and passing. Unset (the default, e.g. the sandboxed `nix build` check phase), they
 /// skip as before. Not covered on purpose: preconditions that aren't the GPU's — the opt-in
-/// Wayland test (`LP_PLAYER_TEST_WAYLAND`), a private PipeWire's binaries, python3 / the repo
+/// Wayland test (`LIASCAPE_PLAYER_TEST_WAYLAND`), a private PipeWire's binaries, python3 / the repo
 /// for `credits`; ffmpeg is never a skip (`ensure_clip` panics without it).
-pub const REQUIRE_GPU_ENV: &str = "LP_REQUIRE_GPU";
+pub const REQUIRE_GPU_ENV: &str = "LIASCAPE_REQUIRE_GPU";
 
 /// Whether [`REQUIRE_GPU_ENV`] is on.
 pub fn require_gpu() -> bool {
@@ -36,7 +36,7 @@ pub fn skip_gpu(reason: &str) {
 /// Returns `None` **only** when [`Gfx::new_offscreen`] fails (no EGL device at all — e.g.
 /// a sandboxed `nix build` check phase with no `/dev/dri`), printing `"SKIP: no EGL
 /// device"` plus the reason so a skipped run still says why ([`skip_gpu`]: under
-/// `LP_REQUIRE_GPU=1` it panics instead). On this machine (NVIDIA 595.84) it always
+/// `LIASCAPE_REQUIRE_GPU=1` it panics instead). On this machine (NVIDIA 595.84) it always
 /// succeeds, so tests that call this genuinely exercise the GPU here — they are not
 /// quietly skipped on the owner's box.
 ///
@@ -54,10 +54,10 @@ pub fn headless_gl() -> Option<Gfx> {
 /// The effect catalogue's directory, or skip ([`skip_gpu`]) — the `transitions/` assets
 /// aren't there (the `nix build` sandbox builds `src/player` alone).
 pub fn catalogue_dir() -> Option<std::path::PathBuf> {
-    let dir = lp_player::gfx::Catalogue::resolve_dir();
+    let dir = liascape_player::gfx::Catalogue::resolve_dir();
     if dir.is_none() {
         skip_gpu(
-            "no transitions/ directory resolved (LP_TRANSITIONS_DIR unset, no \
+            "no transitions/ directory resolved (LIASCAPE_TRANSITIONS_DIR unset, no \
              ~/.local/share/livepaper-web/transitions, no repo transitions/ found above the exe \
              or CARGO_MANIFEST_DIR)",
         );
@@ -70,7 +70,7 @@ pub fn catalogue_dir() -> Option<std::path::PathBuf> {
 /// **Origin: GL bottom-left.** `(0, 0)` is the *bottom-left* corner of the texture, not
 /// the top-left — this is `glReadPixels`'s native coordinate system, the same one
 /// `gl_FragCoord` uses, and this function makes no attempt to flip it (unlike
-/// [`lp_player::gfx::Gfx::write_png`], which flips rows specifically because a PNG's own
+/// [`liascape_player::gfx::Gfx::write_png`], which flips rows specifically because a PNG's own
 /// convention is top-down). Every later task reading pixels back for assertions inherits
 /// this origin — don't re-flip here and then get flipped again at the PNG layer.
 pub fn read_rgba(gfx: &Gfx, tex: &Tex, x: u32, y: u32) -> [u8; 4] {
@@ -177,14 +177,14 @@ fn hex(rgb: [u8; 3]) -> String {
 #[allow(dead_code)]
 static CLIP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// A synthetic WE scene folder (Phase 2 D7) for `lp-scene-worker`'s synthetic renderer:
+/// A synthetic WE scene folder (Phase 2 D7) for `liascape-scene-worker`'s synthetic renderer:
 /// `<crate>/target/test-media/scenes/<name>/` with `project.json` (`type: scene`), a 16-byte
-/// placeholder `scene.pkg`, a 1×1 `preview.png` of `spec.rgb` and `lp-synthetic.json`
+/// placeholder `scene.pkg`, a 1×1 `preview.png` of `spec.rgb` and `liascape-synthetic.json`
 /// (`spec`). Rewritten on every call (temp dir + rename), serialised like clips.
 #[allow(dead_code)]
 pub fn synthetic_scene(
     name: &str,
-    spec: &lp_player::scene::synthetic::SyntheticSpec,
+    spec: &liascape_player::scene::synthetic::SyntheticSpec,
 ) -> std::path::PathBuf {
     let _guard = CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-media/scenes");
@@ -195,14 +195,14 @@ pub fn synthetic_scene(
     std::fs::create_dir_all(&tmp).unwrap();
     let project = serde_json::json!({
         "type": "scene",
-        "title": format!("lp-player synthetic scene {name}"),
+        "title": format!("liascape-player synthetic scene {name}"),
         "file": "scene.json",
         "preview": "preview.png",
     });
     std::fs::write(tmp.join("project.json"), project.to_string()).unwrap();
     std::fs::write(tmp.join("scene.pkg"), [0u8; 16]).unwrap();
     std::fs::write(
-        tmp.join("lp-synthetic.json"),
+        tmp.join("liascape-synthetic.json"),
         serde_json::to_vec_pretty(spec).unwrap(),
     )
     .unwrap();

@@ -2,27 +2,27 @@
 //! `patches/lwe/`, the flake's `lwe-core`, `scripts/lwe.sh`). `.claude/rules/player-core.md`
 //! § Scene worker → "LWE core".
 //!
-//! The core tests SKIP without `LP_LWE_CORE_DIR` (it is set by the devShell and the flake's
-//! package) and FAIL then under `LP_REQUIRE_SCENES=1`; the repo tests SKIP when the crate is
-//! built alone (`nix build .#lp-player` copies only `src/player`).
+//! The core tests SKIP without `LIASCAPE_LWE_CORE_DIR` (it is set by the devShell and the flake's
+//! package) and FAIL then under `LIASCAPE_REQUIRE_SCENES=1`; the repo tests SKIP when the crate is
+//! built alone (`nix build .#liascape-player` copies only `src/player`).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn skip(reason: &str) {
-    if std::env::var("LP_REQUIRE_SCENES").is_ok_and(|v| !v.is_empty() && v != "0") {
-        panic!("LP_REQUIRE_SCENES is set but an LWE test would skip: {reason}");
+    if std::env::var("LIASCAPE_REQUIRE_SCENES").is_ok_and(|v| !v.is_empty() && v != "0") {
+        panic!("LIASCAPE_REQUIRE_SCENES is set but an LWE test would skip: {reason}");
     }
     println!("SKIP: {reason}");
 }
 
 fn core_dir() -> Option<PathBuf> {
-    match std::env::var("LP_LWE_CORE_DIR") {
+    match std::env::var("LIASCAPE_LWE_CORE_DIR") {
         Ok(d) if !d.is_empty() => Some(PathBuf::from(d)),
         _ => {
             skip(
-                "LP_LWE_CORE_DIR is not set (the devShell sets it; or `bash scripts/lwe.sh build`)",
+                "LIASCAPE_LWE_CORE_DIR is not set (the devShell sets it; or `bash scripts/lwe.sh build`)",
             );
             None
         }
@@ -116,7 +116,7 @@ fn core_is_the_pinned_one() {
         Ok(stamp) => assert_eq!(
             stamp.trim(),
             rev,
-            "LP_LWE_CORE_DIR ({}) holds another rev than third_party/lwe/PIN — re-enter the \
+            "LIASCAPE_LWE_CORE_DIR ({}) holds another rev than third_party/lwe/PIN — re-enter the \
              devShell or re-run `bash scripts/lwe.sh fetch prepare build`",
             dir.display()
         ),
@@ -131,7 +131,7 @@ fn worker_links_the_core() {
         return;
     }
     let Some(dir) = core_dir() else { return };
-    let worker = Path::new(env!("CARGO_BIN_EXE_lp-scene-worker"));
+    let worker = Path::new(env!("CARGO_BIN_EXE_liascape-scene-worker"));
     let out = Command::new("readelf").arg("-d").arg(worker).output();
     let Ok(out) = out else {
         println!("SKIP: no readelf");
@@ -140,14 +140,14 @@ fn worker_links_the_core() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
         text.contains("liblinux-wallpaperengine-core.so"),
-        "lp-scene-worker has no NEEDED on the core:\n{text}"
+        "liascape-scene-worker has no NEEDED on the core:\n{text}"
     );
     assert!(
         text.contains(&format!("{}/lib", dir.display())) || text.contains("$ORIGIN"),
-        "lp-scene-worker's RUNPATH names neither {}/lib nor $ORIGIN:\n{text}",
+        "liascape-scene-worker's RUNPATH names neither {}/lib nor $ORIGIN:\n{text}",
         dir.display()
     );
-    let lp = Path::new(env!("CARGO_BIN_EXE_lp-player"));
+    let lp = Path::new(env!("CARGO_BIN_EXE_liascape-player"));
     let out = Command::new("readelf").arg("-d").arg(lp).output().unwrap();
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("linux-wallpaperengine"),
@@ -246,7 +246,7 @@ fn pin_matches_flake() {
         "builtins.fromJSON (builtins.readFile ./third_party/lwe/PIN)",
         "rev = lwePin.rev;",
         "hash = lwePin.nix_hash;",
-        "LP_LWE_CORE_DIR = \"${lwe-core}\";",
+        "LIASCAPE_LWE_CORE_DIR = \"${lwe-core}\";",
     ] {
         assert!(flake.contains(needle), "flake.nix no longer has `{needle}`");
     }

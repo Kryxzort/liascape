@@ -1,23 +1,23 @@
 // Feature-health probe — `scripts/test-ui-matrix.sh --probe probe-health.js` (the matrix's hermetic stack: private
-// backend + headless lp-player + this tree's UI, on a private Xvfb). Owner: "make missing libraries fail loudly — if a
+// backend + headless liascape-player + this tree's UI, on a private Xvfb). Owner: "make missing libraries fail loudly — if a
 // feature won't work because of something in the build, show a warning icon" (FeatureHealth.cs, /health/features,
 // Settings' WarnIcon).
 //   1. the stack as built (everything present — synthetic scenes, the repo's catalogue, the fake VRAM probe, the PATH's
 //      pactl/parec/ffmpeg): /health/features says ok for them, and their Settings rows carry NO warning icon
 //   2. the stack with pieces missing: the stack's player quit and the backend restarted (same port) with a copy of
-//      lp-player that has no lp-scene-worker next to it + LP_SCENE_WORKER_BIN=/nonexistent, LP_PLAYER_VRAM_PROBE=none,
-//      LP_TRANSITIONS_DIR = a catalogue that doesn't load, and a PATH without pactl/parec/playerctl/ffmpeg/ffprobe:
+//      liascape-player that has no liascape-scene-worker next to it + LIASCAPE_SCENE_WORKER_BIN=/nonexistent, LIASCAPE_PLAYER_VRAM_PROBE=none,
+//      LIASCAPE_TRANSITIONS_DIR = a catalogue that doesn't load, and a PATH without pactl/parec/playerctl/ffmpeg/ffprobe:
 //      the endpoint reports each one not ok with its reason, every affected row shows the icon (its tooltip = the
 //      reason), the control itself is still there and enabled, and the summary lists them
-// Exit 1 on any FAIL. The restarted backend is recorded in LP_BACKEND_PID_FILE for the stack's cleanup.
+// Exit 1 on any FAIL. The restarted backend is recorded in LIASCAPE_BACKEND_PID_FILE for the stack's cleanup.
 const { app, BrowserWindow } = require("electron");
 const cp = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const E = process.env;
-const U = E.LP_URL;
-const OUT = E.LP_OUT;
+const U = E.LIASCAPE_URL;
+const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
@@ -57,7 +57,7 @@ async function settingsRows() {
     return { rows, summary: sum ? [...sum.querySelectorAll("[data-feature]")].map((li) => li.dataset.feature) : null };`);
 }
 
-// rows a missing piece must mark, by feature id (the stack runs with AdvancedSettings on and PlayerEngine=lp-player,
+// rows a missing piece must mark, by feature id (the stack runs with AdvancedSettings on and PlayerEngine=liascape-player,
 // so Hardware decoding / Transition method / the GPU section are shown)
 const ROWS = {
   scenes: ["Allow scene support"],
@@ -67,7 +67,7 @@ const ROWS = {
   mpris: ["Only if MPRIS player active"],
   ffmpeg: ["Normalize audio"],
 };
-const REASON = { scenes: /lp-scene-worker not found/, transitions: /catalogue/, vram: /LP_PLAYER_VRAM_PROBE=none/, "auto-mute": /pactl and parec/, mpris: /playerctl/, ffmpeg: /ffmpeg and ffprobe/ };
+const REASON = { scenes: /liascape-scene-worker not found/, transitions: /catalogue/, vram: /LIASCAPE_PLAYER_VRAM_PROBE=none/, "auto-mute": /pactl and parec/, mpris: /playerctl/, ffmpeg: /ffmpeg and ffprobe/ };
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
@@ -79,7 +79,7 @@ app.whenReady().then(async () => {
     console.log(`${v.length ? "FAIL" : "PASS"}  ${name}`);
     for (const x of v) console.log(`        - ${x}`);
   };
-  const T = fs.mkdtempSync(path.join(path.dirname(E.LP_BACKEND_LOG), "health-")); // inside the stack's dir: its cleanup takes it
+  const T = fs.mkdtempSync(path.join(path.dirname(E.LIASCAPE_BACKEND_LOG), "health-")); // inside the stack's dir: its cleanup takes it
   try {
     // ---- 1. everything present
     await win.loadURL(U + "/");
@@ -87,7 +87,7 @@ app.whenReady().then(async () => {
     await cell("present: /health/features ok for what the stack has", async () => {
       const v = [];
       if (!f1) return ["no /health/features answer"];
-      for (const id of ["lp-player", "scenes", "transitions", "vram", "auto-mute", "ffmpeg"]) {
+      for (const id of ["liascape-player", "scenes", "transitions", "vram", "auto-mute", "ffmpeg"]) {
         const f = byId(f1, id);
         if (!f) v.push(`${id} missing from the report`);
         else if (f.ok !== true) v.push(`${id} ok=${f.ok}: ${f.reason}`);
@@ -111,8 +111,8 @@ app.whenReady().then(async () => {
 
     // ---- 2. pieces missing
     const bin = path.join(T, "bin"); fs.mkdirSync(bin);
-    const lp = path.join(T, "lpbin"); fs.mkdirSync(lp);
-    fs.copyFileSync(E.LP_PLAYER_BIN, path.join(lp, "lp-player")); fs.chmodSync(path.join(lp, "lp-player"), 0o755); // no lp-scene-worker beside it
+    const lp = path.join(T, "liascape-bin"); fs.mkdirSync(lp);
+    fs.copyFileSync(E.LIASCAPE_PLAYER_BIN, path.join(lp, "liascape-player")); fs.chmodSync(path.join(lp, "liascape-player"), 0o755); // no liascape-scene-worker beside it
     for (const t of ["sh", "setsid", "env"]) { // what the backend itself spawns through PATH (the player start)
       const w = cp.execFileSync("sh", ["-c", `command -v ${t}`]).toString().trim();
       if (w) fs.symlinkSync(fs.realpathSync(w), path.join(bin, t));
@@ -120,21 +120,21 @@ app.whenReady().then(async () => {
     const cat = path.join(T, "transitions"); fs.mkdirSync(cat);
     fs.writeFileSync(path.join(cat, "manifest.json"), "[]"); // no wrap.vert / wrap.frag.template → the catalogue doesn't load
     // the stack's player quits (its health is what the backend would read otherwise)
-    cp.spawnSync(E.LP_PLAYER_BIN, ["ctl", "--timeout-ms", "3000", "quit"], { env: { ...E }, timeout: 8000 });
-    await waitFor(() => !fs.existsSync(E.LP_PLAYER_SOCKET), 8000, 100);
+    cp.spawnSync(E.LIASCAPE_PLAYER_BIN, ["ctl", "--timeout-ms", "3000", "quit"], { env: { ...E }, timeout: 8000 });
+    await waitFor(() => !fs.existsSync(E.LIASCAPE_PLAYER_SOCKET), 8000, 100);
     await win.loadURL("about:blank"); // the page's WebSocket would hold the old backend's shutdown open
-    const old = Number(E.LP_BACKEND_PID || 0);
+    const old = Number(E.LIASCAPE_BACKEND_PID || 0);
     if (old && procAlive(old)) {
       process.kill(old, "SIGTERM");
       if (!(await waitFor(() => !procAlive(old), 35000, 50))) process.kill(old, "SIGKILL");
     }
-    const env = { ...E, LP_PORT: new URL(U).port, PATH: bin, LP_PLAYER_BIN: path.join(lp, "lp-player"), LP_SCENE_WORKER_BIN: "/nonexistent",
-      LP_PLAYER_VRAM_PROBE: "none", LP_TRANSITIONS_DIR: cat };
-    for (const k of ["DISPLAY", "LP_URL", "LP_CLIPS", "LP_OUT", "LP_ONLY", "LP_SHARD", "LP_PLAYER_ALLOW_SYNTHETIC_SCENES"]) delete env[k];
-    const log = fs.openSync(E.LP_BACKEND_LOG, "a");
-    const ch = cp.spawn(E.LP_DOTNET, [E.LP_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
+    const env = { ...E, LIASCAPE_PORT: new URL(U).port, PATH: bin, LIASCAPE_PLAYER_BIN: path.join(lp, "liascape-player"), LIASCAPE_SCENE_WORKER_BIN: "/nonexistent",
+      LIASCAPE_PLAYER_VRAM_PROBE: "none", LIASCAPE_TRANSITIONS_DIR: cat };
+    for (const k of ["DISPLAY", "LIASCAPE_URL", "LIASCAPE_CLIPS", "LIASCAPE_OUT", "LIASCAPE_ONLY", "LIASCAPE_SHARD", "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES"]) delete env[k];
+    const log = fs.openSync(E.LIASCAPE_BACKEND_LOG, "a");
+    const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
     fs.closeSync(log);
-    if (E.LP_BACKEND_PID_FILE) fs.writeFileSync(E.LP_BACKEND_PID_FILE, String(ch.pid));
+    if (E.LIASCAPE_BACKEND_PID_FILE) fs.writeFileSync(E.LIASCAPE_BACKEND_PID_FILE, String(ch.pid));
     if (!(await waitFor(async () => (await http("GET", "/health")).json?.ok === true, 40000, 200))) throw new Error("the restarted backend didn't answer /health");
     const f2 = await features();
     await cell("missing: /health/features reports each missing piece with its reason", async () => {
@@ -146,7 +146,7 @@ app.whenReady().then(async () => {
         if (f.ok !== false) v.push(`${id} ok=${f.ok}, want false (${f.reason})`);
         if (!re.test(f.reason || "")) v.push(`${id}: reason ${JSON.stringify(f.reason)} doesn't match ${re}`);
       }
-      if (byId(f2, "lp-player")?.ok !== true) v.push(`lp-player: ${JSON.stringify(byId(f2, "lp-player"))} (the copy resolves)`);
+      if (byId(f2, "liascape-player")?.ok !== true) v.push(`liascape-player: ${JSON.stringify(byId(f2, "liascape-player"))} (the copy resolves)`);
       return v;
     });
     await win.loadURL(U + "/");

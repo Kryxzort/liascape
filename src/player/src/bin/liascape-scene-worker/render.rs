@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use glow::HasContext;
-use lp_player::gfx::{Fbo, Gfx, Tex};
-use lp_player::scene::assets;
+use liascape_player::gfx::{Fbo, Gfx, Tex};
+use liascape_player::scene::assets;
 use serde_json::{Map, Value};
 
 use crate::lwe;
