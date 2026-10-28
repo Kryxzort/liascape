@@ -1800,6 +1800,23 @@ C["seq:plPlayAdvanceOnly+next"] = { states: ["pending"], switch: true, async run
     c.mid = (await http("GET", "/current")).json?.path ?? null; c.want = succ(c.before.ps?.videoPaths, c.mid);
     await cliStep(c, "next-wallpaper");
   }, check: (c) => [...expectShownN(c, c.want, 2), ...armedCheck(c)] };
+// a timed playlist of ONE item (600 s), then next / random: the tick takes it (a switch to that item — the strip's next
+// and the only pick), and nothing rotates by itself. The tick that takes every queued next / previous / random started
+// only for > 1 item: the keybind queued pending_action.txt for nobody, and a tick started later (the list grew) threw
+// it away
+for (const a of ["next-wallpaper", "random"]) C[`seq:plPlayOne+${a === "random" ? "random" : "next"}`] = { states: ["single"], switch: true, async run(c) {
+    await playFast(c, [K[1]], PS()); c.exp.paused = false; // (+ /playlist/state: the strip follows it)
+    await sleep(600);
+    c.tStep = Date.now();
+    await cliStep(c, a);
+  }, check(c) {
+    const after = c.evs.filter((e) => e.event === "transition.scheduled" && e._t >= c.tStep);
+    const v = [];
+    if (!after.some((e) => e.path === K[1] && e.align !== "end")) v.push(`${a} in a one-item timed playlist: no switch to ${TITLE(K[1])} was requested (the queued action was never taken)`);
+    if (after.length > 1) v.push(`${after.length} switches after the ${a} (${after.map((e) => `${TITLE(e.path)} ${e.align}`)}), expected one`);
+    if (!c.noOutput && c.after.cur?.path !== K[1]) v.push(`expected ${TITLE(K[1])} on screen, /current says ${TITLE(c.after.cur?.path)}`);
+    return v;
+  } };
 // remove the other item from the strip (the session plays on with two), trash what plays (it plays on from the one
 // survivor: a one-item session) → Undo (both back) → next: the rotation still takes it. A one-item session started no
 // tick and putting items back never started one — the queued next (pending_action.txt) was never taken while

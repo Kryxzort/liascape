@@ -450,9 +450,13 @@ Two bug classes kept recurring; fix the class, not the instance:
       3 s wait gave up, and the backend fell back to a plain `serve` without `--restore`/`--headless`. Wait on the
       supervisor's exit / socket instead of a fixed 3 s, and keep the args on the fallback.
 
-- [ ] **A 1-item timed session has no tick** (2026-10-27, from the fuzz-bug fix): `EnsureTimedTick` starts one only for
+- [x] **A 1-item timed session has no tick** (2026-10-27, from the fuzz-bug fix): `EnsureTimedTick` starts one only for
       > 1 item, so a next/prev/random queued in a 1-item session (or the restart daemon's "restart") is never taken —
       the tick discards it once one starts. Decide: tick for 1 item too (cheap), or consume the queue elsewhere.
+      — done 2026-10-28: a tick for every timed session (the tick is the queue's one consumer — only the timer owner
+      may switch; a second consumer would race it across processes); a 1-item session takes next/random (a switch to
+      its one item) and `restart`, and never rotates by itself (`CanRotate`). Shared with legacy (its leak restart is
+      now taken). Matrix `seq:plPlayOne+next|random` RED 2/2 → GREEN (session.md § Timed Playlist).
 
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,

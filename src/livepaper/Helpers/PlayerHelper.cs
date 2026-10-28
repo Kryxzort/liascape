@@ -963,16 +963,19 @@ public static class PlayerHelper
     }
 
     // The tick runs the interval AND takes every queued user switch (pending_action.txt: next / previous /
-    // random / restart — a keybind, the UI, another process), so a timed session with something to rotate to
-    // has one whatever its interval (pure advance-on-end too: Tick ignores its countdown there). It used to
-    // start only at a session (re)start with > 1 item AND an interval: a pure advance-on-end session never
-    // took a next, and a session that started with one item (a trash leaving one survivor) never got one
-    // when items came back (Undo, a strip add, AppendToActivePlaylist) — every queued next sat untaken while
-    // /current said timed. `takeBack: false` (a live list edit): not once this process released the timer
-    // to another owner (ReleaseTimer); a session (re)started here takes it back as before.
+    // random / restart — a keybind, the UI, another process), so EVERY timed session has one, whatever its
+    // interval (pure advance-on-end too: Tick ignores its countdown there) and whatever its length: a
+    // one-item session (a trash leaving one survivor, a one-item playlist played) takes a next / random (a
+    // switch to its one item, its transition included — the strip's "next" after it is itself) and the
+    // restart daemon's "restart" (legacy's leak workaround); it never rotates by itself (`CanRotate`). It
+    // used to start only at a session (re)start with > 1 item AND an interval: a pure advance-on-end session
+    // never took a next, a one-item session never took anything — the queued action sat in
+    // pending_action.txt until a tick started for a grown list (Undo, a strip add) and threw it away
+    // (StartTimedTimer). `takeBack: false` (a live list edit): not once this process released the timer to
+    // another owner (ReleaseTimer); a session (re)started here takes it back as before.
     private static void EnsureTimedTick(bool takeBack = true)
     {
-        if (_playlistTimer != null || _timedTimerStopped || _timedPaths is not { Count: > 1 }) return;
+        if (_playlistTimer != null || _timedTimerStopped || _timedPaths is not { Count: > 0 }) return;
         if (!takeBack && _timerReleased) return;
         StartTimedTimer();
     }
@@ -1106,6 +1109,10 @@ public static class PlayerHelper
 
             // _timedInterval > Zero prevents spurious expiry in pure advance-on-end mode
             // (where _timedInterval = Zero and _timedRemainingMs starts at 0).
+            // A one-item session has nothing to rotate to: its interval only starts over (it ticks for the
+            // queued user switches above, never to switch to itself every interval).
+            if (_timedRemainingMs <= 0 && _timedInterval > TimeSpan.Zero && !CanRotate)
+                _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
             if (_timedRemainingMs <= 0 && _timedInterval > TimeSpan.Zero)
             {
                 if (_waitingForVideoEnd && !_waitForVideoEnd)
@@ -1139,6 +1146,11 @@ public static class PlayerHelper
             _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
         }
     }
+
+    // Something to rotate to: a one-item timed session never switches by itself (ApplyTimedPlaylist and
+    // RearmAdvanceOnVideoEnd arm nothing for it, its interval only starts over) — only a user's next /
+    // random switches it, to its one item.
+    private static bool CanRotate => _timedPaths is { Count: > 1 };
 
     private static void LaunchAndReset(string path)
     {
@@ -2435,7 +2447,7 @@ public static class PlayerHelper
     private static void PostSwitch(string path)
     {
         _lastSwitchTarget = path;
-        if (_advanceOnVideoEnd && !IsScenePath(path))
+        if (_advanceOnVideoEnd && !IsScenePath(path) && CanRotate)
         {
             var next = AdvanceToNext();
             if (next != null) ArmVideoEndWait(next);
