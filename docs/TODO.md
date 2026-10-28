@@ -22,6 +22,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
 - [ ] **LICENSE** for the repo. There is none today. lp-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [ ] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
+      `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
+      comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
 
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
@@ -168,9 +171,42 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): **all tasks
-    done except Task 14** (Tasks 1–13 and 15, the Task 8 backend wiring, the properties editor and loudness
-    learning). Open: Task 14 — the on-machine battery + `docs/player/reports/phase2.md`, which the owner runs
-    (nine steps in the plan; its findings become their own follow-up tasks).
+    done** (Tasks 1–15, the Task 8 backend wiring, the properties editor and loudness learning). Task 14 — the
+    on-machine battery — ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
+    also `battery.sh scenes`); bar the owner's VT-switch/suspend check (Waiting on owner) only the findings below
+    are open.
+  - **Phase 2 battery findings (Task 14, `docs/player/reports/phase2.md` § 10).** Fixed with tests: F1 scenes at
+    the refresh paced by frame callbacks, F2 the dropout detector's ramp-edge bins + meter gaps (`unmeasured`), F3
+    the bus meter on the RT data thread, F5a the GPU budget reads every output, F6a the source mirror writes only
+    changed values. Open:
+    - [ ] **F4 — real scenes' worker CPU over the plan's 5 %**: per frame the worker costs what LWE costs (Kimi/Bunk
+          ≈ 1.07 ms CPU per frame at 240 fps; legacy LWE 1.04 at 144); at the default 30 fps Kimi 10.2 % (its sound),
+          Bunk 6.6 % (visualiser), Emilia 2.2 %. Profile the scene-audio path at 1× (LWE decode + resample + our
+          stream), add the worker's own CPU to the `workers` probe, re-state the bound per scene class.
+    - [ ] **F5b — a heavy single-draw worker still costs a 240 Hz output frames**: at 220–260 ms/s of worker GPU,
+          DP-2's 240 Hz clip missed 33–38 frames / 2 s (p95 6.9–9.1 ms); the throttle stops at its GPU-load guard
+          (400 ms/s). NVIDIA doesn't preempt the low-priority context mid-draw and with explicit sync off each swap
+          waits for the GPU on the loop. Options: a lower guard when another output misses, splitting LWE's frame
+          (not ours to split), or explicit sync back once egl-wayland2 ships 6235dd8. Re-measure on a quiet machine
+          with the GPU clocks up (the run's card sat in P3, 1140/2100 MHz, with another process on it).
+    - [ ] **F6b — compositor CPU per scene worker mid-transition 2.75–4.05 %** (steady state 0.1 % after F6a):
+          during an S→S fade the runtime recomputes `srcs:` / the scene demand on every sync (`Graph::get`,
+          `srcs_for_connector`, `format!` of paths at the top of the profile). Cache per `picture_rev` / transition
+          change. `perf`: `nix shell nixpkgs#perf -c perf record -g -p <compositor>`.
+    - [ ] **F1 follow-up — tick scenes from the frame callbacks / the exact refresh** instead of a rounded-Hz grid,
+          so a scene at the refresh never beats against the vblank (F1 fixed the presents, not the content clock).
+    - [ ] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet
+          machine) — the LWE load + build on the worker's main thread competes for CPU. Consider the worker's nice /
+          `SCHED_IDLE` for the build and a Ready budget that scales with load (`ready_ms` in the corpus is an upper
+          bound already).
+    - [ ] **F7 — one 3 ms micro-gap at a frozen S→S handoff at 240 Hz** (1/20 in the final run, 2/20 in run 2),
+          ~10 ms before the meter's capture gap of A's stream leaving: a real 3 ms hole at B's onset (the worker's
+          gate vs its `AudioFlowing`) or the capture disturbance starting early. Check with the report's `pw-record`
+          phase method on B's onset (§ 2 of `docs/player/reports/phase2.md`).
+    - [ ] **The bus meter's capture misses 1–5 ms when another stream leaves the graph** (every scene teardown;
+          proven measurement-only — the sink's recorded output stays phase-continuous). The detector calls it
+          `unmeasured`; a meter that never misses (e.g. capturing the loopback's output port, or deriving block times
+          from a frame counter instead of `pw_buffer.time`) would close that blind spot.
   - [x] **Phase 2 Task 15 — docs sweep** (2026-10-28): `docs/player/architecture.md` (process model with
         `lp-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
         never blocks the compositor) + #11 (a worker's audio is a gain on a stream that keeps running),
