@@ -122,7 +122,7 @@ fn write_png_is_fast_enough_for_the_loop() {
     let _ = std::fs::remove_file(&reference);
     assert!(decoded == pixels, "the PNG decodes to the texture's pixels");
     assert!(
-        o < 0.5 * b,
+        o < 0.7 * b,
         "write_png_source {:.1} ms vs a Balanced encode alone {:.1} ms",
         o * 1e3,
         b * 1e3

@@ -493,9 +493,9 @@ runtime still serves cuts.
 **`write_png*` compress with fdeflate's `Compression::Fast`** (Task 13): when `capture` still wrote
 on the loop, the default `Balanced` held it 820–875 ms for a 3840×1080 scene frame (release) —
 every output froze; `Fast` 39–112 ms (now the reply's latency). Guard
-`tests/gfx_basic.rs::write_png_is_fast_enough_for_the_loop` (readback + encode < ½ of a `Balanced`
+`tests/gfx_basic.rs::write_png_is_fast_enough_for_the_loop` (readback + encode < 0.7 × a `Balanced`
 encode alone on a noisy 1080p frame, pixels round-trip; RED with `Balanced`: 1845 vs 1923 ms in the
-debug build).
+debug build; fixed it reads 0.45–0.51 × in a debug build — the old ½ bound failed about every other run).
 
 **`capture` never stalls the loop (2026-10-28, `api/capture.rs`).** The handler only *starts* the
 readback — `Gfx::start_read_back`: `glReadPixels` into a `GL_PIXEL_PACK_BUFFER` (`STREAM_READ`) + a
