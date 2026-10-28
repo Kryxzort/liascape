@@ -64,7 +64,7 @@ run over 500 ms.
   (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time).
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
-`GET /health /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
+`GET /health /health/features /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
 /playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path=`,
 `POST /browse /detail /settings /apply /stop /action /next /prev /random /pause /volume /mute /download /open
 /preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview} /playlist/{state,save,load,play,play-from}
@@ -96,6 +96,30 @@ condition, visible, editable, unsupported, default, value, overridden, min, max,
 — then live on the item's source(s) (`PlayerHelper.ApplyScenePropsLive`) — and answers the new list; a bad value / an
 unknown name / a non-editable type / not a scene folder → **400 `{error}`**, nothing saved. `POST
 /library/scene-props/preview {path, name, value}` = the drag twin (live, nothing saved).
+
+**`GET /health/features`** (`Helpers/FeatureHealth.cs`, owner 2026-10-28 "make missing libraries fail loudly") →
+`{features: [{id, label, ok (true | false | null = unknown), reason, affects (AppSettings keys, camelCase — the Settings
+rows that get a warning icon), inUse (switched on / selected now — the summary lists only those)}]}`. Never spawns a
+player: lp-player's pieces come from the running player's `hello.health` (one quick `hello`), else `lp-player health` +
+`scene-check` in the backend's environment (cached 30 s); tools by a PATH lookup. `Build(Inputs)` is pure (self-test
+`FeatureHealthAssertions`), `Report(s)` gathers. The table:
+
+| id | needs | when missing | affects |
+|---|---|---|---|
+| `lp-player` | the `lp-player` binary (`PlayerEngine.ResolveBinary`) | the engine falls back to legacy | `playerEngine` |
+| `scenes` | lp-player: `lp-scene-worker` (built with LWE's core) + WE's assets dir (player's `hello.health.scenes` / `scene-check`); legacy: `linux-wallpaperengine` | scenes are skipped | `allowScenes` |
+| `transitions` | lp-player: the effects catalogue the player loaded (`transitions/`); legacy: `lp-transition` + the catalogue | every switch is a cut | `globalTransitionEnabled`, `transitionMethod`, `transitions` |
+| `vram` (lp) | a VRAM probe — NVML (`libnvidia-ml`), AMD DRM sysfs, or `nvidia-smi` (Intel: none) | the per-scene VRAM limit and the low-VRAM rule can't act | `sceneVramLimitEnabled`, `sceneVramLimitMib`, `vramLowMode` |
+| `hwdec-interop` (lp) | the render worker's GL interop (CUDA on NVIDIA, VA-API on AMD/Intel) — running player only (null otherwise) | hardware decoding copies every frame through the CPU | `hwDec` |
+| `auto-mute` | `pactl` + `parec` | auto-mute can't hear other apps | `autoMute` |
+| `mpris` | `playerctl` | "Only if MPRIS player active" never sees a player | `autoMuteOnlyIfMprisActive` |
+| `ffmpeg` | `ffmpeg` + `ffprobe` | no loudness measurement, imports / thumbnails / durations fail | `normalizeAudio` |
+| `steamcmd` | steamcmd (`WorkshopDownloader.FindSteamCmd`) | "Download via steamcmd" can't download | `workshopAcquireMode`, `steamCmdPath` |
+
+Not listed (checked, no silent degradation to report): `wl-copy` (the UI copies with `navigator.clipboard`, no
+`wl-copy` call exists), `grim` / `mpvpaper` (legacy only — the owner runs lp-player), the PipeWire audio bus (down → the
+sources play on mpv's default device; nothing stops working). Guards: `--probe probe-health.js` (matrix stack; RED on
+the base UI), the adapter IT's `LP_SCENE_WORKER_BIN=/nonexistent` section (`hello.health` + the endpoint).
 
 ## WS event types
 `wallpaper-changed {path}` (every switch — `SwitchToFile`; `null` on a keybind stop / trash stop) `· settings-changed

@@ -87,6 +87,14 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
         polling path untouched — owner: lp-player only).
   - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
+- [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
+      table in web-backend.md — lp-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
+      MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `lp-player health`; a warning
+      icon with the reason on every affected Settings row (control kept), a summary of what's broken and in use.
+      Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LP_SCENE_WORKER_BIN=/nonexistent`), self-test.
+- [ ] Health follow-ups: the playlist modal's Transitions button has no icon (the global row has); the PipeWire bus
+      being down isn't reported (nothing stops working — audio goes to mpv's default device); Intel GPUs have no VRAM
+      probe at all (an Intel-specific one would make the VRAM rules work there).
 - [x] **Transition duration below 50 ms + free typing in every number field** (owner todo + follow-up, 2026-10-28):
       the floor is 0 ms (0 = a cut, 1–49 ms = that fast an effect; UI, `TransitionService.PickDuration`); every numeric
       settings field is `NumInput` — empty / out-of-range while focused, nothing saved until a valid value or the blur,

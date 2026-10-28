@@ -1,10 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette,
+  FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
-import { api } from "../api/client";
+import { api, type FeatureHealth } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
@@ -23,12 +23,31 @@ function useS() {
   return { g, set: setSetting, settings };
 }
 
+// API: /health/features — a feature a missing build piece / tool breaks here puts a warning icon (its reason as the
+// tooltip) on every row whose settings key it `affects` (owner: "make missing libraries fail loudly"). The control
+// itself stays visible and usable; only `ok === false` warns (null = not known yet).
+type Warn = { label: string; reason: string };
+const HealthCtx = createContext<Map<string, Warn[]>>(new Map());
+function healthWarnings(features: FeatureHealth[]): Map<string, Warn[]> {
+  const m = new Map<string, Warn[]>();
+  for (const f of features) if (f.ok === false)
+    for (const k of f.affects) m.set(k, [...(m.get(k) ?? []), { label: f.label, reason: f.reason ?? `${f.label} can't work here` }]);
+  return m;
+}
+function WarnIcon({ k }: { k?: string }) {
+  const w = useContext(HealthCtx).get(k ?? "");
+  if (!k || !w?.length) return null;
+  const text = w.map((x) => x.reason).join("\n");
+  return <span className="s-warn" title={text} aria-label={text} data-feature-warn={k}><AlertTriangle size={13} /></span>;
+}
+
 // `rk` (+ optional `def`) ties a row to a settings key: a reset icon appears ONLY when the current
 // value deviates from its default (SETTINGS_DEFAULTS), and resets that one setting. `onReset`/`deviated`
-// cover non-settings-backed rows (e.g. Theme, applied via applyTheme not setSetting).
-function Row({ label, hint, disabled, rk, def, deviated, onReset, children }: {
+// cover non-settings-backed rows (e.g. Theme, applied via applyTheme not setSetting). `wk` = the key whose
+// feature warnings (WarnIcon) the row shows, when it has no `rk`.
+function Row({ label, hint, disabled, rk, wk, def, deviated, onReset, children }: {
   label: string; hint?: string; disabled?: boolean;
-  rk?: string; def?: unknown; deviated?: boolean; onReset?: () => void; children: React.ReactNode;
+  rk?: string; wk?: string; def?: unknown; deviated?: boolean; onReset?: () => void; children: React.ReactNode;
 }) {
   const cur = useStore((s) => (rk ? s.settings?.[rk] : undefined));
   const set = useStore((s) => s.setSetting);
@@ -41,7 +60,8 @@ function Row({ label, hint, disabled, rk, def, deviated, onReset, children }: {
     <div className={`srow${disabled ? " disabled" : ""}`}>
       <div className="slabel">
         <span className="slabel-row">{label}
-          {show && <button className="s-reset" title="Reset to default" onClick={reset}><RotateCcw size={12} /></button>}
+          <WarnIcon k={wk ?? rk} />
+          {show &&<button className="s-reset" title="Reset to default" onClick={reset}><RotateCcw size={12} /></button>}
         </span>
         {hint && <span className="shint">{hint}</span>}
       </div>
@@ -146,6 +166,19 @@ export const Settings = memo(function Settings() {
     const t = setInterval(() => api.playerEngine().then(setEngine).catch(() => {}), 5000);
     return () => clearInterval(t);
   }, [lpActive]);
+  // missing build pieces / tools (API: /health/features) → warning icons on the rows they break + the summary;
+  // re-read after a change that can move them (engine, scenes, steamcmd) and every 15 s while open (a player that
+  // started meanwhile reports its GPU interop / VRAM probe)
+  const [features, setFeatures] = useState<FeatureHealth[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const read = () => api.featureHealth().then((r) => alive && setFeatures(r.features ?? [])).catch(() => {});
+    const t0 = setTimeout(read, 300), t = setInterval(read, 15000);
+    return () => { alive = false; clearTimeout(t0); clearInterval(t); };
+  }, [g("playerEngine", "legacy"), g("allowScenes", false), g("steamCmdPath", ""), g("workshopAcquireMode", "subscribe")]); // eslint-disable-line
+  const warnings = useMemo(() => healthWarnings(features), [features]);
+  // the summary: what breaks something switched on / selected now (the row icons show regardless)
+  const broken = features.filter((f) => f.ok === false && f.inUse !== false);
 
   // interval H/M/S
   const iv = g("globalIntervalSeconds", 1800);
@@ -193,7 +226,15 @@ export const Settings = memo(function Settings() {
   };
 
   return (
+    <HealthCtx.Provider value={warnings}>
     <div className="scroll settings" ref={scrollRef}>
+      {broken.length > 0 && (
+        <div className="health-sum" data-health-summary>
+          <div className="health-sum-head"><AlertTriangle size={14} />
+            {broken.length === 1 ? "1 feature can't work here" : `${broken.length} features can't work here`} — missing from this build or system</div>
+          <ul>{broken.map((f) => <li key={f.id} data-feature={f.id}><b>{f.label}:</b> {f.reason}</li>)}</ul>
+        </div>
+      )}
       <Section title="Playback" icon={<SlidersHorizontal size={15} />}>
         <Row label="Loop" rk="loop"><input type="checkbox" checked={g("loop", true)} onChange={(e) => set("loop", e.target.checked)} /></Row>
         <Row label="Mute audio" rk="noAudio"><input type="checkbox" checked={mute} onChange={(e) => set("noAudio", e.target.checked)} /></Row>
@@ -340,7 +381,7 @@ export const Settings = memo(function Settings() {
       <Section title="Workshop download mode" icon={<Download size={15} />}>
         <Row label="Subscribe via Steam" hint="keeps synced + auto-updates">
           <input type="radio" checked={mode === "subscribe"} onChange={() => set("workshopAcquireMode", "subscribe")} /></Row>
-        <Row label="Download via steamcmd" hint="snapshot, no sync">
+        <Row label="Download via steamcmd" hint="snapshot, no sync" wk="workshopAcquireMode">
           <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopAcquireMode", "steamcmd")} /></Row>
         {mode === "subscribe"
           ? <Row label="Steam">
@@ -351,7 +392,7 @@ export const Settings = memo(function Settings() {
             </Row>
           : <>
               <Help>Downloads a one-time snapshot via steamcmd. No online subscription. Requires steamcmd + one-time sign-in.</Help>
-              <Row label="steamcmd path" hint="blank = auto-detect">
+              <Row label="steamcmd path" hint="blank = auto-detect" wk="steamCmdPath">
                 <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />
                 <button className="btn ghost ico" title="Choose steamcmd binary" onClick={() => pickInto("steamCmdPath", "file")}><FolderOpen size={14} /> Browse</button>
               </Row>
@@ -442,5 +483,6 @@ export const Settings = memo(function Settings() {
         </Row>
       </Section>
     </div>
+    </HealthCtx.Provider>
   );
 });

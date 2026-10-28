@@ -46,6 +46,9 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   `QuitOrKill` — a recycled pid (the process died and the kernel handed its number to something
   unrelated) is never signalled as if it were still ours.
   **`Capabilities`** = the last `hello.capabilities` (§ Scenes: `ScenesAvailable`, `SceneStatus`).
+  **`Health()`** (`/health/features`, `Helpers/FeatureHealth.cs`): the running player's `hello.health` (one quick
+  `hello`, never spawns; `FromRunning`), else `lp-player health` in the backend's environment (cached 30 s) — a
+  player older than this build has no `health` and falls back to the CLI of the new binary.
 - **`LpPlayerMedia.cs`** — the media primitives PlayerHelper dispatches to (below).
 - **`MpvPropertyMap.cs`** — mpv IPC property sets → lp-player properties.
 - **`LpPlayerSelfTest.cs`** — `livepaper --lp-player-selftest`.

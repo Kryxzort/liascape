@@ -18,6 +18,7 @@ pub mod ctl;
 pub mod gfx;
 pub mod graph;
 pub mod headless;
+pub mod health;
 pub mod log;
 pub mod mem;
 pub mod mpv;

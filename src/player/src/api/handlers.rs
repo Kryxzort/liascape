@@ -142,6 +142,10 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.stepped() {
         caps.push("stepped");
     }
+    let hwdec = {
+        let w = rt.host.render_worker();
+        crate::health::hwdec_json(w.is_some(), w.and_then(|w| w.hwdec_interop()))
+    };
     Ok(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
@@ -153,6 +157,13 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         // Task 16: `pid` is this compositor (the supervisor's child when supervised).
         "supervisor_pid": rt.supervised.as_ref().map(|s| s.pid),
         "restart": rt.restart_event,
+        // which optional pieces work here, and why not (crate::health) — the backend's warning icons
+        "health": {
+            "effects": crate::health::effects_json(rt.cat.dir(), rt.cat.ids().len()),
+            "vram": crate::health::vram_cached(),
+            "hwdec_interop": hwdec,
+            "scenes": crate::health::scenes_json(rt.scenes_available()),
+        },
     }))
 }
 

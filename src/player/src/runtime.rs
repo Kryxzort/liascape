@@ -4004,6 +4004,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| ServeError::NoCompositor(format!("no EGL device: {e}")))?;
         (gfx, None)
     };
+    crate::health::warm(); // the VRAM check, off the loop (hello.health)
     let cat = match Catalogue::resolve_dir() {
         Some(dir) => Catalogue::load(&dir).map_err(|e| format!("effect catalogue: {e}"))?,
         None => {
