@@ -1,14 +1,14 @@
 ---
 paths:
-  - "src/livepaper/Helpers/PlayerHelper.cs"
-  - "src/livepaper/Helpers/AudioMonitor.cs"
-  - "src/livepaper/Helpers/TransitionService.cs"
+  - "src/backend/Helpers/PlayerHelper.cs"
+  - "src/backend/Helpers/AudioMonitor.cs"
+  - "src/backend/Helpers/TransitionService.cs"
   - "src/native/liascape-transition/**"
 ---
 
 ## Player
 
-`PlayerHelper` is the single entry point for mpvpaper. Under `PlayerEngine=liascape-player` its media primitives dispatch to `src/livepaper/Player/` instead (`player-adapter.md`); everything below describes the legacy engine, unchanged. Kills all existing mpvpaper processes before starting a new one.
+`PlayerHelper` is the single entry point for mpvpaper. Under `PlayerEngine=liascape-player` its media primitives dispatch to `src/backend/Player/` instead (`player-adapter.md`); everything below describes the legacy engine, unchanged. Kills all existing mpvpaper processes before starting a new one.
 
 **stdout/stderr redirection:**
 - **mpvpaper** (`Launch`), **timer daemon** (`SpawnTimerDaemon`), **restart daemon** (`SpawnRestartDaemon`): `RedirectStandardOutput/Error = true`, `BeginOutputReadLine/BeginErrorReadLine` called — required to drain pipes and prevent deadlock.

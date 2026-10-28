@@ -69,7 +69,7 @@ async function startBackend() {
   const spawnIt = () => {
     backend = process.env.LIASCAPE_BACKEND
       ? spawn(process.env.LIASCAPE_BACKEND, ["--serve"], { env, stdio: "inherit" })
-      : spawn("dotnet", ["run", "--project", "src/livepaper", "--", "--serve"], { cwd: repoRoot, env: { ...env, LIASCAPE_UI_DIR: uiDir }, stdio: "inherit" });
+      : spawn("dotnet", ["run", "--project", "src/backend", "--", "--serve"], { cwd: repoRoot, env: { ...env, LIASCAPE_UI_DIR: uiDir }, stdio: "inherit" });
     backend.once("exit", () => {
       if (fs.existsSync(portFile) || !env.LIASCAPE_PORT || process.env.LIASCAPE_PORT) return;
       delete env.LIASCAPE_PORT; spawnIt();

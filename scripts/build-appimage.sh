@@ -33,11 +33,11 @@ export LIASCAPE_UI_DIR="$LIB/ui"
 export LIASCAPE_TRANSITIONS_DIR="$LIB/transitions"
 [ -x "$LIB/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIB/liascape-transition"
 [ -x "$LIB/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIB/liascape-audio"
-export LIASCAPE_BACKEND="$LIB/backend/livepaper"
+export LIASCAPE_BACKEND="$LIB/backend/liascape-backend"
 export LIASCAPE_ELECTRON="$HERE/usr/lib/electron/electron"
 # bare → GUI (electron shell); any flag → headless backend
 if [ $# -eq 0 ]; then exec "$LIASCAPE_ELECTRON" "$LIB/shell"; fi
-exec "$LIB/backend/livepaper" "$@"
+exec "$LIB/backend/liascape-backend" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 

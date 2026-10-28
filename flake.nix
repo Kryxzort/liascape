@@ -41,15 +41,15 @@
       backend = pkgs.buildDotnetModule {
         pname = "livepaper-backend";
         inherit version;
-        src = ./src/livepaper;
-        projectFile = "livepaper.csproj";
+        src = ./src/backend;
+        projectFile = "liascape-backend.csproj";
         nugetDeps = ./deps.json;
         dotnet-sdk = pkgs.dotnet-sdk_10;
         dotnet-runtime = pkgs.dotnet-runtime_10;
         selfContainedBuild = true;
         runtimeId = "linux-x64";
-        # executable inside the csproj is named `livepaper`
-        executables = [ "livepaper" ];
+        # the csproj's AssemblyName: the executable is `liascape-backend`
+        executables = [ "liascape-backend" ];
       };
 
       # 3) Native transition renderer (wlr-layer-shell + EGL/GLES3, libmpv full-live decode).
@@ -209,7 +209,7 @@
           # GUI launcher: electron shell → spawns the backend (--serve) + loads the UI.
           makeWrapper ${pkgs.electron_42}/bin/electron $out/bin/livepaper-ui \
             --add-flags ${shellSrc} \
-            --set LIASCAPE_BACKEND ${backend}/bin/livepaper \
+            --set LIASCAPE_BACKEND ${backend}/bin/liascape-backend \
             --set LIASCAPE_UI_DIR ${ui} \
             --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
             --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
@@ -218,7 +218,7 @@
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           # Headless CLI (--restore/--action/daemons/--serve). Bare `livepaper` opens the GUI.
-          makeWrapper ${backend}/bin/livepaper $out/bin/livepaper-cli \
+          makeWrapper ${backend}/bin/liascape-backend $out/bin/livepaper-cli \
             --set LIASCAPE_UI_DIR ${ui} \
             --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
             --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \

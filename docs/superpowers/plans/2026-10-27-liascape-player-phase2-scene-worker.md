@@ -228,7 +228,7 @@ src/player/src/probe/workers.rs             `workers` probe
 src/player/src/bin/liascape-scene-worker/{main,ring,synthetic,audio,lwe,render}.rs   the worker binary
 src/player/tests/{worker,scene,lwe_build}.rs   new test targets; tests/common gains synthetic_scene + PrivatePw
 src/player/tests/onmachine/scene_corpus.sh  corpus runner
-src/livepaper/Player/*.cs, Helpers/PlayerHelper.cs, Web/ServerHost.cs, app/ui/src/views/Settings.tsx   adapter
+src/backend/Player/*.cs, Helpers/PlayerHelper.cs, Web/ServerHost.cs, app/ui/src/views/Settings.tsx   adapter
 ```
 
 **Render worker interplay (decided):** dmabuf imports, latching and release fences run on the **loop's own
@@ -874,7 +874,7 @@ GPU context losses (the record's `reason` starts "GL context lost").
 ### Task 11: Backend adapter — scenes playable under liascape-player
 
 **Files:**
-- Modify: `src/livepaper/Player/PlayerEngine.cs` (`ScenesPlayable(s) = s.AllowScenes && (IsLiascapePlayer ?
+- Modify: `src/backend/Player/PlayerEngine.cs` (`ScenesPlayable(s) = s.AllowScenes && (IsLiascapePlayer ?
   LiascapePlayerClient.Shared.ScenesAvailable : PlayerHelper.IsLweAvailable())`), `LiascapePlayerClient.cs` (capabilities
   from `hello`; `ScenesAvailable` = `scene` capability when connected, else `liascape-player scene-check` cached 30 s;
   `Topics` += `source.broken`), `LiascapePlayerMedia.cs` (`SourceProps`: a scene folder → `kind: "scene"` + `preview` =
@@ -928,7 +928,7 @@ advances the rotation without a crash mark.
     `/next` skips scenes; `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
     == false` with a reason; `/stop` → the worker pid gone ≤ 1 s; the legacy section starts/kills no mpvpaper
 - [x] **Step 2:** `bash scripts/test-liascape-player-adapter.sh` → the new checks FAIL. **Step 3:** implement.
-- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/livepaper -- --liascape-player-selftest` → PASS;
+- [x] **Step 4:** IT → `RESULT pass=N fail=0`; `dotnet run --project src/backend -- --liascape-player-selftest` → PASS;
   `cd app/ui && npm run build` ok.
 - [x] **Step 5:** Commit `Play Scenes Under liascape-player In The Backend`.
 

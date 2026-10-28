@@ -1,5 +1,5 @@
-src/livepaper/bin/
-src/livepaper/obj/
+src/backend/bin/
+src/backend/obj/
 publish/
 AppDir/
 node_modules/

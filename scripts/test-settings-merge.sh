@@ -26,14 +26,14 @@ DOTNET=${DOTNET:-$(command -v dotnet || true)}
 for t in ffmpeg jq curl python3 timeout; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
 B=$ROOT/src/player/target/debug/liascape-player
 # LIASCAPE_SM_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks)
-DLL=${LIASCAPE_SM_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll}
+DLL=${LIASCAPE_SM_DLL:-$ROOT/src/backend/bin/Debug/net10.0/liascape-backend.dll}
 if [ $BUILD = 1 ]; then
   if command -v nix >/dev/null; then
     (cd "$ROOT" && env -u LD_LIBRARY_PATH nix develop -c cargo build -q --manifest-path src/player/Cargo.toml) || { echo "cargo build failed"; exit 2; }
   else
     (cd "$ROOT" && env -u LD_LIBRARY_PATH cargo build -q --manifest-path src/player/Cargo.toml) || { echo "cargo build failed"; exit 2; }
   fi
-  "$DOTNET" build "$ROOT/src/livepaper" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
+  "$DOTNET" build "$ROOT/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
@@ -42,7 +42,7 @@ T=$(mktemp -d /tmp/liascape-sm-XXXXXX)   # short: a unix socket path must be < 1
 # run the backend from a private copy of its build (a `dotnet watch` on this tree may rebuild bin/Debug
 # mid-test — see test-liascape-player-adapter.sh's snapshot_backend)
 mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
-DLL=$T/backend/livepaper.dll
+DLL=$T/backend/liascape-backend.dll
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions

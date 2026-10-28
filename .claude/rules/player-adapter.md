@@ -1,11 +1,11 @@
 ---
 paths:
-  - "src/livepaper/Player/**"
+  - "src/backend/Player/**"
 ---
 
 # liascape-player adapter (`PlayerEngine` setting, Task 17)
 
-`src/livepaper/Player/` lets the C# backend drive the Rust `liascape-player` (`.claude/rules/player-core.md`)
+`src/backend/Player/` lets the C# backend drive the Rust `liascape-player` (`.claude/rules/player-core.md`)
 instead of mpvpaper + liascape-transition + LWE. `AppSettings.PlayerEngine` = `"legacy"` (default) |
 `"liascape-player"` (experimental; videos/images/colours, and since Phase 2 Task 11 **WE scenes** when the
 player can play them — § Scenes). Settings → Advanced → "Player engine". The switch is live.
@@ -727,10 +727,10 @@ wireplumber / pactl / paplay / parec): the only section with real audio — a pr
 one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR`; the whole IT
 exports `PULSE_SERVER` at that socket (libpulse can't fall back to another server or autospawn one); a player WITHOUT
 `--ao null` (its bus on the private PipeWire), then back to the `--ao null` one. Checks § Auto-mute above.
-`LIASCAPE_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
+`LIASCAPE_IT_DLL=<liascape-backend.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
-`LIASCAPE_PLAYER_BIN=<repo>/src/player/target/debug/liascape-player dotnet run --project src/livepaper --
+`LIASCAPE_PLAYER_BIN=<repo>/src/player/target/debug/liascape-player dotnet run --project src/backend --
 --liascape-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
 assertions on synthetic `pactl` blocks, **`ScenePropertyAssertions`** (a project.json with the corpus's odd cases —
 BOM, untyped / `"Text"` HTML labels, `ui_*` keys, numeric combo values, `fraction: false`, a 0–255 colour, conditions

@@ -1,11 +1,11 @@
 ---
 paths:
-  - "src/livepaper/Helpers/LibraryService.cs"
-  - "src/livepaper/Helpers/LibraryStore.cs"
-  - "src/livepaper/Helpers/SceneProperties.cs"
-  - "src/livepaper/Helpers/DownloadHelper.cs"
-  - "src/livepaper/Helpers/ImportService.cs"
-  - "src/livepaper/Models/LibraryItem.cs"
+  - "src/backend/Helpers/LibraryService.cs"
+  - "src/backend/Helpers/LibraryStore.cs"
+  - "src/backend/Helpers/SceneProperties.cs"
+  - "src/backend/Helpers/DownloadHelper.cs"
+  - "src/backend/Helpers/ImportService.cs"
+  - "src/backend/Models/LibraryItem.cs"
 ---
 
 ## Library layout (per-item folders + per-source `index.json`)

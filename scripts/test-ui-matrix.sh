@@ -109,29 +109,29 @@ XVFB=${XVFB:-$(ls /nix/store/*-xorg-server-*/bin/Xvfb 2>/dev/null | head -1)}
 [ -x "$XVFB" ] || XVFB=$(command -v Xvfb || true)
 [ -x "$XVFB" ] || { echo "no Xvfb — set XVFB=/path/to/Xvfb"; exit 2; }
 B=$ROOT/src/player/target/debug/liascape-player
-DLL=${LIASCAPE_MATRIX_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll} # LIASCAPE_MATRIX_DLL: another backend build (an older commit's — a fix RED)
+DLL=${LIASCAPE_MATRIX_DLL:-$ROOT/src/backend/bin/Debug/net10.0/liascape-backend.dll} # LIASCAPE_MATRIX_DLL: another backend build (an older commit's — a fix RED)
 
 if [ $BUILD = 1 ]; then
   echo "== build"
   (cd "$ROOT" && env -u LD_LIBRARY_PATH cargo build -q --manifest-path src/player/Cargo.toml) || { echo "cargo build failed"; exit 2; }
-  "$DOTNET" build "$ROOT/src/livepaper" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
+  "$DOTNET" build "$ROOT/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 [ -x "${B%/*}/liascape-scene-worker" ] || { echo "not built: ${B%/*}/liascape-scene-worker (drop --no-build)"; exit 2; }
 
 # Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
-# bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
+# bin/Debug whenever a build here touches obj/, and mid-rebuild liascape-backend.runtimeconfig.json is briefly
 # missing — stacks started then died ("backend didn't start": libhostpolicy.so … runtimeconfig.json not
 # found; 2 of 6 matrix shards once). Copied whole, retried until the DLL didn't change during the copy.
 snapshot_backend() {   # $1 = destination dir → prints the copied DLL's path
   local src; src=$(dirname "$DLL")
   for _ in $(seq 1 60); do
-    if [ -f "$src/livepaper.runtimeconfig.json" ] && [ -f "$DLL" ]; then
+    if [ -f "$src/liascape-backend.runtimeconfig.json" ] && [ -f "$DLL" ]; then
       local m0; m0=$(stat -c %Y.%s "$DLL")
       mkdir -p "$1" && cp -a "$src/." "$1/" 2>/dev/null
-      [ -f "$1/livepaper.runtimeconfig.json" ] && [ -f "$1/livepaper.dll" ] && [ "$(stat -c %Y.%s "$DLL")" = "$m0" ] \
-        && { echo "$1/livepaper.dll"; return 0; }
+      [ -f "$1/liascape-backend.runtimeconfig.json" ] && [ -f "$1/liascape-backend.dll" ] && [ "$(stat -c %Y.%s "$DLL")" = "$m0" ] \
+        && { echo "$1/liascape-backend.dll"; return 0; }
     fi
     sleep 1
   done

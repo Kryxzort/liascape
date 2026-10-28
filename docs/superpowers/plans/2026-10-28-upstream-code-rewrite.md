@@ -11,14 +11,14 @@ entirely").
 
 | File | Upstream lines |
 |---|---|
-| `src/livepaper/Helpers/PlayerHelper.cs` | 601 (mostly legacy) |
-| `src/livepaper/Scrapers/MotionBgsScraper.cs` | 231 |
-| `src/livepaper/Helpers/ImportService.cs` | 112 |
-| `src/livepaper/Scrapers/MoewallsScraper.cs` | 92 |
-| `src/livepaper/Scrapers/WallpaperEngineScraper.cs` | 83 |
-| `src/livepaper/Scrapers/DesktophutScraper.cs` | 81 |
-| `src/livepaper/Helpers/DownloadHelper.cs` | 56 |
-| `src/livepaper/Models/AppSettings.cs` | 50 |
+| `src/backend/Helpers/PlayerHelper.cs` | 601 (mostly legacy) |
+| `src/backend/Scrapers/MotionBgsScraper.cs` | 231 |
+| `src/backend/Helpers/ImportService.cs` | 112 |
+| `src/backend/Scrapers/MoewallsScraper.cs` | 92 |
+| `src/backend/Scrapers/WallpaperEngineScraper.cs` | 83 |
+| `src/backend/Scrapers/DesktophutScraper.cs` | 81 |
+| `src/backend/Helpers/DownloadHelper.cs` | 56 |
+| `src/backend/Models/AppSettings.cs` | 50 |
 | `PlaylistService.cs`, `AudioMonitor.cs`, `Program.cs`, `MotionBgsService.cs`, `build-appimage.sh`, `WallpaperEngineService.cs`, `SettingsService.cs`, … | < 50 each |
 
 ## Rules

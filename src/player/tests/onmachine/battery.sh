@@ -203,7 +203,7 @@ fi
 
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || DOTNET=/nix/store/a9ml93kizcwff3yakmqw4qs3w4llpbf2-dotnet-sdk-wrapped-10.0.301/bin/dotnet
-DLL=$REPO/src/livepaper/bin/Debug/net10.0/livepaper.dll
+DLL=$REPO/src/backend/bin/Debug/net10.0/liascape-backend.dll
 
 # ------------------------------------------------------------------ small helpers
 ts() { date +%s.%N; }
@@ -657,7 +657,7 @@ setup_live_backend() {
 
 setup_hermetic_backend() {
   ENFORCE_FRAME_TIMING=0
-  [ -f "$DLL" ] || { err "hermetic mode needs the backend built: $DLL missing (dotnet build src/livepaper)"; exit 2; }
+  [ -f "$DLL" ] || { err "hermetic mode needs the backend built: $DLL missing (dotnet build src/backend)"; exit 2; }
   if [ "$BUILD" = 1 ]; then
     log "== build (hermetic --build)"
     if command -v nix >/dev/null; then
@@ -665,7 +665,7 @@ setup_hermetic_backend() {
     else
       (cd "$REPO" && env -u LD_LIBRARY_PATH cargo build -q --manifest-path src/player/Cargo.toml) || { err "cargo build failed"; exit 2; }
     fi
-    "$DOTNET" build "$REPO/src/livepaper" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
+    "$DOTNET" build "$REPO/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   fi
   HERMETIC_T=$(mktemp -d /tmp/liascape-battery-XXXXXX)   # short: a unix socket path must be < 108 bytes
   mkdir -p "$HERMETIC_T/home/.config/livepaper" "$HERMETIC_T/home/.cache" "$HERMETIC_T/home/.local/share" "$HERMETIC_T/rt" "$HERMETIC_T/st"
@@ -844,7 +844,7 @@ restore_cli_invoke() {
     # exact execve's own environ via `strace -v`), yet it still ran the legacy path (`Apply()` ->
     # `SwitchToFile` -> `setsid mpvpaper ...`). That ruled out a missing-env-var/PATH problem, so
     # second: `strings -el` (UTF-16, .NET string literals) on the installed package's
-    # `livepaper.dll` for "LIASCAPE_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
+    # `liascape-backend.dll` for "LIASCAPE_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
     # on this worktree's own dev build (`$DLL`, what `livepaper-watch`/dotnet watch actually runs)
     # finds both -- the NixOS-packaged `livepaper` is a STALE BUILD that predates liascape-player/
     # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LIASCAPE_PLAYER_BIN`
