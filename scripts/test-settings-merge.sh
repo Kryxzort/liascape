@@ -78,7 +78,7 @@ cat > "$SJ" <<EOF
  "DemuxerMaxBytes":32,"DemuxerMaxBackBytes":8,"LweSilent":true,"LweVolume":55,
  "LweMonitors":[{"Name":"DP-1","Fps":144,"IsPrimary":true},{"Name":"HDMI-A-1","Fps":30,"IsPrimary":false}],
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,
- "GlobalIntervalSeconds":600,"GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,
+ "GlobalIntervalSeconds":600,"GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
  "TransitionMethod":"full-live","AdvancedSettings":true,"KeepPauseOnSwitch":true,"RestartIntervalSeconds":0,"AutoMute":false,
  "AllowScenes":true,"WorkshopAcquireMode":"steamcmd","SteamRefreshToken":"test-refresh-token","SteamAccessToken":"test-access-token",
@@ -114,6 +114,14 @@ snap s0
 [ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.lweMonitors|length' s0)" = 2 ] \
   && ok "loaded the file, not the defaults (volume 80, theme, 2 LweMonitors)" || bad "loaded volume $(f .volume s0) theme $(f .theme s0)"
 [ "$(f 'has("lweSilent")' s0)" = false ] && ok "GET /settings has no lweSilent" || bad "GET /settings still has lweSilent"
+# the rotation redesign (2026-10-28): "Wait for video to end after interval" is gone and the separate minimum merged
+# into the interval field (= the minimum under advance-on-end) — an old file's keys load as unknown ones, no migration
+[ "$(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")] | any' s0)" = false ] \
+  && ok "GET /settings has no globalWaitForVideoEnd / playlistWaitForVideoEnd / globalMinPlaySeconds (removed)" \
+  || bad "GET /settings still has a removed rotation key: $(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")]' s0)"
+[ "$(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)" = '[600,false,0]' ] \
+  && ok "the rotation fields that stay loaded from the old file as they were (interval 600, advance off, max 0)" \
+  || bad "rotation fields after loading an old file: $(f '[.globalIntervalSeconds, .globalAdvanceOnVideoEnd, .globalMaxPlaySeconds]' s0)"
 
 echo "== a partial body changes only its own fields (nothing playing)"
 post /settings '{"Theme":"Nord"}' >/dev/null && ok "POST {\"Theme\":\"Nord\"} → 200" || bad "POST {\"Theme\":\"Nord\"} failed"
@@ -124,6 +132,8 @@ c=$(changed s0 s1 '["theme"]')
 [ "$(disk '.SteamRefreshToken == "test-refresh-token" and .SteamAccessToken == "test-access-token"')" = true ] \
   && ok "the Steam tokens survived on disk" || bad "the Steam tokens were reset on disk"
 [ "$(disk 'has("LweSilent")')" = false ] && ok "the save dropped LweSilent from settings.json" || bad "settings.json still has LweSilent after a save"
+[ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
+  && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"
 if [ "$(engine)" != lp-player ]; then
   bad "the partial body switched the engine to $(engine) — stopping here (every check below plays on lp-player)"
   echo "RESULT pass=$pass fail=$fail"; exit 1
@@ -155,16 +165,16 @@ for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"LweMonitors":
 done
 snap s7; same s6 s7 '[]' "the rejected bodies"
 
-echo "== the advance-on-end play-time limits: partial bodies, clamped 0…359999 s"
-snap l0; post /settings '{"GlobalMinPlaySeconds":30}' >/dev/null; snap l1
-[ "$(f .globalMinPlaySeconds l1)" = 30 ] && ok "{GlobalMinPlaySeconds:30} → 30" || bad "globalMinPlaySeconds → $(f .globalMinPlaySeconds l1)"
-same l0 l1 '["globalMinPlaySeconds"]' "{GlobalMinPlaySeconds:30}"
+echo "== the advance-on-end maximum play time: partial bodies, clamped 0…359999 s; the removed keys are unknown ones"
+snap l0; post /settings '{"GlobalMinPlaySeconds":30,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true}' >/dev/null; snap l1
+[ "$(f '[has("globalWaitForVideoEnd"), has("globalMinPlaySeconds")] | any' l1)" = false ] && ok "{GlobalMinPlaySeconds, GlobalWaitForVideoEnd} → ignored (removed)" || bad "a removed rotation key came back: $(f '[has("globalWaitForVideoEnd"), has("globalMinPlaySeconds")]' l1)"
+same l0 l1 '[]' "{GlobalMinPlaySeconds:30, GlobalWaitForVideoEnd:true, PlaylistWaitForVideoEnd:true}"
 post /settings '{"globalMaxPlaySeconds":-5}' >/dev/null; snap l2
 [ "$(f .globalMaxPlaySeconds l2)" = 0 ] && ok "{globalMaxPlaySeconds:-5} → clamped to 0 (off)" || bad "globalMaxPlaySeconds -5 → $(f .globalMaxPlaySeconds l2)"
 post /settings '{"GlobalMaxPlaySeconds":99999999}' >/dev/null; snap l3
 [ "$(f .globalMaxPlaySeconds l3)" = 359999 ] && ok "{GlobalMaxPlaySeconds:99999999} → clamped to 359999" || bad "globalMaxPlaySeconds 99999999 → $(f .globalMaxPlaySeconds l3)"
 same l2 l3 '["globalMaxPlaySeconds"]' "{GlobalMaxPlaySeconds:99999999}"
-post /settings '{"GlobalMinPlaySeconds":0,"GlobalMaxPlaySeconds":0}' >/dev/null; snap l4
+post /settings '{"GlobalMaxPlaySeconds":0}' >/dev/null; snap l4
 same l0 l4 '[]' "the limits back to 0"
 
 echo "== parallel partial bodies all land"
@@ -251,7 +261,7 @@ for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body sets a maximum play time on a running advance-on-end rotation (live)"
-post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":600}' >/dev/null
+post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0}' >/dev/null   # minimum 0: c1 advances at its end
 post /playlist/play "{\"paths\":[\"$C1\",\"$C2\"],\"settings\":{\"Order\":0}}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
 sleep 1; t_mx=$(date +%s%3N); p_mx=$(cur time_pos)
@@ -261,7 +271,7 @@ post /settings '{"GlobalMaxPlaySeconds":2}' >/dev/null
 for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 d_mx=$(( $(date +%s%3N) - t_mx ))
 [ "$(cur path)" = "$C2" ] && [ "$d_mx" -lt "$lim_mx" ] && ok "{GlobalMaxPlaySeconds:2} → c1 (at ${p_mx} s of 6) left for c2 $d_mx ms after (< $lim_mx; no replay)" || bad "max 2 s live: cur $(cur path) $d_mx ms after (c1 was at ${p_mx} s; want < $lim_mx ms)"
-post /settings '{"GlobalMaxPlaySeconds":0,"GlobalAdvanceOnVideoEnd":false}' >/dev/null
+post /settings '{"GlobalMaxPlaySeconds":0,"GlobalAdvanceOnVideoEnd":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body switches the engine (nothing playing → nothing starts)"

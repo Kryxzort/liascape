@@ -40,25 +40,48 @@ public static class LpPlayerSelfTest
         return 1;
     }
 
-    // ---- advance-on-end play-time limits (PlayerHelper § play-time limits) -------------------
+    // ---- the rotation: advance-on-end's minimum (= the interval field) / maximum (PlayerHelper § Rotation) ---------------
     private static void PlayLimitAssertions(List<string> fails)
     {
-        // effective: the playlist's own only when it overrides the global rotation
-        var g = new AppSettings { GlobalMinPlaySeconds = 30, GlobalMaxPlaySeconds = 600 };
-        var own = new PlaylistSettings { OverrideGlobalSettings = true, MinPlaySeconds = 5, MaxPlaySeconds = 0 };
-        var follows = new PlaylistSettings { OverrideGlobalSettings = false, MinPlaySeconds = 5, MaxPlaySeconds = 7 };
-        void Eff(PlaylistSettings? p, (int, int) want, string what)
+        // effective: the playlist's own rotation only when it overrides the global one
+        var g = new AppSettings { GlobalIntervalSeconds = 30, GlobalAdvanceOnVideoEnd = true, GlobalMaxPlaySeconds = 600 };
+        var own = new PlaylistSettings { OverrideGlobalSettings = true, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 0 };
+        var follows = new PlaylistSettings { OverrideGlobalSettings = false, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 7 };
+        void Eff(PlaylistSettings? p, (int, bool, int) want, string what)
         {
-            var got = PlayerHelper.EffectivePlayLimits(g, p);
-            if (got != want) fails.Add($"EffectivePlayLimits({what}) = {got}, want {want}");
+            var got = PlayerHelper.EffectiveRotation(g, p);
+            if (got != want) fails.Add($"EffectiveRotation({what}) = {got}, want {want}");
         }
-        Eff(own, (5, 0), "override"); Eff(follows, (30, 600), "follows the globals"); Eff(null, (30, 600), "no playlist state");
-        // clamped 0…359999 (negative = off)
+        Eff(own, (5, false, 0), "override"); Eff(follows, (30, true, 600), "follows the globals"); Eff(null, (30, true, 600), "no playlist state");
+        // the limits a rotation acts on: under advance-on-end the interval IS the minimum; off, the interval is the
+        // timer and neither limit applies
+        foreach (var (iv, adv, max, want) in new[] { (30, true, 600, (30, 600)), (0, true, 0, (0, 0)), (30, false, 600, (0, 0)),
+                                                     (20, true, 2, (20, 2)), (-4, true, 400000, (0, 359999)) })
+            if (PlayerHelper.PlayLimits(iv, adv, max) != want) fails.Add($"PlayLimits(interval {iv}, advance {adv}, max {max}) = {PlayerHelper.PlayLimits(iv, adv, max)}, want {want}");
+        // the defaults = the old default rotation (switch at each video end, 30 min at most), globally and per playlist
+        var d = new AppSettings(); var dp = new PlaylistSettings();
+        if ((d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds) != (0, true, 1800))
+            fails.Add($"default global rotation = {(d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds)}, want (0, True, 1800)");
+        if ((dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds) != (0, true, 1800))
+            fails.Add($"default playlist rotation = {(dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds)}, want (0, True, 1800)");
+        // the removed wait toggle / separate minimum: gone from the models (an old file's keys load as unknown ones)
+        foreach (var t in new[] { typeof(AppSettings), typeof(PlaylistSettings), typeof(LastSession) })
+            foreach (var name in new[] { "GlobalWaitForVideoEnd", "PlaylistWaitForVideoEnd", "WaitForVideoEnd", "GlobalMinPlaySeconds", "MinPlaySeconds" })
+                if (t.GetProperty(name) != null) fails.Add($"{t.Name}.{name} still exists (the rotation redesign removed it)");
+        var old = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":20,"GlobalAdvanceOnVideoEnd":true,"GlobalWaitForVideoEnd":true,"GlobalMinPlaySeconds":9,"GlobalMaxPlaySeconds":0}""")!;
+        if ((old.GlobalIntervalSeconds, old.GlobalAdvanceOnVideoEnd, old.GlobalMaxPlaySeconds) != (20, true, 0))
+            fails.Add($"an old-model settings.json loads as {(old.GlobalIntervalSeconds, old.GlobalAdvanceOnVideoEnd, old.GlobalMaxPlaySeconds)}, want (20, True, 0) — its removed keys ignored");
+        // the maximum is clamped 0…359999 (negative = off)
         foreach (var (v, want) in new[] { (-5, 0), (0, 0), (90, 90), (359999, 359999), (400000, 359999) })
         {
-            var s = new AppSettings { GlobalMaxPlaySeconds = v }; var p = new PlaylistSettings { MinPlaySeconds = v };
-            if (s.GlobalMaxPlaySeconds != want || p.MinPlaySeconds != want) fails.Add($"play limit {v} → {s.GlobalMaxPlaySeconds}/{p.MinPlaySeconds}, want {want}");
+            var s = new AppSettings { GlobalMaxPlaySeconds = v }; var p = new PlaylistSettings { MaxPlaySeconds = v };
+            if (s.GlobalMaxPlaySeconds != want || p.MaxPlaySeconds != want) fails.Add($"max play time {v} → {s.GlobalMaxPlaySeconds}/{p.MaxPlaySeconds}, want {want}");
         }
+        // a scene (it never ends) moves on at the minimum under advance-on-end; no minimum → never by it
+        foreach (var (adv, rot, scene, played, min, want) in new[] {
+                 (true, true, true, 3000L, 3000L, true), (true, true, true, 2999L, 3000L, false), (true, true, true, 9000L, 0L, false),
+                 (false, true, true, 9000L, 3000L, false), (true, false, true, 9000L, 3000L, false), (true, true, false, 9000L, 3000L, false) })
+            if (PlayerHelper.SceneMinReached(adv, rot, scene, played, min) != want) fails.Add($"SceneMinReached(advance {adv}, rotates {rot}, scene {scene}, played {played}, min {min}) != {want}");
         // the minimum is reached by the loop playing now: played + its remaining (+150 ms tolerance)
         foreach (var (played, rem, min, want) in new (long, long?, long, bool)[] {
                  (0, 2000, 0, true),          // off

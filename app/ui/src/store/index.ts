@@ -26,8 +26,7 @@ function applyThemeVars(t: Theme) {
 }
 
 const DEFAULT_PS: PlaylistSettings = {
-  order: 0, overrideGlobalSettings: false, intervalSeconds: 1800, advanceOnVideoEnd: true, waitForVideoEnd: false,
-  minPlaySeconds: 0, maxPlaySeconds: 0,
+  order: 0, overrideGlobalSettings: false, intervalSeconds: 0, advanceOnVideoEnd: true, maxPlaySeconds: 1800,
   transitionEnabled: false, transitionEffectIds: [], transitionDurationMs: 600, transitionDurationMaxMs: 0, transitionShuffle: true,
 };
 
@@ -115,7 +114,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFps: 0, wallpaperBgAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnSwitchOnly: false, keepPauseOnSwitch: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartIntervalSeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
-  globalAdvanceOnVideoEnd: true, globalWaitForVideoEnd: false, globalIntervalSeconds: 1800, globalMinPlaySeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
+  globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 1800, autoAddLibraryToPlaylist: false,
   globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", transitionLagOffsetMs: -30,
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 200, autoUnmuteDelayMs: 2000, autoMuteThresholdDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxBytes: 20, demuxerMaxBackBytes: 5, playerEngine: "legacy",
@@ -320,7 +319,7 @@ export const useStore = create<State>((set, get) => ({
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
     settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
-    if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalAdvanceOnVideoEnd", "globalIntervalSeconds"].includes(key))
+    if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalAdvanceOnVideoEnd", "globalIntervalSeconds", "globalMaxPlaySeconds"].includes(key))
       get().refreshPlayingStatus();
   },
   async clearLibrary() { await api.libraryClear(); await get().loadLibrary(); get().setStatus("Library cleared"); },
@@ -394,11 +393,15 @@ function buildPlayingStatus(get: () => State): string {
   const pl = st.playlist, ps = st.playlistSettings;
   const inPl = pl.length > 1 && pl.includes(st.playingPath);
   const advance = ps.overrideGlobalSettings ? ps.advanceOnVideoEnd : ((set.globalAdvanceOnVideoEnd as boolean) ?? true);
-  const interval = ps.overrideGlobalSettings ? ps.intervalSeconds : ((set.globalIntervalSeconds as number) ?? 1800);
+  const interval = ps.overrideGlobalSettings ? ps.intervalSeconds : ((set.globalIntervalSeconds as number) ?? 0);
+  const maxPlay = ps.overrideGlobalSettings ? ps.maxPlaySeconds : ((set.globalMaxPlaySeconds as number) ?? 1800);
   const shuffle = ps.order === 1;
   const cur = titleOf(st.playingPath);
   if (inPl) {
-    let desc = advance ? `${pl.length} wallpapers, on video end` : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
+    // advance-on-end: the interval is the minimum play time (player-adapter.md § Rotation)
+    let desc = advance
+      ? `${pl.length} wallpapers, on video end${interval > 0 ? `, at least ${fmtInterval(interval)}` : ""}${maxPlay > 0 ? `, at most ${fmtInterval(maxPlay)}` : ""}`
+      : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
     if (shuffle) desc += " (shuffled)";
     if (cur) desc += ` → ${cur}`;
     parts.push(desc);

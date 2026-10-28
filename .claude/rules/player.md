@@ -25,8 +25,8 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 **Playlist (Play All / Shuffle):**
 - Shuffle **pre-applied** to path array in `ApplyPlaylist()` (not via `--shuffle`) so order is known for `playlist_observer_paths.json`
 - Single video → `Launch(opts, path)` directly
-- Multi-video (no scenes, or scenes with no interval) → `ApplyTimedPlaylist(intervalSeconds: 0, waitForVideoEnd: false, advanceOnVideoEnd: true)` — livepaper-owned; **no `--playlist=file` or `--loop-playlist=inf`**
-- Scenes present + `AllowScenes` + interval > 0 → `ApplyTimedPlaylist(secs, waitForVideoEnd: true, advanceOnVideoEnd: true)`
+- Multi-video → `ApplyTimedPlaylist(intervalSeconds, advanceOnVideoEnd: true)` (the interval = the minimum play time) — livepaper-owned; **no `--playlist=file` or `--loop-playlist=inf`**
+- Scenes present + playable → the same (a scene moves on at the minimum, else the maximum, else a user switch — `player-adapter.md` § Rotation; the old fallback to `GlobalIntervalSeconds` is gone)
 - Multi-video playlists are livepaper-owned through the timed machinery (no `playlist.txt` / `--playlist=file`)
 
 **`AppendToActivePlaylist(IReadOnlyList<string> paths)`** — injects new paths into a running session:
@@ -52,7 +52,7 @@ is a live texture like a video, so every method runs as picked for V→S, S→V 
 no `--reveal-b`, no `SceneTransitionDelayMs` cover. full-live animates both sides; reveal/frozen hold a
 scene A by a still copy of its last frame (its worker stops rendering at the hold); frozen holds a scene
 B on its first frame until the handoff. A scene never ends, so an `align: end` switch away from one
-("wait for video end") starts as soon as B is ready. `player-core.md` § Scene worker → "Transitions
+starts as soon as B is ready. `player-core.md` § Scene worker → "Transitions
 with scenes (Task 9)".
 
 **Methods + per-switch auto-fallback.** One picker (`TransitionMethod` = frozen|reveal|full-live);
@@ -95,7 +95,7 @@ constrained** — it can't be a live GL texture: a scene **A** → LWE `--screen
   start. CLOSED-LOOP: the backend lead (`durationNow + LastCoverMs + slack`, duration re-read per
   iteration → live) only needs to fire EARLY — the gate spends the slack invisibly. Fired LATE (cover
   blowout) → immediate start. **Loop semantics mirror the desktop** (`--from-loop`/`--to-loop` =
-  `settings.Loop`, exactly what mpvpaper runs with — timed / wait-for-video-end sessions included):
+  `settings.Loop`, exactly what mpvpaper runs with — timed / advance-on-end sessions included):
   a side **shorter than the effect** keeps LOOPING through it when its context loops (that's its
   normal on-screen look), and **freezes on its last frame** (`keep-open=yes`) when Loop is off —
   never rewinds a non-looping clip, never goes black. The aligned advance additionally runtime-pins A
@@ -206,7 +206,7 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `--restart-daemon` periodic
 
 **`ArmVideoEndWait(string next, bool prevIsVideo = true)`** — canonical way to start a `DoVideoEndWait` task. Sets `_waitingForVideoEnd = true`, creates and assigns `_waitCts`, spawns task. Always use this — never inline the 3-line pattern.
 
-**`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. If `_advanceOnVideoEnd && !IsScenePath(path)`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Else: resets `_timedRemainingMs` to full interval. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
+**`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. Resets the item's play time and `_timedRemainingMs`; if `_advanceOnVideoEnd && !IsScenePath(path) && CanRotate`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
 
 **`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed. Under lp-player an aligned switch's B counts as playing from its `transition.started` (its effect runs, `cur:*` = B) — `DoVideoEndWait` commits it then, not at the handoff, like legacy at its overlay's start (player-adapter.md, `DoVideoEndWait` row); a next/prev/random mid-effect steps from B.
 
@@ -230,11 +230,7 @@ both engines. Guard: matrix `seq:random+next` / `seq:random+prev` (`playlist`, `
 
 ## Mode Switches (mid-session, no mpvpaper restart)
 
-**`SwitchFromTimedToAdvanceOnEnd`**: cancels `_waitCts`, un-advances `_historyIndex` if pre-fetch was in flight, sets `_advanceOnVideoEnd = true` / `_timedInterval = Zero`, preserves `_timedRemainingMs`, re-arms `DoVideoEndWait`. Does NOT restart mpvpaper.
-
-**`SwitchFromAdvanceOnEndToTimed`**: cancels `_waitCts`, clears `_waitingForVideoEnd`, converts mpv to single-file loop (`loop-file=inf`), starts the livepaper timer.
-
-**`UpdateTimedSettings`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Never restarts current wallpaper.
+**`UpdateTimedSettings(shuffle, interval, advance)`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Advance toggled → cancel / re-arm the end-of-video wait; a new minimum under advance-on-end (lp-player) → re-arm the armed one to the same B. Never restarts current wallpaper. (`SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` had no caller — removed 2026-10-28.)
 
 **App close**: the Electron shell (`app/shell/main.js`, `window-all-closed` / `before-quit`) kills `livepaper --serve`. The backend's ASP.NET `app.Lifetime.ApplicationStopping` hook (`Web/ServerHost.cs`) is the close handler: it `AudioMonitor.Stop()`s and hands mute back to a detached `--monitor` when AutoMute + playing.
 

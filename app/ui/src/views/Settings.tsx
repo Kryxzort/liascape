@@ -10,7 +10,7 @@ import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
-import { PlayTimeInput } from "../components/PlayTimeInput";
+import { PlayTimeInput, ROT_HINT } from "../components/PlayTimeInput";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
 const lp = (window as unknown as { lp?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).lp;
@@ -180,11 +180,9 @@ export const Settings = memo(function Settings() {
   // the summary: what breaks something switched on / selected now (the row icons show regardless)
   const broken = features.filter((f) => f.ok === false && f.inUse !== false);
 
-  // interval H/M/S
-  const iv = g("globalIntervalSeconds", 1800);
-  const aoe = g("globalAdvanceOnVideoEnd", true); // the play-time limits apply only under advance-on-end
-  const setIv = (h: number, m: number, sec: number) => set("globalIntervalSeconds", h * 3600 + m * 60 + sec);
-  const H = Math.floor(iv / 3600), M = Math.floor((iv % 3600) / 60), S = iv % 60;
+  // the rotation: "Switch when video ends" off → the interval is "Switch every" (a plain timer); on → the SAME field
+  // is "Minimum play time", with "Maximum play time" right below (player-adapter.md § Rotation)
+  const aoe = g("globalAdvanceOnVideoEnd", true);
 
   const adv = g("advancedSettings", false); // gates demuxer / hw-decode / cache / copy-files / live previews
   type Mon = { name: string; fps: number; isPrimary: boolean };
@@ -256,20 +254,14 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Rotation (global)" icon={<Repeat size={15} />}>
-        <Row label="Switch when video ends" rk="globalAdvanceOnVideoEnd"><input type="checkbox" checked={g("globalAdvanceOnVideoEnd", true)} onChange={(e) => set("globalAdvanceOnVideoEnd", e.target.checked)} /></Row>
-        {/* the advance-on-end play-time limits: only under "Switch when video ends" (greyed otherwise) */}
-        <Row label="Minimum play time" hint="a shorter video loops until it, then switches at the end of that loop · a still image shows this long · 0 = off" disabled={!aoe} rk="globalMinPlaySeconds">
-          <PlayTimeInput label="minimum play time (s)" value={g("globalMinPlaySeconds", 0)} disabled={!aoe} onChange={(v) => set("globalMinPlaySeconds", v)} /></Row>
-        <Row label="Maximum play time" hint="a longer video — and a scene, which never ends — switches once it played this long · wall-clock (speed doesn't stretch it), a pause stops it · the interval still applies too, whichever comes first · 0 = off" disabled={!aoe} rk="globalMaxPlaySeconds">
-          <PlayTimeInput label="maximum play time (s)" value={g("globalMaxPlaySeconds", 0)} disabled={!aoe} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
-        <Row label="Wait for video to end after interval" rk="globalWaitForVideoEnd"><input type="checkbox" checked={g("globalWaitForVideoEnd", false)} onChange={(e) => set("globalWaitForVideoEnd", e.target.checked)} /></Row>
-        <Row label="Interval" rk="globalIntervalSeconds">
-          <div className="hms">
-            <NumInput min={0} max={99} value={H} onChange={(v) => setIv(v, M, S)} /><span>h</span>
-            <NumInput min={0} max={59} value={M} onChange={(v) => setIv(H, v, S)} /><span>m</span>
-            <NumInput min={0} max={59} value={S} onChange={(v) => setIv(H, M, v)} /><span>s</span>
-          </div>
-        </Row>
+        <Row label="Switch when video ends" rk="globalAdvanceOnVideoEnd"><input type="checkbox" checked={aoe} onChange={(e) => set("globalAdvanceOnVideoEnd", e.target.checked)} /></Row>
+        {aoe ? <>
+          <Row label="Minimum play time" hint={ROT_HINT.min} rk="globalIntervalSeconds">
+            <PlayTimeInput label="Minimum play time" zeroText="none" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
+          <Row label="Maximum play time" hint={ROT_HINT.max} rk="globalMaxPlaySeconds">
+            <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 1800)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
+        </> : <Row label="Switch every" hint={ROT_HINT.every} rk="globalIntervalSeconds">
+          <PlayTimeInput label="Switch every" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>}
         <Row label="Auto-add new library items to playlist" rk="autoAddLibraryToPlaylist"><input type="checkbox" checked={g("autoAddLibraryToPlaylist", false)} onChange={(e) => set("autoAddLibraryToPlaylist", e.target.checked)} /></Row>
         <Row label="Transitions" hint="animated effect between wallpaper switches" rk="globalTransitionEnabled">
           <button className="btn ghost ico" onClick={() => setTrPicker(true)}><Sparkles size={14} />

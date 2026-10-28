@@ -3782,8 +3782,8 @@ is never a still (`is_still`) but **never ends** (`never_ends` = still | scene).
   0 and never emits `Ended`, so the M2 fallback was the only way out, logging
   `transition.align_fallback`); End leaves such an A's (inert) `loop` alone; `follows_a_end`
   skips it. The same rule in the runtime's parked path (`transition_parked`: a parked scene A →
-  handed off at once, § Runtime "No output left"). This is what the backend's "wait for video
-  end" / restore-aligned switches send when the playing item is a scene.
+  handed off at once, § Runtime "No output left"). This is what the backend's restore-aligned switches
+  send when the playing item is a scene (a scene never ends: its rotation moves it on itself).
 - **Tests** (`tests/transition.rs`, harness, synthetic `frame_index` scenes, frame-index videos
   without audio so every B onset is immediate and every gain exact): `v_to_s_each_method`,
   `s_to_v_each_method`, `s_to_s_each_method` (`combo`: full-live — both sides keep producing
