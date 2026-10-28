@@ -27,7 +27,8 @@
 //! seconds for a cold LWE build) the protocol thread answers `Ping`s itself, so a slow load is
 //! never read as a hang (bounded: `LP_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
 //!
-//! Task 6 adds a third, `lp-scene-audio` (`audio.rs`): the scene's sound as a PipeWire stream
+//! Task 6 adds a third, `lp-scene-audio` (`audio.rs`; started only once the loaded scene turns
+//! out to have a sound — a soundless scene has none): the scene's sound as a PipeWire stream
 //! on the player bus — pulled from LWE (or the synthetic tone), time-stretched to the scene's
 //! speed (`stretch.rs`), gated and gained in dB. The protocol thread applies `Gain`, `Paused`,
 //! `NoAudio`, `Route` and `Speed` to it directly; a quit waits until the stream is silent.
@@ -411,7 +412,7 @@ struct Renderer {
     sock: OwnedFd,
     inbox: Inbox,
     gate: Arc<LoadGate>,
-    /// Task 6: the scene's audio stream (its thread starts at `Start`).
+    /// Task 6: the scene's audio stream (its thread starts when a sound is installed).
     audio: Arc<audio::Control>,
     audio_started: bool,
     gfx: Gfx,
@@ -563,7 +564,7 @@ impl Renderer {
         let (x, y, b) = self.pointer;
         scene.set_pointer(x, y, b);
         if scene.has_audio {
-            self.audio.install(Box::new(scene.audio_puller()));
+            self.install_audio(Box::new(scene.audio_puller()));
         }
         self.scene = Some(SceneImpl::Lwe(scene));
         self.send(&ready);
@@ -626,11 +627,29 @@ impl Renderer {
         }
         if spec_audio.0 {
             // D7: the synthetic scene's sound is a tone (Task 6).
-            self.audio
-                .install(Box::new(audio::Tone::new(spec_audio.1, spec_audio.2)));
+            self.install_audio(Box::new(audio::Tone::new(spec_audio.1, spec_audio.2)));
         }
         self.scene = Some(SceneImpl::Synthetic(scene));
         self.send(&ready);
+    }
+
+    /// The scene has a sound: hand it to the stream, starting the audio thread the first time.
+    /// A scene without sound never starts it (no thread, no PipeWire, no idle wake-ups —
+    /// `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`).
+    fn install_audio(&mut self, src: Box<dyn stretch::Pull>) {
+        self.audio.install(src);
+        if self.audio_started {
+            return;
+        }
+        self.audio_started = true;
+        match self.sock.try_clone() {
+            Ok(s) => {
+                if let Err(e) = audio::spawn(self.audio.clone(), s) {
+                    warn(&format!("start the audio thread: {e}"));
+                }
+            }
+            Err(e) => warn(&format!("dup the socket for audio: {e}")),
+        }
     }
 
     /// Allocate and export a ring of `w`×`h` (fresh slot ids) and send its `buffer`s; it
@@ -689,18 +708,6 @@ impl Renderer {
                 properties,
                 ..
             } => {
-                if !self.audio_started {
-                    // The audio thread waits for a sound to play (its stream opens then).
-                    self.audio_started = true;
-                    match self.sock.try_clone() {
-                        Ok(s) => {
-                            if let Err(e) = audio::spawn(self.audio.clone(), s) {
-                                warn(&format!("start the audio thread: {e}"));
-                            }
-                        }
-                        Err(e) => warn(&format!("dup the socket for audio: {e}")),
-                    }
-                }
                 if self.ring.is_none() && !self.dead {
                     self.start(StartArgs {
                         path,
@@ -751,7 +758,9 @@ impl Renderer {
         if self.lost.is_some() {
             return;
         }
-        warn(&format!("GL context lost ({why}): asking the compositor for a restart"));
+        warn(&format!(
+            "GL context lost ({why}): asking the compositor for a restart"
+        ));
         self.send(&FromWorker::ContextLost);
         self.lost = Some(Instant::now());
         self.pending = None;

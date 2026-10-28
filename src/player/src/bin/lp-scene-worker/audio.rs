@@ -71,8 +71,6 @@ const NULL_PERIOD: Duration = Duration::from_millis(5);
 const RETRY: Duration = Duration::from_secs(1);
 /// The loop's wake-up period (commands, outbox).
 const ITERATE: Duration = Duration::from_millis(5);
-/// How often the audio thread checks for a sound to play before there is one.
-const IDLE_POLL: Duration = Duration::from_millis(20);
 
 /// A dB gain as the stream's amplitude: ≤ −96 dB is exactly 0.
 pub fn gain_lin(db: f64) -> f32 {
@@ -132,7 +130,6 @@ pub struct Control {
     /// The stream's output level after the last callback: `applied gain × gate` (f32 bits).
     level: AtomicU32,
     started: AtomicBool,
-    installed: AtomicBool,
 }
 
 fn f64_bits(v: f64) -> u64 {
@@ -154,7 +151,6 @@ impl Default for Control {
             source: Mutex::new(None),
             level: AtomicU32::new(0),
             started: AtomicBool::new(false),
-            installed: AtomicBool::new(false),
         }
     }
 }
@@ -222,12 +218,6 @@ impl Control {
     /// The scene's sound is ready to pull (after its load).
     pub fn install(&self, src: Box<dyn Pull>) {
         *self.source.lock().unwrap_or_else(|e| e.into_inner()) = Some(src);
-        self.installed.store(true, Ordering::SeqCst);
-    }
-
-    /// A sound was installed (the stream exists from then on).
-    fn has_source(&self) -> bool {
-        self.installed.load(Ordering::SeqCst)
     }
 
     /// Stop pulling (waits for a pull in flight): before the scene is destroyed.
@@ -498,8 +488,9 @@ fn log(sock: &OwnedFd, level: &str, line: String) {
     );
 }
 
-/// Start the audio thread (at `Start`, before the load: the stream exists, silent, from the
-/// first moment). `sock` = a clone of the worker's socket (datagrams are atomic).
+/// Start the audio thread — once the scene's sound is installed (after its load; a scene
+/// without sound never starts it). `sock` = a clone of the worker's socket (datagrams are
+/// atomic).
 pub fn spawn(ctl: Arc<Control>, sock: OwnedFd) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("lp-scene-audio".into())
@@ -511,11 +502,8 @@ fn run(ctl: Arc<Control>, sock: OwnedFd) {
     pw::init();
     // Kept across streams and routes (the gate's and the gain's state continue).
     let dsp = Arc::new(Mutex::new(Dsp::new()));
-    // A scene without sound (or not loaded yet) has nothing to play: no stream, no timer —
-    // a 64-frame graph would otherwise wake this thread 750×/s for silence.
-    while !ctl.has_source() {
-        std::thread::sleep(IDLE_POLL);
-    }
+    // Started once the scene's sound is installed (`Renderer::install_audio`): a scene
+    // without sound has no audio thread, no stream and no timer at all.
     loop {
         let (rgen, route) = ctl.route();
         match route {
