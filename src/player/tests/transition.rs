@@ -1346,3 +1346,953 @@ fn rejected_prop_on_b_keeps_transition() {
     }
     assert_eq!(h.cur("VIRTUAL-1"), vec![b]);
 }
+
+// ------------------------------------------------- Phase 2 Task 9: transitions with scenes
+//
+// Every switch combo with a scene (V→S, S→V, S→S) × full-live / reveal / frozen, align: end,
+// a shared scene A, B failures (a load error, a worker crash, a broken worker) and an
+// interrupt chain of mixed kinds. Scenes are the worker's synthetic `frame_index` pattern
+// (D7 — the harness's base opts allow it), without sound unless a test says otherwise, and
+// the videos are frame-index clips without audio: no B onset waits, so every gain is exact.
+
+use glow::HasContext;
+use lp_player::anim::PropPath;
+use lp_player::gfx::{Catalogue, Composer, Gfx, Tex};
+use lp_player::graph::{Graph, NodeKind, PropValue};
+use lp_player::scene::synthetic::{Fail, Pattern, SyntheticSpec};
+use serde_json::{Map, Value};
+
+use common::harness::{OUT_H, OUT_W};
+
+/// The combo tests' effect length: room for the mid-effect checks at any load.
+const D9: u64 = 1200;
+const METHODS: [&str; 3] = ["full-live", "reveal", "frozen"];
+/// reveal/frozen pause A at `t0 + ANTICLICK + AUDIO_SETTLE_TAIL` (30 + 15 ms).
+const PAUSE_AT: Duration = Duration::from_millis(45);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    Video,
+    Scene,
+}
+
+fn scene_spec() -> SyntheticSpec {
+    SyntheticSpec {
+        pattern: Pattern::FrameIndex,
+        ..SyntheticSpec::default()
+    }
+}
+
+fn scene_dir(name: &str) -> PathBuf {
+    common::synthetic_scene(name, &scene_spec())
+}
+
+/// `to` props for a B of `kind`.
+fn to_props(kind: Kind, name: &str) -> Value {
+    match kind {
+        Kind::Video => json!({"path": s(&idx(300)), "loop": true}),
+        Kind::Scene => json!({"kind": "scene", "path": s(&scene_dir(name))}),
+    }
+}
+
+/// A playing A of `kind` shown on `outputs`.
+fn play_kind(h: &mut Harness, kind: Kind, name: &str, outputs: &[&str]) -> String {
+    match kind {
+        Kind::Video => h.play(&idx(300), json!({"loop": true}), outputs),
+        Kind::Scene => h.play(&scene_dir(name), json!({"kind": "scene"}), outputs),
+    }
+}
+
+fn is_scene(h: &Harness, id: &str) -> bool {
+    h.str(&format!("{id}.kind")) == "scene"
+}
+
+/// How far `id` has played: a scene's latched frame seq, a video's `time_pos`.
+fn played(h: &Harness, id: &str) -> f64 {
+    if is_scene(h, id) {
+        h.scene_src(id).latched_seq().map_or(-1.0, |s| s as f64)
+    } else {
+        h.f64(&format!("{id}.time_pos"))
+    }
+}
+
+fn snapshot_of(h: &Harness, a: &str) -> Option<String> {
+    h.sources()
+        .into_iter()
+        .find(|s| h.str(&format!("{s}.kind")) == "snapshot" && h.str(&format!("{s}.of")) == a)
+}
+
+fn pid_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// Every pixel of `tex` (GL order).
+fn read_tex(gfx: &Gfx, tex: &Tex) -> Vec<u8> {
+    let mut px = vec![0u8; (tex.w * tex.h * 4) as usize];
+    unsafe {
+        let fbo = gfx.fbo(tex);
+        gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo.id));
+        gfx.gl.read_pixels(
+            0,
+            0,
+            tex.w as i32,
+            tex.h as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelPackData::Slice(Some(&mut px)),
+        );
+        gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gfx.gl.delete_framebuffer(fbo.id);
+    }
+    px
+}
+
+/// `tex` composed as a plain `Source` layer on a VIRTUAL-size output (the default fit) —
+/// what an effect's progress-0 / progress-1 frame must equal.
+fn plain(gfx: &Gfx, composer: &mut Composer, cat: &mut Catalogue, tex: &Tex) -> Vec<u8> {
+    let mut g = Graph::new();
+    let mut o = Map::new();
+    o.insert("width".into(), json!(OUT_W));
+    o.insert("height".into(), json!(OUT_H));
+    g.create(NodeKind::Output, Some("out:PLAIN".into()), o)
+        .unwrap();
+    g.create(NodeKind::Source, Some("plain".into()), Map::new())
+        .unwrap();
+    g.set(
+        &PropPath("lay:PLAIN:main.content".into()),
+        PropValue::Str("plain".into()),
+    )
+    .unwrap();
+    let target = gfx.tex(OUT_W, OUT_H);
+    let fbo = gfx.fbo(&target);
+    let textures = |id: &str| (id == "plain").then_some(tex);
+    composer
+        .compose_output(gfx, &g, cat, "out:PLAIN", &textures, &fbo)
+        .expect("plain compose");
+    let px = read_tex(gfx, &target);
+    unsafe {
+        gfx.gl.delete_framebuffer(fbo.id);
+        gfx.gl.delete_texture(target.id);
+    }
+    px
+}
+
+/// The first byte where `got` and `want` differ by more than `tol` (and the largest gap).
+fn first_diff(got: &[u8], want: &[u8], tol: u8) -> Option<(usize, u8)> {
+    assert_eq!(got.len(), want.len());
+    let max = got
+        .iter()
+        .zip(want)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    got.iter()
+        .zip(want)
+        .position(|(a, b)| a.abs_diff(*b) > tol)
+        .map(|i| (i, max))
+}
+
+/// The effect's endpoints are its sides as plain sources (`effect_progress_endpoints_
+/// match_plain_source`, here with live scene/video textures): progress forced to 0 → the
+/// output equals `from` composed alone, 1 → `to` alone (±1 per channel). Compared within
+/// the same iteration's textures, so a side that plays on is no problem.
+fn check_endpoints(h: &mut Harness, fx: &str, what: &str) {
+    let pp = PropPath(format!("{fx}.progress"));
+    h.anim.cancel_target(&pp);
+    for (p, side) in [(0.0, "from"), (1.0, "to")] {
+        h.graph.set(&pp, PropValue::F64(p)).unwrap();
+        h.tick();
+        assert_eq!(
+            h.content("VIRTUAL-1"),
+            fx,
+            "{what}: handed off before the progress-{p} check"
+        );
+        let id = h.str(&format!("{fx}.{side}"));
+        let h2 = &mut *h;
+        let tex = h2
+            .host
+            .texture(&id)
+            .unwrap_or_else(|| panic!("{what}: no texture for {side} {id}"));
+        let want = plain(&h2.gfx, &mut h2.composer, &mut h2.cat, tex);
+        let got = read_tex(&h2.gfx, &h2.outputs[0].1);
+        if let Some((i, max)) = first_diff(&got, &want, 1) {
+            panic!(
+                "{what}: progress {p} ≠ plain {side} ({id}) at byte {i} (pixel {}, max gap {max})",
+                i / 4
+            );
+        }
+    }
+}
+
+/// One switch `a_kind → b_kind` by `method` (fade, `D9`) with what each method promises
+/// checked for a scene side exactly as for a video one:
+/// - full-live: both sides keep producing new frames; `gain.xfade` −3.0103 dB ± 0.05 each at
+///   the midpoint;
+/// - reveal: A shown as a snapshot pixel-identical to A's frame at the hold, A paused at
+///   t0 + 45 ms and (a scene) sent no tick after that, B's xfade rising along sin;
+/// - frozen: as reveal for A, B holds its first frame (paused, silent) through the effect
+///   and plays after the handoff + its 30 ms ramp;
+/// - every method: progress 0 / 1 = the plain sides; done → B alone, A (and a scene A's
+///   worker) gone.
+fn combo(a_kind: Kind, b_kind: Kind, method: &str) {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let what = format!("{a_kind:?}→{b_kind:?} {method}");
+    let a = play_kind(&mut h, a_kind, "t9-a", &["VIRTUAL-1"]);
+    let a_pid = is_scene(&h, &a).then(|| h.scene_src(&a).pid().expect("A's worker"));
+    let corr = h.start(json!({
+        "outputs": "out:*", "to": to_props(b_kind, "t9-b"),
+        "effect_id": "fade", "duration_ms": D9, "method": method
+    }));
+    let b = h.to_of(&corr);
+    let held = method != "full-live";
+    // reveal/frozen copy A's frame when the snapshot node appears: the host copies A's
+    // texture as it stands at the end of that iteration (its next `sync`, before any
+    // new frame latches).
+    let mut copy: Option<(String, Vec<u8>)> = None;
+    if held {
+        let ok = h.tick_until(MS(5000), |h| snapshot_of(h, &a).is_some());
+        assert!(ok, "{what}: no snapshot of A: {:?}", h.tr_events);
+        let sn = snapshot_of(&h, &a).unwrap();
+        let px = read_tex(&h.gfx, h.host.texture(&a).expect("A's frame"));
+        copy = Some((sn, px));
+    }
+    let t0 = start_of(&h.wait_event(&corr, "transition.started", MS(5000)));
+    let fx = h.content("VIRTUAL-1");
+    assert_eq!(h.str(&format!("{fx}.to")), b, "{what}");
+    let from = h.str(&format!("{fx}.from"));
+    match &copy {
+        Some((sn, px)) => {
+            assert_eq!(&from, sn, "{what}: A is shown as its snapshot");
+            assert!(
+                read_tex(&h.gfx, h.host.texture(sn).expect("the snapshot")) == *px,
+                "{what}: the snapshot is pixel-identical to A's frame at the hold"
+            );
+        }
+        None => assert_eq!(from, a, "{what}: full-live shows A itself"),
+    }
+    let (a0, b0) = (played(&h, &a), played(&h, &b));
+    // (when A was seen paused, A's ticks sent / frames latched then, how far A had played)
+    let mut a_hold: Option<(Duration, u64, u64, f64)> = None;
+    let mut video_settled = false;
+    let mut b_xfade = Vec::new();
+    let mid = t0 + MS(D9 / 2);
+    while h.now() < mid {
+        h.tick_toward(mid);
+        let now = h.now();
+        assert!(h.live().len() <= 2, "{what}: live {:?}", h.live());
+        let a_paused = h.bool(&format!("{a}.paused"));
+        let b_paused = h.bool(&format!("{b}.paused"));
+        match method {
+            "full-live" => assert!(!a_paused && !b_paused, "{what}: a side paused"),
+            "reveal" => assert!(!b_paused, "{what}: B plays live in reveal"),
+            _ => {
+                assert!(b_paused, "{what}: frozen B is held");
+                assert!(h.gain(&b) <= -90.0, "{what}: frozen B silent");
+                assert_eq!(played(&h, &b), b0, "{what}: frozen B moved");
+            }
+        }
+        if held && a_paused && a_hold.is_none() {
+            assert!(
+                now >= t0 + PAUSE_AT,
+                "{what}: A paused {:.1} ms after t0, before its ramp settled",
+                ms(now - t0)
+            );
+            let st = is_scene(&h, &a).then(|| h.scene_src(&a).stats());
+            a_hold = Some((
+                now,
+                st.map_or(0, |s| s.ticks_sent),
+                st.map_or(0, |s| s.latched),
+                played(&h, &a),
+            ));
+        }
+        if let Some((_, ticks, latched, _)) = a_hold
+            && is_scene(&h, &a)
+        {
+            let st = h.scene_src(&a).stats();
+            assert_eq!(
+                (st.ticks_sent, st.latched),
+                (ticks, latched),
+                "{what}: held scene A got a tick / latched a frame after its pause"
+            );
+        }
+        // A paused mpv still presents its queued frames (2–3, ~100 ms — why reveal/frozen
+        // show a snapshot): a held *video* A is compared from 150 ms after its pause; a
+        // scene stops exactly at it (checked above).
+        if let Some((at, ticks, latched, _)) = a_hold
+            && !is_scene(&h, &a)
+            && !video_settled
+            && now >= at + MS(150)
+        {
+            video_settled = true;
+            a_hold = Some((at, ticks, latched, played(&h, &a)));
+        }
+        if method == "reveal" {
+            b_xfade.push(h.f64(&format!("{b}.gain.xfade")));
+        }
+    }
+    close(
+        h.f64(&format!("{fx}.progress")),
+        0.5,
+        0.01,
+        &format!("{what}: progress"),
+    );
+    let xfade_mid = -3.0103;
+    match method {
+        "full-live" => {
+            close(
+                h.f64(&format!("{a}.gain.xfade")),
+                xfade_mid,
+                0.05,
+                &format!("{what}: A.gain.xfade at the midpoint"),
+            );
+            close(
+                h.f64(&format!("{b}.gain.xfade")),
+                xfade_mid,
+                0.05,
+                &format!("{what}: B.gain.xfade at the midpoint"),
+            );
+            assert!(played(&h, &a) > a0, "{what}: A kept playing");
+            assert!(played(&h, &b) > b0, "{what}: B kept playing");
+        }
+        _ => {
+            let (_, _, _, a_at) = a_hold.unwrap_or_else(|| panic!("{what}: A was never held"));
+            assert!(
+                is_scene(&h, &a) || video_settled,
+                "{what}: no settled video reference"
+            );
+            assert!(h.gain(&a) <= -90.0, "{what}: held A silent");
+            assert_eq!(played(&h, &a), a_at, "{what}: held A moved");
+            let (sn, px) = copy.as_ref().unwrap();
+            assert!(
+                read_tex(&h.gfx, h.host.texture(sn).unwrap()) == *px,
+                "{what}: the held picture changed"
+            );
+            if method == "reveal" {
+                close(
+                    h.f64(&format!("{b}.gain.xfade")),
+                    xfade_mid,
+                    0.05,
+                    &format!("{what}: B.gain.xfade at the midpoint"),
+                );
+                assert!(
+                    b_xfade.windows(2).all(|w| w[1] >= w[0]),
+                    "{what}: B's xfade must rise: {b_xfade:?}"
+                );
+                assert!(played(&h, &b) > b0, "{what}: B plays live");
+            }
+        }
+    }
+    check_endpoints(&mut h, &fx, &what);
+
+    let handoff = h.wait_event(&corr, "transition.handoff", MS(3000));
+    assert!(
+        matches!(
+            handoff.kind,
+            TransitionEventKind::Handoff {
+                committed: false,
+                ..
+            }
+        ),
+        "{what}: {handoff:?}"
+    );
+    if method == "frozen" {
+        let th = from_ms(handoff.at_ms);
+        assert!(
+            !h.bool(&format!("{b}.paused")),
+            "{what}: B starts at the end"
+        );
+        h.tick_to(th + MS(30));
+        close(
+            h.gain(&b),
+            0.0,
+            1e-6,
+            &format!("{what}: B ramped in by +30 ms"),
+        );
+        let ok = h.tick_until(MS(2000), |h| played(h, &b) > b0);
+        assert!(ok, "{what}: B never played after the handoff");
+    }
+    h.wait_event(&corr, "transition.done", MS(2000));
+    h.tick();
+    assert_eq!(h.cur("VIRTUAL-1"), vec![b.clone()], "{what}");
+    assert_eq!(h.sources(), vec![b.clone()], "{what}: B alone");
+    assert!(h.host.get(&a).is_none(), "{what}: A's live source dropped");
+    close(h.gain(&b), 0.0, 1e-9, &format!("{what}: B at 0 dB"));
+    if let Some(pid) = a_pid {
+        let ok = h.tick_until(MS(2000), |_| !pid_alive(pid));
+        assert!(ok, "{what}: A's worker {pid} never reaped");
+    }
+}
+
+#[test]
+fn v_to_s_each_method() {
+    for m in METHODS {
+        combo(Kind::Video, Kind::Scene, m);
+    }
+}
+
+#[test]
+fn s_to_v_each_method() {
+    for m in METHODS {
+        combo(Kind::Scene, Kind::Video, m);
+    }
+}
+
+#[test]
+fn s_to_s_each_method() {
+    for m in METHODS {
+        combo(Kind::Scene, Kind::Scene, m);
+    }
+}
+
+/// `align: end` from a video A onto a scene B: full-live ends at A's `Ended` (± 17 ms),
+/// reveal/frozen start at it (± one frame, as V→V) — B being a scene changes nothing.
+#[test]
+fn align_end_video_a_to_scene_b() {
+    for method in METHODS {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1", "VIRTUAL-2"]) else {
+            return;
+        };
+        let a = h.play(
+            &ensure_clip("tr_red_3s", RED_3S),
+            json!({"loop": true}),
+            &["VIRTUAL-1"],
+        );
+        let corr = h.start(json!({
+            "outputs": "out:VIRTUAL-1", "to": to_props(Kind::Scene, "t9-end-b"),
+            "effect_id": "fade", "duration_ms": 1000, "method": method, "align": "end"
+        }));
+        let b = h.to_of(&corr);
+        h.tick();
+        assert!(
+            !h.bool(&format!("{a}.loop")),
+            "{method}: A's last iteration"
+        );
+        let started = h.wait_event(&corr, "transition.started", MS(6000));
+        if method == "full-live" {
+            let progress_one = ms(start_of(&started)) + 1000.0;
+            // Keep A alive past the handoff (shown elsewhere → restored, never destroyed)
+            // to see its end: its `Ended`, or the wrap once its loop is back.
+            h.show("VIRTUAL-2", &a);
+            let mut last_tp = h.f64(&format!("{a}.time_pos"));
+            let mut wrapped_at = None;
+            while h.event(&corr, "transition.handoff").is_none()
+                || (h.src_event_at(&a, |e| *e == SourceEvent::Ended).is_none()
+                    && wrapped_at.is_none())
+            {
+                assert!(h.now() < MS(60_000), "{method}: {:?}", h.tr_events);
+                h.tick();
+                let tp = h.f64(&format!("{a}.time_pos"));
+                if wrapped_at.is_none() && tp + 0.5 < last_tp {
+                    wrapped_at = Some(ms(h.now()));
+                }
+                last_tp = tp;
+            }
+            let ended = h
+                .src_event_at(&a, |e| *e == SourceEvent::Ended)
+                .map(ms)
+                .into_iter()
+                .chain(wrapped_at)
+                .fold(f64::INFINITY, f64::min);
+            println!(
+                "align_end V→S full-live: progress=1 − A's end = {:+.1} ms",
+                progress_one - ended
+            );
+            assert!(
+                (progress_one - ended).abs() <= 17.0,
+                "{method}: progress 1 at {progress_one:.1} ms, A's end at {ended:.1} ms"
+            );
+        } else {
+            let ended = h
+                .src_event_at(&a, |e| *e == SourceEvent::Ended)
+                .expect("A's Ended");
+            println!(
+                "align_end V→S {method}: started − A's Ended = {:+.1} ms",
+                started.at_ms - ms(ended)
+            );
+            assert!(
+                (started.at_ms - ms(ended)).abs() <= 33.4,
+                "{method}: started {} ms, Ended {} ms",
+                started.at_ms,
+                ms(ended)
+            );
+        }
+        h.wait_event(&corr, "transition.done", MS(4000));
+        h.tick();
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b.clone()], "{method}");
+        let p0 = played(&h, &b);
+        let ok = h.tick_until(MS(1000), |h| played(h, &b) > p0);
+        assert!(ok, "{method}: scene B plays after the switch");
+    }
+}
+
+/// Task 9's align rule: a lead A that is a scene never ends, so `align: end` is `Now` —
+/// every method (and a cut) starts within the ticks it needs once B is ready (+ the
+/// snapshot copy for reveal/frozen), never after ALIGN_SLACK; A's (inert) loop untouched.
+/// Counted in ticks, not time: load can't move it.
+#[test]
+fn scene_a_align_end_starts_at_once() {
+    for (b_kind, method, effect) in [
+        (Kind::Video, "full-live", Some("fade")),
+        (Kind::Scene, "reveal", Some("fade")),
+        (Kind::Video, "frozen", Some("fade")),
+        (Kind::Scene, "full-live", None),
+    ] {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+            return;
+        };
+        let what = format!("S→{b_kind:?} {method} {effect:?}");
+        let a = h.play(
+            &scene_dir("t9-end-a"),
+            json!({"kind": "scene", "loop": true}),
+            &["VIRTUAL-1"],
+        );
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": to_props(b_kind, "t9-end-b"),
+            "effect_id": effect, "duration_ms": 300, "method": method, "align": "end"
+        }));
+        let b = h.to_of(&corr);
+        assert!(
+            h.bool(&format!("{a}.loop")),
+            "{what}: End leaves a scene's loop alone"
+        );
+        let mut ready_tick = None;
+        let mut started_tick = None;
+        while started_tick.is_none() {
+            assert!(
+                h.now() < MS(8000),
+                "{what}: never started: {:?}",
+                h.tr_events
+            );
+            h.tick();
+            if ready_tick.is_none() && h.src_event_at(&b, |e| *e == SourceEvent::Ready).is_some() {
+                ready_tick = Some(h.ticks);
+            }
+            if h.event(&corr, "transition.started").is_some() {
+                started_tick = Some(h.ticks);
+            }
+        }
+        let gap = started_tick.unwrap() - ready_tick.expect("B Ready before the start");
+        assert!(
+            gap <= 3,
+            "{what}: started {gap} ticks after B was ready (an End wait on a scene)"
+        );
+        h.wait_event(&corr, "transition.done", MS(3000));
+        h.tick();
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b], "{what}");
+    }
+}
+
+/// R34 with a scene A shown on VIRTUAL-2 outside the request: never paused, ramped,
+/// loop-changed or destroyed, its worker keeps rendering; reveal/frozen hold VIRTUAL-1's
+/// picture with a snapshot (constant), full-live shows A itself.
+#[test]
+fn shared_scene_a_is_untouched() {
+    for method in METHODS {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1", "VIRTUAL-2"]) else {
+            return;
+        };
+        let a = h.play(
+            &scene_dir("t9-shared-a"),
+            json!({"kind": "scene", "loop": true}),
+            &["VIRTUAL-1", "VIRTUAL-2"],
+        );
+        let g0 = (
+            h.f64(&format!("{a}.gain.xfade")),
+            h.f64(&format!("{a}.gain.anticlick")),
+            h.gain(&a),
+        );
+        let latched0 = h.scene_src(&a).stats().latched;
+        let corr = h.start(json!({
+            "outputs": "out:VIRTUAL-1", "to": to_props(Kind::Scene, "t9-shared-b"),
+            "effect_id": "fade", "duration_ms": 1000, "method": method
+        }));
+        let b = h.to_of(&corr);
+        let untouched = |h: &Harness, when: &str| {
+            assert!(h.exists(&a), "{method} {when}: A destroyed");
+            assert!(!h.bool(&format!("{a}.paused")), "{method} {when}: A paused");
+            assert!(
+                h.bool(&format!("{a}.loop")),
+                "{method} {when}: A's loop changed"
+            );
+            let g = (
+                h.f64(&format!("{a}.gain.xfade")),
+                h.f64(&format!("{a}.gain.anticlick")),
+                h.gain(&a),
+            );
+            assert_eq!(g, g0, "{method} {when}: A's gains changed");
+            assert_eq!(h.cur("VIRTUAL-2"), vec![a.clone()], "{method} {when}");
+        };
+        let mut held: Option<(String, Vec<u8>)> = None;
+        let mut fx_seen = false;
+        while h.event(&corr, "transition.done").is_none() {
+            assert!(h.now() < MS(30_000), "never done: {:?}", h.tr_events);
+            h.tick();
+            untouched(&h, "during");
+            let content = h.content("VIRTUAL-1");
+            if h.str(&format!("{content}.effect_id")) != "fade" {
+                continue;
+            }
+            fx_seen = true;
+            let from = h.str(&format!("{content}.from"));
+            if method == "full-live" {
+                assert_eq!(from, a, "full-live on a shared A shows A itself");
+                continue;
+            }
+            assert_eq!(h.str(&format!("{from}.kind")), "snapshot", "{method}");
+            assert_eq!(h.str(&format!("{from}.of")), a, "{method}");
+            let px = read_tex(&h.gfx, h.host.texture(&from).expect("snapshot texture"));
+            match &held {
+                None => held = Some((from, px)),
+                Some((id, px0)) => {
+                    assert_eq!(id, &from, "{method}");
+                    assert!(px == *px0, "{method}: VIRTUAL-1's held picture changed");
+                }
+            }
+        }
+        assert!(fx_seen, "{method}: the effect ran");
+        h.tick();
+        untouched(&h, "after");
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b], "{method}");
+        if let Some((snap, _)) = held {
+            assert!(!h.exists(&snap), "{method}: snapshot destroyed at handoff");
+        }
+        let latched = h.scene_src(&a).stats().latched;
+        assert!(
+            latched >= latched0 + 20,
+            "{method}: the shared scene kept rendering ({latched0} → {latched})"
+        );
+    }
+}
+
+/// Crash records the harness's scene workers wrote (a private dir, `Harness::new`).
+fn harness_crash_records() -> usize {
+    let d = std::env::temp_dir().join(format!("lp-harness-crashes-{}", std::process::id()));
+    std::fs::read_dir(d)
+        .map(|r| r.flatten().count())
+        .unwrap_or(0)
+}
+
+/// A scene B that can't play — its folder is gone (Review Focus #1: the real worker's
+/// folder check), its load fails, its renderer build fails — fails the switch cleanly back
+/// to A: `transition.failed` naming the folder, A current, audible, never paused, its loop
+/// back after an End wait; no crash record (a fatal error is not a crash).
+#[test]
+fn scene_b_load_error_keeps_a() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    // A real scene needs an assets dir to be started at all (else the open is refused —
+    // `no_assets_dir_hides_scenes…`): an empty one, the folder check comes first.
+    let assets = std::env::temp_dir().join(format!("lp-t9-assets-{}", std::process::id()));
+    std::fs::create_dir_all(&assets).unwrap();
+    h.host.set_base_opt("scene_assets", Some(json!(s(&assets))));
+    let a = h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let gain0 = h.gain(&a);
+    let records0 = harness_crash_records();
+    let mut fail_load = scene_spec();
+    fail_load.fail = Some(Fail::Load);
+    let mut fail_build = scene_spec();
+    fail_build.fail = Some(Fail::Build);
+    let cases = [
+        (
+            "/nonexistent/lp-player-t9-missing-scene".to_string(),
+            "does not exist",
+            "now",
+        ),
+        (
+            s(&common::synthetic_scene("t9-fail-load", &fail_load)).to_string(),
+            "load failed",
+            "end",
+        ),
+        (
+            s(&common::synthetic_scene("t9-fail-build", &fail_build)).to_string(),
+            "build failed",
+            "now",
+        ),
+    ];
+    for (path, why, align) in cases {
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": {"kind": "scene", "path": path},
+            "effect_id": "fade", "duration_ms": 500, "method": "reveal", "align": align
+        }));
+        let b = h.to_of(&corr);
+        let mut failed = None;
+        while failed.is_none() {
+            assert!(
+                h.now() < MS(60_000),
+                "{path}: never failed: {:?}",
+                h.tr_events
+            );
+            h.tick();
+            assert_eq!(h.cur("*"), vec![a.clone()], "A stays current ({path})");
+            assert_eq!(h.gain(&a), gain0, "A's gain never changes ({path})");
+            assert!(!h.bool(&format!("{a}.paused")), "A never paused ({path})");
+            if let Some(s) = h.host.scene(&b) {
+                assert_eq!(s.stats().restarts, 0, "{path}: a fatal error is no crash");
+            }
+            failed = h.event(&corr, "transition.failed");
+        }
+        match failed.map(|e| e.kind) {
+            Some(TransitionEventKind::Failed { path: p, reason }) => {
+                assert_eq!(p, path);
+                assert!(
+                    reason.contains(&path) && reason.contains(why),
+                    "{path}: reason {reason}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!h.exists(&b), "{path}: the failed B is destroyed");
+        h.tick();
+        assert!(h.bool(&format!("{a}.loop")), "{path}: A's loop restored");
+        assert_eq!(h.gain(&a), gain0);
+        assert_eq!(h.content("VIRTUAL-1"), a);
+    }
+    assert_eq!(harness_crash_records(), records0, "no crash record");
+}
+
+/// B's worker killed at progress 0.5: B keeps its last frame (never None) while the worker
+/// restarts, the effect runs on and hands off as planned — no `transition.failed` — and B
+/// resumes from where it was, not from 0.
+#[test]
+fn scene_b_worker_crash_mid_effect_still_hands_off() {
+    for method in ["full-live", "frozen"] {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+            return;
+        };
+        let records0 = harness_crash_records();
+        h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]);
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": to_props(Kind::Scene, "t9-crash-b"),
+            "effect_id": "fade", "duration_ms": 2000, "method": method
+        }));
+        let b = h.to_of(&corr);
+        let t0 = start_of(&h.wait_event(&corr, "transition.started", MS(5000)));
+        h.tick_to(t0 + MS(1000));
+        let pid = h.scene_src(&b).pid().expect("B's worker");
+        let t_before = h.scene_src(&b).latched_t().expect("B's frame");
+        let gen_before = h.scene_src(&b).stats().latched_gen;
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        // The first frame of the restarted worker: its scene time.
+        let first_new: std::cell::Cell<Option<f64>> = std::cell::Cell::new(None);
+        let note_new = |h: &Harness| {
+            let s = h.scene_src(&b);
+            if first_new.get().is_none() && s.stats().latched_gen > gen_before {
+                first_new.set(s.latched_t());
+            }
+        };
+        while h.event(&corr, "transition.handoff").is_none() {
+            assert!(
+                h.now() < t0 + MS(10_000),
+                "{method}: no handoff: {:?}",
+                h.tr_events
+            );
+            h.tick();
+            assert!(
+                h.scene_src(&b).texture().is_some(),
+                "{method}: B's frame went away with its worker"
+            );
+            assert!(
+                h.event(&corr, "transition.failed").is_none(),
+                "{method}: a restartable crash failed the switch: {:?}",
+                h.tr_events
+            );
+            note_new(&h);
+        }
+        h.wait_event(&corr, "transition.done", MS(3000));
+        h.tick();
+        assert_eq!(h.cur("VIRTUAL-1"), vec![b.clone()], "{method}");
+        // frozen: B was paused (no ticks) — its new worker renders once B plays.
+        let ok = h.tick_until(MS(5000), |h| {
+            note_new(h);
+            first_new.get().is_some() && h.scene_src(&b).latched_t().is_some_and(|t| t > t_before)
+        });
+        assert!(ok, "{method}: B never played on after the restart");
+        let s = h.scene_src(&b);
+        assert!(s.pid().is_some_and(|p| p != pid), "{method}: a new worker");
+        let t_new = first_new.get().unwrap();
+        assert!(
+            t_new >= t_before - 1e-6,
+            "{method}: the restarted worker resumed at {t_new}, before B's last frame {t_before}"
+        );
+        let st = h.scene_src(&b).stats();
+        assert_eq!(st.restarts, 1, "{method}: {st:?}");
+        assert_eq!(
+            harness_crash_records(),
+            records0,
+            "{method}: a restart is no record"
+        );
+    }
+}
+
+/// B's worker crash-loops mid-effect (every worker crashes 700 ms after its start): after
+/// the restart budget (3 in 60 s) it is broken before the handoff → `transition.failed`
+/// and the snap-back: A shown, unpaused, at its recorded gains within 30 ms, playing again;
+/// B ramped out and destroyed; one crash record.
+#[test]
+fn scene_b_broken_mid_effect_snaps_back() {
+    for (a_kind, method) in [(Kind::Scene, "reveal"), (Kind::Video, "full-live")] {
+        let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+            return;
+        };
+        let what = format!("{a_kind:?}→S {method}");
+        let a = play_kind(&mut h, a_kind, "t9-broken-a", &["VIRTUAL-1"]);
+        let mut crashy = scene_spec();
+        crashy.crash_after_ms = Some(700);
+        let dir = common::synthetic_scene("t9-broken-b", &crashy);
+        let records0 = harness_crash_records();
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": {"kind": "scene", "path": s(&dir)},
+            "effect_id": "fade", "duration_ms": 8000, "method": method
+        }));
+        let b = h.to_of(&corr);
+        h.wait_event(&corr, "transition.started", MS(5000));
+        let fx = h.content("VIRTUAL-1");
+        let from = h.str(&format!("{fx}.from"));
+        let failed = h.wait_event(&corr, "transition.failed", MS(8000));
+        assert!(
+            h.event(&corr, "transition.handoff").is_none(),
+            "{what}: broken before the handoff"
+        );
+        match failed.kind {
+            TransitionEventKind::Failed { reason, .. } => {
+                assert!(reason.contains("broken"), "{what}: reason {reason}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(h.content("VIRTUAL-1"), a, "{what}: back to A");
+        assert!(!h.exists(&fx), "{what}: fx destroyed");
+        if from != a {
+            assert!(!h.exists(&from), "{what}: snapshot destroyed");
+        }
+        assert!(!h.bool(&format!("{a}.paused")), "{what}: A unpaused");
+        let tf = h.now();
+        h.tick_to(tf + MS(30));
+        close(h.f64(&format!("{a}.gain.xfade")), 0.0, 1e-9, &what);
+        close(h.f64(&format!("{a}.gain.anticlick")), 0.0, 1e-9, &what);
+        let ok = h.tick_until(MS(1000), |h| !h.exists(&b));
+        assert!(ok, "{what}: B destroyed after its ramp-out");
+        assert_eq!(h.sources(), vec![a.clone()], "{what}");
+        let p0 = played(&h, &a);
+        let ok = h.tick_until(MS(1000), |h| played(h, &a) > p0);
+        assert!(ok, "{what}: A plays again");
+        assert_eq!(
+            harness_crash_records(),
+            records0 + 1,
+            "{what}: one crash record"
+        );
+    }
+}
+
+/// Invariant #6 with mixed kinds, checked on every tick: 10 starts cycling scene / video
+/// targets and methods, each one tick, 100 ms or one running effect after the previous (a
+/// scene's first frame takes > 100 ms, so plain 100 ms gaps would only ever supersede) →
+/// ≤ 2 unpaused sources at every tick, nothing paused
+/// outside a held method, ≥ 1 commit and ≥ 1 supersede, the 10th target current and alone,
+/// every superseded scene B's worker reaped.
+#[test]
+fn mixed_kind_interrupt_chain_every_tick() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let targets = [
+        to_props(Kind::Scene, "t9-chain-1"),
+        json!({"path": s(&blue10()), "loop": true}),
+        to_props(Kind::Scene, "t9-chain-2"),
+        json!({"path": s(&green10()), "loop": true}),
+    ];
+    let check = |h: &Harness, when: &str| {
+        let live = h.live();
+        assert!(
+            live.len() <= 2,
+            "{when}: {} live sources: {live:?}",
+            live.len()
+        );
+        let allowed: BTreeSet<String> = h.tr.status().into_iter().flat_map(|s| s.held).collect();
+        for p in h.paused() {
+            assert!(
+                allowed.contains(&p),
+                "{when}: {p} is paused outside any held method; status {:?}",
+                h.tr.status()
+            );
+        }
+    };
+    let mut pids = BTreeSet::new();
+    let mut last_b = String::new();
+    for i in 0..10 {
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": targets[i % 4],
+            "effect_id": "fade", "duration_ms": 1000, "method": METHODS[(i + 1) % 3]
+        }));
+        last_b = h.to_of(&corr);
+        // The gap before the next start, by condition (never by timing alone): one tick
+        // (B can't be ready yet — superseded), 100 ms (either), or until the effect runs
+        // (the next start commits it).
+        let c = corr.clone();
+        let until = h.now() + MS(100);
+        let ok = h.tick_until(MS(5000), |h| {
+            check(h, &format!("after start #{i}"));
+            match i % 3 {
+                0 => true,
+                1 => h.now() >= until,
+                _ => h.event(&c, "transition.started").is_some(),
+            }
+        });
+        assert!(ok, "#{i} never started: {:?}", h.tr_events);
+        for id in h.host.scene_ids() {
+            if let Some(p) = h.host.scene(&id).and_then(|s| s.pid()) {
+                pids.insert(p);
+            }
+        }
+    }
+    let ok = h.tick_until(MS(5000), |h| {
+        check(h, "settling");
+        h.tr.status().is_empty()
+    });
+    assert!(ok, "the chain never settled: {:?}", h.tr.status());
+    let count = |f: &dyn Fn(&TransitionEventKind) -> bool| {
+        h.tr_events.iter().filter(|e| f(&e.kind)).count()
+    };
+    let commits = count(&|k| {
+        matches!(
+            k,
+            TransitionEventKind::Handoff {
+                committed: true,
+                ..
+            }
+        )
+    });
+    let supersedes = count(
+        &|k| matches!(k, TransitionEventKind::Cancelled { reason } if reason == "superseded"),
+    );
+    println!(
+        "mixed chain: {commits} commits, {supersedes} supersedes, {} scene workers",
+        pids.len()
+    );
+    assert!(
+        commits >= 1 && supersedes >= 1,
+        "{commits} commits, {supersedes} supersedes"
+    );
+    h.tick();
+    assert_eq!(
+        h.cur("*"),
+        vec![last_b.clone()],
+        "the 10th target is current"
+    );
+    assert_eq!(
+        h.sources(),
+        vec![last_b.clone()],
+        "exactly one source remains"
+    );
+    assert_eq!(
+        h.host.ids(),
+        vec![last_b],
+        "exactly one live source remains"
+    );
+    assert!(!pids.is_empty(), "scene workers were spawned");
+    let ok = h.tick_until(MS(3000), |_| pids.iter().all(|p| !pid_alive(*p)));
+    assert!(ok, "superseded scene workers left alive: {pids:?}");
+}

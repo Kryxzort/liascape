@@ -419,6 +419,14 @@ fn is_still(g: &Graph, id: &str) -> bool {
     )
 }
 
+/// A source that never reaches an end — a still, or a scene (Phase 2 Task 9: a scene has
+/// no duration and never emits `Ended`; its `loop` is stored, inert). `align: end` on such
+/// a lead A is `Now`, and End leaves its loop alone. Unlike a still, a scene's picture
+/// changes: reveal/frozen still hold it by a snapshot (`changing_sides` uses `is_still`).
+pub(crate) fn never_ends(g: &Graph, id: &str) -> bool {
+    is_still(g, id) || get_str(g, id, "kind") == "scene"
+}
+
 fn secs(d: Duration) -> f64 {
     d.as_secs_f64()
 }
@@ -793,14 +801,15 @@ impl Transitions {
             onset: None,
             align_deadline: None,
         };
-        // align: end — A's current iteration is its last (unless shared, R34, or a still).
+        // align: end — A's current iteration is its last (unless shared, R34, or it never
+        // ends: a still or a scene).
         if req.align == Align::End
             && let Some(li) = lead
         {
             let side = &mut tr.sides[li];
             if let Some(a) = side.a.clone()
                 && !side.shared
-                && !is_still(g, &a)
+                && !never_ends(g, &a)
                 && get_bool(g, &a, "loop")
             {
                 side.orig.looped = Some(true);
@@ -1379,8 +1388,10 @@ impl Transitions {
         let Some(a) = tr.sides[li].a.clone() else {
             return Some(now);
         };
-        if !is_source(g, &a) || is_still(g, &a) {
-            return Some(now); // `End` on an image (or a vanished A) is `Now`
+        if !is_source(g, &a) || never_ends(g, &a) {
+            // `End` on an A that never ends (an image, a scene) or a vanished A is `Now` —
+            // never a wait for ALIGN_SLACK's fallback.
+            return Some(now);
         }
         // M2: never wait for an end that doesn't come (A errored without `Ended`, stalled,
         // no known duration): A's remaining play time at its speed + ALIGN_SLACK, then
@@ -1470,14 +1481,14 @@ impl Transitions {
 
     /// A full-live `align: end` effect whose lead A it keeps ending with — the lead A, if
     /// it is ours (not shared: a shared looping A's boundaries are cached, TODO) and a
-    /// playing kind (not a still).
+    /// kind that ends (not a still, not a scene).
     fn follows_a_end(&self, tr: &Tr, g: &Graph) -> Option<String> {
         if tr.effect_id.is_none() || tr.method != Method::FullLive || tr.align != Align::End {
             return None;
         }
         let side = &tr.sides[tr.lead?];
         let a = side.a.clone()?;
-        (!side.shared && is_source(g, &a) && !is_still(g, &a)).then_some(a)
+        (!side.shared && is_source(g, &a) && !never_ends(g, &a)).then_some(a)
     }
 
     /// full-live `align: end`, Running: the effect ends with A — a speed-up that moves A's
@@ -2439,6 +2450,51 @@ mod tests {
             h.tick(100, &[]);
         }
         assert!(h.has(&t, "transition.started"), "never fell back");
+    }
+
+    /// Phase 2 Task 9: a scene never ends (no duration, no `Ended`) — an `align: end` lead A
+    /// that is a scene is `Now` at once, like a still, for every method, instead of waiting
+    /// out ALIGN_SLACK (10 s) and logging `transition.align_fallback`. Its (stored, inert)
+    /// `loop` isn't touched. Unlike a still, reveal/frozen still hold it by a snapshot (its
+    /// picture changes).
+    #[test]
+    fn scene_lead_a_align_end_starts_now() {
+        for (method, effect) in [
+            ("full-live", Some("fade")),
+            ("reveal", Some("fade")),
+            ("frozen", Some("fade")),
+            ("full-live", None),
+        ] {
+            let mut h = H::new(&["V1"]);
+            let a = h.video(&["V1"], 0.0, 4.2);
+            h.g.set(&path(&a, "path"), PropValue::Str("/scenes/123".into()))
+                .unwrap();
+            // (kind is creation-only on a live source; the graph-only harness can set it)
+            h.g.set(&path(&a, "kind"), PropValue::Str("scene".into()))
+                .unwrap();
+            let t = h.start(req("/b.mkv", method, "end", effect));
+            assert!(
+                h.bool(&a, "loop"),
+                "{method}: End must not turn a scene's loop off"
+            );
+            let b = h.b_of(&t);
+            h.observe(&b, "ready", PropValue::Bool(true));
+            h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+            if method == "reveal" || method == "frozen" {
+                let snap =
+                    h.g.ids_of(NodeKind::Source)
+                        .into_iter()
+                        .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                        .unwrap_or_else(|| panic!("{method}: a scene A is held by a snapshot"));
+                assert_eq!(get_str(&h.g, &snap, "of"), a);
+                h.observe(&snap, "ready", PropValue::Bool(true));
+                h.tick(16, &[(snap.clone(), SourceEvent::Ready)]);
+            }
+            assert!(
+                h.has(&t, "transition.started"),
+                "{method}/{effect:?}: a scene lead A must start at once, not wait out ALIGN_SLACK"
+            );
+        }
     }
 
     /// Speed storm: A's speed dragged every 90 ms while `align: end` waits (`time_pos` arriving

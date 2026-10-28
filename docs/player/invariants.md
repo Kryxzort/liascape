@@ -125,6 +125,12 @@ source, the 10th target ends current and alone; ≥ 1 commit and ≥ 1 supersede
 `commit_running_each_method`, `b_error_mid_effect_snaps_back`, `bad_target_keeps_a`,
 `cancel_waiting_restores_a`, `cancel_running_snaps_back`, `restore_targets_not_mid_ramp`
 (R41), unit `supersede_does_not_rewind_cancel_does` (R44), `held_a_destroyed_at_handoff`.
+With scenes (Phase 2 Task 9): `mixed_kind_interrupt_chain_every_tick` (the same per-tick
+assertions over scene/video targets), `tests/api.rs::rapid_interrupt_chain_mixed_kinds` and
+`scene_switch_storm_reaps_workers` (every superseded scene B's worker reaped),
+`scene_b_load_error_keeps_a`, `scene_b_broken_mid_effect_snaps_back` (a worker past its restart
+budget mid-effect is a failed B: snap-back), `scene_b_worker_crash_mid_effect_still_hands_off`
+(a restartable crash is not).
 
 ## 7. Pause freezes everything — picture, audio and time — and resume continues exactly
 
