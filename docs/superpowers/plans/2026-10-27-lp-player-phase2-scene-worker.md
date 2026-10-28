@@ -552,7 +552,7 @@ and the supervise test's new-worker checks.
   default `true` until Ready says otherwise (R92's conservative rule).
 - `Envelope`: 1 ms max-channel RMS dBFS of the **pre-gain** samples, batched every 50 ms.
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - worker unit (`cargo test --bin lp-scene-worker`): `gain_change_ramps_across_one_buffer` (0 → −96 within a
     480-frame buffer of 1.0: first ≈ 1.0, last = 0.0, monotonic, max step ≤ 1/479 + 1e-6),
     `silent_db_is_exact_zero`, `gain_matches_db_to_lin` (−6.0206 dB → 0.5 ± 1e-6),
@@ -566,8 +566,26 @@ and the supervise test's new-worker checks.
     `scene_reroutes_after_pipewire_restart` (the `i7_bus_reconnects_after_pipewire_restart` pattern: back on the bus,
     `gain.pause` ramp-in `reason: flowed`)
   - unit `dropout_uses_scene_envelope_as_reference` (synthetic envelope + gain schedule → expected matches ±1.5 dB)
-- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
-- [ ] **Step 5:** Commit `Add Scene Audio On The Player Bus`.
+- [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
+- [x] **Step 5:** Commit `Add Scene Audio On The Player Bus`.
+
+**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Scene
+audio (Task 6)"): the owner's speed decision is in — a WSOLA stage (`stretch.rs`, bit-exact
+passthrough at 1×) and a new `ToWorker::Speed`; `PROTOCOL` 2 (`Start` gained `id`, `gain_db`,
+`no_audio`, `speed`; `Gain`/`NoAudio`/`Speed` fold into the restart's `Start`); the worker's
+`paused` means "play no audio" (also always in stepped mode); a worker-side 30 ms gate
+declicks anything that stops while audible (pause, mute, route change, quit) and fades a
+restarted worker in, but jumps when the stream is silent (no extra pull, no drift); the protocol
+thread applies the audio messages directly (never behind a render or a load); a PipeWire that
+can't be reached falls back to the null timer (no flow) and retries every 1 s; the stream opens
+when the loaded scene has sound (not at `Start`: a soundless scene opens none — no wake-ups for
+silence).
+`scene_audio_flowing_gates_onset` + `scene_has_audio_false_skips_onset_wait` became one test,
+`scene_audio_flowing_gates_every_onset` (`--ao null`, every onset path), plus
+`scene_crossfades_are_equal_power_on_the_bus`, `scene_pause_park_and_destroy_on_the_bus`, the
+opt-in `real_scene_sound_on_the_bus`, the stretch units and `--lwe-smoke --audio-dump`; the
+identity check accepts any `N/48000` `node.latency` (PipeWire rewrites the prop to the running
+quantum). `PrivatePw` lives in `tests/common/pw.rs`.
 
 **Size: L** (≈ 2 days).
 

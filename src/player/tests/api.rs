@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use common::pw::PrivatePw;
 use common::{ClipSpec, ensure_clip, headless_gl};
 use serde_json::{Value, json};
 
@@ -4654,117 +4655,7 @@ fn t20e_wayland_present_heap_stays_flat() {
     );
 }
 
-/// I7 (final review): a **private, hermetic** PipeWire + WirePlumber (their own runtime/
-/// config/state dirs, no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/V4L2
-/// monitors, so no real device is ever touched; one null sink as the only output). The
-/// owner's PipeWire is never involved: `PIPEWIRE_RUNTIME_DIR` points every client of this
-/// test (the bus, mpv's AO) at the private socket.
-struct PrivatePw {
-    dir: PathBuf,
-    procs: Vec<Child>,
-}
-
-impl PrivatePw {
-    fn available() -> bool {
-        ["pipewire", "wireplumber"].iter().all(|b| {
-            Command::new(b)
-                .arg("--version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        })
-    }
-
-    fn new(dir: PathBuf) -> PrivatePw {
-        for d in ["run", "state", "cfg/wireplumber/wireplumber.conf.d"] {
-            std::fs::create_dir_all(dir.join(d)).unwrap();
-        }
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::write(
-            dir.join("pw.conf"),
-            r#"context.properties = { core.daemon = true core.name = pipewire-0
-  default.clock.rate = 48000 support.dbus = false log.level = 1 }
-context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
-context.modules = [
-  { name = libpipewire-module-protocol-native } { name = libpipewire-module-profiler }
-  { name = libpipewire-module-access } { name = libpipewire-module-metadata }
-  { name = libpipewire-module-spa-device-factory } { name = libpipewire-module-spa-node-factory }
-  { name = libpipewire-module-client-node } { name = libpipewire-module-client-device }
-  { name = libpipewire-module-adapter } { name = libpipewire-module-link-factory } ]
-context.objects = [
-  { factory = spa-node-factory args = { factory.name = support.node.driver node.name = Dummy-Driver
-      node.group = pipewire.dummy priority.driver = 20000 } }
-  { factory = adapter args = { factory.name = support.null-audio-sink node.name = hermetic-sink
-      node.description = "hermetic sink" media.class = Audio/Sink audio.position = [ FL FR ]
-      monitor.channel-volumes = true node.group = pipewire.dummy priority.driver = 21000 } } ]
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("cfg/wireplumber/wireplumber.conf.d/99-hermetic.conf"),
-            "wireplumber.profiles = { policy = { support.reserve-device = disabled \
-             monitor.alsa.reserve-device = disabled support.portal-permissionstore = disabled \
-             script.client.access-portal = disabled support.logind = disabled \
-             monitor.bluez.seat-monitoring = disabled hooks.device.profile.state = disabled \
-             hooks.device.routes.state = disabled } }\n",
-        )
-        .unwrap();
-        PrivatePw {
-            dir,
-            procs: Vec::new(),
-        }
-    }
-
-    fn run_dir(&self) -> PathBuf {
-        self.dir.join("run")
-    }
-
-    fn spawn(&self, bin: &str, args: &[&str]) -> Child {
-        let mut c = Command::new(bin);
-        die_with_parent(&mut c);
-        c.args(args)
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("HOME", &self.dir)
-            .env("XDG_RUNTIME_DIR", self.run_dir())
-            .env("PIPEWIRE_RUNTIME_DIR", self.run_dir())
-            .env("XDG_CONFIG_HOME", self.dir.join("cfg"))
-            .env("XDG_STATE_HOME", self.dir.join("state"))
-            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        c.spawn().expect("spawn private pipewire")
-    }
-
-    fn start(&mut self) {
-        let conf = self.dir.join("pw.conf");
-        let pw = self.spawn("pipewire", &["-c", conf.to_str().unwrap()]);
-        wait_for(Duration::from_secs(5), "private pipewire socket", || {
-            self.run_dir().join("pipewire-0").exists().then_some(())
-        });
-        let wp = self.spawn("wireplumber", &["-p", "policy"]);
-        self.procs = vec![pw, wp];
-        std::thread::sleep(Duration::from_millis(700));
-    }
-
-    /// The audio server "restarts": both daemons die at once.
-    fn kill(&mut self) {
-        for mut p in self.procs.drain(..) {
-            let _ = p.kill();
-            let _ = p.wait();
-        }
-    }
-}
-
-impl Drop for PrivatePw {
-    fn drop(&mut self) {
-        self.kill();
-    }
-}
-
+/// I7: the private PipeWire (`common::pw::PrivatePw`).
 #[test]
 fn i7_bus_reconnects_after_pipewire_restart() {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -6457,14 +6348,7 @@ fn tone_wav(path: &Path) {
 
 /// The `node.name`s of the private PipeWire's nodes.
 fn pw_nodes(pw: &PrivatePw) -> Vec<String> {
-    let out = Command::new("pw-dump")
-        .env_clear()
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .env("XDG_RUNTIME_DIR", pw.run_dir())
-        .env("PIPEWIRE_RUNTIME_DIR", pw.run_dir())
-        .output()
-        .expect("pw-dump");
-    let v: Value = serde_json::from_slice(&out.stdout).unwrap_or(json!([]));
+    let v = pw.dump();
     v.as_array()
         .unwrap()
         .iter()
@@ -6548,4 +6432,651 @@ fn visualiser_input_reaches_only_scenes_that_want_it() {
     });
     let _ = tone.kill();
     let _ = tone.wait();
+}
+
+// ------------------------------------------------------------ Phase 2 Task 6: scene audio
+
+/// A synthetic scene that plays a tone (`hz`, −20 dBFS peak → −23 on the bus meter).
+fn tone_scene(hz: f64) -> SyntheticSpec {
+    SyntheticSpec {
+        pattern: Pattern::Solid,
+        has_audio: true,
+        tone_hz: hz,
+        tone_dbfs: -20.0,
+        ..SyntheticSpec::default()
+    }
+}
+
+/// A real-clock server on a private PipeWire (bus up), synthetic scenes allowed.
+fn scene_audio_serve(pw: &PrivatePw, root: PathBuf, serial: MutexGuard<'static, ()>) -> Serve {
+    let run = pw.run_dir();
+    let srv = Serve::spawn_env(
+        root,
+        &[
+            "--ao",
+            "pipewire",
+            "--clock",
+            "real",
+            "--log-level",
+            "debug",
+        ],
+        &[
+            ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
+            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    wait_for(Duration::from_secs(5), "bus up and metering", || {
+        let b = c.ok("probe", json!({"name": "bus"}));
+        (b["state"] == json!("up") && b["meter"]["available"] == json!(true)).then_some(())
+    });
+    srv
+}
+
+/// The bus meter's 1 ms samples `[t_ms, dB]` over `[from, to)` (t_mono_ms).
+fn meter_samples(c: &mut Client, from: f64, to: f64) -> Vec<(f64, f64)> {
+    // An unavailable meter (the bus reconnecting) reads as nothing captured.
+    let r = c.call(
+        "probe",
+        json!({"name": "meter.window", "args": {"from_ms": from, "to_ms": to}}),
+    );
+    r["result"]["samples"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap()))
+        .collect()
+}
+
+/// Power mean (dB) of 1 ms dB samples.
+fn power_mean_db(s: &[(f64, f64)]) -> f64 {
+    let p = s.iter().map(|(_, db)| 10f64.powf(db / 10.0)).sum::<f64>() / s.len().max(1) as f64;
+    10.0 * p.max(1e-14).log10()
+}
+
+fn bus_now(c: &mut Client) -> f64 {
+    c.ok("probe", json!({"name": "bus"}))["now_ms"]
+        .as_f64()
+        .unwrap()
+}
+
+/// The bus level over the last `ms`: power mean of the meter's 1 ms samples.
+fn bus_db(c: &mut Client, ms: f64) -> f64 {
+    let now = bus_now(c);
+    power_mean_db(&meter_samples(c, now - ms, now))
+}
+
+fn has_event(c: &mut Client, kind: &str, pred: impl Fn(&Value) -> bool) -> bool {
+    c.ok(
+        "logs",
+        json!({"kind_prefix": kind, "min_level": "debug", "limit": 10000}),
+    )["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["kind"] == json!(kind) && pred(e))
+}
+
+fn private_pw() -> Option<(MutexGuard<'static, ()>, PathBuf, PrivatePw)> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return None;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    pw.start();
+    Some((serial, root, pw))
+}
+
+/// A tone scene shown on every output, its tone on the bus.
+fn playing_tone_scene(c: &mut Client, name: &str, hz: f64) -> String {
+    let id = create_scene(c, name, &tone_scene(hz), json!({}));
+    show_all(c, &id);
+    wait_for(Duration::from_secs(5), "the tone on the bus", || {
+        (bus_db(c, 200.0) > -26.0).then_some(())
+    });
+    id
+}
+
+/// Plan Task 6: a scene's sound is a PipeWire stream on the player bus — opened with the
+/// identity the plan names, linked to `lp-player-bus`, at the scene's level (a −20 dBFS tone
+/// reads −23 on the meter).
+#[test]
+fn scene_audio_on_bus_with_identity() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let id = playing_tone_scene(&mut c, "api-audio-id", 1000.0);
+    std::thread::sleep(Duration::from_millis(300));
+    let db = bus_db(&mut c, 300.0);
+    println!("scene tone on the bus: {db:.2} dB (meter power mean)");
+    assert!((db + 23.0).abs() < 3.0, "{db}");
+    assert!(
+        has_event(&mut c, "source.audio_flowing", |e| e["id"] == json!(id)),
+        "the scene reported flowing audio"
+    );
+    let dump = pw.dump();
+    let objs = dump.as_array().unwrap();
+    let name = format!("lp-player-scene.{id}");
+    let node = objs
+        .iter()
+        .find(|o| o["info"]["props"]["node.name"] == json!(name))
+        .unwrap_or_else(|| panic!("no {name} node"));
+    let props = &node["info"]["props"];
+    println!("scene stream props: {props}");
+    assert_eq!(props["application.name"], json!("lp-player"));
+    assert_eq!(props["media.role"], json!("Wallpaper"));
+    assert_eq!(props["target.object"], json!("lp-player-bus"));
+    // We request 256/48000; PipeWire rewrites the prop to the quantum the graph runs at
+    // (every stream here reads the same, the bus's own included).
+    assert!(
+        props["node.latency"]
+            .as_str()
+            .is_some_and(|l| l.ends_with("/48000")),
+        "{props}"
+    );
+    assert_eq!(props["state.restore-props"], json!(false));
+    assert_eq!(props["state.restore-target"], json!(false));
+    let bus = objs
+        .iter()
+        .find(|o| o["info"]["props"]["node.name"] == json!("lp-player-bus"))
+        .expect("bus sink");
+    let linked = objs.iter().any(|o| {
+        o["type"] == json!("PipeWire:Interface:Link")
+            && o["info"]["output-node-id"] == node["id"]
+            && o["info"]["input-node-id"] == bus["id"]
+    });
+    assert!(linked, "the scene stream is linked to lp-player-bus");
+    let w = worker_of(&mut c, &id);
+    println!("worker audio: {}", w["audio"]);
+    assert!(w["audio"]["envelope_blocks"].as_u64().unwrap() > 100);
+    assert!((w["audio"]["envelope_dbfs"].as_f64().unwrap() + 23.0).abs() < 3.0);
+}
+
+/// A gain ramp (`animate gain.user` 0 → −20 dB over 300 ms) reaches the bus smoothly:
+/// monotonic, no step, ending at −43.
+#[test]
+fn scene_gain_ramp_reaches_the_bus() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let id = playing_tone_scene(&mut c, "api-audio-ramp", 1000.0);
+    std::thread::sleep(Duration::from_millis(200));
+    let t0 = bus_now(&mut c);
+    c.ok(
+        "animate",
+        json!({"path": format!("{id}.gain.user"), "to": -20.0, "duration_ms": 300}),
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    let s = meter_samples(&mut c, t0 - 50.0, t0 + 600.0);
+    // 1 kHz: every 1 ms block is one period — each sample is the level itself.
+    let bins: Vec<f64> = s.chunks(10).map(power_mean_db).collect();
+    let rises = bins.windows(2).filter(|w| w[1] > w[0] + 0.5).count();
+    let end = power_mean_db(&s[s.len() - 100..]);
+    println!(
+        "ramp on the bus (10 ms bins): {:?}",
+        bins.iter()
+            .map(|b| (b * 10.0).round() / 10.0)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(rises, 0, "monotonic: {bins:?}");
+    assert!((end + 43.0).abs() < 3.0, "end {end}");
+    let max_step = bins
+        .windows(2)
+        .map(|w| (w[0] - w[1]).abs())
+        .fold(0.0, f64::max);
+    assert!(
+        max_step < 3.0,
+        "a step: largest 10 ms change {max_step:.2} dB"
+    );
+}
+
+/// `no_audio` is live on a scene: on → silent within 100 ms (the worker's 30 ms gate), off →
+/// `source.audio_flowing`, then the tone again; the same worker throughout.
+#[test]
+fn scene_no_audio_toggle_is_live() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let id = playing_tone_scene(&mut c, "api-audio-mute", 1000.0);
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    let t_on = bus_now(&mut c);
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.no_audio"), "value": true}),
+    );
+    std::thread::sleep(Duration::from_millis(400));
+    let after = meter_samples(&mut c, t_on + 100.0, t_on + 350.0);
+    let loudest = after.iter().map(|s| s.1).fold(-200.0, f64::max);
+    println!("no_audio on: loudest 1 ms block 100–350 ms after: {loudest:.1} dB");
+    assert!(loudest <= -90.0, "silent within 100 ms: {loudest}");
+    let t_off = now_ms(&mut c);
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.no_audio"), "value": false}),
+    );
+    wait_for(Duration::from_secs(2), "flowing again", || {
+        has_event(&mut c, "source.audio_flowing", |e| {
+            e["id"] == json!(id) && e["t_mono_ms"].as_f64().unwrap() > t_off
+        })
+        .then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let db = bus_db(&mut c, 200.0);
+    println!("no_audio off: {db:.2} dB");
+    assert!((db + 23.0).abs() < 3.0, "{db}");
+    assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
+}
+
+fn settled(c: &mut Client) {
+    wait_for(Duration::from_secs(5), "settled", || {
+        c.ok("state", json!({}))["transitions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+            .then_some(())
+    })
+}
+
+/// Invariant #8 for scenes (`--ao null`: the worker's real-time pull timer is the stream): a
+/// frozen V→S holds B's ramp-in until B's own `source.audio_flowing`, a full-live one too, a
+/// scene without sound never waits (no `onset_timeout` either way), and every other onset
+/// path — unpark, a reveal's snap-back, the R88 resume — waits for a scene's flow.
+#[test]
+fn scene_audio_flowing_gates_every_onset() {
+    let Some(srv) = scene_serve(&["--clock", "real", "--log-level", "debug"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let v = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &v);
+    wait_playing(&mut c, &v, 0.3);
+    // Frozen V→S onto a scene with sound: B's ramp waits for its flow.
+    let dir = common::synthetic_scene("api-onset-s", &tone_scene(660.0));
+    let t0 = now_ms(&mut c);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dir)},
+               "effect_id": "fade", "duration_ms": 200, "method": "frozen"}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    let st = onset_after_flow(&mut c, &b, "anticlick", t0);
+    println!("frozen V→S onset: {st}");
+    settled(&mut c);
+    // Full-live S→S onto a scene WITHOUT sound: never waits.
+    let quiet = common::synthetic_scene("api-onset-quiet", &synth(Pattern::Solid));
+    c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&quiet)},
+               "effect_id": "fade", "duration_ms": 200, "method": "full-live"}),
+    );
+    settled(&mut c);
+    // Back onto a scene with sound, full-live (B's ramp = the xfade slot).
+    let t2 = now_ms(&mut c);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dir)},
+               "effect_id": "fade", "duration_ms": 200, "method": "full-live"}),
+    );
+    let a = r["to"].as_str().unwrap().to_string();
+    onset_after_flow(&mut c, &a, "xfade", t2);
+    settled(&mut c);
+    // Unpark.
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    wait_for(Duration::from_secs(2), "parked", || {
+        (worker_of(&mut c, &a)["paused"] == json!(true)).then_some(())
+    });
+    let t3 = now_ms(&mut c);
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-1", "width": 640, "height": 360, "hz": 60}),
+    );
+    onset_after_flow(&mut c, &a, "anticlick", t3);
+    // A reveal's snap-back (A held paused, then restored).
+    let other = common::synthetic_scene("api-onset-b", &tone_scene(880.0));
+    let corr = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&other)},
+               "effect_id": "fade", "duration_ms": 3000, "method": "reveal"}),
+    )["corr"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(Duration::from_secs(3), "A held", || {
+        (worker_of(&mut c, &a)["paused"] == json!(true)).then_some(())
+    });
+    let t4 = now_ms(&mut c);
+    c.ok("cancel", json!({ "corr": corr }));
+    onset_after_flow(&mut c, &a, "anticlick", t4);
+    settled(&mut c);
+    // The R88 resume.
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    wait_for(Duration::from_secs(2), "gated", || {
+        (worker_of(&mut c, &a)["paused"] == json!(true)).then_some(())
+    });
+    let t5 = now_ms(&mut c);
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    onset_after_flow(&mut c, &a, "pause", t5);
+    assert!(
+        !has_event(&mut c, "runtime.onset_timeout", |_| true)
+            && !has_event(&mut c, "transition.onset_timeout", |_| true),
+        "every onset onto a scene flowed in time"
+    );
+}
+
+/// Invariants #2/#5 on the bus, every switch combo with a scene (V→S, S→S, S→V): a full-live
+/// crossfade of two equal-level, unrelated tones keeps the bus power steady (equal-power
+/// cos/sin — a linear fade would dip 3 dB at the midpoint), and the dropout detector — a
+/// scene's reference taken from its worker's envelope — finds no drop or micro-gap.
+#[test]
+fn scene_crossfades_are_equal_power_on_the_bus() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string(); // 440 Hz
+    let v = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &v);
+    wait_for(
+        Duration::from_secs(5),
+        "the video's tone on the bus",
+        || (bus_db(&mut c, 200.0) > -26.0).then_some(()),
+    );
+    let s1 = common::synthetic_scene("api-xf-s1", &tone_scene(1000.0));
+    let s2 = common::synthetic_scene("api-xf-s2", &tone_scene(625.0));
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string(); // 660 Hz
+    let steps = [
+        ("V→S", json!({"kind": "scene", "path": s(&s1)})),
+        ("S→S", json!({"kind": "scene", "path": s(&s2)})),
+        ("S→V", json!({"path": blue, "loop": true})),
+    ];
+    let mut worst_all: f64 = 0.0;
+    for (name, to) in steps {
+        std::thread::sleep(Duration::from_millis(400));
+        let corr = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": to, "effect_id": "fade",
+                   "duration_ms": 1000, "method": "full-live"}),
+        )["corr"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let evs = wait_for(Duration::from_secs(6), "transition.done", || {
+            let evs = c.ok(
+                "logs",
+                json!({"corr": corr, "kind_prefix": "transition.", "limit": 100}),
+            )["events"]
+                .as_array()
+                .unwrap()
+                .clone();
+            evs.iter()
+                .any(|e| e["kind"] == "transition.done")
+                .then_some(evs)
+        });
+        let at = |k: &str| {
+            evs.iter().find(|e| e["kind"] == json!(k)).unwrap()["t_mono_ms"]
+                .as_f64()
+                .unwrap()
+        };
+        let (t_start, t_hand) = (at("transition.started"), at("transition.handoff"));
+        std::thread::sleep(Duration::from_millis(700));
+        let samples = meter_samples(&mut c, t_start - 300.0, t_hand + 300.0);
+        // 25 ms power means across the effect (B's onset may start a few ms after t0).
+        let inner: Vec<(f64, f64)> = samples
+            .iter()
+            .copied()
+            .filter(|(t, _)| *t >= t_start + 25.0 && *t < t_hand - 25.0)
+            .collect();
+        let bins: Vec<f64> = inner.chunks(25).map(power_mean_db).collect();
+        let before: Vec<(f64, f64)> = samples
+            .iter()
+            .copied()
+            .filter(|(t, _)| *t < t_start)
+            .collect();
+        let before = power_mean_db(&before);
+        let worst = bins.iter().map(|b| (b - before).abs()).fold(0.0, f64::max);
+        worst_all = worst_all.max(worst);
+        println!(
+            "{name}: before {before:.2} dB; 25 ms bins through the fade within ±{worst:.2} dB \
+             of it: {:?}",
+            bins.iter()
+                .map(|b| (b * 10.0).round() / 10.0)
+                .collect::<Vec<_>>()
+        );
+        assert!((before + 23.0).abs() < 3.0, "{name}: {before}");
+        assert!(worst < 1.5, "{name}: not equal-power: off by {worst:.2} dB");
+        // The dropout detector; a scene's reference = its worker's envelope.
+        c.ok("probe", json!({"name": "dropout", "args": {"corr": corr}}));
+        let report = wait_for(Duration::from_secs(10), "probe.dropout", || {
+            logs_of(&mut c, "probe.dropout")
+                .into_iter()
+                .find(|e| e["corr"] == json!(corr))
+        });
+        println!("{name}: dropout {}", report["report"]);
+        let r = &report["report"];
+        assert_eq!(r["fit"], json!("ok"), "{name}: {report}");
+        assert_eq!(r["drops"], json!([]), "{name}: {report}");
+        assert_eq!(r["micro_gaps"], json!([]), "{name}: {report}");
+    }
+    println!("crossfade curve error, all combos: ±{worst_all:.2} dB");
+}
+
+/// The loudest 1 ms block 150–450 ms after now (the bus meter).
+fn loudest_after(c: &mut Client, what: &str) -> f64 {
+    let t = bus_now(c);
+    std::thread::sleep(Duration::from_millis(500));
+    let s = meter_samples(c, t + 150.0, t + 450.0);
+    let loudest = s.iter().map(|s| s.1).fold(-200.0, f64::max);
+    println!("{what}: loudest 1 ms block {loudest:.1} dB");
+    loudest
+}
+
+/// Scenes and the bus: the player-pause gate (R88) and parking (every output gone) both leave
+/// the bus silent and come back on flowing audio with the same worker; a destroy ramps the
+/// stream out before it goes (never a cut).
+#[test]
+fn scene_pause_park_and_destroy_on_the_bus() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let id = playing_tone_scene(&mut c, "api-audio-pause", 1000.0);
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    // The player pause.
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    assert!(loudest_after(&mut c, "player paused") <= -90.0);
+    let blocks = worker_of(&mut c, &id)["audio"]["envelope_blocks"]
+        .as_u64()
+        .unwrap();
+    let t = now_ms(&mut c);
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    onset_after_flow(&mut c, &id, "pause", t);
+    std::thread::sleep(Duration::from_millis(300));
+    let db = bus_db(&mut c, 200.0);
+    assert!((db + 23.0).abs() < 3.0, "resumed: {db}");
+    assert!(
+        worker_of(&mut c, &id)["audio"]["envelope_blocks"]
+            .as_u64()
+            .unwrap()
+            > blocks,
+        "the stream kept running"
+    );
+    // Parking.
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    assert!(loudest_after(&mut c, "parked") <= -90.0);
+    let t = now_ms(&mut c);
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-1", "width": 640, "height": 360, "hz": 60}),
+    );
+    onset_after_flow(&mut c, &id, "anticlick", t);
+    std::thread::sleep(Duration::from_millis(300));
+    let db = bus_db(&mut c, 200.0);
+    assert!((db + 23.0).abs() < 3.0, "unparked: {db}");
+    assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
+    // Destroy: the retire ramp, then the stream goes — never cut while audible.
+    let t = bus_now(&mut c);
+    c.ok("destroy", json!({ "id": id }));
+    std::thread::sleep(Duration::from_millis(500));
+    let s = meter_samples(&mut c, t - 20.0, t + 400.0);
+    // 1 kHz: each 1 ms sample is the level. From leaving the tone's level to silence must
+    // take a ramp's time (30 ms linear in amplitude), not a block or two.
+    let fall = s.iter().find(|p| p.1 < -24.0).expect("the tone fades").0;
+    let silent = s
+        .iter()
+        .find(|p| p.0 > fall && p.1 <= -90.0)
+        .expect("silent after")
+        .0;
+    println!("destroy: −1 dB → silent in {:.0} ms", silent - fall);
+    assert!(
+        silent - fall >= 20.0,
+        "a cut, not a ramp: silent {:.0} ms after it started falling",
+        silent - fall
+    );
+    let name = format!("lp-player-scene.{id}");
+    wait_for(Duration::from_secs(2), "the stream gone", || {
+        (!pw_nodes(&pw).contains(&name)).then_some(())
+    });
+}
+
+/// The `i7_bus_reconnects_after_pipewire_restart` pattern for a scene: PipeWire dies and
+/// comes back → the scene's stream is rebuilt on the bus, its tone is back, and the ramp-in
+/// (`gain.pause`) waited for the scene's own flowing audio — the same worker throughout.
+#[test]
+fn scene_reroutes_after_pipewire_restart() {
+    let Some((serial, root, mut pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let id = playing_tone_scene(&mut c, "api-audio-pwrestart", 1000.0);
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    let bus_state = |c: &mut Client| c.ok("probe", json!({"name": "bus"}))["state"].clone();
+    pw.kill();
+    wait_for(Duration::from_secs(3), "bus down", || {
+        (bus_state(&mut c) == json!("down")).then_some(())
+    });
+    wait_for(Duration::from_secs(2), "re-routed to the default", || {
+        (worker_of(&mut c, &id)["audio"]["route"] == json!("default")).then_some(())
+    });
+    let t_down = now_ms(&mut c);
+    pw.start();
+    wait_for(Duration::from_secs(10), "bus back up", || {
+        (bus_state(&mut c) == json!("up")).then_some(())
+    });
+    wait_for(
+        Duration::from_secs(5),
+        "the scene's tone on the bus again",
+        || (bus_db(&mut c, 200.0) > -26.0).then_some(()),
+    );
+    let name = format!("lp-player-scene.{id}");
+    assert!(pw_nodes(&pw).contains(&name), "the stream is back");
+    onset_after_flow(&mut c, &id, "pause", t_down);
+    assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
+}
+
+/// CPU of `pid` over `secs` (% of one core): `(the whole process, its thread named comm)`.
+fn cpu_of_thread(pid: u32, comm: &str, secs: f64) -> (f64, f64) {
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
+    let a = thread_ticks(pid);
+    std::thread::sleep(Duration::from_secs_f64(secs));
+    let b = thread_ticks(pid);
+    let (mut total, mut named) = (0u64, 0u64);
+    for (tid, (c, t1)) in &b {
+        let d = t1.saturating_sub(a.get(tid).map_or(0, |(_, t)| *t));
+        total += d;
+        if c == comm {
+            named += d;
+        }
+    }
+    let pct = |t: u64| t as f64 / hz / secs * 100.0;
+    (pct(total), pct(named))
+}
+
+/// On-machine (opt-in, `LP_PLAYER_TEST_SCENES=<…/431960>`, else SKIP; FAIL under
+/// `LP_REQUIRE_SCENES=1`): a real Workshop scene with a sound stream (2371103399) plays its
+/// sound through LWE's host driver into the worker's stream on a PRIVATE PipeWire's bus —
+/// never the owner's speakers — at 1×, 1.5× and 0.5× (time-stretched, pitch kept); the bus
+/// level matches the worker's own envelope (gain 0 dB) and the worker's CPU is reported.
+#[test]
+fn real_scene_sound_on_the_bus() {
+    let require = std::env::var("LP_REQUIRE_SCENES").is_ok_and(|v| v == "1");
+    let Some(root) = std::env::var_os("LP_PLAYER_TEST_SCENES").map(PathBuf::from) else {
+        assert!(
+            !require,
+            "LP_REQUIRE_SCENES=1 but LP_PLAYER_TEST_SCENES is not set"
+        );
+        println!("SKIP: LP_PLAYER_TEST_SCENES is not set");
+        return;
+    };
+    let Some((serial, sroot, pw)) = private_pw() else {
+        assert!(!require, "LP_REQUIRE_SCENES=1 but no private PipeWire");
+        return;
+    };
+    let srv = scene_audio_serve(&pw, sroot, serial);
+    let mut c = srv.client();
+    let dir = root.join("2371103399");
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(10), "the scene playing", || {
+        (f64_of(&mut c, &format!("{id}.time_pos")).unwrap_or(0.0) > 0.5).then_some(())
+    });
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["audio"]["has_audio"], json!(true), "{w}");
+    let db = wait_for(
+        Duration::from_secs(10),
+        "the scene's sound on the bus",
+        || {
+            let db = bus_db(&mut c, 500.0);
+            (db > -70.0).then_some(db)
+        },
+    );
+    println!("2371103399 on the bus: {db:.1} dB");
+    let pid = w["pid"].as_u64().unwrap() as u32;
+    for speed in [1.0, 1.5, 0.5, 1.0] {
+        c.ok(
+            "set",
+            json!({"path": format!("{id}.speed"), "value": speed}),
+        );
+        std::thread::sleep(Duration::from_millis(500));
+        let t0 = bus_now(&mut c);
+        let secs = 5.0;
+        let (cpu, audio_cpu) = cpu_of_thread(pid, "lp-scene-audio", secs);
+        let s = meter_samples(&mut c, t0, t0 + secs * 1000.0);
+        let bus = power_mean_db(&s);
+        let env = worker_of(&mut c, &id)["audio"].clone();
+        // Exactly-silent 1 ms blocks (this scene's sound has none at 1×: a dropout). A
+        // release worker reads 0 at every speed; a debug one misses 64-frame graph cycles on
+        // its WSOLA steps (1–2 ms holes at ≠ 1×), which the < 20 ms bound tolerates.
+        let (mut run, mut longest) = (0, 0);
+        for p in &s {
+            run = if p.1 <= -95.9 { run + 1 } else { 0 };
+            longest = longest.max(run);
+        }
+        let silent = s.iter().filter(|p| p.1 <= -95.9).count();
+        println!(
+            "speed {speed}: bus {bus:.1} dB, {silent} silent 1 ms blocks (longest run \
+             {longest} ms), worker CPU {cpu:.1} % (audio thread {audio_cpu:.1} %), envelope {}",
+            env["envelope_dbfs"]
+        );
+        assert!(bus > -70.0, "sound at {speed}x: {bus}");
+        assert!(longest < 20, "a gap at {speed}x: {longest} ms of silence");
+    }
 }

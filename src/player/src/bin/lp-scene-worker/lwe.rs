@@ -370,6 +370,15 @@ impl Scene {
         }
     }
 
+    /// The context's host audio driver as a [`Pull`](crate::stretch::Pull) for the audio
+    /// thread (Task 6). It holds the raw context: take it out of the audio thread's hands
+    /// (`audio::Control::remove`) before this `Scene` is dropped.
+    pub fn audio_puller(&self) -> LwePull {
+        LwePull {
+            context: self.context,
+        }
+    }
+
     pub fn audio_streams(&self) -> i32 {
         unsafe { wp_context_audio_stream_count(self.context) }
     }
@@ -381,6 +390,25 @@ impl Scene {
                 return String::new();
             }
             CStr::from_ptr(p).to_string_lossy().into_owned()
+        }
+    }
+}
+
+/// `wp_context_audio_pull` from another thread (patch 0003: the host driver locks its own
+/// stream list, and the pull never waits for decoding).
+pub struct LwePull {
+    context: *mut c_void,
+}
+
+// The context outlives every pull: the renderer removes the puller before dropping the scene.
+unsafe impl Send for LwePull {}
+
+impl crate::stretch::Pull for LwePull {
+    fn pull(&mut self, out: &mut [f32]) {
+        let n = out.len() / CHANNELS as usize;
+        let got = unsafe { wp_context_audio_pull(self.context, out.as_mut_ptr(), n) };
+        if got < n {
+            out[got * CHANNELS as usize..].fill(0.0);
         }
     }
 }
@@ -407,6 +435,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut assets = None;
     let mut out = None;
     let mut seconds = 3.0f32;
+    let mut audio_dump = 0.0f32;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -414,6 +443,7 @@ pub fn smoke(args: &[String]) -> ! {
             "--assets" => assets = it.next().cloned(),
             "--out" => out = it.next().cloned(),
             "--seconds" => seconds = it.next().and_then(|v| v.parse().ok()).unwrap_or(3.0),
+            "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             _ => {}
         }
     }
@@ -428,6 +458,7 @@ pub fn smoke(args: &[String]) -> ! {
         Path::new(&assets),
         Path::new(&out),
         seconds,
+        audio_dump,
     ) {
         Ok(json) => {
             println!("{json}");
@@ -440,7 +471,13 @@ pub fn smoke(args: &[String]) -> ! {
     }
 }
 
-fn run_smoke(dir: &Path, assets: &Path, out: &Path, seconds: f32) -> Result<String, String> {
+fn run_smoke(
+    dir: &Path,
+    assets: &Path,
+    out: &Path,
+    seconds: f32,
+    audio_dump: f32,
+) -> Result<String, String> {
     use glow::HasContext;
     use lp_player::gfx::Gfx;
 
@@ -528,6 +565,11 @@ fn run_smoke(dir: &Path, assets: &Path, out: &Path, seconds: f32) -> Result<Stri
         peak = buf.iter().fold(peak, |p, v| p.max(v.abs()));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    let dump = if audio_dump > 0.0 {
+        audio_dump_stretch(&scene, out, audio_dump)?
+    } else {
+        serde_json::Value::Null
+    };
     frame_ms.sort_by(|a, b| a.total_cmp(b));
     let mean = frame_ms.iter().sum::<f64>() / frame_ms.len() as f64;
     let p95 = frame_ms[(frame_ms.len() * 95 / 100).min(frame_ms.len() - 1)];
@@ -548,10 +590,62 @@ fn run_smoke(dir: &Path, assets: &Path, out: &Path, seconds: f32) -> Result<Stri
         "audio_streams": scene.audio_streams(),
         "audio_peak": peak,
         "shots": shots,
+        "audio_dump": dump,
     });
     drop(scene);
     if changed == 0 || lit == 0 {
         return Err(format!("not animating or blank: {json}"));
     }
     Ok(json.to_string())
+}
+
+/// `--audio-dump S` (Task 6 diagnostic): `S` seconds of the scene's sound pulled at 1× in real
+/// time (64-frame pulls, like the stream's callbacks) → `<out>/audio-in.f32`, then that same
+/// input through the time stretch at 0.5× and 1.5× → `audio-out-0.5.f32` / `-1.5.f32`
+/// (interleaved stereo F32, 48 kHz). Reports each file's exact-silence 1 ms blocks.
+fn audio_dump_stretch(scene: &Scene, out: &Path, secs: f32) -> Result<serde_json::Value, String> {
+    use crate::stretch::{Pull, Stretch};
+    let ch = CHANNELS as usize;
+    let total = (secs * SAMPLE_RATE as f32) as usize;
+    let mut input = vec![0f32; total * ch];
+    let t0 = std::time::Instant::now();
+    for (i, chunk) in input.chunks_mut(64 * ch).enumerate() {
+        let due = std::time::Duration::from_secs_f64(i as f64 * 64.0 / SAMPLE_RATE as f64);
+        if let Some(w) = due.checked_sub(t0.elapsed()) {
+            std::thread::sleep(w);
+        }
+        scene.pull_audio(chunk);
+    }
+    struct VecPull(Vec<f32>, usize);
+    impl Pull for VecPull {
+        fn pull(&mut self, out: &mut [f32]) {
+            for v in out.iter_mut() {
+                *v = self.0.get(self.1).copied().unwrap_or(0.0);
+                self.1 += 1;
+            }
+        }
+    }
+    let silent_blocks = |x: &[f32]| {
+        x.chunks_exact(48 * ch)
+            .filter(|b| lp_player::audio::meter::dbfs_block(b, ch) <= -95.9)
+            .count()
+    };
+    let write = |name: &str, x: &[f32]| -> Result<(), String> {
+        let bytes: Vec<u8> = x.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(out.join(name), bytes).map_err(|e| e.to_string())
+    };
+    write("audio-in.f32", &input)?;
+    let mut report = serde_json::json!({"in_silent_1ms": silent_blocks(&input)});
+    for speed in [0.5f64, 1.5] {
+        let n = ((total as f64 / speed) as usize).saturating_sub(4800);
+        let mut st = Stretch::new();
+        let mut src = VecPull(input.clone(), 0);
+        let mut o = vec![0f32; n * ch];
+        for chunk in o.chunks_mut(64 * ch) {
+            st.produce(chunk, speed, &mut src);
+        }
+        write(&format!("audio-out-{speed}.f32"), &o)?;
+        report[format!("out_{speed}_silent_1ms")] = serde_json::json!(silent_blocks(&o));
+    }
+    Ok(report)
 }

@@ -64,7 +64,8 @@ happen regardless of timing.
   `assets.rs` WE's assets dir, `pointer.rs` output → scene coordinates).
   `src/sources/scene.rs` — `SceneSource`. `src/gfx/dmabuf.rs` — dmabuf export/import +
   native fences on `Gfx`. `src/bin/lp-scene-worker/lwe.rs` — LWE's core (feature `lwe`);
-  `render.rs` — a real scene in the worker (Task 7).
+  `render.rs` — a real scene in the worker (Task 7); `audio.rs` + `stretch.rs` — the scene's
+  sound as a stream on the player bus, time-stretched (Task 6).
   § Scene worker.
 
 **`build.rs`** (Task 10) runs bindgen over `mpv/client.h` + `mpv/render.h` +
@@ -3126,7 +3127,8 @@ hard-coded `kind == "video"` learned about `scene`.
   start/restore/crash resume, a live set jumps; `speed` scales the clock (stepped: the step
   advance does); `kind` change → `unsupported` (both ways: `MpvSource` refuses `scene`);
   `color` → `unsupported`; `loop`, `hwdec`, `fps_cap`, `cache`, `demuxer_*`, `af`,
-  `audio_delay`, `preview`, `gain.*`, `no_audio` stored (gains/no_audio: Task 6). Observed:
+  `audio_delay`, `preview` stored; `gain.*`, `no_audio` and `speed` drive the worker's stream (§ "Scene
+  audio (Task 6)"). Observed:
   `kind` `scene`, `ready`, `time_pos` (the clock), `duration` 0, `width`/`height` (export
   size), `has_audio` (the worker's `Ready`, `true` until then — R92), `paused`.
 - **Snapshot.** A scene is saved like a video: position = `time_pos` once ready, `playing`
@@ -3209,7 +3211,8 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   `scene_assets` fails at once (`unsupported`, the resolver's error naming
   `LP_WE_ASSETS_DIR` / `player.scene_assets`) → `source.error`, **no worker spawned** —
   never a 1×1 render loop.
-- **The worker's two threads.** The renderer (main thread: GL, ring, LWE) and
+- **The worker's two threads** (three since Task 6: + `lp-scene-audio`, § "Scene audio").
+  The renderer (main thread: GL, ring, LWE) and
   `lp-scene-proto`, which reads the socket and hands messages over a channel. While the
   renderer is inside a load + build (`LoadGate`: a cold LWE build took up to 2.8 s) the
   protocol thread answers `Ping` itself — bounded by `LP_SCENE_LOAD_TIMEOUT_MS` (30 s), after
@@ -3288,11 +3291,135 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   (private PipeWire, a `pw-cat` tone → −9.0 dBFS at the scene; no capture node without a scene
   that wants it). Unit `restart_start_folds_live_changes` covers `SetProperty`.
 
-**For Tasks 6/9/11 and the properties editor.** Task 6: the worker's `LweScene` has
-`pull_audio`-ready LWE (host driver); `Ready.has_audio` is the LWE stream count — until Task 6
-streams it, a transition onto a scene with sound waits out `ONSET_TIMEOUT`. Task 9: nothing
+**For Tasks 9/11 and the properties editor.** (Task 6 is done — § "Scene audio (Task 6)"
+below.) Task 9: nothing
 scene-specific in the pointer/visualiser paths (both sides of a transition are fed). Task 11:
 `ScenesAvailable` = `hello.capabilities` `scene`, else `lp-player scene-check` (exit + JSON
 `reason`); set `player.scene_assets` from a setting if one is added; scenes `create` may carry
 `scene_props`. Editor: read `general.properties`, persist per item, send `set
 <src>.scene_props` (whole map), subscribe `scene.property` for refusals.
+
+### Scene audio (Task 6)
+
+A scene's sound is a PipeWire stream of its own worker on the player bus, driven by the
+compositor's dB gains exactly like a video's `volume-gain` — the invariants (#1–#8) hold for
+scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; compositor side
+`sources/scene.rs`; the dropout reference `probe/dropout.rs` (`SceneEnvelopes`).
+
+- **Protocol (`PROTOCOL` 2).** `Start` gained `id` (the source id), `gain_db` (default −96),
+  `no_audio`, `speed`; `ToWorker::Speed {speed}` is new; `Gain`/`NoAudio`/`Speed` are
+  **folded into the restart's `Start`** by `WorkerHost` (recorded while connected too, like
+  `SetProperty`) — a restarted worker resumes at the same level/mute/speed. The worker's
+  `paused` now means *play no audio*: the effective pause, or always in stepped mode (a stepped
+  scene never sends `Paused {false}`). `FromWorker::AudioFlowing`, `Envelope {t0_ms,
+  dbfs_1ms}` (`t0_ms` on `CLOCK_MONOTONIC`).
+- **The stream** (thread `lp-scene-audio`, its own PipeWire main loop; the process callback runs
+  there — no `RT_PROCESS`, like the bus): playback, F32 stereo 48 kHz, `node.name =
+  lp-player-scene.<id>`, `node.description = "lp-player scene"`, `application.name =
+  lp-player`, `media.role = Wallpaper`, `node.latency = 256/48000` (requested — PipeWire
+  rewrites the prop to the running quantum in `pw-dump`), `state.restore-props/target =
+  false`; the route: `Device("pipewire/lp-player-bus")` → `target.object = lp-player-bus` +
+  `node.dont-reconnect` (the compositor re-routes us, never WirePlumber), `Default` → no target,
+  `Null` (`--ao null`) → a real-time timer thread pulling and discarding (so `AudioFlowing`,
+  envelopes and the scene's sound clock work in hermetic tests). The thread starts at `Start`
+  but **opens the stream only once a sound is installed** (the load said `has_audio`: LWE stream
+  count > 0, synthetic `has_audio`) — silent then (gate shut, gain ramping from 0); a scene
+  without sound never opens one (found by `transport_meets_the_spike_budget`: an always-on null
+  timer took the worker from ~3.4–5.4 % to 7.2 % CPU); a PipeWire that can't be reached →
+  the same timer (keeps the sound in step with the picture, reports **no** flow), retried every
+  1 s; a `Route` change fades the old stream out on the gate (≤ 100 ms bound), then rebuilds.
+- **The signal path per buffer (`audio::Dsp`, pure, unit-tested):** pull (LWE's
+  `wp_context_audio_pull`, or the synthetic `Tone` — `tone_hz`/`tone_dbfs` peak, `has_audio`)
+  through the time stretch → **gate** → envelope → **gain**.
+  - **Gain**: the compositor's `Gain {db}` (`Gains::effective_db()` of the source's `gain.*`
+    slots, sent on every slot change — the 1 kHz `push_gain` path included — and re-sent at
+    every `Ready`), interpolated **linearly in amplitude** from the previous to the latest across
+    one buffer (`(i+1)/n`, last sample exact); ≤ −96 dB is exact `0.0` (`audio::gain_lin`).
+  - **Gate** — the worker's own 30 ms linear anti-click (`ANTICLICK_FRAMES` 1440, counted in
+    whole frames so its ends are exact): open while the scene *plays* (a source installed, not
+    paused, not `no_audio`, not quitting), closed otherwise. **When the stream is silent anyway**
+    (applied and target gain both 0) it jumps — so the normal "compositor ramps, then pauses"
+    pulls not one sample more (no decode drift) and an un-pause at −96 starts at once. It is what
+    fades a restarted worker in at its folded `Start.gain_db`, and an audible pause / mute /
+    route change / quit out (still pulling for those 30 ms). `no_audio` on → ≤ −90 dB within
+    100 ms (measured −96 in every block 100–350 ms after).
+  - **Pull lock**: the source sits in a `Mutex`; the callback `try_lock`s (a miss = silence
+    for that buffer: only at install/remove); the renderer `remove()`s it (waiting for a pull in
+    flight) before an LWE scene is dropped (`fatal`) — *stop pulling before `wp_context_destroy`*.
+- **Time stretch (`stretch::Stretch`, owner decision: speed scales the sound, pitch kept).**
+  WSOLA: 20 ms periodic-Hann segments (`WIN` 960) overlapped by half (`HOP` 480), segment `j`
+  taken near input `j·speed·HOP` at the ±10 ms (`SEARCH` 480) offset whose first hop best
+  matches the last segment's natural continuation (normalised cross-correlation of the L+R
+  mono, a coarse pass on every 4th sample/candidate, then a ±3 full-resolution refine). **At
+  exactly 1× it is a passthrough** — pulled straight into the output, bit-exact, no added
+  latency; leaving 1× starts WSOLA at the current position (the next hop is the first overlap),
+  returning continues at the last segment's natural continuation (the overlap-add would give the
+  input there: the window halves sum to 1) — continuous both ways. The scene clock and the
+  stream both follow `speed` (the `Speed` message; stepped: never). Measured (unit, 440 Hz,
+  period 109.09 frames — no hop is whole periods): pitch 440.01 Hz at 0.5×/1.5×/0.1×/4×
+  (440.06 at 0.73×), 25 ms-block level −9.031 ± 0.003 dB (amplitude 0.5), input consumed at
+  speed + 0.01 (the look-ahead), the largest sample step across 1→1.5→0.5→1 switches 0.02879 vs
+  the tone's own 0.02880. RED (search disabled → nominal positions): 419.99 Hz and −9.86 dB at
+  0.5×. On the real scene's sound (2371103399, `--lwe-smoke --audio-dump 6`): no exact-silent
+  1 ms block in the input or in the 0.5×/1.5× output.
+- **`AudioFlowing` (invariant #8).** Worker: an arming counter (a `Start` that plays, `Paused
+  {false}`, `NoAudio {false}`, a `Route`); the first buffer after it that *pulled the scene's
+  sound into a real stream* (not the fallback timer, not before the load) sends one. Compositor:
+  `flow_armed` (open-unpaused, un-pause, `no_audio` off, a route change, a path change) + the
+  worker's message (`flow_seen`) → `SourceEvent::AudioFlowing` once the load is shown and not
+  paused; at once (no wait) when stepped, `has_audio: false`, or `no_audio`. Known window: an
+  `AudioFlowing` from an *earlier* arming that arrives after a re-arm counts (≤ a few ms: the
+  worker resumes pulling at its next callback) — no epoch in the protocol.
+- **Quit.** `Control::quit(200 ms)`: playing = false → the gate closes (at once if silent),
+  then the process exits once the stream's level (`applied × gate`) is exactly 0 — on `Quit`,
+  on EOF, and on a quit during a load (`_exit` after it). The compositor's retire ramp
+  normally made it silent already: destroy of a playing tone scene measured 28 ms from −1 dB to
+  silence on the bus, then the node is gone.
+- **Envelope → dropout reference.** 1 ms max-channel RMS dBFS of the gated, pre-gain samples
+  (`audio::meter::BlockMeter`; `meter::dbfs_block` is the shared one-block form), batched every
+  50 blocks, stamped with the buffer's play time (`CLOCK_MONOTONIC` now + one buffer). The
+  compositor maps it onto the log's `t_mono_ms` (the meter's clock) and keeps ≤ 10 s
+  (`take_envelope`); `Runtime::record_scene_envelopes` (every `update_sources`) files it into
+  `SceneEnvelopes` (≤ 40 000 entries per scene, dead ones kept `DEAD_LINGER`, ≤ 16 tracks;
+  `loop` probe bounds `scene_envelope_tracks/samples`); `SourceWindow.envelope` → the
+  expected mix uses it instead of an ffmpeg decode (`envelope_power_bins`: 10 ms power means,
+  silent where nothing arrived). Measured: S→S `probe dropout` lag 2–3 ms, fit 0.06 dB, offset
+  0.0. **Pre-existing, found here:** a video's reference reads its mono clip ~3 dB hot (mpv
+  upmixes mono → stereo at −3 dB per channel; the `-ac 1` decode doesn't), so V↔S fits show
+  1.2–1.6 dB and a −2 dB `offset_db` (absorbed; no drops) — the video side, not the scene's.
+- **Probe `workers` → `audio`**: `{route, gain_db, no_audio, has_audio, speed, flow_armed,
+  flows, envelope_dbfs, envelope_blocks}`.
+- **Measured** (private PipeWire, 64-frame graph quantum): a −20 dBFS tone scene on the bus
+  −23.01 dB (power mean); an `animate gain.user` 0 → −20 over 300 ms lands as a dB-linear
+  staircase-free ramp (10 ms bins −23.0 … −43.0, ≤ 0.7 dB per bin); full-live crossfades with
+  equal-level unrelated tones keep the bus power within ±0.13 (V→S), ±0.23 (S→S), ±0.96 dB
+  (S→V, the video's onset hold) of steady through a 1 s fade — equal power holds. The real scene
+  2371103399 at 1×/1.5×/0.5× on the bus: **release worker** 0 silent 1 ms blocks in 5 s each,
+  CPU 5.4 / 6.5 / 5.1 % of a core (the audio thread 1.5 / 2.5 / 1.9 %); a **debug** worker's
+  WSOLA step (~0.35 ms) misses 64-frame cycles — 1–2 ms holes every 10–20 ms at ≠ 1× (none at
+  1×; audio thread 5–14 %). Ship/measure release.
+- **Tests.** Worker units (`cargo test --bin lp-scene-worker`): `gain_change_ramps_across_one_buffer`,
+  `silent_db_is_exact_zero`, `gain_matches_db_to_lin`, `envelope_of_full_scale_sine_is_minus_3_01`,
+  `gate_declicks_only_an_audible_stream`, `audio_flowing_once_per_arming`,
+  `time_stretch_is_bit_exact_at_1x`, `time_stretch_keeps_pitch_level_and_rate`,
+  `time_stretch_speed_changes_are_continuous` (RED with a stepped gain / no gate / no search).
+  Lib: `restart_start_folds_live_changes` (+ Gain/NoAudio/Speed), `dropout_uses_scene_envelope_as_reference`.
+  `tests/api.rs` (private PipeWire `tests/common/pw.rs::PrivatePw` — moved from `api.rs`;
+  SKIP without the binaries): `scene_audio_on_bus_with_identity`, `scene_gain_ramp_reaches_the_bus`,
+  `scene_no_audio_toggle_is_live`, `scene_crossfades_are_equal_power_on_the_bus` (V→S, S→S,
+  S→V + `probe dropout` each: fit ok, no drops/micro-gaps), `scene_pause_park_and_destroy_on_the_bus`,
+  `scene_reroutes_after_pipewire_restart` (the I7 pattern: back on the bus, `gain.pause` ramp-in
+  `reason: flowed`, same worker); `--ao null`: `scene_audio_flowing_gates_every_onset` (frozen
+  V→S, full-live S→S onto a scene with and without sound, unpark, reveal snap-back, R88 resume —
+  each `onset.started {reason: flowed}` after the scene's own `source.audio_flowing`, no
+  `onset_timeout`; RED with the worker's `AudioFlowing` suppressed: `reason: timeout`); opt-in
+  `real_scene_sound_on_the_bus` (`LP_PLAYER_TEST_SCENES`, 2371103399; set `LP_SCENE_WORKER_BIN`
+  to a release worker for the numbers above). Diagnostic: `lp-scene-worker --lwe-smoke …
+  --audio-dump S` (real sound in, the stretch at 0.5×/1.5× out, raw F32 files + silent-block
+  counts).
+- **For Tasks 8/9/10/11 + loudness.** Task 9: nothing audio-specific left — a scene B's onset
+  waits for its flow like a video's. Task 10: a crash restart resumes at the folded gain, faded
+  in over 30 ms by the gate (the crash itself cuts — the process is gone); `Ready` re-sends the
+  gain. Loudness learned on first play: integrate the `SceneEnvelopes` track (pre-gain, so a
+  user gain never biases it). Task 11: `no_audio`/`gain.*`/`speed` on a scene are live like a
+  video's.

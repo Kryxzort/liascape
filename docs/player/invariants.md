@@ -348,6 +348,18 @@ that analysed before the window's post-roll was captured — all fixed in
 is still a 30 ms drop: `tests/dropout.rs::an_unramped_cut_at_effect_start_is_flagged`).
 `dropout.sh` passes every case at 60 Hz and 240 Hz.
 
+**Scenes (Phase 2 Task 6).** A scene's sound is its worker's own PipeWire stream, so the
+same rules hold through `SceneSource`: `SourceEvent::AudioFlowing` waits for the worker's
+`AudioFlowing` (the first stream buffer after an un-pause / `no_audio` off / route change / a
+start that plays that pulled the scene's sound), at once for a scene without sound, stepped or
+muted; the worker's own 30 ms gate fades anything that stops while audible and never pulls a
+sample more when the compositor already ramped to silence; its process exits only once its
+stream's level is exactly 0. Tests: `tests/api.rs::scene_audio_flowing_gates_every_onset`
+(every onset path onto a scene `reason: flowed`, no `onset_timeout`),
+`scene_crossfades_are_equal_power_on_the_bus`, `scene_pause_park_and_destroy_on_the_bus`,
+`scene_reroutes_after_pipewire_restart` (`.claude/rules/player-core.md` § Scene worker →
+"Scene audio (Task 6)").
+
 **Final review (I6) — one onset helper for every path.** `src/player/src/onset.rs`:
 `PendingOnset` (held ramp: `start` at the confirmation instant, never backdated; bounded by
 `ONSET_TIMEOUT`), `Onsets` (a holder: `schedule` / `tick(events)` / `force` / `cancel`),

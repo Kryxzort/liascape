@@ -638,7 +638,9 @@ fn format_pod() -> Vec<u8> {
     .unwrap_or_default()
 }
 
-pub(crate) fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
+/// Connect `stream` as 48 kHz F32 stereo FL/FR (`AUTOCONNECT | MAP_BUFFERS`). Public for the
+/// scene worker's playback stream (Task 6), which uses the bus's exact format.
+pub fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
     let bytes = format_pod();
     let pod = spa::pod::Pod::from_bytes(&bytes).ok_or("bad format pod")?;
     stream

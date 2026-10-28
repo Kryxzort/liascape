@@ -54,6 +54,20 @@ pub fn block_dbfs(sum_sq: &[f64], frames: usize) -> f64 {
     (10.0 * ms.log10()).max(SILENT_DB)
 }
 
+/// Max-channel RMS dBFS (floor −96) of one block of interleaved `samples` with `channels`
+/// channels — the meter's measure, shared with the scene worker's `Envelope` (Task 6) so a
+/// scene's reference and the bus capture are the same number.
+pub fn dbfs_block(samples: &[f32], channels: usize) -> f32 {
+    let channels = channels.max(1);
+    let mut sum_sq = vec![0.0f64; channels];
+    for frame in samples.chunks_exact(channels) {
+        for (acc, &x) in sum_sq.iter_mut().zip(frame) {
+            *acc += (x as f64) * (x as f64);
+        }
+    }
+    block_dbfs(&sum_sq, samples.len() / channels) as f32
+}
+
 /// Splits an interleaved stream into 1 ms blocks (pure; unit-tested without PipeWire).
 #[derive(Debug, Clone)]
 pub struct BlockMeter {

@@ -665,6 +665,10 @@ pub struct SourceWindow {
     /// R78: the source's own duration (file-seconds) at snapshot time, when known.
     /// `None` disables wrap handling even if `looped` is set — nothing to wrap against.
     pub duration: Option<f64>,
+    /// Phase 2 Task 6: a scene's reference — its worker's own envelope over the window (1 ms
+    /// pre-gain dBFS on the log clock, [`SceneEnvelopes`]) instead of a decoded file (a
+    /// scene folder has none). Already in window time (speed included).
+    pub envelope: Option<Vec<(Duration, f32)>>,
 }
 
 /// One source's recorded `(t, effective_gain_db)` history, oldest first, on the log's
@@ -1060,7 +1064,10 @@ pub fn expected_envelopes(
     let dur_s = window.1.saturating_sub(window.0).as_secs_f64();
     let decoded: Vec<Vec<f64>> = sources
         .iter()
-        .map(|s| decode_power_bins(&s.path, s.position, dur_s, s.speed, s.duration, s.looped))
+        .map(|s| match &s.envelope {
+            Some(env) => envelope_power_bins(env, window),
+            None => decode_power_bins(&s.path, s.position, dur_s, s.speed, s.duration, s.looped),
+        })
         .collect();
     let ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
     let coarse = mix_envelope(&ids, &decoded, gain_schedule, window);
@@ -1208,6 +1215,111 @@ impl GainHistory {
             })
             .collect()
     }
+}
+
+/// Phase 2 Task 6: the most scene envelopes kept (a few scenes live at once + the dead ones
+/// lingering for their post-roll analysis).
+const MAX_ENVELOPE_TRACKS: usize = 16;
+/// One scene's envelope entries at most (1 ms each: the last [`HISTORY_SPAN`]).
+const MAX_ENVELOPE_SAMPLES: usize = 40_000;
+
+/// Each scene source's own sound before its gain — the worker's `Envelope` (1 ms max-channel
+/// RMS dBFS, on the log clock) — kept like [`GainHistory`]: a scene has no file to decode, so
+/// this is its dropout reference ([`SourceWindow::envelope`]). Bounded per track by
+/// [`MAX_ENVELOPE_SAMPLES`], dead tracks by [`DEAD_LINGER`], in total by
+/// [`MAX_ENVELOPE_TRACKS`].
+#[derive(Default)]
+pub(crate) struct SceneEnvelopes {
+    tracks: HashMap<String, (VecDeque<(Duration, f32)>, Duration)>,
+}
+
+impl SceneEnvelopes {
+    pub(crate) fn new() -> SceneEnvelopes {
+        SceneEnvelopes::default()
+    }
+
+    /// Append `id`'s new entries (oldest first) at log time `now`.
+    pub(crate) fn record(&mut self, id: &str, entries: Vec<(Duration, f32)>, now: Duration) {
+        let tr = self.tracks.entry(id.to_string()).or_default();
+        tr.1 = now;
+        tr.0.extend(entries);
+        while tr.0.len() > MAX_ENVELOPE_SAMPLES {
+            tr.0.pop_front();
+        }
+    }
+
+    /// Mark the live scenes seen at `now`; drop dead tracks after [`DEAD_LINGER`] and the
+    /// least recently seen past [`MAX_ENVELOPE_TRACKS`].
+    pub(crate) fn retain_live(&mut self, live: &[String], now: Duration) {
+        for id in live {
+            if let Some(tr) = self.tracks.get_mut(id) {
+                tr.1 = now;
+            }
+        }
+        self.tracks
+            .retain(|_, tr| now.saturating_sub(tr.1) <= DEAD_LINGER);
+        while self.tracks.len() > MAX_ENVELOPE_TRACKS {
+            let Some(id) = self
+                .tracks
+                .iter()
+                .min_by_key(|(_, tr)| tr.1)
+                .map(|(id, _)| id.clone())
+            else {
+                break;
+            };
+            self.tracks.remove(&id);
+        }
+    }
+
+    /// `id`'s entries inside `window` (`None` = not a scene / nothing recorded).
+    pub(crate) fn window(
+        &self,
+        id: &str,
+        window: (Duration, Duration),
+    ) -> Option<Vec<(Duration, f32)>> {
+        let tr = self.tracks.get(id)?;
+        Some(
+            tr.0.iter()
+                .filter(|(t, _)| *t >= window.0 && *t < window.1)
+                .copied()
+                .collect(),
+        )
+    }
+
+    /// `(tracks, samples)` — the `loop` probe's bounds.
+    pub(crate) fn stats(&self) -> (usize, usize) {
+        (
+            self.tracks.len(),
+            self.tracks.values().map(|tr| tr.0.len()).sum(),
+        )
+    }
+}
+
+/// A scene's 10 ms **power** bins over `window` from its 1 ms dBFS envelope (Task 6): each
+/// bin the mean power of the entries inside it; a bin with none is silent (the scene's
+/// sound wasn't on its stream then).
+fn envelope_power_bins(env: &[(Duration, f32)], window: (Duration, Duration)) -> Vec<f64> {
+    let n = (window.1.saturating_sub(window.0).as_secs_f64() * 100.0).round() as usize;
+    let mut sum = vec![0.0f64; n];
+    let mut cnt = vec![0u32; n];
+    for (t, db) in env {
+        let Some(off) = t.checked_sub(window.0) else {
+            continue;
+        };
+        let k = (off.as_secs_f64() * 1000.0) as usize / BIN_MS as usize;
+        if k < n {
+            sum[k] += if *db as f64 <= SILENT_DB {
+                0.0
+            } else {
+                10f64.powf(*db as f64 / 10.0)
+            };
+            cnt[k] += 1;
+        }
+    }
+    sum.iter()
+        .zip(&cnt)
+        .map(|(s, c)| if *c > 0 { s / *c as f64 } else { 0.0 })
+        .collect()
 }
 
 /// What's known about one transition's audio window, from `transition.started` and
@@ -1369,8 +1481,13 @@ fn rebase_position(position: f64, speed: f64, duration: Option<f64>, looped: boo
     shifted
 }
 
-fn snapshot_window(s: &AudioSourceSnapshot) -> SourceWindow {
+fn snapshot_window(
+    s: &AudioSourceSnapshot,
+    scenes: &SceneEnvelopes,
+    window: (Duration, Duration),
+) -> SourceWindow {
     SourceWindow {
+        envelope: scenes.window(&s.id, window),
         id: s.id.clone(),
         path: PathBuf::from(&s.path),
         position: rebase_position(s.position, s.speed, s.duration, s.loop_),
@@ -1489,9 +1606,9 @@ fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition, dump:
     let observed = meter.window(window.0, window.1);
     let mut sources = Vec::with_capacity(pending.a.len() + 1);
     for s in &pending.a {
-        sources.push(snapshot_window(s));
+        sources.push(snapshot_window(s, &rt.scene_envelopes, window));
     }
-    sources.push(snapshot_window(&pending.b));
+    sources.push(snapshot_window(&pending.b, &rt.scene_envelopes, window));
     let ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
     let schedule = rt.gain_history.snapshot(&ids);
     std::thread::spawn(move || {
@@ -1642,6 +1759,56 @@ mod tests {
         assert_eq!(gain_at(schedule.get("b_absent"), ms(0)), SILENT_DB);
         schedule.insert("empty".into(), Vec::new());
         assert_eq!(gain_at(schedule.get("empty"), ms(0)), SILENT_DB);
+    }
+
+    /// Phase 2 Task 6: a scene's reference is its worker's own envelope (no file to decode):
+    /// the expected mix is that envelope × the recorded gain schedule, in window time; ms the
+    /// worker sent nothing for are silent; the history keeps a dead scene for its post-roll,
+    /// then drops it.
+    #[test]
+    fn dropout_uses_scene_envelope_as_reference() {
+        let window = (ms(1000), ms(1400));
+        // −23 dBFS steady (a −20 dBFS-peak tone), nothing from 1350 ms on.
+        let env: Vec<(Duration, f32)> = (900..1350).map(|t| (ms(t), -23.0f32)).collect();
+        let mut scenes = SceneEnvelopes::new();
+        scenes.record("s", env, ms(1350));
+        let got = scenes.window("s", window).unwrap();
+        assert_eq!(got.len(), 350, "only the window's entries");
+        assert!(scenes.window("video", window).is_none());
+        let src = SourceWindow {
+            id: "s".into(),
+            path: PathBuf::from("/a/scene/folder"),
+            position: 0.0,
+            speed: 1.0,
+            looped: false,
+            duration: None,
+            envelope: Some(got),
+        };
+        let mut schedule = GainSchedule::new();
+        // 0 dB, then a −6 dB step at 1200 ms.
+        schedule.insert(
+            "s".into(),
+            vec![(ms(0), 0.0), (ms(1199), 0.0), (ms(1200), -6.0)],
+        );
+        let (coarse, fine) = expected_envelopes(&[src], &schedule, window);
+        assert_eq!(coarse.len(), 40);
+        for (t, db) in &coarse {
+            let want = if *t < ms(1200) {
+                -23.0
+            } else if *t < ms(1350) {
+                -29.0
+            } else {
+                -140.0
+            };
+            assert!((db - want).abs() < 1.5, "{t:?}: {db} vs {want}");
+        }
+        assert_eq!(fine.len(), 400);
+        assert!((fine[100].1 + 23.0).abs() < 1.5, "{:?}", fine[100]);
+        // Dead: kept for its post-roll, then dropped.
+        scenes.retain_live(&[], ms(1350) + DEAD_LINGER);
+        assert_eq!(scenes.stats().0, 1);
+        scenes.retain_live(&[], ms(1351) + DEAD_LINGER);
+        assert_eq!(scenes.stats(), (0, 0));
     }
 
     #[test]

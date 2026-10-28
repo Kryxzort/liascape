@@ -117,6 +117,11 @@ impl LweScene {
         })
     }
 
+    /// The scene's sound for the audio thread (Task 6).
+    pub fn audio_puller(&self) -> lwe::LwePull {
+        self.scene.audio_puller()
+    }
+
     pub fn set_pointer(&self, x: f64, y: f64, buttons: u32) {
         self.scene.set_pointer(x, y, buttons);
     }
