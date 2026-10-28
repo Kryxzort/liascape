@@ -1,9 +1,10 @@
 //! Pure scene helpers (Phase 2; `.claude/rules/player-core.md` § Scene worker): the export
 //! size of a scene's frame ring ([`cover_size`]), the synthetic test scene's spec
-//! ([`synthetic`], D7), WE's assets dir ([`assets`], Task 7) and the pointer → scene mapping
-//! ([`pointer`], Task 7). No GPU.
+//! ([`synthetic`], D7), WE's assets dir ([`assets`], Task 7), the pointer → scene mapping
+//! ([`pointer`], Task 7) and the worker GPU budget ([`budget`], Task 8). No GPU.
 
 pub mod assets;
+pub mod budget;
 pub mod pointer;
 pub mod synthetic;
 

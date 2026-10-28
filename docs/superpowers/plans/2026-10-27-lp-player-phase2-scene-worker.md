@@ -675,12 +675,51 @@ time (three far-apart ticks don't move particles).
   `gpu_ms_p50 × fps_actual ≥ 400` ms/s → cap = max(**10**, fps_actual / 2); after **5 s** below **0.5 %** missed,
   cap × 1.25 up to demand. Events `scene.throttled {id, fps_from, fps_to, gpu_ms, missed_pct}` / `scene.unthrottled`.
 
-- [ ] **Step 1: Write failing tests:** unit `budget_halves_under_starvation_and_recovers`,
+- [x] **Step 1: Write failing tests:** unit `budget_halves_under_starvation_and_recovers`,
   `budget_ignores_misses_a_light_worker_cannot_cause` (10 % GPU load → never throttles), `budget_floor_is_10`;
   api `per_output_scene_fps_gates_presents` (`--redraw-policy content`, VIRTUAL-1 scene_fps 60, VIRTUAL-2 15, one
   60 fps scene on both → 60 ± 3 and 15 ± 2 presents/s); api `scene_fps_change_is_live_same_pid`.
-- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS. (The on-machine numbers are Task 14 step 4.)
-- [ ] **Step 5:** Commit `Add Scene FPS And Worker GPU Budget`.
+- [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS. (The on-machine numbers are Task 14 step 4.)
+- [x] **Step 5:** Commit `Add Scene FPS And Worker GPU Budget`.
+
+**Done (2026-10-28) — with the owner's VRAM decisions folded in** (`.claude/rules/player-core.md`
+§ Scene worker → "GPU budget and VRAM (Task 8)"; invariant #7 gained the VRAM hold):
+- **As planned:** `scene/budget.rs` (`Budget::observe`, the plan's thresholds; plus `SETTLE` 2 s
+  between cuts — the 2 s miss window must hold only frames made at the new rate — and each
+  ×1.25 step needs another calm 5 s), tick rate = min(demand, cap) live on the same worker, the
+  runtime feeding every 500 ms, the worker's `GL_TIME_ELAPSED` (`gputimer.rs`, read back only
+  when available, ≤ 4 queries in flight), the per-output present gate in `redraw.rs` (a grid of
+  `1/eff`, an early frame deferred to its slot — never dropped), probe fields (`fps_target` =
+  effective, `fps_demand`, `fps_actual`, `gpu_ms_p50/p95`, `throttle`), events
+  `scene.throttled` / `scene.unthrottled` (+ `scene.throttle_eased` for a step still below the
+  demand).
+- **Deviation:** the budget's `missed_pct` also counts the scene's **own** missed frames (< 90 %
+  of its tick rate over a whole 2 s window at it): a 30 fps scene on a 144 Hz output presents with
+  idle gaps, so the output's paced window never sees its misses; the 400 ms/s GPU-load condition
+  still keeps a light worker from ever being throttled.
+- **The budget setting:** `player.scene_throttle` (bool, default true; false = fixed fps, a cap
+  lifted at once — `scene.unthrottled {reason: off}`).
+- **VRAM guard:** `player.scene_vram_limit_mib` (0 = off, default) → a worker over it for 2 s is
+  stopped: `scene.vram_exceeded {id, path, pid, used_mib, limit_mib}` + `source.error`
+  "stopped: used X MiB > limit Y MiB of VRAM (vram_exceeded)", no restart, no crash record.
+  Measured per process: NVML dlopened (never linked) → AMD sysfs + `/proc/<pid>/fdinfo` →
+  `nvidia-smi` (its plain process table: `--query-compute-apps` lists compute processes only, never
+  a GL client), on the `lp-vram` thread; `LP_PLAYER_VRAM_PROBE=none|fake:<file>|…` (tests).
+- **Low-VRAM rule:** `player.vram_low_mode` `stop` (default) | `pause` | `off`; low = free <
+  max(512 MiB, 5 %) for 3 s; free again = free − reserve ≥ low + max(1 GiB, 10 %) for 10 s (doubling
+  on a re-trigger within 60 s, ≤ 160 s; reserve = what our resumed sources take back); applied as a
+  composed player pause (R75/R88 unchanged), `stop` then frees every video/image/scene source
+  (stills of their last frames shown, new media nodes wait) and reopens them at their positions on
+  release. Events `vram.low`, `vram.stopped`, `vram.recovered`, `vram.resuming`, `vram.resumed`,
+  `source.suspended`/`.resumed`; probe `vram`; observed `player.vram_low_active`. Inert under the
+  stepped clock. Intel GPUs have no `mem_info_vram_*` → no system total → no rule there (noted).
+- **Tests added beyond the plan:** `tests/scene.rs::scene_budget_throttles_live_and_recovers`;
+  `tests/api.rs::scene_over_vram_limit_is_stopped_not_crashed`,
+  `low_vram_stop_frees_and_resumes_every_source`, `low_vram_pause_mode_pauses_without_freeing`;
+  units in `redraw.rs` and `vram.rs` (rule, parsers, fake probe). Every test server runs
+  `LP_PLAYER_VRAM_PROBE=none` unless it drives a fake.
+- **For Task 11:** the property/event table in player-core § "GPU budget and VRAM (Task 8)" → "For
+  Task 11" (also listed under Task 11 below).
 
 **Size: M** (1–1.5 days).
 
@@ -759,6 +798,18 @@ Nothing else in the recipe is kind-specific: a scene is not a still (reveal/froz
   `scripts/test-lp-player-adapter.sh`, `.claude/rules/player-adapter.md`
 
 `LweVolume` is read by neither engine (scenes follow Volume / the item override), so there is nothing to port.
+
+**From Task 8 (player side done; wire these live):** a Settings group "GPU & VRAM" → `set
+player.scene_throttle <bool>` (default true; "auto-throttle"), `set player.scene_vram_limit_mib
+<MiB>` (0 = off, the default; toggle on → the limit, suggested 1536), `set player.vram_low_mode
+stop|pause|off` (default `stop`); per-monitor fps stays `out:<c>.scene_fps` (above). Subscribe
+`scene.vram_exceeded {id, path, pid, used_mib, limit_mib}` → like `source.broken` for playback
+(advance a rotation / show the preview) but **never** `MarkCrashed`; the UI says "stopped: used X
+MiB > limit Y" (also the `source.error` reason, suffix `(vram_exceeded)`). Optional status:
+`vram.low` / `vram.resumed`, observed `player.vram_low_active`; the low-VRAM pause is not a user
+pause (`player.paused` stays false — don't mirror it into the UI's pause state). Adapter IT: each
+setting → `get player.<prop>` live; with `LP_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
+advances the rotation without a crash mark.
 
 - [ ] **Step 1: Write failing checks:**
   - self-test: `SourceProps` of a scene folder (kind, preview, no af); `OwnStreamFilter` excludes a synthetic

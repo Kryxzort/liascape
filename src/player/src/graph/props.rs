@@ -144,6 +144,46 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_assets_resolved",
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
+            // Phase 2 Task 8 (owner: "GPU budget = a setting, default auto-throttle"): `true`
+            // = a scene whose worker starves its outputs is throttled stepwise and restored
+            // (`scene::budget`); `false` = every scene ticks at exactly its outputs'
+            // `eff(scene_fps, refresh)` (a cap in force is lifted at once). Live.
+            (
+                "scene_throttle",
+                def(PropType::Bool, false, PropValue::Bool(true)),
+            ),
+            // Task 8, the per-scene VRAM guard: a scene worker using more than this many MiB of
+            // VRAM (2 s in a row) is stopped — reported like a broken scene (`source.error`)
+            // plus `scene.vram_exceeded`, never a crash record. 0 = off (the default; the
+            // owner's suggestion when on: 1536). Live (the next sample applies it).
+            (
+                "scene_vram_limit_mib",
+                ranged(
+                    PropType::F64,
+                    (0.0, 1_048_576.0),
+                    "0–1048576",
+                    PropValue::F64(0.0),
+                ),
+            ),
+            // Task 8, the system low-VRAM rule (owner round 3): what happens while the GPU's
+            // free VRAM is low (`crate::vram` thresholds, hysteresis + hold): `stop` (the
+            // default) pauses everything and frees the sources' GPU memory (each shows a still
+            // of its last frame), `pause` only pauses, `off` does nothing. Every source kind;
+            // resumes once VRAM is free again. Live.
+            (
+                "vram_low_mode",
+                def(
+                    PropType::Enum(&["stop", "pause", "off"]),
+                    false,
+                    PropValue::Str("stop".to_string()),
+                ),
+            ),
+            // Observed: the low-VRAM rule is holding the player (paused, and in `stop` mode the
+            // sources' GPU memory freed).
+            (
+                "vram_low_active",
+                def(PropType::Bool, true, PropValue::Bool(false)),
+            ),
         ],
         NodeKind::Output => vec![
             (

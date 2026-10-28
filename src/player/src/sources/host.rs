@@ -48,6 +48,23 @@ struct Hosted {
     wake: Option<RawFd>,
 }
 
+/// Phase 2 Task 8 (low VRAM, mode `stop`): a media source whose decoder/worker was dropped to
+/// free GPU memory while its node stays in the graph ([`SourceHost::suspend_media`]).
+struct Suspended {
+    /// Where it was (`time_pos`; `None` = the node's own `position`).
+    position: Option<f64>,
+    /// It had shown its first frame (its reopened twin's `Ready` is then no news).
+    was_ready: bool,
+    /// A still of its last frame, shown in its place until the reopened source has one.
+    stand_in: Option<SnapshotSource>,
+}
+
+/// A source reopened by [`SourceHost::resume_media`] whose first frame isn't in yet.
+struct Resuming {
+    was_ready: bool,
+    stand_in: Option<SnapshotSource>,
+}
+
 /// I5 (final review): wakes the loop when an async open's core is ready.
 pub type OpenWaker = Arc<dyn Fn() + Send + Sync>;
 
@@ -257,6 +274,15 @@ pub struct SourceHost {
     /// Phase 2: async opens hand their core's rendering to this worker (§ Sources "Render
     /// worker"); `None` = every mpv source renders on the loop.
     render_worker: Option<Arc<RenderWorker>>,
+    /// Task 8 (low VRAM, `stop`): media sources dropped to free GPU memory, by node id…
+    suspended: BTreeMap<String, Suspended>,
+    /// …new media nodes are not opened meanwhile (they open at the resume)…
+    suspend_new: bool,
+    /// …and reopened ones still waiting for their first frame (stand-in shown, the mirror and
+    /// their `Ready` held back).
+    resuming: BTreeMap<String, Resuming>,
+    /// Where each reopened source starts (its `position` for the open only).
+    resume_at: BTreeMap<String, f64>,
 }
 
 impl SourceHost {
@@ -275,7 +301,111 @@ impl SourceHost {
             opening: BTreeMap::new(),
             route_gen: 0,
             render_worker: None,
+            suspended: BTreeMap::new(),
+            suspend_new: false,
+            resuming: BTreeMap::new(),
+            resume_at: BTreeMap::new(),
         }
+    }
+
+    /// Phase 2 Task 8 (the low-VRAM rule, mode `stop`): drop every video/image/scene source's
+    /// decoder or worker to free its GPU memory — the node stays, a still of its last frame is
+    /// shown in its place (`texture`), and media nodes created meanwhile wait unopened. The
+    /// caller has paused and silenced them first (the player pause). Returns the ids.
+    pub fn suspend_media(&mut self, gfx: &Gfx) -> Vec<String> {
+        self.suspend_new = true;
+        let ids: Vec<String> = self
+            .sources
+            .iter()
+            .filter(|(_, h)| h.src.as_mpv().is_some() || h.src.as_scene().is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &ids {
+            let Some(mut h) = self.sources.remove(id) else {
+                continue;
+            };
+            let position = match h.src.read("time_pos") {
+                Some(PropValue::F64(t)) => Some(t),
+                _ => None,
+            };
+            let ready = matches!(h.src.read("ready"), Some(PropValue::Bool(true)));
+            // A source still resuming from an earlier stop keeps that stand-in.
+            let earlier = self.resuming.remove(id);
+            let stand_in = match h.src.texture() {
+                Some(t) => Some(SnapshotSource::new(gfx, id, Some(t))),
+                None => earlier.and_then(|r| r.stand_in),
+            };
+            self.suspended.insert(
+                id.clone(),
+                Suspended {
+                    position,
+                    was_ready: ready,
+                    stand_in,
+                },
+            );
+            log::event(
+                "host",
+                Level::Info,
+                "source.suspended",
+                None,
+                json!({ "id": id, "source_kind": h.src.kind(), "position": position }),
+            );
+            if h.src.begin_teardown() {
+                drop(h);
+            } else {
+                self.dying.push((id.clone(), h, std::time::Instant::now()));
+            }
+        }
+        // Cores still being made: dropped (their result goes to the reaper), opened at the
+        // resume from the node.
+        for id in std::mem::take(&mut self.opening).into_keys() {
+            self.suspended.insert(
+                id,
+                Suspended {
+                    position: None,
+                    was_ready: false,
+                    stand_in: None,
+                },
+            );
+        }
+        ids
+    }
+
+    /// Task 8: the low VRAM is over — every suspended source reopens (next `sync`) at the
+    /// position it had, its stand-in shown until its first frame; new media nodes open again.
+    /// Returns the ids.
+    pub fn resume_media(&mut self) -> Vec<String> {
+        self.suspend_new = false;
+        let mut ids = Vec::new();
+        for (id, sus) in std::mem::take(&mut self.suspended) {
+            if let Some(t) = sus.position {
+                self.resume_at.insert(id.clone(), t);
+            }
+            self.resuming.insert(
+                id.clone(),
+                Resuming {
+                    was_ready: sus.was_ready,
+                    stand_in: sus.stand_in,
+                },
+            );
+            ids.push(id);
+        }
+        ids
+    }
+
+    /// Suspended sources (Task 8; probes).
+    pub fn suspended_ids(&self) -> Vec<String> {
+        self.suspended.keys().cloned().collect()
+    }
+
+    /// Reopened sources still waiting for their first frame (Task 8).
+    pub fn resuming_count(&self) -> usize {
+        self.resuming.len()
+    }
+
+    /// Whether media sources are suspended now (new ones wait).
+    pub fn media_suspended(&self) -> bool {
+        self.suspend_new
     }
 
     /// I7 (final review): the audio bus went down (`device = None`: mpv's default device)
@@ -486,6 +616,10 @@ impl SourceHost {
         }
         self.failed
             .retain(|id| graph.kind_of(id) == Some(NodeKind::Source));
+        let alive = |id: &String| graph.kind_of(id) == Some(NodeKind::Source);
+        self.suspended.retain(|id, _| alive(id));
+        self.resuming.retain(|id, _| alive(id));
+        self.resume_at.retain(|id, _| alive(id));
         // I5: a node gone while its core is still being made — the worker's result is
         // dropped with the slot (`PreparedCore::drop` hands the core to the reaper).
         self.opening
@@ -511,9 +645,12 @@ impl SourceHost {
                 .unwrap_or_else(|e| e.into_inner())
                 .take()
                 .expect("filtered on is_some");
-            let Some(node) = graph.props_of(&id) else {
+            let Some(mut node) = graph.props_of(&id) else {
                 continue;
             };
+            if let Some(t) = self.resume_at.remove(&id) {
+                patch_position(&mut node, t);
+            }
             let t_open = std::time::Instant::now();
             let opened_src = result
                 .map_err(|e| e.to_string())
@@ -556,15 +693,34 @@ impl SourceHost {
             if self.sources.contains_key(&id)
                 || self.failed.contains(&id)
                 || self.opening.contains_key(&id)
+                || self.suspended.contains_key(&id)
             {
                 continue;
             }
-            let Some(node) = graph.props_of(&id) else {
+            let Some(mut node) = graph.props_of(&id) else {
                 continue;
             };
+            // Task 8: while media is suspended (low VRAM), a new video/image/scene waits.
+            if self.suspend_new && is_media(&node) {
+                self.suspended.insert(
+                    id.clone(),
+                    Suspended {
+                        position: None,
+                        was_ready: false,
+                        stand_in: None,
+                    },
+                );
+                continue;
+            }
+            // A reopened source starts where it was suspended (kept until it really opens: an
+            // async open reads the node again when its core is ready).
+            if let Some(&t) = self.resume_at.get(&id) {
+                patch_position(&mut node, t);
+            }
             if self.start_async_open(&id, &node) {
                 continue;
             }
+            self.resume_at.remove(&id);
             let t_open = std::time::Instant::now();
             let opened_src = self.open(gfx, &id, &node, player_paused);
             self.open_time += t_open.elapsed();
@@ -884,11 +1040,24 @@ impl SourceHost {
     pub fn update(&mut self, gfx: &Gfx, graph: &mut Graph) {
         self.reap_dying(false);
         let mut new_events = Vec::new();
+        let mut resumed = Vec::new();
         for (id, h) in &mut self.sources {
             if h.src.update(gfx) {
                 self.changed.insert(id.clone());
             }
+            // Task 8: a source reopened after a low-VRAM stop is the same wallpaper: until its
+            // first frame the graph keeps what it knew (no mirror) and the stand-in shows.
+            let resuming = self.resuming.get(id);
+            if let Some(r) = resuming
+                && matches!(h.src.read("ready"), Some(PropValue::Bool(true)))
+                && h.src.texture().is_some()
+            {
+                resumed.push((id.clone(), r.was_ready));
+            }
             for ev in h.src.poll_events() {
+                if ev == SourceEvent::Ready && resuming.is_some_and(|r| r.was_ready) {
+                    continue; // it was ready before the stop: not news
+                }
                 match &ev {
                     SourceEvent::Error { reason } => log::event(
                         "host",
@@ -912,12 +1081,26 @@ impl SourceHost {
                 if prop == "paused" && self.player_paused {
                     continue;
                 }
+                if resuming.is_some() {
+                    continue;
+                }
                 if let Some(v) = h.src.read(prop) {
                     let _ = graph.set_observed(&PropPath(format!("{id}.{prop}")), v);
                 }
             }
         }
         self.events.extend(new_events);
+        for (id, _) in resumed {
+            self.resuming.remove(&id);
+            self.changed.insert(id.clone());
+            log::event(
+                "host",
+                Level::Info,
+                "source.resumed",
+                None,
+                json!({ "id": id }),
+            );
+        }
     }
 
     /// Drop every dying source whose teardown is ready (all of them with `force`).
@@ -980,9 +1163,19 @@ impl SourceHost {
         std::mem::take(&mut self.events)
     }
 
-    /// The live texture of source node `id` (the compositor's `textures` closure).
+    /// The live texture of source node `id` (the compositor's `textures` closure) — or, for a
+    /// source suspended/resuming after a low-VRAM stop (Task 8), the still of its last frame.
     pub fn texture(&self, id: &str) -> Option<&Tex> {
-        self.sources.get(id).and_then(|h| h.src.texture())
+        self.sources
+            .get(id)
+            .and_then(|h| h.src.texture())
+            .or_else(|| {
+                self.suspended
+                    .get(id)
+                    .and_then(|s| s.stand_in.as_ref())
+                    .or_else(|| self.resuming.get(id).and_then(|r| r.stand_in.as_ref()))
+                    .and_then(|st| st.texture())
+            })
     }
 
     /// The live source for node `id` (probes/tests).
@@ -1067,6 +1260,20 @@ impl SourceHost {
     pub fn wake_fds(&self) -> Vec<RawFd> {
         self.sources.values().filter_map(|h| h.wake).collect()
     }
+}
+
+/// `node`'s `position` for an open (a source resumed after a low-VRAM stop — Task 8).
+fn patch_position(node: &mut Vec<(String, PropValue)>, t: f64) {
+    node.retain(|(k, _)| k != "position");
+    node.push(("position".into(), PropValue::F64(t)));
+}
+
+/// A video/image/scene node (what a low-VRAM stop suspends — Task 8): not colour/snapshot.
+fn is_media(node: &[(String, PropValue)]) -> bool {
+    !matches!(
+        node.iter().find(|(k, _)| k == "kind").map(|(_, v)| v),
+        Some(PropValue::Str(k)) if k == "color" || k == "snapshot"
+    )
 }
 
 /// What the outputs showing source `id` ask of it (Phase 2 Task 5): each `out:<c>` in

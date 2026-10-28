@@ -17,6 +17,8 @@
 //!   worker thread and replies `pending`, delivering `probe.dropout` as an event.
 //! - `snapshot` (`snapshot.rs`, Task 16) — the state snapshot: what would be saved now,
 //!   when it's next written, writer counters.
+//! - `vram` (`vram.rs`, Phase 2 Task 8) — the VRAM sampler, the low-VRAM rule's state and
+//!   hold, each scene worker's VRAM against `player.scene_vram_limit_mib`.
 //! - `memory` (`memory.rs`, Task 20b) — RSS + glibc malloc in-use vs retained, arena
 //!   count; `args: {"trim": true}` runs `malloc_trim(0)` and reports the RSS it gave back.
 
@@ -25,6 +27,7 @@ pub mod dropout;
 pub mod frames;
 mod memory;
 mod snapshot;
+mod vram;
 mod workers;
 
 use serde_json::{Map, Value, json};
@@ -75,6 +78,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
         memory::memory,
         "RSS + glibc malloc in-use vs retained bytes, arena count; {trim: true} runs \
          malloc_trim(0) and reports what it gave back",
+    ),
+    (
+        "vram",
+        vram::vram,
+        "VRAM (Task 8): the sampler, the newest sample, the low-VRAM rule and its hold, each \
+         scene worker against the per-scene limit",
     ),
     (
         "workers",

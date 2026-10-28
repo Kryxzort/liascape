@@ -85,6 +85,11 @@ fn rgb(c: [u8; 3]) -> (f32, f32, f32) {
 
 impl Synthetic {
     /// `fail: build` refuses like a scene whose first render produced nothing.
+    /// Task 8 (tests): the GPU time every frame reports instead of the measured one.
+    pub fn report_gpu_ms(&self) -> Option<f32> {
+        self.spec.report_gpu_ms
+    }
+
     pub fn new(gfx: &Gfx, spec: SyntheticSpec) -> Result<Synthetic, String> {
         if spec.fail == Some(Fail::Build) {
             return Err(

@@ -32,5 +32,6 @@ pub mod snapshot;
 pub mod sources;
 pub mod supervise;
 pub mod units;
+pub mod vram;
 pub mod wl;
 pub mod worker;

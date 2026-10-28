@@ -64,6 +64,9 @@ pub struct SyntheticSpec {
     /// Task 7: the "load + build" takes this long (the worker's renderer thread sleeps, like a
     /// cold LWE build of up to 2.8 s) — the protocol must stay answered meanwhile.
     pub load_ms: u64,
+    /// Task 8 (test-only): every `Frame` reports this GPU time instead of the measured one —
+    /// drives the GPU budget deterministically without loading the GPU.
+    pub report_gpu_ms: Option<f32>,
 }
 
 impl Default for SyntheticSpec {
@@ -82,6 +85,7 @@ impl Default for SyntheticSpec {
             hang_after_ms: None,
             fail: None,
             load_ms: 0,
+            report_gpu_ms: None,
         }
     }
 }
