@@ -48,17 +48,12 @@ public static class AppOps
 
         if (EffAdvance(s, ps))
         {
-            if (interval > 0)
-            {
-                var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-                PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, advanceOnVideoEnd: true);
-                Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
-                return "";
-            }
-            PlayerHelper.ApplyPlaylist(paths, s.BuildMpvPlaylistOptions(), shuffle, 0);
-            Save(s, PlayerHelper.IsTimedPlaylistActive()
-                ? new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = 0, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings }
-                : new LastSession { IsPlaylist = true, Paths = paths, Shuffle = shuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+            // always the timed machinery, whatever the minimum (0 = switch at every end is an ordinary value now): a
+            // minimum of 0 used to go through ApplyPlaylist, where one item (a trash leaving one survivor, a one-item
+            // playlist) became a plain non-timed launch — an Undo growing it back then had no rotation to re-arm
+            var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
+            PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, advanceOnVideoEnd: true);
+            Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
             return "";
         }
 

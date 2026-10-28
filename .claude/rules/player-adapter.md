@@ -266,7 +266,10 @@ playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation
     (align:now, its transition), the same moment a still image moves on. No minimum → the maximum moves it; neither →
     it plays until a user switch (the Settings hint says so). Judgement call: "minimum then the next end" with no end
     to wait for = the minimum; holding a scene to the maximum instead would make the minimum meaningless for scenes.
-    `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone.
+    `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone, and a playlist play under
+    advance-on-end (`AppOps.PlayPlaylist`) always goes through `ApplyTimedPlaylist`, minimum 0 included (it used to
+    take `ApplyPlaylist` there, where ONE item — a trash leaving one survivor — became a plain non-timed launch an Undo
+    could never re-arm; matrix `pending × selTrashUndo:shown+other`, `seq:trash×2+undo×2`, `seq3:stripRemove+…`).
   - **Maximum**: once the playing item played that long the rotation advances **now** with its transition, even
     mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
     the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
