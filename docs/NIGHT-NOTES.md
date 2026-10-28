@@ -16,3 +16,10 @@ Read this when the owner asks "anything I should know". Append during unattended
   switch at every end), plus a **"Separate timing for scenes"** toggle with one "Switch scenes after" field (a scene
   never ends, so min/max make no sense for it). Your config migration will keep today's behaviour exactly: min 0,
   scenes switch after your 20 s.
+- Pushed the loudness refinement (`01a5d60`) and the player hygiene batch (`9a480c8`). The long-red
+  `transport_meets_the_spike_budget` is settled: the worker's work per frame is constant; the CPU % swung with the core
+  type / clocks / memory contention. A soundless scene no longer runs an idle audio thread; screenshots no longer stall
+  the player (810 ms → < 1 ms); a VRAM-stopped scene frees all but its shown buffer. **First fully green crate suite in
+  both render modes in two days.**
+- LWE: upstream's new fixes landed on `main`, not `next-v2` (ours). An agent is porting the relevant ones onto your
+  fork's `livepaper/next-v2` (fast-forward push only) and re-running the scene corpus.
