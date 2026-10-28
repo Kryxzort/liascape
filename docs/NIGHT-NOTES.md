@@ -23,3 +23,9 @@ Read this when the owner asks "anything I should know". Append during unattended
   both render modes in two days.**
 - LWE: upstream's new fixes landed on `main`, not `next-v2` (ours). An agent is porting the relevant ones onto your
   fork's `livepaper/next-v2` (fast-forward push only) and re-running the scene corpus.
+- Pushed the scene-timing follow-up (`1c1918a`): 0 = off for min/max, "Separate timing for scenes" + "Switch scenes
+  after". **Your rotation config is migrated** (backup: `~/livepaper-backup-20261028-2247`): your playlists with
+  advance+wait (`dp`, `Full?`, the active one) → min off, max off, scenes after 20 s = exactly today's behaviour;
+  `gg` keeps 3660 s as the maximum; the globals and `ds` stay plain timers. I stopped/started the dev backend unit for
+  it (your wallpaper may have gone blank for a moment). Press Ctrl+R in the app before changing settings.
+- Found by the rotation agent: an fps cap (VideoFps > 0) stopped still images from ever showing — an agent is fixing it.
