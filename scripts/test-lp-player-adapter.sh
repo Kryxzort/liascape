@@ -130,7 +130,7 @@ L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
 {"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
- "GlobalAdvanceOnVideoEnd":true,"GlobalWaitForVideoEnd":true,"GlobalIntervalSeconds":20,"RestartIntervalSeconds":600}
+ "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"RestartIntervalSeconds":600}
 EOF
 
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
@@ -259,7 +259,7 @@ g55=$(dB 55); g20=$(dB 20)
 post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
 
-echo "== timed playlist: interval 20 s + WaitForVideoEnd + AdvanceOnVideoEnd (2 s clips → advance on end)"
+echo "== timed playlist: advance-on-end, no minimum play time (2 s clips → advance on end)"
 # A rotation's rate is counted on the PLAYER's clock: the handoffs (after index $1) whose t_mono_ms lies
 # within $2 ms of the first one (the play's own switch). The sleep only lets that window pass. Counting
 # "handoffs during a sleep after the request" broke under load: the /playlist/play request itself took
@@ -310,8 +310,9 @@ waitfor $WAIT cur_is path "$E1" && ok "e1.mp4 on screen after the /next" || bad 
 setting '.GlobalTransitionDurationMs = 300'
 
 echo "== advance-on-end play-time limits: a minimum (a short clip loops, advances at the end of the loop that reaches it) / a maximum (a long one advances, align:now)"
-# Wall-clock seconds (GlobalMinPlaySeconds / GlobalMaxPlaySeconds, 0 = off); the playlists below follow the globals
-# (advance-on-end + wait-for-video-end + interval 20 s, set at the top). Times are judged by the player's own event
+# Wall-clock seconds, 0 = off. Under "Switch when video ends" the rotation's one interval field IS the minimum
+# (GlobalIntervalSeconds — the UI's "Minimum play time"); GlobalMaxPlaySeconds is the maximum. The playlists below
+# follow the globals (advance-on-end, minimum 0, set at the top). Times are judged by the player's own event
 # clocks: t0 = the handoff of the play's own switch (its first item fully shown — 300 ms into that item, a fade).
 tev_n() { ctl logs '{"kind_prefix":"transition.","limit":10000}' | jq '.events|length'; }
 # after transition event $1: the first switch scheduled to $2 that handed off (or, with $3 = any, the first one scheduled)
@@ -345,7 +346,7 @@ nsched_all() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' |
 stop_now
 
 # min before the play (ApplyTimedPlaylist picks it up): a.mp4 is 2 s → its loops end at +1.7, +3.7, +5.7 s; the first ≥ 5 s is the 3rd
-setting '.GlobalMinPlaySeconds = 5 | .GlobalMaxPlaySeconds = 0'
+setting '.GlobalIntervalSeconds = 5 | .GlobalMaxPlaySeconds = 0'
 m0=$(tev_n); nw0=$(nows)
 post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0}}" >/dev/null
 swr=none; waitfor 20000 sw_seen "$m0" "$Bc"
@@ -356,19 +357,27 @@ between "$(sw_field 1)" 3300 5600 && ok "…its aligned switch requested inside 
 [ $(( $(nows) - nw0 )) -le 1 ] && ok "…never cut mid-loop (no align:now switch but the play's own)" || bad "min: $(( $(nows) - nw0 - 1 )) align:now switches besides the play's own"
 
 # min set LIVE while an aligned switch is already armed for the first loop's end (p1.mp4, 4 s: loops end +3.7, +7.7 s)
-setting '.GlobalMinPlaySeconds = 0'; stop_now
+setting '.GlobalIntervalSeconds = 0'; stop_now
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$P1\",\"$P2\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor $WAIT armed_to "$P2" || bad "min live: no aligned switch to p2 armed"
-setting '.GlobalMinPlaySeconds = 6'; t_set=$(ms_now)
+setting '.GlobalIntervalSeconds = 6'; t_set=$(ms_now)
 swr=none; waitfor 20000 sw_seen "$m0" "$P2"
 echo "     min set $(( t_set - $(t0w) )) ms after p1 showed"
 [ $(( t_set - $(t0w) )) -lt 3500 ] || bad "min live: precondition — the setting landed after p1's first loop ended"
 between "$(sw_field 2)" 7200 8400 && ok "min 6 s set live: the armed switch was re-armed, p1 advanced at its 2nd loop's end (+$(sw_field 2) ms; $(sw_field 6) cancelled)" \
   || bad "min 6 s set live on a 4 s clip: $swr (want a handoff at +7.2…8.4 s)"
-setting '.GlobalMinPlaySeconds = 0'; stop_now
+setting '.GlobalIntervalSeconds = 0'; stop_now
 
-# max: e1.mp4 is 12 s → advances 3 s in (align:now, like a timed switch). Interval 0 here: the pure advance-on-end path (ApplyPlaylist)
+# a playlist's own minimum (override): a.mp4 (2 s) with 3 s → advances at its 2nd loop's end (+3.7 s), never at its 1st
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":3,\"AdvanceOnVideoEnd\":true}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$Bc"
+between "$(sw_field 2)" 3200 4400 && [ "$(sw_field 3)" = end ] && ok "the playlist's own min 3 s: a 2 s clip advanced at its 2nd loop's end (handoff +$(sw_field 2) ms, align $(sw_field 3))" \
+  || bad "playlist override min 3 s on a 2 s clip: $swr (want a handoff at +3.2…4.4 s, align end)"
+stop_now
+
+# max: e1.mp4 is 12 s → advances 3 s in (align:now, like a timed switch). Minimum 0: the pure advance-on-end path (ApplyPlaylist)
 setting '.GlobalMaxPlaySeconds = 3 | .GlobalIntervalSeconds = 0'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -376,7 +385,7 @@ swr=none; waitfor 15000 sw_seen "$m0" "$E2"
 between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s: the 12 s clip advanced 3 s in (requested +$(sw_field 1) ms, align $(sw_field 3), handed off +$(sw_field 2))" \
   || bad "max 3 s on a 12 s clip: $swr (want align now at +2.3…3.9 s)"
 waitfor $WAIT cur_is path "$E2" && ok "…e2 on screen" || bad "max: cur $(basename "$(cur path)")"
-setting '.GlobalIntervalSeconds = 20 | .GlobalMaxPlaySeconds = 0'; stop_now
+setting '.GlobalMaxPlaySeconds = 0'; stop_now
 
 # max set live 1 s in, then an unrelated edit: neither restarts the item's play time (it advances ~5 s after e1 showed, not 5 s after an edit)
 m0=$(tev_n)
@@ -418,19 +427,22 @@ waitfor $WAIT cur_is path "$E1"; sleep 4
 [ "$(n_sched_to "$m0" "$E1")" = 1 ] && ok "max 2 s on a one-item playlist: no switch to itself in 4 s" || bad "one-item playlist: $(n_sched_to "$m0" "$E1") switches to e1 (want only the play's own)"
 stop_now
 
-# pure timed (advance-on-end off): the limits don't apply — the 20 s interval rules (max 2 s, 4 s watched)
-setting '.GlobalAdvanceOnVideoEnd = false | .GlobalWaitForVideoEnd = false'
-m0=$(nsched_all)
+# pure timed (advance-on-end off): a plain timer — the 3 s interval switches MID-video (align:now; e1 is 12 s), the
+# maximum (2 s) doesn't apply. The removed "wait for video to end" toggle's key, still in an old settings.json, changes
+# nothing (it used to hold the switch for e1's end).
+setting '.GlobalAdvanceOnVideoEnd = false | .GlobalIntervalSeconds = 3 | .GlobalWaitForVideoEnd = true'
+m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
-waitfor $WAIT cur_is path "$E1"; sleep 4
-[ "$(n_sched_to "$m0" "$E2")" = 0 ] && ok "advance-on-end off: max 2 s ignored (no switch in 4 s of a 20 s interval)" || bad "pure timed: max switched ($(n_sched_to "$m0" "$E2") switches to e2)"
-setting '.GlobalAdvanceOnVideoEnd = true | .GlobalWaitForVideoEnd = true | .GlobalMaxPlaySeconds = 0'; stop_now
+swr=none; waitfor 15000 sw_seen "$m0" "$E2" any
+between "$(sw_field 1)" 2200 3900 && [ "$(sw_field 3)" = now ] && ok "advance-on-end off: the 3 s timer switched mid-video (+$(sw_field 1) ms, align $(sw_field 3)); max 2 s and the old wait key ignored" \
+  || bad "pure timed 3 s (max 2 s, an old wait key): $swr (want align now at +2.2…3.9 s — counted from the handoff of the play's own switch, the timer from its request; the 2 s max would land ≤ +2.0 s)"
+setting '.GlobalAdvanceOnVideoEnd = true | .GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0 | .GlobalWaitForVideoEnd = false'; stop_now
 
 # a per-playlist override (its own rotation): the playlist's max wins over the globals' (2 s here, global 0)
 m0=$(tev_n)
-post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":20,\"AdvanceOnVideoEnd\":true,\"WaitForVideoEnd\":true,\"MaxPlaySeconds\":2}}" >/dev/null
+post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"IntervalSeconds\":20,\"AdvanceOnVideoEnd\":true,\"MaxPlaySeconds\":2}}" >/dev/null
 swr=none; waitfor 15000 sw_seen "$m0" "$E2"
-between "$(sw_field 1)" 1300 2900 && [ "$(sw_field 3)" = now ] && ok "the playlist's own max 2 s (override): advanced at +$(sw_field 1) ms" || bad "playlist override max 2 s: $swr"
+between "$(sw_field 1)" 1300 2900 && [ "$(sw_field 3)" = now ] && ok "the playlist's own max 2 s (override, min 20 s — a cap beats the minimum): advanced at +$(sw_field 1) ms" || bad "playlist override max 2 s: $swr"
 # …and a /playlist/state edit of its max applies live (2 → 0: e2 then plays on — 4 s watched, no align:now switch)
 post /playlist/state '{"settings":{"maxPlaySeconds":0}}' >/dev/null; m1=$(nsched_all); sleep 4
 [ "$(nows_after "$m1")" = 0 ] && ok "/playlist/state max 0 (live): no more max switches" || bad "/playlist/state max 0: $(nows_after "$m1") align:now switches after it"
@@ -438,12 +450,12 @@ stop_now
 
 # a still image under advance-on-end never ends (it switched at once); with a minimum it shows for it
 I1=$T/i1.png; ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=320x180" -frames:v 1 "$I1"
-setting '.GlobalMinPlaySeconds = 3'
+setting '.GlobalIntervalSeconds = 3'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$I1\",\"$E1\"],\"settings\":{\"Order\":0}}" >/dev/null
 swr=none; waitfor 15000 sw_seen "$m0" "$E1"
 between "$(sw_field 2)" 2400 4300 && ok "min 3 s: an image showed for it (handoff to e1 at +$(sw_field 2) ms)" || bad "min 3 s × image: $swr"
-setting '.GlobalMinPlaySeconds = 0'
+setting '.GlobalIntervalSeconds = 0'
 
 echo "== /stop"
 post /stop '{}' >/dev/null
@@ -737,13 +749,19 @@ ns=$(nsch)
 post /playlist/play "{\"paths\":[\"$A\",\"$S1\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor 15000 switched_to "$S1" "$ns" end && waitfor $WAIT scene_ready "$S1" && ok "an aligned V→S at the video's end ($sc): $(method_of "$sc"), the scene shows" || bad "aligned V→S: corr ${sc:-none}, cur $(basename "$(cur path)") kind $(cur kind)"
 stop_now
-# a scene never ends: under advance-on-end it plays until the interval (20 s here; 0 = until a user switch) — and,
-# with a maximum play time, until that (align:now, a transition like a timed switch)
+# a scene never ends: under advance-on-end it plays until the minimum play time (it has no end to wait for — the
+# minimum reached IS its end), else until the maximum, else until a user switch (align:now, a transition like a timed switch)
 m0=$(nsched_all)
 post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
 waitfor $WAIT scene_ready "$S1"; sleep 4
-[ "$(n_sched_to "$m0" "$A")" = 0 ] && ok "advance-on-end, no maximum: the scene still plays after 4 s (the 20 s interval)" || bad "a scene under advance-on-end switched within 4 s ($(n_sched_to "$m0" "$A") switches to a)"
+[ "$(n_sched_to "$m0" "$A")" = 0 ] && ok "advance-on-end, no minimum, no maximum: the scene still plays after 4 s" || bad "a scene under advance-on-end (no limits) switched within 4 s ($(n_sched_to "$m0" "$A") switches to a)"
 stop_now
+setting '.GlobalIntervalSeconds = 3'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "min 3 s on a scene: advanced once it was reached (+$(sw_field 1) ms, align $(sw_field 3))" || bad "min 3 s × scene: $swr (want align now at +2.3…3.9 s)"
+setting '.GlobalIntervalSeconds = 0'; stop_now
 setting '.GlobalMaxPlaySeconds = 3'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -1066,7 +1084,7 @@ mv "$T/removed-ss1" "$LIB/imported/ss1"; mv "$T/removed-ss2" "$LIB/imported/ss2"
 
 echo "== play-from keeps the playlist's transition settings (it used to rebuild them from rotation fields only)"
 pf=$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$b], startIndex:1, settings:{order:1, overrideGlobalSettings:true,
-  intervalSeconds:20, advanceOnVideoEnd:true, waitForVideoEnd:true, transitionEnabled:true,
+  intervalSeconds:20, advanceOnVideoEnd:true, transitionEnabled:true,
   transitionEffectIds:["fade","wipeLeft"], transitionDurationMs:1234, transitionDurationMaxMs:0, transitionShuffle:false}}')
 post /playlist/play-from "$pf" >/dev/null
 pf_playing() { st=$(curl -sf -m 5 "$U/playlist/state") && { cur_is path "$SV1" || cur_is path "$SV2"; }; }   # the play-from is on screen
@@ -1266,6 +1284,24 @@ swr=none; waitfor 15000 sw_seen "$m0" "$E2"
 echo "     the new backend answered $(( t_up - $(t0w) )) ms after e1 showed"
 between "$(sw_field 1)" 6300 8200 && [ "$(sw_field 3)" = now ] && ok "max 7 s across a backend restart: advanced at +$(sw_field 1) ms of e1" || bad "max × backend restart: $swr (want align now at +6.3…8.2 s)"
 setting '.GlobalMaxPlaySeconds = 0'; stop_now
+
+echo "== …and a minimum play time (6 s on p1, a 4 s clip): it loops on across the restart and advances at its 2nd loop's end"
+setting '.GlobalIntervalSeconds = 6'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$P1\",\"$P2\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT cur_is path "$P1"; sleep 1.5
+port0=$(cat "$XDG_CONFIG_HOME/livepaper/serve.port"); old=$BP
+kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+sleep 1
+BLOG=$T/backend-limits2.log
+"$DOTNET" "$DLL" --serve > "$BLOG" 2>&1 & BP=$!
+new_backend_up "$port0"; t_up=$(ms_now)
+swr=none; waitfor 20000 sw_seen "$m0" "$P2"
+echo "     the new backend answered $(( t_up - $(t0w) )) ms after p1 showed"
+[ $(( t_up - $(t0w) )) -lt 3500 ] || bad "precondition: the new backend answered after p1's first loop ended"
+between "$(sw_field 2)" 7200 8400 && [ "$(sw_field 3)" = end ] && ok "min 6 s across a backend restart: p1 advanced at its 2nd loop's end (handoff +$(sw_field 2) ms)" \
+  || bad "min × backend restart: $swr (want a handoff at +7.2…8.4 s, align end)"
+setting '.GlobalIntervalSeconds = 0'; stop_now
 
 echo "== a second backend started while the first runs takes the playlist over (the first stops ticking)"
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null

@@ -384,24 +384,20 @@ public static class ServerHost
             // (0 → off) instead of only on the next play.
             if (prev.RestartIntervalSeconds != s.RestartIntervalSeconds || prev.RestartOnSwitchOnly != s.RestartOnSwitchOnly)
                 PlayerHelper.UpdateRestartTimer();
-            // the advance-on-end play-time limits → the running rotation, live (the effective ones: a playlist
-            // with its own override keeps its own — /playlist/state applies those). Before the rotation below, so
-            // a switch it arms (advance-on-end just turned on) is held by the new minimum.
-            if (prev.GlobalMinPlaySeconds != s.GlobalMinPlaySeconds || prev.GlobalMaxPlaySeconds != s.GlobalMaxPlaySeconds)
-            {
-                var (minS, maxS) = PlayerHelper.EffectivePlayLimits(s, PlaylistService.LoadCurrentState()?.Settings);
-                PlayerHelper.ApplyPlayLimitsLive(minS, maxS);
-            }
-            // rotation (interval / advance-on-end / wait-for-video-end) changed → live-update a RUNNING
-            // timed playlist that follows the GLOBAL settings (a playlist with its own override is
-            // updated by /playlist/state instead). No replay needed.
+            // the maximum play time → the running rotation, live (the effective one: a playlist with its own
+            // override keeps its own — /playlist/state applies those). Before the rotation below, so a switch it
+            // arms (advance-on-end just turned on) already reads it.
+            if (prev.GlobalMaxPlaySeconds != s.GlobalMaxPlaySeconds)
+                PlayerHelper.ApplyMaxPlayLive(PlayerHelper.EffectiveRotation(s, PlaylistService.LoadCurrentState()?.Settings).Max);
+            // rotation (interval — the minimum play time under advance-on-end — / advance-on-end) changed →
+            // live-update a RUNNING timed playlist that follows the GLOBAL settings (a playlist with its own
+            // override is updated by /playlist/state instead). No replay needed.
             if (PlayerHelper.IsTimedPlaylistActive()
                 && (prev.GlobalIntervalSeconds != s.GlobalIntervalSeconds
-                    || prev.GlobalAdvanceOnVideoEnd != s.GlobalAdvanceOnVideoEnd
-                    || prev.GlobalWaitForVideoEnd != s.GlobalWaitForVideoEnd)
+                    || prev.GlobalAdvanceOnVideoEnd != s.GlobalAdvanceOnVideoEnd)
                 && !(PlaylistService.LoadCurrentState()?.Settings.OverrideGlobalSettings ?? false))
             {
-                PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalWaitForVideoEnd, s.GlobalAdvanceOnVideoEnd);
+                PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd);
             }
             // the effective transition (the globals, when the playlist follows them) or the method changed → an
             // aligned switch already armed for A's end takes it (lp-player requested it with the old one)

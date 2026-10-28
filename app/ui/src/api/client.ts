@@ -90,9 +90,9 @@ export interface LibraryItem {
 }
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
-  advanceOnVideoEnd: boolean; waitForVideoEnd: boolean;
-  // advance-on-end play-time limits, wall-clock seconds, 0 = off (gated by overrideGlobalSettings too)
-  minPlaySeconds: number; maxPlaySeconds: number;
+  // the rotation: advanceOnVideoEnd off → intervalSeconds is a timer; on → it is the minimum play time and
+  // maxPlaySeconds the maximum (wall-clock seconds, 0 = off) — player-adapter.md § Rotation
+  advanceOnVideoEnd: boolean; maxPlaySeconds: number;
   // WE-style transitions (gated by overrideGlobalSettings; else the globalTransition* fallbacks).
   transitionEnabled: boolean; transitionEffectIds: string[];
   transitionDurationMs: number; transitionDurationMaxMs: number; transitionShuffle: boolean;

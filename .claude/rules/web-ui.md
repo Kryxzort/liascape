@@ -296,14 +296,16 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
   worker / `scene/` / `worker/` / `vram.rs` / their probes → the scene family. Fuzz excludes them (their fixtures).
 
-## Advance-on-end play-time limits (2026-10-28)
-Settings → Rotation: "Minimum play time" / "Maximum play time" rows right under "Switch when video ends" (greyed while
-it is off), and the same pair in the playlist-settings modal (`.pl-playtime`, inside the override block, greyed unless
-override + advance-on-end). Both are `components/PlayTimeInput.tsx`: a seconds field (0 = off) with its h/m/s reading;
-**free typing (emptiable); only a complete in-range number commits live; clamped 0…359999 and saved on blur /
-Enter** (the owner's number-input rule; Escape drops the draft) — the props of the shared `NumInput` (min / max / step
-/ value / onChange, another lane's, not on lp-player yet): swap its inner `<input>` for it at the merge. Semantics: `player-adapter.md` §
-Play-time limits. Matrix cells drive them with `setValue` + a `focusout`.
+## Rotation rows (redesigned 2026-10-28)
+Settings → Rotation: "Switch when video ends", then ONE interval row — **"Switch every"** while it's off (a plain
+timer), **"Minimum play time"** while it's on (the same `globalIntervalSeconds`, relabelled: toggling shows the same
+value under the other label) with **"Maximum play time"** (`globalMaxPlaySeconds`) right below it (only while on). The
+"Wait for video to end after interval" row is gone. The playlist-settings modal mirrors it inside its override block
+(field labels SWITCH EVERY / MINIMUM PLAY TIME + MAXIMUM PLAY TIME). Every duration is `components/PlayTimeInput.tsx`:
+a thin h/m/s wrapper over the shared `NumInput` (3 fields, `aria-label` "<label> hours|minutes|seconds", the total
+clamped to 359999 s; "none" / "off" next to a 0 minimum / maximum); hints in its `ROT_HINT`. The status line reads
+"N wallpapers, on video end, at least X, at most Y". Semantics: `player-adapter.md` § Rotation. Matrix cells drive the
+seconds field (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`).
 
 ## Settings page under lp-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;

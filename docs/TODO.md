@@ -81,12 +81,21 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),
       wall-clock seconds, 0 = off by default, global + per-playlist override, live, kept across a backend restart.
-      `player-adapter.md` § Play-time limits (every mode combo), UI `PlayTimeInput` (blur-commit). Guards: IT §
+      `player-adapter.md` § Rotation (was § Play-time limits; the minimum merged into the interval field since), UI `PlayTimeInput`. Guards: IT §
       "advance-on-end play-time limits" (RED on the base backend), self-test `PlayLimitAssertions`, settings-merge,
       matrix `playlist|global:minPlay|maxPlay`, `global:maxPlay:own`.
   - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
         polling path untouched — owner: lp-player only).
-  - [ ] Unify `PlayTimeInput` with the shared blur-commit number input once it lands (the other UI lane).
+  - [x] Unify `PlayTimeInput` with the shared `NumInput` — now a thin h/m/s wrapper over it (rotation redesign below).
+- [x] **Rotation redesign** (owner-approved, 2026-10-28): "Switch when video ends" off → "Switch every" (a plain
+      timer, unchanged); on → the SAME interval field is "Minimum play time" (play at least this long, then switch at
+      the next video end; a shorter clip loops to a loop's end; an image / a scene shows this long) with "Maximum play
+      time" right below (switch even mid-video). "Wait for video to end after interval" and the separate minimum are
+      gone (no in-app migration — a one-off jq script converted the owner's settings / playlists / session files).
+      Same in the playlist modal. `player-adapter.md` § Rotation. Guards: IT § "advance-on-end play-time limits" + scene
+      + backend-restart (RED on the base backend: 26 fails incl. every new check), settings-merge (RED 6), self-test
+      `PlayLimitAssertions`, matrix `plAdvanceRelabel` / `gAdvanceRelabel` / `gAdvanceOn` / `playlist|global:minPlay|maxPlay`.
+  - [ ] A later task renames code identifiers to the UI labels (`IntervalSeconds` → switch-every / minimum, …).
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
       table in web-backend.md — lp-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `lp-player health`; a warning
@@ -99,7 +108,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       the floor is 0 ms (0 = a cut, 1–49 ms = that fast an effect; UI, `TransitionService.PickDuration`); every numeric
       settings field is `NumInput` — empty / out-of-range while focused, nothing saved until a valid value or the blur,
       clamped to min/max on blur/Enter. Guards: matrix `num:*`, `plTrShort`/`plTrZero` (RED 12/12). The other agent's
-      new min/max play-time inputs (rotation) can adopt `NumInput` once merged.
+      new min/max play-time inputs (rotation) adopted `NumInput` (PlayTimeInput = an h/m/s wrapper over it).
 - [x] **F / any key while holding a slider** (owner todo, 2026-10-28: "make F not do yellow outline when holding
       slider"): no app shortcut is bound to F — any key flipped the held (mouse-focused) slider to keyboard focus →
       Chromium's focus ring. `hooks/rangeDrag.ts` swallows keys during a range drag (shortcuts, Escape, arrows) and

@@ -25,8 +25,6 @@ public static class AppOps
         p.OverrideGlobalSettings ? p.IntervalSeconds : s.GlobalIntervalSeconds;
     private static bool EffAdvance(AppSettings s, PlaylistSettings p) =>
         p.OverrideGlobalSettings ? p.AdvanceOnVideoEnd : s.GlobalAdvanceOnVideoEnd;
-    private static bool EffWait(AppSettings s, PlaylistSettings p) =>
-        p.OverrideGlobalSettings ? p.WaitForVideoEnd : s.GlobalWaitForVideoEnd;
 
     // `paths` are already in the desired order (the UI sends the current strip order).
     // `persist` / `persistPaths` = what to save as the current playlist state when it differs from what
@@ -46,29 +44,28 @@ public static class AppOps
         catch { }
         var s = SettingsService.Load();
         bool shuffle = ps.Order == PlaylistOrder.Shuffle;
-        int interval = EffInterval(s, ps);
-        bool wait = EffWait(s, ps);
+        int interval = EffInterval(s, ps);   // advance-on-end: the minimum play time; else the timer
 
         if (EffAdvance(s, ps))
         {
             if (interval > 0)
             {
                 var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-                PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, wait, advanceOnVideoEnd: true);
-                Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, WaitForVideoEnd = wait, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+                PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, advanceOnVideoEnd: true);
+                Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
                 return "";
             }
             PlayerHelper.ApplyPlaylist(paths, s.BuildMpvPlaylistOptions(), shuffle, 0);
             Save(s, PlayerHelper.IsTimedPlaylistActive()
-                ? new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = 0, WaitForVideoEnd = true, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings }
+                ? new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = 0, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings }
                 : new LastSession { IsPlaylist = true, Paths = paths, Shuffle = shuffle, AdvanceOnVideoEnd = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
             return "";
         }
 
         if (interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
         var timed = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        PlayerHelper.ApplyTimedPlaylist(timed, s.BuildMpvOptions(), shuffle, interval, wait);
-        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, WaitForVideoEnd = wait, AdvanceOnVideoEnd = false, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+        PlayerHelper.ApplyTimedPlaylist(timed, s.BuildMpvOptions(), shuffle, interval);
+        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, AdvanceOnVideoEnd = false, OverrideGlobalSettings = ps.OverrideGlobalSettings });
         return "";
     }
 
@@ -317,7 +314,8 @@ public static class AppOps
     {
         var prevP = PlaylistService.LoadCurrentState();
         PlaylistService.SaveCurrentState(p);
-        // Live-apply a rotation change (interval / advance-on-end / wait, or the override toggle) to
+        // Live-apply a rotation change (interval — the minimum under advance-on-end — / advance-on-end / the
+        // maximum, or the override toggle) to
         // the RUNNING timed playlist — no replay. Diff the EFFECTIVE rotation vs the previously-saved
         // state so a plain reorder/add (which also POSTs state) never resets the countdown. When the
         // playlist follows globals, /settings owns the live-apply (this stays a no-op then).
@@ -333,16 +331,13 @@ public static class AppOps
                 PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle, prevP?.VideoPaths);
 
             var g = SettingsService.Load();
-            (int iv, bool wait, bool adv) Eff(CustomPlaylist? c) =>
-                (c?.Settings.OverrideGlobalSettings ?? false)
-                    ? (c!.Settings.IntervalSeconds, c.Settings.WaitForVideoEnd, c.Settings.AdvanceOnVideoEnd)
-                    : (g.GlobalIntervalSeconds, g.GlobalWaitForVideoEnd, g.GlobalAdvanceOnVideoEnd);
-            // the advance-on-end play-time limits (min / max), diffed like the rotation: an unrelated save leaves the
-            // item's play time and an armed switch alone. Before the rotation, so a switch it arms takes the new minimum.
-            var lim = PlayerHelper.EffectivePlayLimits(g, p.Settings);
-            if (lim != PlayerHelper.EffectivePlayLimits(g, prevP?.Settings)) PlayerHelper.ApplyPlayLimitsLive(lim.Min, lim.Max);
-            var now = Eff(p);
-            if (now != Eff(prevP)) PlayerHelper.ApplyRotationLive(now.iv, now.wait, now.adv);
+            // the effective rotation, diffed prev → now: an unrelated save (a reorder, a transition) leaves the
+            // countdown, the item's play time and an armed switch alone. The maximum first, so a switch the rotation
+            // arms (advance-on-end just turned on) already reads it.
+            var now = PlayerHelper.EffectiveRotation(g, p.Settings);
+            var was = PlayerHelper.EffectiveRotation(g, prevP?.Settings);
+            if (now.Max != was.Max) PlayerHelper.ApplyMaxPlayLive(now.Max);
+            if ((now.Interval, now.Advance) != (was.Interval, was.Advance)) PlayerHelper.ApplyRotationLive(now.Interval, now.Advance);
             // the playlist's transitions changed (on/off, effects, duration): an armed aligned switch takes them
             if (!TransitionService.SameConfig(TransitionService.Effective(g, prevP?.Settings), TransitionService.Effective(g, p.Settings)))
                 PlayerHelper.RearmAlignedSwitch();
@@ -410,7 +405,7 @@ public static class AppOps
             ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
             ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
             ps.IntervalSeconds = sess.TimedIntervalSeconds;
-            ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd; ps.WaitForVideoEnd = sess.WaitForVideoEnd;
+            ps.AdvanceOnVideoEnd = sess.AdvanceOnVideoEnd;
             int at = strip.IndexOf(playing);
             if (at >= 0 && survivors.Count > 0)
             {

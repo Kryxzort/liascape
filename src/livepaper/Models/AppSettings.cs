@@ -63,7 +63,10 @@ public class AppSettings
     public bool KeepPauseOnSwitch { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
-    public int GlobalIntervalSeconds { get; set; } = 1800;
+    // The global rotation (PlayerHelper § Rotation): GlobalAdvanceOnVideoEnd ("Switch when video ends") off →
+    // GlobalIntervalSeconds is a plain timer ("Switch every"); on → it is the minimum play time and
+    // GlobalMaxPlaySeconds the maximum (below). Defaults = the old default rotation (each video end, 30 min at most).
+    public int GlobalIntervalSeconds { get; set; } = 0;
     public bool GlobalAdvanceOnVideoEnd { get; set; } = true;
     public string Theme { get; set; } = "Catppuccin Mocha";
     private int _restartIntervalSeconds = 600;
@@ -72,13 +75,9 @@ public class AppSettings
         get => _restartIntervalSeconds;
         set => _restartIntervalSeconds = Math.Clamp(value, 0, 3600);
     }
-    public bool GlobalWaitForVideoEnd { get; set; } = false;
-    public bool PlaylistWaitForVideoEnd { get; set; } = false;
-    // Advance-on-end play-time limits (wall-clock seconds, 0 = off; PlayerHelper § play-time limits): a clip shorter
-    // than the minimum loops until it, then advances at the end of the loop that reaches it; one longer than the
-    // maximum (and a scene, which never ends) advances once it played that long. Only under advance-on-end.
-    private int _globalMinPlaySeconds, _globalMaxPlaySeconds;
-    public int GlobalMinPlaySeconds { get => _globalMinPlaySeconds; set => _globalMinPlaySeconds = PlayLimit(value); }
+    // The maximum play time under advance-on-end (wall-clock seconds, 0 = off): the playing item — a video mid-clip,
+    // a scene — advances once it played that long (a cap beats the minimum).
+    private int _globalMaxPlaySeconds = 1800;
     public int GlobalMaxPlaySeconds { get => _globalMaxPlaySeconds; set => _globalMaxPlaySeconds = PlayLimit(value); }
     public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
     public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields

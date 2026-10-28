@@ -40,16 +40,18 @@ public static class PlayerHelper
     private static List<string> _currentObserverPaths = [];
     private static readonly object _lock = new();
     private static CancellationTokenSource? _daemonCts;
-    private static bool _waitForVideoEnd;
     private static bool _advanceOnVideoEnd;
     private static bool _waitingForVideoEnd;
-    // ── Advance-on-end play-time limits (player-adapter.md § Play-time limits). The session's effective min / max
-    // (wall-clock ms, 0 = off — the playlist's own when it overrides the globals, else the globals: read from the
-    // config at a session's start / resume, live from /settings + /playlist/state) and the playing item's play
-    // time (wall-clock ms since it became current, pauses excluded — the tick counts it; persisted in timed_state
-    // with the moment it was saved, so a backend restart counts the time the player played on meanwhile).
-    private static long _minPlayMs, _maxPlayMs;
+    // ── Rotation (player-adapter.md § Rotation). "Switch when video ends" off: `_timedInterval` is a plain timer.
+    // On: `_timedInterval` IS the minimum play time (MinPlayMs — the one interval field, relabelled in the UI) and
+    // `_maxPlayMs` the maximum (wall-clock ms, 0 = off — the playlist's own when it overrides the globals, else the
+    // global one: read from the config at a session's start / resume, live from /settings + /playlist/state). The
+    // playing item's play time (wall-clock ms since it became current, pauses excluded — the tick counts it;
+    // persisted in timed_state with the moment it was saved, so a backend restart counts the time the player played
+    // on meanwhile) is what both are measured against.
+    private static long _maxPlayMs;
     private static long _itemPlayedMs;
+    private static long MinPlayMs => _advanceOnVideoEnd ? (long)_timedInterval.TotalMilliseconds : 0;
     private static double _currentSpeed = 1.0;
     private static CancellationTokenSource? _waitCts;
     private static CancellationTokenSource? _prelaunchCts;
@@ -642,7 +644,7 @@ public static class PlayerHelper
         string Options, bool Shuffle, int IntervalSeconds,
         List<string> History, int HistoryIndex,
         bool TimerPaused = false, bool TimerStopped = false, long RemainingMs = 0,
-        bool WaitForVideoEnd = false, bool AdvanceOnVideoEnd = false, bool WaitingForVideoEnd = false,
+        bool AdvanceOnVideoEnd = false, bool WaitingForVideoEnd = false,
         long ItemPlayedMs = 0, long PlayedSavedAtMs = 0);
 
     private static void SaveTimedState()
@@ -655,7 +657,7 @@ public static class PlayerHelper
                 _timedOptions, _timedShuffle, (int)_timedInterval.TotalSeconds,
                 _history, _historyIndex,
                 _timedTimerPaused, _timedTimerStopped, _timedRemainingMs,
-                _waitForVideoEnd, _advanceOnVideoEnd, _waitingForVideoEnd,
+                _advanceOnVideoEnd, _waitingForVideoEnd,
                 _itemPlayedMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             var path = TimedStatePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -748,7 +750,6 @@ public static class PlayerHelper
             _timedTimerPaused = state.TimerPaused;
             _timedTimerStopped = state.TimerStopped;
             _timedRemainingMs = state.RemainingMs > 0 ? state.RemainingMs : (long)_timedInterval.TotalMilliseconds;
-            _waitForVideoEnd = state.WaitForVideoEnd;
             _advanceOnVideoEnd = state.AdvanceOnVideoEnd;
             _waitingForVideoEnd = state.WaitingForVideoEnd;
             // the playing item's play time: what was counted + (unpaused) the time since it was saved — the player
@@ -812,15 +813,13 @@ public static class PlayerHelper
                 ? videoPaths.OrderBy(_ => Guid.NewGuid()).ToArray()
                 : videoPaths.ToArray();
 
+            // scenes (they never end): the timed machinery under advance-on-end — a scene moves on at the minimum
+            // play time (`intervalSeconds`), else at the maximum, else at a user switch (§ Rotation)
             var settings = SettingsService.Load();
             if (PlayerEngine.ScenesPlayable(settings) && paths.Any(IsScenePath))
             {
-                var secs = intervalSeconds > 0 ? intervalSeconds : settings.GlobalIntervalSeconds;
-                if (secs > 0)
-                {
-                    ApplyTimedPlaylist(paths, mpvOptions, shuffle, secs, waitForVideoEnd: true, advanceOnVideoEnd: true);
-                    return;
-                }
+                ApplyTimedPlaylist(paths, mpvOptions, shuffle, intervalSeconds, advanceOnVideoEnd: true);
+                return;
             }
 
             paths = paths.Where(p => !IsScenePath(p)).ToArray();
@@ -834,14 +833,15 @@ public static class PlayerHelper
             else
             {
                 // Livepaper-owned: full playlist control, mid-session injection, no mpv playlist file
-                ApplyTimedPlaylist(paths, mpvOptions, shuffle, intervalSeconds: 0, waitForVideoEnd: false, advanceOnVideoEnd: true);
+                ApplyTimedPlaylist(paths, mpvOptions, shuffle, intervalSeconds, advanceOnVideoEnd: true);
                 return;
             }
         }
         UpdateRestartTimer();
     }
 
-    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd = false, bool advanceOnVideoEnd = false)
+    // `intervalSeconds`: advance-on-end off → the timer; on → the minimum play time (§ Rotation)
+    public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool advanceOnVideoEnd = false)
     {
         lock (_lock)
         {
@@ -867,9 +867,8 @@ public static class PlayerHelper
             _timedTimerPaused = false;
             _timedTimerStopped = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-            _waitForVideoEnd = waitForVideoEnd;
             _advanceOnVideoEnd = advanceOnVideoEnd;
-            RefreshPlayLimits();
+            RefreshMaxPlay();
             _itemPlayedMs = 0;
             // Pick up per-video speed override for the first item so tick scales interval
             // correctly from the first tick rather than after the next transition's SetSpeed.
@@ -901,8 +900,8 @@ public static class PlayerHelper
     // Re-arms DoVideoEndWait after state is loaded from disk (daemon resume/restore).
     // Handles three cases:
     //   (a) Current item is a scene → clear wait flag, no rearm. Timer ticks normally.
-    //   (b) Saved _waitingForVideoEnd=true (wait was in flight for either advance-on-end pre-fetch
-    //       or wait-for-video-end after timer fire) → rearm DoVideoEndWait on the prefetched next.
+    //   (b) Saved _waitingForVideoEnd=true (the advance-on-end pre-fetch's wait was in flight)
+    //       → rearm DoVideoEndWait on the prefetched next.
     //   (c) Saved _waitingForVideoEnd=false + _advanceOnVideoEnd=true → set up new pre-fetch wait.
     // Must be called inside _lock.
     private static void RearmAdvanceOnVideoEnd()
@@ -928,9 +927,8 @@ public static class PlayerHelper
             return;
         }
 
-        // (b) A wait was in flight in the GUI — re-attach to the pre-fetched next item.
-        // Covers both advance-on-end (pre-fetched at launch) and wait-for-video-end (pre-fetched
-        // when the timer fired). Current is a video (scene case bailed above), so prevIsVideo: true.
+        // (b) A wait was in flight in the GUI — re-attach to the pre-fetched next item (pre-fetched
+        // at the switch). Current is a video (scene case bailed above), so prevIsVideo: true.
         if (_waitingForVideoEnd && _historyIndex >= 0 && _historyIndex < _history.Count)
         {
             ArmVideoEndWait(_history[_historyIndex]);
@@ -958,7 +956,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedTimerPaused = false;
             _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
-            RefreshPlayLimits();
+            RefreshMaxPlay();
             _itemPlayedMs = 0; // the item starts over (SwitchToFile below), like the countdown
 
             // When WaitingForVideoEnd=true the saved _historyIndex is pre-fetched one step ahead;
@@ -988,7 +986,7 @@ public static class PlayerHelper
             _timedTimerStopped = false;
             _timedTimerPaused = false;
             // _timedRemainingMs is restored from state — preserves the countdown (and the item's play time)
-            RefreshPlayLimits();
+            RefreshMaxPlay();
 
             EnsureTimedTick();
 
@@ -1064,8 +1062,8 @@ public static class PlayerHelper
                 TransitionService.TransLog($"TICK scene-crash advance: idx={_historyIndex} item={System.IO.Path.GetFileName(_history[_historyIndex])} IsLweRunning=false");
                 OnSceneCrashed?.Invoke(_history[_historyIndex]);
                 _timedRemainingMs = 0;
-                // Kill orphaned LWE immediately — the advance may go through DoVideoEndWait
-                // (waitForVideoEnd=true) which doesn't call SwitchToFile right away.
+                // Kill orphaned LWE immediately — the advance may go through DoVideoEndWait,
+                // which doesn't call SwitchToFile right away.
                 _prelaunchCts?.Cancel();
                 _prelaunchCts = null;
                 if (_prelaunchPidsToKill != null) { KillPids(_prelaunchPidsToKill); _prelaunchPidsToKill = null; }
@@ -1110,7 +1108,7 @@ public static class PlayerHelper
 
             // Maximum play time (advance-on-end): the item played that long → the next one now, with its
             // transition (align:now, like a timed switch; an armed end-of-video switch is cancelled — AdvanceAndLaunch
-            // takes its pre-fetched B). A scene never ends: this is what moves it on (else the interval, if any).
+            // takes its pre-fetched B). A cap beats the minimum.
             if (MaxPlayReached(_advanceOnVideoEnd, CanRotate, _itemPlayedMs, _maxPlayMs))
             {
                 LpPlayerClient.Log($"max play time: {_itemPlayedMs / 1000.0:0.0} s ≥ {_maxPlayMs / 1000.0:0.#} s → advancing");
@@ -1120,30 +1118,36 @@ public static class PlayerHelper
                 return;
             }
 
-            // Freeze countdown only when BOTH waitForVideoEnd=true and a waiter is active.
-            // In advance-on-end-only combined mode (_waitForVideoEnd=false), the interval still
-            // counts so it can fire as a fallback if the video runs long.
-            // _timedInterval > Zero distinguishes combined/timed mode from pure advance-on-end
-            // (where _timedInterval = Zero and the countdown is irrelevant).
-            if ((!_waitingForVideoEnd || !_waitForVideoEnd) && (!_advanceOnVideoEnd || _timedInterval > TimeSpan.Zero || IsLweRunning))
+            // A scene (it never ends) under advance-on-end: the minimum reached IS its end → the next one now
+            // (align:now). No minimum → it plays until the maximum (above), else until a user switch.
+            if (SceneMinReached(_advanceOnVideoEnd, CanRotate, PlayingIsScene, _itemPlayedMs, MinPlayMs))
             {
-                // Scale by playback speed so the timer counts video-time, not wall-clock.
-                // At 2x speed the interval expires in half the wall-clock time, which is
-                // correct: 15 real minutes = 30 minutes of video content. Scenes run at 1x.
-                var speedFactor = IsLweRunning ? 1.0 : _currentSpeed;
-                _timedRemainingMs -= (long)(elapsedMs * speedFactor);
+                LpPlayerClient.Log($"min play time on a scene: {_itemPlayedMs / 1000.0:0.0} s ≥ {MinPlayMs / 1000.0:0.#} s → advancing");
+                _itemPlayedMs = 0;
+                AdvanceAndLaunch();
+                _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
+                return;
             }
 
-            // Video→scene LEAD (pure timed mode): a scene needs SceneTransitionDelayMs to load behind
+            // Under advance-on-end the rotation has no countdown: a video / image switches at its (min-held) end —
+            // DoVideoEndWait — and the limits above do the rest.
+            if (_advanceOnVideoEnd)
+            {
+                _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
+                return;
+            }
+
+            // The plain timer (advance-on-end off). Scaled by playback speed so it counts video time, not wall
+            // clock: at 2x the interval expires in half the wall-clock time. Scenes run at 1x.
+            var speedFactor = IsLweRunning ? 1.0 : _currentSpeed;
+            _timedRemainingMs -= (long)(elapsedMs * speedFactor);
+
+            // Video→scene LEAD (legacy, pure timed mode): a scene needs SceneTransitionDelayMs to load behind
             // the cover, so fire the switch that many ms EARLY — the live video keeps playing under the
-            // overlay during the load and the scene reveals right at the interval boundary (mirrors the
-            // video-end lead in DoVideoEndWait). Only V→S with a transition enabled; the reset-to-full
-            // in LaunchAndReset prevents a re-fire. Skipped for advance-on-end / wait modes (those lead
-            // via DoVideoEndWait) and for intervals shorter than the lead.
-            // Gate on the wait MODE flags (_waitForVideoEnd / _advanceOnVideoEnd), not just the transient
-            // _waitingForVideoEnd — between switches that transient is false, so without this the lead
-            // fired off the INTERVAL in wait-for-video-end mode (premature V→S) instead of off the video end.
-            if (!_advanceOnVideoEnd && !_waitForVideoEnd && !_waitingForVideoEnd && _timedInterval > TimeSpan.Zero)
+            // overlay during the load and the scene reveals right at the interval boundary. Only V→S with a
+            // transition enabled; the reset-to-full in LaunchAndReset prevents a re-fire. Skipped for
+            // intervals shorter than the lead.
+            if (!_waitingForVideoEnd && _timedInterval > TimeSpan.Zero)
             {
                 int leadMs = SettingsService.Load().SceneTransitionDelayMs;
                 if (leadMs > 0 && _timedRemainingMs <= leadMs && _timedRemainingMs > 0
@@ -1161,41 +1165,13 @@ public static class PlayerHelper
                 }
             }
 
-            // _timedInterval > Zero prevents spurious expiry in pure advance-on-end mode
-            // (where _timedInterval = Zero and _timedRemainingMs starts at 0).
+            // _timedInterval > Zero: an interval of 0 never fires (AppOps refuses to start one with > 1 item).
             // A one-item session has nothing to rotate to: its interval only starts over (it ticks for the
             // queued user switches above, never to switch to itself every interval).
             if (_timedRemainingMs <= 0 && _timedInterval > TimeSpan.Zero && !CanRotate)
                 _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
             if (_timedRemainingMs <= 0 && _timedInterval > TimeSpan.Zero)
-            {
-                if (_waitingForVideoEnd && !_waitForVideoEnd)
-                {
-                    // Combined mode: interval fired before the video ended.
-                    // AdvanceAndLaunch handles the pre-fetched _historyIndex + cancels the waiter.
-                    AdvanceAndLaunch();
-                }
-                else if (!_waitingForVideoEnd)
-                {
-                    if (_waitForVideoEnd)
-                    {
-                        var next = AdvanceToNext();
-                        if (next != null)
-                        {
-                            ArmVideoEndWait(next, prevIsVideo: false);
-                        }
-                        else
-                        {
-                            AdvanceAndLaunch();
-                        }
-                    }
-                    else
-                    {
-                        AdvanceAndLaunch();
-                    }
-                }
-                // _waitingForVideoEnd && _waitForVideoEnd: DoVideoEndWait handles the advance
-            }
+                AdvanceAndLaunch();
 
             _playlistTimer?.Change(TickInterval, Timeout.InfiniteTimeSpan);
         }
@@ -1206,48 +1182,52 @@ public static class PlayerHelper
     // random switches it, to its one item.
     private static bool CanRotate => _timedPaths is { Count: > 1 };
 
-    // ── Advance-on-end play-time limits (player-adapter.md § Play-time limits) ─────────────────────────────
-    // Wall-clock seconds (speed never scales them; a pause stops the clock), 0 = off, only under advance-on-end.
-    // Minimum: a clip shorter than it loops on, and the end-of-video switch is requested in the loop that reaches
-    // it (HoldForMinPlay) → it advances at that loop's end, never mid-loop; a still image (it never ends) shows for
-    // it. Maximum: once the playing item played that long the rotation advances now (the tick, align:now) — the
-    // only end a scene has besides the interval. The interval keeps its own meaning (a combined rotation's video-time
-    // cap; wait-for-video-end's timer for scenes): whichever comes first. A one-item session never switches to itself.
+    // ── Rotation (player-adapter.md § Rotation) ─────────────────────────────────────────────────────────────
+    // "Switch when video ends" off: the interval is a plain timer (mid-video, speed-scaled). On: wall-clock seconds
+    // (speed never scales them; a pause stops the clock), 0 = off —
+    // - minimum (= the interval field): a clip plays at least this long and switches at its next end; a shorter one
+    //   loops on, and the end-of-video switch is requested in the loop that reaches it (HoldForMinPlay) → it advances
+    //   at that loop's end, never mid-loop; a still image (it never ends) shows for it; a scene (it never ends either)
+    //   switches once it's reached (the tick, align:now).
+    // - maximum: once the playing item played that long the rotation advances now (the tick, align:now), even
+    //   mid-video; a cap beats the minimum (max < min → the max fires).
+    // A one-item session never switches to itself.
 
-    // The effective limits of a playlist: its own when it overrides the global rotation, else the globals.
-    public static (int Min, int Max) EffectivePlayLimits(AppSettings s, PlaylistSettings? p) =>
-        p?.OverrideGlobalSettings == true ? (p.MinPlaySeconds, p.MaxPlaySeconds) : (s.GlobalMinPlaySeconds, s.GlobalMaxPlaySeconds);
+    // A playlist's effective rotation: its own when it overrides the global one, else the globals'.
+    public static (int Interval, bool Advance, int Max) EffectiveRotation(AppSettings s, PlaylistSettings? p) =>
+        p?.OverrideGlobalSettings == true
+            ? (p.IntervalSeconds, p.AdvanceOnVideoEnd, p.MaxPlaySeconds)
+            : (s.GlobalIntervalSeconds, s.GlobalAdvanceOnVideoEnd, s.GlobalMaxPlaySeconds);
 
-    // from the config (like TransitionService.CurrentConfig: the current playlist state + the settings) — a session's
-    // start / restore / resume; live edits come through ApplyPlayLimitsLive
-    private static void RefreshPlayLimits()
+    // The play-time limits a rotation acts on: only under advance-on-end (the interval is the minimum there); off,
+    // the interval is the timer and neither applies.
+    public static (int Min, int Max) PlayLimits(int intervalSeconds, bool advance, int maxSeconds) =>
+        advance ? (Math.Max(0, intervalSeconds), AppSettings.PlayLimit(maxSeconds)) : (0, 0);
+
+    // the maximum from the config (like TransitionService.CurrentConfig: the current playlist state + the settings) —
+    // a session's start / restore / resume; live edits come through ApplyMaxPlayLive (the minimum is the session's
+    // own interval, which a session carries itself)
+    private static void RefreshMaxPlay()
     {
-        try
-        {
-            var (min, max) = EffectivePlayLimits(SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings);
-            _minPlayMs = min * 1000L; _maxPlayMs = max * 1000L;
-        }
+        try { _maxPlayMs = EffectiveRotation(SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings).Max * 1000L; }
         catch { }
     }
 
-    // /settings (the globals) and /playlist/state (a playlist's own): the effective limits changed — live on the running
-    // rotation. The item's play time keeps counting (an edit never resets it); a new maximum is compared by the next tick
-    // (already past it → it advances now); a new minimum re-arms an end-of-video switch already armed for A's end — that
-    // one was requested for the end of A's CURRENT loop — so the new one holds (or releases) it.
-    public static void ApplyPlayLimitsLive(int minSeconds, int maxSeconds)
+    // /settings (the global one) and /playlist/state (a playlist's own): the effective maximum changed — live on the
+    // running rotation. The item's play time keeps counting (an edit never resets it); the next tick compares it
+    // (already past it → it advances now).
+    public static void ApplyMaxPlayLive(int maxSeconds)
     {
-        lock (_lock)
-        {
-            long min = AppSettings.PlayLimit(minSeconds) * 1000L, max = AppSettings.PlayLimit(maxSeconds) * 1000L;
-            bool minChanged = min != _minPlayMs;
-            _minPlayMs = min; _maxPlayMs = max;
-            if (!minChanged || !PlayerEngine.IsLpPlayer || _timedPaths == null || !_advanceOnVideoEnd || !_waitingForVideoEnd
-                || _timerReleased || _waitCts == null || ScenePlaying || _history == null || _historyIndex < 0 || _historyIndex >= _history.Count) return;
-            var next = _history[_historyIndex];
-            CancelVideoEndWait();
-            ArmVideoEndWait(next);
-        }
+        lock (_lock) { _maxPlayMs = AppSettings.PlayLimit(maxSeconds) * 1000L; }
     }
+
+    // the playing item is a scene (whatever the engine: under lp-player no LWE process exists)
+    private static bool PlayingIsScene =>
+        _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count && IsScenePath(_history[PlayingHistoryIndex]);
+
+    // a scene's end under advance-on-end: the minimum reached (none set → only the maximum or a user switch moves it)
+    public static bool SceneMinReached(bool advanceOnEnd, bool canRotate, bool isScene, long playedMs, long minMs) =>
+        advanceOnEnd && canRotate && isScene && minMs > 0 && playedMs >= minMs;
 
     public static bool MaxPlayReached(bool advanceOnEnd, bool canRotate, long playedMs, long maxMs) =>
         advanceOnEnd && canRotate && maxMs > 0 && playedMs >= maxMs;
@@ -1274,7 +1254,7 @@ public static class PlayerHelper
         while (true)
         {
             long min, played; bool adv;
-            lock (_lock) { min = _minPlayMs; played = _itemPlayedMs; adv = _advanceOnVideoEnd; }
+            lock (_lock) { min = MinPlayMs; played = _itemPlayedMs; adv = _advanceOnVideoEnd; }
             if (ct.IsCancellationRequested) return false;
             if (!adv || min <= 0) return true;
             long? rem = LpPlayerMedia.TimeRemaining() is double r ? (long)(r * 1000) : null;
@@ -1779,95 +1759,6 @@ public static class PlayerHelper
         catch { return null; }
     }
 
-    // Switch from timed-interval mode to advance-on-end without restarting mpvpaper.
-    // Tears down the timer, appends remaining paths to mpv's in-memory playlist, and
-    // sets loop-playlist so mpv advances naturally when each file ends.
-    public static void SwitchFromTimedToAdvanceOnEnd(IReadOnlyList<string> allPaths, bool shuffle)
-    {
-        lock (_lock)
-        {
-            if (_timedPaths == null || _history == null) return;
-
-            // Cancel any in-flight pre-fetch wait
-            bool wasWaiting = _waitingForVideoEnd;
-            _waitCts?.Cancel();
-            _waitCts = null;
-            _waitingForVideoEnd = false;
-
-            // Un-advance history index if pre-fetch was in progress
-            if (wasWaiting && _historyIndex > 0)
-                _historyIndex--;
-
-            _advanceOnVideoEnd = true;
-            _waitForVideoEnd = false;
-            _timedInterval = TimeSpan.Zero;
-            _timedShuffle = shuffle;
-            // _timedRemainingMs preserved: scenes still use the countdown;
-            // video paths arm DoVideoEndWait which holds the tick via _waitingForVideoEnd.
-
-            // Re-arm DoVideoEndWait for the next item
-            string? currentPath = (_historyIndex >= 0 && _historyIndex < _history.Count)
-                ? _history[_historyIndex] : null;
-            if (currentPath != null && !IsScenePath(currentPath) && _timedPaths.Count > 1)
-            {
-                var next = AdvanceToNext();
-                if (next != null)
-                    ArmVideoEndWait(next);
-            }
-
-            SaveTimedState();
-        }
-    }
-
-    // Switch from advance-on-end mode to timed-interval without restarting mpvpaper.
-    // Converts mpv to single-file loop mode, then starts the livepaper timer.
-    public static void SwitchFromAdvanceOnEndToTimed(IReadOnlyList<string> allPaths, string mpvOptions, bool shuffle, int intervalSeconds, bool waitForVideoEnd)
-    {
-        lock (_lock)
-        {
-            if (allPaths.Count == 0) return;
-
-            // Cancel any in-flight DoVideoEndWait (may have set loop-file=no + loadfile append)
-            _waitCts?.Cancel();
-            _waitCts = null;
-            _waitingForVideoEnd = false;
-
-            var currentPath = TryQueryCurrentPath();
-
-            // Restore single-file loop mode and clear any pre-appended next item
-            TrySendCommand("set", "loop-file", "inf");
-            TrySendCommand("playlist-clear");
-            TrySendCommand("set", "loop-playlist", "no");
-
-            var ordered = new List<string>(allPaths);
-            _timedPaths = ordered;
-            _timedOptions = mpvOptions;
-            _timedShuffle = shuffle;
-            _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
-            _timedTimerPaused = false;
-            _timedTimerStopped = false;
-            var timePos = TryQueryTimePos();
-            long fullMs = (long)_timedInterval.TotalMilliseconds;
-            long elapsedMs = timePos.HasValue ? (long)(timePos.Value * 1000) : 0;
-            bool instantAdvance = elapsedMs >= fullMs;
-            _timedRemainingMs = instantAdvance ? fullMs : fullMs - elapsedMs;
-            _waitForVideoEnd = waitForVideoEnd;
-            _advanceOnVideoEnd = false;
-
-            var startPath = currentPath ?? ordered[0];
-            var idx = ordered.IndexOf(startPath);
-            if (idx < 0) idx = 0;
-            _timedIndex = idx;
-            _history = [startPath];
-            _historyIndex = 0;
-
-            SaveTimedState();
-
-            EnsureTimedTick();
-            if (ordered.Count > 1 && intervalSeconds > 0 && instantAdvance) AdvanceAndLaunch();
-        }
-    }
-
     // Reorders the active playlist in real time without restarting mpvpaper or resetting the timer countdown.
     // Sequential: positions the current wallpaper at index 0, then appends the rest in original order
     //             starting from current+1 (wrapping). Shuffled: same but randomises the tail.
@@ -2217,7 +2108,7 @@ public static class PlayerHelper
         //    switch's transition.handoff is the gate (a new request would supersede a pre-Running one).
         //    Cancel (ct) → `cancel {corr}` inside SwitchAndWait.
         //    Phase 2: a scene on either side too (kind-agnostic in the player). A scene A never ends, so
-        //    a switch away from one (wait-for-video-end after the interval, scenes' only arming path) is
+        //    a switch away from one (a restore re-arming onto a scene — the tick moves scenes on itself) is
         //    align:"now" — legacy's "prevIsScene → switch now".
         if (PlayerEngine.IsLpPlayer)
         {
@@ -2623,17 +2514,12 @@ public static class PlayerHelper
     {
         _lastSwitchTarget = path;
         _itemPlayedMs = 0; // `path` became the playing item (lp-player: when its effect started)
+        _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
         if (_advanceOnVideoEnd && !IsScenePath(path) && CanRotate)
         {
             var next = AdvanceToNext();
             if (next != null) ArmVideoEndWait(next);
-            // In combined mode (advance-on-end + real interval), also reset the fallback countdown
-            // so the interval applies fresh to the newly started video.
-            if (_timedInterval > TimeSpan.Zero)
-                _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
         }
-        else
-            _timedRemainingMs = (long)_timedInterval.TotalMilliseconds;
         SaveTimedState();
     }
 
@@ -2840,25 +2726,20 @@ public static class PlayerHelper
         return true;
     }
 
-    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds, bool waitForVideoEnd = false, bool advanceOnVideoEnd = false)
+    public static void UpdateTimedSettings(bool shuffle, int intervalSeconds, bool advanceOnVideoEnd = false)
     {
         lock (_lock)
         {
             if (_timedPaths == null && !LoadTimedState()) return;
             _timedShuffle = shuffle;
+            long oldMin = MinPlayMs;
             var oldIntervalMs = (long)_timedInterval.TotalMilliseconds;
             _timedInterval = TimeSpan.FromSeconds(intervalSeconds);
             var newIntervalMs = (long)_timedInterval.TotalMilliseconds;
             var elapsed = Math.Max(0L, oldIntervalMs - _timedRemainingMs);
             _timedRemainingMs = elapsed >= newIntervalMs ? newIntervalMs : newIntervalMs - elapsed;
 
-            bool advanceChanged = _advanceOnVideoEnd != advanceOnVideoEnd;
-            bool waitChanged = _waitForVideoEnd != waitForVideoEnd;
-            _waitForVideoEnd = waitForVideoEnd;
-
-            // If advance-on-end is toggling, or waitForVideoEnd toggles while a
-            // DoVideoEndWait is already in-flight, cancel and re-arm as needed.
-            if (advanceChanged || (waitChanged && _waitingForVideoEnd))
+            if (_advanceOnVideoEnd != advanceOnVideoEnd)
             {
                 // _historyIndex is pre-fetched one step ahead when _waitingForVideoEnd is true.
                 // Step back to the actual playing item so AdvanceToNext() re-fetches correctly.
@@ -2874,9 +2755,15 @@ public static class PlayerHelper
                         ArmVideoEndWait(next);
                 }
             }
-            else
+            else if (MinPlayMs != oldMin && PlayerEngine.IsLpPlayer && _advanceOnVideoEnd && _waitingForVideoEnd && !_timerReleased
+                     && _waitCts != null && !ScenePlaying && _history != null && _historyIndex >= 0 && _historyIndex < _history.Count)
             {
-                _advanceOnVideoEnd = advanceOnVideoEnd;
+                // a new minimum under advance-on-end: the end-of-video switch already armed was requested for the
+                // end of A's CURRENT loop (or is still held for an older minimum) — re-arm it to the same B so the
+                // new minimum holds (or releases) it. The item's play time keeps counting.
+                var next = _history[_historyIndex];
+                CancelVideoEndWait();
+                ArmVideoEndWait(next);
             }
 
             // (Positive→0 leaves the timer ticking harmlessly; the `_timedInterval > Zero` guard in Tick
@@ -2887,12 +2774,12 @@ public static class PlayerHelper
         }
     }
 
-    // Live-apply a rotation change (interval / wait-for-video-end / advance-on-end) to the RUNNING timed
-    // playlist with no replay — preserves the running shuffle + the proportional countdown. No-op when no
-    // timed session is active (UpdateTimedSettings early-returns). Wired from /settings (global rotation,
-    // when the session follows globals) + /playlist/state (per-playlist rotation, when it overrides).
-    public static void ApplyRotationLive(int intervalSeconds, bool waitForVideoEnd, bool advanceOnVideoEnd)
-        => UpdateTimedSettings(_timedShuffle, intervalSeconds, waitForVideoEnd, advanceOnVideoEnd);
+    // Live-apply a rotation change (interval — the minimum under advance-on-end — / advance-on-end) to the RUNNING
+    // timed playlist with no replay — preserves the running shuffle + the proportional countdown + the item's play
+    // time. No-op when no timed session is active (UpdateTimedSettings early-returns). Wired from /settings (global
+    // rotation, when the session follows globals) + /playlist/state (per-playlist rotation, when it overrides).
+    public static void ApplyRotationLive(int intervalSeconds, bool advanceOnVideoEnd)
+        => UpdateTimedSettings(_timedShuffle, intervalSeconds, advanceOnVideoEnd);
 
     // PlayerEngine changed (/settings), live: stop the OLD engine's media, then replay on the new one —
     // a running timed playlist resumes at the item it was on (timed_state.json), else LastSession.
@@ -2929,7 +2816,7 @@ public static class PlayerHelper
             if (session.IsTimedPlaylist)
             {
                 var paths = session.Shuffle ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList() : session.Paths;
-                ApplyTimedPlaylist(paths, cur.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd, session.AdvanceOnVideoEnd);
+                ApplyTimedPlaylist(paths, cur.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.AdvanceOnVideoEnd);
             }
             else if (session.IsPlaylist) ApplyPlaylist(session.Paths, cur.BuildMpvPlaylistOptions(), session.Shuffle);
             else Apply(session.Paths[0], cur.BuildMpvOptions());
@@ -3044,7 +2931,7 @@ public static class PlayerHelper
                     var paths = session.Shuffle
                         ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList()
                         : session.Paths;
-                    ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.WaitForVideoEnd, session.AdvanceOnVideoEnd);
+                    ApplyTimedPlaylist(paths, settings.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.AdvanceOnVideoEnd);
                 }
                 // For the upgrade case (LastSession.IsPlaylist + timedActive) without resume,
                 // there's no recorded TimedIntervalSeconds to reconstruct from — bail.
@@ -3785,12 +3672,12 @@ public static class PlayerHelper
             int i = PlayingHistoryIndex;
             if (i < 0 || i >= _history.Count || !SamePath(_history[i], path)) return;
             TransitionService.TransLog($"{why}: {System.IO.Path.GetFileName(path)} → advance");
-            if (_timedInterval > TimeSpan.Zero)
+            if (!_advanceOnVideoEnd && _timedInterval > TimeSpan.Zero)
             {
                 _timedRemainingMs = 0;
                 _playlistTimer?.Change(TimeSpan.Zero, Timeout.InfiniteTimeSpan); // the tick advances now
             }
-            else AdvanceAndLaunch(); // no countdown to expire (a pure advance-on-end session)
+            else AdvanceAndLaunch(); // no countdown to expire (an advance-on-end session)
         }
     }
 

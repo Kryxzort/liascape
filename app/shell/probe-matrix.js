@@ -251,7 +251,9 @@ let BASE_SETTINGS;
 // Fades: 1200 ms (global too — test-ui-matrix.sh's settings); the mid-effect states' playlist keeps EFFECT_MS so a
 // control still lands inside the running effect. Was 2500 everywhere: every switch a cell made waited it out.
 const EFFECT_MS = 2500;
-const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, waitForVideoEnd: false, minPlaySeconds: 0, maxPlaySeconds: 0,
+// the rotation (player-adapter.md § Rotation): advance-on-end off → intervalSeconds is the timer; on → it is the minimum
+// play time and maxPlaySeconds the maximum (0 = off)
+const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, maxPlaySeconds: 0,
   transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
 // Getting INTO a state isn't what a cell tests: its entry switches run as ENTRY_MS fades BEFORE the UI loads (the
 // app opened onto a playing wallpaper, as in real use), then the configured durations go back — so the UI reads
@@ -325,7 +327,8 @@ function sceneShown(c, p) {
   return v;
 }
 
-const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ advanceOnVideoEnd: true, transitionDurationMs: 600 }) });
+// advance-on-end with no minimum (the interval field IS the minimum there): k4's switch is armed for its end at once
+const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
 const STATES = {
   // roles: which item is on screen (`shown`) and which other item is live in the state (`other`: the
   // incoming B of an effect, the pending B of an end-wait) or, with nothing else live, an off-screen one
@@ -356,8 +359,8 @@ const STATES = {
       await post("/playlist/play", STATES.playlistGlobal.playlist()); c.ok = await waitSettled(12000, K[0]); } },
   // like `pending`, but the playlist FOLLOWS the global rotation + transitions (no override) — opt-in: only
   // the controls that list it run here. Its globals go in before the UI loads (the UI saves its whole copy).
-  pendingGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[3], K[0]], playlist: () => ({ ...PENDING_PL(), settings: PS({ overrideGlobalSettings: false }) }),
-    async pre() { const s = await getSettings(); Object.assign(s, { globalAdvanceOnVideoEnd: true, globalTransitionDurationMs: 600 }); await post("/settings", s); },
+  pendingGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[3], K[0]], playlist: () => ({ ...PENDING_PL(), settings: PS({ overrideGlobalSettings: false, intervalSeconds: 0 }) }),
+    async pre() { const s = await getSettings(); Object.assign(s, { globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalTransitionDurationMs: 600 }); await post("/settings", s); },
     async enter(c) { c.playlist = true; c.fresh = true;
       await post("/playlist/play", STATES.pendingGlobal.playlist());
       c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
@@ -859,7 +862,8 @@ C["plInterval"] = { states: ["playlist", "pending"], async run(c) {
   }, check(c) {
     const v = [];
     if (c.after.ps?.settings?.intervalSeconds !== 8) v.push(`playlist interval ${c.after.ps?.settings?.intervalSeconds}, expected 8`);
-    // pending: advance-on-end stays on (it advances at A's end; the 8 s interval switches too — a combined rotation)
+    // pending: advance-on-end stays on — the field is its MINIMUM play time there (8 s ≤ k4's 10 s: it still advances at
+    // k4's end, re-armed for it)
     if (!c.pending && !c.sw) v.push("no switch within 11 s of setting an 8 s interval");
     return [...v, ...armedCheck(c)];
   } };
@@ -879,18 +883,28 @@ C["plIntervalZero"] = { states: ["playlist"], async run(c) {
     const n = switchesTo(c).length; if (n > 2) v.push(`${n} switches requested in the cell (storm?)`);
     return v;
   } };
-// wait-for-video-end on + a 4 s interval: the interval's switch waits for A's end (armed align:end, not now)
-C["plWaitEnd"] = { states: ["playlist"], async run(c) {
-    await ui(`${plOpen} m.setCheck(m.plCheck("Wait for video to end"), true, "wait"); await m.sleep(300); m.setValue(${hms(2)}, 4, "s"); await m.sleep(300); m.setValue(${hms(1)}, 0, "m"); ${plClose}`);
+// "Switch when video ends" on (the timed playlist, 600 s): the one interval field is relabelled "Minimum play time"
+// (same value), "Maximum play time" appears below it, there's no wait toggle any more; a 4 s minimum on k1 (30 s) →
+// the switch is armed for k1's end (align:end), never made now
+C["plAdvanceRelabel"] = { states: ["playlist"], async run(c) {
+    await ui(`${plOpen} m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); await m.sleep(400);`);
+    c.ui = await js(`(() => { const lab = [...document.querySelectorAll(".pl-modal .field-label")].map((e) => e.textContent.trim());
+      const g = document.querySelectorAll(".pl-modal .hms"); const v = (i) => [...g[i]?.querySelectorAll("input") ?? []].map((x) => x.value);
+      return { lab, min: v(0), max: v(1), wait: [...document.querySelectorAll(".pl-modal label.ck")].some((l) => /wait for video/i.test(l.textContent)) }; })()`);
+    await ui(`m.setValue(${hms(2)}, 4, "s"); await m.sleep(300); m.setValue(${hms(1)}, 0, "m"); ${plClose}`);
     c.tChange = Date.now();
     c.armed = await waitFor(async () => armedTo(await ctl.call("state")).length > 0, 9000, 100);
   }, check(c) {
     const v = [];
     const s = c.after.ps?.settings;
-    if (!s?.waitForVideoEnd || s?.intervalSeconds !== 4) v.push(`playlist wait ${s?.waitForVideoEnd} interval ${s?.intervalSeconds}, expected true / 4`);
-    if (!c.armed) v.push("the interval passed but no switch was armed for A's end");
+    if (!s?.advanceOnVideoEnd || s?.intervalSeconds !== 4) v.push(`playlist advance ${s?.advanceOnVideoEnd} interval (minimum) ${s?.intervalSeconds}, expected true / 4`);
+    if (!c.ui?.lab?.includes("MINIMUM PLAY TIME") || c.ui?.lab?.includes("SWITCH EVERY")) v.push(`modal labels ${JSON.stringify(c.ui?.lab)}: expected "MINIMUM PLAY TIME" in place of "SWITCH EVERY"`);
+    if (JSON.stringify(c.ui?.min) !== '["0","10","0"]') v.push(`the minimum shows ${JSON.stringify(c.ui?.min)} — expected the same field's 600 s (0 h 10 m 0 s)`);
+    if (!c.ui?.lab?.includes("MAXIMUM PLAY TIME") || (c.ui?.max ?? []).length !== 3) v.push(`no "MAXIMUM PLAY TIME" h/m/s field under the minimum (${JSON.stringify(c.ui)})`);
+    if (c.ui?.wait) v.push("the removed \"Wait for video to end\" toggle is still in the modal");
+    if (!c.armed) v.push("a 4 s minimum on a 30 s clip: no switch armed for its end");
     const now = c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end");
-    if (now.length) v.push(`with wait-for-video-end the interval switched at once (to ${now.map((e) => TITLE(e.path))})`);
+    if (now.length) v.push(`advance-on-end + a 4 s minimum switched at once (to ${now.map((e) => TITLE(e.path))})`);
     return v;
   } };
 // order → Shuffle: no switch now; the session keeps what plays; an armed switch still goes to a playlist item
@@ -1167,7 +1181,7 @@ C["gAdvanceOff"] = { states: ["pending", "pendingGlobal"], rearms: true, async r
 // --- the global interval (Settings → Rotation) → 8 s: a timed playlist that follows the globals switches within it;
 // one with its own interval (playlist: 600 s) doesn't
 C["gInterval8s"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
-    await ui(`m.tab("Settings"); await m.sleep(600); const iv = m.row("Interval").querySelectorAll(".hms input");
+    await ui(`m.tab("Settings"); await m.sleep(600); const iv = m.row("Switch every").querySelectorAll(".hms input");
       m.setValue(iv[2], 8, "s"); await m.sleep(300); m.setValue(iv[1], 0, "m");`);
     c.tChange = Date.now();
     c.sw = await waitFor(async () => events.some((e) => e._t >= c.tChange && e.event === "transition.scheduled"), 11000, 100);
@@ -1396,34 +1410,47 @@ function expectShownN(c, want, maxNow) {
   return v;
 }
 const settingsTab = (drive) => `m.tab("Settings"); await m.sleep(600); ${drive}`;
-const gIntervalTo = (secs) => `const iv = m.row("Interval").querySelectorAll(".hms input"); m.setValue(iv[2], ${secs}, "s"); await m.sleep(300); m.setValue(iv[1], 0, "m");`;
+const gIntervalTo = (secs, row = "Switch every") => `const iv = m.row(${JSON.stringify(row)}).querySelectorAll(".hms input"); m.setValue(iv[2], ${secs}, "s"); await m.sleep(300); m.setValue(iv[1], 0, "m");`;
 
-// --- Settings → Rotation (global): wait-for-end / advance-on-end. A timed playlist that follows the globals
-// (playlistGlobal: 600 s) takes them live; one with its own rotation (playlist: 600 s, no wait, no advance) never does
-// wait-for-video-end on + a 4 s interval: the interval's switch is armed for A's end (align:end), never made now
-C["gWaitEnd"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Wait for video to end after interval"), true, "wait"); await m.sleep(300); ${gIntervalTo(4)}`));
+// --- Settings → Rotation (global): advance-on-end and its minimum / maximum. A timed playlist that follows the globals
+// (playlistGlobal: 600 s) takes them live; one with its own rotation (playlist: 600 s, no advance) never does
+// "Switch when video ends" on: the "Switch every" row becomes "Minimum play time" (same value) with "Maximum play time"
+// below it and no wait toggle; a 4 s minimum → the switch is armed for A's end (align:end), never made now
+const rowLabels = `[...document.querySelectorAll(".settings .srow .slabel-row")].map((r) => r.firstChild?.textContent?.trim())`;
+C["gAdvanceRelabel"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
+    await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance"); await m.sleep(400);`));
+    c.ui = await js(`(() => { const rows = ${rowLabels}; const v = (l) => [...(document.querySelector(".settings") && [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === l)?.querySelectorAll(".hms input") || [])].map((x) => x.value);
+      return { rows: rows.filter((r) => /switch|play time|wait|interval/i.test(r || "")), min: v("Minimum play time"), max: v("Maximum play time") }; })()`);
+    await ui(`${gIntervalTo(4, "Minimum play time")}`);
     c.armed = await waitFor(async () => armedTo(await ctl.call("state")).length > 0, 9000, 100);
     c.armedSt = await ctl.call("state");
   }, check(c) {
     const v = [];
-    if (c.after.s.globalWaitForVideoEnd !== true || c.after.s.globalIntervalSeconds !== 4) v.push(`globalWaitForVideoEnd ${c.after.s.globalWaitForVideoEnd} / globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected true / 4`);
+    if (c.after.s.globalAdvanceOnVideoEnd !== true || c.after.s.globalIntervalSeconds !== 4) v.push(`globalAdvanceOnVideoEnd ${c.after.s.globalAdvanceOnVideoEnd} / globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected true / 4`);
+    if ("globalWaitForVideoEnd" in c.after.s) v.push("GET /settings still has globalWaitForVideoEnd");
+    const want = ["Switch when video ends", "Minimum play time", "Maximum play time"];
+    if (JSON.stringify(c.ui?.rows) !== JSON.stringify(want)) v.push(`rotation rows ${JSON.stringify(c.ui?.rows)}, expected ${JSON.stringify(want)}`);
+    if (JSON.stringify(c.ui?.min) !== '["0","10","0"]') v.push(`the minimum shows ${JSON.stringify(c.ui?.min)} — expected the "Switch every" field's 600 s (0 h 10 m 0 s)`);
     const now = c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end");
-    if (now.length) v.push(`with wait-for-video-end the interval switched at once (to ${now.map((e) => TITLE(e.path))})`);
+    if (now.length) v.push(`advance-on-end + a 4 s minimum switched at once (to ${now.map((e) => TITLE(e.path))})`);
     if (c.state === "playlistGlobal") {
-      const a = armedTo(c.armedSt), want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
-      if (!c.armed) v.push("following the globals: the 4 s interval passed but no switch was armed for A's end");
-      else if (a.length !== 1 || a[0] !== want) v.push(`armed ${JSON.stringify(a.map(TITLE))} after the interval, expected one to ${TITLE(want)}`);
-    } else if (c.armed) v.push(`a global wait-for-end + interval change armed ${JSON.stringify(armedTo(c.armedSt).map(TITLE))} on a playlist with its own rotation (600 s, no wait)`);
+      const a = armedTo(c.armedSt), want2 = succ(c.before.ps?.videoPaths, c.before.cur?.path);
+      if (!c.armed) v.push("following the globals: a 4 s minimum on a 30 s clip, but no switch armed for its end");
+      else if (a.length !== 1 || a[0] !== want2) v.push(`armed ${JSON.stringify(a.map(TITLE))}, expected one to ${TITLE(want2)}`);
+    } else if (c.armed) v.push(`a global advance-on-end + minimum change armed ${JSON.stringify(armedTo(c.armedSt).map(TITLE))} on a playlist with its own rotation (600 s, no advance)`);
     return [...v, ...keptShown(c)];
   } };
-// advance-on-end on: following the globals → one aligned switch armed to the strip's next; its own rotation → nothing
+// advance-on-end on: following the globals → the old 600 s interval is now the minimum (k1, 30 s, loops: nothing
+// requested yet), then the minimum → 0 → one aligned switch armed to the strip's next; its own rotation → nothing
 C["gAdvanceOn"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance");`)); await sleep(1200);
+    await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance");`)); await sleep(1500);
+    c.heldArmed = armedTo(await ctl.call("state"));
+    await ui(`m.setValue(m.row("Minimum play time").querySelectorAll(".hms input")[1], 0, "m");`); await sleep(1200);
   }, check(c) {
-    const v = c.after.s.globalAdvanceOnVideoEnd === true ? [] : ["globalAdvanceOnVideoEnd not saved on"];
+    const v = c.after.s.globalAdvanceOnVideoEnd === true && c.after.s.globalIntervalSeconds === 0 ? [] : [`globalAdvanceOnVideoEnd ${c.after.s.globalAdvanceOnVideoEnd} / minimum ${c.after.s.globalIntervalSeconds}, expected true / 0`];
     const a = armedTo(c.after.st), want = succ(c.after.ps?.videoPaths, c.after.cur?.path);
-    if (c.state === "playlistGlobal" && (a.length !== 1 || a[0] !== want)) v.push(`following the globals: armed ${JSON.stringify(a.map(TITLE))} after advance-on-end on, expected one to ${TITLE(want)}`);
+    if (c.heldArmed.length) v.push(`a 600 s minimum on a 30 s clip: a switch was requested already (${JSON.stringify(c.heldArmed.map(TITLE))}) — it must hold until the loop that reaches it`);
+    if (c.state === "playlistGlobal" && (a.length !== 1 || a[0] !== want)) v.push(`following the globals: armed ${JSON.stringify(a.map(TITLE))} after advance-on-end on + minimum 0, expected one to ${TITLE(want)}`);
     if (c.state === "playlist" && a.length) v.push(`a global advance-on-end change armed ${JSON.stringify(a.map(TITLE))} on a playlist with its own rotation`);
     return [...v, ...noSwitchNow(c), ...keptShown(c)];
   } };
@@ -1435,7 +1462,7 @@ C["plOverrideOff"] = { states: ["pending"], rearms: true, async run() {
     const v = c.after.ps?.settings?.overrideGlobalSettings === false ? [] : [`overrideGlobalSettings ${c.after.ps?.settings?.overrideGlobalSettings}, expected false`];
     return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c, null)];
   } };
-// following the globals (advance-on-end on, armed) → override on (its own rotation: timed 600 s, advance off):
+// following the globals (advance-on-end on, armed) → override on (its own rotation: a 0 s timer, advance off):
 // disarmed → its own "Switch when video ends" on: armed again to the strip's next, with ITS transition (fade, PS()'s duration)
 C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, async run(c) {
     await ui(`${plOpen} m.setCheck(m.plCheck("Override global rotation settings"), true, "override"); await m.sleep(1200);`);
@@ -2204,13 +2231,18 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
   } };
 
 // --- advance-on-end play-time limits (wall-clock seconds, 0 = off), live on the `pending` rotation: k4 (10 s) plays
-// with its switch to k1 armed for its end. A limit field commits on blur (the owner's number-input rule), so the drive
-// fires focusout after typing. `where`: the playlist modal (its own rotation) or the Settings page (the globals).
-const limitDrive = (where, which, secs) => where === "playlist"
-  ? `${plOpen} const el = document.querySelector('.pl-modal input[aria-label="${which} play time (s)"]'); m.setValue(el, ${secs}, "${which}");
-     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); ${plClose}`
-  : settingsTab(`const el = m.input("${which === "minimum" ? "Minimum" : "Maximum"} play time"); m.setValue(el, ${secs}, "${which}");
-     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await m.sleep(300);`);
+// with its switch to k1 armed for its end. The minimum IS the rotation's interval field (relabelled under "Switch when
+// video ends"), the maximum the field below it — both h/m/s groups (PlayTimeInput over NumInput); the drive sets the
+// seconds field (a value set without focus commits at once) and fires focusout anyway.
+// `where`: the playlist modal (its own rotation) or the Settings page (the globals).
+const limitDrive = (where, which, secs) => {
+  const label = which === "minimum" ? "Minimum play time" : "Maximum play time";
+  return where === "playlist"
+    ? `${plOpen} const el = document.querySelector('.pl-modal input[aria-label="${label} seconds"]'); m.setValue(el, ${secs}, "${which}");
+       el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); ${plClose}`
+    : settingsTab(`const el = m.row("${label}")?.querySelector('input[aria-label="${label} seconds"]'); m.setValue(el, ${secs}, "${which}");
+       el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await m.sleep(300);`);
+};
 // k4's position now → when (wall ms) its current loop ends; skips the cell when too little of it is left to act in
 async function k4LoopEnd(c, needMs) {
   const pos = Number(await pget("cur:*.time_pos")), t = Date.now();
@@ -2231,7 +2263,7 @@ for (const where of ["playlist", "global"]) C[`${where}:minPlay`] = { states: [w
     await waitFor(async () => (await http("GET", "/current")).json?.path === K[0] && (c.tSwitched = Date.now()), 26000, 100);
     await waitSettled(8000);
   }, check(c) {
-    const v = limitSaved(c, where, "minPlaySeconds", 15);
+    const v = limitSaved(c, where, "intervalSeconds", 15);
     if (c.tChange > c.k4.end - 800) v.push(`precondition: the limit landed ${c.tChange - c.k4.end} ms after k4's loop end`);
     const sw = c.evs.filter((e) => e.event === "transition.scheduled" && e.path === K[0]);
     if (!c.tSwitched) v.push("k4 never advanced to k1 within 26 s of a 15 s minimum");
@@ -2257,7 +2289,7 @@ for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [w
   } };
 // a global maximum on a playlist with its OWN rotation (no limits): nothing switches now
 C["global:maxPlay:own"] = { states: ["pending"],
-  // (the global limits' rows are enabled with the global advance-on-end; the playlist's own rotation doesn't read it)
+  // (the global maximum's row shows with the global advance-on-end; the playlist's own rotation doesn't read it)
   async pre() { const s = await getSettings(); await post("/settings", { ...s, globalAdvanceOnVideoEnd: true }); },
   async run(c) {
     c.k4 = await k4LoopEnd(c, 4500); if (!c.k4) return;
@@ -2673,7 +2705,7 @@ const FUZZ_RULES = [
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
   [/^plShuffle$/, { last: "a shuffled order makes every later 'the strip's next' expectation (armedCheck, *+next) unknowable" }],
-  [/^(plInterval|plIntervalZero|plWaitEnd|gInterval8s|gWaitEnd|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],
+  [/^(plInterval|plIntervalZero|plAdvanceRelabel|gInterval8s|gAdvanceRelabel|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],
   [/-keep$/, { last: "KeepPauseOnSwitch stays on — every later switch from a pause expects it to resume" }],
   [/^cli:volume-(up|down):global$/, { last: "VolumeKeyTarget stays global — the later volume keys expect auto", when: (x) => offGlobal(30)(x) }], // its pre: own 30
   [/^cli:volume-(up|down):item$/, { last: "VolumeKeyTarget stays item — the later volume keys expect auto",

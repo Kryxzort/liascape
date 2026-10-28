@@ -9,12 +9,13 @@ public class PlaylistSettings
 {
     public PlaylistOrder Order { get; set; } = PlaylistOrder.Sequential;
     public bool OverrideGlobalSettings { get; set; } = false;
-    public int IntervalSeconds { get; set; } = 1800;
+    // The rotation (gated by OverrideGlobalSettings; PlayerHelper § Rotation): AdvanceOnVideoEnd ("Switch when video
+    // ends") off → IntervalSeconds is a plain timer ("Switch every"); on → IntervalSeconds is the minimum play time and
+    // MaxPlaySeconds the maximum (wall-clock seconds, 0 = off). The defaults = the old default rotation (switch at
+    // each video end, 30 min at most).
+    public int IntervalSeconds { get; set; } = 0;
     public bool AdvanceOnVideoEnd { get; set; } = true;
-    public bool WaitForVideoEnd { get; set; } = false;
-    // advance-on-end play-time limits (wall-clock seconds, 0 = off) — gated by OverrideGlobalSettings like the rest
-    private int _minPlaySeconds, _maxPlaySeconds;
-    public int MinPlaySeconds { get => _minPlaySeconds; set => _minPlaySeconds = AppSettings.PlayLimit(value); }
+    private int _maxPlaySeconds = 1800;
     public int MaxPlaySeconds { get => _maxPlaySeconds; set => _maxPlaySeconds = AppSettings.PlayLimit(value); }
 
     // Transitions (gated by OverrideGlobalSettings, like the rotation fields above; else the

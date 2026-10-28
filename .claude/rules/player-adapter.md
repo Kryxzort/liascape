@@ -196,7 +196,7 @@ code below it is unchanged)
 | `SwitchToFile` | `LpPlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null, alignEnd:false)` → `Switch` = `transition {outputs:"out:*", to:{path, props}, effect_id/params/duration_ms/method from TransitionService.Pick or effect_id:null (cut), align:"now"}` — a scene folder too (`kind: scene`, § Scenes); a scene when `!ScenesPlayable` → `KillCurrentProcess` (AllowScenes=false parity; the pickers never hand one over) |
 | (duration) | `TransitionService.PickDuration` clamps 0–10000 ms (the floor was 50; owner QOL 2026-10-28); a picked **0 = a cut** — `Pick` returns null, so the request carries `effect_id: null` (the player's 30 ms anticlick swap), never a 0 ms effect; 1–49 ms go as that `duration_ms` (gains still ≥ 30 ms, R42). Self-test `TransitionDurationAssertions`; matrix `plTrShort` / `plTrZero` |
 | `Launch` | a queued cut (`tcfg:null`) — whatever was on screen was just stopped |
-| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append; since Phase 2 any switch incl. a scene side — a scene A never ends, so with A a scene (wait-for-video-end after the interval) it is `align:"now"`, legacy's "prevIsScene → switch now"; the failure fallback switches to the item AFTER a B that is skipped by then, e.g. a scene that broke before its handoff) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
+| `DoVideoEndWait` (both V→V branches: transitions on AND the transitions-off gapless append; since Phase 2 any switch incl. a scene side — a scene A never ends, so with A a scene (a restore re-arming onto one; the tick moves scenes on itself) it is `align:"now"`, legacy's "prevIsScene → switch now"; the failure fallback switches to the item AFTER a B that is skipped by then, e.g. a scene that broke before its handoff) | `WaitLastHandoff` (the previous switch's `transition.handoff` — a new request would SUPERSEDE a pre-Running one), then `SwitchAndWait(next, …, tcfg: on ? cfg : null, alignEnd:true, ct)`; then the existing `lock { …; PostSwitch(next) }`. Not handed off (failed / unreachable / cancelled by someone else / timed out) → **a growing back-off** (I4: 1 s, 2 s, 4 s … ≤ 30 s while consecutive switches keep failing, `LpPlayerMedia.NextFailureBackoff`; a handoff resets it), then `SwitchToFile(next)` now — a player refusing for any reason can never spin the playlist. The aligned wait itself is **bounded** (M2: A's remaining time + `AlignBackstopSlackSec` 15 s, behind the player's own 10 s `align_fallback`; on timeout the corr is cancelled) — **re-derived each time it runs out** (`AlignedWaitCheck`, speed storm): while the player has **no output** (`state.outputs` empty — monitors off: it holds the aligned switch until an output shows it, player-core.md § Runtime, I4) or is **paused** (its clock and the switch stand still) it keeps waiting; otherwise it waits A's remaining time at its *current* speed + slack again as long as A's `time_pos` moved since the last check (first baseline: A's position when armed), and only gives up when A stopped moving (a stall). Before, the bound read at arming was final: a slow-down after arming (4× → 0.5×) or a pause longer than remaining + 15 s cancelled the switch and cut A long before its end — switching *while paused*. `LP_TEST_ALIGN_BACKSTOP_SLACK_SEC` shortens the slack for the IT only. `ct` cancel → `cancel {corr}`. **B becomes the session's current item when its effect STARTS** (`transition.started` → `SwitchAndWait`'s `onStarted` → `Commit` under `_lock`: `_waitingForVideoEnd` off, `wallpaper-changed`, `PostSwitch` — the next pre-fetch + its waiter, which first waits for this one's handoff), not at its handoff: from Running the player shows B (`cur:*` = B) and a new request commits it (→ `handoff {committed}`), a cancel would snap back to A. Counted at the handoff, a next in that window (the effect's duration) cancelled the running switch and switched now to the same pre-fetched B — the user's next did nothing (IT "/next mid-wait" flaked ~1 in 6 /next, `cur a.mp4 → a.mp4`); a prev went to the item before A. Legacy commits at its overlay's start the same way. Whichever comes first commits (a `committed` flag under `_lock` + `_waitCts.Token == ct`): the started callback, or the handoff when the event was missed; a committed switch's own wait is never cancelled again (a next cancels only the following, not-yet-requested one) and a non-handoff end after it is only logged. Guard: IT "/next during the aligned switch's EFFECT". The `_lastSwitchTarget` settle gate and the playtime polling are legacy-only |
 | `RearmAlignedSwitch` (from `/playlist/state` when the playlist's transitions change, `/settings` when the global ones or `TransitionMethod` do) | the armed aligned switch was **requested at arm time** with the effect + duration of then (the player times it for A's end — legacy picks its effect when the overlay starts, near A's end), so a transition change while one is armed (advance-on-end: for the whole clip) ran the OLD effect at A's end: cancel the wait and re-arm it to the same `next` (`CancelVideoEndWait` + `ArmVideoEndWait`) → a fresh request with the new config. No-op under legacy / with nothing armed. Guard: matrix `pending × plTrOff/plTrDuration/plTrEffect` |
 | `SendCommand` / `TrySendCommand` | `LpPlayerMedia.Mpv(args)`, queued: property sets → `MpvPropertyMap` → a volume/speed literal (`/volume {value}`) = a resolver pass with it as the PLAYING item's transient value (every other source keeps its own), `mute` (SetMute / SetUserMute) = a forced resolver pass of `gain.mute` from `PlayerHelper.IsMuted`, the rest → `Set` (layer props → `lay:*:main`, `pause` → `player.paused`, else `srcs:*`); `cycle pause` → `TogglePause` (so PlayerHelper's `TogglePause` needs no change of its own; § Pause); `loadfile`/`playlist-*`/`loop-file`/`loop-playlist` are mpv-playlist plumbing → acknowledged and dropped (the timed machinery owns rotation, the recipe owns A's loop) |
 | `TryQueryCurrentPath` / `TryQueryTimePos` / `TryQueryProperty` / `TryQueryTimeRemaining` | `get cur:*.path` / `.time_pos` / mpv-name map / `(duration − time_pos)/speed` (ambiguous across outputs → the first output's `cur:`) |
@@ -243,24 +243,41 @@ PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/
 full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
 unmutes when it ends.
 
-## Play-time limits (advance-on-end minimum / maximum, 2026-10-28)
-Owner: "maximum minimum when end on wallpaper". Two settings per rotation, **wall-clock seconds, 0 = off** (both off
-by default): `AppSettings.GlobalMinPlaySeconds` / `GlobalMaxPlaySeconds` and `PlaylistSettings.MinPlaySeconds` /
-`MaxPlaySeconds` (gated by `OverrideGlobalSettings` like the other rotation fields — `PlayerHelper.EffectivePlayLimits`),
-clamped 0…359999 in the setters. **They only act under advance-on-end** ("Switch when video ends"); the UI greys them
-otherwise (pure timed and wait-for-video-end-only rotations ignore them).
-- **Minimum** — a clip shorter than it loops on and advances at the end of the loop that reaches it (never mid-loop):
-  `DoVideoEndWait` (lp-player) runs `HoldForMinPlay` before it requests the aligned switch — every ≤ 1 s and right
-  after each loop's wrap it reads A's remaining time (`LpPlayerMedia.TimeRemaining`, wall clock at A's speed) and
-  requests only once `played + remaining + 150 ms ≥ min` (`MinPlayReached`). The player's `align:end` makes A's
-  CURRENT loop its last (player-core.md § Align), so a request ~0.1 s into the crossing loop ends exactly there,
-  with B given that whole loop to get ready. A must loop meanwhile: with `Loop` off the hold turns A's loop on
-  (`SetLoop(true)`; align:end turns it off again). A clip already ≥ the minimum is never held (= today). A still
-  image (it never ends — `align:end` on a still is `Now`) shows for the minimum (today: it flashed by). A scene A is
-  never held. Legacy: not implemented (its video-end polling path is unchanged).
-- **Maximum** — once the playing item played that long the rotation advances **now** with its transition, like a
-  timed switch (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken —
-  `AdvanceAndLaunch`): the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. Shared by both engines.
+## Rotation (advance-on-end minimum / maximum; redesigned 2026-10-28)
+Owner-approved model (the play-time limits added the same day were folded into it). Per rotation (the globals, or a
+playlist's own when `OverrideGlobalSettings` — `PlayerHelper.EffectiveRotation`):
+- **"Switch when video ends" OFF** (`AdvanceOnVideoEnd` false): `IntervalSeconds` is **"Switch every"** — a plain timer
+  (the tick's countdown, speed-scaled as before, switches `align:now`, mid-video). Unchanged; the maximum doesn't apply.
+- **ON**: the SAME field is the **"Minimum play time"** (`IntervalSeconds`, relabelled in the UI — one value: toggling
+  shows it under the other label), and **"Maximum play time"** (`MaxPlaySeconds`, clamped 0…359999 in the setters) sits
+  below it. Both **wall-clock seconds, 0 = off** (`PlayerHelper.PlayLimits`; `MinPlayMs` = the interval while advance is on).
+  The tick has **no countdown** under advance-on-end.
+  - **Video**: plays at least the minimum, then switches at its next end (align:end). A clip shorter than the minimum
+    loops on and advances at the end of the loop that reaches it, never mid-loop: `DoVideoEndWait` (lp-player) runs
+    `HoldForMinPlay` before it requests the aligned switch — every ≤ 1 s and right after each loop's wrap it reads A's
+    remaining time (`LpPlayerMedia.TimeRemaining`, wall clock at A's speed) and requests only once
+    `played + remaining + 150 ms ≥ min` (`MinPlayReached`). The player's `align:end` makes A's CURRENT loop its last
+    (player-core.md § Align), so a request ~0.1 s into the crossing loop ends exactly there, with B given that whole
+    loop to get ready. A must loop meanwhile: with `Loop` off the hold turns A's loop on (`SetLoop(true)`; align:end
+    turns it off again). While held, the player has **no** armed switch (nothing is requested until that loop) — a
+    clip already ≥ the minimum is never held. Minimum 0 = switch at every end.
+  - **Still image** (it never ends — `align:end` on a still is `Now`): shows for the minimum (0 → it flashes by).
+  - **Scene** (never ends): **the minimum reached IS its end** — the tick's `SceneMinReached` advances it then
+    (align:now, its transition), the same moment a still image moves on. No minimum → the maximum moves it; neither →
+    it plays until a user switch (the Settings hint says so). Judgement call: "minimum then the next end" with no end
+    to wait for = the minimum; holding a scene to the maximum instead would make the minimum meaningless for scenes.
+    `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone.
+  - **Maximum**: once the playing item played that long the rotation advances **now** with its transition, even
+    mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
+    the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
+    max fires; documented, not enforced).
+- **Removed**: "Wait for video to end after interval" (`GlobalWaitForVideoEnd` / `PlaylistWaitForVideoEnd` /
+  `PlaylistSettings.WaitForVideoEnd` / `LastSession.WaitForVideoEnd` / `TimedState.WaitForVideoEnd`, `_waitForVideoEnd`
+  and its tick branches) and the separate `GlobalMinPlaySeconds` / `PlaylistSettings.MinPlaySeconds` (merged into the
+  interval field). An old settings.json / playlist / session file's keys load as unknown ones — **no in-app
+  migration** (owner: nobody else uses the app); a one-off jq script converted the owner's files (old table: adv+wait
+  → min = interval; adv, no wait → min = old min, max = the old interval cap ∧ old max; timer + wait → advance-on-end
+  with min = interval; timer → unchanged). Dead `SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` removed.
 - **Play time** (`_itemPlayedMs`): counted by the tick in wall clock (never scaled by speed — a 2× clip with max 60 s
   plays 60 real seconds) and **not while paused** (the paused tick returns before it); reset by `PostSwitch` (every
   switch — under lp-player an aligned switch's B from its effect's start), `ApplyTimedPlaylist`, `RestoreTimedPlaylist`
@@ -268,27 +285,24 @@ otherwise (pure timed and wait-for-video-end-only rotations ignore them).
   (`ItemPlayedMs` + `PlayedSavedAtMs`); `LoadTimedState` adds the time since that save unless paused
   (`PlayedAfterLoad`) — the player outlives the backend and played on while no process counted (a backend restart,
   the `--timer-daemon` hand-over, which is SIGKILLed without saving).
-- **Scenes** never end. Under advance-on-end a scene plays until the **maximum** if set; else, as before, until the
-  interval (`GlobalIntervalSeconds` > 0: the tick's countdown — with wait-for-video-end then an `align:now` switch,
-  A being a scene) or, with interval 0, until a user switch. Both set → whichever first. The minimum doesn't hold a
-  scene.
-- **The interval keeps its own meaning** next to them: in a combined rotation (advance-on-end + interval > 0 +
-  wait off) it is a video-time cap (the old fallback) — the earliest of interval / maximum / the clip's (min-held)
-  end wins. A cap beats the minimum (max < min → the max fires; documented, not enforced).
-- **1-item playlist**: neither ever switches it to itself (`CanRotate`; no aligned switch is armed).
-- **User switches** (next / prev / random / restore / play-from): the new item's play time starts at 0 — limits apply
-  to it from there.
-- **Live**: `/settings` (the globals changed → the effective pair → `ApplyPlayLimitsLive`, before the rotation's own
-  live-apply) and `/playlist/state` (`AppOps.SavePlaylistState`: the effective pair diffed prev → now, so a reorder /
-  unrelated save does nothing). A new maximum is read by the next tick (already played past it → advances now); a
-  changed minimum re-arms an aligned switch already armed (`CancelVideoEndWait` + `ArmVideoEndWait`, same B — it was
-  requested for the end of A's current loop). A session (re)start / restore / resume reads them from the config
-  (`RefreshPlayLimits`: the current playlist state + settings, like `TransitionService.CurrentConfig`) — never from
-  `LastSession`.
-- Tests: self-test `PlayLimitAssertions` (effective/override, clamps, `MinPlayReached`, `MaxPlayReached`,
-  `PlayedAfterLoad`); IT § "advance-on-end play-time limits" + the scene and backend-restart checks;
-  `test-settings-merge.sh` (partial / clamped bodies, a live max); matrix `playlist:minPlay|maxPlay`,
-  `global:minPlay|maxPlay` (pendingGlobal), `global:maxPlay:own`.
+- **1-item playlist**: never switches itself (`CanRotate`; no aligned switch is armed, neither limit fires).
+- **User switches** (next / prev / random / restore / play-from): the new item's play time starts at 0.
+- **Live**: `/settings` (the global max changed → `ApplyMaxPlayLive`, before the rotation's own live-apply; interval /
+  advance → `ApplyRotationLive` when the playlist follows the globals) and `/playlist/state` (`AppOps.SavePlaylistState`:
+  the effective rotation diffed prev → now, so a reorder / unrelated save does nothing). A new maximum is read by the
+  next tick (already played past it → advances now); a new minimum (`UpdateTimedSettings`, advance unchanged) re-arms
+  an aligned switch already armed or held (`CancelVideoEndWait` + `ArmVideoEndWait`, same B). A session (re)start /
+  restore / resume reads the maximum from the config (`RefreshMaxPlay`: the current playlist state + settings) — the
+  minimum is the session's own interval (`ApplyTimedPlaylist`'s, `LastSession.TimedIntervalSeconds`, `timed_state`).
+- Tests: self-test `PlayLimitAssertions` (`EffectiveRotation` override/follows, `PlayLimits`, the defaults = the old
+  default rotation, the removed properties gone + an old-model JSON loads, the max clamp, `SceneMinReached`,
+  `MinPlayReached`, `MaxPlayReached`, `PlayedAfterLoad`); IT § "advance-on-end play-time limits" (min = the interval:
+  a 2 s clip loops to its 3rd loop end, set live while armed, a playlist's own, an image, pure timed ignores max + an
+  old wait key, max mid-video / live / × pause / × speed / 1-item / override) + the scene (min 3 s moves it, none
+  doesn't) and backend-restart (max and min across it) checks; `test-settings-merge.sh` (an old-model file loads, the
+  removed keys gone from GET and the next save, partial / clamped max bodies, a live max); matrix `playlist:minPlay|
+  maxPlay`, `global:minPlay|maxPlay` (pendingGlobal), `global:maxPlay:own`, `plAdvanceRelabel`, `gAdvanceRelabel`,
+  `gAdvanceOn` (the 600 s interval becomes a minimum that holds, then 0 arms).
 
 ## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
 A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:
@@ -340,9 +354,8 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the item modal's "Scene
   crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
   (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
-  flight) the rotation **advances at once**: `_timedRemainingMs = 0` + the tick fired now (its owner/pause/
-  mode rules apply; a wait-for-video-end session arms a switch that, A being a scene, goes `align:"now"`), or
-  `AdvanceAndLaunch` without an interval. A single wallpaper keeps what the player shows (its last frame /
+  flight) the rotation **advances at once**: a timer rotation (advance-on-end off) → `_timedRemainingMs = 0` + the
+  tick fired now (its owner/pause/mode rules apply), an advance-on-end one (no countdown) → `AdvanceAndLaunch`. A single wallpaper keeps what the player shows (its last frame /
   the preview, silent). A scene that breaks as a pending B is that switch's `transition.failed`; the
   DoVideoEndWait fallback then skips it (row above). From then on `IsSkippedPath` skips it — unless
   whitelisted (`/library/whitelist`) — and `Apply` refuses it. A missing / half-downloaded folder is a load
