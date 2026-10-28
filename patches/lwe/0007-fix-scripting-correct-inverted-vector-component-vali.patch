@@ -1,0 +1,44 @@
+From a3ab652c7c82d10d56e9e8e96c6ae0a55d521bbe Mon Sep 17 00:00:00 2001
+From: David Mireles <davidmirelesll@outlook.com>
+Date: Tue, 27 Oct 2026 19:57:46 -0600
+Subject: [PATCH 07/17] fix(scripting): correct inverted vector component
+ validation in jsToDynamicValue (#618)
+
+ScriptEngine::jsToDynamicValue guards the JS->glm::vec conversion with:
+
+    if (!JS_IsNumber (x) || JS_IsNumber (y)) {
+        sLog.exception ("Vector's x and y components must be numbers");
+    }
+
+The second clause is missing a '!': a valid numeric y triggers the
+exception (since sLog.exception is [[noreturn]] and throws runtime_error).
+That breaks every JS->vec2/vec3/vec4 conversion from a scene script as
+soon as the script passes a real vector literal.
+
+Caught while auditing the scripting refactor in #599. Restore the
+intended predicate so both x and y must be non-numeric to throw.
+
+(cherry picked from commit 58a7f14ac18f3cdb67168702c5706b1dbe25fae9)
+
+Origin: upstream-PR
+Upstream-PR: https://github.com/Almamu/linux-wallpaperengine/pull/618
+Adapted-by: livepaper
+Why: a scene script passing a real vector to the engine threw on every JS->vec conversion
+Status: upstream: merged on Almamu/linux-wallpaperengine main 2026-10-28, not (yet) on next-v2
+---
+ src/core/WallpaperEngine/Scripting/ScriptEngine.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 0af419c..6d9f4b7 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -152,7 +152,7 @@ static void jsToDynamicValue (JSContext* ctx, JSValue val, DynamicValue& source)
+ 	    JS_FreeValue (ctx, w);
+ 	});
+ 
+-	if (!JS_IsNumber (x) || JS_IsNumber (y)) {
++	if (!JS_IsNumber (x) || !JS_IsNumber (y)) {
+ 	    sLog.exception ("Vector's x and y components must be numbers");
+ 	}
+ 

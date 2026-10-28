@@ -1,0 +1,85 @@
+From 08865412f661d7d867023c93fabee35a6634bb32 Mon Sep 17 00:00:00 2001
+From: CoderNoveau <thomastpnguyen@gmail.com>
+Date: Wed, 28 Oct 2026 13:13:20 +1100
+Subject: [PATCH 10/17] fix: Wayland outputs were locked to half refresh (EGL
+ swap interval + libmpv blocking) (#677)
+
+* fix: set EGL swap interval to 0 on Wayland outputs
+
+WaylandOutputViewport paces rendering with its own wl_surface_frame
+callback (swapOutput requests one before every eglSwapBuffers). With the
+default swap interval of 1, eglSwapBuffers additionally blocks on the EGL
+surface's internal frame callback, so each frame waits for two vblanks.
+On a 60Hz output every surface was locked to exactly 30fps regardless of
+--fps or the number of outputs.
+
+Measured with WAYLAND_DEBUG=1 on Hyprland (NVIDIA EGL, 5 outputs @60Hz),
+wl_surface.commit intervals per surface:
+
+  before: 30.0 fps, stdev 0.1ms  (two wl_callback.done per frame:
+          one from the app's queue, one from the EGLSurface queue)
+  after:  60.1 fps, stdev ~2ms
+
+Rendering is still driven only by frame callbacks, so nothing runs
+unthrottled; the --fps sleep in the driver loop is unchanged.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+* fix: do not block in mpv_render_context_render for the frame target time
+
+GLPlayer::render is called from the output's frame callback, i.e. the
+host loop is already display-synced. libmpv's default
+MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=1 makes every render call sleep
+until the video frame's target time, which is only meant for hosts with
+no vsync of their own. With one player per output on a single thread,
+that wait serialises every output onto the video's frame grid: with the
+swap-interval fix in place, all outputs dropped to exactly the source
+rate (24.0 fps for a 24fps file, every interval >25ms) instead of
+presenting at the output's refresh.
+
+Passing 0 lets mpv return whichever frame is due now, giving a normal
+2:3 cadence for 24fps content on 60Hz outputs.
+
+Same measurement as the previous commit, 5 outputs @60Hz:
+
+  swap interval fix only:      24.0 fps, p99 42ms
+  swap interval + this commit: 60.1 fps, p99 19ms, no gaps >25ms
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+(cherry picked from commit 681acde5f1e30cfdc1a8e21d91a9e6c74f0775cc)
+
+[livepaper: only the GLPlayer half: next-v2 has no WaylandOutputViewport (its frontend, not built for the core, has its own Wayland output); the core's mpv player renders without waiting for the frame target time]
+
+Origin: upstream-PR
+Upstream-PR: https://github.com/Almamu/linux-wallpaperengine/pull/677
+Adapted-by: livepaper
+Why: a host-paced render loop must never sleep inside mpv_render_context_render (video wallpapers / video textures in the core)
+Status: upstream: merged on Almamu/linux-wallpaperengine main 2026-10-28, not (yet) on next-v2
+---
+ src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+index a59b63e..ec2ed48 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+@@ -170,9 +170,15 @@ void GLPlayer::render () const {
+ 
+     // no need to flip as it'll be handled by the wallpaper rendering code
+     int flip_y = 0;
++    // The host loop is paced by the compositor's frame callbacks (vsync). Do not
++    // let libmpv block until the frame's target time: with several outputs each
++    // owning a player on one thread, that serialises every screen onto the
++    // video's frame grid and judders 24fps content on 60Hz outputs.
++    int block_for_target_time = 0;
+ 
+     mpv_render_param params[] = { { MPV_RENDER_PARAM_OPENGL_FBO, &fbo },
+ 				  { MPV_RENDER_PARAM_FLIP_Y, &flip_y },
++				  { MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
+ 				  { MPV_RENDER_PARAM_INVALID, nullptr } };
+ 
+     mpv_render_context_render (this->m_renderContext, params);

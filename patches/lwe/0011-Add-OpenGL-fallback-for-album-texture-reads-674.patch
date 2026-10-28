@@ -1,0 +1,44 @@
+From 1213812ff2af2677d9ddae30bb360e336ee68995 Mon Sep 17 00:00:00 2001
+From: JMarsz-EA <111395624+JMarsz-EA@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 19:21:45 -0700
+Subject: [PATCH 11/17] Add OpenGL fallback for album texture reads (#674)
+
+(cherry picked from commit 84e3b26b1105ba90ad2b978a0f2626a4558568b8)
+
+[livepaper: next-v2 loads GL through glad, not GLEW: GLEW_VERSION_4_5 -> GLAD_GL_VERSION_4_5; the indentation of upstream's follow-up 14f5b9b4 "fix: formatting went wrong" folded in]
+
+Origin: upstream-PR
+Upstream-PR: https://github.com/Almamu/linux-wallpaperengine/pull/674
+Adapted-by: livepaper
+Why: glGetnTexImage is null on a GL < 4.5 context: album-art textures crashed there
+Status: upstream: merged on Almamu/linux-wallpaperengine main 2026-10-28, not (yet) on next-v2
+---
+ src/core/WallpaperEngine/Render/AlbumTexture.cpp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/AlbumTexture.cpp b/src/core/WallpaperEngine/Render/AlbumTexture.cpp
+index b2254bb..8165128 100644
+--- a/src/core/WallpaperEngine/Render/AlbumTexture.cpp
++++ b/src/core/WallpaperEngine/Render/AlbumTexture.cpp
+@@ -76,7 +76,13 @@ void AlbumTexture::copyContents (const TextureProvider& other) const noexcept {
+ 
+     // Read the source texture
+     glBindTexture (GL_TEXTURE_2D, other.getTextureID (0));
+-    glGetnTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, bufferSize, buffer);
++
++    // glGetnTexImage is core only since GL 4.5; glad leaves it null on an older context
++    if (GLAD_GL_VERSION_4_5) {
++	glGetnTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, bufferSize, buffer);
++    } else {
++	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
++    }
+ 
+     // Upload into another texture
+     glBindTexture (GL_TEXTURE_2D, this->m_textureID);
+@@ -134,4 +140,4 @@ void AlbumTexture::load () const {
+ bool AlbumTexture::isReady () const {
+     // these are only ready to be rendered if their content's are present
+     return this->m_width > 0 && this->m_height > 0;
+-}
+\ No newline at end of file
++}

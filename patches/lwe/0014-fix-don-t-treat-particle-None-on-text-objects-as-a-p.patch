@@ -1,0 +1,72 @@
+From 4bccb0c9becd94e5e217d1f6db9de7574e235ba0 Mon Sep 17 00:00:00 2001
+From: Greg Gage <webmaster@zedle.com>
+Date: Tue, 27 Oct 2026 22:57:11 -0400
+Subject: [PATCH 14/17] fix: don't treat "particle": "None" on text objects as
+ a particle system (#692)
+
+Some scenes' text objects carry "particle": "None" (Workshop 1315534440,
+"[4K] RetroLake", has four clock text objects like that). ObjectParser::parse
+dispatched any object with a "particle" key to parseParticle, which tried to
+load a particle file called "None", got no material, and CParticle's
+constructor then dereferenced the null material and segfaulted while the
+scene loaded.
+
+Only an inline definition or a non-empty path other than "None" now counts
+as a particle system, so those objects reach parseText. CScene also skips a
+particle system whose material failed to load instead of crashing on it.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+(cherry picked from commit eff5d740e69a019c6451ba2fd17e8f29eb5a810a)
+
+Origin: upstream-PR
+Upstream-PR: https://github.com/Almamu/linux-wallpaperengine/pull/692
+Adapted-by: livepaper
+Why: text objects with "particle": null/"None" were built as particle systems with no material: SIGSEGV in CParticle::CParticle (scene corpus: 1884904087, 2047150134)
+Status: upstream: merged on Almamu/linux-wallpaperengine main 2026-10-28, not (yet) on next-v2
+---
+ src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp | 8 +++++++-
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp  | 5 +++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index dfa03ad..47c2158 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -25,6 +25,12 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+     const auto lightIt = it.find ("light");
+     // use shape to refer to VolumeLight
+     const auto shapeIt = it.find ("shape");
++    // Only an inline definition or a file path is a particle system; other objects (text
++    // objects, for example) can carry a placeholder like "particle": "None".
++    const bool hasParticle = particleIt != it.end ()
++	&& (particleIt->is_object ()
++	    || (particleIt->is_string () && !particleIt->get<std::string> ().empty ()
++		&& particleIt->get<std::string> () != "None"));
+ 
+     // Parse base object data
+     // Some particle objects have numeric 'name' fields, so handle type mismatches gracefully
+@@ -69,7 +75,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	return parseImage (it, project, std::move (basedata), *imageIt);
+     } else if (soundIt != it.end () && soundIt->is_array ()) {
+ 	return parseSound (it, std::move (basedata));
+-    } else if (particleIt != it.end ()) {
++    } else if (hasParticle) {
+ 	return parseParticle (it, project, std::move (basedata));
+     } else if (textIt != it.end ()) {
+ 	return parseText (it, project, std::move (basedata));
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 0b5dd07..efe45c4 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -239,6 +239,11 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	    return nullptr;
+ 	}
+ 
++	if (particleData.material == nullptr || particleData.material->material == nullptr) {
++	    sLog.error ("Ignoring particle system without a material: ", particleData.name);
++	    return nullptr;
++	}
++
+ 	renderObject = new Objects::CParticle (*this, particleData);
+     } else {
+ 	sLog.error ("Unknown object type, creating placeholder, empty object: ", object.id);

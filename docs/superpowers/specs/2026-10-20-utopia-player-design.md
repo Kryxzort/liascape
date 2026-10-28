@@ -317,7 +317,8 @@ src/player-workers/web/     web worker (our code around LWE webhelper/CEF)
 third_party/lwe/            linux-wallpaperengine, vendored verbatim at a pinned upstream commit
 patches/lwe/NNNN-*.patch    our changes to LWE, one topic per patch, each with a header:
                               Origin: ours | upstream-PR #NNN (author) | upstream-issue #NNN
-                              Why: … · Status: candidate-for-upstream | local-only
+                              Why: … · Status: candidate-for-upstream | local-only | upstream: <where merged>
+                              (the last: an upstream fix picked from a branch our base lacks, e.g. main → next-v2)
 UPSTREAM.md                 per vendored repo: URL, pinned commit, patch list, how to rebase, last sync date
 ```
 

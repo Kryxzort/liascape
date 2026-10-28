@@ -1,11 +1,13 @@
-// Tests of livepaper's patches to LWE's public API (patches/lwe/0003-0005), run by
+// Tests of livepaper's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016), run by
 // `bash scripts/lwe.sh test` against the built core. C++ only because LWE's public headers are:
 // they use `struct` tags as type names (`wp_mute_check*`), which C rejects.
 //
 //   host_api_test <fixtures dir> <empty dir> [<WE assets dir>]
 //
 // Fixtures: min-scene (clear colour only — builds without WE's assets: docs/player/spikes/lwe-core.md
-// §7) and fail-scene (loads, then its renderer build throws: an object with a missing parent).
+// §7), fail-scene (loads, then its renderer build throws: an object with a missing parent),
+// case-scene (min-scene whose project.json names its scene file in another case) and text-scene
+// (text objects with `padding` as a string / a number / an array and `"particle": "None"`).
 //
 // Exit 0 = every test passed (or SKIPped, with the reason printed); 1 = a failure. Needs
 // SDL_AUDIODRIVER=dummy (the SDL test must not open a real device). The render tests need a
@@ -388,6 +390,126 @@ static bool min_scene_renders_without_assets () {
     return true;
 }
 
+// load + build + render a clear-colour-only scene folder; its native size and centre pixel
+static bool render_clear_scene (const std::string& dir, int wantW, int wantH, int r, int g, int b) {
+    wp_configuration* cfg = wp_config_create ();
+    wp_config_set_assets_dir (cfg, g_emptyDir.c_str ());
+    wp_config_set_audio_output (cfg, &kStereo48k);
+    wp_context* ctx = wp_context_create (cfg);
+    wp_context_set_gl_proc_address (ctx, &g_proc);
+    wp_context_set_time_counter (ctx, &g_clock);
+    wp_project* p = wp_project_load_folder (ctx, nullptr, dir.c_str ());
+    CHECK (p != nullptr, "load of %s failed", dir.c_str ());
+    wp_project_set_output_framebuffer (p, scratch_fbo ());
+    g_now = 0.0f;
+    wp_render_update_time (ctx);
+    wp_render_frame (p);
+    const int w = wp_project_get_width (p), h = wp_project_get_height (p);
+    CHECK (w == wantW && h == wantH, "native size %dx%d (scene.json says %dx%d)", w, h, wantW, wantH);
+    const unsigned int fbo = scratch_fbo (w, h);
+    wp_project_set_output_framebuffer (p, fbo);
+    g_now = 1 / 30.0f;
+    wp_render_update_time (ctx);
+    wp_render_frame (p);
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (fbo, w / 2, h / 2, px);
+    CHECK (std::abs (px[0] - r) <= 2 && std::abs (px[1] - g) <= 2 && std::abs (px[2] - b) <= 2,
+           "centre pixel %u %u %u, want %d %d %d", px[0], px[1], px[2], r, g, b);
+    wp_project_destroy (p);
+    wp_context_destroy (ctx);
+    wp_config_destroy (cfg);
+    return true;
+}
+
+static std::string read_file (const std::string& path) {
+    std::string out;
+    if (FILE* f = fopen (path.c_str (), "rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread (buf, 1, sizeof buf, f)) > 0) {
+            out.append (buf, n);
+        }
+        fclose (f);
+    }
+    return out;
+}
+
+static bool write_file (const std::string& path, const std::string& data) {
+    FILE* f = fopen (path.c_str (), "wb");
+    if (!f) {
+        return false;
+    }
+    const bool ok = fwrite (data.data (), 1, data.size (), f) == data.size ();
+    return fclose (f) == 0 && ok;
+}
+
+// a scene.pkg (PKGV0001: sized header, file count, then name / offset / length per file, then the data)
+static std::string make_pkg (const std::vector<std::pair<std::string, std::string>>& files) {
+    std::string out;
+    auto u32 = [&out] (uint32_t v) { out.append (reinterpret_cast<const char*> (&v), 4); };
+    auto sized = [&] (const std::string& s) {
+        u32 (static_cast<uint32_t> (s.size ()));
+        out += s;
+    };
+    sized ("PKGV0001");
+    u32 (static_cast<uint32_t> (files.size ()));
+    uint32_t offset = 0;
+    for (const auto& [name, data] : files) {
+        sized (name);
+        u32 (offset);
+        u32 (static_cast<uint32_t> (data.size ()));
+        offset += static_cast<uint32_t> (data.size ());
+    }
+    for (const auto& file : files) {
+        out += file.second;
+    }
+    return out;
+}
+
+// 0016: Wallpaper Engine's filesystem is case-insensitive; scenes name files in whatever case the author
+// typed (scene corpus 3354740764: models/Shadow.json → materials/shadow.json, the pkg holds Shadow.json)
+static bool case_insensitive_asset_lookup () {
+    if (!egl_up ()) {
+        printf ("    SKIP: %s\n", g_eglSkip.c_str ());
+        return true;
+    }
+    // a plain folder: project.json says "Scene.JSON", the file is scene.json (unpatched: load failed)
+    if (!render_clear_scene (g_fixtures + "/case-scene", 48, 24, 153, 102, 51)) {
+        return false;
+    }
+    // the same inside a scene.pkg
+    char tmpl[] = "/tmp/lwe-case-pkg.XXXXXX";
+    const char* tmp = mkdtemp (tmpl);
+    CHECK (tmp != nullptr, "mkdtemp failed");
+    const std::string dir = tmp;
+    CHECK (write_file (dir + "/project.json", read_file (g_fixtures + "/case-scene/project.json")), "write project.json");
+    CHECK (write_file (dir + "/scene.pkg", make_pkg ({ { "scene.json", read_file (g_fixtures + "/case-scene/scene.json") } })),
+           "write scene.pkg");
+    const bool ok = render_clear_scene (dir, 48, 24, 153, 102, 51);
+    unlink ((dir + "/project.json").c_str ());
+    unlink ((dir + "/scene.pkg").c_str ());
+    rmdir (dir.c_str ());
+    return ok;
+}
+
+// 0012 (#652) + 0014 (#692) + 0015: text objects as Workshop scenes write them load — "padding" as a
+// "x y" string (unpatched: type_error 302 escaping a noexcept function → SIGABRT, corpus 3233141951 /
+// 3326873240) or a number, "particle": "None" on a text object — and a field in a shape WE never writes
+// (an array) falls back to its default instead of aborting the process
+static bool odd_text_fields_load () {
+    wp_configuration* cfg = wp_config_create ();
+    wp_config_set_assets_dir (cfg, g_emptyDir.c_str ());
+    wp_config_set_audio_output (cfg, &kStereo48k);
+    wp_context* ctx = wp_context_create (cfg);
+    const std::string dir = g_fixtures + "/text-scene";
+    wp_project* p = wp_project_load_folder (ctx, nullptr, dir.c_str ());
+    CHECK (p != nullptr, "load of %s failed", dir.c_str ());
+    wp_project_destroy (p);
+    wp_context_destroy (ctx);
+    wp_config_destroy (cfg);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -403,6 +525,8 @@ int main (int argc, char** argv) {
     run ("pull_without_streams_is_silence", pull_without_streams_is_silence);
     run ("render_after_failed_build_returns", render_after_failed_build_returns);
     run ("min_scene_renders_without_assets", min_scene_renders_without_assets);
+    run ("case_insensitive_asset_lookup", case_insensitive_asset_lookup);
+    run ("odd_text_fields_load", odd_text_fields_load);
     run ("host_pull_mixes_scene_sound_at_unity_gain", host_pull_mixes_scene_sound_at_unity_gain);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);

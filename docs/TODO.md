@@ -651,28 +651,30 @@ Two bug classes kept recurring; fix the class, not the instance:
         --ab-legacy --legacy-output DP-1 --reuse /tmp/lp-scene-corpus-<stamp>` (after `livepaper --kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
         = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
-  - [ ] **LWE: catch exceptions at the wp_* C API** — an exception escaping `wp_project_load_folder` (or a render)
-        `terminate`s the worker: a scene that can never load becomes a crash loop (4 crashes, then broken) instead
-        of a clean `load failed`. Wrap the C entry points (`try … catch → NULL / false + a log line`). Corpus:
-        3233141951, 3326873240.
-  - [ ] **LWE: text `padding` as a vec2 string** — `ObjectParser::parseText` reads `padding` with
-        `optional<int>`; WE ≥ 2.x writes `"32.00000 32.00000"` → `nlohmann type_error 302` → SIGABRT (above).
-        Parse a number or a vec2 string. Corpus: 3233141951, 3326873240 (2 of the 45 scenes with text).
-  - [ ] **LWE: CParticle segfault on embedded leaves presets** — SIGSEGV in `CParticle::CParticle` +108 during the
-        first `wp_render_frame` (the scene build) for particle objects using old presets shipped in the scene.pkg
-        (`particles/presets/leaves2.json` + child `leaves2b`, `leaves5.json`). Needs a debug LWE build to find the
-        null. Corpus: 1884904087, 2047150134.
+  - [x] **LWE: catch exceptions at the wp_* C API** (2026-10-28, fork patch 0015) — the C entry points already
+        `try`/`catch`; the SIGABRT came from `JsonExtensions::optional`, which is `noexcept` and threw inside →
+        `terminate`. A wrong-typed optional value is now absent/default + a log line. Corpus: 3233141951,
+        3326873240 (broken → ok).
+  - [x] **LWE: text `padding` as a vec2 string** (2026-10-28) — upstream `main` #652, cherry-picked (0012):
+        `padding` is a `vec2`, a number broadcasts. Corpus: 3233141951, 3326873240.
+  - [x] **LWE: CParticle segfault on embedded leaves presets** (2026-10-28) — not the leaves: both scenes' clock
+        text objects carry `"particle": null`, dispatched to `parseParticle` → a particle without a material →
+        null deref in `CParticle::CParticle`. Upstream `main` #692, cherry-picked (0014). Corpus: 1884904087,
+        2047150134 (broken → ok, leaves and clock both drawn).
   - [ ] **LWE: 3D / perspective scenes** — `Projection must have a width. Contents: null`: `general.
         orthogonalprojection` null + a perspective `camera {eye, center, up}`; next-v2 parses only 2D scenes.
         Corpus: 3276522107, 3477054430, 3509243656. Likely the biggest item (upstream may have work in flight).
-  - [ ] **LWE: case-insensitive asset lookup** — WE (Windows) resolves `materials/shadow.json` to the pkg's
-        `materials/Shadow.json`; LWE's `AssetLocator` is case-sensitive, the load fails silently (`readString`
-        throws inside `MaterialParser::load`, caught → NULL). Fall back to a case-insensitive match (pkg entries,
-        the item folder, the assets dir). Corpus: 3354740764. Also: log *which* file wasn't found.
-  - [ ] **LWE: an object whose effect fails to compile disappears** — a packaged (old) godrays fragment fails
-        glslang (`'v_Bounds' : undeclared identifier`), `Failed to setup object 13`, and the object — the scene's
-        only one — draws nothing (black frame). Render the object without the failed effect (what WE does at
-        worst). Corpus: 2189783622.
+  - [x] **LWE: case-insensitive asset lookup** (2026-10-28, fork patch 0016) — no exact match on any mountpoint →
+        a case-insensitive one (pkg entries, a directory walked per component), logged `Found X as Y (case
+        differs)`. Corpus: 3354740764 (load_failed → ok). Still open: log *which* file wasn't found on a real miss.
+  - [x] **LWE: an object whose effect fails to compile disappears** (2026-10-28, fork patch 0017) — the effect is
+        left out (`Leaving out effect …`), the image renders. Corpus: 2189783622 (blank → ok); the same drops
+        happened (unnoticed — other layers drew) in 3233141951, 3326873240, 3354740764. A passthrough/fullscreen
+        layer (pure post-processing) still goes whole: rendering part of its chain blacked out 3432999904.
+  - [ ] **LWE: the packaged godrays shader itself** — 2189783622 now renders without its godrays effect: the old
+        `godrays` fragment shipped in its scene.pkg uses `v_Bounds`, which its vertex stage never declares
+        (`'v_Bounds' : undeclared identifier`, `missing #endif`) — needs a look at how WE resolves that shader
+        (probably a newer stock godrays from `assets/` that LWE should prefer, or a compat rewrite).
   - [x] **`ctl capture` still encodes on the loop** (2026-10-28, player-core.md § GFX / EGL "`capture` never
         stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lp-capture` maps → encodes → writes, the
         reply is deferred until written (like `step`'s). Loop max busy around a 3840×1080 capture 810 ms (debug)

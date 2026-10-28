@@ -1,0 +1,35 @@
+{
+	"camera" : {
+		"center" : "0.00000 0.00000 -1.00000",
+		"eye" : "0.00000 0.00000 0.00000",
+		"up" : "0.00000 1.00000 0.00000"
+	},
+	"general" : {
+		"clearcolor" : "0.20000 0.40000 0.60000",
+		"orthogonalprojection" : {
+			"width" : 64,
+			"height" : 32
+		}
+	},
+	"objects" : [
+		{
+			"id" : 1,
+			"name" : "clock",
+			"text" : "12:00",
+			"particle" : "None",
+			"padding" : "32.00000 32.00000"
+		},
+		{
+			"id" : 2,
+			"name" : "scalar padding",
+			"text" : "a",
+			"padding" : 32
+		},
+		{
+			"id" : 3,
+			"name" : "padding in no shape WE writes",
+			"text" : "b",
+			"padding" : [ 1, 2 ]
+		}
+	]
+}

@@ -201,11 +201,20 @@ fn patch_headers_are_complete() {
                 "{name}: needs Upstream-Commit:"
             );
         }
+        // `upstream: <where>` = already merged upstream, on a branch our base doesn't have yet (a
+        // cherry-pick from upstream `main` onto `next-v2`); dropped by the next rebase onto a base that has it
         let status = field("Status").unwrap_or_default();
+        let merged = status.starts_with("upstream: ") && status.len() > "upstream: ".len();
         assert!(
-            status == "candidate-for-upstream" || status == "local-only",
-            "{name}: Status `{status}` ∉ {{candidate-for-upstream, local-only}}"
+            status == "candidate-for-upstream" || status == "local-only" || merged,
+            "{name}: Status `{status}` ∉ {{candidate-for-upstream, local-only, upstream: <where>}}"
         );
+        if merged {
+            assert!(
+                origin.starts_with("upstream-"),
+                "{name}: `Status: upstream: …` needs an upstream Origin, not `{origin}`"
+            );
+        }
     }
 }
 
