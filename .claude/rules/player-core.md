@@ -3358,8 +3358,10 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   `paused` now means *play no audio*: the effective pause, or always in stepped mode (a stepped
   scene never sends `Paused {false}`). `FromWorker::AudioFlowing`, `Envelope {t0_ms,
   dbfs_1ms}` (`t0_ms` on `CLOCK_MONOTONIC`).
-- **The stream** (thread `lp-scene-audio`, its own PipeWire main loop; the process callback runs
-  there — no `RT_PROCESS`, like the bus): playback, F32 stereo 48 kHz, `node.name =
+- **The stream** (thread `lp-scene-audio`, its own PipeWire main loop, which sends the
+  envelope/`AudioFlowing`; the process callback runs on PipeWire's **data thread with
+  `RT_PROCESS`** — real-time priority through the client's `module-rt`, `SCHED_RR` measured on
+  `data-loop.0` — 2026-10-28, see "RT process callback" below): playback, F32 stereo 48 kHz, `node.name =
   lp-player-scene.<id>`, `node.description = "lp-player scene"`, `application.name =
   lp-player`, `media.role = Wallpaper`, `node.latency = 256/48000` (requested — PipeWire
   rewrites the prop to the running quantum in `pw-dump`), `state.restore-props/target =
@@ -3432,6 +3434,26 @@ scenes unchanged. Worker side `src/bin/lp-scene-worker/{audio,stretch}.rs`; comp
   0.0. **Pre-existing, found here:** a video's reference reads its mono clip ~3 dB hot (mpv
   upmixes mono → stereo at −3 dB per channel; the `-ac 1` decode doesn't), so V↔S fits show
   1.2–1.6 dB and a −2 dB `offset_db` (absorbed; no drops) — the video side, not the scene's.
+- **RT process callback (the `scene_gain_ramp_reaches_the_bus` flake, 2026-10-28).** The flake
+  (~2/10: one 10 ms bin −44.3 dB after the ramp settled at −43, failing the monotonic check) was a
+  **real dropout on the bus**, not the meter: the 1 ms samples showed one block −45.4 and the next
+  exact −96 (one 64-frame quantum of silence, contiguous timestamps) at a random time — not at the
+  ramp — and `pw-top` counted **ERR on `lp-player-scene.*` only** (bus, its playback and the meter
+  0): the worker's stream missed graph cycles. Its process callback ran on the non-real-time
+  `lp-scene-audio` main-loop thread; at the 64-frame quantum this machine and the private
+  PipeWire run (1.33 ms per cycle), a normal-priority thread scheduled late under load ~4 misses
+  one. mpv's AO uses `RT_PROCESS` (why videos never showed it). Fix: `RT_PROCESS` (`bus::
+  connect_with`); the callback owns the `Dsp` (`Arc<Mutex<Dsp>>`, never locked by the main loop
+  while streaming — no priority inversion), the envelope goes through `Outbox` (`try_lock`; a held
+  lock leaves the blocks for the next buffer) and `AudioFlowing`/the level are atomics; the route
+  close checks `Control::level()`. Measured (private PipeWire, 60 ramp cycles ≈ 100 s at load ~4,
+  same build with the flag toggled): without RT 7 xruns, 3 failing dips; with RT **0 xruns, 0
+  dips**; the test 20/20 after. The Task 10 commit's base had the same code (`audio.rs` unchanged
+  since Task 6). **A second, measurement-side hazard found with it:** the bus meter's own capture
+  (on the non-RT `lp-bus` thread, by design) once missed a cycle — a 2.3 ms timestamp gap whose
+  block joins two non-adjacent sine pieces (~1 dB off); the test now leaves out a 10 ms bin that
+  isn't time-contiguous (≤ 2 allowed) — a dropout on the bus is contiguous −96 blocks and still
+  fails.
 - **Probe `workers` → `audio`**: `{route, gain_db, no_audio, has_audio, speed, flow_armed,
   flows, envelope_dbfs, envelope_blocks}`.
 - **Measured** (private PipeWire, 64-frame graph quantum): a −20 dBFS tone scene on the bus

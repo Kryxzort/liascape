@@ -6937,7 +6937,9 @@ fn scene_audio_on_bus_with_identity() {
 }
 
 /// A gain ramp (`animate gain.user` 0 → −20 dB over 300 ms) reaches the bus smoothly:
-/// monotonic, no step, ending at −43.
+/// monotonic, no step, ending at −43. (Flaked ~2/10 until the worker's stream got
+/// `RT_PROCESS`: its non-RT callback missed 64-frame cycles under load — a quantum of silence
+/// on the bus; player-core.md § Scene audio → "RT process callback".)
 #[test]
 fn scene_gain_ramp_reaches_the_bus() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -6954,8 +6956,20 @@ fn scene_gain_ramp_reaches_the_bus() {
     );
     std::thread::sleep(Duration::from_millis(700));
     let s = meter_samples(&mut c, t0 - 50.0, t0 + 600.0);
-    // 1 kHz: every 1 ms block is one period — each sample is the level itself.
-    let bins: Vec<f64> = s.chunks(10).map(power_mean_db).collect();
+    // 1 kHz: every 1 ms block is one period — each sample is the level itself. A bin is only
+    // a measurement of 10 ms of the bus when the meter captured them contiguously: its own
+    // capture runs on the (non-real-time) bus thread and can miss a graph cycle under load —
+    // a timestamp gap, and the block across it joins two non-adjacent pieces of the sine
+    // (~1 dB off). Such bins are left out (a few at most); a dropout ON the bus is contiguous
+    // silence (−96 blocks, no gap) and still fails the monotonic check.
+    let contiguous = |c: &[(f64, f64)]| c.windows(2).all(|w| w[1].0 - w[0].0 < 1.5);
+    let bins: Vec<f64> = s
+        .chunks(10)
+        .filter(|c| contiguous(c))
+        .map(power_mean_db)
+        .collect();
+    let gapped = s.chunks(10).count() - bins.len();
+    assert!(gapped <= 2, "the meter missed {gapped} of the bins' cycles: {s:?}");
     let rises = bins.windows(2).filter(|w| w[1] > w[0] + 0.5).count();
     let end = power_mean_db(&s[s.len() - 100..]);
     println!(

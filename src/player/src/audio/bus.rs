@@ -641,15 +641,21 @@ fn format_pod() -> Vec<u8> {
 /// Connect `stream` as 48 kHz F32 stereo FL/FR (`AUTOCONNECT | MAP_BUFFERS`). Public for the
 /// scene worker's playback stream (Task 6), which uses the bus's exact format.
 pub fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
+    connect_with(stream, dir, StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS)
+}
+
+/// [`connect`] with explicit stream flags (the scene worker adds `RT_PROCESS`: its process
+/// callback must run on PipeWire's real-time data thread — Phase 2 Task 6's stream, Task 10's
+/// flake fix).
+pub fn connect_with(
+    stream: &StreamRc,
+    dir: spa::utils::Direction,
+    flags: StreamFlags,
+) -> Result<(), String> {
     let bytes = format_pod();
     let pod = spa::pod::Pod::from_bytes(&bytes).ok_or("bad format pod")?;
     stream
-        .connect(
-            dir,
-            None,
-            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
-            &mut [pod],
-        )
+        .connect(dir, None, flags, &mut [pod])
         .map_err(|e| format!("stream connect: {e}"))
 }
 
