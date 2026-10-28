@@ -245,6 +245,15 @@ ends with the session.**
   silent (the pause gate holds a playing A at −96) swaps at once instead of waiting for the resume
   (`tests/api.rs::cut_while_paused_swaps_at_once`). Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
   (now: torn down while still paused), `scripts/test-lp-player-adapter.sh` (I1 cases).
+- **The low-VRAM hold is a pause too (Phase 2 Task 8).** While the GPU's VRAM is low
+  (`player.vram_low_mode` `stop`/`pause`, `crate::vram`), the runtime's effective player pause is
+  `player.paused || vram hold` — so every rule above applies unchanged (gates ramp out, time and
+  transitions freeze, the resume is the flow-gated ramp-in); `player.paused` itself is never
+  written (a user pause made meanwhile survives the release). In `stop` mode the paused, silent
+  media sources are then torn down (two-phase, the reaper) and reopened at their positions before
+  the hold lets go; a still of each one's last frame is shown meanwhile, so the picture never goes
+  black. `tests/api.rs::low_vram_stop_frees_and_resumes_every_source`,
+  `low_vram_pause_mode_pauses_without_freeing`.
 
 ## 8. No audio onset or offset without a ramp the listener can hear — ramps run on audio that is actually flowing
 

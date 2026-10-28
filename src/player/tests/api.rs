@@ -60,6 +60,9 @@ fn new_root() -> PathBuf {
 /// a killed test run): `PR_SET_PDEATHSIG` — no stray `serve` ever outlives its test.
 fn die_with_parent(c: &mut Command) {
     use std::os::unix::process::CommandExt;
+    // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
+    // that drives it sets `fake:<file>` after this).
+    c.env("LP_PLAYER_VRAM_PROBE", "none");
     unsafe {
         c.pre_exec(|| {
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
@@ -7079,4 +7082,425 @@ fn real_scene_sound_on_the_bus() {
         assert!(bus > -70.0, "sound at {speed}x: {bus}");
         assert!(longest < 20, "a gap at {speed}x: {longest} ms of silence");
     }
+}
+
+// ---------------------------------------------------------------- Phase 2 Task 8: scene fps
+
+/// A real-clock, content-paced scene server (presents only on picture changes, like Wayland).
+fn paced_scene_serve() -> Option<Serve> {
+    let mut srv = scene_serve(&[])?;
+    let serial = srv._serial.take();
+    drop(srv);
+    Some(scene_serve_in(
+        &["--clock", "real", "--redraw-policy", "content"],
+        serial,
+    ))
+}
+
+/// Presents per second of VIRTUAL-1 and VIRTUAL-2 over `d` (`frames` probe totals, divided by
+/// the wall time between the two probes).
+fn presents_per_s(c: &mut Client, d: Duration) -> (f64, f64) {
+    let presents = |f: &Value, o: &str| {
+        f["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == o)
+            .unwrap_or_else(|| panic!("no {o}: {f}"))["totals"]["presents"]
+            .as_u64()
+            .unwrap() as f64
+    };
+    let f0 = c.ok("probe", json!({"name": "frames"}));
+    let t0 = Instant::now();
+    std::thread::sleep(d);
+    let f1 = c.ok("probe", json!({"name": "frames"}));
+    let s = t0.elapsed().as_secs_f64();
+    (
+        (presents(&f1, "VIRTUAL-1") - presents(&f0, "VIRTUAL-1")) / s,
+        (presents(&f1, "VIRTUAL-2") - presents(&f0, "VIRTUAL-2")) / s,
+    )
+}
+
+/// Task 8: one scene worker serves both outputs (D1) and ticks at the faster one's rate; each
+/// output presents its frames at most at its own `eff(scene_fps, refresh)` — VIRTUAL-1
+/// (scene_fps 60) every frame, VIRTUAL-2 (15) a quarter of them.
+#[test]
+fn per_output_scene_fps_gates_presents() {
+    let Some(srv) = paced_scene_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "out:VIRTUAL-1.scene_fps", "value": 60}));
+    c.ok("set", json!({"path": "out:VIRTUAL-2.scene_fps", "value": 15}));
+    let id = create_scene(&mut c, "api-t8-gate", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.5);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["fps_target"], json!(60.0), "the fastest output's rate: {w}");
+    let (v1, v2) = presents_per_s(&mut c, Duration::from_secs(2));
+    let fps = worker_of(&mut c, &id)["fps_actual"].clone();
+    println!("scene at {fps}/s: VIRTUAL-1 {v1:.1} presents/s, VIRTUAL-2 {v2:.1}");
+    assert!((v1 - 60.0).abs() <= 3.0, "VIRTUAL-1 at 60: {v1:.2}");
+    assert!((v2 - 15.0).abs() <= 2.0, "VIRTUAL-2 at 15: {v2:.2}");
+}
+
+/// Task 8: `out:<c>.scene_fps` is live — the worker's tick rate and each output's presents
+/// follow every change within 0.5 s, on the same worker (no respawn, no Ready).
+#[test]
+fn scene_fps_change_is_live_same_pid() {
+    let Some(srv) = paced_scene_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source.ready", "worker."]}));
+    let id = create_scene(&mut c, "api-t8-live", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.5);
+    let pid = worker_of(&mut c, &id)["pid"].clone();
+    let target = |c: &mut Client, want: f64| {
+        wait_for(Duration::from_millis(500), "the new tick rate", || {
+            (worker_of(c, &id)["fps_target"].as_f64() == Some(want)).then_some(())
+        });
+    };
+    target(&mut c, 30.0);
+    let (a1, a2) = presents_per_s(&mut c, Duration::from_secs(2));
+    println!("default 30/30: {a1:.1} / {a2:.1} presents/s");
+    assert!((a1 - 30.0).abs() <= 2.0 && (a2 - 30.0).abs() <= 2.0, "{a1} {a2}");
+    c.ok("set", json!({"path": "out:VIRTUAL-1.scene_fps", "value": 60}));
+    target(&mut c, 60.0);
+    std::thread::sleep(Duration::from_millis(300));
+    let (b1, b2) = presents_per_s(&mut c, Duration::from_secs(2));
+    println!("60/30: {b1:.1} / {b2:.1} presents/s");
+    assert!((b1 - 60.0).abs() <= 3.0, "VIRTUAL-1 at 60: {b1}");
+    assert!((b2 - 30.0).abs() <= 2.0, "VIRTUAL-2 still at 30: {b2}");
+    // 0 = the output's refresh (60 here) on VIRTUAL-2; then both down to 15.
+    c.ok("set", json!({"path": "out:VIRTUAL-2.scene_fps", "value": 0}));
+    std::thread::sleep(Duration::from_millis(300));
+    let (c1, c2) = presents_per_s(&mut c, Duration::from_secs(2));
+    println!("60/0(=60): {c1:.1} / {c2:.1} presents/s");
+    assert!((c2 - 60.0).abs() <= 3.0, "VIRTUAL-2 at its refresh: {c2}");
+    c.ok("set", json!({"path": "out:*.scene_fps", "value": 15}));
+    target(&mut c, 15.0);
+    std::thread::sleep(Duration::from_millis(300));
+    let (d1, d2) = presents_per_s(&mut c, Duration::from_secs(2));
+    println!("15/15: {d1:.1} / {d2:.1} presents/s");
+    assert!((d1 - 15.0).abs() <= 2.0 && (d2 - 15.0).abs() <= 2.0, "{d1} {d2}");
+    assert_eq!(worker_of(&mut c, &id)["pid"], pid, "the same worker throughout");
+    let evs = c.drain_events();
+    let readies = evs
+        .iter()
+        .filter(|e| e["event"] == "source.ready" && e["id"] == json!(id))
+        .count();
+    assert!(readies <= 1, "no second load: {evs:?}");
+    let count = |k: &str| evs.iter().filter(|e| e["event"] == k).count();
+    assert_eq!(count("worker.spawned"), 1, "one worker: {evs:?}");
+    assert_eq!(count("worker.restart"), 0, "{evs:?}");
+}
+
+// ---------------------------------------------------------------- Phase 2 Task 8: VRAM
+
+/// A real-clock synthetic-scene server whose VRAM sampler reads `vram.json` in its root
+/// (`LP_PLAYER_VRAM_PROBE=fake:…`), sampled every 50 ms with short holds
+/// (`LP_PLAYER_VRAM_TIMING` = interval 50, enter 300, resume 600, settle 200, scene 1000 ms).
+/// The file starts at 8 GiB with 6000 MiB free.
+fn vram_serve() -> Option<(Serve, PathBuf)> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    let root = new_root();
+    let file = root.join("vram.json");
+    write_vram(&file, 6000.0, &[]);
+    let probe = PathBuf::from(format!("fake:{}", file.display()));
+    let srv = Serve::spawn_env(
+        root,
+        &["--clock", "real"],
+        &[
+            ("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LP_PLAYER_VRAM_PROBE", &probe),
+            ("LP_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
+        ],
+        Some(serial),
+    );
+    Some((srv, file))
+}
+
+/// The fake sampler's next reading: an 8 GiB card with `free` MiB free, `procs` = (pid, MiB).
+/// Written via a rename (a sample never reads half a file).
+fn write_vram(file: &Path, free: f64, procs: &[(u64, f64)]) {
+    let m: serde_json::Map<String, Value> = procs
+        .iter()
+        .map(|(p, v)| (p.to_string(), json!(v)))
+        .collect();
+    let tmp = file.with_extension("tmp");
+    std::fs::write(
+        &tmp,
+        json!({"total_mib": 8192, "free_mib": free, "procs": m}).to_string(),
+    )
+    .unwrap();
+    std::fs::rename(&tmp, file).unwrap();
+}
+
+/// Wait until `id`'s `time_pos` moved away from `from` (it plays; a looping clip may wrap).
+fn wait_moving(c: &mut Client, id: &str, from: f64) {
+    wait_for(Duration::from_secs(5), "playback to move on", || {
+        f64_of(c, &format!("{id}.time_pos"))
+            .filter(|t| (t - from).abs() > 0.05)
+            .map(|_| ())
+    });
+}
+
+fn vram_probe(c: &mut Client) -> Value {
+    c.ok("probe", json!({"name": "vram"}))
+}
+
+fn events_named(evs: &[Value], name: &str) -> Vec<Value> {
+    evs.iter().filter(|e| e["event"] == name).cloned().collect()
+}
+
+/// Wait (≤ `limit`) for an event named `name`, keeping everything received.
+fn wait_event(c: &mut Client, seen: &mut Vec<Value>, name: &str, limit: Duration) -> Value {
+    let t = Instant::now();
+    loop {
+        seen.extend(c.drain_events());
+        if let Some(e) = seen.iter().find(|e| e["event"] == name) {
+            return e.clone();
+        }
+        assert!(t.elapsed() < limit, "no {name} within {limit:?}: {seen:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Task 8, the per-scene VRAM guard: off by default (a worker at 5000 MiB plays on); with
+/// `player.scene_vram_limit_mib` 1536 a spike shorter than the 1 s hold is ignored, a worker
+/// over it for the hold is stopped — `scene.vram_exceeded {used_mib, limit_mib}` and a
+/// `source.error` "stopped: used 1800 MiB > limit 1536 MiB" (so the backend can advance), but
+/// no crash record, no restart, not `broken`; its last frame stays shown.
+#[test]
+fn scene_over_vram_limit_is_stopped_not_crashed() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok(
+        "subscribe",
+        json!({"topics": ["scene.vram_exceeded", "source.error", "worker."]}),
+    );
+    let mut spec = synth(Pattern::Solid);
+    spec.rgb = [10, 200, 30];
+    let id = create_scene(&mut c, "api-t8-vram", &spec, json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    // Default: no limit.
+    write_vram(&file, 6000.0, &[(pid, 5000.0)]);
+    wait_for(Duration::from_secs(3), "the sampler measuring the worker", || {
+        (vram_probe(&mut c)["scenes"][0]["used_mib"] == json!(5000.0)).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(1300));
+    assert!(pid_alive(pid), "no limit by default");
+    assert_eq!(worker_of(&mut c, &id)["vram_stopped"], Value::Null);
+    // A spike shorter than the hold: ignored.
+    c.ok("set", json!({"path": "player.scene_vram_limit_mib", "value": 1536}));
+    wait_for(Duration::from_secs(3), "the over-limit timer", || {
+        vram_probe(&mut c)["scenes"][0]["over_ms"]
+            .as_f64()
+            .map(|_| ())
+    });
+    write_vram(&file, 6000.0, &[(pid, 900.0)]);
+    wait_for(Duration::from_secs(3), "the spike to pass", || {
+        let v = vram_probe(&mut c);
+        (v["scenes"][0]["used_mib"] == json!(900.0) && v["scenes"][0]["over_ms"].is_null())
+            .then_some(())
+    });
+    assert!(pid_alive(pid), "a spike shorter than the hold is no reason");
+    let mut seen = c.drain_events();
+    assert!(events_named(&seen, "scene.vram_exceeded").is_empty(), "{seen:?}");
+    // Over it for the hold: stopped.
+    let t = Instant::now();
+    write_vram(&file, 6000.0, &[(pid, 1800.0)]);
+    let ev = wait_event(&mut c, &mut seen, "scene.vram_exceeded", Duration::from_secs(5));
+    let took = t.elapsed();
+    println!("stopped {took:?} after going over (hold 1 s): {ev}");
+    assert!(took >= Duration::from_millis(900), "not before the hold: {took:?}");
+    assert_eq!(ev["id"], json!(id));
+    assert_eq!(ev["used_mib"], json!(1800.0));
+    assert_eq!(ev["limit_mib"], json!(1536.0));
+    let err = wait_event(&mut c, &mut seen, "source.error", Duration::from_secs(2));
+    let reason = err["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("stopped: used 1800 MiB > limit 1536 MiB"),
+        "the UI's text: {reason}"
+    );
+    wait_for(Duration::from_secs(2), "the worker to exit", || {
+        (!pid_alive(pid)).then_some(())
+    });
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["vram_stopped"]["used_mib"], json!(1800.0), "{w}");
+    assert_eq!(w["restarts_60s"], json!(0), "{w}");
+    assert_ne!(w["state"], json!("broken"), "not a crash: {w}");
+    seen.extend(c.drain_events());
+    for k in ["worker.restart", "worker.broken", "worker.hung"] {
+        assert!(events_named(&seen, k).is_empty(), "{k}: {seen:?}");
+    }
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+    // The last frame stays.
+    let p = srv.path("t8-vram.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
+    near(png_pixel(&p, 320, 180), [10, 200, 30], 0, "the last frame");
+}
+
+/// A playing video on VIRTUAL-1 and a scene on VIRTUAL-2, for the low-VRAM rule.
+fn video_and_scene(c: &mut Client, name: &str) -> (String, String) {
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let v = create_src(c, json!({"path": s(&clip), "loop": true}));
+    let mut spec = synth(Pattern::Solid);
+    spec.rgb = [200, 40, 90];
+    let sc = create_scene(c, name, &spec, json!({}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": v}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": sc}));
+    wait_playing(c, &v, 0.5);
+    wait_playing(c, &sc, 0.5);
+    (v, sc)
+}
+
+/// Task 8, the low-VRAM rule's default `stop`: free VRAM under the threshold for the enter hold
+/// → every source pauses silently, then the video's decoder and the scene's worker are freed
+/// (`vram.stopped`), each output keeping a still of its last frame and `player.paused` left as
+/// the user set it; free again (minus what resuming takes back) for the resume hold → both
+/// reopen where they were (`vram.resumed`), a new scene worker, playing on.
+#[test]
+fn low_vram_stop_frees_and_resumes_every_source() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    let (v, sc) = video_and_scene(&mut c, "api-t8-low-stop");
+    c.ok("subscribe", json!({"topics": ["vram.", "source."]}));
+    let scene_pid = worker_of(&mut c, &sc)["pid"].as_u64().unwrap();
+    let mut seen = Vec::new();
+    let t = Instant::now();
+    write_vram(&file, 300.0, &[]);
+    let low = wait_event(&mut c, &mut seen, "vram.low", Duration::from_secs(5));
+    let took = t.elapsed();
+    assert!(took >= Duration::from_millis(280), "not before the enter hold: {took:?}");
+    assert_eq!(low["mode"], json!("stop"));
+    assert_eq!(low["low_mib"], json!(512.0));
+    let stopped = wait_event(&mut c, &mut seen, "vram.stopped", Duration::from_secs(3));
+    let ids: Vec<&str> = stopped["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(ids.contains(&v.as_str()) && ids.contains(&sc.as_str()), "{stopped}");
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"]["player"]["vram_low_active"], json!(true));
+    assert_eq!(st["graph"]["player"]["paused"], json!(false), "the user's pause untouched");
+    wait_for(Duration::from_secs(2), "the scene worker to go", || {
+        (!pid_alive(scene_pid)).then_some(())
+    });
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let hosted: Vec<&Value> = p["sources"].as_array().unwrap().iter().map(|s| &s["id"]).collect();
+    assert!(!hosted.contains(&&json!(v)) && !hosted.contains(&&json!(sc)), "freed: {p}");
+    // Stills of the last frames stay on screen; time stands still.
+    let shot = srv.path("t8-low.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-2", "path": s(&shot)}));
+    near(png_pixel(&shot, 160, 90), [200, 40, 90], 0, "the scene's still");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+    assert_ne!(png_pixel(&shot, 320, 300), [0, 0, 0, 0], "the video's still");
+    let tv = f64_of(&mut c, &format!("{v}.time_pos")).unwrap();
+    let ts = f64_of(&mut c, &format!("{sc}.time_pos")).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(f64_of(&mut c, &format!("{v}.time_pos")).unwrap(), tv, "frozen");
+    assert!(events_named(&seen, "vram.recovered").is_empty(), "300 MiB free is still low");
+    // A wallpaper created while stopped waits unopened (no decoder) until the resume.
+    let clip = ensure_clip("frame_index_90", ClipSpec::FrameIndex { frames: 90 });
+    let late = create_src(&mut c, json!({"path": s(&clip), "paused": true}));
+    std::thread::sleep(Duration::from_millis(200));
+    let vp = vram_probe(&mut c);
+    assert_eq!(vp["hold"]["phase"], json!("held"), "{vp}");
+    assert!(
+        vp["suspended"].as_array().unwrap().contains(&json!(late)),
+        "a new video waits: {vp}"
+    );
+    // Free again.
+    write_vram(&file, 4000.0, &[]);
+    let rec = wait_event(&mut c, &mut seen, "vram.recovered", Duration::from_secs(5));
+    assert_eq!(rec["reason"], json!("free"));
+    let resumed = wait_event(&mut c, &mut seen, "vram.resumed", Duration::from_secs(8));
+    println!("{rec}\n{resumed}");
+    assert_eq!(resumed["pending"], json!(0), "every source showed a frame first");
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"]["player"]["vram_low_active"], json!(false));
+    let tv2 = f64_of(&mut c, &format!("{v}.time_pos")).unwrap();
+    assert!(
+        (tv2 - tv).rem_euclid(4.0) < 1.5,
+        "the video resumed where it was ({tv} → {tv2})"
+    );
+    wait_moving(&mut c, &v, tv2);
+    wait_playing(&mut c, &sc, ts + 0.3);
+    wait_for(Duration::from_secs(5), "the late video to open", || {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        p["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["id"] == json!(late))
+            .then_some(())
+    });
+    let new_pid = worker_of(&mut c, &sc)["pid"].as_u64().unwrap();
+    assert_ne!(new_pid, scene_pid, "a new worker");
+    seen.extend(c.drain_events());
+    assert_eq!(events_named(&seen, "vram.low").len(), 1, "one engage: {seen:?}");
+}
+
+/// Task 8, `pause` mode: the low VRAM pauses everything (same scene worker, nothing freed) and
+/// resumes after; a user pause made meanwhile survives the release.
+#[test]
+fn low_vram_pause_mode_pauses_without_freeing() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.vram_low_mode", "value": "pause"}));
+    let (v, sc) = video_and_scene(&mut c, "api-t8-low-pause");
+    c.ok("subscribe", json!({"topics": ["vram."]}));
+    let pid = worker_of(&mut c, &sc)["pid"].as_u64().unwrap();
+    let mut seen = Vec::new();
+    write_vram(&file, 200.0, &[]);
+    let low = wait_event(&mut c, &mut seen, "vram.low", Duration::from_secs(5));
+    assert_eq!(low["mode"], json!("pause"));
+    std::thread::sleep(Duration::from_millis(300));
+    let tv = f64_of(&mut c, &format!("{v}.time_pos")).unwrap();
+    let ts = f64_of(&mut c, &format!("{sc}.time_pos")).unwrap();
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(f64_of(&mut c, &format!("{v}.time_pos")).unwrap(), tv, "paused");
+    assert_eq!(f64_of(&mut c, &format!("{sc}.time_pos")).unwrap(), ts, "paused");
+    seen.extend(c.drain_events());
+    assert!(events_named(&seen, "vram.stopped").is_empty(), "pause frees nothing");
+    assert_eq!(worker_of(&mut c, &sc)["pid"].as_u64(), Some(pid), "same worker");
+    // Free again: playing on.
+    write_vram(&file, 5000.0, &[]);
+    wait_event(&mut c, &mut seen, "vram.resumed", Duration::from_secs(5));
+    wait_moving(&mut c, &v, tv);
+    wait_playing(&mut c, &sc, ts + 0.3);
+    assert_eq!(worker_of(&mut c, &sc)["pid"].as_u64(), Some(pid), "same worker");
+    // Low again, the user pauses meanwhile: still paused after the release.
+    seen.clear();
+    write_vram(&file, 200.0, &[]);
+    wait_event(&mut c, &mut seen, "vram.low", Duration::from_secs(5));
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    write_vram(&file, 5000.0, &[]);
+    wait_event(&mut c, &mut seen, "vram.resumed", Duration::from_secs(5));
+    std::thread::sleep(Duration::from_millis(300));
+    let t1 = f64_of(&mut c, &format!("{v}.time_pos")).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        f64_of(&mut c, &format!("{v}.time_pos")).unwrap(),
+        t1,
+        "the user's pause survives"
+    );
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    wait_moving(&mut c, &v, t1);
 }

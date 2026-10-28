@@ -5,7 +5,10 @@
 //! fps_target, fps_actual (frames latched in the last second), paused, stepped, ready,
 //! scene_time, latched_t, latched, stale_reuses, queued, ticks_sent, frames_received,
 //! resizes, buffer_sets, spawns, rings, last_error}` + `reaping` (stopped workers not
-//! reaped yet). Task 8 adds the GPU fields.
+//! reaped yet). Task 8: `fps_target` is the effective rate (min(demand, the GPU budget's cap)),
+//! plus `fps_demand`, `gpu_ms_p50`/`gpu_ms_p95` (the worker's GL_TIME_ELAPSED over 2 s),
+//! `throttle {cap, demand, since_ms}` (null = unthrottled) and `vram_stopped {used_mib,
+//! limit_mib}` (the per-scene VRAM guard stopped it).
 
 use serde_json::{Value, json};
 

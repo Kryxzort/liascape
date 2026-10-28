@@ -771,6 +771,83 @@ fn scene_tick_rate_follows_demand() {
     assert_eq!(h.scene_src(&id).tick_hz(), 60.0);
 }
 
+/// Task 8: the worker GPU budget, live on one worker. A scene whose worker reports 20 ms of
+/// GPU per frame (the synthetic `report_gpu_ms` knob — 600 ms/s at 30 fps) is throttled to
+/// half its latched rate when its outputs miss 10 % of their frames, steps back up × 1.25 after
+/// 5 s calm (a virtual budget clock), and `auto` off lifts the cap at once — the tick rate
+/// follows each change, same pid. A light worker (the plain synthetic scene: its real
+/// `GL_TIME_ELAPSED` reading is a fraction of a ms) is never throttled for the same misses.
+#[test]
+fn scene_budget_throttles_live_and_recovers() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let mut heavy = spec(Pattern::FrameIndex);
+    heavy.report_gpu_ms = Some(20.0);
+    let id = h.scene("t8-heavy", &heavy, json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    tick_for(&mut h, Duration::from_millis(2500));
+    let pid = h.scene_src(&id).pid();
+    let fps = |h: &mut Harness, d: Duration| {
+        let (l0, w0) = (h.scene_src(&id).stats().latched, Instant::now());
+        tick_for(h, d);
+        (h.scene_src(&id).stats().latched - l0) as f64 / w0.elapsed().as_secs_f64()
+    };
+    assert_eq!(h.scene_src(&id).gpu_ms().0, Some(20.0), "the knob's GPU time arrives");
+    assert_eq!(h.scene_src(&id).throttle_cap(), None);
+    let t0 = Duration::from_secs(1000);
+    let budget = |h: &mut Harness, at: Duration, missed: f64, auto: bool| {
+        h.host
+            .scene_mut(&id)
+            .expect("hosted")
+            .observe_budget(at, missed, auto);
+    };
+    budget(&mut h, t0, 0.0, true);
+    assert_eq!(h.scene_src(&id).throttle_cap(), None, "clean outputs: no cap");
+    budget(&mut h, t0 + Duration::from_millis(500), 10.0, true);
+    let cap = h.scene_src(&id).throttle_cap().expect("throttled");
+    assert!((14.0..=16.0).contains(&cap), "half of ~30 fps: {cap}");
+    assert_eq!(h.scene_src(&id).tick_hz(), cap, "ticks at the cap");
+    assert_eq!(h.scene_src(&id).demand_hz(), 30.0, "the demand is kept");
+    tick_for(&mut h, Duration::from_millis(500));
+    let f = fps(&mut h, Duration::from_secs(2));
+    assert!((f - cap).abs() <= 2.0, "throttled to {cap}: {f:.2}/s");
+    assert_eq!(h.scene_src(&id).pid(), pid, "same worker");
+    // Calm for 5 s of the budget's clock: one step up.
+    budget(&mut h, t0 + Duration::from_secs(1), 0.0, true);
+    budget(&mut h, t0 + Duration::from_millis(5500), 0.0, true);
+    assert_eq!(h.scene_src(&id).throttle_cap(), Some(cap), "not before 5 s calm");
+    budget(&mut h, t0 + Duration::from_secs(6), 0.0, true);
+    assert_eq!(h.scene_src(&id).throttle_cap(), Some(cap * 1.25));
+    // The setting off: fixed fps again at once.
+    budget(&mut h, t0 + Duration::from_secs(7), 10.0, false);
+    assert_eq!(h.scene_src(&id).throttle_cap(), None);
+    assert_eq!(h.scene_src(&id).tick_hz(), 30.0);
+    budget(&mut h, t0 + Duration::from_secs(10), 50.0, false);
+    assert_eq!(h.scene_src(&id).throttle_cap(), None, "off never throttles");
+    tick_for(&mut h, Duration::from_millis(500));
+    let f = fps(&mut h, Duration::from_secs(2));
+    assert!((f - 30.0).abs() <= 2.0, "back at 30: {f:.2}/s");
+    assert_eq!(h.scene_src(&id).pid(), pid, "same worker");
+
+    let light = h.scene("t8-light", &spec(Pattern::FrameIndex), json!({}));
+    h.show("VIRTUAL-1", &light);
+    h.wait_ready(&light);
+    tick_for(&mut h, Duration::from_millis(2500));
+    let (p50, p95) = h.scene_src(&light).gpu_ms();
+    let (p50, p95) = (p50.expect("measured GPU time"), p95.unwrap());
+    println!("light synthetic scene: gpu_ms p50 {p50:.3} p95 {p95:.3}");
+    assert!(p50 > 0.0 && p50 < 5.0, "a trivial frame: {p50} ms");
+    for i in 0..10 {
+        h.host
+            .scene_mut(&light)
+            .unwrap()
+            .observe_budget(t0 + Duration::from_millis(500 * i), 10.0, true);
+    }
+    assert_eq!(h.scene_src(&light).throttle_cap(), None, "a light worker is never the cause");
+}
+
 /// A live `path` change is a new worker on the new folder, the old frame held (never None)
 /// until the new one's first frame — not a crash, not a restart.
 #[test]

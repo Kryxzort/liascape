@@ -68,6 +68,9 @@ fn state_dir(root: &Path) -> PathBuf {
 /// (DrKonqi) pops a notification per crash (measured).
 fn guard(c: &mut Command) {
     use std::os::unix::process::CommandExt;
+    // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
+    // that drives it sets `fake:<file>` after this).
+    c.env("LP_PLAYER_VRAM_PROBE", "none");
     unsafe {
         c.pre_exec(|| {
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);

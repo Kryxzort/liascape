@@ -14,12 +14,19 @@
 //! = a new worker on the new folder with the old frame held until its first frame; stepped
 //! mode ticks exactly the step's scene time ([`step_to`]).
 //!
+//! Task 8: the tick rate is `min(demand, the GPU budget's cap)` ([`observe_budget`] — the
+//! runtime feeds it every 500 ms; `scene::budget`), the worker's per-frame GPU time arrives in
+//! `Frame.gpu_ms`, and the per-scene VRAM guard stops a worker over its limit
+//! ([`stop_for_vram`] — reported like an error, never a crash).
+//!
 //! Imports, latching and release fences run on the caller's (the loop's) context — plan
 //! "Render worker interplay": a one-off import per slot and an fd poll per frame, so no
 //! share-group rebind and no extra thread hop.
 //!
 //! [`set_demand`]: SceneSource::set_demand
 //! [`step_to`]: SceneSource::step_to
+//! [`observe_budget`]: SceneSource::observe_budget
+//! [`stop_for_vram`]: SceneSource::stop_for_vram
 
 use std::collections::{BTreeMap, VecDeque};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
@@ -34,6 +41,7 @@ use crate::gfx::{Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
 use crate::graph::{ApiError, NodeKind};
 use crate::log::{self, Level};
+use crate::scene::budget::Budget;
 use crate::units::{GainSlot, Gains};
 use crate::worker::dmabuf::{ImportedRing, Latch};
 use crate::worker::proto::{AudioRoute, FromWorker, ToWorker};
@@ -58,6 +66,12 @@ const POSITION_EVERY: Duration = Duration::from_millis(100);
 /// Envelope entries (1 ms each) kept for the runtime between drains (10 s: a caller that never
 /// drains — a harness — holds a bounded amount).
 const ENVELOPE_KEEP: usize = 10_000;
+
+/// The window the GPU budget's inputs are taken over (the `frames` probe's miss window).
+const BUDGET_WINDOW: Duration = Duration::from_secs(2);
+
+/// A scene latching under this fraction of its tick rate is missing its own frames (Task 8).
+const DEFICIT_RATIO: f64 = 0.9;
 
 /// One output showing a scene ([`SceneSource::set_demand`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +344,21 @@ pub struct SceneSource {
     /// The newest envelope block (probe) and how many arrived.
     envelope_last: Option<f32>,
     envelope_blocks: u64,
+    /// Task 8: the rate the outputs ask for (`demand_of`); `opts.tick_hz` is what the scene
+    /// ticks at = `min(demand, the GPU budget's cap)`.
+    demand_hz: f64,
+    /// Task 8: the worker GPU budget (`scene::budget`).
+    budget: Budget,
+    /// Since when the scene is throttled (probe).
+    throttled_since: Option<Instant>,
+    /// Since when the scene runs at its current rate, unpaused and loaded (its own frame
+    /// deficit only counts once a whole budget window was made at it).
+    rate_since: Option<Instant>,
+    /// The worker's `Frame.gpu_ms` of the last [`BUDGET_WINDOW`].
+    gpu_ms: VecDeque<(Instant, f32)>,
+    /// Task 8 (VRAM guard): the worker was stopped for using more VRAM than the per-scene
+    /// limit — `(used_mib, limit_mib)`; reported like an error, never a crash.
+    vram_stopped: Option<(f64, f64)>,
 }
 
 fn epoll_new() -> Result<OwnedFd, String> {
@@ -521,6 +550,12 @@ impl SceneSource {
             envelope: VecDeque::new(),
             envelope_last: None,
             envelope_blocks: 0,
+            demand_hz: opts.tick_hz,
+            budget: Budget::new(opts.tick_hz),
+            throttled_since: None,
+            rate_since: None,
+            gpu_ms: VecDeque::new(),
+            vram_stopped: None,
             opts,
         };
         if !src.opts.defer_spawn {
@@ -579,10 +614,14 @@ impl SceneSource {
             return;
         };
         let hz = hz.clamp(1.0, 1000.0);
-        if (hz - self.opts.tick_hz).abs() > 1e-9 {
-            self.opts.tick_hz = hz;
-            self.tick_period = Duration::from_secs_f64(1.0 / hz);
+        if (hz - self.demand_hz).abs() > 1e-9 {
+            let from = self.opts.tick_hz;
+            self.demand_hz = hz;
+            if self.budget.set_demand(hz) {
+                self.unthrottled(from, hz, "demand");
+            }
         }
+        self.apply_rate();
         if max != self.opts.max_size {
             self.opts.max_size = max;
             if let Some(h) = self.host.as_mut() {
@@ -596,6 +635,183 @@ impl SceneSource {
         {
             self.fail(e);
         }
+    }
+
+    /// The tick rate = `min(demand, the budget's cap)` (Task 8), live: the next tick is
+    /// scheduled on the new period.
+    fn apply_rate(&mut self) {
+        let hz = self.budget.rate().clamp(1.0, 1000.0);
+        if (hz - self.opts.tick_hz).abs() > 1e-9 {
+            self.opts.tick_hz = hz;
+            self.tick_period = Duration::from_secs_f64(1.0 / hz);
+            self.rate_since = self.rate_since.map(|_| Instant::now());
+        }
+    }
+
+    /// Task 8 (the VRAM guard): the worker used `used_mib` > `limit_mib` of VRAM — stop it.
+    /// Reported like a broken scene (`SourceEvent::Error` "stopped: used X MiB > limit Y MiB",
+    /// so a rotation advances / a single wallpaper keeps its last frame) plus
+    /// `scene.vram_exceeded`, but never a crash: no restart, no crash record, nothing marks it
+    /// crashed. The last frame stays shown; a `path` change starts a new worker.
+    pub fn stop_for_vram(&mut self, used_mib: f64, limit_mib: f64) {
+        if self.vram_stopped.is_some() || self.host.is_none() {
+            return;
+        }
+        log::event(
+            "scene",
+            Level::Warn,
+            "scene.vram_exceeded",
+            None,
+            json!({"id": self.opts.id, "path": self.opts.path, "pid": self.pid(),
+                   "used_mib": used_mib, "limit_mib": limit_mib}),
+        );
+        if let Some(h) = self.host.as_mut() {
+            h.stop();
+        }
+        self.vram_stopped = Some((used_mib, limit_mib));
+        let reason = format!(
+            "stopped: used {used_mib:.0} MiB > limit {limit_mib:.0} MiB of VRAM (vram_exceeded)"
+        );
+        if self.error.is_none() {
+            self.events.push(SourceEvent::Error {
+                reason: format!("{}: {reason}", self.opts.path.display()),
+            });
+            self.error = Some(reason);
+        }
+    }
+
+    /// The VRAM guard stopped this scene: `(used_mib, limit_mib)`.
+    pub fn vram_stopped(&self) -> Option<(f64, f64)> {
+        self.vram_stopped
+    }
+
+    /// Task 8: one GPU-budget observation (the runtime, every `budget::OBSERVE_EVERY`):
+    /// `missed_pct` = the worst miss rate of the outputs showing this scene over the last 2 s,
+    /// `now` the caller's monotonic time (tests pass a virtual one). `auto` off (`player.
+    /// scene_throttle` false) lifts any cap at once — fixed fps. Skipped while the scene can't
+    /// render (paused, stepped, not loaded, stopped): its numbers say nothing then.
+    pub fn observe_budget(&mut self, now: Duration, missed_pct: f64, auto: bool) {
+        let from = self.opts.tick_hz;
+        if !auto {
+            if self.budget.cap().is_some() {
+                self.budget.lift();
+                self.apply_rate();
+                self.unthrottled(from, self.opts.tick_hz, "off");
+            }
+            return;
+        }
+        if self.paused
+            || self.opts.stepped
+            || !self.loaded
+            || self.host.is_none()
+            || self.error.is_some()
+            || self.broken.is_some()
+        {
+            return;
+        }
+        let inst = Instant::now();
+        let (p50, _) = self.gpu_ms_stats(inst);
+        let fps = self.fps_over(inst, BUDGET_WINDOW);
+        // The scene's own missed frames count too: a worker delivering under 90 % of its rate
+        // over a whole window at that rate (on an output presenting below its refresh — a
+        // 30 fps scene on 144 Hz — the output has no back-to-back presents to miss).
+        let deficit = match self.rate_since {
+            Some(t)
+                if inst.saturating_duration_since(t) >= BUDGET_WINDOW
+                    && fps < DEFICIT_RATIO * self.opts.tick_hz =>
+            {
+                (1.0 - fps / self.opts.tick_hz) * 100.0
+            }
+            _ => 0.0,
+        };
+        let missed_pct = missed_pct.max(deficit);
+        if self
+            .budget
+            .observe(now, missed_pct, p50.unwrap_or(0.0), fps)
+            .is_none()
+        {
+            return;
+        }
+        self.apply_rate();
+        let to = self.opts.tick_hz;
+        if to < from {
+            log::event(
+                "scene",
+                Level::Warn,
+                "scene.throttled",
+                None,
+                json!({"id": self.opts.id, "fps_from": from, "fps_to": to,
+                       "demand": self.demand_hz, "gpu_ms": p50, "fps_actual": fps,
+                       "missed_pct": missed_pct}),
+            );
+            self.throttled_since.get_or_insert(inst);
+        } else if self.budget.cap().is_none() {
+            self.unthrottled(from, to, "recovered");
+        } else {
+            log::event(
+                "scene",
+                Level::Info,
+                "scene.throttle_eased",
+                None,
+                json!({"id": self.opts.id, "fps_from": from, "fps_to": to,
+                       "demand": self.demand_hz, "missed_pct": missed_pct}),
+            );
+        }
+    }
+
+    /// `scene.unthrottled {id, fps_from, fps_to, reason}`: `recovered` (calm steps reached the
+    /// demand), `off` (the setting), `demand` (the outputs now ask for no more than the cap).
+    fn unthrottled(&mut self, from: f64, to: f64, reason: &str) {
+        self.throttled_since = None;
+        log::event(
+            "scene",
+            Level::Info,
+            "scene.unthrottled",
+            None,
+            json!({"id": self.opts.id, "fps_from": from, "fps_to": to, "reason": reason}),
+        );
+    }
+
+    /// Median and 95th percentile of the worker's GPU time per frame over the last 2 s.
+    fn gpu_ms_stats(&self, now: Instant) -> (Option<f64>, Option<f64>) {
+        let mut v: Vec<f64> = self
+            .gpu_ms
+            .iter()
+            .filter(|(t, _)| now.saturating_duration_since(*t) <= BUDGET_WINDOW)
+            .map(|(_, ms)| *ms as f64)
+            .collect();
+        if v.is_empty() {
+            return (None, None);
+        }
+        v.sort_by(f64::total_cmp);
+        let n = v.len();
+        let rank = |p: f64| v[((p * n as f64).ceil() as usize).clamp(1, n) - 1];
+        (Some(rank(0.5)), Some(rank(0.95)))
+    }
+
+    /// Frames latched per second over the last `window`.
+    fn fps_over(&self, now: Instant, window: Duration) -> f64 {
+        let n = self
+            .latch_times
+            .iter()
+            .filter(|t| now.saturating_duration_since(**t) <= window)
+            .count();
+        n as f64 / window.as_secs_f64()
+    }
+
+    /// The rate the outputs ask for (before the GPU budget's cap).
+    pub fn demand_hz(&self) -> f64 {
+        self.demand_hz
+    }
+
+    /// The GPU budget's cap (`None` = unthrottled).
+    pub fn throttle_cap(&self) -> Option<f64> {
+        self.budget.cap()
+    }
+
+    /// Median / p95 GPU time per frame over the last 2 s (the worker's `GL_TIME_ELAPSED`).
+    pub fn gpu_ms(&self) -> (Option<f64>, Option<f64>) {
+        self.gpu_ms_stats(Instant::now())
     }
 
     /// Stepped mode: show exactly scene time `t` (one tick, unless that frame is shown or
@@ -714,8 +930,23 @@ impl SceneSource {
                     Err(e) => self.fail(e),
                 }
             }
-            FromWorker::Frame { slot, seq, t, .. } => {
+            FromWorker::Frame {
+                slot,
+                seq,
+                t,
+                gpu_ms,
+            } => {
                 self.stats.frames_received += 1;
+                if let Some(ms) = gpu_ms.filter(|ms| ms.is_finite() && *ms >= 0.0) {
+                    self.gpu_ms.push_back((now, ms));
+                }
+                while self
+                    .gpu_ms
+                    .front()
+                    .is_some_and(|(at, _)| now.saturating_duration_since(*at) > BUDGET_WINDOW)
+                {
+                    self.gpu_ms.pop_front();
+                }
                 self.inflight = self.seq.saturating_sub(seq + 1);
                 let acquire = fds.into_iter().next();
                 if let Some(f) = &acquire {
@@ -927,6 +1158,9 @@ impl SceneSource {
         self.has_audio = None;
         self.error = None;
         self.broken = None;
+        self.vram_stopped = None;
+        self.rate_since = None;
+        self.gpu_ms.clear();
         self.sync = None;
         self.flow_armed = !self.paused;
         self.flow_seen = false;
@@ -1072,9 +1306,11 @@ impl SceneSource {
             self.exact_pending = false;
             self.exact_seq = None;
             self.flow_seen = false;
+            self.rate_since = None;
         } else {
             self.next_tick = Some(now);
             self.arm_flowing();
+            self.rate_since = self.loaded.then_some(now);
         }
     }
 
@@ -1100,7 +1336,7 @@ impl SceneSource {
         while self
             .latch_times
             .front()
-            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(1))
+            .is_some_and(|t| now.duration_since(*t) > BUDGET_WINDOW)
         {
             self.latch_times.pop_front();
         }
@@ -1109,6 +1345,7 @@ impl SceneSource {
         }
         if !self.loaded && l.generation == self.latch.generation() {
             self.loaded = true;
+            self.rate_since = (!self.paused).then_some(now);
             self.events.push(SourceEvent::Ready);
             self.clock.set_running(self.clock_should_run(), now);
             self.next_tick = Some(now + self.tick_period);
@@ -1249,7 +1486,8 @@ impl SceneSource {
             .iter()
             .filter(|t| now.duration_since(**t) <= Duration::from_secs(1))
             .count();
-        json!({
+        let (gpu_p50, gpu_p95) = self.gpu_ms_stats(now);
+        let mut v = json!({
             "id": self.opts.id,
             "path": self.opts.path,
             "pid": self.pid(),
@@ -1264,6 +1502,7 @@ impl SceneSource {
             "max_size": self.opts.max_size,
             "fps_target": self.opts.tick_hz,
             "fps_actual": fps_actual,
+
             "paused": self.paused,
             "stepped": self.opts.stepped,
             "ready": self.loaded,
@@ -1290,7 +1529,23 @@ impl SceneSource {
             }).collect::<Map<String, Value>>(),
             // Task 6
             "audio": audio,
-        })
+        });
+        // Task 8: the GPU budget and the VRAM guard.
+        v["fps_demand"] = json!(self.demand_hz);
+        v["gpu_ms_p50"] = json!(gpu_p50);
+        v["gpu_ms_p95"] = json!(gpu_p95);
+        v["throttle"] = json!(self.budget.cap().map(|cap| json!({
+            "cap": cap,
+            "demand": self.demand_hz,
+            "since_ms": self
+                .throttled_since
+                .map(|t| now.saturating_duration_since(t).as_secs_f64() * 1e3),
+        })));
+        v["vram_stopped"] = json!(
+            self.vram_stopped
+                .map(|(used, limit)| json!({"used_mib": used, "limit_mib": limit}))
+        );
+        v
     }
 }
 

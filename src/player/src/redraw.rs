@@ -22,9 +22,17 @@
 //! Otherwise it is **idle**: no frame is drawn and no frame callback requested (the
 //! `frames` probe reports `idle: true`). Headless outputs don't use this — they compose on
 //! every tick, unchanged (R46).
+//!
+//! **Scene frames are gated per output (Phase 2 Task 8):** one scene worker serves every
+//! output showing it (D1) and ticks at the fastest of their `eff(scene_fps, refresh)`, so a
+//! new scene frame wakes output `<c>` at most `eff(out:<c>.scene_fps, refresh)` times per
+//! second ([`Redraw::mark_shown_gated`]): on a grid of that period, a frame that comes early
+//! is deferred to its slot ([`Redraw::promote_due`]) — never dropped, so the last frame before
+//! a pause is still drawn. Anything else that wakes the output (a video it shows, an
+//! animation) presents the scene's newest frame with it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::anim::{Animator, PropPath, is_gain_path};
 use crate::graph::{Graph, NodeKind, PropValue};
@@ -36,7 +44,15 @@ pub struct Redraw {
     drawn_rev: BTreeMap<String, u64>,
     /// Outputs with a new source frame / a backend request since their last present.
     dirty: BTreeSet<String>,
+    /// Task 8: per output, the grid slot of the last scene frame let through…
+    gate_last: BTreeMap<String, Instant>,
+    /// …and when a scene frame that came early may wake it.
+    gate_due: BTreeMap<String, Instant>,
 }
+
+/// A gated scene frame this close before its slot is on time (the loop's own jitter must not
+/// cost a slot).
+pub const GATE_SLACK: Duration = Duration::from_millis(2);
 
 impl Redraw {
     pub fn new() -> Redraw {
@@ -63,6 +79,79 @@ impl Redraw {
             {
                 self.dirty.insert(name.to_string());
             }
+        }
+    }
+
+    /// [`mark_shown`](Self::mark_shown) with the per-output scene gate (Task 8): `period(src,
+    /// output)` = `Some(1 / eff(scene_fps, refresh))` for a scene source, `None` for anything
+    /// else (marks at once). An output only woken by gated sources is marked on a grid of its
+    /// period; an early frame is deferred to its slot (`promote_due`).
+    pub fn mark_shown_gated(
+        &mut self,
+        graph: &Graph,
+        changed: &BTreeSet<String>,
+        now: Instant,
+        period: impl Fn(&str, &str) -> Option<Duration>,
+    ) {
+        if changed.is_empty() {
+            return;
+        }
+        for out in graph.ids_of(NodeKind::Output) {
+            let Some(name) = out.strip_prefix("out:") else {
+                continue;
+            };
+            let mut gated: Option<Duration> = None;
+            let mut ungated = false;
+            for s in shown_by(graph, &format!("lay:{name}:main")) {
+                if !changed.contains(&s) {
+                    continue;
+                }
+                match period(&s, name) {
+                    Some(p) => gated = Some(gated.map_or(p, |g| g.min(p))),
+                    None => ungated = true,
+                }
+            }
+            if ungated {
+                self.dirty.insert(name.to_string());
+            } else if let Some(p) = gated {
+                self.gate(name, p, now);
+            }
+        }
+    }
+
+    fn gate(&mut self, name: &str, period: Duration, now: Instant) {
+        match self.gate_last.get(name).copied() {
+            Some(last) if now + GATE_SLACK < last + period => {
+                self.gate_due.entry(name.to_string()).or_insert(last + period);
+            }
+            last => self.open_gate(name, last, period, now),
+        }
+    }
+
+    /// Let a scene frame through on `name`'s grid (`last` + `period`, or now after a gap).
+    fn open_gate(&mut self, name: &str, last: Option<Instant>, period: Duration, now: Instant) {
+        let slot = match last {
+            Some(l) if l + period + period > now => l + period,
+            _ => now,
+        };
+        self.dirty.insert(name.to_string());
+        self.gate_last.insert(name.to_string(), slot);
+        self.gate_due.remove(name);
+    }
+
+    /// Deferred scene frames whose slot came (`mark_shown_gated`): mark their outputs. Call
+    /// before deciding what presents (every paced pass).
+    pub fn promote_due(&mut self, now: Instant) {
+        let due: Vec<(String, Instant)> = self
+            .gate_due
+            .iter()
+            .filter(|(_, d)| now + GATE_SLACK >= **d)
+            .map(|(n, d)| (n.clone(), *d))
+            .collect();
+        for (name, d) in due {
+            self.dirty.insert(name.clone());
+            self.gate_last.insert(name.clone(), d);
+            self.gate_due.remove(&name);
         }
     }
 
@@ -99,6 +188,8 @@ impl Redraw {
     pub fn forget(&mut self, name: &str) {
         self.dirty.remove(name);
         self.drawn_rev.remove(name);
+        self.gate_last.remove(name);
+        self.gate_due.remove(name);
     }
 }
 
@@ -275,6 +366,56 @@ mod tests {
             r.wants("DP-1", rev, false),
             "B's frames show through the effect"
         );
+    }
+
+    /// Task 8: one scene frame every 1/60 s, shown on DP-1 (scene_fps 60) and DP-2 (15): DP-1
+    /// presents every frame, DP-2 at most 15 per second — on a grid, the frame that came early
+    /// deferred to its slot, never lost (the last one before the scene stops is drawn too).
+    #[test]
+    fn scene_frames_wake_each_output_at_its_scene_fps() {
+        let mut g = two_outputs();
+        g.set(&p("lay:DP-2:main.content"), PropValue::Str("a".into()))
+            .unwrap();
+        let mut r = Redraw::new();
+        let rev = g.picture_rev();
+        let period = |_: &str, out: &str| {
+            Some(Duration::from_secs_f64(if out == "DP-1" { 1.0 / 60.0 } else { 1.0 / 15.0 }))
+        };
+        let t0 = Instant::now();
+        let mut presents = [0, 0];
+        let pass = |r: &mut Redraw, now: Instant, presents: &mut [i32; 2]| {
+            r.promote_due(now);
+            for (i, o) in ["DP-1", "DP-2"].iter().enumerate() {
+                if r.wants(o, rev, false) {
+                    presents[i] += 1;
+                    r.drawn(o, rev);
+                }
+            }
+        };
+        pass(&mut r, t0, &mut presents);
+        presents = [0, 0];
+        // 1 s of 60 fps frames, with the loop's own jitter (±1 ms), a pass every 4 ms between.
+        for i in 0..60u64 {
+            let at = t0 + Duration::from_micros(i * 16_667 + (i % 3) * 1000);
+            r.mark_shown_gated(&g, &set(&["a"]), at, period);
+            for k in 0..4 {
+                pass(&mut r, at + Duration::from_millis(k * 4), &mut presents);
+            }
+        }
+        assert_eq!(presents[0], 60, "DP-1 at 60: {presents:?}");
+        assert!((14..=16).contains(&presents[1]), "DP-2 at 15: {presents:?}");
+        // The last frame came early on DP-2: it is drawn at its slot, not lost.
+        let last = t0 + Duration::from_millis(1100);
+        r.mark_shown_gated(&g, &set(&["a"]), last, period);
+        let mut later = [0, 0];
+        pass(&mut r, last, &mut later);
+        pass(&mut r, last + Duration::from_millis(70), &mut later);
+        assert_eq!(later[1], 1, "the deferred frame reaches DP-2: {later:?}");
+        // A non-scene source is never gated.
+        r.drawn("DP-1", rev);
+        r.drawn("DP-2", rev);
+        r.mark_shown_gated(&g, &set(&["a"]), last + Duration::from_millis(71), |_, _| None);
+        assert!(r.wants("DP-2", rev, false), "ungated: marked at once");
     }
 
     #[test]

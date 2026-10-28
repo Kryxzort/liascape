@@ -36,6 +36,7 @@
 //! sound and the time stretch's 0.5×/1.5× output as raw F32.
 
 mod audio;
+mod gputimer;
 #[cfg(feature = "lwe")]
 mod lwe;
 #[cfg(feature = "lwe")]
@@ -407,6 +408,8 @@ struct Renderer {
     exit_code: Option<i32>,
     /// The scene's native size (a `resize` re-exports at its cover size).
     native: (u32, u32),
+    /// Task 8: `GL_TIME_ELAPSED` per frame, read back later without waiting (`Frame.gpu_ms`).
+    timer: gputimer::GpuTimer,
 }
 
 /// `poll` a `sync_file` until it signals (bounded; a kernel wait, never a spin).
@@ -720,6 +723,8 @@ impl Renderer {
             }
         }
         let input = self.input.take();
+        self.timer.begin(&self.gfx.gl);
+        let mut report_gpu_ms = None;
         match scene {
             SceneImpl::Synthetic(s) => {
                 if let Some(v) = &input {
@@ -732,6 +737,7 @@ impl Renderer {
                     (self.pointer.1 * h as f64 / nh) as f32,
                 );
                 s.render(&self.gfx, &slot.fbo, w, h, seq, self.level, p);
+                report_gpu_ms = s.report_gpu_ms();
             }
             #[cfg(feature = "lwe")]
             SceneImpl::Lwe(s) => {
@@ -741,13 +747,17 @@ impl Renderer {
                 s.render(&self.gfx, t, &slot.fbo, w, h);
             }
         }
+        self.timer.end(&self.gfx.gl);
+        // The newest finished measurement (an earlier frame's — never waited for); the
+        // synthetic `report_gpu_ms` knob (tests) stands in for it.
+        let measured = self.timer.poll(&self.gfx.gl);
         slot.busy = true;
         let id = slot.id;
         let frame = FromWorker::Frame {
             slot: id,
             seq,
             t,
-            gpu_ms: None,
+            gpu_ms: report_gpu_ms.or(measured),
         };
         match self.gfx.native_fence() {
             Ok(fence) if !self.fdpoll => {
@@ -898,6 +908,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         hang_at: k.hang_after_ms.map(|ms| now + Duration::from_millis(ms)),
         exit_code: k.exit_code,
         native: (1, 1),
+        timer: gputimer::GpuTimer::default(),
     };
     r.log(format!(
         "gfx: context priority requested low, granted {}",
