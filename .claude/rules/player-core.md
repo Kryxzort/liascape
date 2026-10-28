@@ -3746,6 +3746,25 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   frame with it. Headless every-tick composing is unaffected. Unit
   `scene_frames_wake_each_output_at_its_scene_fps` (RED with the gate bypassed: DP-2 60 instead of
   15).
+- **A scene at the refresh is paced by frame callbacks, not the gate (Task 14, on-machine).** On
+  an output with frame callbacks (Wayland) whose `eff(scene_fps, refresh)` is its refresh
+  (`scene_fps` 0 or ≥ it), `redraw::scene_gate_period(scene_fps, refresh, callbacks)` is `None` —
+  ungated — and while such a scene plays at that rate (`SceneSource::clock_running`, `tick_hz` ≥ the
+  refresh: not paused, not throttled below it, not holding a crashed worker's frame) the output
+  **presents on every frame callback** like an animation (`runtime::scene_paces_output` →
+  `render_paced`'s `animating`). Why both: the gate's grid (1 / the *rounded* refresh, 6.944 ms for
+  143.981 Hz) drifted against the vblank, and whenever its slot fell after a callback the output
+  went idle and presented off-callback at the slot — measured with `scene_fps 0`: DP-1 144
+  presents/s but **0 of 288 intervals paced** for ~20 s at a time, DP-2 235–239.5 presents/s with
+  ~100 idle gaps/s. Ungated alone fixed DP-1 but not DP-2: the worker's frames come on the loop's
+  clock (240.000 Hz) against a 239.76 Hz vblank, so presenting only on a *new* frame still left
+  callbacks with nothing new (paced mean 3.4 ms on a 4.17 ms display — two presents in one refresh).
+  After both: DP-1 6.94 ms (288/288 paced), DP-2 4.17 ms (478–480/480) for all four step-1 scenes
+  (`tests/onmachine/scenes.sh outputs`); a repeat only when the two clocks slip (~once per 4 s at
+  240 Hz). Below the refresh (30 fps on 144 Hz) the gate and content pacing are unchanged. Unit
+  `scene_at_the_refresh_is_paced_by_frame_callbacks_not_the_gate` (RED: `Some(6.944 ms)` for
+  scene_fps 0 on 144 Hz); the presenting half is runtime-only (no hermetic Wayland) — guarded by the
+  on-machine step.
 - **GPU time (`bin/lp-scene-worker/gputimer.rs`).** One `GL_TIME_ELAPSED` query around each
   frame's rendering (scene + blit into the slot), read back **only once `QUERY_RESULT_AVAILABLE`**
   — normally a frame or two later — never waited on; ≤ `MAX_QUERIES` 4 in flight (all busy → that

@@ -29,7 +29,9 @@
 //! second ([`Redraw::mark_shown_gated`]): on a grid of that period, a frame that comes early
 //! is deferred to its slot ([`Redraw::promote_due`]) — never dropped, so the last frame before
 //! a pause is still drawn. Anything else that wakes the output (a video it shows, an
-//! animation) presents the scene's newest frame with it.
+//! animation) presents the scene's newest frame with it. A scene at the output's refresh is
+//! not gated on an output with frame callbacks ([`scene_gate_period`]) — the runtime presents
+//! it on every callback instead (`runtime::scene_paces_output`, Phase 2 Task 14).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -53,6 +55,20 @@ pub struct Redraw {
 /// A gated scene frame this close before its slot is on time (the loop's own jitter must not
 /// cost a slot).
 pub const GATE_SLACK: Duration = Duration::from_millis(2);
+
+/// The gate period for a scene shown on an output (`mark_shown_gated`'s `period`): one frame of
+/// `eff(scene_fps, refresh)` — or `None` (not gated) when that is the output's refresh and the
+/// output has frame callbacks (Wayland): they already pace it at the refresh, on the vblank,
+/// while the gate's own time grid (1 / the rounded refresh) drifts against the real one and,
+/// whenever its slot fell after a callback, made the output present off-callback at the slot
+/// (Task 14: DP-1 0 of 288 intervals paced for ~20 s at a time, DP-2 lost frames).
+pub fn scene_gate_period(scene_fps: f64, refresh_hz: f64, frame_callbacks: bool) -> Option<Duration> {
+    let hz = crate::sources::scene::eff_fps(scene_fps, refresh_hz);
+    if frame_callbacks && refresh_hz > 0.0 && hz >= refresh_hz {
+        return None;
+    }
+    Some(Duration::from_secs_f64(1.0 / hz.clamp(1.0, 1000.0)))
+}
 
 impl Redraw {
     pub fn new() -> Redraw {
@@ -371,6 +387,26 @@ mod tests {
     /// Task 8: one scene frame every 1/60 s, shown on DP-1 (scene_fps 60) and DP-2 (15): DP-1
     /// presents every frame, DP-2 at most 15 per second — on a grid, the frame that came early
     /// deferred to its slot, never lost (the last one before the scene stops is drawn too).
+    #[test]
+    fn scene_at_the_refresh_is_paced_by_frame_callbacks_not_the_gate() {
+        // Phase 2 Task 14 (on-machine): with scene_fps at (or above) the refresh, the gate's own
+        // time grid (1/144 s) drifts against the real vblank (143.981 Hz) — whenever its slot
+        // fell after a frame callback the output went idle and presented off-callback at the
+        // slot: DP-1 presented 144/s with 0 of 288 intervals paced for ~20 s at a time, DP-2
+        // lost frames (235–239.5 presents/s, ~100 idle gaps/s). Frame callbacks already cap an
+        // output at its refresh, so such a scene is not gated there.
+        let ms = |d: Option<Duration>| d.map(|d| (d.as_secs_f64() * 1e3 * 1000.0).round() / 1000.0);
+        assert_eq!(scene_gate_period(0.0, 144.0, true), None, "scene_fps 0 = the refresh");
+        assert_eq!(scene_gate_period(240.0, 144.0, true), None, "above the refresh");
+        assert_eq!(scene_gate_period(144.0, 144.0, true), None, "exactly the refresh");
+        assert_eq!(ms(scene_gate_period(30.0, 144.0, true)), Some(33.333), "below: gated");
+        assert_eq!(ms(scene_gate_period(144.0, 240.0, true)), Some(6.944), "below: gated");
+        // Without frame callbacks (headless `--redraw-policy content`) the gate is all that
+        // limits an output to its refresh.
+        assert_eq!(ms(scene_gate_period(0.0, 60.0, false)), Some(16.667));
+        assert_eq!(ms(scene_gate_period(15.0, 60.0, false)), Some(66.667));
+    }
+
     #[test]
     fn scene_frames_wake_each_output_at_its_scene_fps() {
         let mut g = two_outputs();

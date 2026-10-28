@@ -926,6 +926,12 @@ impl SceneSource {
         n as f64 / window.as_secs_f64()
     }
 
+    /// Whether the scene clock runs (loaded, not paused, not stepped, not holding a crashed
+    /// worker's frame) — i.e. new frames keep coming at `tick_hz`.
+    pub fn clock_running(&self) -> bool {
+        self.clock_should_run()
+    }
+
     /// The rate the outputs ask for (before the GPU budget's cap).
     pub fn demand_hz(&self) -> f64 {
         self.demand_hz
