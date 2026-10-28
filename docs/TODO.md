@@ -536,6 +536,13 @@ Two bug classes kept recurring; fix the class, not the instance:
       succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
       incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
+- [ ] **Matrix shard hung in `scene × sceneProp:restart`** (2026-10-28, the `--changed lp-player --jobs 2` run for the
+      fix above): shard 0 stopped after `sceneProp:set` for 30 min (stack healthy — backend `/health` 200, the player's
+      `state` fine, the scene's worker running; the probe idle), killed by hand; the cell and every scene cell after it
+      passed on a rerun (31/31). The probe has no per-cell deadline and two waits without one: `ctlClient`'s
+      `connect()` (its timeout only starts after the connection) and `js()` / `executeJavaScript`. Give a cell a
+      deadline (→ ERROR + the stack's state) and `connect()` its own timeout. Electron ignores SIGUSR1 here (no
+      inspector), so the next one needs that deadline to say where it waits.
 - [ ] Optional: a backend instance id in a WS hello (the page could tell a restart from a dropped socket). Not needed
       while every reopen re-reads; only worth it if `resync` ever gets expensive.
 

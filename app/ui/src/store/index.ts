@@ -421,14 +421,16 @@ function savePlaylistDebounced(get: () => State) {
   }, 200);
 }
 
-// One read of everything the store mirrors (resync). A read fails → null → that piece stays as shown.
+// One read of everything the store mirrors (resync). A read fails → null → that piece stays as shown. Only the core
+// reads decide "unreachable" (a fetch TypeError — no answer, or cross-origin dev: an answer without CORS headers): a
+// side read that keeps failing (playlist names, undo depth, Steam status) must not keep init retrying forever.
 type Setter = (p: Partial<State>) => void;
 async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   let unreachable = false;
-  const r = <T,>(p: Promise<T>) => p.then((v) => ({ v }), (e) => { if (e instanceof TypeError) unreachable = true; return null; });
+  const r = <T,>(p: Promise<T>, core = true) => p.then((v) => ({ v }), (e) => { if (core && e instanceof TypeError) unreachable = true; return null; });
   const [sources, themes, settings, cur, lib, pstate, names, depth, steam] = await Promise.all([
     r(api.sources()), r(api.themes()), r(api.settings()), r(api.current()), r(api.library()), r(api.playlistState()),
-    r(api.playlistNames()), r(api.undoDepth()), r(api.steamStatus()),
+    r(api.playlistNames(), false), r(api.undoDepth(), false), r(api.steamStatus(), false),
   ]);
   const st = get();
   const playingLine = st.status === "" || st.status === buildPlayingStatus(get); // no transient notice showing
