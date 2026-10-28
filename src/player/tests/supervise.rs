@@ -1098,3 +1098,107 @@ fn scene_snapshot_restores_at_position() {
 fn s_json(p: &Path) -> Value {
     json!(s(p))
 }
+
+fn png_rgb(path: &Path, x: u32, y: u32) -> [u8; 3] {
+    let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    let mut rd = dec.read_info().unwrap();
+    let mut buf = vec![0; rd.output_buffer_size().unwrap()];
+    let info = rd.next_frame(&mut buf).unwrap();
+    let i = ((y * info.width + x) * 4) as usize;
+    [buf[i], buf[i + 1], buf[i + 2]]
+}
+
+/// Phase 2 Task 10: a broken scene (its every worker crashed before a first frame: past the
+/// restart budget, showing its preview) is saved `broken: true`, and the restarted compositor
+/// restores it as its preview — `broken` again, **no worker** (none spawned for it), the
+/// preview on every output — instead of crash-looping a fresh worker through a new budget.
+#[test]
+fn broken_scene_restores_as_preview() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let mut sup = Sup::spawn_in(
+        new_root(),
+        &[],
+        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
+        Some(serial),
+        true,
+    );
+    let png = common::solid_png("sup-t10-preview", [0, 255, 0]);
+    let dir = common::synthetic_scene(
+        "sup-t10-broken",
+        &lp_player::scene::synthetic::SyntheticSpec {
+            crash_after_ms: Some(0),
+            ..Default::default()
+        },
+    );
+    let mut c = sup.client();
+    let id = c.create(json!({"kind": "scene", "path": s(&dir), "preview": s(&png)}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    wait_state(&mut c, Duration::from_secs(20), |st| {
+        st["graph"][&id]["broken"] == json!(true)
+    });
+    let snap = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["sources"]
+            .as_object()
+            .is_some_and(|m| m.values().any(|s| s["path"] == s_json(&dir) && s["broken"] == true))
+    });
+    let saved = snap["sources"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|s| s["path"] == s_json(&dir))
+        .unwrap()
+        .clone();
+    assert_eq!(saved["kind"], json!("scene"), "{saved}");
+    assert_eq!(saved["props"]["preview"], s_json(&png), "{saved}");
+    drop(c);
+    let (_h, latency) = sup.crash(libc::SIGSEGV);
+    println!("restart latency {latency:?}");
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| {
+        sources(st).iter().any(|(_, n)| n["path"] == s_json(&dir))
+    });
+    let (nid, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s_json(&dir))
+        .unwrap();
+    assert_eq!(node["kind"], json!("scene"), "{node}");
+    assert_eq!(node["broken"], json!(true), "restored broken: {node}");
+    for conn in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&st, conn), nid, "{conn} shows the restored scene");
+    }
+    // The preview shows (the image opens on the restored source).
+    let shot = sup.root.join("t10-restored.png");
+    let t = Instant::now();
+    loop {
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+        let px = png_rgb(&shot, 320, 180);
+        if px[0] <= 3 && px[1] >= 252 && px[2] <= 3 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "the restored broken scene shows {px:?}, not its preview"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let st = c.state();
+    let w = st["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == json!(nid))
+        .cloned()
+        .expect("a workers entry");
+    assert!(w["pid"].is_null(), "no worker for a restored broken scene: {w}");
+    assert_eq!(w["state"], "broken", "{w}");
+    let spawned: Vec<Value> = c
+        .logs("worker.spawned")
+        .into_iter()
+        .filter(|e| e["id"] == json!(nid))
+        .collect();
+    assert!(spawned.is_empty(), "spawned {spawned:?}");
+}

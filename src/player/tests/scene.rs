@@ -1312,3 +1312,217 @@ fn real_scenes_render_and_animate() {
         assert!(gl_errors.is_empty(), "{id}: {gl_errors:?}");
     }
 }
+
+// ---------------------------------------------------------------- Task 10: the crash policy
+
+/// A crashed worker's restart resumes at the scene time of the frame it left on screen —
+/// exactly that `t`, not the compositor's clock moved on by the outage; the picture is held
+/// (identical) from the restart until the new worker's first frame, and `time_pos` never
+/// jumps (the scene clock stops while no worker renders). RED before: the first frame of the
+/// restarted worker was the outage past the held one (the clock ran through the restart).
+#[test]
+fn crash_holds_last_frame_and_resumes_at_position() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let id = h.scene(
+        "t10-resume",
+        &spec(Pattern::FrameIndex),
+        json!({"position": 2.0}),
+    );
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    let tp = format!("{id}.time_pos");
+    assert!(
+        h.tick_until(Duration::from_secs(10), |h| h.f64(&tp) >= 3.0),
+        "never reached t = 3"
+    );
+    let period = 1.0 / h.scene_src(&id).tick_hz();
+    let pid = h.scene_src(&id).pid().expect("a worker");
+    let gen0 = h.scene_src(&id).stats().latched_gen;
+    let kill_tp = h.f64(&tp);
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    let mut samples: Vec<(Instant, f64)> = vec![(Instant::now(), kill_tp)];
+    // (the held frame's t, the output's marker) once the restart is under way
+    let mut held: Option<(f64, [u8; 4])> = None;
+    let mut held_checks = 0;
+    let ok = h.tick_until(Duration::from_secs(10), |h| {
+        samples.push((Instant::now(), h.f64(&tp)));
+        let s = h.scene_src(&id);
+        if s.stats().latched_gen != gen0 {
+            return true;
+        }
+        if s.stats().restarts >= 1 {
+            let px = h.out_corner("VIRTUAL-1");
+            match &held {
+                None => held = Some((s.latched_t().expect("the held frame"), px)),
+                Some((_, p)) => {
+                    assert_eq!(&px, p, "the held picture changed during the restart");
+                    held_checks += 1;
+                }
+            }
+        }
+        false
+    });
+    assert!(ok, "no frame from the restarted worker: {:?}", h.src_events);
+    let (held_t, _) = held.expect("the restart was seen before the new frame");
+    assert!(held_checks > 0, "the restart took no tick at all");
+    let s = h.scene_src(&id);
+    assert_ne!(s.pid(), Some(pid), "a new worker");
+    assert_eq!(s.stats().restarts, 1);
+    let t_new = s.latched_t().unwrap();
+    println!("killed at time_pos {kill_tp:.4}; held t {held_t:.4}; first new frame t {t_new:.4}");
+    assert!(
+        (t_new - held_t).abs() < 1e-6,
+        "the restarted worker's first frame is t = {t_new}, the held frame was t = {held_t}"
+    );
+    assert!(
+        held_t >= kill_tp - period - 0.02,
+        "the held frame t = {held_t} is more than a tick before the kill ({kill_tp})"
+    );
+    let tp_new = h.f64(&tp);
+    assert!(
+        (tp_new - held_t).abs() <= period + 0.02,
+        "time_pos {tp_new} at the first new frame, the held frame was {held_t}"
+    );
+    for w in samples.windows(2) {
+        let (dw, ds) = (
+            w[1].0.duration_since(w[0].0).as_secs_f64(),
+            w[1].1 - w[0].1,
+        );
+        assert!(
+            ds >= -0.1 && ds <= dw + 0.1,
+            "time_pos jumped {:.3} → {:.3} in {dw:.3} s",
+            w[0].1,
+            w[1].1
+        );
+    }
+    // It plays on from there.
+    tick_for(&mut h, Duration::from_millis(400));
+    let tp_after = h.f64(&tp);
+    assert!(
+        (tp_after - held_t - 0.4).abs() <= 0.15,
+        "time_pos {tp_after} 0.4 s after resuming at {held_t}"
+    );
+    assert_eq!(readies(&h, &id), 1, "a restart is not a load");
+    assert!(
+        !h.src_events
+            .iter()
+            .any(|(_, i, e)| i == &id && matches!(e, SourceEvent::Error { .. })),
+        "{:?}",
+        h.src_events
+    );
+}
+
+/// The green test preview (mpv's ordered dither may move a channel by one).
+fn green(px: [u8; 4]) -> bool {
+    px[0] <= 3 && px[1] >= 252 && px[2] <= 3
+}
+
+/// A worker that crashes before its first frame (every one: `crash_after_ms 0`) has nothing
+/// to hold: the source shows its `preview` image while it restarts and once it is broken
+/// (3 restarts) — never black, never anything else. `broken` is observed in the graph, one
+/// `Error`, no `Ready`.
+#[test]
+fn crash_before_first_frame_shows_preview() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let png = common::solid_png("t10-preview-green", [0, 255, 0]);
+    let mut sp = spec(Pattern::Solid);
+    sp.rgb = [255, 0, 0];
+    sp.crash_after_ms = Some(0);
+    let id = h.scene(
+        "t10-preview",
+        &sp,
+        json!({"preview": png.to_str().unwrap()}),
+    );
+    h.show("VIRTUAL-1", &id);
+    let mut shown_before_broken = 0;
+    let ok = h.tick_until(Duration::from_secs(15), |h| {
+        let s = h.scene_src(&id);
+        if let Some(t) = s.texture() {
+            let px = common::read_rgba(&h.gfx, t, t.w / 2, t.h / 2);
+            assert!(green(px), "only the preview may show: {px:?}");
+            if s.broken().is_none() {
+                shown_before_broken += 1;
+            }
+        }
+        s.broken().is_some()
+    });
+    assert!(ok, "never broken: {:?}", h.src_events);
+    // The preview stays (an image open may still be finishing at the break).
+    let ok = h.tick_until(Duration::from_secs(5), |h| {
+        h.scene_src(&id).texture().is_some() && green(h.out_corner("VIRTUAL-1"))
+    });
+    assert!(ok, "the broken scene shows its preview on the output");
+    tick_for(&mut h, Duration::from_millis(300));
+    assert!(green(h.out_corner("VIRTUAL-1")), "and keeps it");
+    println!("preview shown on {shown_before_broken} ticks before the break");
+    let s = h.scene_src(&id);
+    assert_eq!(s.stats().restarts, 3);
+    assert!(s.pid().is_none(), "no worker once broken");
+    assert!(h.bool(&format!("{id}.broken")), "observed `broken`");
+    assert_eq!(readies(&h, &id), 0, "never a frame of the scene itself");
+    let errors = h
+        .src_events
+        .iter()
+        .filter(|(_, i, e)| i == &id && matches!(e, SourceEvent::Error { .. }))
+        .count();
+    assert_eq!(errors, 1, "{:?}", h.src_events);
+}
+
+/// A GPU context loss in the worker (`EGL_NV_robustness_video_memory_purge`, a GPU reset —
+/// here the synthetic `context_lost_after_ms`: every worker reports `ContextLost` 600 ms after
+/// its start) is a crash restart: the compositor kills and restarts it through the same
+/// budget, the frame held meanwhile; the 4th within 60 s is broken, its crash record naming
+/// the context loss.
+#[test]
+fn context_lost_is_a_restart() {
+    let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let mut sp = spec(Pattern::FrameIndex);
+    sp.context_lost_after_ms = Some(600);
+    let id = h.scene("t10-ctxlost", &sp, json!({}));
+    h.show("VIRTUAL-1", &id);
+    h.wait_ready(&id);
+    let pid = h.scene_src(&id).pid().unwrap();
+    let gen0 = h.scene_src(&id).stats().latched_gen;
+    let ok = h.tick_until(Duration::from_secs(10), |h| {
+        assert!(h.scene_src(&id).texture().is_some(), "the frame went away");
+        h.scene_src(&id).stats().latched_gen > gen0
+    });
+    assert!(ok, "no restart after the context loss: {:?}", h.src_events);
+    let s = h.scene_src(&id);
+    assert_eq!(s.stats().restarts, 1);
+    assert_ne!(s.pid(), Some(pid), "a new worker");
+    let tail = s.log_tail().join("\n");
+    assert!(
+        tail.contains("GL context lost"),
+        "the restart names the context loss:\n{tail}"
+    );
+    assert!(s.broken().is_none() && s.error().is_none());
+    let ok = h.tick_until(Duration::from_secs(15), |h| {
+        h.scene_src(&id).broken().is_some()
+    });
+    assert!(ok, "never broken after repeated context losses");
+    let s = h.scene_src(&id);
+    assert_eq!(s.stats().restarts, 3);
+    assert!(s.texture().is_some(), "the last frame is kept");
+    let reason = s.broken().unwrap().to_string();
+    let rec = reason
+        .split("crash record ")
+        .nth(1)
+        .and_then(|r| r.strip_suffix(')'))
+        .expect("the record path in the reason");
+    let rec: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(rec).expect("the crash record")).unwrap();
+    assert!(
+        rec["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("GL context lost")),
+        "{rec}"
+    );
+    assert!(h.bool(&format!("{id}.broken")));
+}

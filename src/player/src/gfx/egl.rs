@@ -123,7 +123,32 @@ impl Priority {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OffscreenOpts {
     pub priority: Option<Priority>,
+    /// Phase 2 Task 10: ask for a context that **reports** a GPU reset instead of rendering
+    /// garbage after one — robust buffer access + `LOSE_CONTEXT_ON_RESET` (EGL 1.5 /
+    /// `EGL_KHR_create_context`, else `EGL_EXT_create_context_robustness`), plus
+    /// `EGL_GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV` where listed (NVIDIA purges VRAM on
+    /// suspend/resume and VT switches). A driver refusing it falls back to a plain context;
+    /// [`Gfx::loses_context_on_reset`] says what was granted, [`Gfx::reset_status`] polls it.
+    /// The scene worker asks for it (a lost context = a crash restart); compositor contexts
+    /// don't.
+    pub robust: bool,
 }
+
+/// `EGL_CONTEXT_OPENGL_ROBUST_ACCESS` (EGL 1.5 / `EGL_KHR_create_context`).
+const CONTEXT_OPENGL_ROBUST_ACCESS: egl::Int = 0x31B2;
+/// `EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY` (EGL 1.5 / `_KHR`).
+const CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY: egl::Int = 0x31BD;
+/// `EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT` (`EGL_EXT_create_context_robustness`).
+const CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT: egl::Int = 0x3138;
+/// `EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT` (`EGL_EXT_create_context_robustness`).
+const CONTEXT_OPENGL_ROBUST_ACCESS_EXT: egl::Int = 0x30BF;
+/// `EGL_LOSE_CONTEXT_ON_RESET` (core and `_EXT`).
+const LOSE_CONTEXT_ON_RESET: egl::Int = 0x31BF;
+/// `EGL_GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV` (`EGL_NV_robustness_video_memory_purge`).
+const GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV: egl::Int = 0x334C;
+/// `GL_RESET_NOTIFICATION_STRATEGY` / `GL_LOSE_CONTEXT_ON_RESET` (GL 4.5 / `KHR_robustness`).
+const GL_RESET_NOTIFICATION_STRATEGY: u32 = 0x8256;
+const GL_LOSE_CONTEXT_ON_RESET: u32 = 0x8252;
 
 /// Opaque `EGLDeviceEXT` handle (`EGL_EXT_device_base`). Not a `khronos-egl` type — that
 /// extension predates EGL 1.5 and isn't part of the crate's core API, so this module talks
@@ -308,8 +333,14 @@ impl Gfx {
         require_surfaceless_context(&egl, display, &path)?;
 
         let config = choose_config(&egl, display, egl::PBUFFER_BIT)?;
-        let (context, priority) =
-            create_prioritized_context(&egl, display, config, opts.priority, &path)?;
+        let (context, priority) = create_prioritized_context(
+            &egl,
+            display,
+            config,
+            opts.priority,
+            opts.robust,
+            &path,
+        )?;
 
         egl.make_current(display, None, None, Some(context))
             .map_err(|e| format!("eglMakeCurrent (surfaceless) failed: {e}"))?;
@@ -335,6 +366,39 @@ impl Gfx {
     /// The context priority the driver granted (`None` without `EGL_IMG_context_priority`).
     pub fn context_priority(&self) -> Option<Priority> {
         self.priority
+    }
+
+    /// Phase 2 Task 10: this context reports a GPU reset (its reset notification strategy is
+    /// `LOSE_CONTEXT_ON_RESET` — [`OffscreenOpts::robust`] was granted), so
+    /// [`reset_status`](Self::reset_status) means something. Reads GL state: call with this
+    /// context current.
+    pub fn loses_context_on_reset(&self) -> bool {
+        unsafe {
+            use glow::HasContext;
+            self.gl.get_parameter_i32(GL_RESET_NOTIFICATION_STRATEGY) as u32
+                == GL_LOSE_CONTEXT_ON_RESET
+        }
+    }
+
+    /// Phase 2 Task 10: `glGetGraphicsResetStatus` (GL 4.5 / `KHR`/`ARB_robustness`, looked up
+    /// once): `0` (`GL_NO_ERROR`) while the context is fine, else the reset it suffered
+    /// (`GUILTY`/`INNOCENT`/`UNKNOWN_CONTEXT_RESET`, or `PURGED_CONTEXT_RESET_NV` after an
+    /// NVIDIA video-memory purge) — the context is lost then and must be recreated. `None`
+    /// when the driver has no such entry point. Cheap (no GPU sync); this context current.
+    pub fn reset_status(&self) -> Option<u32> {
+        use std::sync::OnceLock;
+        static PROC: OnceLock<usize> = OnceLock::new();
+        let p = *PROC.get_or_init(|| {
+            ["glGetGraphicsResetStatus", "glGetGraphicsResetStatusKHR", "glGetGraphicsResetStatusARB"]
+                .iter()
+                .find_map(|n| self.shared.egl.get_proc_address(n).map(|f| f as usize))
+                .unwrap_or(0)
+        });
+        if p == 0 {
+            return None;
+        }
+        let f: unsafe extern "system" fn() -> u32 = unsafe { std::mem::transmute(p) };
+        Some(unsafe { f() })
     }
 
     /// This context's EGL instance, display and context (Phase 2 `gfx::dmabuf`).
@@ -384,7 +448,8 @@ impl Gfx {
         let path = "EGL_PLATFORM_WAYLAND_KHR".to_string();
 
         let config = choose_config(&egl, display, egl::WINDOW_BIT)?;
-        let (context, priority) = create_prioritized_context(&egl, display, config, None, &path)?;
+        let (context, priority) =
+            create_prioritized_context(&egl, display, config, None, false, &path)?;
 
         egl.make_current(display, None, None, Some(context))
             .map_err(|e| format!("eglMakeCurrent (wayland, no surface yet) failed: {e}"))?;
@@ -1006,12 +1071,16 @@ fn create_prioritized_context(
     display: egl::Display,
     config: egl::Config,
     want: Option<Priority>,
+    robust: bool,
     path: &str,
 ) -> Result<(egl::Context, Option<Priority>), String> {
     let ext = egl
         .query_string(Some(display), egl::EXTENSIONS)
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
+    if robust {
+        return create_robust_context(egl, display, config, want, &ext, path);
+    }
     if !has_ext(&ext, "EGL_IMG_context_priority") {
         return Ok((create_core_3_3_context(egl, display, config)?, None));
     }
@@ -1050,6 +1119,117 @@ fn create_prioritized_context(
         "gfx.context_priority",
         None,
         serde_json::json!({"requested": want.name(), "granted": granted.map(|p| p.name()),
+                           "path": path}),
+    );
+    Ok((context, granted))
+}
+
+/// The robustness attributes this display takes (empty = none it can grant): robust access +
+/// `LOSE_CONTEXT_ON_RESET` through EGL 1.5 / `EGL_KHR_create_context`, else the `_EXT` tokens,
+/// plus the NVIDIA video-memory-purge reset where listed.
+fn robustness_attribs(egl: &EglInstance, display: egl::Display, ext: &str) -> Vec<egl::Int> {
+    let version = egl
+        .query_string(Some(display), egl::VERSION)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let v15 = version
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .next()
+        .and_then(|v| {
+            let mut it = v.split('.');
+            Some((it.next()?.parse::<u32>().ok()?, it.next()?.parse::<u32>().ok()?))
+        })
+        .is_some_and(|(maj, min)| (maj, min) >= (1, 5));
+    let mut a = if v15 || has_ext(ext, "EGL_KHR_create_context") {
+        vec![
+            CONTEXT_OPENGL_ROBUST_ACCESS,
+            egl::TRUE as egl::Int,
+            CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY,
+            LOSE_CONTEXT_ON_RESET,
+        ]
+    } else if has_ext(ext, "EGL_EXT_create_context_robustness") {
+        vec![
+            CONTEXT_OPENGL_ROBUST_ACCESS_EXT,
+            egl::TRUE as egl::Int,
+            CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT,
+            LOSE_CONTEXT_ON_RESET,
+        ]
+    } else {
+        return Vec::new();
+    };
+    if has_ext(ext, "EGL_NV_robustness_video_memory_purge") {
+        a.extend([GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV, egl::TRUE as egl::Int]);
+    }
+    a
+}
+
+/// [`create_prioritized_context`] with the robustness attributes (Task 10, the scene worker):
+/// tried with the priority, then robust without the NV purge reset, then without robustness
+/// (the plain priority path) — a driver that refuses any of it still gets a context.
+/// `gfx.context_robust {requested, attribs, granted_attribs, path}` (info).
+fn create_robust_context(
+    egl: &EglInstance,
+    display: egl::Display,
+    config: egl::Config,
+    want: Option<Priority>,
+    ext: &str,
+    path: &str,
+) -> Result<(egl::Context, Option<Priority>), String> {
+    let prio_ext = has_ext(ext, "EGL_IMG_context_priority");
+    let robust = robustness_attribs(egl, display, ext);
+    egl.bind_api(egl::OPENGL_API)
+        .map_err(|e| format!("eglBindAPI(EGL_OPENGL_API) failed: {e}"))?;
+    let attempt = |extra: &[egl::Int]| {
+        let mut a = vec![
+            egl::CONTEXT_MAJOR_VERSION,
+            3,
+            egl::CONTEXT_MINOR_VERSION,
+            3,
+            egl::CONTEXT_OPENGL_PROFILE_MASK,
+            egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        ];
+        if let Some(w) = want.filter(|_| prio_ext) {
+            a.extend([CONTEXT_PRIORITY_LEVEL_IMG, w.to_egl()]);
+        }
+        a.extend_from_slice(extra);
+        a.push(egl::NONE);
+        egl.create_context(display, config, None, &a).ok()
+    };
+    // The NV purge pair is the last two entries when present.
+    let without_purge = if robust.len() > 4 { &robust[..4] } else { &robust[..] };
+    let mut granted_attribs = "none";
+    let mut context = None;
+    if !robust.is_empty() {
+        context = attempt(&robust).map(|c| {
+            granted_attribs = "all";
+            c
+        });
+        if context.is_none() && robust.len() > 4 {
+            context = attempt(without_purge).map(|c| {
+                granted_attribs = "no_purge";
+                c
+            });
+        }
+    }
+    let context = match context.or_else(|| attempt(&[])) {
+        Some(c) => c,
+        None => create_core_3_3_context(egl, display, config)?,
+    };
+    let granted = if prio_ext {
+        egl.query_context(display, context, CONTEXT_PRIORITY_LEVEL_IMG)
+            .ok()
+            .and_then(Priority::from_egl)
+    } else {
+        None
+    };
+    crate::log::event(
+        "gfx",
+        crate::log::Level::Info,
+        "gfx.context_robust",
+        None,
+        serde_json::json!({"requested": want.map(|p| p.name()),
+                           "granted": granted.map(|p| p.name()),
+                           "attribs": robust.len() / 2, "granted_attribs": granted_attribs,
                            "path": path}),
     );
     Ok((context, granted))

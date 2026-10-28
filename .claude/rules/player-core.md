@@ -319,7 +319,8 @@ and is **never** recorded in `drain_changes` — an observation must not be forw
 the source as a command. `kind_of(id)`, `ids_of(kind)`, `props_of(id)` (every prop + set
 `gain.<slot>`s, what a source is opened from) and `effective_gain_db(id)` are plain reads.
 `Source.kind` also allows `snapshot`, with read-only `of` (seeded at create), and (Phase 2
-Task 5) `scene` — plus `Source.preview` (Str). `outputs_of(id)` is the inverse of
+Task 5) `scene` — plus `Source.preview` (Str) and (Task 10) read-only `Source.broken` (Bool:
+observed — a scene past its restart budget —, seeded at create by a snapshot restore). `outputs_of(id)` is the inverse of
 `srcs:<c>` (a scene's demand). § Scene worker → "The `scene` Source kind".
 
 **Snapshot shape.** `Graph::snapshot()` is one JSON object keyed by node id; each node's
@@ -2006,7 +2007,9 @@ full), `io` (capture write, ctl connect).
 cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
 (runtime, `position` is debug-level ~10 Hz, every change in stepped mode),
 `source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
-(host), `source.broken` (a scene past its restart budget, § Scene worker), `transition.output_adopted`, `output.added|removed|changed|layer_failed|
+(host), `source.broken` (a scene past its restart budget, § Scene worker), `scene.context_lost|resuming|
+resumed|preview|preview_failed|restored_broken` (Task 10, § Scene worker → "Crash policy"),
+`worker.killed`, `gfx.context_robust`, `transition.output_adopted`, `output.added|removed|changed|layer_failed|
 present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|layer|
 gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the last two Task
 20e), `input.pointer` (debug), `loop.failed`,
@@ -2630,7 +2633,9 @@ same place.
   opacity)}`; `output_props` — remembered props of connectors not present; `sources` — per
   referenced source `{kind, path, position, paused, speed, loop, gains (set slots except
   xfade/anticlick), props (every other settable source prop: color, hwdec, fps_cap, cache,
-  demuxer_*, af, no_audio, audio_delay), playing, transition_target}`; `parked` — `{id,
+  demuxer_*, af, no_audio, audio_delay), playing, transition_target, broken (Phase 2 Task
+  10: a scene past its restart budget — only when true; restored as its preview, no worker)}`;
+  `parked` — `{id,
   resume_paused, connector}`. Source keys are references inside the file only: a restore
   mints fresh ids (`snapshot.restored.ids` maps old → new).
 - **Excluded:** effects, `snapshot`-kind sources, sources no output shows (graves, held A's,
@@ -2820,9 +2825,13 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   written via a temp + rename) = `{scene_id (the item folder's name), id (source), path,
   reason, signal|code, restarts (in the window), total_restarts, uptime_ms, t_wall,
   log_tail}`; past `MAX_CRASH_RECORDS` (20) the oldest (mtime) go. `worker::write_crash_record`.
+- **`kill_for_restart(why)`** (Task 10): SIGKILL the live worker as a crash — the usual
+  `Exited` → restart/broken path follows, with `why` leading the restart's and the record's reason
+  (`"GL context lost, killed by signal 9"`); `worker.killed {id, pid, why}`. For `ContextLost`.
 - Events (comp `worker`, one corr `wk-N` per host): `worker.spawned {id, pid, bin, attempt}`,
   `.ready {pid, protocol, features, sync, ms}`, `.exited {pid, signal, code, hung,
   uptime_ms}`, `.hung {pid, waited_ms, hello}`, `.restart {attempt, prev_pid, pid, why}`,
+  `.killed {pid, why}`,
   `.broken {reason, record, restarts}`, `.stopped`, `.bad_message`, `.spawn_failed`,
   `.record_failed`. `source.broken` is the source's view (§ "The `scene` Source kind" → Errors).
 
@@ -2948,7 +2957,7 @@ frame, never waited for (Task 8, § "GPU budget and VRAM"). Synthetic and env kn
   skip-ahead when behind (never a burst). Scene time = `position` + wall time since open (Task
   5: the pause-excised clock). `texture()` = the latched slot — **it survives the worker's
   death** (spike §6) and, after a restart, stays the dead worker's frame until the new
-  worker's first frame latches. `broken()` (budget spent; Task 10 maps it to `Error`) is
+  worker's first frame latches. `broken()` (budget spent; mapped to `Error` + `source.broken`, Task 10) is
   separate from `error()` (can't play). `stats()` (`latched`, `stale_reuses`, `superseded`,
   `queued`, `ticks_sent`, `frames_received`, `tick_send_failures`, `restarts`, `rings`,
   `latched_gen`), `latencies_ms()` (last 1024 tick → latch), `wake_fd()`, `pid()`,
@@ -3073,7 +3082,7 @@ path: <item folder>, position?, paused?, speed?, preview?}}`. The transition rec
 hard-coded `kind == "video"` learned about `scene`.
 
 - **Schema.** `Source.kind` enum + `scene`; `Source.preview` (Str, the item's preview image —
-  stored on every kind, used by Task 10); `Output.scene_fps` (F64 0–480, default **30** = D5,
+  stored on every kind, shown by Task 10's crash policy); `Output.scene_fps` (F64 0–480, default **30** = D5,
   `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
   `out:<c>` whose `srcs:` holds `id` — shown there, or held there by a transition).
   `onset::kind_has_audio(kind)` = `video | scene` (`has_audio`, `audible`, the restore fade,
@@ -3151,8 +3160,9 @@ hard-coded `kind == "video"` learned about `scene`.
   stopped (no restart loop, no crash record); `broken` (restart budget spent) → also `Error`,
   plus ONE `source.broken {id, path, scene_id, reason, restarts, record, signal|code}` (error,
   comp `source`; the fields from the crash record the host just wrote — Phase 2 Task 11, what the
-  backend adapter marks the item crashed from: player-adapter.md § Scenes; Task 10 adds the
-  preview); either holds until `path` changes. Test `tests/api.rs::source_broken_event_names_the_scene`
+  backend adapter marks the item crashed from: player-adapter.md § Scenes; Task 10 added
+  `total_restarts`, `uptime_ms`, `shows` and the rest of the crash policy — § "Crash policy (Task
+  10)"); either holds until `path` changes. Test `tests/api.rs::source_broken_event_names_the_scene`
   (a synthetic scene crashing every 100 ms, real clock: one event, `restarts: 3`, `signal: 6`, the
   record on disk; RED before: no event in 20 s).
 - **Property semantics:** `path` live (above); `paused` freezes; `position` = scene time at
@@ -3165,7 +3175,8 @@ hard-coded `kind == "video"` learned about `scene`.
   size), `has_audio` (the worker's `Ready`, `true` until then — R92), `paused`.
 - **Snapshot.** A scene is saved like a video: position = `time_pos` once ready, `playing`
   (`kind_has_audio`), refreshed every 2 s while it plays (`Runtime::media_playing`); a restore
-  recreates it at that position on a fresh worker (the old one died with its compositor).
+  recreates it at that position on a fresh worker (the old one died with its compositor) — a
+  broken one is saved `broken: true` and restored as its preview, no worker (Task 10).
 - **Probes / API.** `hello.capabilities` has `scene` when `paths::scene_worker_bin()`
   resolves and (Task 7) an assets dir does, unless synthetic scenes are allowed; `state.workers`
   = the `workers` probe's entries; `workers` (`probe/workers.rs`) — per scene source `{id, path,
@@ -3173,7 +3184,9 @@ hard-coded `kind == "video"` learned about `scene`.
   total_restarts, sync, fourcc (e.g. `AB24`), modifier (hex), size (export), native, max_size
   (demand), fps_target, fps_actual (latched in the last second), paused, stepped, ready,
   scene_time, latched_t, latched, stale_reuses, queued, ticks_sent, frames_received, resizes,
-  buffer_sets, spawns, rings, last_error}` + `reaping`; `sources` adds for a scene `pid,
+  buffer_sets, spawns, rings, last_error}` + `reaping` (Task 10 adds `broken`,
+  `restored_broken`, `resuming`, `context_losses`, `preview {path, open, shown, error}`; `state`
+  is `broken` for a restored-broken scene with no worker); `sources` adds for a scene `pid,
   scene_time, latched_t, fps_target, export_size, native, step_status, error`.
 - **Task 4's direct path** is `SceneSource::open_opts(gfx, SceneOpts)` (spawns at once unless
   `defer_spawn`); `SceneOpts` gained `paused`, `speed`, `stepped`, `assets_dir`, `audio`,
@@ -3687,10 +3700,115 @@ is never a still (`is_still`) but **never ends** (`never_ends` = still | scene).
   exactly (the latch gate). A scene worker's first frame takes > 100 ms (its EGL setup alone), so
   a chain of plain 100 ms gaps only ever supersedes — the chains choose their gaps by condition.
   A `Tick.t` is the compositor's clock, so a restarted worker's frames continue the scene time
-  whatever its `Start.position`; Task 10's `crash_holds_last_frame_and_resumes_at_position`
-  checks the resume itself.
-- **For Task 10.** A crash mid-effect already holds B's last frame and restarts it (budget 3 in
-  60 s); broken → `SourceEvent::Error` → the recipe's snap-back (pre-Running: abort). Missing:
-  `source.broken`, the preview when no frame exists (a B that crashes before its first frame
-  just waits for the restarted worker's — its `Ready` comes from it), a broken scene in the
-  snapshot.
+  whatever its `Start.position` — Task 10 stops that clock at the held frame for the outage, so the
+  restart resumes exactly there (`crash_holds_last_frame_and_resumes_at_position`).
+- **For Task 10** (done — § "Crash policy (Task 10)" below). A crash mid-effect holds B's last
+  frame and restarts it (budget 3 in 60 s); broken → `SourceEvent::Error` → the recipe's snap-back
+  (pre-Running: abort); a B that crashes before its first frame waits for the restarted worker's
+  (its `Ready` comes from it) — and shows its preview meanwhile if anything samples it.
+
+### Crash policy (Task 10)
+
+Spec §6.3 / the plan's Global Constraints, end to end: a worker crash or hang keeps the source's
+last frame (or its preview if none arrived), restarts **up to 3 times within 60 s resuming at the
+held position**, then the source is **broken** (event, persisted crash record, the backend's
+skip/advance applies). Other outputs, videos and audio are never touched. Code:
+`sources/scene.rs` (`hold_for_restart`, the preview, `ContextLost`), `worker/mod.rs`
+(`kill_for_restart`), `snapshot.rs` (`broken`), the worker's `main.rs` (robust context,
+`context_lost`), `gfx/egl.rs` (`OffscreenOpts::robust`).
+
+- **Resume at the held frame (exactly).** A `Tick.t` is the compositor's scene clock, so before
+  this the clock ran on through a restart (spawn + EGL + export + first frame ≈ 0.1–0.3 s) and the
+  restarted worker's first frame jumped that far ahead of the frozen picture. Now
+  `hold_for_restart` — on `Hung`, `Exited` and again at `Restarted` (after
+  `Latch::forget_worker`, so a frame of the dead worker that latched between a hang and the reap
+  is the final one) — **stops the clock at the held frame's `t`** (or at the clock after a
+  `position` set the frame didn't show yet: `clock_jumped`) and sets `resuming = Some(held
+  generation)`; `Start.position` carries it too (`set_resume_position`). While resuming,
+  `tick()` sends exactly **one tick at that `t`** (after the new worker's `Ready`); the clock runs
+  again when a frame of a **later generation** latched (`on_latched`): `scene.resuming {id, t,
+  attempt}` / `scene.resumed {id, t, seq}` (info). `time_pos` is frozen through the outage (never
+  a jump; it may step back ≤ one tick + latency to the held frame's `t` at the kill, or by the
+  hang timeout after a hang — the picture froze there). Paused through the crash: no tick until
+  the un-pause (the held frame is exact), then the resume tick; a `position` set while paused
+  ticks at once (`exact_pending`) and that frame ends the resume. Stepped: untouched (the step
+  re-sends its own tick). The GPU budget skips a resuming scene. Measured
+  (`crash_holds_last_frame_and_resumes_at_position`, 30 fps): killed at `time_pos` 3.0054, held
+  `t` 2.9710, first new frame `t` 2.9710 (RED before: 3.1482 — the outage).
+- **The preview when nothing is on screen.** A worker that dies (`Exited`/`Hung`/`Restarted`/
+  `Broken`) with no frame latched sets `preview_wanted`; the next `update` opens the `preview`
+  prop (Source `preview`, `SceneOpts::preview`) as an internal **paused, silent image
+  `MpvSource`** (`ao: null`, `no_audio`, `kind: image` — any format mpv reads: the backend sends
+  `preview.jpg|png|gif|webp`), its wake fd in the source's epoll; `texture()` = the latched frame,
+  else the preview's texture once it rendered (`preview_shown()`), else `None`. The first worker
+  frame retires it (`MpvSource`'s two-phase teardown, `preview_dying`; `SceneSource::
+  begin_teardown`/`teardown_ready` wait for it, R51). **Cost:** the open is synchronous on the loop
+  (an mpv core + render context + its first render, ~10–30 ms) — only on these crash paths and a
+  restored broken scene, never for a normal load. No preview set / a failed open or load →
+  `scene.preview_failed {id, preview, reason}` (warn), never retried, nothing shown (as before).
+  `scene.preview {id, preview, open_ms}` (info). A live `preview` change re-points a shown one.
+  Stepped: a broken scene's `step_status` is `Pending("preview")` until its preview is on screen
+  (a step's capture shows it), then `Broken`. Test `crash_before_first_frame_shows_preview`
+  (every worker crashes at start: only the preview ever shows, before and after the break).
+- **Broken** (budget spent, unchanged mechanics): `SourceEvent::Error` + ONE `source.broken {id,
+  path, scene_id, reason, restarts, record, signal|code, total_restarts, uptime_ms, shows:
+  last_frame|preview|nothing}` (the shape Task 11's backend reads; fields added only). The source
+  then holds its last frame (or the preview), **silent** (no worker, no stream; `has_audio` reads
+  `false` and `AudioFlowing` is immediate — nothing waits on a broken scene), its clock frozen.
+  Source prop **`broken`** (Bool, **read-only**, observed — `SourceHost::MIRRORED`): `state` /
+  `get <id>.broken`; `workers` probe `broken`, `state: broken`. A `path` change clears it (a new
+  worker, a fresh budget). Tests `tests/api.rs::broken_after_three_restarts_in_60s` (the event,
+  every crash-record field — `scene_id`, `id`, `path`, `reason` "… after 3 restarts within 60 s",
+  `signal` 6, `restarts`/`total_restarts` 3, `uptime_ms`, `t_wall`, `log_tail` with the worker's
+  `stub: crashing` and the `restart 3` marker —, `source.error`, `broken` observed, no 5th spawn,
+  the last frame on the output), `source_broken_event_names_the_scene` (Task 11).
+- **`ContextLost` = a crash restart.** The worker's context is created **robust**
+  (`OffscreenOpts::robust`: robust access + `LOSE_CONTEXT_ON_RESET`, + `EGL_GENERATE_RESET_ON_
+  VIDEO_MEMORY_PURGE_NV` where listed — NVIDIA purges VRAM on suspend/resume and VT switches;
+  `gfx.context_robust {requested, granted, attribs, granted_attribs, path}`; the worker logs
+  `gfx: robust context granted|not available`), and polls `Gfx::reset_status()`
+  (`glGetGraphicsResetStatus`, no GPU sync) after every frame: non-zero → `ContextLost`, renders
+  nothing more, fades its stream (≤ 200 ms) and waits to be killed (exits 4 itself after 5 s).
+  The compositor: `scene.context_lost {id, path, pid}` (warn) + `WorkerHost::kill_for_restart("GL
+  context lost")` — SIGKILL, `worker.killed {id, pid, why}`, then the ordinary path: the restart
+  (its `why` / log-tail marker "GL context lost, killed by signal 9"), through the **same budget**
+  (4 within 60 s = broken, the record's `reason` naming it). Judgement call: the protocol carries
+  no reset kind, so an innocent reset counts like a guilty one — one suspend/resume is one
+  restart, far inside the budget. Test `context_lost_is_a_restart` (synthetic
+  `context_lost_after_ms: 600` — every worker reports it: frame held, restart 1 names it, broken
+  after 3 with the record's reason). Real detection is on-machine only (a GPU reset can't be
+  triggered hermetically); `workers` probe `context_losses`.
+- **Hang timeout knob `LP_SCENE_WORKER_HANG_MS`** (`sources::scene::HANG_ENV`, read at each
+  scene's open in the compositor's environment; a positive whole number of ms, else
+  `HANG_TIMEOUT` 2 s — unit `hang_timeout_knob`). Tests run 300. `tests/api.rs::
+  hang_is_killed_and_restarted` (`hang_after_ms` 1500: `worker.hung` after 304 ms — RED: 2005 —,
+  `worker.restart {why: "hung, killed by signal 9"}`, the hung pid gone, frames from the new
+  worker past the held `t`).
+- **Snapshot: a broken scene restores as its preview.** `SourceSnap.broken` (saved only when true,
+  `skip_serializing_if`), `create_props` seeds `broken: true` (read-only, seeded by `create` like
+  `of`); `SceneSource::open` sees it → `restored_broken`, `broken` set, **no worker is ever
+  spawned** (`set_demand` skips), the preview opened at once (`scene.restored_broken {id, path,
+  preview}`, warn), no `Error`/`source.broken` again (the backend already marked the item), no
+  restore fade (`!s.broken` in `restored_source`'s audible check). A source error marks the
+  snapshot dirty (`update_sources`: a break is no graph change, and a scene that never readied
+  isn't refreshed by the 2 s rule). Without this a player restart gave a crash-looping scene a
+  fresh budget every time. Unit `broken_scene_is_saved_and_recreated_broken`; supervise
+  `broken_scene_restores_as_preview` (saved `broken`, SIGSEGV → restored `broken`, its preview on
+  the output, `workers` `state: broken` / `pid: null`, no `worker.spawned` for it).
+- **Other outputs are never touched.** `tests/api.rs::crash_never_touches_other_outputs`
+  (`--redraw-policy content`: VIRTUAL-1 a looping frame-index video, VIRTUAL-2 a scene killed 4
+  times — 3 restarts, then broken —, 1.2 s apart): VIRTUAL-1's presents per window within ±2/s of
+  its own baseline window and no frame held longer than the baseline's longest + one 60 Hz tick
+  (measured 29.4–31.3 fps, max 35–38 ms vs baseline 30.0 / 36.9), its `time_pos` advancing at 1×,
+  its gains/paused/loop/speed and `lay:VIRTUAL-1:main.content` unchanged, no event about it; loop
+  `max_busy` ≤ 5 ms around it all (measured 2.4–3.8; render worker off: the video renders on
+  the loop, 6–9 ms stretches without any kill, so the bound is that no-kill maximum + 5 ms —
+  measured +2.2 at most, the restart handled in the same tick). This one was GREEN before Task 10 too — a
+  guard: the isolation came from Tasks 3–5.
+- **For the backend (Task 11's adapter — not changed here):** nothing it relies on changed shape
+  (`source.broken` only gained fields). New facts it may use: `<src>.broken` (read-only, in
+  `state`) and `source.broken.shows`; a player restart brings a broken scene back **broken** (its
+  preview, no worker) — so after a restart `broken: true` on the shown scene is expected, and
+  re-applying the same item needs a new source (a `transition`; a same-path `set` is a no-op), as
+  whitelisting already does; a scene can also break from repeated GPU context losses (the record's
+  `reason` starts "GL context lost") — it is marked crashed like any other break.

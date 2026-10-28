@@ -170,6 +170,8 @@ struct Proc {
     eof_at: Option<Instant>,
     killed: bool,
     hung: bool,
+    /// Why the host killed it (Task 10: `kill_for_restart`) — the restart's / record's reason.
+    why: Option<String>,
 }
 
 /// Supervises one scene worker. See the module docs.
@@ -271,6 +273,28 @@ impl WorkerHost {
         if let ToWorker::Start { position, .. } = &mut self.spec.start {
             *position = t;
         }
+    }
+
+    /// Task 10: end the live worker as a crash — SIGKILL now, then the usual path (`Exited`,
+    /// a restart through the [`RestartBudget`], or `Broken` + a crash record), with `why`
+    /// leading the restart's / record's reason (`"GL context lost, killed by signal 9"`).
+    /// For a worker that reported it can't go on (`ContextLost`). Never blocks; a no-op when
+    /// nothing is running or it is already being killed.
+    pub fn kill_for_restart(&mut self, why: &str) {
+        let Some(p) = self.proc_.as_mut().filter(|p| !p.killed) else {
+            return;
+        };
+        unsafe { libc::kill(p.pid, libc::SIGKILL) };
+        p.killed = true;
+        p.why = Some(why.to_string());
+        let pid = p.pid;
+        log::event(
+            "worker",
+            Level::Warn,
+            "worker.killed",
+            Some(self.corr.clone()),
+            json!({"id": self.spec.id, "pid": pid, "why": why}),
+        );
     }
 
     /// `Quit`, then the process is handed to the reaper (SIGKILL after [`STOP_GRACE`]).
@@ -495,6 +519,7 @@ impl WorkerHost {
             eof_at: None,
             killed: false,
             hung: false,
+            why: None,
         })
     }
 
@@ -758,7 +783,11 @@ impl WorkerHost {
             (_, Some(c)) => format!("exited with code {c}"),
             _ => "vanished".to_string(),
         };
-        let how = if p.hung { format!("hung, {how}") } else { how };
+        let how = match (&p.why, p.hung) {
+            (Some(why), _) => format!("{why}, {how}"),
+            (None, true) => format!("hung, {how}"),
+            (None, false) => how,
+        };
         match self.spec.budget.admit(&mut self.history, now) {
             Some(attempt) => match self.spawn_proc(attempt) {
                 Ok(np) => {

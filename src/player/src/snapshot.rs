@@ -132,6 +132,9 @@ pub struct SourceSnap {
     /// completed).
     #[serde(default)]
     pub transition_target: bool,
+    /// Phase 2 Task 10: a scene past its restart budget — restored as its preview, no worker.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub broken: bool,
 }
 
 fn one() -> f64 {
@@ -164,6 +167,10 @@ impl SourceSnap {
         m.insert("loop".into(), json!(self.looped));
         for (slot, db) in &self.gains {
             m.insert(format!("gain.{slot}"), json!(db));
+        }
+        if self.broken {
+            // Read-only, seeded at create: the scene comes back as its preview, no worker.
+            m.insert("broken".into(), json!(true));
         }
         m
     }
@@ -313,6 +320,7 @@ fn source_snap(
         gains,
         props: persistent(g, anim, id, NodeKind::Source, &SOURCE_FIELDS, false),
         transition_target: target_b,
+        broken: kind == "scene" && get_bool(g, id, "broken"),
         kind,
     }
 }
@@ -672,6 +680,49 @@ mod tests {
         assert_eq!(cp["gain.user"], json!(-6.0));
         let mut g2 = Graph::new();
         g2.create(NodeKind::Source, None, cp).unwrap();
+    }
+
+    /// Phase 2 Task 10: a scene past its restart budget (`broken`, observed) is saved
+    /// `broken: true` and recreated with it (seeded at create — `broken` is read-only), so a
+    /// restore shows its preview without a worker; a playing scene saves no `broken` key.
+    #[test]
+    fn broken_scene_is_saved_and_recreated_broken() {
+        let mut g = graph();
+        src(
+            &mut g,
+            "sc",
+            json!({"kind": "scene", "path": "/w/431960/123", "preview": "/w/431960/123/p.jpg"}),
+        );
+        src(&mut g, "ok", json!({"kind": "scene", "path": "/w/431960/456"}));
+        g.set_observed(&p("sc.broken"), PropValue::Bool(true))
+            .unwrap();
+        g.set(&p("lay:DP-1:main.content"), PropValue::Str("sc".into()))
+            .unwrap();
+        g.set(&p("lay:DP-2:main.content"), PropValue::Str("ok".into()))
+            .unwrap();
+        let s = cap(&g, &Animator::new(), &[]);
+        let sc = &s.sources["sc"];
+        assert!(sc.broken, "{sc:?}");
+        assert_eq!(sc.props["preview"], json!("/w/431960/123/p.jpg"));
+        assert!(!sc.props.contains_key("broken"), "a field, not a prop");
+        assert!(!s.sources["ok"].broken);
+        let bytes = String::from_utf8(s.to_bytes()).unwrap();
+        assert_eq!(bytes.matches("\"broken\"").count(), 1, "{bytes}");
+        assert_eq!(Snapshot::parse(bytes.as_bytes()).unwrap(), s);
+        let cp = sc.create_props();
+        assert_eq!(cp["broken"], json!(true));
+        assert!(!s.sources["ok"].create_props().contains_key("broken"));
+        let mut g2 = Graph::new();
+        let id = g2.create(NodeKind::Source, None, cp).unwrap();
+        assert_eq!(
+            g2.get(&p(&format!("{id}.broken"))).unwrap(),
+            PropValue::Bool(true),
+            "seeded at create"
+        );
+        let e = g2
+            .set(&p(&format!("{id}.broken")), PropValue::Bool(false))
+            .unwrap_err();
+        assert_eq!(e.code, "read_only");
     }
 
     #[test]

@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 
-use super::{Source, SourceEvent, StepStatus, unsupported};
+use super::{MpvSource, Source, SourceEvent, StepStatus, unsupported};
 use crate::gfx::dmabuf::DmabufDesc;
 use crate::gfx::{Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
@@ -214,6 +214,9 @@ pub struct SceneOpts {
     /// Spawn the worker at the first [`SceneSource::set_demand`] naming an output instead of
     /// at open (the graph path: the ring is exported at the right size from the start).
     pub defer_spawn: bool,
+    /// The item's preview image (Task 10: shown while no worker frame exists after a crash,
+    /// and for a scene restored broken). Empty = none.
+    pub preview: String,
 }
 
 impl SceneOpts {
@@ -240,6 +243,7 @@ impl SceneOpts {
             hang_timeout: HANG_TIMEOUT,
             crash_dir: crate::paths::crash_dir(),
             defer_spawn: false,
+            preview: String::new(),
         }
     }
 }
@@ -359,6 +363,41 @@ pub struct SceneSource {
     /// Task 8 (VRAM guard): the worker was stopped for using more VRAM than the per-scene
     /// limit — `(used_mib, limit_mib)`; reported like an error, never a crash.
     vram_stopped: Option<(f64, f64)>,
+    /// Task 10: the worker died with a frame on screen — the scene clock is stopped at that
+    /// frame's `t` until a frame of a later worker generation (`> held`) latched: the restart
+    /// resumes exactly where the picture froze. `Some(held generation)`.
+    resuming: Option<u32>,
+    /// The resume's one tick (at the held `t`) is out.
+    resume_ticked: bool,
+    /// A `position` set since the last latch: a restart resumes at the clock (the requested
+    /// time), not at the held frame.
+    clock_jumped: bool,
+    /// Task 10: the `preview` image (an internal paused image `MpvSource`), shown by
+    /// [`texture`](Self::texture) while no worker frame exists — opened when a worker dies
+    /// before the first frame and for a scene restored broken; retired at the first frame.
+    preview: Option<MpvSource>,
+    /// A retired preview finishing its two-phase teardown (never a blocking free).
+    preview_dying: Option<MpvSource>,
+    /// The preview should show (a worker died with no frame on screen).
+    preview_wanted: bool,
+    /// The preview can't show (none set, or its open/load failed) — never retried.
+    preview_error: Option<String>,
+    /// Restored from a snapshot already broken: no worker is ever spawned (until `path`).
+    restored_broken: bool,
+    /// `ContextLost` reports (the worker's GL context was lost → a crash restart).
+    context_losses: u32,
+}
+
+/// The hang-timeout knob (Task 10): a `Tick`/`Ping` unanswered this many ms = hung (tests
+/// set 300; production leaves it unset = [`HANG_TIMEOUT`], 2 s).
+pub const HANG_ENV: &str = "LP_SCENE_WORKER_HANG_MS";
+
+/// The hang timeout for the value of [`HANG_ENV`]: a positive whole number of ms, else
+/// [`HANG_TIMEOUT`].
+pub fn hang_timeout(v: Option<&str>) -> Duration {
+    v.and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map_or(HANG_TIMEOUT, Duration::from_millis)
 }
 
 fn epoll_new() -> Result<OwnedFd, String> {
@@ -458,7 +497,26 @@ impl SceneSource {
             _ => AudioRoute::Default,
         };
         o.defer_spawn = true;
+        o.hang_timeout = hang_timeout(std::env::var(HANG_ENV).ok().as_deref());
+        o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
+        // Task 10: a scene the snapshot saved broken (past its restart budget before the
+        // player restarted) comes back as its preview with no worker — never a fresh crash
+        // loop on every player restart. A `path` change plays again.
+        if matches!(get("broken"), Some(PropValue::Bool(true))) {
+            src.restored_broken = true;
+            src.broken =
+                Some("broken before the player restarted (restored as its preview)".into());
+            src.preview_wanted = true;
+            src.ensure_preview(gfx);
+            log::event(
+                "scene",
+                Level::Warn,
+                "scene.restored_broken",
+                None,
+                json!({"id": id, "path": path, "preview": src.opts.preview}),
+            );
+        }
         // Task 6: the stream starts at the node's gain and mute (the worker is spawned later,
         // at the first demand, with them in its `Start`).
         for (k, v) in node {
@@ -556,6 +614,15 @@ impl SceneSource {
             rate_since: None,
             gpu_ms: VecDeque::new(),
             vram_stopped: None,
+            resuming: None,
+            resume_ticked: false,
+            clock_jumped: false,
+            preview: None,
+            preview_dying: None,
+            preview_wanted: false,
+            preview_error: None,
+            restored_broken: false,
+            context_losses: 0,
             opts,
         };
         if !src.opts.defer_spawn {
@@ -601,7 +668,7 @@ impl SceneSource {
     /// The scene clock runs once the load's first frame (at `position`) is shown, while not
     /// paused and not stepped — like a video's `time_pos`, nothing passes while it loads.
     fn clock_should_run(&self) -> bool {
-        self.loaded && !self.paused && !self.opts.stepped
+        self.loaded && !self.paused && !self.opts.stepped && self.resuming.is_none()
     }
 
     /// The outputs showing this scene now (`SourceHost::sync`, every iteration): the ring is
@@ -631,6 +698,7 @@ impl SceneSource {
         }
         if self.host.is_none()
             && self.error.is_none()
+            && self.broken.is_none()
             && let Err(e) = self.spawn()
         {
             self.fail(e);
@@ -706,6 +774,7 @@ impl SceneSource {
             || self.host.is_none()
             || self.error.is_some()
             || self.broken.is_some()
+            || self.resuming.is_some()
         {
             return;
         }
@@ -827,6 +896,10 @@ impl SceneSource {
 
     pub fn step_status(&self) -> StepStatus {
         if let Some(e) = self.error.as_ref().or(self.broken.as_ref()) {
+            // A broken scene's preview is still coming (a step's capture shows it).
+            if self.broken.is_some() && self.preview_pending() {
+                return StepStatus::Pending("preview");
+            }
             return StepStatus::Broken(e.clone());
         }
         if !self.worker_ready {
@@ -857,7 +930,7 @@ impl SceneSource {
     fn on_event(&mut self, gfx: &Gfx, now: Instant, ev: WorkerEvent) {
         match ev {
             WorkerEvent::Msg(m, fds) => self.on_message(gfx, now, m, fds),
-            WorkerEvent::Restarted { .. } => {
+            WorkerEvent::Restarted { attempt } => {
                 self.stats.restarts += 1;
                 self.latch.forget_worker();
                 self.worker_ready = false;
@@ -870,8 +943,23 @@ impl SceneSource {
                     self.exact_seq = None;
                     self.exact_pending = true;
                 }
+                // The held frame is final now (queued ones were dropped): resume at its `t`.
+                if let Some(t) = self.hold_for_restart(now) {
+                    if let Some(h) = self.host.as_mut() {
+                        h.set_resume_position(t);
+                    }
+                    log::event(
+                        "scene",
+                        Level::Info,
+                        "scene.resuming",
+                        None,
+                        json!({"id": self.opts.id, "t": t, "attempt": attempt}),
+                    );
+                }
+                self.want_preview_if_blank();
             }
             WorkerEvent::Broken { record } => {
+                self.want_preview_if_blank();
                 let reason = format!("scene worker broken (crash record {})", record.display());
                 if self.broken.is_none() {
                     // The source is broken until its path changes. `source.broken` (Phase 2 Task 11,
@@ -883,7 +971,145 @@ impl SceneSource {
                 }
                 self.broken = Some(reason);
             }
-            WorkerEvent::Exited { .. } | WorkerEvent::Hung { .. } => {}
+            // The picture froze with the worker: so does the scene clock (a restart resumes
+            // there); nothing on screen → the preview.
+            WorkerEvent::Exited { .. } | WorkerEvent::Hung { .. } => {
+                self.hold_for_restart(now);
+                self.want_preview_if_blank();
+            }
+        }
+    }
+
+    /// Task 10: the worker is gone with a frame on screen — stop the scene clock at that
+    /// frame's `t` (or at the clock, after a `position` set the frame didn't show yet) until a
+    /// later generation's frame latched ([`on_latched`](Self::on_latched)). Idempotent (an
+    /// old frame latching between a hang and the reap moves the held `t`; the `Restarted`
+    /// call takes the final one). `None` = nothing to hold (no frame yet — the load logic
+    /// re-ticks the start —, or stepped: the step re-sends its own tick).
+    fn hold_for_restart(&mut self, now: Instant) -> Option<f64> {
+        if !self.loaded || self.opts.stepped {
+            return None;
+        }
+        let t = match (self.clock_jumped, self.latched_t()) {
+            (false, Some(t)) => t,
+            _ => self.clock.now(now),
+        };
+        self.clock.set_running(false, now);
+        self.clock.jump(t, now);
+        let held = self.latch.current().map_or(0, |c| c.3);
+        if self.resuming.is_none_or(|g| g < held) {
+            self.resuming = Some(held);
+        }
+        self.resume_ticked = false;
+        Some(t)
+    }
+
+    /// A worker died and nothing is on screen: the preview should show.
+    fn want_preview_if_blank(&mut self) {
+        if self.latch.current().is_none() {
+            self.preview_wanted = true;
+        }
+    }
+
+    /// The preview should show but isn't on screen yet (and can still come).
+    fn preview_pending(&self) -> bool {
+        self.preview_wanted
+            && self.latch.current().is_none()
+            && self.preview_error.is_none()
+            && !self.opts.preview.is_empty()
+            && self.preview.as_ref().is_none_or(|p| p.texture().is_none())
+    }
+
+    /// Open the preview image (once): a paused, silent image `MpvSource` on this context —
+    /// synchronous on the loop (an mpv core + render context + first render, ~10–30 ms), so
+    /// only on the crash paths (a worker died before the first frame, a restored broken
+    /// scene), never for a normal load.
+    fn ensure_preview(&mut self, gfx: &Gfx) {
+        if !self.preview_wanted
+            || self.preview.is_some()
+            || self.preview_error.is_some()
+            || self.latch.current().is_some()
+        {
+            return;
+        }
+        if self.opts.preview.is_empty() {
+            self.preview_error = Some("no preview set".into());
+            return;
+        }
+        let mut o = Map::new();
+        o.insert("ao".into(), json!("null"));
+        o.insert("kind".into(), json!("image"));
+        o.insert("paused".into(), json!(true));
+        o.insert("no_audio".into(), json!(true));
+        let t = Instant::now();
+        match MpvSource::open(gfx, &self.opts.preview, &o) {
+            Ok(p) => {
+                epoll_ctl(&self.wake, libc::EPOLL_CTL_ADD, p.wake_fd());
+                log::event(
+                    "scene",
+                    Level::Info,
+                    "scene.preview",
+                    None,
+                    json!({"id": self.opts.id, "preview": self.opts.preview,
+                           "open_ms": t.elapsed().as_secs_f64() * 1e3}),
+                );
+                self.preview = Some(p);
+            }
+            Err(e) => self.preview_failed(e.to_string()),
+        }
+    }
+
+    fn preview_failed(&mut self, reason: String) {
+        log::event(
+            "scene",
+            Level::Warn,
+            "scene.preview_failed",
+            None,
+            json!({"id": self.opts.id, "preview": self.opts.preview, "reason": reason}),
+        );
+        self.preview_error = Some(reason);
+    }
+
+    /// The preview's per-update work: open it when wanted, render it, retire it once a worker
+    /// frame is on screen, finish a retired one's teardown. Whether the shown texture changed.
+    fn update_preview(&mut self, gfx: &Gfx) -> bool {
+        let mut changed = false;
+        if self.preview_wanted {
+            self.ensure_preview(gfx);
+        }
+        if let Some(p) = self.preview.as_mut() {
+            if p.update(gfx) && self.latch.current().is_none() {
+                changed = true;
+            }
+            let mut failed = None;
+            for ev in p.poll_events() {
+                if let SourceEvent::Error { reason } = ev {
+                    failed = Some(reason);
+                }
+            }
+            if let Some(r) = failed {
+                self.preview_failed(r);
+            }
+        }
+        if self.latch.current().is_some() {
+            self.preview_wanted = false;
+            self.retire_preview();
+        }
+        if self.preview_dying.as_mut().is_some_and(|p| p.teardown_ready()) {
+            self.preview_dying = None;
+        }
+        changed
+    }
+
+    /// Start the preview's two-phase teardown (a worker frame replaced it, or the source goes).
+    fn retire_preview(&mut self) {
+        let Some(mut p) = self.preview.take() else {
+            return;
+        };
+        epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, p.wake_fd());
+        if !p.begin_teardown() {
+            // At most one dies at a time (a preview only ever opens before a first frame).
+            self.preview_dying = Some(p);
         }
     }
 
@@ -1003,6 +1229,22 @@ impl SceneSource {
                 );
                 self.prop_results.insert(name, (ok, reason));
             }
+            // Task 10: the worker's GL context is gone (a GPU reset, an NVIDIA video-memory
+            // purge after suspend): it can't render again — a crash restart, through the
+            // budget, its record naming the cause.
+            FromWorker::ContextLost => {
+                self.context_losses += 1;
+                log::event(
+                    "scene",
+                    Level::Warn,
+                    "scene.context_lost",
+                    None,
+                    json!({"id": self.opts.id, "path": self.opts.path, "pid": self.pid()}),
+                );
+                if let Some(h) = self.host.as_mut() {
+                    h.kill_for_restart("GL context lost");
+                }
+            }
             FromWorker::Error { reason, fatal } => {
                 if fatal {
                     self.fail(reason);
@@ -1023,8 +1265,10 @@ impl SceneSource {
         }
     }
 
-    /// `source.broken {id, path, scene_id, reason, signal|code, restarts, record}` — the fields
-    /// from the crash record the host just wrote (a small file; read once, at the break).
+    /// `source.broken {id, path, scene_id, reason, signal|code, restarts, record,
+    /// total_restarts, uptime_ms, shows}` — the fields from the crash record the host just
+    /// wrote (a small file; read once, at the break); `shows` (Task 10) = what stays on screen:
+    /// `last_frame` | `preview` | `nothing`.
     fn log_broken(&self, record: &std::path::Path) {
         let rec: Value = std::fs::read(record)
             .ok()
@@ -1038,11 +1282,19 @@ impl SceneSource {
             "restarts": rec.get("restarts").cloned().unwrap_or(Value::Null),
             "record": record,
         });
-        for k in ["signal", "code"] {
+        for k in ["signal", "code", "total_restarts", "uptime_ms"] {
             if let Some(v) = rec.get(k) {
                 ev[k] = v.clone();
             }
         }
+        // Task 10: what the output keeps showing — the last frame, else the preview image.
+        ev["shows"] = json!(if self.latch.current().is_some() {
+            "last_frame"
+        } else if self.opts.preview.is_empty() || self.preview_error.is_some() {
+            "nothing"
+        } else {
+            "preview"
+        });
         log::event("source", Level::Error, "source.broken", None, ev);
     }
 
@@ -1132,6 +1384,15 @@ impl SceneSource {
             }
             return;
         }
+        if self.resuming.is_some() {
+            // Task 10: one tick at the held `t` (the clock is stopped there); the clock runs
+            // again once its frame latched.
+            if !self.resume_ticked {
+                let t = self.clock.now(now);
+                self.resume_ticked = self.send_tick(now, t).is_some();
+            }
+            return;
+        }
         if self.inflight >= MAX_INFLIGHT {
             return;
         }
@@ -1184,6 +1445,10 @@ impl SceneSource {
         self.error = None;
         self.broken = None;
         self.vram_stopped = None;
+        self.restored_broken = false;
+        self.resuming = None;
+        self.resume_ticked = false;
+        self.clock_jumped = false;
         self.rate_since = None;
         self.gpu_ms.clear();
         self.sync = None;
@@ -1368,6 +1633,21 @@ impl SceneSource {
         if self.exact_seq.is_some_and(|s| l.seq >= s) {
             self.exact_seq = None;
         }
+        self.clock_jumped = false;
+        if self.resuming.is_some_and(|g| l.generation > g) {
+            // Task 10: the restarted worker's first frame (at the held `t`) is on screen.
+            self.resuming = None;
+            self.clock.set_running(self.clock_should_run(), now);
+            self.next_tick = Some(now + self.tick_period);
+            self.rate_since = (!self.paused).then_some(now);
+            log::event(
+                "scene",
+                Level::Info,
+                "scene.resumed",
+                None,
+                json!({"id": self.opts.id, "t": l.t, "seq": l.seq}),
+            );
+        }
         if !self.loaded && l.generation == self.latch.generation() {
             self.loaded = true;
             self.rate_since = (!self.paused).then_some(now);
@@ -1380,11 +1660,27 @@ impl SceneSource {
     /// The latched frame (kept through a worker crash, restart and path change); `None`
     /// before the first.
     pub fn texture(&self) -> Option<&Tex> {
-        let (slot, _, _, generation) = self.latch.current()?;
-        self.rings
-            .iter()
-            .find(|r| r.generation == generation)?
-            .tex(slot)
+        match self.latch.current() {
+            Some((slot, _, _, generation)) => self
+                .rings
+                .iter()
+                .find(|r| r.generation == generation)?
+                .tex(slot),
+            // Task 10: no worker frame (a crash before the first one, a restored broken
+            // scene) — the preview image, once it rendered.
+            None => self.preview.as_ref().and_then(|p| p.texture()),
+        }
+    }
+
+    /// The preview image is what [`texture`](Self::texture) shows.
+    pub fn preview_shown(&self) -> bool {
+        self.latch.current().is_none()
+            && self.preview.as_ref().is_some_and(|p| p.texture().is_some())
+    }
+
+    /// `ContextLost` reports so far.
+    pub fn context_losses(&self) -> u32 {
+        self.context_losses
     }
 
     /// The latched frame's tick `seq`.
@@ -1504,6 +1800,8 @@ impl SceneSource {
                 };
                 (s, w, t)
             }
+            // Task 10: restored broken (no worker is ever spawned).
+            None if self.broken.is_some() => ("broken".to_string(), 0, 0),
             None => ("not_spawned".to_string(), 0, 0),
         };
         let fps_actual = self
@@ -1570,6 +1868,17 @@ impl SceneSource {
             self.vram_stopped
                 .map(|(used, limit)| json!({"used_mib": used, "limit_mib": limit}))
         );
+        // Task 10: the crash policy.
+        v["broken"] = json!(self.broken.is_some());
+        v["restored_broken"] = json!(self.restored_broken);
+        v["resuming"] = json!(self.resuming.is_some());
+        v["context_losses"] = json!(self.context_losses);
+        v["preview"] = json!({
+            "path": self.opts.preview,
+            "open": self.preview.is_some(),
+            "shown": self.preview_shown(),
+            "error": self.preview_error,
+        });
         v
     }
 }
@@ -1602,6 +1911,9 @@ impl Source for SceneSource {
             self.on_event(gfx, now, ev);
         }
         let mut changed = false;
+        if self.preview_wanted || self.preview.is_some() || self.preview_dying.is_some() {
+            changed |= self.update_preview(gfx);
+        }
         if self.latch_allowed()
             && let Some(mut l) = self.latch.latch(|| gfx.native_fence().ok())
         {
@@ -1627,6 +1939,7 @@ impl Source for SceneSource {
             && (self.opts.stepped
                 || self.has_audio == Some(false)
                 || self.no_audio
+                || self.broken.is_some()
                 || self.flow_seen)
         {
             // Nothing to hear (stepped: never real audio; no sound; muted) — nothing to wait
@@ -1685,6 +1998,7 @@ impl Source for SceneSource {
                     // The runtime's step drives the clock (`step_to`).
                 } else {
                     self.clock.jump(t, now);
+                    self.clock_jumped = true;
                     // Paused: show the new time's frame (once the load's first one is in).
                     if self.paused && self.load_ticked {
                         self.exact_pending = true;
@@ -1719,6 +2033,20 @@ impl Source for SceneSource {
                     }
                 }
             }
+            // Task 10: a new preview image (the item's thumbnail changed): a shown one follows.
+            "preview" => {
+                if let PropValue::Str(p) = v
+                    && *p != self.opts.preview
+                {
+                    self.opts.preview = p.clone();
+                    self.preview_error = None;
+                    if let Some(pv) = self.preview.as_mut()
+                        && pv.apply("path", v).is_err()
+                    {
+                        self.retire_preview();
+                    }
+                }
+            }
             // Task 7: the scene's user properties, live (`wp_project_property_set_*`).
             "scene_props" => {
                 if let PropValue::Map(m) = v {
@@ -1748,8 +2076,13 @@ impl Source for SceneSource {
             "time_pos" => Some(PropValue::F64(self.scene_time())),
             "width" => SceneSource::size(self).map(|(w, _)| PropValue::I64(w as i64)),
             "height" => SceneSource::size(self).map(|(_, h)| PropValue::I64(h as i64)),
-            "has_audio" => Some(PropValue::Bool(self.has_audio.unwrap_or(true))),
+            // A broken scene (no worker, Task 10) is never heard: nothing to wait for.
+            "has_audio" => Some(PropValue::Bool(
+                self.broken.is_none() && self.has_audio.unwrap_or(true),
+            )),
             "paused" => Some(PropValue::Bool(self.paused)),
+            // Task 10: past the restart budget (or restored so) — observed into the graph.
+            "broken" => Some(PropValue::Bool(self.broken.is_some())),
             "color" => None,
             _ => self.props.get(prop).cloned(),
         }
@@ -1757,6 +2090,27 @@ impl Source for SceneSource {
 
     fn poll_events(&mut self) -> Vec<SourceEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    /// The worker quits now (never blocks); a preview image goes through `MpvSource`'s own
+    /// two-phase teardown (R51) before this source may be dropped.
+    fn begin_teardown(&mut self) -> bool {
+        if let Some(h) = self.host.take() {
+            epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, h.wake_fd());
+            drop(h); // `quit`, reaped off the loop
+        }
+        // A second dying preview is rare (one only ever opens before a first frame).
+        self.preview_dying = None;
+        self.retire_preview();
+        self.preview_dying.is_none()
+    }
+
+    fn teardown_ready(&mut self) -> bool {
+        if self.preview_dying.as_mut().is_some_and(|p| !p.teardown_ready()) {
+            return false;
+        }
+        self.preview_dying = None;
+        true
     }
 
     fn as_scene(&self) -> Option<&SceneSource> {
@@ -1819,6 +2173,17 @@ mod tests {
         );
         c.set_running(true, at(9000));
         assert!((c.now(at(10000)) - 2.0).abs() < 1e-9);
+    }
+
+    /// Task 10: `LP_SCENE_WORKER_HANG_MS` sets the hang timeout (tests: 300); unset, empty,
+    /// zero or garbage → the production `HANG_TIMEOUT` (2 s).
+    #[test]
+    fn hang_timeout_knob() {
+        assert_eq!(hang_timeout(Some("300")), Duration::from_millis(300));
+        assert_eq!(hang_timeout(Some(" 750 ")), Duration::from_millis(750));
+        for v in [None, Some(""), Some("0"), Some("-5"), Some("2s"), Some("x")] {
+            assert_eq!(hang_timeout(v), HANG_TIMEOUT, "{v:?}");
+        }
     }
 
     #[test]

@@ -410,7 +410,20 @@ struct Renderer {
     native: (u32, u32),
     /// Task 8: `GL_TIME_ELAPSED` per frame, read back later without waiting (`Frame.gpu_ms`).
     timer: gputimer::GpuTimer,
+    /// Task 10: the context reports GPU resets (`OffscreenOpts::robust` granted) — polled
+    /// after every frame.
+    robust: bool,
+    /// The synthetic `context_lost_after_ms` (tests): when to act as if the context was lost.
+    lost_at: Option<Instant>,
+    /// The context is lost (`ContextLost` sent at this instant): nothing renders again; the
+    /// compositor kills us (a crash restart) — we exit ourselves after `LOST_EXIT_AFTER`.
+    lost: Option<Instant>,
 }
+
+/// Task 10: a worker whose context is lost waits this long for the compositor's kill, then
+/// exits (code `LOST_EXIT_CODE`) — never a worker idling forever on a dead context.
+const LOST_EXIT_AFTER: Duration = Duration::from_secs(5);
+const LOST_EXIT_CODE: i32 = 4;
 
 /// `poll` a `sync_file` until it signals (bounded; a kernel wait, never a spin).
 fn wait_fence_cpu(fd: &OwnedFd, ms: i32) {
@@ -561,6 +574,9 @@ impl Renderer {
         if let Some(ms) = spec.hang_after_ms {
             self.hang_at = Some(now + Duration::from_millis(ms));
         }
+        if let Some(ms) = spec.context_lost_after_ms {
+            self.lost_at = Some(now + Duration::from_millis(ms));
+        }
         let native = (spec.native[0].max(1), spec.native[1].max(1));
         self.native = native;
         let (w, h) = cover_size(native, (s.max_size[0], s.max_size[1]));
@@ -701,8 +717,25 @@ impl Renderer {
         std::process::exit(0)
     }
 
+    /// Task 10: the GL context is gone (a GPU reset, an NVIDIA video-memory purge — or the
+    /// synthetic knob): report `ContextLost` and render nothing more. The compositor kills
+    /// and restarts us through its crash budget; the stream is faded first (bounded).
+    fn context_lost(&mut self, why: &str) {
+        if self.lost.is_some() {
+            return;
+        }
+        warn(&format!("GL context lost ({why}): asking the compositor for a restart"));
+        self.send(&FromWorker::ContextLost);
+        self.lost = Some(Instant::now());
+        self.pending = None;
+        self.audio.quit(QUIT_FADE_MAX);
+    }
+
     /// Render the pending tick into a free slot and hand it over.
     fn render(&mut self) {
+        if self.lost.is_some() {
+            return;
+        }
         let (Some(ring), Some(scene)) = (self.ring.as_mut(), self.scene.as_mut()) else {
             return;
         };
@@ -748,6 +781,14 @@ impl Renderer {
             }
         }
         self.timer.end(&self.gfx.gl);
+        // Task 10: a reset during this frame (robust contexts report it; nothing rendered
+        // since can be trusted) — no `Frame`, a restart instead.
+        if self.robust
+            && let Some(st) = self.gfx.reset_status().filter(|st| *st != 0)
+        {
+            slot.busy = false;
+            return self.context_lost(&format!("glGetGraphicsResetStatus {st:#x}"));
+        }
         // The newest finished measurement (an earlier frame's — never waited for); the
         // synthetic `report_gpu_ms` knob (tests) stands in for it.
         let measured = self.timer.poll(&self.gfx.gl);
@@ -797,12 +838,22 @@ impl Renderer {
             if self.hang_at.is_some_and(|t| now >= t) {
                 hang();
             }
-            let can_render =
-                self.pending.is_some() && self.ring.as_ref().is_some_and(|r| r.free().is_some());
+            if self.lost_at.is_some_and(|t| now >= t) {
+                self.lost_at = None;
+                self.context_lost("synthetic context_lost_after_ms");
+            }
+            let lost_exit = self.lost.map(|t| t + LOST_EXIT_AFTER);
+            if lost_exit.is_some_and(|t| now >= t) {
+                warn("context lost and not restarted: exiting");
+                std::process::exit(LOST_EXIT_CODE);
+            }
+            let can_render = self.lost.is_none()
+                && self.pending.is_some()
+                && self.ring.as_ref().is_some_and(|r| r.free().is_some());
             let timeout = if can_render {
                 Some(Duration::ZERO)
             } else {
-                [self.crash_at, self.hang_at]
+                [self.crash_at, self.hang_at, self.lost_at, lost_exit]
                     .into_iter()
                     .flatten()
                     .map(|t| t.saturating_duration_since(now))
@@ -848,6 +899,8 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     }
     let gfx = match Gfx::new_offscreen_with(OffscreenOpts {
         priority: Some(Priority::Low),
+        // Task 10: a GPU reset / video-memory purge is reported (→ `ContextLost`, a restart).
+        robust: true,
     }) {
         Ok(g) => g,
         Err(e) => {
@@ -909,10 +962,30 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         exit_code: k.exit_code,
         native: (1, 1),
         timer: gputimer::GpuTimer::default(),
+        robust: false,
+        lost_at: None,
+        lost: None,
     };
     r.log(format!(
         "gfx: context priority requested low, granted {}",
         r.gfx.context_priority().map_or("n/a", |p| p.name())
+    ));
+    let mut r = r;
+    r.robust = r.gfx.loses_context_on_reset() && r.gfx.reset_status().is_some();
+    // The strategy query is GL 4.5 / KHR_robustness: an older context flags it — clear that,
+    // LWE's own error check must not see ours.
+    unsafe {
+        use glow::HasContext;
+        while r.gfx.gl.get_error() != glow::NO_ERROR {}
+    }
+    r.log(format!(
+        "gfx: robust context {} (a GPU reset or video-memory purge {})",
+        if r.robust { "granted" } else { "not available" },
+        if r.robust {
+            "is reported: ContextLost, a restart"
+        } else {
+            "goes unnoticed until the worker crashes"
+        }
     ));
     r.run()
 }

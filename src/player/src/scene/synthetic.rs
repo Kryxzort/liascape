@@ -67,6 +67,10 @@ pub struct SyntheticSpec {
     /// Task 8 (test-only): every `Frame` reports this GPU time instead of the measured one —
     /// drives the GPU budget deterministically without loading the GPU.
     pub report_gpu_ms: Option<f32>,
+    /// Task 10 (test-only): this long after its start the worker reports `ContextLost` as if
+    /// its GL context had been lost (a GPU reset / `EGL_NV_robustness_video_memory_purge`),
+    /// then renders nothing more — the compositor must treat it as a crash restart.
+    pub context_lost_after_ms: Option<u64>,
 }
 
 impl Default for SyntheticSpec {
@@ -86,6 +90,7 @@ impl Default for SyntheticSpec {
             fail: None,
             load_ms: 0,
             report_gpu_ms: None,
+            context_lost_after_ms: None,
         }
     }
 }

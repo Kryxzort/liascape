@@ -6219,6 +6219,299 @@ fn source_broken_event_names_the_scene() {
     assert_eq!(n, 1, "one source.broken per break");
 }
 
+// ---------------------------------------------------------------- Phase 2 Task 10: crash policy
+
+/// A real-clock synthetic-scene server (`extra` args, `envs` added to its environment).
+fn scene_serve_real_env(extra: &[&str], envs: &[(&str, &Path)]) -> Option<Serve> {
+    let mut srv = scene_serve(&[])?;
+    let serial = srv._serial.take();
+    drop(srv);
+    let mut env = vec![("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))];
+    env.extend_from_slice(envs);
+    let mut args = vec!["--clock", "real"];
+    args.extend_from_slice(extra);
+    Some(Serve::spawn_env(new_root(), &args, &env, serial))
+}
+
+/// `name`'s `all` window in the `frames` probe result `f`.
+fn frames_window(f: &Value, name: &str) -> Value {
+    f["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["name"] == name)
+        .unwrap_or_else(|| panic!("no {name}: {f}"))["all"]
+        .clone()
+}
+
+/// A scene worker killed again and again (3 restarts, then broken) never touches another
+/// output: VIRTUAL-1's video keeps presenting a new frame every frame (content redraw policy:
+/// one present per new video frame — measured against its own baseline window), its
+/// `time_pos` advances at 1×, its gains/paused/loop and what VIRTUAL-1 shows never change,
+/// and the loop never stalls (`max_busy` ≤ 5 ms around the kills, restarts and the break; with the
+/// render worker off — the video rendering on the loop — ≤ 5 ms over its own no-kill maximum).
+#[test]
+fn crash_never_touches_other_outputs() {
+    let Some(srv) = scene_serve_real_env(&["--redraw-policy", "content"], &[]) else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source.", "worker."]}));
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let v = create_src(&mut c, json!({"path": s(&clip), "loop": true}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": v}));
+    let sc = create_scene(&mut c, "api-t10-iso", &synth(Pattern::FrameIndex), json!({}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": sc}));
+    wait_playing(&mut c, &v, 0.5);
+    wait_playing(&mut c, &sc, 0.5);
+    let keep = |n: &Value| {
+        json!({"gain": n["gain"], "gain_effective_db": n["gain_effective_db"],
+               "paused": n["paused"], "loop": n["loop"], "speed": n["speed"]})
+    };
+    let before = keep(&c.ok("state", json!({}))["graph"][&v]);
+    let frames = |c: &mut Client| {
+        let f = c.ok("probe", json!({"name": "frames", "args": {"reset": true}}));
+        frames_window(&f, "VIRTUAL-1")
+    };
+    frames(&mut c);
+    std::thread::sleep(Duration::from_millis(1500));
+    let base = frames(&mut c);
+    println!("VIRTUAL-1 baseline: {base}");
+    // The loop's own worst stretch without kills, over as long as the kills take: with the
+    // render worker off the video renders ON the loop (§ Sources "Render worker"), several ms
+    // per frame, and a kill's handling lands in the same tick — then the plan's 5 ms is what the
+    // kills may ADD to that stretch; with it on, nothing over 5 ms at all.
+    let worker_on = !c.ok("probe", json!({"name": "sources"}))["render_worker"].is_null();
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    std::thread::sleep(Duration::from_millis(4800));
+    let base_busy = c.ok("probe", json!({"name": "loop"}))["max_busy_ms"]
+        .as_f64()
+        .unwrap();
+    let busy_bound = if worker_on {
+        5.0
+    } else {
+        base_busy + 5.0
+    };
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    c.drain_events(); // its open/ready/flowing: only what the kills cause counts below
+    let mut tps: Vec<(Instant, f64)> = Vec::new();
+    let mut windows = Vec::new();
+    let mut kills = 0;
+    loop {
+        let w = worker_of(&mut c, &sc);
+        if w["state"] == "broken" {
+            break;
+        }
+        assert!(kills < 4, "still not broken after {kills} kills: {w}");
+        let pid = w["pid"].as_u64().expect("a live worker");
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        kills += 1;
+        // The restart (or the break) runs meanwhile; VIRTUAL-1 is sampled throughout.
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(1200) {
+            tps.push((Instant::now(), f64_of(&mut c, &format!("{v}.time_pos")).unwrap()));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        windows.push(frames(&mut c));
+    }
+    let busy = c.ok("probe", json!({"name": "loop"}))["max_busy_ms"]
+        .as_f64()
+        .unwrap();
+    println!(
+        "{kills} kills; loop max busy {busy:.2} ms (without kills {base_busy:.2}, render worker {worker_on}); VIRTUAL-1 windows: {windows:?}"
+    );
+    assert_eq!(kills, 4, "3 restarts, then broken");
+    let fps = |w: &Value| w["fps"].as_f64().unwrap();
+    let max_ms = |w: &Value| w["max_ms"].as_f64().unwrap();
+    for w in &windows {
+        assert!(
+            (fps(w) - fps(&base)).abs() <= 2.0,
+            "VIRTUAL-1 presented {} frames/s around a kill, {} before",
+            fps(w),
+            fps(&base)
+        );
+        // No frame held longer than in the baseline window (+ one 60 Hz tick of jitter).
+        assert!(
+            max_ms(w) <= max_ms(&base).max(2.0 * 1000.0 / 60.0) + 1000.0 / 60.0 + 1.0,
+            "VIRTUAL-1 held a frame {} ms around a kill (baseline max {} ms)",
+            max_ms(w),
+            max_ms(&base)
+        );
+    }
+    for p in tps.windows(2) {
+        let (dw, dt) = (
+            p[1].0.duration_since(p[0].0).as_secs_f64(),
+            p[1].1 - p[0].1,
+        );
+        // A looping 4 s clip: a wrap is the only way back.
+        if dt < -3.0 {
+            continue;
+        }
+        assert!(
+            dt >= 0.0 && dt <= dw + 0.1,
+            "VIRTUAL-1's time_pos {:.3} → {:.3} in {dw:.3} s",
+            p[0].1,
+            p[1].1
+        );
+    }
+    let advanced: f64 = tps
+        .windows(2)
+        .map(|p| p[1].1 - p[0].1)
+        .filter(|d| *d >= 0.0)
+        .sum();
+    let wall = tps.last().unwrap().0.duration_since(tps[0].0).as_secs_f64();
+    assert!(
+        (advanced - wall).abs() <= 0.25,
+        "VIRTUAL-1 played {advanced:.2} s in {wall:.2} s"
+    );
+    assert!(
+        busy <= busy_bound,
+        "loop max busy {busy} ms around the kills (bound {busy_bound}, without kills {base_busy})"
+    );
+    let st = c.ok("state", json!({}));
+    assert_eq!(keep(&st["graph"][&v]), before, "VIRTUAL-1's source was touched");
+    assert_eq!(st["graph"]["lay:VIRTUAL-1:main"]["content"], json!(v));
+    let evs = c.drain_events();
+    let touched: Vec<&Value> = evs
+        .iter()
+        .filter(|e| e["id"] == json!(v) && e["event"] != "source.position")
+        .collect();
+    assert!(touched.is_empty(), "events about VIRTUAL-1's source: {touched:?}");
+}
+
+/// The hang timeout is the `LP_SCENE_WORKER_HANG_MS` knob (300 here; else 2 s): a worker that
+/// stops answering (`hang_after_ms`) is seen as hung within it, SIGKILLed, gone, and restarted
+/// — the frame held, then playing on from it. RED before the knob: `waited_ms` ≈ 2000.
+#[test]
+fn hang_is_killed_and_restarted() {
+    let Some(srv) = scene_serve_real_env(&[], &[("LP_SCENE_WORKER_HANG_MS", Path::new("300"))])
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    let sp = SyntheticSpec {
+        hang_after_ms: Some(1500),
+        ..synth(Pattern::FrameIndex)
+    };
+    let id = create_scene(&mut c, "api-t10-hang", &sp, json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.2);
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    let hung = wait_for(Duration::from_secs(5), "worker.hung", || {
+        logs_of(&mut c, "worker.hung")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    let waited = hung["waited_ms"].as_f64().unwrap();
+    println!("hung after {waited} ms: {hung}");
+    assert_eq!(hung["pid"], json!(pid), "{hung}");
+    assert!(
+        (300.0..600.0).contains(&waited),
+        "hang seen after {waited} ms (LP_SCENE_WORKER_HANG_MS=300)"
+    );
+    let restart = wait_for(Duration::from_secs(5), "worker.restart", || {
+        logs_of(&mut c, "worker.restart")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    assert_eq!(restart["prev_pid"], json!(pid), "{restart}");
+    assert!(
+        restart["why"].as_str().is_some_and(|w| w.contains("hung")),
+        "{restart}"
+    );
+    let held = worker_of(&mut c, &id)["latched_t"].as_f64().unwrap();
+    wait_for(Duration::from_secs(5), "frames from the new worker", || {
+        let w = worker_of(&mut c, &id);
+        (w["pid"].as_u64().is_some_and(|p| p != pid)
+            && w["latched_t"].as_f64().is_some_and(|t| t > held + 0.1))
+        .then_some(())
+    });
+    assert!(!pid_alive(pid), "the hung worker is gone");
+    assert!(worker_of(&mut c, &id)["last_error"].is_null());
+}
+
+/// Past the restart budget (3 within 60 s) a scene is broken: ONE `source.broken {restarts:
+/// 3}`, a crash record with every field (scene id, source id, path, reason, signal, restarts,
+/// total, uptime, wall time, the worker's last log lines), a `source.error` naming it,
+/// `broken` observed, no worker and no further spawn — and a single wallpaper keeps its last
+/// frame (it played before each crash), silent (no worker, no stream).
+#[test]
+fn broken_after_three_restarts_in_60s() {
+    let Some(srv) = scene_serve_real_env(&[], &[]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let png = common::solid_png("api-t10-preview", [0, 255, 0]);
+    let sp = SyntheticSpec {
+        crash_after_ms: Some(700),
+        rgb: [255, 0, 0],
+        ..synth(Pattern::Solid)
+    };
+    let id = create_scene(&mut c, "api-t10-broken-1234567", &sp, json!({"preview": s(&png)}));
+    show_all(&mut c, &id);
+    let ev = wait_for(Duration::from_secs(20), "source.broken", || {
+        logs_of(&mut c, "source.broken")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    assert_eq!(ev["restarts"], json!(3), "{ev}");
+    assert_eq!(ev["signal"], json!(libc::SIGABRT), "{ev}");
+    assert_eq!(ev["total_restarts"], json!(3), "{ev}");
+    assert_eq!(ev["shows"], json!("last_frame"), "{ev}");
+    let rec: Value = serde_json::from_slice(
+        &std::fs::read(ev["record"].as_str().expect("record path")).expect("the record"),
+    )
+    .unwrap();
+    println!("record: {rec}");
+    assert_eq!(rec["scene_id"], json!("api-t10-broken-1234567"), "{rec}");
+    assert_eq!(rec["id"], json!(id), "{rec}");
+    assert_eq!(rec["path"], ev["path"], "{rec}");
+    assert_eq!(rec["signal"], json!(libc::SIGABRT), "{rec}");
+    assert_eq!(rec["restarts"], json!(3), "{rec}");
+    assert_eq!(rec["total_restarts"], json!(3), "{rec}");
+    assert!(rec["uptime_ms"].as_f64().is_some_and(|u| u >= 600.0), "{rec}");
+    assert!(rec["t_wall"].as_str().is_some_and(|t| t.contains('T')), "{rec}");
+    assert!(
+        rec["reason"].as_str().is_some_and(|r| r.contains("3 restarts within 60 s")),
+        "{rec}"
+    );
+    let tail: Vec<&str> = rec["log_tail"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(tail.iter().any(|l| l.contains("stub: crashing")), "{tail:?}");
+    assert!(tail.iter().any(|l| l.contains("restart 3")), "{tail:?}");
+    let err = logs_of(&mut c, "source.error")
+        .into_iter()
+        .find(|e| e["id"] == json!(id))
+        .expect("a source.error");
+    assert!(
+        err["reason"].as_str().is_some_and(|r| r.contains("broken")),
+        "{err}"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"][&id]["broken"], json!(true), "{}", st["graph"][&id]);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["state"], "broken", "{w}");
+    assert!(w["pid"].is_null(), "{w}");
+    let spawned = logs_of(&mut c, "worker.spawned")
+        .into_iter()
+        .filter(|e| e["id"] == json!(id))
+        .count();
+    assert_eq!(spawned, 4, "the first worker + 3 restarts, nothing after the break");
+    let n = logs_of(&mut c, "source.broken")
+        .into_iter()
+        .filter(|e| e["id"] == json!(id))
+        .count();
+    assert_eq!(n, 1, "one source.broken");
+    let p = srv.path("t10-broken.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
+    near(png_pixel(&p, 320, 180), [255, 0, 0], 2, "the last frame, not the preview");
+}
+
 /// Mouse on: `headless.pointer` over an output reaches the scene in its own coordinates (the
 /// pointer_dot scene draws its dot there), and during a fade both sides see it.
 #[test]
