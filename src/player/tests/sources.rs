@@ -1409,3 +1409,71 @@ fn snapshot_copies_frame_and_orientation() {
         "the snapshot keeps the frame it copied"
     );
 }
+
+/// An fps cap (`fps_cap`, the backend's `VideoFps`) never stalls a still image (TODO "An fps
+/// cap stalls a still image"): mpv's `fps` filter emits a frame only once it knows how long it
+/// lasts, and a still shown with `image-display-duration=inf` never tells it — the image stayed
+/// `ready: false` with no texture. A still runs no `vf` whatever the cap; a video keeps it.
+/// Cases: opened capped; the cap changed live on a shown image; a capped source switched
+/// image → video → image by `path`; a still whose extension says video (`.dat` — mpv's image
+/// flag corrects the guess after the load). RED before: never Ready (events `[AudioFlowing]`).
+#[test]
+fn fps_cap_never_stalls_an_image() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    let vf = |src: &MpvSource| src.mpv_get_string("vf").unwrap_or_default();
+    let centre_is = |gfx: &Gfx, src: &MpvSource, rgb: [u8; 3], what: &str| {
+        let tex = src.texture().expect("texture after Ready");
+        assert_rgb(read_rgba(gfx, tex, tex.w / 2, tex.h / 2), rgb, 3, what);
+    };
+    // Opened with the cap.
+    let mut src = open_ready(&gfx, path_str(&green), json!({"fps_cap": 30.0}));
+    centre_is(&gfx, &src, [0, 255, 0], "the capped image");
+    assert_eq!(
+        src.read("fps_cap"),
+        Some(PropValue::F64(30.0)),
+        "the prop keeps the cap"
+    );
+    assert_eq!(vf(&src), "", "no fps filter on a still");
+    // Live on a shown image.
+    src.apply("fps_cap", &PropValue::F64(24.0))
+        .expect("live cap");
+    settle(&gfx, &mut src);
+    assert_eq!(vf(&src), "", "still none after a live cap change");
+    assert_eq!(src.read("fps_cap"), Some(PropValue::F64(24.0)));
+    // → a video: the cap applies.
+    src.apply("path", &PropValue::Str(path_str(&red).into()))
+        .expect("path → video");
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ready(e)
+    });
+    assert!(ok, "capped video never Ready; events: {evs:?}");
+    settle(&gfx, &mut src);
+    assert!(
+        vf(&src).contains("fps"),
+        "the video is capped: vf = {:?}",
+        vf(&src)
+    );
+    centre_is(&gfx, &src, [255, 0, 0], "the capped video");
+    // → an image again: no filter, Ready.
+    src.apply("path", &PropValue::Str(path_str(&green).into()))
+        .expect("path → image");
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
+        ready(e)
+    });
+    assert!(
+        ok,
+        "image loaded into a capped source never Ready; events: {evs:?}"
+    );
+    centre_is(&gfx, &src, [0, 255, 0], "the image after the path change");
+    assert_eq!(vf(&src), "");
+    drop(src);
+    // A still the extension calls a video: capped at the load, corrected by mpv's image flag.
+    let dat = green.with_file_name("image_green_misnamed.dat");
+    std::fs::copy(&green, &dat).expect("copy the png");
+    let src = open_ready(&gfx, path_str(&dat), json!({"fps_cap": 30.0}));
+    assert_eq!(src.kind(), "image", "mpv's flag corrected the guess");
+    centre_is(&gfx, &src, [0, 255, 0], "the misnamed still");
+}

@@ -292,9 +292,9 @@ post /stop '{}' >/dev/null; sleep 0.6
 echo "== a partial body sets \"Switch scenes after\" on a running advance-on-end rotation holding a still image (live)"
 # separate timing on, 0 = off → the image (it never ends) stays; {GlobalSwitchScenesAfterSeconds:2} → it moves on
 I1=$T/i1.png; timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=320x180" -frames:v 1 "$I1"
-# VideoFps 0: the parallel section left 98, and an image source with an fps cap never gets ready (a player bug —
-# docs/TODO.md "an fps cap stalls a still image")
-post /settings '{"VideoFps":0}' >/dev/null
+# an fps cap on (the parallel section left 98; 30 here explicitly): the player ignores it on a still image
+# (it once stalled the image unready — docs/TODO.md "An fps cap stalls a still image", fixed)
+post /settings '{"VideoFps":30}' >/dev/null
 post /settings '{"GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":0}' >/dev/null
 post /playlist/play "{\"paths\":[\"$I1\",\"$C1\"],\"settings\":{\"Order\":0}}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$I1" ] && break; sleep 0.1; done

@@ -459,6 +459,17 @@ between "$(sw_field 2)" 2400 4300 && ok "min 3 s: an image showed for it (handof
 setting '.GlobalIntervalSeconds = 0'
 stop_now
 
+# an fps cap never stalls a still: VideoFps 30 → an image item plays (it used to sit in waiting_ready,
+# ready:false — docs/TODO.md "An fps cap stalls a still image"); the cap still reaches the node
+setting '.VideoFps = 30'
+post /apply "{\"path\":\"$I1\"}" >/dev/null
+waitfor $WAIT shows "$I1" && cur_is ready true && cur_near fps_cap 30 && ok "VideoFps 30 × an image: it plays (ready, fps_cap 30 kept)" \
+  || bad "VideoFps 30 × image: cur $(basename "$(cur path)") ready $(cur ready) fps_cap $(cur fps_cap), transitions $(ctl state | jq -c '[.transitions[].phase]')"
+post /apply "{\"path\":\"$E1\"}" >/dev/null
+waitfor $WAIT shows "$E1" && cur_is ready true && ok "…and a video after it plays capped" || bad "VideoFps 30 × video after the image: cur $(basename "$(cur path)") ready $(cur ready)"
+setting '.VideoFps = 0'
+stop_now
+
 echo "== 0 = off for both limits (minimum 0, maximum 0): a short clip switches at its end, a long one plays to its end"
 # p1 (4 s) → e1 (12 s) → e2: each switch at its clip's end (align:end), never cut by a limit
 m0=$(tev_n); nw0=$(nows)
