@@ -734,23 +734,30 @@ waitfor $WAIT newcomp "$oldCP" || bad "no new compositor after killing $oldCP"; 
 waitfor $WAIT shows "$C" && ok "c on screen after the restart (the snapshot brought back a)" || bad "after the restart: cur $(basename "$(cur path)") — the backend last switched to c"
 [ "$(curl -sf -m 5 "$U/current" | jq -r .path)" = "$C" ] && ok "/current says c" || bad "/current $(curl -sf -m 5 "$U/current" | jq -c .)"
 stop_now
-restart_player 6   # normal snapshot writes again for the sections below
 
 echo "== a rebuilt player binary: the backend restarts the player onto it, keeping what it shows"
 # The player outlives the backend on purpose, so a rebuild/reinstall never reached a running one: fixes
 # "persisted" for hours. Here: a new file at the backend's binary path (cp + mv = a new inode, like cargo/nix).
+# Every snapshot write of the old player takes 4 s (an fsync under I/O load): its clean quit — the pause's write
+# still in flight, then the final snapshot — takes seconds. The upgrade waited 1.5 s, SIGTERMed, SIGKILLed at 3 s
+# (killing the final snapshot: the new player restored an older one) and then gave up on the new one after 3 s.
+restart_player 5 LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
+kills() { grep -cE "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
 rebuild() { cp "$B" "$T/bin/lp-player.new" && mv -f "$T/bin/lp-player.new" "$T/bin/lp-player"; }
 post /apply "{\"path\":\"$D\"}" >/dev/null; waitfor $WAIT shows "$D" || bad "/apply d → cur $(cur path)"
 post /pause '{}' >/dev/null; waitfor $WAIT paused_is true || bad "/pause → player.paused $(playerPaused)"
-CP0=$(comp_pid); SP0=$(sup_pid)
+CP0=$(comp_pid); SP0=$(sup_pid); k0=$(kills)
 curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: running player current" || bad "stale before the rebuild: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
 rebuild
-for _ in $(seq 1 200); do c=$(comp_pid); [ -n "$c" ] && [ "$c" != "$CP0" ] && break; sleep 0.1; done   # ≤ the 10 s check + 2 s settle
+waitfor 60000 newcomp "$CP0"   # ≤ the 10 s check + 2 s settle + the old player's slow quit (≤ 2 writes of 4 s)
 CP=$(comp_pid); SP=$(sup_pid)
 [ -n "$CP" ] && [ "$CP" != "$CP0" ] && [ -n "$SP" ] && [ "$SP" != "$SP0" ] && ok "idle player upgraded: compositor $CP0 → $CP, supervisor $SP0 → $SP" || bad "no upgrade: compositor $CP0 → $CP, supervisor $SP0 → $SP"
 [ "$(readlink "/proc/$CP/exe")" = "$T/bin/lp-player" ] && ok "it runs the new build" || bad "it runs $(readlink "/proc/$CP/exe")"
 [ "$(cur path)" = "$D" ] && [ "$(playerPaused)" = true ] && ok "same wallpaper, still paused" || bad "after the upgrade: cur $(basename "$(cur path)") paused=$(playerPaused)"
 [ "$(ctl logs '{"kind_prefix":"snapshot.restored"}' | jq '.events|length')" -ge 1 ] && ok "restored from its snapshot" || bad "no snapshot.restored on the new player"
+[ "$(kills)" = "$k0" ] && ok "the old player's slow clean quit was waited for (never signalled)" || bad "the upgrade signalled the quitting player: $(grep -E "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -2 | tr '\n' ' ')"
+sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
+case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "the new player got the old one's arguments + --restore" ;; *) bad "the new supervisor runs: $sa" ;; esac
 curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: current again" || bad "still stale: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
 post /pause '{}' >/dev/null
 stop_now
@@ -777,6 +784,20 @@ CP=$(comp_pid); SP=$(sup_pid)
 [ -n "$CP" ] && [ "$CP" != "$CP0" ] && [ "$(cur path)" = "$E2" ] && ok "upgraded at the switch: E2 on screen, compositor $CP0 → $CP" || bad "after L1's end: compositor $CP0 → $CP, cur $(basename "$(cur path)")"
 waitfor $WAIT armed_for "$L1"
 [ -n "$(aligned_corr "$L1")" ] && [ "$(storms)" = "$st0" ] && [ "$(nows)" = 0 ] && ok "the next end-of-video switch is armed on the new player, no storm" || bad "after the upgrade: armed=$(aligned_corr "$L1") storms=$(( $(storms) - st0 )) now-switches=$(nows)"
+stop_now
+
+echo "== the player gone (its supervisor killed): the next switch starts it again with the supervisor's own arguments"
+# A failed upgrade (or any player that went away) fell back to a plain `serve` at the next switch — without the
+# running one's --headless / --outputs / --socket (here: no Wayland, so it never came up) and without --restore.
+gone() { ! kill -0 "$1" 2>/dev/null; }
+post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → cur $(cur path)"
+oldSP=$SP; oldCP=$CP; kill -9 "$SP"
+waitfor 30000 gone "$oldCP" || bad "the compositor $oldCP outlived its killed supervisor by 30 s"
+post /apply "{\"path\":\"$C\"}" >/dev/null
+waitfor 20000 shows "$C" && ok "the next switch started the player again: c on screen" || bad "after the player was gone: cur $(basename "$(cur path)"), /player-engine $(curl -sf -m 5 "$U/player-engine" | jq -c '{reason}')"
+SP=$(sup_pid); CP=$(comp_pid)
+sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
+case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "started with the gone supervisor's arguments + --restore" ;; *) bad "the new supervisor ($SP) runs: $sa" ;; esac
 stop_now
 
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"

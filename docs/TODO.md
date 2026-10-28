@@ -451,9 +451,12 @@ Two bug classes kept recurring; fix the class, not the instance:
       switch is saved by the snapshot as A where it plays and re-armed by `DoVideoEndWait` (it switched NOW before).
       Player-side ordering considered: a switch's reply can't wait for an fsync, so the backend closes the window.
       IT RED 5 → GREEN (a lagging snapshot via `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS`; a crash while armed).
-- [ ] **In-place upgrade fails under IO load**: the old compositor's clean quit took 3.1–3.3 s, `UpgradeInPlace`'s fixed
+- [x] **In-place upgrade fails under IO load**: the old compositor's clean quit took 3.1–3.3 s, `UpgradeInPlace`'s fixed
       3 s wait gave up, and the backend fell back to a plain `serve` without `--restore`/`--headless`. Wait on the
       supervisor's exit / socket instead of a fixed 3 s, and keep the args on the fallback.
+      — done 2026-10-28: the old supervisor's exit for 10 s + 3 × its last snapshot write time (≤ 120 s) before any
+      signal, the new pid's hello ≤ 30 s while it lives; `EnsureRunning` starts the last player's own arguments +
+      `--restore`. IT RED 3 → GREEN (4 s snapshot writes; the supervisor killed).
 
 - [x] **A 1-item timed session has no tick** (2026-10-27, from the fuzz-bug fix): `EnsureTimedTick` starts one only for
       > 1 item, so a next/prev/random queued in a 1-item session (or the restart daemon's "restart") is never taken —

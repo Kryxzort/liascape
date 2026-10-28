@@ -119,7 +119,12 @@ back to Legacy always stays possible).
 - `EnsureRunning()` (only a **switch** calls it — queries/sets never spawn): connect, else
   `setsid sh -c 'exec lp-player serve …'` (no `--headless`; session env inherited — `WAYLAND_DISPLAY`
   etc.; stdio → `~/.cache/livepaper/lp-player-serve.log`, never a pipe: the player outlives the
-  backend) and wait ≤ 3 s for the socket. Exit 1 ("already running" on the instance lock) keeps
+  backend) and wait ≤ 3 s for the socket. **Arguments:** the first start runs `serve` (`--socket` when not
+  the default); once this client has talked to a player, it runs **that player's own arguments + `--restore`**
+  (`_serveArgs`, read from its supervisor's cmdline when a new player pid answers `hello`, minus
+  `--supervised/--restore/--restarted`) — a player that went away (a failed upgrade, a killed or given-up
+  supervisor) comes back with the same `--headless/--outputs/--socket/--ao`, showing what it showed. Before
+  (2026-10-28), a failed upgrade under I/O load fell back to a plain `serve`: no `--headless`, no `--restore`. Exit 1 ("already running" on the instance lock) keeps
   connecting to the winner. A failed start isn't retried for 10 s (`LastError` → `/player-engine`).
   **Item 4, before any of that**: if the last-known supervisor pid is still alive (`ProcIdentity`-
   checked), a switch landing mid-supervised-restart must NOT race it to spawn a second `serve` into the
@@ -144,7 +149,15 @@ back to Legacy always stays possible).
   **Upgrade** = `QuitOrKill` (the player writes its final snapshot) → the supervisor's own `serve`
   arguments (from its cmdline, minus `--supervised/--restore/--restarted`) + `--restore` → the same
   wallpaper at the same place, paused stays paused, ~0.2 s; then events resubscribe and the `Restarted`
-  handler re-applies settings (R81). Never twice onto the same build (a check that can't see through
+  handler re-applies settings (R81). **Every wait is on the real condition with a deadline that scales**
+  (2026-10-28 — under I/O load the old player's clean quit took 3.1–3.3 s: its final snapshot is fsync'ed,
+  0.1–11.8 s measured; the fixed 1.5 + 1.5 s SIGTERMed and SIGKILLed it mid-snapshot, the new player's
+  fixed 3 s wait gave up and the next switch fell back to a plain `serve`): the old **supervisor's exit**
+  for `QuitWaitMs` = 10 s + 3 × the player's own last snapshot write time (`probe snapshot`
+  `last_write_ms`: the write in flight + the final one), ≤ 120 s, before any signal (then SIGTERM → the
+  supervisor's own 10 s stop wait → SIGKILL, 12 s each); then the **new player's `hello` from a new pid**
+  while the process we started lives, ≤ 30 s (it exiting ends the wait, with its exit hint). A failure
+  keeps `_serveArgs`, so the fallback (`EnsureRunning`) starts the same arguments + `--restore`. Never twice onto the same build (a check that can't see through
   some wrapper must not restart the player every 10 s). **When**: before every switch (`Switch`, after
   `EnsureRunning`), and from a 10 s check in `--serve` only while **no transition is pending** — an
   armed align:end switch would be dropped by the restart and the rotation would switch early (failure
@@ -404,8 +417,12 @@ one handoff at E1's end (RED before: E2 restored at once + an `align:now` switch
 whose snapshot lags the last switch** (a player restarted with `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000` — every
 write takes 4 s, an fsync under I/O load; precondition: the snapshot still shows a after the switch to c) → c on
 screen again, `/current` c (RED before: a stayed); a rebuilt binary → an idle paused
-player is upgraded within ~12 s (new compositor + supervisor, the new build, same wallpaper, still
-paused, `snapshot.restored`, `/player-engine` current), and an advance-on-end playlist is **not**
+player — its old player restarted with 4 s snapshot writes, so its clean quit takes seconds — is upgraded within
+~60 s (new compositor + supervisor, the new build, same wallpaper, still paused, `snapshot.restored`,
+`/player-engine` current, **never signalled** (no "did not quit" line), the old supervisor's arguments +
+`--restore`; RED before: SIGTERM at 1.5 s, SIGKILL at 3 s, the final snapshot lost), **the supervisor killed** → the
+next switch starts the player again with its own arguments + `--restore` and shows (RED before: a plain `serve`,
+no Wayland here → never came up), and an advance-on-end playlist is **not**
 upgraded while its switch is armed (stale > 15 s) but at its next switch, the following switch armed
 on the new player (`LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
 while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
