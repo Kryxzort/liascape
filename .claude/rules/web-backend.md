@@ -101,7 +101,8 @@ unknown name / a non-editable type / not a scene folder → **400 `{error}`**, n
 `wallpaper-changed {path}` (every switch — `SwitchToFile`; `null` on a keybind stop / trash stop) `· settings-changed
 {…changed fields}` (the backend changed settings itself — a keybind volume-up/down; the UI merges it:
 every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume) `· scene-crashed {path}` (legacy: an LWE process died; lp-player: the scene's `source.broken` — the item is then marked crashed in its index; the UI marks its card at once) `· scene-vram-stopped {path, usedMib, limitMib, message}` (lp-player: the VRAM guard stopped a scene — not a crash; the UI's status bar shows the message) `· timed-stopped · download-progress {id,value,done?,status?}
-· unsub-progress {done,total,currentId,finished?} · library-synced {count} · library-item-changed {path, volumeOverride} (a volume keybind moved an item's own volume) · steam-qr {png}
+· unsub-progress {done,total,currentId,finished?} · library-synced {count} (the startup one fires before any open page has
+reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, volumeOverride} (a volume keybind moved an item's own volume) · steam-qr {png}
 · steam-signed-in {…status} · steam-qr-error {message}`.
 
 ## Rules

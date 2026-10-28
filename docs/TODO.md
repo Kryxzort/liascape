@@ -528,6 +528,17 @@ Two bug classes kept recurring; fix the class, not the instance:
       its one item) and `restart`, and never rotates by itself (`CanRotate`). Shared with legacy (its leak restart is
       now taken). Matrix `seq:plPlayOne+next|random` RED 2/2 → GREEN (session.md § Timed Playlist).
 
+- [x] **"Library is empty" after a backend restart under the open app** (owner, 2026-10-28 13:11): a cherry-pick
+      changed `api/client.ts` + the backend → Vite's HMR re-created the store and re-ran `init` while `dotnet watch`
+      had the backend down; `init` failed (the library read became `[]`) and nothing ever re-read it. A plain restart
+      under a production page left the library / strip / settings stale too (whatever changed in the gap).
+      — done 2026-10-28: `store.resync()` (one read of everything mirrored, each piece applied only when its read
+      succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
+      Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
+      incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
+- [ ] Optional: a backend instance id in a WS hello (the page could tell a restart from a dropped socket). Not needed
+      while every reopen re-reads; only worth it if `resync` ever gets expensive.
+
 ## Follow-up projects (each gets its own brainstorm)
 - [ ] **PARKED (owner, 2026-10-28): in-player auto-mute rework** — the Phase 3 auto-mute Signal (per-stream
       metering in the player, own bus excluded by ownership, ≤ 100 ms). Auto-mute stays `AudioMonitor` in the

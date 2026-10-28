@@ -57,6 +57,7 @@ interface State {
   appActive: boolean;
 
   init(): Promise<void>;
+  resync(): Promise<boolean>;
   // browse
   setSource(i: number): void; setQuery(q: string): void; reload(): Promise<void>; loadMore(): Promise<void>;
   setBrowseFilter(p: Partial<WorkshopFilter>): void; isWorkshop(): boolean; setBrowseSort(i: number): void;
@@ -99,6 +100,11 @@ let stateTimer: ReturnType<typeof setTimeout>;
 let settingsTimer: ReturnType<typeof setTimeout>;
 let statusTimer: ReturnType<typeof setTimeout>;
 let statusHeldUntil = 0;
+// a strip / settings edit whose debounced save hasn't fired yet: a resync keeps the local copy (that save is on its way)
+let stripSavePending = false;
+let settingsSavePending = false;
+let resyncing: Promise<boolean> | null = null;
+let resyncAgain = false;
 const dlCtrls: Record<string, AbortController> = {}; // per-download abort (cancel)
 
 // Reset-to-defaults for the playback/mpv fields.
@@ -128,28 +134,25 @@ export const useStore = create<State>((set, get) => ({
   themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
   settingsItem: null, settingsSiblings: [], settingsMorphId: null, settingsSource: null, appActive: true,
 
+  // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
+  // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
+  // page shows (init used to take a failed /library as [] → "Library is empty" for good while a wallpaper played).
   async init() {
-    const [sources, themes, settings, cur, lib, pstate, names, depth, steam] = await Promise.all([
-      api.sources(), api.themes(), api.settings(), api.current().catch(() => null),
-      api.library().catch(() => []), api.playlistState().catch(() => null),
-      api.playlistNames().catch(() => []), api.undoDepth().catch(() => ({ depth: 0 })),
-      api.steamStatus().catch(() => null),
-    ]);
-    const themeName = (settings.theme as string) || themes[0]?.name;
-    const theme = themes.find((t) => t.name === themeName) ?? themes[0] ?? null;
-    if (theme) applyThemeVars(theme);
-    // restore the saved source if it's still available, else first available
-    const savedSrc = LS.get<number>("activeSource", -1);
-    const avail = new Set(sources.filter((s) => s.available).map((s) => s.index));
-    set({
-      sources, themes, settings, theme,
-      activeSource: avail.has(savedSrc) ? savedSrc : (sources.find((s) => s.available)?.index ?? 0),
-      playingPath: cur?.path ?? null, libraryItems: lib, playlistNames: names, undoDepth: depth.depth,
-      playlist: pstate?.videoPaths ?? [], playlistSettings: pstate?.settings ?? DEFAULT_PS,
-      playlistName: pstate?.name ?? null, steam,
-    });
-    get().refreshPlayingStatus(); // show the now-playing line if something's already playing
+    for (let i = 0; !(await get().resync()); i++) await new Promise((r) => setTimeout(r, Math.min(250 * 2 ** i, 2000)));
     await get().reload();
+  },
+  // API: everything the page mirrors from the backend, read as one — at start (init) and after every WS reconnect
+  // (App.tsx: a backend restart or any gap in the push events — what changed meanwhile was never pushed). Each piece
+  // is applied only when ITS read succeeded; a failed one keeps what's shown. true = no read failed for want of a
+  // backend (an HTTP error from a live one isn't retried). Overlapping calls coalesce into one more pass.
+  async resync() {
+    if (resyncing) { resyncAgain = true; return resyncing; }
+    resyncing = (async () => {
+      let ok: boolean;
+      do { resyncAgain = false; ok = await readBackend(set, get); } while (resyncAgain);
+      return ok;
+    })().finally(() => { resyncing = null; });
+    return resyncing;
   },
 
   // ---- browse ----
@@ -312,9 +315,9 @@ export const useStore = create<State>((set, get) => ({
   setSetting(key, value) {
     const s = { ...(get().settings ?? {}), [key]: value };
     set({ settings: s });
-    clearTimeout(settingsTimer);
+    clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
-    settingsTimer = setTimeout(() => api.saveSettings(get().settings ?? s).catch(() => {}), 250);
+    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalAdvanceOnVideoEnd", "globalIntervalSeconds"].includes(key))
       get().refreshPlayingStatus();
@@ -410,9 +413,51 @@ function buildPlayingStatus(get: () => State): string {
 }
 
 function savePlaylistDebounced(get: () => State) {
-  clearTimeout(stateTimer);
+  clearTimeout(stateTimer); stripSavePending = true;
   stateTimer = setTimeout(() => {
+    stripSavePending = false;
     const { playlist, playlistSettings, playlistName } = get();
     api.savePlaylistState({ videoPaths: playlist, settings: playlistSettings, name: playlistName }).catch(() => {});
   }, 200);
+}
+
+// One read of everything the store mirrors (resync). A read fails → null → that piece stays as shown.
+type Setter = (p: Partial<State>) => void;
+async function readBackend(set: Setter, get: () => State): Promise<boolean> {
+  let unreachable = false;
+  const r = <T,>(p: Promise<T>) => p.then((v) => ({ v }), (e) => { if (e instanceof TypeError) unreachable = true; return null; });
+  const [sources, themes, settings, cur, lib, pstate, names, depth, steam] = await Promise.all([
+    r(api.sources()), r(api.themes()), r(api.settings()), r(api.current()), r(api.library()), r(api.playlistState()),
+    r(api.playlistNames()), r(api.undoDepth()), r(api.steamStatus()),
+  ]);
+  const st = get();
+  const playingLine = st.status === "" || st.status === buildPlayingStatus(get); // no transient notice showing
+  const p: Partial<State> = {};
+  if (sources) {
+    p.sources = sources.v;
+    if (!st.sources.length) { // first load: restore the saved source if it's still available, else the first available
+      const saved = LS.get<number>("activeSource", -1);
+      const avail = new Set(sources.v.filter((x) => x.available).map((x) => x.index));
+      p.activeSource = avail.has(saved) ? saved : (sources.v.find((x) => x.available)?.index ?? 0);
+    }
+  }
+  if (themes) p.themes = themes.v;
+  if (settings && !settingsSavePending) p.settings = settings.v;
+  const tl = p.themes ?? st.themes, ss = p.settings ?? st.settings;
+  if (tl.length && ss) {
+    const name = (ss.theme as string) || tl[0]?.name;
+    const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
+    if (theme) { applyThemeVars(theme); p.theme = theme; }
+  }
+  if (cur) p.playingPath = cur.v?.path ?? null;
+  if (lib) p.libraryItems = lib.v;
+  if (pstate && !stripSavePending) {
+    p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
+  }
+  if (names) p.playlistNames = names.v;
+  if (depth) p.undoDepth = depth.v.depth;
+  if (steam) p.steam = steam.v;
+  set(p);
+  if (playingLine) get().refreshPlayingStatus(); // the now-playing line follows (a transient notice reverts to it itself)
+  return !unreachable;
 }

@@ -59,7 +59,14 @@ export default function App() {
     // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
     else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
   }, []); // eslint-disable-line
-  useEvents(onEvent);
+  // the backend came back (a restart under the open page): re-read everything it mirrors; a Browse list the outage
+  // left empty loads again
+  const onReconnect = useCallback(() => {
+    s.resync().catch(() => {});
+    const st = useStore.getState();
+    if (!st.wallpapers.length && !st.loading && st.sources.length) s.reload().catch(() => {});
+  }, []); // eslint-disable-line
+  useEvents(onEvent, onReconnect);
 
   // (Escape closes the preview from inside it — morphing back into its card, components/useMorph.ts)
 
