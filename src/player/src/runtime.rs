@@ -2803,7 +2803,8 @@ impl Runtime {
     /// one is retired — it's paused and silent, so it goes at once), so a rotation keeps
     /// its place and the *last* target is what an output shows when one comes back. An
     /// `align: now` request is handed off at once; an `align: end` one waits for that
-    /// output (the parked A is paused — its end can't come before), and a newer parked
+    /// output (the parked A is paused — its end can't come before) unless the parked A
+    /// never ends (a scene or a still: `Now`, Phase 2 Task 9), and a newer parked
     /// request supersedes it. Events: `transition.scheduled` → `.handoff {committed,
     /// parked}` → `.done` (or `.cancelled {reason: "superseded"}`), corr `tr-<n>`.
     pub(crate) fn transition_parked(
@@ -2851,6 +2852,12 @@ impl Runtime {
                     "duration_ms": req.duration_ms, "parked": true }),
         );
         let old = self.parked.take().map(|pk| pk.id);
+        // Phase 2 Task 9: a parked A that never ends (a scene, a still) has no end to wait
+        // for — `align: end` is `Now`, exactly as in the recipe (`never_ends`).
+        let wait_end = req.align == crate::recipes::transition::Align::End
+            && !old
+                .as_deref()
+                .is_some_and(|o| crate::recipes::transition::never_ends(&self.graph, o));
         self.graph.set_parked(None);
         if let Some(prev) = self.parked_req.take() {
             log::event(
@@ -2874,7 +2881,7 @@ impl Runtime {
         {
             self.retire(old);
         }
-        if req.align == crate::recipes::transition::Align::End {
+        if wait_end {
             self.parked_req = Some(ParkedReq {
                 corr: corr.clone(),
                 b: b.clone(),

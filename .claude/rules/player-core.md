@@ -1462,8 +1462,8 @@ curve, requested }` on the `Tr` (`tr.onset`) — a transition has at most one at
 for that id arrives (`start_onset`: *now* adds the `Animation`, with `start` = the
 confirmation instant, never backdated to the un-pause); `step()`'s own top-of-call check
 resolves it unconfirmed once `ONSET_TIMEOUT` (150 ms) passes, logging
-`transition.onset_timeout`. `recipes::transition::b_has_audio` (= `crate::onset::has_audio`: kind == `video` && not
-`no_audio` && not `has_audio == false`, R92) skips the whole mechanism for a `color`/`image`/`snapshot` B, or one explicitly
+`transition.onset_timeout`. `recipes::transition::b_has_audio` (= `crate::onset::has_audio`: kind `video` or `scene` (Phase 2
+Task 5) && not `no_audio` && not `has_audio == false`, R92) skips the whole mechanism for a `color`/`image`/`snapshot` B, or one explicitly
 muted — nothing to confirm, ramp it in at once exactly as before this task
 (`schedule_onset` is the one seam every call site goes through). `Phase::Handoff`'s
 `transition.done` check requires `tr.onset.is_none()` too — never fires while a
@@ -1505,8 +1505,10 @@ image/colour/snapshot; a video is never a still, even with no known duration) or
 has ended (it holds its last frame) is held as itself. With snapshots the effect starts one
 iteration later (the host opens the copy on its next `sync`).
 
-**Align.** `Now` = when B is ready. `End` (lead A = the first requested output's A; a
-still/absent A → `Now`): non-shared A gets `loop=false` at `start` (restored on
+**Align.** `Now` = when B is ready. `End` (lead A = the first requested output's A; an A
+that never ends — a still or a **scene** (`never_ends`, Phase 2 Task 9: no duration, no
+`Ended`) — or an absent A → `Now`, at once, never the `ALIGN_SLACK` fallback; its loop is left
+alone): non-shared A gets `loop=false` at `start` (restored on
 cancel/failure — and seeked to 0 if it ended because of it). full-live *ends* at A's end:
 start = end − D, where end is the minimum over ticks of `now + (duration − time_pos)/speed`
 minus half a frame (`time_pos` is the shown frame's pts, so each sample over-estimates by
@@ -1861,7 +1863,9 @@ once), reply `{corr, to, parked: true}`, events `transition.scheduled {parked: t
 `.handoff {committed: true, parked: true}` → `.done`. An `align: end` request waits instead
 (`Runtime::parked_req`; the parked A is paused, its end can't come) and hands off when an output
 shows B (`unpark`), or is `.cancelled {reason: "superseded", parked: true}` by the next one / by
-`stop`. So a rotation keeps its place invisibly and the *last* target is what the next output
+`stop` — **unless the parked A never ends** (a scene or a still, the recipe's `never_ends`; Phase 2
+Task 9): then it is handed off at once like `align: now` (`tests/api.rs::
+parked_scene_align_end_hands_off_at_once`; RED before: it waited for an output). So a rotation keeps its place invisibly and the *last* target is what the next output
 shows. Test: `tests/api.rs::i4_transitions_while_no_output_replace_the_parked_wallpaper`.
 
 **Onsets (final review I6).** `Runtime::onsets` (`crate::onset::Onsets`, player clock) holds the
@@ -3631,3 +3635,62 @@ total_mib}`** / **`vram.resumed`** (optional: a UI status line "paused: VRAM low
 `player.vram_low_active` (bool). The backend must NOT treat the low-VRAM pause as a user pause
 (`player.paused` stays false) and must not re-assert anything when it ends. Diagnose with `ctl
 probe '{"name":"vram"}'` and `'{"name":"workers"}'`.
+
+### Transitions with scenes (Task 9)
+
+The recipe stays kind-agnostic: a scene B is held in `srcs:` by its transition (its worker spawns
+at the first `sync` after `start` refreshed `srcs:` — in the harness one tick later than in the
+runtime, whose `refresh_srcs` runs right after the request), opened paused it readies with its
+first frame (one tick), its onset waits for the worker's `AudioFlowing` like a video's (none when
+it has no sound); reveal/frozen hold a scene A by a `SnapshotSource` blit of its latched frame
+and pause it at `t0 + 45 ms` (its worker gets no tick and latches nothing after that); a scene
+is never a still (`is_still`) but **never ends** (`never_ends` = still | scene).
+- **The one rule added (`recipes/transition.rs::never_ends`).** `align: end` on a lead A that
+  never ends is `Now` at once (it waited out `ALIGN_SLACK` — 10 s — before: a scene has duration
+  0 and never emits `Ended`, so the M2 fallback was the only way out, logging
+  `transition.align_fallback`); End leaves such an A's (inert) `loop` alone; `follows_a_end`
+  skips it. The same rule in the runtime's parked path (`transition_parked`: a parked scene A →
+  handed off at once, § Runtime "No output left"). This is what the backend's "wait for video
+  end" / restore-aligned switches send when the playing item is a scene.
+- **Tests** (`tests/transition.rs`, harness, synthetic `frame_index` scenes, frame-index videos
+  without audio so every B onset is immediate and every gain exact): `v_to_s_each_method`,
+  `s_to_v_each_method`, `s_to_s_each_method` (`combo`: full-live — both sides keep producing
+  frames, `gain.xfade` −3.0103 ± 0.05 dB each at the midpoint; reveal — fx `from` = a snapshot
+  pixel-identical to A's frame at the copy, A paused ≥ t0 + 45 ms, a scene A sent no tick and
+  latched nothing after it, B's xfade rising to −3.0103 at the midpoint; frozen — B on its first
+  frame, paused and silent through the effect, at 0 dB 30 ms after the handoff, then playing;
+  every method — progress forced to 0 / 1 composes exactly the plain sides (±1, the
+  `effect_progress_endpoints_match_plain_source` property with live textures), done → B alone,
+  a scene A's worker reaped), `align_end_video_a_to_scene_b` (full-live ends at A's end ±
+  17 ms, measured +9.0; reveal/frozen start at its `Ended`, +0.0), `scene_a_align_end_starts_at_once`
+  (S→V/S→S, every method + a cut: started ≤ 3 ticks after B's `Ready` — counted in ticks, not
+  time; RED with the rule removed: never started in 8 s), `shared_scene_a_is_untouched` (A on
+  VIRTUAL-2 too: never paused/ramped/loop-changed, kept rendering; snapshot constant on
+  VIRTUAL-1), `scene_b_load_error_keeps_a` (missing folder via the real worker's folder check,
+  synthetic `fail: load` / `fail: build`: `transition.failed` naming the folder, A untouched, no
+  restart, no crash record), `scene_b_worker_crash_mid_effect_still_hands_off` (SIGKILL at
+  progress 0.5, full-live and frozen: B's texture never None, no `transition.failed`, normal
+  handoff, one restart, a new pid, no crash record, B's scene time continuous),
+  `scene_b_broken_mid_effect_snaps_back` (every worker crashes 700 ms after its start → broken
+  after 3 restarts mid-effect → `transition.failed` "…broken…", snap-back to A within 30 ms, A
+  playing again, B destroyed, one crash record; S→S reveal and V→S full-live),
+  `mixed_kind_interrupt_chain_every_tick` (invariant #6 per tick over 10 scene/video starts,
+  gaps by condition: one tick / 100 ms / until Running). Unit
+  `scene_lead_a_align_end_starts_now` (every method + a cut; RED: End turned the scene's loop off
+  and nothing started). `tests/api.rs` (real clock): `scene_switch_storm_reaps_workers` (Review
+  Focus #5: 10 S→S starts 100 ms apart, ≤ 2 unpaused at every poll; settled → within 1 s one
+  worker, the 10th's, every earlier pid gone, `reaping` 0), `rapid_interrupt_chain_mixed_kinds`
+  (V, S, V, S… through the runtime: `state` polled, paused ⊆ `transitions[].held`, commits and
+  supersedes, the 10th alone, other workers reaped), `parked_scene_align_end_hands_off_at_once`.
+- **Gotchas found writing them.** A paused **video** A still presents 2–3 queued frames
+  (`time_pos` moves ~30 ms after the pause — why the snapshot exists); a paused **scene** A stops
+  exactly (the latch gate). A scene worker's first frame takes > 100 ms (its EGL setup alone), so
+  a chain of plain 100 ms gaps only ever supersedes — the chains choose their gaps by condition.
+  A `Tick.t` is the compositor's clock, so a restarted worker's frames continue the scene time
+  whatever its `Start.position`; Task 10's `crash_holds_last_frame_and_resumes_at_position`
+  checks the resume itself.
+- **For Task 10.** A crash mid-effect already holds B's last frame and restarts it (budget 3 in
+  60 s); broken → `SourceEvent::Error` → the recipe's snap-back (pre-Running: abort). Missing:
+  `source.broken`, the preview when no frame exists (a B that crashes before its first frame
+  just waits for the restarted worker's — its `Ready` comes from it), a broken scene in the
+  snapshot.

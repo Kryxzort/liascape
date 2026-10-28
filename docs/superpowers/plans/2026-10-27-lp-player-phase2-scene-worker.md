@@ -734,7 +734,7 @@ Nothing else in the recipe is kind-specific: a scene is not a still (reveal/froz
 `SnapshotSource`, which blits the latched dmabuf texture), and `b_has_audio` already goes through
 `onset::has_audio` (Task 5).
 
-- [ ] **Step 1: Write failing tests** (synthetic scenes, VIRTUAL-1/2, `ao: null`):
+- [x] **Step 1: Write failing tests** (synthetic scenes, VIRTUAL-1/2, `ao: null`):
   - `v_to_s_each_method`, `s_to_v_each_method`, `s_to_s_each_method` — full-live: both sides keep latching new
     frames, graph `gain.xfade` −3.0103 dB ± 0.05 each at the midpoint; reveal: A shown as a snapshot pixel-identical
     to A's last latched frame, A's worker gets no Tick after `pause_at` (t0 + 45 ms), B's xfade rises sin; frozen:
@@ -749,8 +749,27 @@ Nothing else in the recipe is kind-specific: a scene is not a still (reveal/froz
   - api `scene_switch_storm_reaps_workers` (Review 5: 10 S→S starts 100 ms apart → ≤ 2 unpaused sources per
     output after every tick; 1 s after the last: one live worker, every earlier pid reaped, the 10th current)
   - api `rapid_interrupt_chain_mixed_kinds` (V, S, V, S… 10 starts; invariant #6's assertions)
-- [ ] **Step 2:** → FAIL (the align one at least). **Step 3:** implement. **Step 4:** → PASS.
-- [ ] **Step 5:** Commit `Make Every Transition Work With Scenes`.
+- [x] **Step 2:** → FAIL (the align one at least). **Step 3:** implement. **Step 4:** → PASS.
+- [x] **Step 5:** Commit `Make Every Transition Work With Scenes`.
+
+**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Transitions
+with scenes (Task 9)"): the rule is `never_ends` (still | scene) in `start_instant`, End's
+loop-off and `follows_a_end`; the same rule found missing in the runtime's parked path
+(`transition_parked`: an `align: end` from a parked scene waited for an output) — fixed +
+`tests/api.rs::parked_scene_align_end_hands_off_at_once`. `Harness::scene(name, spec, extra)`
+already existed (Task 5). Interpretations: "A's worker gets no Tick after `pause_at`" = none after
+the pause *applies* (the recipe pauses on the first tick ≥ t0 + 45 ms; the source learns it at the
+next `sync`); a held **video** A's `time_pos` is compared from 150 ms after its pause (mpv presents
+queued frames — known, why snapshots exist), a scene A's from the pause itself; "progress 0/1
+captures" = progress forced to 0 and 1 mid-effect, the output compared with the plain side
+composed in the same iteration (±1); the frozen B "rises after handoff + 30 ms" = at 0 dB at
+handoff + 30 ms, then playing. The chains (`mixed_kind_interrupt_chain_every_tick`, harness, and
+the api `rapid_interrupt_chain_mixed_kinds`) pick their gaps by condition (one tick / 100 ms /
+until Running) — a scene's first frame takes > 100 ms, so plain 100 ms gaps never commit; the
+storm keeps the plan's 100 ms. Added: `scene_a_align_end_starts_at_once` (harness, counted in
+ticks), `scene_b_load_error_keeps_a` covers the real worker's missing folder plus synthetic
+`fail: load`/`fail: build`. Crash tests needed no Task 10 piece (the B's last frame is held, a
+broken worker is already a `SourceEvent::Error`).
 
 **Size: M** (1–1.5 days; mostly tests).
 

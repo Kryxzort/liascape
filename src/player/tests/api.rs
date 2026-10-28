@@ -7543,3 +7543,271 @@ fn low_vram_pause_mode_pauses_without_freeing() {
     c.ok("set", json!({"path": "player.paused", "value": false}));
     wait_moving(&mut c, &v, t1);
 }
+
+// ---------------------------------------------------------------- Phase 2 Task 9: transitions × scenes
+
+const T9_METHODS: [&str; 3] = ["full-live", "reveal", "frozen"];
+
+/// Invariant #6 as seen through `state`: ≤ 2 unpaused sources (both outputs show the same
+/// switch, so that is ≤ 2 per output) and, with `held`, nothing paused outside what an
+/// in-flight transition holds on purpose. Every scene worker pid seen goes into `pids`.
+fn t9_check(c: &mut Client, when: &str, held: bool, pids: &mut std::collections::BTreeSet<u64>) {
+    let st = c.ok("state", json!({}));
+    let allowed: std::collections::BTreeSet<String> = st["transitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["held"].as_array().cloned().unwrap_or_default())
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let mut live = Vec::new();
+    for (id, n) in st["graph"].as_object().unwrap() {
+        if n.get("gain_effective_db").is_none() || n["kind"] == "snapshot" {
+            continue;
+        }
+        if n["paused"] == json!(false) {
+            live.push(id.clone());
+        } else if held {
+            assert!(
+                allowed.contains(id),
+                "{when}: {id} is paused outside any held method: {}",
+                st["transitions"]
+            );
+        }
+    }
+    assert!(
+        live.len() <= 2,
+        "{when}: {} unpaused sources: {live:?}",
+        live.len()
+    );
+    for w in st["workers"].as_array().unwrap() {
+        if let Some(p) = w["pid"].as_u64() {
+            pids.insert(p);
+        }
+    }
+}
+
+/// Review Focus #5: Next spammed across scenes (keybind auto-repeat over S→S→S): 10 starts
+/// 100 ms apart, every method → ≤ 2 unpaused sources per output whenever we look; once the
+/// chain has settled, within 1 s: one live worker (the 10th's), every earlier pid reaped,
+/// nothing left reaping, the 10th current and alone.
+#[test]
+fn scene_switch_storm_reaps_workers() {
+    let Some(srv) = scene_serve(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_scene(&mut c, "t9-storm-a", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.1);
+    let dirs: Vec<PathBuf> = (0..3)
+        .map(|i| common::synthetic_scene(&format!("t9-storm-{i}"), &synth(Pattern::FrameIndex)))
+        .collect();
+    let mut pids = std::collections::BTreeSet::new();
+    t9_check(&mut c, "before", false, &mut pids);
+    let mut last = String::new();
+    for i in 0..10 {
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dirs[i % 3])},
+                   "effect_id": "fade", "duration_ms": 1000, "method": T9_METHODS[i % 3]}),
+        );
+        last = r["to"].as_str().unwrap().to_string();
+        let until = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < until {
+            t9_check(&mut c, &format!("after start #{i}"), false, &mut pids);
+        }
+    }
+    wait_for(Duration::from_secs(10), "the storm settles", || {
+        t9_check(&mut c, "settling", false, &mut pids);
+        c.ok("state", json!({}))["transitions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+            .then_some(())
+    });
+    println!("storm: {} scene workers seen", pids.len());
+    assert!(pids.len() >= 3, "workers were spawned: {pids:?}");
+    let live_pid = wait_for(
+        Duration::from_secs(1),
+        "one live worker, the rest reaped",
+        || {
+            let p = c.ok("probe", json!({"name": "workers"}));
+            let ws = p["workers"].as_array().unwrap();
+            if ws.len() != 1 || ws[0]["id"] != json!(last) || p["reaping"] != json!(0) {
+                return None;
+            }
+            let live = ws[0]["pid"].as_u64()?;
+            pids.iter()
+                .all(|&q| q == live || !pid_alive(q))
+                .then_some(live)
+        },
+    );
+    assert!(pid_alive(live_pid), "the 10th's worker lives");
+    assert_eq!(content(&mut c, "VIRTUAL-1"), last);
+    assert_eq!(content(&mut c, "VIRTUAL-2"), last);
+    let st = c.ok("state", json!({}));
+    let sources: Vec<&String> = st["graph"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, n)| n.get("gain_effective_db").is_some())
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(sources, vec![&last], "the 10th alone: {st}");
+}
+
+/// Invariant #6 with mixed kinds through the whole runtime: V, S, V, S … 10 starts, every
+/// method, each one request, 100 ms or one running effect after the previous (by condition:
+/// a scene's first frame takes > 100 ms, so plain 100 ms gaps would only ever supersede) →
+/// ≤ 2 unpaused sources and nothing paused outside a transition's `held` whenever we look;
+/// ≥ 1 commit and ≥ 1 supersede; the 10th target (a scene) current and alone, every other
+/// scene worker reaped.
+#[test]
+fn rapid_interrupt_chain_mixed_kinds() {
+    let Some(srv) = scene_serve(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.3);
+    let scenes = [
+        common::synthetic_scene("t9-mixed-1", &synth(Pattern::FrameIndex)),
+        common::synthetic_scene("t9-mixed-2", &synth(Pattern::Solid)),
+    ];
+    let mut pids = std::collections::BTreeSet::new();
+    let mut last = String::new();
+    for i in 0..10 {
+        let to = if i % 2 == 0 {
+            json!({"path": if i % 4 == 0 { &blue } else { &red }, "loop": true})
+        } else {
+            json!({"kind": "scene", "path": s(&scenes[(i / 2) % 2])})
+        };
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": to, "effect_id": "fade", "duration_ms": 1000,
+                   "method": T9_METHODS[(i + 1) % 3]}),
+        );
+        last = r["to"].as_str().unwrap().to_string();
+        let corr = r["corr"].as_str().unwrap().to_string();
+        t9_check(&mut c, &format!("after start #{i}"), true, &mut pids);
+        match i % 3 {
+            0 => {}
+            1 => {
+                let until = Instant::now() + Duration::from_millis(100);
+                while Instant::now() < until {
+                    t9_check(&mut c, &format!("after start #{i}"), true, &mut pids);
+                }
+            }
+            _ => wait_for(Duration::from_secs(5), "the effect runs", || {
+                t9_check(&mut c, &format!("running #{i}"), true, &mut pids);
+                logs_of(&mut c, "transition.started")
+                    .iter()
+                    .any(|e| e["corr"] == json!(corr))
+                    .then_some(())
+            }),
+        }
+    }
+    wait_for(Duration::from_secs(10), "the chain settles", || {
+        t9_check(&mut c, "settling", true, &mut pids);
+        c.ok("state", json!({}))["transitions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+            .then_some(())
+    });
+    let commits = logs_of(&mut c, "transition.handoff")
+        .iter()
+        .filter(|e| e["committed"] == json!(true))
+        .count();
+    let supersedes = logs_of(&mut c, "transition.cancelled")
+        .iter()
+        .filter(|e| e["reason"] == json!("superseded"))
+        .count();
+    println!(
+        "mixed chain: {commits} commits, {supersedes} supersedes, {} scene workers",
+        pids.len()
+    );
+    assert!(
+        commits >= 1 && supersedes >= 1,
+        "{commits} commits, {supersedes} supersedes"
+    );
+    assert!(
+        logs_of(&mut c, "transition.failed").is_empty(),
+        "no switch failed"
+    );
+    assert_eq!(
+        content(&mut c, "VIRTUAL-1"),
+        last,
+        "the 10th target is current"
+    );
+    let st = c.ok("state", json!({}));
+    let sources: Vec<&String> = st["graph"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, n)| n.get("gain_effective_db").is_some())
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(sources, vec![&last], "the 10th alone: {st}");
+    wait_for(
+        Duration::from_secs(1),
+        "every other scene worker reaped",
+        || {
+            let p = c.ok("probe", json!({"name": "workers"}));
+            let ws = p["workers"].as_array().unwrap();
+            let live = ws.first().and_then(|w| w["pid"].as_u64())?;
+            (ws.len() == 1
+                && ws[0]["id"] == json!(last)
+                && pids.iter().all(|&q| q == live || !pid_alive(q)))
+            .then_some(())
+        },
+    );
+}
+
+/// Task 9's align rule where no output is left (I4): with a parked scene there is no end to
+/// wait for — an `align: end` switch is handed off at once, like `align: now`; from a parked
+/// video it still waits for an output (its end can't come while it is parked).
+#[test]
+fn parked_scene_align_end_hands_off_at_once() {
+    let Some(srv) = scene_serve(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let a = create_scene(
+        &mut c,
+        "t9-parked-a",
+        &synth(Pattern::FrameIndex),
+        json!({}),
+    );
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.1);
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-1"}));
+    c.ok("headless.remove_output", json!({"name": "VIRTUAL-2"}));
+    wait_for(Duration::from_secs(2), "parked", || {
+        (c.ok("state", json!({}))["parked"] == json!(a)).then_some(())
+    });
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let mut corrs = Vec::new();
+    for _ in 0..2 {
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": red, "loop": true},
+                   "effect_id": "fade", "duration_ms": 300, "align": "end"}),
+        );
+        assert_eq!(r["parked"], json!(true), "{r}");
+        corrs.push(r["corr"].as_str().unwrap().to_string());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let evs = c.drain_events();
+    let handed = |corr: &str| {
+        evs.iter()
+            .any(|e| e["corr"] == json!(corr) && e["event"] == "transition.handoff")
+    };
+    assert!(handed(&corrs[0]), "from a parked scene: at once: {evs:?}");
+    assert!(!handed(&corrs[1]), "from a parked video: waits: {evs:?}");
+}

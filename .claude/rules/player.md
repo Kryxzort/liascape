@@ -47,6 +47,14 @@ sides keep *playing* through the effect — the renderer decodes A (from its liv
 0) with libmpv, not two frozen stills. Frozen stills remain the warmup fallback + the only source for
 scene sides.
 
+**Under `PlayerEngine=lp-player` none of the scene constraints below apply** (Phase 2 Task 9): a scene
+is a live texture like a video, so every method runs as picked for V→S, S→V and S→S — no auto-fallback,
+no `--reveal-b`, no `SceneTransitionDelayMs` cover. full-live animates both sides; reveal/frozen hold a
+scene A by a still copy of its last frame (its worker stops rendering at the hold); frozen holds a scene
+B on its first frame until the handoff. A scene never ends, so an `align: end` switch away from one
+("wait for video end") starts as soon as B is ready. `player-core.md` § Scene worker → "Transitions
+with scenes (Task 9)".
+
 **Methods + per-switch auto-fallback.** One picker (`TransitionMethod` = frozen|reveal|full-live);
 `TryStart` resolves the *actual* method per switch from the A/B kinds. **Only a SCENE side is
 constrained** — it can't be a live GL texture: a scene **A** → LWE `--screenshot` still (windowless; grim fallback) (`fromTex`), a scene **B**
