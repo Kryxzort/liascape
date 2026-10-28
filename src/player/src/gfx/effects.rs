@@ -241,6 +241,11 @@ impl Catalogue {
         }
     }
 
+    /// The directory it was loaded from (`None` for [`Catalogue::empty`]).
+    pub fn dir(&self) -> Option<&Path> {
+        (!self.dir.as_os_str().is_empty()).then_some(self.dir.as_path())
+    }
+
     /// Every effect id from `manifest.json`, in manifest order.
     pub fn ids(&self) -> Vec<String> {
         self.effects.iter().map(|e| e.id.clone()).collect()

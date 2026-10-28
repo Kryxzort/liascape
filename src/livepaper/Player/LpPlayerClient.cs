@@ -143,6 +143,50 @@ public sealed class LpPlayerClient
         }
     }
 
+    // `/health/features` (FeatureHealth): the running player's `hello.health` ({effects, vram, hwdec_interop, scenes},
+    // each {ok, reason, …}) — one quick `hello`, never spawns —; no player answering → `lp-player health` (effects +
+    // vram in this backend's environment, what a player it starts would see), cached 30 s. null = no binary / no answer.
+    public (JsonElement? Health, bool FromRunning) Health()
+    {
+        if (SocketExists && !IsStalled)
+            try
+            {
+                var h = Call("hello", null, QuickMs);
+                if (h.ValueKind == JsonValueKind.Object && h.TryGetProperty("health", out var he) && he.ValueKind == JsonValueKind.Object)
+                    return (he.Clone(), true);
+            }
+            catch (LpPlayerException) { }
+        return (HealthCheck(), false);
+    }
+
+    private (long At, JsonElement? V)? _healthCheck;
+    private JsonElement? HealthCheck()
+    {
+        lock (_sceneCheckLock)
+        {
+            if (_healthCheck is { } c && Environment.TickCount64 - c.At < 30_000) return c.V;
+            JsonElement? r = null;
+            if (PlayerEngine.ResolveBinary() is string bin)
+                try
+                {
+                    var psi = new ProcessStartInfo(bin) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                    psi.ArgumentList.Add("health");
+                    using var p = Process.Start(psi)!;
+                    var outTask = p.StandardOutput.ReadToEndAsync();
+                    _ = p.StandardError.ReadToEndAsync();
+                    if (!p.WaitForExit(8000)) { try { p.Kill(true); } catch { } }
+                    else if (p.ExitCode == 0)
+                    {
+                        using var doc = JsonDocument.Parse(outTask.Result);
+                        r = doc.RootElement.Clone();
+                    }
+                }
+                catch (Exception e) { Log($"`lp-player health` failed: {e.Message}"); }
+            _healthCheck = (Environment.TickCount64, r);
+            return r;
+        }
+    }
+
     // ---- logging (rate-limited: an identical line at most once per 10 s) ------------------------
     private static readonly Dictionary<string, long> _logSeen = new();
     private static readonly string _logPath = Path.Combine(

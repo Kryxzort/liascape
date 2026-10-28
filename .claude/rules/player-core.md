@@ -22,7 +22,16 @@ happen regardless of timing.
 
 - `src/main.rs` — CLI entry point: `--version`, `serve` (§ Runtime; without `--headless`
   = real Wayland outputs, § Wayland; supervised unless `--no-supervise`, § Supervisor),
-  `ctl` (§ Command API); any other invocation prints usage and exits 2.
+  `ctl` (§ Command API), `scene-check` (§ Scene worker → "Real scenes"), `health` (below); any other
+  invocation prints usage and exits 2.
+- `src/health.rs` — feature health (owner 2026-10-28, "make missing libraries fail loudly"): which optional
+  pieces work here and why not, each `{ok, reason, …}` (`ok` null = not known): `effects` (the catalogue —
+  none / empty / unloadable → every switch is a cut), `vram` (one sample of `vram::probe_from_env` — none →
+  the VRAM limit and low-VRAM rule can't act; run once at serve start on the `lp-health` thread, `hello`
+  never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
+  none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`). `hello.health` carries all four;
+  `lp-player health` prints `{effects, vram}` (no render worker without a GL context) for when no player runs —
+  the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
 - `src/log.rs` — the event log (below).
@@ -1986,7 +1995,7 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs}` | — | `ctl hello` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs, health {effects, vram, hwdec_interop, scenes} (each `{ok, reason, …}`, `crate::health`)}` | — | `ctl hello` |
 | `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |

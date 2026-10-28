@@ -55,6 +55,8 @@ async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSigna
 }
 
 // ---- types (mirror the C# camelCase DTOs) ----
+export interface FeatureHealth { id: string; label: string; ok: boolean | null; reason: string | null; affects: string[]; inUse?: boolean }
+
 export interface WorkshopFilter {
   sort: string; trendDays: number; type: string;
   ageRating?: string; resolution?: string; genres: string[]; features: string[];
@@ -131,6 +133,9 @@ export const api = {
   playerEngine: () => jget<{ engine: string; active: string; available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null }>("/player-engine"),
+  // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the
+  // settings keys whose rows get a warning icon. ok null = not known yet.
+  featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
   lwePreview: () => fetch(`${API}/lwe-preview`).then((r) => r.text()),
   importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
   libraryClear: () => jpost("/library/clear"),

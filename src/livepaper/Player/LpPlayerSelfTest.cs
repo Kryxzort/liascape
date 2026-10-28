@@ -28,6 +28,7 @@ public static class LpPlayerSelfTest
             SceneSkipAssertions(fails);
             SceneAdapterAssertions(fails);
             TransitionDurationAssertions(fails);
+            FeatureHealthAssertions(fails);
             ScenePropertyAssertions(fails);
             PlayLimitAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
@@ -83,6 +84,38 @@ public static class LpPlayerSelfTest
                  (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
                  (-7L, 10_000L, false, 10_000L, 0L) })
             if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
+    // ---- /health/features (FeatureHealth.Build): every missing piece → its feature not ok, with a reason ----------
+    private static void FeatureHealthAssertions(List<string> fails)
+    {
+        using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"scenes":{"ok":true,"reason":null}}""");
+        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null}}""");
+        FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
+        var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
+        foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
+        var none = FeatureHealth.Build(new(true, null, bad.RootElement, (false, "lp-scene-worker not found"), t => t is not ("pactl" or "playerctl" or "ffprobe"), false, false));
+        void Want(string id, bool? ok, string? inReason, string affects)
+        {
+            var x = F(none, id);
+            if (x.ok != ok) fails.Add($"health: {id} ok={x.ok}, want {ok}");
+            if (inReason != null && !(x.reason ?? "").Contains(inReason)) fails.Add($"health: {id} reason \"{x.reason}\" lacks \"{inReason}\"");
+            if (!x.affects.Contains(affects)) fails.Add($"health: {id} affects [{string.Join(",", x.affects)}], want {affects}");
+        }
+        Want("scenes", false, "lp-scene-worker", "allowScenes");
+        Want("transitions", false, "no catalogue", "globalTransitionEnabled");
+        Want("vram", false, "VRAM", "sceneVramLimitEnabled");
+        Want("hwdec-interop", null, null, "hwDec");
+        Want("auto-mute", false, "pactl", "autoMute");
+        Want("mpris", false, "playerctl", "autoMuteOnlyIfMprisActive");
+        Want("ffmpeg", false, "ffprobe", "normalizeAudio");
+        Want("steamcmd", false, "steamcmd", "workshopAcquireMode");
+        if ((F(none, "auto-mute").reason ?? "").Contains("parec")) fails.Add("health: auto-mute names parec, which is present");
+        var noBin = FeatureHealth.Build(new(true, "lp-player not found", null, (false, "lp-player not found"), _ => true, true, false));
+        if (F(noBin, "lp-player").ok != false || noBin.Any(x => x.id == "vram")) fails.Add("health: a missing lp-player → its feature false, no player-side features");
+        var d = new AppSettings();
+        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true) })
+            if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
+    }
+
     // ---- transition duration floor (0 = a cut; 1–49 ms allowed — the floor was 50) ----------------
     private static void TransitionDurationAssertions(List<string> fails)
     {

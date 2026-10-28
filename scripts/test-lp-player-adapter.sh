@@ -1053,6 +1053,12 @@ restart_player 9 LP_SCENE_WORKER_BIN=/nonexistent
 ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose lp-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
 pe_off() { curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false and (.scenes.reason | type == "string" and length > 0)' >/dev/null; }
 waitfor $WAIT pe_off && ok "/player-engine.scenes: unavailable, with a reason: $(curl -sf -m 5 "$U/player-engine" | jq -r .scenes.reason)" || bad "/player-engine.scenes: $(pe_scenes)"
+# "missing libraries fail loudly" (FeatureHealth): the running player's hello.health and /health/features say so
+ctl hello | jq -e '.health.scenes.ok == false and (.health.scenes.reason | test("lp-scene-worker not found")) and .health.effects.ok == true' >/dev/null \
+  && ok "hello.health: scenes not ok (lp-scene-worker not found), effects ok" || bad "hello.health: $(ctl hello | jq -c .health)"
+hf_scenes() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "scenes") | .ok == false and (.reason | test("lp-scene-worker")) and (.affects | index("allowScenes") != null)' >/dev/null; }
+waitfor $WAIT hf_scenes && ok "/health/features: scenes not ok with the reason, affects allowScenes" \
+  || bad "/health/features: $(curl -sf -m 10 "$U/health/features" | jq -c '.features[] | select(.id == "scenes")')"
 lib_steps_no_scene "no lp-scene-worker"
 restart_player 10
 setting '.AllowScenes = false'

@@ -432,6 +432,9 @@ public static class ServerHost
         app.MapGet("/mpv-preview", () => Results.Text(SettingsService.Load().BuildMpvOptions()));
         // the Player engine row: what's asked for / running, whether lp-player can run (+ why not)
         app.MapGet("/player-engine", () => Results.Json(livepaper.Player.PlayerEngine.Status()));
+        // API: which features can't work here because a build piece / runtime tool is missing (FeatureHealth) — the
+        // Settings page's warning icons (one quick player hello; CLI checks cached 30 s).
+        app.MapGet("/health/features", () => Results.Json(new { features = FeatureHealth.Report(SettingsService.Load()) }));
         app.MapGet("/lwe-preview", () => Results.Text(SettingsService.Load().BuildLweOptions()));
         app.MapPost("/library/import", async (ImportReq r) =>
         {

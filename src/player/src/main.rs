@@ -187,10 +187,20 @@ fn main() -> ExitCode {
         Some("serve") => serve_main(&args[1..]),
         Some("ctl") => lp_player::ctl::main(&args[1..]),
         Some("scene-check") => scene_check(&args[1..]),
+        Some("health") => {
+            // `hello.health` for when no player runs (no render worker here: no hwdec interop);
+            // the backend's capability report (/health/features) reads it, exit 0
+            let out = serde_json::json!({
+                "effects": lp_player::health::effects_here(),
+                "vram": lp_player::health::vram_here(),
+            });
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
         _ => {
             eprintln!(
                 "usage: lp-player --version | lp-player serve [--headless …] | lp-player ctl \
-                 <verb> ['<json args>'] | lp-player scene-check [--assets <dir>]"
+                 <verb> ['<json args>'] | lp-player scene-check [--assets <dir>] | lp-player health"
             );
             ExitCode::from(2)
         }
