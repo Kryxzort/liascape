@@ -619,7 +619,7 @@ input[type=range]:focus-visible { outline: none; }
 .btn.danger.glow-stop { box-shadow: 0 0 12px -3px var(--danger); }
 .btn.danger.glow-stop:hover { background: var(--danger-bg); box-shadow: 0 0 18px -2px var(--danger); }
 
-/* debug HUD (?debug / LP_DEBUG=1) */
+/* debug HUD (?debug / LIASCAPE_DEBUG=1) */
 .dbg-hud { position: fixed; top: 6px; right: 6px; z-index: 9999; pointer-events: none;
   font: 10px/1.3 ui-monospace, monospace; color: #b9f; background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent);
   border: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);

@@ -1,7 +1,7 @@
-//! The synthetic test scene (plan D7): `lp-synthetic.json` in a scene folder makes
-//! `lp-scene-worker` render a known pattern instead of LWE — exact, repeatable checks of the
+//! The synthetic test scene (plan D7): `liascape-synthetic.json` in a scene folder makes
+//! `liascape-scene-worker` render a known pattern instead of LWE — exact, repeatable checks of the
 //! transport, timing, crashes and every switch combo without WE's proprietary assets. Only
-//! honoured when the worker's environment has `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (production
+//! honoured when the worker's environment has `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (production
 //! never sets it). The pattern maths live here so tests predict every checked pixel exactly.
 
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub enum Fail {
     Build,
 }
 
-/// `lp-synthetic.json`. Every field has a default.
+/// `liascape-synthetic.json`. Every field has a default.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SyntheticSpec {

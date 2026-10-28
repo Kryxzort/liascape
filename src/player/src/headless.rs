@@ -140,7 +140,7 @@ fn bad(msg: String) -> ApiError {
         code: "out_of_range",
         message: msg,
         hint: "outputs are `<W>x<H>@<Hz>` with W,H in 1–16384 and Hz in 1–1000; names are \
-               non-empty, without `.`, `:`, `*` or spaces; `lp-player ctl state` lists them"
+               non-empty, without `.`, `:`, `*` or spaces; `liascape-player ctl state` lists them"
             .into(),
     }
 }
@@ -214,7 +214,7 @@ impl Headless {
             return Err(ApiError {
                 code: "unsupported",
                 message: format!("output {n:?} already exists"),
-                hint: "`lp-player ctl state` lists the outputs; remove it first with \
+                hint: "`liascape-player ctl state` lists the outputs; remove it first with \
                        headless.remove_output"
                     .into(),
             });
@@ -233,7 +233,7 @@ impl Headless {
             return Err(ApiError {
                 code: "no_such_node",
                 message: format!("no headless output {name:?}"),
-                hint: "`lp-player ctl state` lists the outputs (`out:<name>`)".into(),
+                hint: "`liascape-player ctl state` lists the outputs (`out:<name>`)".into(),
             });
         }
         if !x.is_finite() || !y.is_finite() {
@@ -254,7 +254,7 @@ impl Headless {
             return Err(ApiError {
                 code: "no_such_node",
                 message: format!("no headless output {name:?}"),
-                hint: "`lp-player ctl state` lists the outputs (`out:<name>`)".into(),
+                hint: "`liascape-player ctl state` lists the outputs (`out:<name>`)".into(),
             });
         };
         let o = self.outs.remove(i);

@@ -140,7 +140,7 @@ pub struct Catalogue {
 impl Catalogue {
     /// Resolve the `transitions/` directory to load, in order (brief's exact order):
     ///
-    /// 1. `LP_TRANSITIONS_DIR` env var.
+    /// 1. `LIASCAPE_TRANSITIONS_DIR` env var.
     /// 2. `~/.local/share/livepaper-web/transitions` (the Electron UI's installed copy).
     /// 3. The repo's own `transitions/`, found by walking up from the current exe's path
     ///    and, failing that, from `CARGO_MANIFEST_DIR` (a build-time constant, so this
@@ -151,11 +151,11 @@ impl Catalogue {
     /// than handed to [`Catalogue::load`] to fail on.
     ///
     /// Returns `None` if nothing above resolves — notably true inside `nix build
-    /// .#lp-player`'s sandboxed check phase, where `src/player` is built without its
+    /// .#liascape-player`'s sandboxed check phase, where `src/player` is built without its
     /// sibling `transitions/` directory present. Callers (every test in
     /// `tests/effects_all.rs`) treat `None` as a clean skip, not a failure.
     pub fn resolve_dir() -> Option<PathBuf> {
-        if let Ok(env_dir) = std::env::var("LP_TRANSITIONS_DIR") {
+        if let Ok(env_dir) = std::env::var("LIASCAPE_TRANSITIONS_DIR") {
             let p = PathBuf::from(env_dir);
             if p.join("manifest.json").is_file() {
                 return Some(p);

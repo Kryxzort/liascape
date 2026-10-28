@@ -6,9 +6,9 @@
 
 use std::os::fd::OwnedFd;
 
-use lp_player::gfx::dmabuf::EglImage;
-use lp_player::gfx::{Fbo, Gfx, Tex};
-use lp_player::worker::proto::FromWorker;
+use liascape_player::gfx::dmabuf::EglImage;
+use liascape_player::gfx::{Fbo, Gfx, Tex};
+use liascape_player::worker::proto::FromWorker;
 
 /// A `Buffer` message and its plane fds.
 pub type BufferMsg = (FromWorker, Vec<OwnedFd>);

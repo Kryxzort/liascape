@@ -1,4 +1,4 @@
-//! `workers` (Phase 2 Task 5): one entry per scene source — its `lp-scene-worker` and the
+//! `workers` (Phase 2 Task 5): one entry per scene source — its `liascape-scene-worker` and the
 //! frame transport (`SceneSource::worker_info`): `{id, path, pid, state (not_spawned |
 //! starting | running | restarting N | broken | stopped), restarts_60s, total_restarts,
 //! sync (fence|fdpoll), fourcc, modifier, size (export), native, max_size (the demand),

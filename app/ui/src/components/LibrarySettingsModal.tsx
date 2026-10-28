@@ -35,8 +35,8 @@ export function LibrarySettingsModal({
   const [dur, setDur] = useState("");
   const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
-  // lp-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
-  const sceneSpeed = useStore((s) => s.settings?.playerEngine === "lp-player");
+  // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
+  const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
   const prevRef = useRef<{ vol: number | null; spd: number | null; last: number; tm: number | null }>({ vol: null, spd: null, last: 0, tm: null });
   // one pending persist PER FIELD — a shared one let a speed drag replace a volume drag's save

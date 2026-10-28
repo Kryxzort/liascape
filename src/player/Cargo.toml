@@ -1,24 +1,24 @@
 [package]
-name = "lp-player"
+name = "liascape-player"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "lp-player — Wayland live-wallpaper compositor"
+description = "liascape-player — Wayland live-wallpaper compositor"
 
 [features]
-# The scene worker links LWE's core (`LP_LWE_CORE_DIR`: the flake's `lwe-core` — devShell and
+# The scene worker links LWE's core (`LIASCAPE_LWE_CORE_DIR`: the flake's `lwe-core` — devShell and
 # package — or `scripts/lwe.sh build`). `--no-default-features` builds without it:
-# `lp-scene-worker` then runs `--stub` and the synthetic renderer only.
+# `liascape-scene-worker` then runs `--stub` and the synthetic renderer only.
 default = ["lwe"]
 lwe = []
 
 [[bin]]
-name = "lp-player"
+name = "liascape-player"
 path = "src/main.rs"
 
 [[bin]]
-name = "lp-scene-worker"
-path = "src/bin/lp-scene-worker/main.rs"
+name = "liascape-scene-worker"
+path = "src/bin/liascape-scene-worker/main.rs"
 
 [dependencies]
 calloop = "0.14.5"

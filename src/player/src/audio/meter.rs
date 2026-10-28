@@ -1,6 +1,6 @@
 //! The bus meter (spec §5.3: "the probes tap the bus monitor: the real, server-side mix of
 //! exactly the player's audio and nothing else"; Task 14). A PipeWire capture stream on the
-//! `lp-player-bus` monitor (48 kHz F32, stereo, a 10 ms quantum requested via
+//! `liascape-player-bus` monitor (48 kHz F32, stereo, a 10 ms quantum requested via
 //! `node.latency = 480/48000`) turns every 1 ms of the bus mix into one dBFS value and keeps
 //! the last 4 minutes of them in a ring of `(t_mono, dbfs_1ms)`.
 //!
@@ -15,7 +15,7 @@
 //!   CLOCK_MONOTONIC) + its first frame's offset in that buffer; a block spanning two buffers
 //!   is stamped at its first frame.
 //! - The capture's `process` callback runs on PipeWire's **real-time data thread**
-//!   (`RT_PROCESS`, Phase 2 Task 14) — on the non-RT `lp-bus` main loop it missed whole graph
+//!   (`RT_PROCESS`, Phase 2 Task 14) — on the non-RT `lia-bus` main loop it missed whole graph
 //!   cycles under load (a timestamp jump, then silent blocks), exactly when a switch loads the
 //!   machine — and never blocks or allocates: blocks go to a callback-local staging buffer,
 //!   moved into the ring under a `try_lock` (a reader copying a window just delays them to

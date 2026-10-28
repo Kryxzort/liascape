@@ -1,6 +1,6 @@
-# lp-player Phase 1 — on-machine battery report (Task 20)
+# liascape-player Phase 1 — on-machine battery report (Task 20)
 
-Branch `lp-player`. Battery run on `0569d28`; the four product fixes it found (§ 5) are on top —
+Branch `liascape-player`. Battery run on `0569d28`; the four product fixes it found (§ 5) are on top —
 final code `53c4ea8`, re-verified live: the 12 scene-skip cells (§ 1.3) and the 1 h soak (§ 4).
 Battery script: `src/player/tests/onmachine/battery.sh`. Results:
 `src/player/tests/onmachine/results/task20-final-run/` (main matrix + realism + extremes,
@@ -39,10 +39,10 @@ frame check (§1.1, two bugs), `wait-for-end`'s timeout (§1.2), `restore-replay
 
 **4 real Phase-1 product findings — all fixed, reviewed and re-verified live (§ 5):** the
 soak's RSS growth (§ 4, two causes: glibc arena retention, Task 20b; an NVIDIA egl-wayland2
-event-queue leak, Task 20e), `/next`/`/prev`/`/random` crashing on a scene under `lp-player`
+event-queue leak, Task 20e), `/next`/`/prev`/`/random` crashing on a scene under `liascape-player`
 (§ 1.3, Task 20c), and a 65–320 ms loop stall per switch from hwdec interop/`vulkan-copy` init
 (Task 20d). **Final soak: PASS (0.31 MiB/min).** One deployment item for the owner: the
-installed `livepaper` NixOS package predates lp-player entirely (§ 1.4) — rebuild with
+installed `livepaper` NixOS package predates liascape-player entirely (§ 1.4) — rebuild with
 `sudo nixos-rebuild switch --impure`.
 
 ## 1. Method × mode matrix
@@ -106,7 +106,7 @@ read as "not meaningful" rather than as 43 real pacing failures.
 
 All three methods' `wait-for-end` cell failed their very first switch: `tr-136`/`tr-324`/
 `tr-515`, "transition did not reach a terminal state". `events.jsonl` (state dir
-`~/.local/state/livepaper/lp-player/events.jsonl`, which survives past the run since it isn't
+`~/.local/state/livepaper/liascape-player/events.jsonl`, which survives past the run since it isn't
 rotated) shows what actually happened to all three:
 
 ```
@@ -116,7 +116,7 @@ transition.cancelled {reason:"cancelled"}                                     --
 
 — i.e. the switch was genuinely still in flight, correctly waiting on A's natural end
 (`align:"end"`), when **the C# adapter's own backstop cancelled it** —
-`LpPlayerMedia.SwitchAndWait`'s `AlignBackstopSlackSec` = 15 s (`.claude/rules/player-adapter.md`
+`LiascapePlayerMedia.SwitchAndWait`'s `AlignBackstopSlackSec` = 15 s (`.claude/rules/player-adapter.md`
 § `DoVideoEndWait`: "the aligned wait itself is bounded... behind the player's own 10 s
 `align_fallback`"). The battery's own `term_timeout()` is `EFFECT_DURATION_MS/1000 + 10`
 (12 s at the `--effect-ms 2000` the main matrix ran at) — correct for a plain cut/effect switch,
@@ -146,8 +146,8 @@ sized for the wrong quantity (effect duration instead of clip duration).
 #### 1.2a Why `advance-on-end` (same code path) didn't show this
 
 `advance-on-end` (`AdvanceOnVideoEnd=true`, `WaitForVideoEnd=false`, interval 8 s) arms the
-*same* lp-player `DoVideoEndWait`/`SwitchAndWait(alignEnd:true)` path — there's no
-`lp-player`-side branch on `WaitForVideoEnd` at all (`PlayerHelper.cs` ~line 1961). The
+*same* liascape-player `DoVideoEndWait`/`SwitchAndWait(alignEnd:true)` path — there's no
+`liascape-player`-side branch on `WaitForVideoEnd` at all (`PlayerHelper.cs` ~line 1961). The
 difference is `PlayerHelper.cs`'s playlist tick (~line 1032): with `_waitingForVideoEnd &&
 !_waitForVideoEnd`, the tick's own interval elapsing calls `AdvanceAndLaunch()` directly,
 superseding the pending aligned wait every time well before 12 s — which is exactly why
@@ -163,9 +163,9 @@ idx 13 in every method — no corr exists for any of these, so there's nothing f
 show for the failure itself; the HTTP exchange below is the evidence of record instead).
 
 **Root cause, reproduced live** (against the owner's real library, `PlayerEngine` switched to
-`lp-player`, `lp-player-bus.playback` muted, legacy stopped first, state snapshotted and fully
+`liascape-player`, `liascape-player-bus.playback` muted, legacy stopped first, state snapshotted and fully
 restored and verified afterward — `playerEngine`/`autoMute` back to `legacy`/`true`, no
-`lp-player`/`mpvpaper` process left, default sink `easyeffects_sink` unchanged):
+`liascape-player`/`mpvpaper` process left, default sink `easyeffects_sink` unchanged):
 
 ```
 POST /apply {path: <workshop path for id 1098847996>}   -> 200
@@ -179,25 +179,25 @@ POST /next                                                -> 500
 `/next`/`/prev`) and `ApplyRandom` (`:2547-2563`, used by `/random`) both step/pick from
 `LibraryService.LoadAll()` **unfiltered** — scenes included — and call `Apply(pickPath, ...)`
 (`:703`) unconditionally. `Apply()`'s own scene check (`:707-716`) is exactly right for a direct
-`/apply` call from the UI: `if (IsScenePath(videoPath)) { if (PlayerEngine.IsLpPlayer) throw new
+`/apply` call from the UI: `if (IsScenePath(videoPath)) { if (PlayerEngine.IsLiascapePlayer) throw new
 InvalidOperationException("Scenes need the Legacy player engine for now..."); ... }` — Phase 1's
-documented design (`global-constraints.md`: "Under lp-player in Phase 1, scene items are skipped
+documented design (`global-constraints.md`: "Under liascape-player in Phase 1, scene items are skipped
 exactly like `AllowScenes=false`"). But `/next`, `/prev` and `/random`'s own route handlers
 (`Web/ServerHost.cs:536-538`, thin wrappers with no try/catch) never catch this exception — it
 propagates out of the ASP.NET minimal-API lambda as an unhandled 500, with **no transition ever
-requested of lp-player**. The owner's real library (300 items at the time of this investigation)
+requested of liascape-player**. The owner's real library (300 items at the time of this investigation)
 has scenes scattered roughly every 3-10 items (8 of the first 35 are scenes), so hitting one
 within a few navigations is close to certain over 25-50 switches of `/next`/`/prev`/`/random`,
 and `next-mid-transition` (two `/next` calls per logical switch) hits it at roughly half the
 switch count of plain `manual-next` — consistent with its idx-13-vs-idx-25 boundary.
 
 **This was a real Phase-1 gap, not a battery-script artifact**: `/next`/`/prev`/`/random` must
-**skip** scene items under `lp-player` (the same "skipped exactly like `AllowScenes=false`"
+**skip** scene items under `liascape-player` (the same "skipped exactly like `AllowScenes=false`"
 contract `Apply()` itself already half-implements for a *direct* apply), not crash the whole
 switch.
 
 **Fixed (Task 20c, `6eedd0c` "Backend: Skip Unplayable Scenes In Next/Prev/Random Under
-lp-player"):** `TryStepLibrary` steps past unplayable scenes in the same direction (bounded to
+liascape-player"):** `TryStepLibrary` steps past unplayable scenes in the same direction (bounded to
 one library pass); `ApplyRandom` and the timed `RandomAndLaunch` drop them from the pool; an
 all-scene library → HTTP 409 `{error: "No playable wallpaper…"}` (CLI: stderr + exit 1), the
 playing wallpaper untouched. Legacy + `AllowScenes=false` 500'd the same way and is fixed too.
@@ -221,18 +221,18 @@ first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out 
    installed NixOS package). `strace`'d it directly: it execs through 4 wrapper layers down to
    `.../livepaper-backend-0.1.0/lib/livepaper-backend/livepaper`, which then runs `setsid
    mpvpaper ...` — the **legacy** path — even though the already-running `--serve` backend's own
-   `PlayerEngine` is `lp-player`. First hypothesis: a binary-resolution gap (the wrapper exports
-   `LP_TRANSITION_BIN`/`LP_AUDIO_BIN` but not `LP_PLAYER_BIN`, and doesn't bundle `lp-player`
-   next to itself) — tried exporting `LP_PLAYER_BIN` into the one-shot process and `strace -v`
+   `PlayerEngine` is `liascape-player`. First hypothesis: a binary-resolution gap (the wrapper exports
+   `LIASCAPE_TRANSITION_BIN`/`LIASCAPE_AUDIO_BIN` but not `LIASCAPE_PLAYER_BIN`, and doesn't bundle `liascape-player`
+   next to itself) — tried exporting `LIASCAPE_PLAYER_BIN` into the one-shot process and `strace -v`
    confirmed the variable genuinely reached that exact process's own `execve` environment. **It
    made no difference — mpvpaper still launched.**
 2. That ruled out binary resolution, so: `strings -el` (UTF-16, how .NET stores string literals)
-   on the installed package's `livepaper.dll` for `"LP_PLAYER_BIN"` / `"PlayerEngine"` —
+   on the installed package's `livepaper.dll` for `"LIASCAPE_PLAYER_BIN"` / `"PlayerEngine"` —
    **zero matches, anywhere in the derivation.** The same search on this worktree's own dev build
    (`src/livepaper/bin/Debug/net10.0/livepaper.dll`, what `livepaper-watch`/`dotnet watch`
    actually runs) finds both immediately. **The owner's installed `livepaper` package is a stale
-   build that predates `PlayerEngine`/lp-player existing in the C# source at all** — not a
-   resolvable-binary gap `LP_PLAYER_BIN` could ever have fixed; the feature simply isn't compiled
+   build that predates `PlayerEngine`/liascape-player existing in the C# source at all** — not a
+   resolvable-binary gap `LIASCAPE_PLAYER_BIN` could ever have fixed; the feature simply isn't compiled
    into that binary.
 
 **Confirmed fix, live:** priming the session (`POST /apply`) then running
@@ -243,7 +243,7 @@ instead of the installed CLI produced a real `transition.scheduled`/`.handoff` i
 --restore` (the dev build already resolved at the top of the script) instead of `command -v
 livepaper`. This is a battery-script workaround for testing purposes only — it does **not** fix
 the underlying gap, which is that the owner's actually-installed `livepaper` (what runs for
-real, outside this test harness, for every one-shot CLI flag) has no lp-player code in it at
+real, outside this test harness, for every one-shot CLI flag) has no liascape-player code in it at
 all.
 
 **Re-run** (`task20-rerun-restore-fix/`, `--switches 8 --effect-ms 2000`): **all three methods,
@@ -258,12 +258,12 @@ all.
 (frame_violations after both §1.1 fixes: 0, 0, 3/8 — the last is real low-fps-content pacing,
 §1.1's "what's left is not a bug".)
 
-**Severity note for the owner:** while `lp-player` is selected, the installed `livepaper`
+**Severity note for the owner:** while `liascape-player` is selected, the installed `livepaper`
 binary's one-shot flags (`--restore`, `--random`, `--kill`, `--action=*`) all silently run
 legacy instead — including `--restore` itself, used on every boot/session-resume. The
 long-running `--serve` backend (what the Electron UI actually talks to) is unaffected (it
-resolves `lp-player` fine via its own dev-tree path walk) — but the owner should rebuild/
-reinstall the NixOS `livepaper` package from this branch before relying on `lp-player` day to
+resolves `liascape-player` fine via its own dev-tree path walk) — but the owner should rebuild/
+reinstall the NixOS `livepaper` package from this branch before relying on `liascape-player` day to
 day, tracked in `docs/TODO.md`.
 
 ## 2. Per-monitor isolation (`permonitor`)
@@ -273,8 +273,8 @@ day, tracked in `docs/TODO.md`.
 - **Bug (socket never existed).** `run_permonitor()`'s `setup_live_backend()` only flips the
   `PlayerEngine` setting — `player-adapter.md`'s `EnsureRunning()` is explicit that "only a
   switch calls it — queries/sets never spawn." Without an actual HTTP switch first, no
-  `lp-player serve` process (and no socket) exists when the raw `ctl` calls that follow run, so
-  every one of them failed with `io`/"can't connect to .../lp-player.sock: No such file or
+  `liascape-player serve` process (and no socket) exists when the raw `ctl` calls that follow run, so
+  every one of them failed with `io`/"can't connect to .../liascape-player.sock: No such file or
   directory". (`run_battery`'s own cells never hit this — every cell starts with a real
   `/apply`/`/playlist/play` HTTP call before touching `ctl`.) First attempt at a fix (prime with
   `/apply`, wait for the socket) surfaced a **second** bug: the priming apply is itself a
@@ -327,8 +327,8 @@ position/scale, `out:DP-1` back showing `cur:DP-2`'s content with its remembered
 the compositor child, new compositor answered `hello` **152 ms** later, both outputs restored
 (pixels verified, one covered by a notification popup — fell back to the documented ¼w/¾h
 pixel), background layer re-verified. Final cleanup: monitor layout and workspaces restored
-exactly, no `lp-player` layer/process left, legacy `pgrep -x mpvpaper` empty throughout,
-default sink (`easyeffects_sink`) unchanged. This run used its own private `lp-player serve`
+exactly, no `liascape-player` layer/process left, legacy `pgrep -x mpvpaper` empty throughout,
+default sink (`easyeffects_sink`) unchanged. This run used its own private `liascape-player serve`
 instance (own `XDG_RUNTIME_DIR`) and never touched the `--serve` backend's `PlayerEngine`
 setting at all.
 
@@ -369,7 +369,7 @@ the first 5 min.
 | task | finding | fix | commit |
 |---|---|---|---|
 | 20b | soak RSS +6.4 MiB/min — glibc arena retention of freed mpv frame buffers | fixed mmap threshold + `malloc_trim` on the reaper; `memory` probe | `5e15356` |
-| 20c | `/next` `/prev` `/random` HTTP 500 when the step lands on a scene under lp-player (12 cells) | skip unplayable scenes; all-scene library → 409 | `6eedd0c` |
+| 20c | `/next` `/prev` `/random` HTTP 500 when the step lands on a scene under liascape-player (12 cells) | skip unplayable scenes; all-scene library → 409 | `6eedd0c` |
 | 20d | `hwdec=auto` → `vulkan-copy` stalls the loop 230–320 ms per switch without an X server; a loadable libcuda → CUDA interop init 65–90 ms per switch even with `hwdec=no` | `gpu-hwdec-interop=no` + copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`); live now `nvdec-copy` | `68200f7` |
 | 20e | live-only in-use heap +2 MiB/min — undispatched Wayland event queue (NVIDIA egl-wayland2 1.0.2, explicit sync) | explicit sync off by default + default-queue drain | `53c4ea8` |
 
@@ -384,20 +384,20 @@ until egl-wayland2 > 1.0.2 ships. Both are in `docs/TODO.md`.
 ## Concerns / follow-ups
 
 - **§1.4's packaging gap** means every one-shot CLI flag run via the *installed* `livepaper`
-  silently falls back to legacy whenever `lp-player` is configured, because that package
-  predates lp-player's existence in the source entirely — not merely a missing env var. Needs a
+  silently falls back to legacy whenever `liascape-player` is configured, because that package
+  predates liascape-player's existence in the source entirely — not merely a missing env var. Needs a
   real rebuild/reinstall of the NixOS package from this branch (`docs/TODO.md`), not a flake
   code fix.
 - **§1.3's scene-skip gap** needs a product fix (`TryStepLibrary`/`ApplyRandom` should filter
-  `IsScene` items under `lp-player`, or the routes should catch+retry past the `Apply()`
+  `IsScene` items under `liascape-player`, or the routes should catch+retry past the `Apply()`
   exception) — tracked in `docs/TODO.md`.
 - `docs/player/debugging.md`'s existing symptom table is audio-dropout-focused; neither §1.3 nor
   §1.4 fits that table's scope (they're backend/adapter/deployment issues, not audio glitches) —
   reported here and in `docs/TODO.md` instead of forced into that table.
-- No explicit cap exists on concurrent `lp-open` worker threads (async mpv core opens, final
+- No explicit cap exists on concurrent `lia-open` worker threads (async mpv core opens, final
   review I5) — noted as a TODO item for a future hardening pass, not exercised by anything in
   this battery (every cell here opens sources well below any plausible concurrency ceiling).
-- No `LP_REQUIRE_GPU` test mode exists to make a GPU-less CI run fail loudly instead of silently
+- No `LIASCAPE_REQUIRE_GPU` test mode exists to make a GPU-less CI run fail loudly instead of silently
   skipping every GPU-dependent test (`tests/common::headless_gl` et al. already print `"SKIP: no
   EGL device"` and return) — noted as a TODO item; every run in this report had a real GPU, so it
   wasn't exercised either way.

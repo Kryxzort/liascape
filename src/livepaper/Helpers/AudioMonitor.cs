@@ -126,7 +126,7 @@ public static class AudioMonitor
     // classified ours is remembered until its `remove` — its later `change` events (uncork, relink, a volume or
     // property change) never open another window. Before (owner report, 2026-10-28): a new stream was counted at
     // once and checked 100 ms later, and every `change` re-added an already-checked own stream → each switch's
-    // incoming source (lp-player's mpv `lp-player` / scene worker `lp-player-scene.<id>` stream, ramping in at
+    // incoming source (liascape-player's mpv `liascape-player` / scene worker `liascape-player-scene.<id>` stream, ramping in at
     // −62 dB > the −70 dB threshold) auto-muted the wallpaper for a hitch — for the whole unmute delay when > 0.
     private static async Task WatchStreamsAsync(double thresholdDb, CancellationToken ct)
     {
@@ -395,7 +395,7 @@ public static class AudioMonitor
         catch { return false; }
     }
 
-    // Every listed sink-input + the foreign ones among them (one `pactl list sink-inputs`; lp-player's ownership
+    // Every listed sink-input + the foreign ones among them (one `pactl list sink-inputs`; liascape-player's ownership
     // filter — itself a `pactl list short sinks` + maybe a `hello` — and the LWE client ids built concurrently, so
     // classifying costs one round trip, inside parec's own start-up).
     private static async Task<(HashSet<uint> listed, HashSet<uint> foreign)> ListStreamsAsync(CancellationToken ct)
@@ -409,9 +409,9 @@ public static class AudioMonitor
         psi.ArgumentList.Add("list");
         psi.ArgumentList.Add("sink-inputs");
 
-        // lp-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
-        var isOwnTask = livepaper.Player.PlayerEngine.IsLpPlayer
-            ? Task.Run<Func<string, bool>?>(livepaper.Player.LpPlayerMedia.OwnStreamFilter, ct)
+        // liascape-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
+        var isOwnTask = livepaper.Player.PlayerEngine.IsLiascapePlayer
+            ? Task.Run<Func<string, bool>?>(livepaper.Player.LiascapePlayerMedia.OwnStreamFilter, ct)
             : Task.FromResult<Func<string, bool>?>(null);
         var lweTask = Task.Run(PlayerHelper.GetLweClientObjectIds, ct);
         Process? proc;

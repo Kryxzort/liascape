@@ -1,13 +1,13 @@
-# lp-player Phase 2 — on-machine battery report (Task 14)
+# liascape-player Phase 2 — on-machine battery report (Task 14)
 
-Branch `lp-player` (worktree of the Task 14 run), battery on `4f1040f` + the fixes it found (§ 10). Builds per step:
+Branch `liascape-player` (worktree of the Task 14 run), battery on `4f1040f` + the fixes it found (§ 10). Builds per step:
 step 1 on `0743b77` (F1); steps 3 and 4 (before) on `5139419` (F1–F3); steps 4 (after) and 6 on `9550127` (+ F5); steps 2, 5
 and 7 — the final numbers — on `d7d412b` (every fix). Release builds throughout. Machine: i9-12900K, RTX 3070 Ti (NVIDIA 595.84), Hyprland 0.56.2, DP-1 143.981 Hz +
 DP-2 239.760 Hz (1920×1080 each), PipeWire 1.6.9. Run 2026-10-28/29 overnight, unattended, while other agents'
 test lanes shared the machine (load 2–4; one other lane's `liascape-player` was on the GPU during steps 4–5).
 
 **Battery:** `src/player/tests/onmachine/scenes.sh` (+ `scenes_steps.sh`; also `battery.sh scenes <step…>`) —
-`outputs | dropout | crash | budget | workers | pause | soak`. Its own `lp-player serve` (private runtime/state dirs,
+`outputs | dropout | crash | budget | workers | pause | soak`. Its own `liascape-player serve` (private runtime/state dirs,
 socket, instance lock; `RLIMIT_CORE` 1), on the real Wayland session for steps 1, 3, 4, 5, 7 and on headless outputs
 (60 Hz / 240 Hz) for steps 2 and 6. **No audio ever reached the owner's speakers:** every step runs a private,
 hermetic PipeWire + WirePlumber (the `PrivatePw` recipe — own dirs, `policy` profile, one null sink — plus
@@ -15,7 +15,7 @@ hermetic PipeWire + WirePlumber (the `PrivatePw` recipe — own dirs, `policy` p
 the visualiser tap at it; the visualiser's test noise is played into that private graph (the plan's "a `pw-play` tone
 on the default sink" — deviation, deliberately). Results (gitignored): `src/player/tests/onmachine/results/phase2/`
 (`<step>.json` = every check `{name, value, bound, pass}`; `dropout-switches.jsonl` = every switch;
-`soak-samples.jsonl`; images). Test media: synthetic (ffmpeg clips, `lp-synthetic.json` scenes) and the SFW Workshop
+`soak-samples.jsonl`; images). Test media: synthetic (ffmpeg clips, `liascape-synthetic.json` scenes) and the SFW Workshop
 folder `~/.local/share/Steam/steamapps/workshop/content/431960` only.
 
 ## Summary
@@ -77,14 +77,14 @@ frame landed just after a callback and waited a whole period (§ 10 F1).
 | synthetic | **4.0 %** | **1.2 %** | −27.2 % | +1.8 % |
 | Emilia 1726902114 | 7.2 % ✗ | **2.2 %** | −26.2 % | +2.8 % |
 | Kimi 2371103399 (sound) | 26.0 % ✗ | 10.2 % ✗ | −27.2 % | +1.8 % |
-| Bunk 2134765860 (visualiser) | 25.6 % ✗ | 6.6 % ✗ | −21.8 % | +7.2 % (incl. `lp-sysmon`) |
+| Bunk 2134765860 (visualiser) | 25.6 % ✗ | 6.6 % ✗ | −21.8 % | +7.2 % (incl. `lia-sysmon`) |
 
 Bound: worker < 5 %, compositor ≤ +1 % per worker vs the video baseline (all PASS — a scene costs the compositor far
 less than decoding a 240 fps clip; against the decode-free animation baseline a worker adds 1.8–2.8 %, Bunk 7.2 %
 with the visualiser tap). **The worker bound holds for the synthetic and for Emilia at 30 fps only.** For scale, the
 installed legacy `linux-wallpaperengine` (one process rendering and presenting, `--silent`, DP-1 only):
 
-| scene | legacy at 30 fps | legacy at 144 fps | lp-player worker per frame | legacy per frame |
+| scene | legacy at 30 fps | legacy at 144 fps | liascape-player worker per frame | legacy per frame |
 |---|---|---|---|---|
 | Emilia | 1.6 % | 4.4 % | 0.30 ms (240 fps) / 0.73 ms (30) | 0.31 ms (144) / 0.53 ms (30) |
 | Kimi | 5.8 % | 15.0 % | 1.08 ms (240) / 3.4 ms (30, **with its sound**) | 1.04 ms (144) / 1.9 ms (30, silent) |
@@ -165,7 +165,7 @@ switches), one per switch that tears a scene's stream down (S→V, S→S: 20/20)
 full-live S→S): an independent `pw-record` of the sink shows B's steady 550 Hz tone across the instant the meter's
 timestamps jump (2.3–5 ms) with no phase step above 0.02 rad over ~2.5 s — one skipped 64-frame graph cycle would step
 it by 1.68 rad. So the graph never skipped; the meter's capture did. F3 (the meter on the RT data thread) removed the
-`lp-bus` main loop as one cause (571 → 508) but not this one; the detector simply doesn't judge those few ms.
+`lia-bus` main loop as one cause (571 → 508) but not this one; the detector simply doesn't judge those few ms.
 
 ## 3. Crash isolation (step 3) — PASS (56/56)
 
@@ -266,11 +266,11 @@ switch outcomes read from `.event` instead of `.kind`), fixed before this run.
 
 The battery never suspends, switches VTs or logs out. These are what the robust worker context
 (`gfx.context_robust`, `EGL_GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV`) and the crash policy are
-built for; they can only be checked by hand. With `lp-player` as the engine and a real scene
+built for; they can only be checked by hand. With `liascape-player` as the engine and a real scene
 playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 1726902114 on DP-2):
 
 1. **VT switch.** `Ctrl+Alt+F3`, wait 10 s, back to the session's VT. Expect: both outputs show
-   the scene again within ~2 s; `lp-player ctl logs '{"kind_prefix":"scene."}'` shows either
+   the scene again within ~2 s; `liascape-player ctl logs '{"kind_prefix":"scene."}'` shows either
    nothing (no purge) or `scene.context_lost` → `worker.killed {why: "GL context lost"}` →
    `worker.restart` → `scene.resumed` per scene; never `source.broken`; the scene's sound comes
    back faded in (no click). `ctl probe '{"name":"workers"}'` → `context_losses` ≤ 1 per scene,
@@ -285,7 +285,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
    unaffected by the scene's restart (`ctl probe '{"name":"frames"}'` on DP-1 normal right after).
 5. If anything breaks: `ctl probe '{"name":"workers","args":{"log_tail":true}}'` (the worker's
    `gfx: robust context granted|not available` line and its last stderr) and
-   `~/.local/state/livepaper/lp-player/crashes/*.json` — file it in `docs/TODO.md` → lp-player.
+   `~/.local/state/livepaper/liascape-player/crashes/*.json` — file it in `docs/TODO.md` → liascape-player.
 
 ## 9. Scene corpus — fresh run + A/B against the legacy engine
 
@@ -293,7 +293,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
 `--ab-legacy --legacy-output DP-1` (the installed `linux-wallpaperengine`, `--silent`, `SDL_AUDIODRIVER=dummy`,
 `--screenshot` after 4 s, drawing on DP-1). Report regenerated: `docs/player/reports/scene-corpus.{md,json}`.
 
-- **lp-player:** 90 ok, 1 static (2783122117 — a still image with a sound, by design), 3 load_failed (3276522107,
+- **liascape-player:** 90 ok, 1 static (2783122117 — a still image with a sound, by design), 3 load_failed (3276522107,
   3477054430, 3509243656 — the 3D/perspective scenes `next-v2` can't parse, the known Phase 6 item),
   **2 timeout** (2883756643, 2890767643 — both `ok` in the previous run with Ready 6.7 s / 1.7 s; this run shared the
   machine with the soak and another lane's UI matrix at load 12–14: re-run alone at that load, 2890767643 readied in
@@ -309,7 +309,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
 
 ## 10. Findings
 
-Each fix is its own commit with a test (RED → GREEN); the open ones are filed in `docs/TODO.md` → lp-player →
+Each fix is its own commit with a test (RED → GREEN); the open ones are filed in `docs/TODO.md` → liascape-player →
 "Phase 2 battery findings".
 
 ### F1 — a scene at the refresh missed every few vblanks (FIXED, `0743b77` "Pace Scenes At The Refresh On Frame Callbacks")
@@ -346,11 +346,11 @@ contiguous hole still is one). Every existing detector test passes. Re-run: 38/3
 
 **Symptom:** after F2, `unmeasured` stretches in 517 of 720 switches — at B's worker spawn (~20–50 ms into the window)
 and at A's teardown (~1550 ms): *every* switch that tore a scene down had one. **Cause:** the meter's capture callback
-ran on the bus's own `lp-bus` main loop (no `RT_PROCESS`), which also handles the registry/link churn of a stream
+ran on the bus's own `lia-bus` main loop (no `RT_PROCESS`), which also handles the registry/link churn of a stream
 appearing or vanishing — the capture missed whole cycles exactly when a switch happens, so the detector was blind at
 the instants that matter. The callback was already RT-safe (no allocation, `try_lock`). **Fix:** `RT_PROCESS` on the
 meter's capture; the `bus` probe reports `meter.callback_thread` / `callback_policy`. **RED → GREEN:**
-`tests/api.rs::meter_capture_runs_on_the_rt_data_thread` (RED: `lp-bus`, `other`; GREEN: `data-loop.0`, `rr`);
+`tests/api.rs::meter_capture_runs_on_the_rt_data_thread` (RED: `lia-bus`, `other`; GREEN: `data-loop.0`, `rr`);
 the bus/meter/scene-audio/dropout api tests 14/14. On-machine: the crash step's DP-1 meter max step 1.00 ms through
 15 worker kills/hangs; the final step-2 run: 508 `unmeasured` stretches (571 before) — **F3 removed one cause, not the main one**: the rest is the capture missing cycles when another stream leaves the graph, proven measurement-only (§ 2, the `pw-record` phase check).
 
@@ -400,7 +400,7 @@ disturbance starting a cycle before its timestamp jump. Next step: § 2's `pw-re
 ## 11. Battery-script bugs (fixed while running; no product verdict depended on them)
 
 - `mk_clip` built a broken lavfi source when the source string already had options (`color=c=…`).
-- Legacy LWE exited at once without `--assets-dir`; the battery passes lp-player's own resolution.
+- Legacy LWE exited at once without `--assets-dir`; the battery passes liascape-player's own resolution.
 - The synthetic `frame_index` scene is 99.7 % one grey by design — the pixel check reads its centre instead of the
   generic "non-blank" rule.
 - A private PipeWire started from a backgrounded shell function leaked (its `$!` was the subshell's) — started

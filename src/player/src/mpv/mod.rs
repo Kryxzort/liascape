@@ -2,7 +2,7 @@
 //! [`RenderContext`] (its OpenGL render context). Only what the sources need — options,
 //! properties, commands, property observation, events, and the render API.
 //!
-//! **Threading.** Nothing here is `Send`: lp-player drives each core from its single render
+//! **Threading.** Nothing here is `Send`: liascape-player drives each core from its single render
 //! thread (spec §4.1), the same thread that calls the render API. `render.h` ("Threading")
 //! forbids that thread from *waiting* on any core function not marked "Safe to be called
 //! from mpv render API threads": the core can itself be waiting on the render thread
@@ -665,7 +665,7 @@ impl WeakClient {
     /// # Safety
     /// `core` must be a live, initialized core that outlives this client.
     pub unsafe fn create(core: *mut ffi::mpv_handle) -> Result<WeakClient, MpvError> {
-        let raw = unsafe { ffi::mpv_create_weak_client(core, c"lp-render".as_ptr()) };
+        let raw = unsafe { ffi::mpv_create_weak_client(core, c"lia-render".as_ptr()) };
         let raw = NonNull::new(raw).ok_or_else(|| {
             MpvError::new(ffi::mpv_error::MPV_ERROR_NOMEM, "mpv_create_weak_client")
         })?;

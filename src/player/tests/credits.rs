@@ -1,7 +1,7 @@
 //! M10 (final review; spec §7 "a test fails when it is stale"): `CREDITS.md` is generated
 //! from `UPSTREAM.md` (+ `patches/`) by `scripts/gen-credits.py`; this runs its `--check`
 //! (exit 1 with a diff when stale). Skips (prints `SKIP: …`) when the repo around the crate
-//! isn't there — `nix build .#lp-player` builds `src/player` alone — or there's no
+//! isn't there — `nix build .#liascape-player` builds `src/player` alone — or there's no
 //! `python3`.
 
 use std::path::Path;

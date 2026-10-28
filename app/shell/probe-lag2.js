@@ -10,7 +10,7 @@ app.whenReady().then(async () => {
   const js = (s) => win.webContents.executeJavaScript(s);
   await win.loadURL(url); await wait(6500);
 
-  await js(`window.lpdbg.tab('library')`); await wait(1500);
+  await js(`window.liascapeDbg.tab('library')`); await wait(1500);
   await js(`window.__lt=0; window.__n=0; window.__po=new PerformanceObserver(l=>{for(const e of l.getEntries()){window.__lt+=e.duration;window.__n++;}}); window.__po.observe({entryTypes:['longtask']});`);
   const reset = () => js(`window.__lt=0;window.__n=0;`);
   const read = () => js(`({ms:Math.round(window.__lt), n:window.__n})`);

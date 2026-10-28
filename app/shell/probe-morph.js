@@ -1,5 +1,5 @@
 // Settings-modal morph probe — `scripts/test-ui-matrix.sh --probe probe-morph.js` (same hermetic stack as
-// the matrix: private backend + headless lp-player + this tree's UI bundle, on a private Xvfb). Opens the
+// the matrix: private backend + headless liascape-player + this tree's UI bundle, on a private Xvfb). Opens the
 // per-item settings modal from a library card and from a playlist-strip item and samples the modal media's
 // on-screen box every frame through the open and the close (its transform AND its clip-path crop):
 //   - it starts and ends ON the source's visible thumbnail (the card / strip crop), whatever the aspects
@@ -9,15 +9,15 @@
 //   - an animated preview keeps animating inside the modal (gif → the same /anim image; a video item →
 //     its video playing) — it used to freeze on a still
 // k1 = a square preview + gif (like a Wallpaper Engine item; the harness writes them), k2 = video only.
-// Screenshots of an open + close: <LP_OUT>/morph-<surface>-<n>.png. Exit 1 on any FAIL.
+// Screenshots of an open + close: <LIASCAPE_OUT>/morph-<surface>-<n>.png. Exit 1 on any FAIL.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
 const E = process.env;
-const U = E.LP_URL;
-const K = JSON.parse(E.LP_CLIPS);
-const OUT = E.LP_OUT;
+const U = E.LIASCAPE_URL;
+const K = JSON.parse(E.LIASCAPE_CLIPS);
+const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 

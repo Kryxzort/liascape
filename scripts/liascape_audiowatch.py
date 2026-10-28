@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""lp-audiowatch — continuous sink-monitor capture, correlated with lp-transition handoff events.
+"""liascape-audiowatch — continuous sink-monitor capture, correlated with liascape-transition handoff events.
 
 The legacy-engine monitor (2026-10-20): the reference-based half of this (`refcheck`,
-below) is what `lp-player`'s native `probe dropout` (Task 15, `src/player/src/probe/
+below) is what `liascape-player`'s native `probe dropout` (Task 15, `src/player/src/probe/
 dropout.rs`) ports — see `docs/player/debugging.md` for the bugs it originally found
 (cubic volume sag, a speed-step micro-gap, ready-timeout silence, paused-after-kill
 silence) and the native tool's own usage. This script stays as the external monitor for
-the **legacy** engine (mpvpaper + `lp-transition`), which has no in-process probe of its
+the **legacy** engine (mpvpaper + `liascape-transition`), which has no in-process probe of its
 own; `ffmpeg` is resolved from `PATH` (never a hard-coded store path), so it runs
 unmodified on any machine with `ffmpeg` installed.
 
@@ -22,7 +22,7 @@ be told apart from quiet passages in the music.
 import array, collections, datetime, json, math, operator, os, re, shutil, subprocess, sys, threading, time
 
 SR, MS = 48000, 48
-LOG = os.path.expanduser('~/.cache/livepaper/lp-transition.log')
+LOG = os.path.expanduser('~/.cache/livepaper/liascape-transition.log')
 DEV = sys.argv[1] if len(sys.argv) > 1 else 'easyeffects_sink.monitor'
 OUTDIR = sys.argv[2] if len(sys.argv) > 2 else '/tmp'
 os.makedirs(OUTDIR, exist_ok=True)
@@ -273,5 +273,5 @@ def tail():
 
 threading.Thread(target=capture, daemon=True).start()
 time.sleep(1.0)
-say('lp-audiowatch armed: device=%s log=%s out=%s' % (DEV, LOG, OUTDIR))
+say('liascape-audiowatch armed: device=%s log=%s out=%s' % (DEV, LOG, OUTDIR))
 tail()

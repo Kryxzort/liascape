@@ -425,11 +425,11 @@ impl Drop for Scene {
     }
 }
 
-/// `lp-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]`: renders a
+/// `liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]`: renders a
 /// real scene offscreen through LWE's core, writes the native frames at 1 s and at S (default 3)
 /// as `<out>/lwe-smoke-1s.png` / `-<S>s.png` (upright, alpha forced to 1), pulls 0.5 s of its
 /// sound through the host driver, and prints one JSON line. Exit 0 = rendered and animating.
-/// A diagnostic for the build (Task 1) and the patches (Task 2); not used by lp-player.
+/// A diagnostic for the build (Task 1) and the patches (Task 2); not used by liascape-player.
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
@@ -449,7 +449,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: lp-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]"
         );
         std::process::exit(2)
     };
@@ -479,7 +479,7 @@ fn run_smoke(
     audio_dump: f32,
 ) -> Result<String, String> {
     use glow::HasContext;
-    use lp_player::gfx::Gfx;
+    use liascape_player::gfx::Gfx;
 
     let gfx = Gfx::new_offscreen()?;
     let t0 = std::time::Instant::now();
@@ -627,7 +627,7 @@ fn audio_dump_stretch(scene: &Scene, out: &Path, secs: f32) -> Result<serde_json
     }
     let silent_blocks = |x: &[f32]| {
         x.chunks_exact(48 * ch)
-            .filter(|b| lp_player::audio::meter::dbfs_block(b, ch) <= -95.9)
+            .filter(|b| liascape_player::audio::meter::dbfs_block(b, ch) <= -95.9)
             .count()
     };
     let write = |name: &str, x: &[f32]| -> Result<(), String> {

@@ -250,13 +250,13 @@ issues:
   - Smoothing is a fixed 0.3 per update, so it depends on the frame rate.
   - Measured on Bunk: a synthetic 6-tone input barely moved the bars (41 px changed). Broadband noise drives every
     bar (54 k px changed). We did not investigate why the tones barely registered.
-  - Without input the bars sit at 0. This is good for lp-player: the visualiser can be fed from our own audio bus.
+  - Without input the bars sit at 0. This is good for liascape-player: the visualiser can be fed from our own audio bus.
 - **Phase 2 consequence:** the core's audio cannot meet the global constraints as-is:
   - The constraints require dB gains, equal-power ramps and ≤ 30 ms anti-click ramps on running streams.
   - The worker should own scene audio. Add one patch, `wp_context_set_audio_output`: a host pull-callback driver
     implementing the existing abstract `Audio::Drivers::AudioDriver` (7 virtuals; today's SDL driver is 232 lines).
   - Estimated size: about 150–200 lines.
-  - The fallback, controlling the SDL sink-input externally, is the legacy `lp-audio`/pactl approach that §6.1
+  - The fallback, controlling the SDL sink-input externally, is the legacy `liascape-audio`/pactl approach that §6.1
     retires.
 
 ### 4.2 Pausing and stepping time
@@ -405,6 +405,6 @@ A deterministic **broken build** needs no missing assets either: `fail-scene` (o
 §4.4 crash reproduced without the owner's library (fixed by `patches/lwe/0004`).
 
 The patched core (`patches/lwe/0001–0006`, `UPSTREAM.md`) rendered real scenes through
-`lp-scene-worker --lwe-smoke` with the host audio driver: 2371103399 (3840×1080, 0 GL errors,
+`liascape-scene-worker --lwe-smoke` with the host audio driver: 2371103399 (3840×1080, 0 GL errors,
 one sound stream pulled by the host, no SDL device) and 1726902114 (2048×1423) — frames upright
 and matching the previews (`.claude/rules/player-core.md` § Scene worker → "LWE core").

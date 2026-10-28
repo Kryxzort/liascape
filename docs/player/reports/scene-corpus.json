@@ -13,7 +13,7 @@
    ],
    "ok": true,
    "reason": null,
-   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/livepaper-pro/.claude/worktrees/agent-a2b6f21a80f02ca3c/src/player/target/release/lp-scene-worker"
+   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/livepaper-pro/.claude/worktrees/agent-a2b6f21a80f02ca3c/src/player/target/release/liascape-scene-worker"
   },
   "player_version": "0.1.0",
   "lwe_rev": "40eacc9a278738ba3fce5d4f1b030e543b4ca2e0"
@@ -3958,7 +3958,7 @@
     "[info] gfx: context priority requested low, granted low",
     "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
     "Projection must have a width. Contents: null",
-    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 (a truncated scene.pkg or an unsupported project)"
+    "liascape-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 (a truncated scene.pkg or an unsupported project)"
    ],
    "capture_errors": [],
    "class": "load_failed",
@@ -5403,7 +5403,7 @@
     "[info] gfx: context priority requested low, granted low",
     "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
     "Projection must have a width. Contents: null",
-    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 (a truncated scene.pkg or an unsupported project)"
+    "liascape-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 (a truncated scene.pkg or an unsupported project)"
    ],
    "capture_errors": [],
    "class": "load_failed",
@@ -5760,7 +5760,7 @@
     "[info] gfx: context priority requested low, granted low",
     "[info] gfx: robust context granted (a GPU reset or video-memory purge is reported: ContextLost, a restart)",
     "Projection must have a width. Contents: null",
-    "lp-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 (a truncated scene.pkg or an unsupported project)"
+    "liascape-scene-worker: load failed: /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 (a truncated scene.pkg or an unsupported project)"
    ],
    "capture_errors": [],
    "class": "load_failed",
@@ -6145,7 +6145,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1155728109.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1155728109 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1155728109.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1155728109 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6167,7 +6167,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1160682576.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1160682576 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1160682576.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1160682576 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Stop requested by signal 15",
      "Stopping"
@@ -6178,7 +6178,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1174926427.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1174926427 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1174926427.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1174926427 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Stop requested by signal 15",
@@ -6190,7 +6190,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1195626192.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1195626192 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1195626192.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1195626192 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6211,7 +6211,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1264170639.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1264170639 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1264170639.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1264170639 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Stop requested by signal 15",
      "Stopping"
@@ -6259,7 +6259,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1726902114.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1726902114 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1726902114.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1726902114 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6276,7 +6276,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1797172968.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1797172968 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1797172968.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1797172968 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6294,7 +6294,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1864677589.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1864677589 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1864677589.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1864677589 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6310,7 +6310,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/1934084447.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1934084447 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/1934084447.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1934084447 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6327,7 +6327,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2064316482.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2064316482 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2064316482.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2064316482 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6363,7 +6363,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2182433068.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2182433068 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2182433068.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2182433068 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Stop requested by signal 15",
@@ -6375,7 +6375,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2189783622.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2189783622 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2189783622.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2189783622 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "GLSL fragment unit parsing Failed: ERROR: 0:119: 'v_Bounds' : undeclared identifier ",
      "ERROR: 0:119: 'scalar swizzle' : not supported for this version or the enabled extensions ",
@@ -6400,7 +6400,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2219762084.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2219762084 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2219762084.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2219762084 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6416,7 +6416,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2288455459.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2288455459 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2288455459.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2288455459 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6441,7 +6441,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2290002190.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2290002190 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2290002190.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2290002190 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6529,7 +6529,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2375914945.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2375914945 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2375914945.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2375914945 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6550,7 +6550,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2388299037.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2388299037 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2388299037.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2388299037 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6576,7 +6576,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2469881470.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2469881470 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2469881470.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2469881470 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
@@ -6641,7 +6641,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2542468435.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2542468435 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2542468435.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2542468435 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Stop requested by signal 15",
      "Stopping"
@@ -6652,7 +6652,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2561227934.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2561227934 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2561227934.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2561227934 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6670,7 +6670,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2638125030.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2638125030 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2638125030.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2638125030 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6686,7 +6686,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2672425887.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2672425887 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2672425887.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2672425887 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -6791,7 +6791,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2683776412.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2683776412 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2683776412.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2683776412 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot obtain pixel data for screen DP-1. OpenGL error: 1282",
      "Stop requested by signal 15",
@@ -6803,7 +6803,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2694785040.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2694785040 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2694785040.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2694785040 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -6820,7 +6820,7 @@
     "legacy": "starts",
     "here": "static",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2783122117.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2783122117.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Stop requested by signal 15",
      "Stopping"
@@ -6868,7 +6868,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2828233985.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2828233985 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2828233985.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2828233985 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "CText: no usable system font found",
@@ -6956,7 +6956,7 @@
     "legacy": "screenshot",
     "here": "timeout",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2890767643.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2890767643 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2890767643.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2890767643 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "Detected a non-string texture, most likely a special value: {\"name\":\"$mediaThumbnail\",\"type\":\"system\"}",
@@ -6987,7 +6987,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2905264428.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2905264428 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2905264428.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2905264428 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Stop requested by signal 15",
@@ -6999,7 +6999,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2921510865.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2921510865 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2921510865.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2921510865 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -7012,7 +7012,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/2951169110.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2951169110 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/2951169110.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2951169110 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: console is not defined",
      "Resolving require module: LightingV1 in shader genericropeparticle",
@@ -7025,7 +7025,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3013489778.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3013489778 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3013489778.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3013489778 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7042,7 +7042,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3019192537.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3019192537 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3019192537.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3019192537 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Stop requested by signal 15",
      "Stopping"
@@ -7053,7 +7053,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3022080536.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3022080536 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3022080536.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3022080536 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: shared is not defined",
      "ScriptEngine [evaluate]: ReferenceError: shared is not defined",
@@ -7069,7 +7069,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3023509773.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3023509773 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3023509773.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3023509773 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -7104,7 +7104,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3028473503.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3028473503 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3028473503.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3028473503 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot load libcuda.so.1",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7130,7 +7130,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3029971128.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3029971128 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3029971128.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3029971128 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
@@ -7221,7 +7221,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3089687436.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3089687436 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3089687436.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3089687436 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot load libcuda.so.1",
      "● Video  --vid=1  --vlang=eng  (h264 3840x2160 60 fps) [default]",
@@ -7242,7 +7242,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3104056709.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3104056709 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3104056709.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3104056709 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: thisScene is not defined",
      "ScriptEngine [evaluate]: ReferenceError: input is not defined",
@@ -7257,7 +7257,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3134525336.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3134525336 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3134525336.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3134525336 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericparticle",
      "Vertex info",
@@ -7403,7 +7403,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3291729669.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291729669 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3291729669.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291729669 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
      "ScriptEngine [evaluate]: SyntaxError: Unexpected token '*'",
@@ -7418,7 +7418,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3291745179.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291745179 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3291745179.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291745179 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
      "ScriptEngine [evaluate]: SyntaxError: Unexpected token '*'",
@@ -7439,7 +7439,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3309103316.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3309103316 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3309103316.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3309103316 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7496,7 +7496,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3366535880.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3366535880 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3366535880.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3366535880 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7511,7 +7511,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3387433141.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3387433141 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3387433141.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3387433141 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -7543,7 +7543,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3395587987.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3395587987 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3395587987.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3395587987 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -7593,7 +7593,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3422085307.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422085307 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3422085307.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422085307 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -7610,7 +7610,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3422383300.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422383300 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3422383300.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422383300 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7623,7 +7623,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3426575339.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3426575339 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3426575339.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3426575339 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot load libcuda.so.1",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7650,7 +7650,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3432876246.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3432876246 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3432876246.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3432876246 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot load libcuda.so.1",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7746,7 +7746,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3461192631.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3461192631 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3461192631.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3461192631 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Stop requested by signal 15",
@@ -7795,7 +7795,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3478602089.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3478602089 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3478602089.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3478602089 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -7956,7 +7956,7 @@
     "legacy": "screenshot",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3556794116.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3556794116 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3556794116.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3556794116 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Cannot load libcuda.so.1",
      "Resolving require module: LightingV1 in shader genericimage4",
@@ -7978,7 +7978,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3593587273.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3593587273 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3593587273.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3593587273 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Stop requested by signal 15",
@@ -7990,7 +7990,7 @@
     "legacy": "starts",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-phase2/legacy-20261029-023455/3749550751.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3749550751 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-phase2/legacy-20261029-023455/3749550751.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3749550751 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Resolving require module: LightingV1 in shader genericimage4",
      "Resolving require module: LightingV1 in shader genericparticle",
@@ -8007,7 +8007,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/1884904087.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1884904087 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/1884904087.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1884904087 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter"
     ]
    },
@@ -8016,7 +8016,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/2047150134.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2047150134 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/2047150134.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2047150134 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter"
     ]
    },
@@ -8025,7 +8025,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/2134765860.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2134765860 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/2134765860.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2134765860 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "ScriptEngine [evaluate]: SyntaxError: Unexpected token '*'",
@@ -8047,7 +8047,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/2932157836.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2932157836 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/2932157836.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2932157836 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec2 is not defined",
      "ScriptEngine [evaluate]: ReferenceError: Vec2 is not defined",
@@ -8105,7 +8105,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3163060610.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3163060610 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3163060610.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3163060610 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Unknown object type found: {\"camera\":\"default\",\"fov\":50.0,\"id\":247,\"name\":\"\",\"origin\":{\"script\":\"'use strict';\\n\\n/**\\n * @param {Object} changedUserProperties - only includes user properties that were recently changed!\\n */\\nexport function applyUserProperties(changedUserProperties) {\\n\\tif (changedUserProperties.hasOwnProperty('g_yoffset')) {\\n\\t\\tthisObject.origin = new Vec3(0, changedUserProperties.g_yoffset, 0)\\n\\t}\\n}\",\"value\":\"0.00000 0.00000 0.00000\"},\"path\":\"scripts/camera_paths_247.json\",\"queuemode\":\"random\",\"zoom\":1.0}",
      "Unknown object type found: {\"id\":13,\"locktransforms\":true,\"name\":\"基础脚本\",\"scale\":\"0.00000 0.00000 0.00000\",\"visible\":{\"script\":\"/*\\n\\n\\n\\tNote to unpackers:\\n\\t- I am not a computer science major, and all my programming knowledge is completely self-taught!\\n\\t- The current Event Dispenser, Animation Scheduler, and Transition Interpolator are all in an unfinished state, and may have a considerable number of unknown bugs (especially the Transition Interpolator). Also the code at this \\t\\t\\t\\tstage may not be standardized.\\n\\t- If I have time to make the code for this project more standardized, I will upload the code to Github.\\n\\t\\t\\t- noeru_desu\\t2024.02.19\\n\\n\\n\\t解包者请注意：\\n\\t- 我不是计算机专业的学生，我的所有编程知识都是完全自学的！\\n\\t- 当前的事件分发器、动画调度器、过渡插值器均处于未完成状态，可能存在相当多的未知Bug(特别是过渡插值器)。同时现阶段的代码可能不规范。\\n\\t- 如果我有时间使该项目的代码更加规范化，一段时间后我应该会将代码上传到Github上。\\n\\t\\t\\t- noeru_desu\\t2024.02.19\\n\\n\\n*/\\n\\n'use strict';\\n\\nconst isRunningInEditor = engine.isRunningInEditor()\\nconst debugMode = isRunningInEditor && false\\nconst tips = isRunningInEditor && true\\nconst globalReplayable = true\\n\\n/*\\n\\n\\tCustom Events\\n\\n*/\\n\\nclass Event {\\n\\t/**\\n\\t* @param {Hashable} eventID\\n\\t* @param {ILayer} layer\\n\\t* @param {IObject} object\\n\\t* @param {any} eventData\\n\\t*/\\n\\tconstructor(eventID, eventData) {\\n\\t\\tthis.srcLayer = thisLayer;\\t// 由于类将在源脚本进行实例化，所以此处变量将指向调用源的父级对象\\n\\t\\tthis.srcObject = thisObject;\\n\\t\\tthis.id = eventID;\\n\\t\\tthis.data = eventData;\\n\\t\\tthis.interrupted = false;\\n\\t}\\n\\n\\tinterruptDispatch() {\\n\\t\\tif (debugMode) {\\n\\t\\t\\tconsole.log('DEBUG: Event \\\"' + this.id + '\\\" dispatch has been interrupted.')\\n\\t\\t}\\n\\t\\tthis.interrupted = true\\n\\t}\\n}\\n\\nclass Listener {\\n\\t/**\\n\\t* @param {Hashable} listenerID\\n\\t* @param {ILayer} layer\\n\\t* @param {IObject} object\\n\\t* @param {any} eventData\\n\\t*/\\n\\tconstructor(listenerID, callback, priority = 0, data = null) {\\n\\t\\tthis.thisLayer = thisLayer\\t// 由于类将在源脚本进行实例化，所以此处变量将指向调用源的父级对象\\n\\t\\tthis.thisObject = thisObject\\n\\t\\tthis.id = listenerID;\\n\\t\\tthis.callback = callback;\\n\\t\\tthis.priority = priority;\\n\\t\\tthis.data = data\\n\\t}\\n}\\n\\nclass EventType {\\n\\t/**\\n\\t* @param {Hashable} eventID\\n\\t* @param {string} eventName\\n\\t*/\\n\\tconstructor(eventID, eventName = null, skipDebug = false) {\\n\\t\\tthis.id = eventID\\n\\t\\tthis.debug = !skipDebug\\n\\t\\tthis.name = eventName\\n\\t\\tthis.listeners = new Map()\\n\\t\\tthis.sortedListeners = [];\\n\\t\\tthis.sorted = false;\\n\\t\\tthis.hasListener = false\\n\\t}\\n\\n\\t/**\\n\\t* @param {Hashable} listenerID\\n\\t* @param {function} callback\\n\\t* @param {Number} priority\\n\\t*/\\n\\taddListener(listenerID, callback, priority = 0, data = null) {\\n\\t\\tif (this.listeners.has(listenerID)) {\\n\\t\\t\\tconsole.log('WARNING: Listener ID \\\"' + listenerID + '\\\" is already registered. New Registration operation has been ignored.')\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.listeners.set(listenerID, new Listener(listenerID, callback, priority, data))\\n\\t\\tthis.sorted = false\\n\\t\\tthis.hasListener = true\\n\\t}\\n\\n\\tsortCallbacks() {\\n\\t\\tif (this.sorted) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.sortedListeners = Array(this.listeners.values())\\n\\t\\tthis.sortedListeners.sort((a, b) => b.priority - a.priority)\\n\\t\\tthis.sorted = true;\\n\\t}\\n\\n\\ttryCallback(event, listener) {\\n\\t\\ttry {\\n\\t\\t\\tlistener.callback(event, listener)\\n\\t\\t} catch (err) {\\n\\t\\t\\tconsole.log('WARNING: An error occurs when dispatching event \\\"' + event.id + '\\\" to listener \\\"' + listener.id + '\\\": ' + err)\\n\\t\\t\\tconsole.log('You can set the \\\"callbackWithoutTry\\\" property of the event dispatcher to \\\"true\\\" to prevent catching errors for debugging purposes.')\\n\\t\\t}\\n\\t}\\n\\n\\tcallback(event, listener) {\\n\\t\\tlistener.callback(event, listener)\\n\\t}\\n\\n\\t/**\\n\\t* @param {Event} event\\n\\t*/\\n\\tdispatchToAll(event) {\\n\\t\\tif (!this.hasListener) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.sortCallbacks()\\n\\t\\tlet cbFunc = eventDispatcher.callbackWithoutTry ? this.callback : this.tryCallback\\n\\t\\tif (debugMode && this.debug) {\\n\\t\\t\\tconsole.log('DEBUG: Dispatching event \\\"' + event.id + '\\\" to listeners [ ' + Array(this.listeners.values()).map((listener) => { return listener.id }).join(\\\", \\\") + ' ]')\\n\\t\\t}\\n\\t\\tfor (let listener of this.listeners.values()) {\\n\\t\\t\\tcbFunc(event, listener)\\n\\t\\t\\tif (event.interrupted) {\\n\\t\\t\\t\\tbreak\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {Hashable} listenerID\\n\\t* @param {Event} event\\n\\t*/\\n\\tdispatchToListener(listenerID, event) {\\n\\t\\tif (!this.hasListener) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tlet listener = this.listeners.get(listenerID)\\n\\t\\tif (listener == undefined) {\\n\\t\\t\\tconsole.log('WARNING: Listener ID \\\"' + listenerID + '\\\" does not exist')\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.sortCallbacks()\\n\\t\\tlistener.callback(event, listener)\\n\\t}\\n}\\n\\nclass EventDispatcher {\\n\\tconstructor() {\\n\\t\\tthis.eventTypes = new Map()\\n\\t\\tthis.dispatching = false\\n\\t\\tthis.tasks = []\\n\\t\\tthis.callbackWithoutTry = false\\t\\t// 调试时使用\\n\\t}\\n\\n\\t/**\\n\\t* @param {Hashable} eventID\\n\\t* @param {string} eventName\\n\\t*/\\n\\tregisterEvent(eventID, eventName = null, skipDebug = false) {\\n\\t\\tif (this.eventTypes.has(eventID)) {\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t\\tthis.eventTypes.set(eventID, new EventType(eventID, eventName, skipDebug))\\n\\t\\treturn true\\n\\t}\\n\\n\\t/**\\n\\t* @param {Hashable} eventID\\n\\t* @param {Hashable} listenerID\\n\\t* @param {function} callback\\n\\t* @param {Number} priority\\n\\t*/\\n\\tregisterListener(eventID, listenerID, callback, priority = 0, data = null) {\\n\\t\\tlet eventType = this.eventTypes.get(eventID)\\n\\t\\tif (eventType == undefined) {\\n\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + eventID + '\\\" does not exist')\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t\\teventType.addListener(listenerID, callback, priority, data)\\n\\t\\treturn true\\n\\t}\\n\\n\\t/**\\n\\t* @param {Event} event\\n\\t*/\\n\\tdispatchEventToAll(event, autoWait = true, log = true) {\\n\\t\\tlet eventType = this.eventTypes.get(event.id)\\n\\t\\tif (eventType == undefined) {\\n\\t\\t\\tif (log) {\\n\\t\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + event.id + '\\\" does not exist')\\n\\t\\t\\t}\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tif (autoWait) {\\n\\t\\t\\tif (this.dispatching) {\\n\\t\\t\\t\\tthis.tasks.push([event])\\n\\t\\t\\t\\treturn\\n\\t\\t\\t}\\n\\t\\t\\tthis.dispatching = true\\n\\t\\t\\teventType.dispatchToAll(event)\\n\\t\\t\\tthis.dispatching = false\\n\\t\\t\\tthis.nextTask()\\n\\t\\t} else {\\n\\t\\t\\teventType.dispatchToAll(event)\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {Hashable} listenerID\\n\\t* @param {Event} event\\n\\t*/\\n\\tdispatchEventToListener(listenerID, event, autoWait = true, log = true) {\\n\\t\\tlet eventType = this.eventTypes.get(eventID)\\n\\t\\tif (eventType == undefined) {\\n\\t\\t\\tif (log) {\\n\\t\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + event.id + '\\\" does not exist')\\n\\t\\t\\t}\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tif (autoWait) {\\n\\t\\t\\tif (this.dispatching) {\\n\\t\\t\\t\\tthis.tasks.push([listenerID, event])\\n\\t\\t\\t\\treturn\\n\\t\\t\\t}\\n\\t\\t\\tthis.dispatching = true\\n\\t\\t\\teventType.dispatchToListener(listenerID, event)\\n\\t\\t\\tthis.dispatching = false\\n\\t\\t\\tthis.nextTask()\\n\\t\\t} else {\\n\\t\\t\\teventType.dispatchToListener(listenerID, event)\\n\\t\\t}\\n\\t}\\n\\n\\tnextTask() {\\n\\t\\tif (this.dispatching || this.tasks.length == 0) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tlet task = this.tasks.shift()\\n\\t\\tif (task.length == 1) {\\n\\t\\t\\tthis.dispatchEventToAll(task[0])\\n\\t\\t} else {\\n\\t\\t\\tthis.dispatchEventToListener(task[0], task[1])\\n\\t\\t}\\n\\t}\\n}\\n\\nlet eventDispatcher = new EventDispatcher()\\nshared.eventDispatcher = eventDispatcher\\nshared.Event = Event\\n\\n\\n/*\\n\\n\\tMedia Integration (events)\\n\\nshared.eventDispatcher.registerEvent('mBdColorUpdate')\\nshared.eventDispatcher.registerEvent('mTextColorUpdate')\\nshared.eventDispatcher.registerEvent('mMixedColorUpdate')\\nshared.eventDispatcher.registerEvent('mPlayTextUpdateAni')\\nshared.eventDispatcher.registerEvent('mRefreshTextColor')\\n*/\\n\\n\\n\\n/*\\n\\n\\tAnimation System\\n\\n*/\\n\\n\\nclass AnimationScheduler {\\n\\tconstructor() {\\n\\t\\tthis.tidCount = -1\\n\\t\\tthis.aidCount = -1\\n\\t\\tthis.aniTasks = new Map()\\n\\t\\tthis.needToMapAni = false\\n\\t\\tthis.cAniMappers = new Map()\\n\\t\\tthis.needToDelMapper = false\\n\\t\\tthis.cAniMapperDelTasks = {}\\t// 尚未使用，待修改为Map\\n\\t\\tthis.cAniListeners = new Map()\\n\\t\\tthis.needToCalcInterpolator = false\\n\\t\\tthis.tAniInterpolators = new Map()\\n\\t\\tthis.globalEvents = new Set()\\n\\t}\\n\\n\\t_getTid() {\\n\\t\\tthis.tidCount += 1\\n\\t\\treturn this.tidCount\\n\\t}\\n\\n\\t_getAid() {\\n\\t\\tthis.aidCount += 1\\n\\t\\treturn this.aidCount\\n\\t}\\n\\n\\tsetGlobalDispatching(eventName, enable = true) {\\n\\t\\tif (enable) {\\n\\t\\t\\tif (!eventDispatcher.registerEvent(eventName)) {\\n\\t\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + eventName + '\\\" has been registered in the global event dispatcher, so beware of incorrect event listeners!')\\n\\t\\t\\t}\\n\\t\\t\\tthis.globalEvents.add(eventName)\\n\\t\\t} else {\\n\\t\\t\\tthis.globalEvents.delete(eventName)\\n\\t\\t}\\n\\t}\\n\\n\\tremoveInterpolator(aid, callback = true) {\\n\\t\\tlet data = this.tAniInterpolators.get(aid)\\n\\t\\tthis.tAniInterpolators.delete(aid)\\n\\t\\tthis.needToCalcInterpolator = this.tAniInterpolators.size != 0\\n\\t\\tif (callback) {\\n\\t\\t\\tdata.srcAni.setEndSignal()\\n\\t\\t}\\n\\t}\\n\\n\\taddInterpolator(aid, data) {\\n\\t\\tthis.tAniInterpolators.set(aid, data)\\n\\t\\tthis.needToCalcInterpolator = true\\n\\t}\\n\\n\\tcalcInterpolators() {\\n\\t\\tlet tAniData;\\n\\t\\tlet frametime = engine.frametime\\n\\t\\tfor (tAniData of this.tAniInterpolators.values()) {\\n\\t\\t\\tif (tAniData._addFrametime(frametime)) {\\n\\t\\t\\t\\ttAniData._frameUpdate()\\n\\t\\t\\t} else {\\n\\t\\t\\t\\ttAniData._frameUpdate()\\n\\t\\t\\t\\tthis.removeInterpolator(tAniData.srcAni.aid)\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\tmapAnis() {\\n\\t\\treturn\\n\\t\\tlet config, data;\\n\\t\\tfor (config of this.cAniMappers.values()) {\\n\\t\\t\\tdata = mapper[2]\\n\\t\\t\\tconfig[1](data, config[0](data))\\n\\t\\t}\\n\\t\\tif (this.needToDelMapper) {\\n\\t\\t\\tthis.cAniMapperDelTasks.forEach((aid) => { if (this.cAniMapperDelTasks[aid] != 0) { this.cAniMappers.delete(aid); delete this.cAniMapperDelTasks[aid] } else { this.cAniMapperDelTasks[aid] = 1 } })\\n\\t\\t\\tthis.needToMapAni = this.cAniMappers.size != 0\\n\\t\\t\\tthis.needToDelMapper = Object.keys(this.cAniMapperDelTasks).length != 0\\n\\t\\t}\\n\\t}\\n\\n\\tremoveAniMapper(aid) {\\n\\t\\treturn\\n\\t\\tthis.cAniMapperDelTasks[aid] = 0\\n\\t\\tthis.needToDelMapper = true\\n\\t}\\n\\n\\taddAniMapper(aid, config) {\\n\\t\\tif (this.cAniMappers.has(aid)) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.cAniMappers.set(aid, config)\\n\\t\\tthis.needToMapAni = true\\n\\t}\\n\\n\\taddTAniInterpolator(name, interpolator, deltaFunc, equalityChecker) {\\n\\t\\tif (name in interpolators) {\\n\\t\\t\\tthrow 'Interpolator \\\"' + name + '\\\" already exists.'\\n\\t\\t}\\n\\t\\tinterpolators[name] = interpolator\\n\\t\\tdeltaFuncs[name] = deltaFunc\\n\\t\\tequalityCheckers[name] = equalityChecker\\n\\t}\\n\\n\\treportEventToAniList(eventName) {\\n\\t\\tlet taskList;\\n\\t\\tfor (taskList of this.aniTasks.values()) {\\n\\t\\t\\ttaskList.handleAnimationEvent(eventName)\\n\\t\\t}\\n\\t\\tif (this.globalEvents.has(eventName)) {\\n\\t\\t\\teventDispatcher.dispatchEventToAll(new Event(eventName), undefined, false)\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {AnimationEvent} event - info about the event\\n\\t*/\\n\\treportAniEvent(event) {\\n\\t\\tlet listener = this.cAniListeners.get(event.name)\\n\\t\\tif (listener != undefined) {\\n\\t\\t\\tlistener[0](listener[1])\\n\\t\\t\\tthis.cAniListeners.delete(event.name)\\n\\t\\t}\\n\\t\\tthis.reportEventToAniList(event.name)\\n\\t}\\n\\n\\t/**\\n\\t* @param {String} eventName - name of event\\n\\t*/\\n\\treportAniEventName(eventName) {\\n\\t\\tlet listener = this.cAniListeners.get(eventName)\\n\\t\\tif (listener != undefined) {\\n\\t\\t\\tlistener[0](listener[1])\\n\\t\\t\\tthis.cAniListeners.delete(eventName)\\n\\t\\t}\\n\\t\\tthis.reportEventToAniList(eventName)\\n\\t}\\n}\\n\\nlet aniScheduler = new AnimationScheduler()\\nshared.aniScheduler = aniScheduler\\n\\n\\nfunction getAniEventInfo(name, frame = null) {\\n\\tif (frame == null) {\\n\\t\\treturn name\\n\\t} else {\\n\\t\\treturn name + String(frame)\\n\\t}\\n}\\n\\n\\nclass AnimationTaskList {\\n\\t/**\\n\\t* @param {String} trigEvent\\n\\t*/\\n\\tconstructor(name, backwardMode = false, globalEndCallbackEvent = null) {\\n\\t\\t/*if (!(backwardMode.constructor === Bool)) {\\n\\t\\t\\tthrow 'The backwardMode parameter only accepts boolean types.'\\n\\t\\t}*/\\n\\t\\tthis.name = name\\n\\t\\tthis.backwardTaskList = null\\n\\t\\tthis.backwardMode = backwardMode\\n\\t\\tthis.dEndEvent = globalEndCallbackEvent\\n\\t\\tthis.startEvents = new Map()\\n\\t\\tthis.endEvents = new Map()\\n\\t\\tthis.runningAnis = new Map()\\n\\t\\tthis.tid = null\\n\\t\\tthis.active = false\\n\\t\\tthis.anis = new Map()\\n\\t\\tif (globalEndCallbackEvent != null) {\\n\\t\\t\\tif (!eventDispatcher.registerEvent(globalEndCallbackEvent)) {\\n\\t\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + globalEndCallbackEvent + '\\\" has been registered in the global event dispatcher, so beware of incorrect event listeners!')\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\tsetGlobalEndCallbackEvent(eventName = null) {\\n\\t\\tthis.dEndEvent = eventName\\n\\t\\tif (eventName != null) {\\n\\t\\t\\tif (!eventDispatcher.registerEvent(eventName)) {\\n\\t\\t\\t\\tconsole.log('WARNING: Event ID \\\"' + eventName + '\\\" has been registered in the global event dispatcher, so beware of incorrect event listeners!')\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\tcheckActivity(includeSubList = true) {\\n\\t\\tif (this.active) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: AnimationTaskList ' + this.name + ' has ' + Array.from(this.runningAnis.values()).map((data) => {return data[0].ani.name}).toString() + ' animations in activity.')\\n\\t\\t\\t}\\n\\t\\t\\treturn true\\n\\t\\t} else if (includeSubList && this.backwardTaskList != null) {\\n\\t\\t\\treturn this.backwardTaskList.checkActivity(true)\\n\\t\\t} else {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: AnimationTaskList ' + this.name + ' is inactive.')\\n\\t\\t\\t}\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {AnimationTaskList} taskList\\n\\t*/\\n\\tbindBackwardTaskList(taskList) {\\n\\t\\tthis.backwardTaskList = taskList\\n\\t\\tthis.backwardTaskList.runningAnis = this.runningAnis\\n\\t}\\n\\n\\tcleanUpRunningAniList() {\\n\\t\\tlet ani;\\n\\t\\tfor ([ani] of this.runningAnis.values()) {\\n\\t\\t\\tif (ani.ended) {\\n\\t\\t\\t\\tthis.runningAnis.delete(ani.aid)\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {String} trigEventInfo\\n\\t*/\\n\\tbackward(trigEventInfo) {\\n\\t\\tif (this.backwardTaskList == null) {\\n\\t\\t\\tthrow 'Please bind the backward AnimationTaskList first.'\\n\\t\\t}\\n\\t\\tthis.removeTask()\\n\\t\\tthis.backwardTaskList.start(trigEventInfo)\\n\\t}\\n\\n\\t/**\\n\\t* @param {String} trigEventInfo\\n\\t*/\\n\\tstart(trigEventInfo) {\\n\\t\\tif (this.tid == null) {\\n\\t\\t\\tthis.tid = aniScheduler._getTid()\\n\\t\\t} else if (aniScheduler.aniTasks.has(this.tid)) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.active = true\\n\\t\\tif (this.backwardTaskList != null) {\\n\\t\\t\\tthis.backwardTaskList.removeTask()\\n\\t\\t}\\n\\t\\taniScheduler.aniTasks.set(this.tid, this)\\n\\t\\tthis.cleanUpRunningAniList()\\n\\t\\tif (this.runningAnis.size != 0) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: ContinuousAnimation [' + Array.from(this.runningAnis.values()).map((data) => {return data[0].ani.name}).toString() + '] in AnimationTaskList ' + this.name + ' is interrupted.')\\n\\t\\t\\t}\\n\\t\\t\\tthis.runningAnis.forEach(this.playAni, this)\\n\\t\\t} else if (trigEventInfo != null) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: AnimationTaskList ' + this.name + ' is activated.')\\n\\t\\t\\t}\\n\\t\\t\\tlet cbList = this.startEvents.get(trigEventInfo)\\n\\t\\t\\tif (cbList == undefined) {\\n\\t\\t\\t\\tthrow 'Start event \\\"' + trigEventInfo + '\\\" does not exist, available events: ' + Array(this.startEvents.keys()).toString()\\n\\t\\t\\t}\\n\\t\\t\\tcbList.forEach(this.playAniEvent, this)\\n\\t\\t\\tif (this.runningAnis.size == 0) {\\n\\t\\t\\t\\tthis.removeTask()\\n\\t\\t\\t\\tthis._end()\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\t/**\\n\\t* @param {ContinuousAnimation} ani\\n\\t* @param {String} startEventInfo\\n\\t* @param {String} endEventInfo\\n\\t*/\\n\\taddTask(ani, startEventName = null, aniReplayable = globalReplayable, rate = 1, conditionChecker = null, __check = true) {\\n\\t\\tlet endEventName = ((this.backwardMode ? -1 : 1) * rate) <= 0 ? ani.firstEventArray[0] : ani.lastEventArray[0]\\n\\t\\tif (__check && this.anis.has(ani.aid)) {\\n\\t\\t\\tconsole.log('WARNING: ContinuousAnimation \\\"' + ani.ani.name + '\\\" is re-added to AnimationTaskList \\\"' + this.name + '\\\". The old configuration will be discarded.')\\n\\t\\t\\tthis.updateTask(ani, startEventName, endEventName, aniReplayable, rate)\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tif (startEventName != null) {\\n\\t\\t\\tif (startEventName.constructor === String) {\\n\\t\\t\\t\\tif (!(this.startEvents.has(startEventName))) {\\n\\t\\t\\t\\t\\tthis.startEvents.set(startEventName, new Map())\\n\\t\\t\\t\\t}\\n\\t\\t\\t\\tthis.startEvents.get(startEventName).set(ani.aid, [ani, rate, aniReplayable, conditionChecker])\\n\\t\\t\\t\\tstartEventName = [startEventName]\\n\\t\\t\\t} else {\\n\\t\\t\\t\\tstartEventName.forEach((name) => {\\n\\t\\t\\t\\t\\tif (!(this.startEvents.has(name))) {\\n\\t\\t\\t\\t\\t\\tthis.startEvents.set(name, new Map())\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\tthis.startEvents.get(name).set(ani.aid, [ani, rate, aniReplayable, conditionChecker])\\n\\t\\t\\t\\t\\t// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 临时写法 !!!!!!!!!!!!!!!!!!!\\n\\t\\t\\t\\t\\tif (aniReplayable) {\\n\\t\\t\\t\\t\\t\\taniReplayable = false\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\t// ---------------------------------------------------------------------------------------------------------\\n\\t\\t\\t\\t}, this)\\n\\t\\t\\t}\\n\\t\\t}\\n\\t\\tif (this.endEvents.has(endEventName)) {\\n\\t\\t\\tconsole.log('WARNING: The animation endpoint event \\\"' + endEventName + '\\\" already exists, please use a unique event name to prevent scheduling confusion.')\\n\\t\\t}\\n\\t\\tthis.endEvents.set(endEventName, ani)\\n\\t\\t/*if (endEventName != null) {\\n\\t\\t\\tif (!(this.endEvents.has(endEventName))) {\\n\\t\\t\\t\\tthis.endEvents.set(endEventName, new Set())\\n\\t\\t\\t}\\n\\t\\t\\tthis.endEvents.get(endEventName).add(ani)\\n\\t\\t}*/\\n\\t\\tthis.anis.set(ani.aid, [startEventName, endEventName])\\n\\t}\\n\\n\\t/**\\n\\t* @param {ContinuousAnimation} ani\\n\\t* @param {String} startEventInfo\\n\\t* @param {String} endEventInfo\\n\\t*/\\n\\tupdateTask(ani, startEventName = null, endEventName = null, aniReplayable = globalReplayable, rate = 1) {\\n\\t\\tif (!this.anis.has(ani.aid)) {\\n\\t\\t\\tconsole.log('WARNING: ContinuousAnimation \\\"' + ani.ani.name + '\\\" does not exist in AnimationTaskList \\\"' + this.name + '\\\", it will be added automatically.')\\n\\t\\t\\tthis.addTask(ani, startEventName, endEventName, aniReplayable, rate)\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tlet oldStartEventName, oldEndEventName = this.anis.get(ani.aid)\\n\\t\\tif (oldStartEventName != null) {\\n\\t\\t\\toldStartEventName.forEach((name) => {this.startEvents.get(name).delete(ani.aid)}, this)\\n\\t\\t}\\n\\t\\t/*if (oldEndEventName != null) {\\n\\t\\t\\tthis.endEvents.get(endEventName).delete(ani.aid)\\n\\t\\t}*/\\n\\t\\tthis.endEvents.delete(oldEndEventName)\\n\\t\\tthis.addTask(ani, startEventName, endEventName, aniReplayable, rate, false)\\n\\t}\\n\\n\\t/**\\n\\t* @param {Array} data\\n\\t* @param {Number} aid\\n\\t*/\\n\\tplayAni(data, aid) {\\n\\t\\tlet ani, rate, replayable, started;\\n\\t\\t[ani, rate, replayable] = data\\n\\t\\tani.rate = rate\\n\\t\\tif (this.backwardMode) {\\n\\t\\t\\tstarted = ani.backward(replayable)\\n\\t\\t} else {\\n\\t\\t\\tstarted = ani.forward(replayable)\\n\\t\\t}\\n\\t\\tif (started) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: Starting ContinuousAnimation ' + ani.ani.name)\\n\\t\\t\\t}\\n\\t\\t\\tthis.runningAnis.set(aid, data)\\n\\t\\t}\\n\\t}\\n\\n\\tplayAniEvent(data, aid) {\\n\\t\\tlet checker = data[3]\\n\\t\\tif (!(checker == null || checker())) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.playAni(data, aid)\\n\\t}\\n\\n\\tremoveTask() {\\n\\t\\tif (this.active != undefined) {\\n\\t\\t\\tthis.active = false\\n\\t\\t}\\n\\t\\taniScheduler.aniTasks.delete(this.tid)\\n\\t}\\n\\n\\thandleAnimationEvent(eventName) {\\n\\t\\tlet anis = this.startEvents.get(eventName)\\n\\t\\tif (anis != undefined) {\\n\\t\\t\\tthis._eName = eventName\\n\\t\\t\\tanis.forEach(this.playAniEvent, this)\\n\\t\\t}\\n\\t\\tanis = this.endEvents.get(eventName)\\n\\t\\tif (anis != undefined) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: ContinuousAnimation ' + anis.ani.name + ' has ended. (' + eventName + ')')\\n\\t\\t\\t}\\n\\t\\t\\tthis.runningAnis.delete(anis.aid)\\n\\t\\t\\t/*let ani;\\n\\t\\t\\tfor (ani of anis) {\\n\\t\\t\\t\\tani.stop();\\n\\t\\t\\t\\tthis.runningAnis.delete(ani.aid)\\n\\t\\t\\t}*/\\n\\t\\t}\\n\\t\\tif (this.active && (this.runningAnis.size == 0)) {\\n\\t\\t\\tengine.setTimeout(this.removeTask, 20)\\n\\t\\t\\tthis._end()\\n\\t\\t}\\n\\t}\\n\\n\\t_end() {\\n\\t\\tthis.active = false\\n\\t\\tif (this.dEndEvent != null) {\\n\\t\\t\\teventDispatcher.dispatchEventToAll(new Event(this.dEndEvent), undefined, false)\\n\\t\\t}\\n\\t}\\n\\n\\t// Debug Tools\\n\\n}\\n\\n\\nclass ContinuousAnimation {\\n\\t/**\\n\\t* @param {IAnimation} ani\\n\\t* @param {Object} events\\n\\t*/\\n\\tconstructor(ani, events, endCallback = null, startAtEnd = false, startFrame = 0, endFrame) {\\n\\t\\tthis.cbData = [this.setEndSignal, this]\\n\\t\\tthis.ani = ani\\n\\t\\tthis.ended = true\\n\\t\\tthis.rate = ani.rate\\n\\t\\tthis.endCallback = endCallback\\n\\t\\tthis.aid = aniScheduler._getAid()\\n\\t\\tthis.startFrame = startFrame\\n\\t\\tthis.endFrame = endFrame == undefined ? ani.frameCount : endFrame\\n\\t\\tthis.ani.play()\\n\\t\\tthis.stop()\\n\\t\\tif ((this.rate * (startAtEnd ? -1 : 1)) < 0) {\\n\\t\\t\\tani.setFrame(this.endFrame - 0.1)\\n\\t\\t} else {\\n\\t\\t\\tani.setFrame(this.startFrame)\\n\\t\\t}\\n\\t\\tif (events == undefined) {\\n\\t\\t\\tthrow \\\"Please provide the event settings for \\\" + ani.name\\n\\t\\t} else if (!(this.startFrame in events)) {\\n\\t\\t\\tthrow \\\"An event needs to be bound to the first frame\\\"\\n\\t\\t} else if (!(this.endFrame in events)) {\\n\\t\\t\\tthrow \\\"An event needs to be bound to the last frame\\\"\\n\\t\\t}\\n\\t\\tfor (let frame in events) {\\n\\t\\t\\tlet eventData = events[frame]\\n\\t\\t\\tif (!Array.isArray(eventData)) {\\n\\t\\t\\t\\tevents[frame] = [eventData]\\n\\t\\t\\t}\\n\\t\\t}\\n\\t\\tthis.events = events\\n\\t\\tthis.firstEventArray = events[this.startFrame]\\n\\t\\tthis.lastEventArray = events[this.endFrame]\\n\\t\\tthis.dForward = startAtEnd\\n\\t\\tthis.mapperConfig = null\\n\\t}\\n\\n\\tsetToStart() {\\n\\t\\tif (!this.ended) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.dForward = false\\n\\t\\tthis.ani.setFrame(this.startFrame)\\n\\t}\\n\\n\\tsetToEnd() {\\n\\t\\tif (!this.ended) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis.dForward = true\\n\\t\\tthis.ani.setFrame(this.endFrame - 0.01)\\n\\t}\\n\\n\\tstop() {\\n\\t\\tif (this.mapperConfig == null) {\\n\\t\\t\\tthis.ani.pause()\\n\\t\\t} else {\\n\\t\\t\\tthis.ani.stop()\\n\\t\\t}\\n\\t}\\n\\n\\tupdateStatus() {\\n\\t\\t// For safe mode only\\n\\t\\tlet currentFrame = this.ani.getFrame()\\n\\t\\tthis.ended = (currentFrame <= 1) || (currentFrame >= this.ani.frameCount - 1)\\n\\t}\\n\\n\\t_deleteAniListener(eventName) {\\n\\t\\taniScheduler.cAniListeners.delete(eventName)\\n\\t}\\n\\n\\t_addAniListener(eventName) {\\n\\t\\taniScheduler.cAniListeners.set(eventName, this.cbData)\\n\\t}\\n\\n\\tforward(replayable = globalReplayable) {\\n\\t\\tlet firstEventArray, lastEventArray;\\n\\t\\tif (this.rate > 0) {\\n\\t\\t\\tfirstEventArray = this.firstEventArray\\n\\t\\t\\tlastEventArray = this.lastEventArray\\n\\t\\t} else {\\n\\t\\t\\tfirstEventArray = this.lastEventArray\\n\\t\\t\\tlastEventArray = this.firstEventArray\\n\\t\\t}\\n\\t\\tif (!this.ended) {\\n\\t\\t\\tfirstEventArray.forEach(this._deleteAniListener, this)\\n\\t\\t} else if ((!replayable) && this.dForward) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: Repeat forward playback of ContinuousAnimation ' + this.ani.name + ' has been blocked.')\\n\\t\\t\\t}\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t\\tthis.ani.rate = this.rate\\n\\t\\tthis._play()\\n\\t\\tlastEventArray.forEach(this._addAniListener, this)\\n\\t\\treturn true\\n\\t}\\n\\n\\tbackward(replayable = globalReplayable) {\\n\\t\\tlet firstEventArray, lastEventArray;\\n\\t\\tif (this.rate > 0) {\\n\\t\\t\\tfirstEventArray = this.firstEventArray\\n\\t\\t\\tlastEventArray = this.lastEventArray\\n\\t\\t} else {\\n\\t\\t\\tfirstEventArray = this.lastEventArray\\n\\t\\t\\tlastEventArray = this.firstEventArray\\n\\t\\t}\\n\\t\\tif (!this.ended) {\\n\\t\\t\\tlastEventArray.forEach(this._deleteAniListener, this)\\n\\t\\t} else if ((!replayable) && !this.dForward) {\\n\\t\\t\\tif (debugMode) {\\n\\t\\t\\t\\tconsole.log('DEBUG: Repeat backward playback of ContinuousAnimation ' + this.ani.name + ' has been blocked.')\\n\\t\\t\\t}\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t\\tthis.ani.rate = -this.rate\\n\\t\\tthis._play(false)\\n\\t\\tfirstEventArray.forEach(this._addAniListener, this)\\n\\t\\treturn true\\n\\t}\\n\\n\\t_play(forward = true) {\\n\\t\\tthis.ani.play()\\n\\t\\tthis._startAniMapper()\\n\\t\\tif (this.ended) {\\n\\t\\t\\tthis.dForward = forward\\n\\t\\t\\tthis.ended = false\\n\\t\\t\\tthis.ani.setFrame(this.ani.rate > 0 ? this.startFrame : this.endFrame - 0.01)\\n\\t\\t} else if (this.dForward != forward) {\\n\\t\\t\\tthis.dForward = forward\\n\\t\\t\\tlet aniFrame = this.ani.getFrame()\\n\\t\\t\\tif (this.rate * (forward ? 1 : -1) > 0) {\\t// 向正\\n\\t\\t\\t\\tObject.keys(this.events).forEach((eFrame) => {\\n\\t\\t\\t\\t\\tif (eFrame > aniFrame) {\\n\\t\\t\\t\\t\\t\\treturn\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\tthis.events[eFrame].forEach(aniScheduler.reportEventToAniList, aniScheduler)\\n\\t\\t\\t\\t}, this)\\n\\t\\t\\t} else {\\t// 向反\\n\\t\\t\\t\\tObject.keys(this.events).forEach((eFrame) => {\\n\\t\\t\\t\\t\\tif (eFrame < aniFrame) {\\n\\t\\t\\t\\t\\t\\treturn\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\tthis.events[eFrame].forEach(aniScheduler.reportEventToAniList, aniScheduler)\\n\\t\\t\\t\\t}, this)\\n\\t\\t\\t}\\n\\t\\t}\\n\\t}\\n\\n\\tsetEndSignal(self) {\\n\\t\\tself.stop()\\n\\t\\tself._stopAniMapper()\\n\\t\\tif (!self.ended && self.endCallback != null) {\\n\\t\\t\\tself.endCallback()\\n\\t\\t}\\n\\t\\tself.ended = true\\n\\t}\\n\\n\\t// Animation Mapper\\n\\tbindMapper(getter, setter, data) {\\n\\t\\tthrow \\\"This feature is not yet available\\\"\\n\\t\\t// setter(MapperData, getter())\\n\\t\\tthis.mapperConfig = [getter, setter, new MapperData(data)]\\n\\t}\\n\\n\\t_startAniMapper() {\\n\\t\\tif (this.mapperConfig != null) {\\n\\t\\t\\taniScheduler.addAniMapper(this.aid, this.mapperConfig)\\n\\t\\t}\\n\\t}\\n\\n\\t_stopAniMapper() {\\n\\t\\tif (this.mapperConfig != null) {\\n\\t\\t\\taniScheduler.removeAniMapper(this.aid)\\n\\t\\t}\\n\\t}\\n}\\n\\nclass MapperData {\\n\\tconstructor(data) {\\n\\t\\tthis.data = data\\n\\t\\tthis.thisLayer = thisLayer\\n\\t\\tthis.thisObject = thisObject\\n\\t}\\n}\\n\\nfunction easeInOutQuad(x) {\\n\\treturn x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;\\n}\\n\\nclass CbData {\\n\\tconstructor() {\\n\\t\\tthis.data;\\n\\t\\tthis.thisLayer = thisLayer\\n\\t\\tthis.thisObject = thisObject\\n\\t}\\n}\\n\\nclass TAnimationData {\\n\\t/**\\n\\t* @param {TransitionAnimation} srcAni\\n\\t*/\\n\\tconstructor(srcAni, data = null, duration = 0, forward = true, startValue = 0, endValue = 1) {\\n\\t\\tthis.srcAni = srcAni\\n\\t\\tthis.data = data\\n\\t\\tthis.rawFactor = forward ? 0 : 1\\n\\t\\tthis.duration = duration\\n\\t\\tthis.time = forward ? 0 : duration\\n\\t\\tthis.startValue = startValue\\n\\t\\tthis.endValue = endValue\\n\\t\\tthis.init = true\\n\\t\\tthis.direction = forward\\n\\t\\tthis.setDirection(forward)\\n\\t\\tif (srcAni != null) {\\n\\t\\t\\tthis.delta = srcAni.deltaFunc(startValue, endValue)\\n\\t\\t\\tthis.thisLayer = srcAni.thisLayer\\n\\t\\t\\tthis.thisObject = srcAni.thisObject\\n\\t\\t}\\n\\t}\\n\\n\\tcalcFactor() {\\n\\t\\treturn this.srcAni.easingFunc(this.rawFactor)\\n\\t}\\n\\n\\tsetDirection(forward) {\\n\\t\\tthis.direction = forward\\n\\t\\tthis._addFrametime = forward ? this._addFactor : this._subtractFactor\\n\\t}\\n\\n\\treverseDirection() {\\n\\t\\tthis.setDirection(!this.direction)\\n\\t}\\n\\n\\t_addFactor(frametime) {\\n\\t\\tif (this.init) {\\n\\t\\t\\tthis.init = false\\n\\t\\t\\treturn true\\n\\t\\t}\\n\\t\\tthis.time += frametime\\n\\t\\tthis.rawFactor = this.time / this.duration\\n\\t\\tif (this.rawFactor < 1) {\\n\\t\\t\\treturn true\\n\\t\\t} else {\\n\\t\\t\\tthis.rawFactor = 1\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\n\\t_subtractFactor(frametime) {\\n\\t\\tif (this.init) {\\n\\t\\t\\tthis.init = false\\n\\t\\t\\treturn true\\n\\t\\t}\\n\\t\\tthis.time -= frametime\\n\\t\\tthis.rawFactor = this.time / this.duration\\n\\t\\tif (this.rawFactor > 0) {\\n\\t\\t\\treturn true\\n\\t\\t} else {\\n\\t\\t\\tthis.rawFactor = 0\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\n\\t_frameUpdate() {\\n\\t\\tthis.srcAni.setter(this, this.srcAni.interpolator(this))\\n\\t}\\n}\\n\\nfunction numberDelta(a, b) {\\n\\treturn b - a\\n}\\n\\nfunction vectorDelta(a, b) {\\n\\treturn b.subtract(a)\\n}\\n\\nconst vecAxes = ['x', 'y', 'z', 'w']\\n\\nfunction vectorEquality(vecA, vecB) {\\n\\tlet typeA = vecA.constructor\\n\\tif (typeA != vecB.constructor) {\\n\\t\\treturn false\\n\\t}\\n\\tswitch (typeA) {\\n\\t\\tcase Vec2: return _vectorEquality(vecA, vecB, 2)\\n\\t\\tcase Vec3: return _vectorEquality(vecA, vecB, 3)\\n\\t\\tcase Vec4: return _vectorEquality(vecA, vecB, 4)\\n\\t}\\n}\\n\\nfunction _vectorEquality(vecA, vecB, axeNum) {\\n\\tlet axe;\\n\\tfor (let i = 0; i <= axeNum; i++) {\\n\\t\\taxe = vecAxes[i]\\n\\t\\tif (vecA[axe] != vecB[axe]) {\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\treturn true\\n}\\n\\n\\n/**\\n * @param {TAnimationData} data\\n*/\\nfunction numberInterpolator(data) {\\n\\treturn data.startValue + (data.delta * data.calcFactor())\\n}\\n\\n/**\\n * @param {TAnimationData} data\\n*/\\nfunction vectorInterpolator(data) {\\n\\treturn data.startValue.add(data.delta.multiply(data.calcFactor()))\\n}\\n\\nconst interpolators = {\\n\\t'number': numberInterpolator,\\n\\t'vector': vectorInterpolator\\n}\\n\\nconst deltaFuncs = {\\n\\t'number': numberDelta,\\n\\t'vector': vectorDelta\\n}\\n\\nconst equalityCheckers = {\\n\\t'number': (a, b) => a == b,\\n\\t'vector': vectorEquality\\n}\\n\\nclass TransitionAnimation {\\n\\t/**\\n\\t* @param {IAnimation} ani\\n\\t* @param {Object} events\\n\\t*/\\n\\tconstructor(interpolator = 'number', getter, setter, duration, events, endCallback = null, easingFunc = easeInOutQuad) {\\n\\t\\tif (!(interpolator in interpolators)) {\\n\\t\\t\\tthrow 'No interpolator named \\\"' + interpolator + '\\\" is available. Available interpolators: [' + Object.keys(interpolators).toString() + ']'\\n\\t\\t}\\n\\t\\tthis.ended = true\\n\\t\\tthis.basicCbData = new CbData()\\n\\t\\tthis.thisLayer = thisLayer\\n\\t\\tthis.thisObject = thisObject\\n\\t\\tthis.getter = getter\\n\\t\\tthis.setter = setter\\n\\t\\tthis.duration = duration\\n\\t\\tthis.endCallback = endCallback\\n\\t\\tthis.interpolator = interpolators[interpolator]\\n\\t\\tthis.deltaFunc = deltaFuncs[interpolator]\\n\\t\\tthis.equalityChecker = equalityCheckers[interpolator]\\n\\t\\tthis.easingFunc = easingFunc\\n\\t\\tthis.aid = aniScheduler._getAid()\\n\\t\\tthis.events = events\\n\\t\\tObject.keys(events).forEach((factor) => { if (factor != 0 && factor != 1) { console.log('WARNING: No support yet for handling animation events that are not endpoints.') } })\\n\\t}\\n\\n\\tstop() {\\n\\t\\taniScheduler.removeInterpolator(this.aid)\\n\\t}\\n\\n\\ttransition(targetValue, data = null) {\\n\\t\\tif (\\n\\t\\t\\t(!this.ended) && (\\n\\t\\t\\t\\t(this.lastData.direction && this.equalityChecker(this.lastData.startValue, targetValue))\\n\\t\\t\\t\\t||\\n\\t\\t\\t\\t((!this.lastData.direction) && this.equalityChecker(this.lastData.endValue, targetValue))\\n\\t\\t\\t)\\n\\t\\t) {\\n\\t\\t\\tthis.lastData.reverseDirection()\\n\\t\\t} else {\\n\\t\\t\\tthis.ended = false\\n\\t\\t\\tthis.basicCbData.data = data\\n\\t\\t\\tthis.lastData = new TAnimationData(this, data, this.duration, true, this.getter(this.basicCbData), targetValue)\\n\\t\\t\\taniScheduler.addInterpolator(this.aid, this.lastData)\\n\\t\\t}\\n\\t\\tthis._dispatchStartEvent()\\n\\t}\\n\\n\\tbackward(targetValue, data = null) {\\n\\t\\tthrow \\\"Method was deprecated\\\"\\n\\t\\tif (tips) {\\n\\t\\t\\tconsole.log('Tip: It would seem pointless to use backward mode in transition animation.')\\n\\t\\t}\\n\\t\\tif (this.ended && !replayable && this.dForward == false) {\\n\\t\\t\\treturn\\n\\t\\t}\\n\\t\\tthis._play(targetValue, false, data)\\n\\t}\\n\\n\\t_dispatchStartEvent() {\\n\\t\\tlet eName = this.events[this.lastData.direction ? 0 : 1]\\n\\t\\tif (eName != undefined) {\\n\\t\\t\\taniScheduler.reportAniEventName(eName)\\n\\t\\t}\\n\\t}\\n\\n\\t_dispatchEndEvent() {\\n\\t\\tlet eName = this.events[this.lastData.rawFactor]\\n\\t\\tif (eName != undefined) {\\n\\t\\t\\taniScheduler.reportAniEventName(eName)\\n\\t\\t}\\n\\t}\\n\\n\\tsetEndSignal() {\\n\\t\\tif (!this.ended && this.endCallback != null) {\\n\\t\\t\\tthis.endCallback(this.basicCbData)\\n\\t\\t}\\n\\t\\tthis._dispatchEndEvent()\\n\\t\\tthis.ended = true\\n\\t}\\n}\\n\\nshared.CAniClass = ContinuousAnimation\\nshared.TAniClass = TransitionAnimation\\nshared.CAniTaskListClass = AnimationTaskList\\n\\n\\n/**\\n * @param {Boolean} value - for property 'visible'\\n * @return {Boolean} - update current property value\\n */\\nexport function update() {\\n\\tif (aniScheduler.needToCalcInterpolator) {\\n\\t\\taniScheduler.calcInterpolators()\\n\\t}\\n\\t/*\\n\\tif (aniScheduler.needToMapAni) {\\n\\t\\taniScheduler.mapAnis()\\n\\t}\\n\\t*/\\n\\treturn false\\n}\\n\\n// Initalize\\nshared.eventDispatcher.registerEvent('mBdColorUpdate')\\nshared.eventDispatcher.registerEvent('mTextColorUpdate')\\nshared.eventDispatcher.registerEvent('mMixedColorUpdate')\\nshared.eventDispatcher.registerEvent('mPlayTextUpdateAni')\\nshared.eventDispatcher.registerEvent('mRefreshTextColor')\\nshared.eventDispatcher.registerEvent('timeStageUpdate')\\nshared.eventDispatcher.registerEvent('clockUpdate', undefined, true)\\n\",\"value\":true}}",
@@ -8134,7 +8134,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3219908811.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3219908811 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3219908811.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3219908811 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
@@ -8166,7 +8166,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3233141951.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3233141951 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3233141951.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3233141951 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
      "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
@@ -8178,7 +8178,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3243449890.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3243449890 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3243449890.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3243449890 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: Vec3 is not defined",
      "ScriptEngine [evaluate]: SyntaxError: Unexpected token '*'",
@@ -8215,7 +8215,7 @@
     "legacy": "exited",
     "here": "load_failed",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3276522107.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3276522107.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Projection must have a width. Contents: null",
      "Projection must have a width. Contents: null"
@@ -8226,7 +8226,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3326873240.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3326873240 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3326873240.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3326873240 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Unknown object type found: {\"disablepropagation\":false,\"id\":130,\"name\":\"myLayer\",\"origin\":\"2055.59619 1262.86682 0.00000\",\"solid\":true,\"visible\":{\"script\":\"// 假设你的图层名称为 \\\"myLayer\\\"\\nthisLayer = scene.getLayer(\\\"myLayer\\\");\\n\\n// 监听 timeVarying 属性的变化\\nscene.on(\\\"update\\\", function() {\\n    if (scene.timeVarying) {\\n        thisLayer.visible = false; // 隐藏图层\\n    } else {\\n        thisLayer.visible = true; // 显示图层\\n    }\\n});\\n\",\"value\":true}}",
      "Unknown object type found: {\"disablepropagation\":false,\"id\":193,\"name\":\"\",\"origin\":\"1920.00000 1080.00000 0.00000\",\"solid\":true}",
@@ -8245,7 +8245,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3354740764.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3354740764.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "filesystem error: Cannot find requested file in any of the mountpoints: Success [/materials/shadow.json]"
     ]
@@ -8255,7 +8255,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3363252053.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3363252053 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3363252053.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3363252053 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "ScriptEngine [evaluate]: ReferenceError: engine is not defined",
      "ScriptEngine [evaluate]: ReferenceError: thisLayer is not defined",
@@ -8276,7 +8276,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3413117423.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3413117423 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3413117423.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3413117423 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "terminate called after throwing an instance of 'nlohmann::json_abi_v3_11_3::detail::type_error'",
      "  what():  [json.exception.type_error.302] type must be number, but is object"
@@ -8324,7 +8324,7 @@
     "legacy": "exited",
     "here": "load_failed",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3477054430.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3477054430.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Projection must have a width. Contents: null",
      "Projection must have a width. Contents: null"
@@ -8335,7 +8335,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3479521040.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3479521040 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3479521040.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3479521040 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Unknown object type found: {\"id\":218,\"name\":\"Cloud\",\"origin\":\"1223.71313 766.59814 0.00000\"}",
      "Unknown object type found: {\"angles\":\"0.00000 -0.00000 0.00000\",\"id\":409,\"name\":\"\",\"origin\":\"1610.47217 492.28336 0.00000\"}",
@@ -8348,7 +8348,7 @@
     "legacy": "exited",
     "here": "load_failed",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3509243656.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3509243656.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Projection must have a width. Contents: null",
      "Projection must have a width. Contents: null"
@@ -8359,7 +8359,7 @@
     "legacy": "exited",
     "here": "ok",
     "legacy_log_tail": [
-     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/lp-scene-corpus-leg19/legacy-20261029-023948/3516174947.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3516174947 ",
+     "Running with: /nix/store/0cyavljc697p7gi043xliwc1gvvrh2fi-linux-wallpaperengine-0-unstable-2026-05-12/bin/linux-wallpaperengine --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir /mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets --screenshot /tmp/liascape-scene-corpus-leg19/legacy-20261029-023948/3516174947.png --screenshot-delay 120 --screen-root DP-1 --bg /mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3516174947 ",
      "Using wallpaper engine's assets at \"/mnt/Games/Steam/SteamLibrary/steamapps/common/wallpaper_engine/assets\" based on --assets-dir parameter",
      "Unknown object type found: {\"id\":649,\"name\":\"\",\"origin\":\"1719.79285 674.00830 0.00000\",\"parallaxDepth\":\"-2.00000 -2.00000\"}",
      "Unknown object type found: {\"id\":418,\"name\":\"\",\"origin\":\"2739.68433 447.57040 0.00000\",\"parallaxDepth\":\"-1.53000 -1.53000\",\"visible\":{\"user\":{\"condition\":\"2\",\"name\":\"newproperty\"},\"value\":false}}",

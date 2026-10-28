@@ -1,4 +1,4 @@
-// Verify the debug HUD renders + the lpdbg bridge works. electron app/shell/probe-dbg.js <url-with-?debug>
+// Verify the debug HUD renders + the liascapeDbg bridge works. electron app/shell/probe-dbg.js <url-with-?debug>
 const { app, BrowserWindow } = require("electron");
 const url = process.argv[2];
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
@@ -9,16 +9,16 @@ app.whenReady().then(async () => {
   await win.loadURL(url); await wait(6500);
   const out = {};
   out.hud = await js(`(() => { const h=document.querySelector('.dbg-hud'); return h?h.textContent.replace(/\\s+/g,' ').trim():null; })()`);
-  out.bridge = await js(`typeof window.lpdbg`);
-  out.metrics = await js(`window.lpdbg && window.lpdbg.metrics()`).catch((e) => String(e));
-  out.help = await js(`window.lpdbg && window.lpdbg.help()`).catch(() => null);
+  out.bridge = await js(`typeof window.liascapeDbg`);
+  out.metrics = await js(`window.liascapeDbg && window.liascapeDbg.metrics()`).catch((e) => String(e));
+  out.help = await js(`window.liascapeDbg && window.liascapeDbg.help()`).catch(() => null);
   // drive: switch to library, read cards, autoscroll briefly
-  out.tab = await js(`window.lpdbg && window.lpdbg.tab('library')`);
+  out.tab = await js(`window.liascapeDbg && window.liascapeDbg.tab('library')`);
   await wait(1500);
-  out.libMetrics = await js(`window.lpdbg && window.lpdbg.metrics()`);
-  out.autoscroll = await js(`window.lpdbg && window.lpdbg.autoscroll(3000,2)`);
+  out.libMetrics = await js(`window.liascapeDbg && window.liascapeDbg.metrics()`);
+  out.autoscroll = await js(`window.liascapeDbg && window.liascapeDbg.autoscroll(3000,2)`);
   await wait(1600);
-  out.afterScroll = await js(`window.lpdbg && window.lpdbg.metrics()`);
+  out.afterScroll = await js(`window.liascapeDbg && window.liascapeDbg.metrics()`);
   console.log("PROBE_DBG " + JSON.stringify(out));
   app.quit();
 });

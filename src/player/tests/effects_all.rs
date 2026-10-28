@@ -5,15 +5,15 @@
 //! Skips cleanly (prints `SKIP: ...` and returns) when either precondition is missing:
 //! no EGL device at all (`common::headless_gl`, mirrors `gfx_basic.rs`), or no
 //! `transitions/` directory can be resolved (`Catalogue::resolve_dir`) — the case inside
-//! `nix build .#lp-player`'s sandboxed check phase, where `src/player` is built without
+//! `nix build .#liascape-player`'s sandboxed check phase, where `src/player` is built without
 //! its sibling `transitions/` directory present. Never fails the build over either —
-//! unless `LP_REQUIRE_GPU=1` says this run must have both (`common::skip_gpu`).
+//! unless `LIASCAPE_REQUIRE_GPU=1` says this run must have both (`common::skip_gpu`).
 
 mod common;
 
 use common::{headless_gl, read_rgba};
 use glow::HasContext;
-use lp_player::gfx::{Catalogue, Gfx, Tex};
+use liascape_player::gfx::{Catalogue, Gfx, Tex};
 
 /// Build a real `Gfx` + loaded `Catalogue`, or print why this test is skipping and
 /// return `None`. Shared by every test below so each one's skip message names which of

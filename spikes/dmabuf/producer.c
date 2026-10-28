@@ -89,7 +89,7 @@ static void egl_init(bool dump) {
     EGLint ncfg = 0;
     if (!eglChooseConfig(g_dpy, cfgAttr, &cfg, 1, &ncfg) || ncfg == 0)
         die("eglChooseConfig");
-    const int prio = env_prio("LP_SPIKE_PRODUCER_PRIO"); // EGL_IMG_context_priority experiment
+    const int prio = env_prio("LIASCAPE_SPIKE_PRODUCER_PRIO"); // EGL_IMG_context_priority experiment
     EGLint ctxAttr[] = { EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
                          EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE, 0, EGL_NONE };
     if (prio)
@@ -128,7 +128,7 @@ static const char *FS = "#version 330 core\n"
                         "out vec4 o;\n"
                         "void main() {\n"
                         "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
-                        "  float acc = 0.0;\n" // optional synthetic GPU load (LP_SPIKE_WORK), never changes pixels
+                        "  float acc = 0.0;\n" // optional synthetic GPU load (LIASCAPE_SPIKE_WORK), never changes pixels
                         "  for (int i = 0; i < u_work; i++) acc += sin(float(i) * 0.001 + gl_FragCoord.x);\n"
                         "  if (acc == 12345.678) discard;\n"
                         "  if (p.x < 64 && p.y >= 1080 - 64) {\n"
@@ -158,7 +158,7 @@ static GLuint compile(GLenum type, const char *src) {
 
 static GLuint g_prog, g_vao;
 static GLint g_uN, g_uWork;
-static int g_work; // env LP_SPIKE_WORK: per-pixel loop iterations of synthetic GPU load (0 = trivial frame)
+static int g_work; // env LIASCAPE_SPIKE_WORK: per-pixel loop iterations of synthetic GPU load (0 = trivial frame)
 
 static void gl_init(void) {
     g_prog = glCreateProgram();
@@ -353,7 +353,7 @@ static void setup_dmabuf_ring(void) {
 static GLuint g_rt[2], g_rtFbo[2], g_pbo[2];
 
 static void setup_shm_ring(void) {
-    int fd = memfd_create("lp-dmabuf-spike-shm", MFD_CLOEXEC);
+    int fd = memfd_create("liascape-dmabuf-spike-shm", MFD_CLOEXEC);
     if (fd < 0 || ftruncate(fd, (off_t)(FRAME_BYTES * RING)) < 0)
         die("memfd");
     g_shm = mmap(NULL, FRAME_BYTES * RING, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -404,8 +404,8 @@ int main(int argc, char **argv) {
     if ((g_mode == MODE_FENCE || g_mode == MODE_FDPOLL) && !p_dupFence)
         die("eglDupNativeFenceFDANDROID missing");
     gl_init();
-    if (getenv("LP_SPIKE_WORK"))
-        g_work = atoi(getenv("LP_SPIKE_WORK"));
+    if (getenv("LIASCAPE_SPIKE_WORK"))
+        g_work = atoi(getenv("LIASCAPE_SPIKE_WORK"));
     if (g_work) { // measure the synthetic GPU time per frame once
         GLuint fbo, tex = make_target(&fbo);
         render(fbo, 1);
@@ -414,7 +414,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 10; i++)
             render(fbo, 1);
         glFinish();
-        LOG("synthetic GPU load LP_SPIKE_WORK=%d: %.3f ms GPU per frame\n", g_work, (now_ns() - t0) / 10 / 1e6);
+        LOG("synthetic GPU load LIASCAPE_SPIKE_WORK=%d: %.3f ms GPU per frame\n", g_work, (now_ns() - t0) / 10 / 1e6);
         glDeleteFramebuffers(1, &fbo);
         glDeleteTextures(1, &tex);
     }

@@ -13,7 +13,7 @@
 //! `FrameIndex`'s neutral-grey `(n,n,n)` marker within ±1 (luma quantisation only).
 //!
 //! Skips (prints `SKIP: …`, returns) only when there's no EGL device at all — fails instead
-//! under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
+//! under `LIASCAPE_REQUIRE_GPU=1` (`common::skip_gpu`).
 
 mod common;
 
@@ -22,10 +22,10 @@ use std::time::{Duration, Instant};
 
 use common::{ClipSpec, ensure_clip, headless_gl, read_rgba};
 use glow::HasContext;
-use lp_player::gfx::Gfx;
-use lp_player::graph::PropValue;
-use lp_player::sources::mpv::mpv_hwdec;
-use lp_player::sources::{ColorSource, MpvSource, RenderWorker, Source, SourceEvent};
+use liascape_player::gfx::Gfx;
+use liascape_player::graph::PropValue;
+use liascape_player::sources::mpv::mpv_hwdec;
+use liascape_player::sources::{ColorSource, MpvSource, RenderWorker, Source, SourceEvent};
 use serde_json::{Map, Value, json};
 
 /// `opts` for `MpvSource::open`, always with `ao: "null"` (R26).
@@ -35,7 +35,7 @@ fn opts(v: Value) -> Map<String, Value> {
     m
 }
 
-/// `MpvSource::open`, or — with the render worker on (`LP_PLAYER_RENDER_WORKER`, the same
+/// `MpvSource::open`, or — with the render worker on (`LIASCAPE_PLAYER_RENDER_WORKER`, the same
 /// switch `serve` reads; § Sources "Render worker") — the same open with the render context
 /// on a worker sharing `gfx`'s context, exactly as the real-clock runtime's async open does
 /// it (`prepare_core` → `attach_render` → `open_with_core`). Each source gets its own worker;
@@ -44,7 +44,7 @@ fn open_src(
     gfx: &Gfx,
     path: &str,
     o: &Map<String, Value>,
-) -> Result<MpvSource, lp_player::graph::ApiError> {
+) -> Result<MpvSource, liascape_player::graph::ApiError> {
     if !worker_mode() {
         return MpvSource::open(gfx, path, o);
     }
@@ -61,7 +61,7 @@ fn open_src(
 }
 
 fn worker_mode() -> bool {
-    lp_player::runtime::render_worker_enabled(None)
+    liascape_player::runtime::render_worker_enabled(None)
 }
 
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -459,7 +459,7 @@ fn fence_sync_stub_is_used() {
         false
     });
     assert!(
-        lp_player::sources::mpv::fence_stub_calls() > 0,
+        liascape_player::sources::mpv::fence_stub_calls() > 0,
         "libmpv never called glFenceSync through our get_proc_address"
     );
 }
@@ -950,7 +950,7 @@ fn path_change_before_first_pump_shows_only_new_file() {
 fn stale_load_error_is_not_reported_for_new_path() {
     let Some((_serial, gfx)) = gpu() else { return };
     let red = ensure_clip("solid_red_2s", RED_2S);
-    let missing = "/nonexistent/lp-player-stale-error.mkv";
+    let missing = "/nonexistent/liascape-player-stale-error.mkv";
     let mut src = open_src(&gfx, missing, &opts(json!({"loop": true}))).expect("open");
     std::thread::sleep(Duration::from_millis(300)); // A's END_FILE(ERROR) queued, unpumped
     src.apply("path", &PropValue::Str(path_str(&red).into()))
@@ -976,7 +976,7 @@ fn path_change_to_missing_then_back() {
     let red = ensure_clip("solid_red_2s", RED_2S);
     let green = ensure_clip("image_green", ClipSpec::Image { rgb: [0, 255, 0] });
     let mut src = open_ready(&gfx, path_str(&red), json!({"loop": true}));
-    let missing = "/nonexistent/lp-player-path-change-missing.mkv";
+    let missing = "/nonexistent/liascape-player-path-change-missing.mkv";
     src.apply("path", &PropValue::Str(missing.into())).unwrap();
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
@@ -1015,7 +1015,7 @@ fn path_change_to_missing_then_back() {
 fn nul_bytes_are_rejected() {
     let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
-    let code = |r: Result<(), lp_player::graph::ApiError>| r.unwrap_err().code;
+    let code = |r: Result<(), liascape_player::graph::ApiError>| r.unwrap_err().code;
     let nul_path = format!("{}\0.png", path_str(&clip));
     assert_eq!(
         open_src(&gfx, &nul_path, &opts(json!({})))
@@ -1248,7 +1248,7 @@ fn apply_validates_like_graph() {
     let Some((_serial, gfx)) = gpu() else { return };
     let clip = ensure_clip("solid_red_2s", RED_2S);
     let mut src = open_src(&gfx, path_str(&clip), &opts(json!({}))).expect("open");
-    let code = |r: Result<(), lp_player::graph::ApiError>| r.unwrap_err().code;
+    let code = |r: Result<(), liascape_player::graph::ApiError>| r.unwrap_err().code;
     assert_eq!(
         code(src.apply("speed", &PropValue::F64(9.0))),
         "out_of_range"
@@ -1275,7 +1275,7 @@ fn apply_validates_like_graph() {
 #[test]
 fn missing_file_reports_error_with_path() {
     let Some((_serial, gfx)) = gpu() else { return };
-    let path = "/nonexistent/lp-player-test-missing.mkv";
+    let path = "/nonexistent/liascape-player-test-missing.mkv";
     let mut src = open_src(&gfx, path, &opts(json!({}))).expect("open is async");
     let wake = Some(src.wake_fd());
     let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| {
@@ -1341,7 +1341,7 @@ fn color_source() {
 /// that frame while the source moves on.
 #[test]
 fn snapshot_copies_frame_and_orientation() {
-    use lp_player::sources::SnapshotSource;
+    use liascape_player::sources::SnapshotSource;
     let Some((_serial, gfx)) = gpu() else { return };
 
     // Orientation + exact copy: top red / bottom blue.

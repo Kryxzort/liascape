@@ -1,8 +1,8 @@
 //! dmabuf scene-frame transport (Phase 2 Task 4; `.claude/rules/player-core.md` § Scene
 //! worker → "Frame transport"; evidence `docs/player/spikes/dmabuf.md`). GPU: each test
-//! drives a [`SceneSource`] whose `lp-scene-worker` renders `lp-synthetic.json` (D7) into a
+//! drives a [`SceneSource`] whose `liascape-scene-worker` renders `liascape-synthetic.json` (D7) into a
 //! 3-slot ring of exported `GL_RGBA8` textures; the source imports them once and latches
-//! only frames whose acquire fence already signalled. SKIP without EGL (`LP_REQUIRE_GPU=1`
+//! only frames whose acquire fence already signalled. SKIP without EGL (`LIASCAPE_REQUIRE_GPU=1`
 //! fails instead). One test at a time (`GPU`): their frame-rate and timing assertions must
 //! not compete with each other for the GPU.
 
@@ -12,11 +12,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use glow::HasContext;
-use lp_player::gfx::{Gfx, Tex};
-use lp_player::scene::synthetic::{MARKER, PROBE, Pattern, SyntheticSpec, grad_rgb, marker_rgb};
-use lp_player::sources::Source;
-use lp_player::sources::scene::{SceneOpts, SceneSource};
-use lp_player::worker::RestartBudget;
+use liascape_player::gfx::{Gfx, Tex};
+use liascape_player::scene::synthetic::{MARKER, PROBE, Pattern, SyntheticSpec, grad_rgb, marker_rgb};
+use liascape_player::sources::Source;
+use liascape_player::sources::scene::{SceneOpts, SceneSource};
+use liascape_player::worker::RestartBudget;
 
 static GPU: Mutex<()> = Mutex::new(());
 
@@ -25,7 +25,7 @@ fn gpu_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn crash_dir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("lp-scene-test-{}-{name}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("liascape-scene-test-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -50,11 +50,11 @@ fn open_with(
     tweak: impl FnOnce(&mut SceneOpts),
 ) -> SceneSource {
     let dir = common::synthetic_scene(name, s);
-    let mut o = SceneOpts::new(dir, env!("CARGO_BIN_EXE_lp-scene-worker"));
+    let mut o = SceneOpts::new(dir, env!("CARGO_BIN_EXE_liascape-scene-worker"));
     o.synthetic = true;
     o.tick_hz = 144.0;
     o.max_size = [1920, 1080];
-    o.env = vec![("LP_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into())];
+    o.env = vec![("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into())];
     o.crash_dir = crash_dir(name);
     tweak(&mut o);
     SceneSource::open_opts(gfx, o).expect("open the scene source")
@@ -373,7 +373,7 @@ fn fdpoll_fallback_is_equally_correct() {
         return;
     };
     let mut src = open_with(&gfx, "fdpoll", &spec(Pattern::FrameIndex), |o| {
-        o.env.push(("LP_SCENE_SYNC".into(), "fdpoll".into()));
+        o.env.push(("LIASCAPE_SCENE_SYNC".into(), "fdpoll".into()));
     });
     let seqs = transport_run(&gfx, &mut src, 300);
     assert_eq!(src.sync(), Some("fdpoll"));
@@ -881,7 +881,7 @@ fn audio_thread_only_for_a_scene_with_sound() {
             >= 10));
         let names = thread_names(src.pid().unwrap());
         assert_eq!(
-            names.iter().any(|n| n == "lp-scene-audio"),
+            names.iter().any(|n| n == "lia-scene-audio"),
             sound,
             "has_audio {sound}: worker threads {names:?}"
         );
@@ -901,7 +901,7 @@ fn worker_context_is_low_priority() {
     // The compositor keeps the driver default (see `gfx::OffscreenOpts`) — above the worker.
     assert_eq!(
         granted,
-        lp_player::gfx::Priority::Medium,
+        liascape_player::gfx::Priority::Medium,
         "the compositor's default"
     );
     let mut src = open(&gfx, "prio", &spec(Pattern::Solid));
@@ -920,9 +920,9 @@ fn worker_context_is_low_priority() {
 // ---------------------------------------------------------------- Task 5: the `scene` Source kind
 
 use common::harness::Harness;
-use lp_player::anim::PropPath;
-use lp_player::graph::PropValue;
-use lp_player::sources::SourceEvent;
+use liascape_player::anim::PropPath;
+use liascape_player::graph::PropValue;
+use liascape_player::sources::SourceEvent;
 use serde_json::json;
 
 /// A harness (GPU + catalogue, else SKIP) with the scene lock held first.
@@ -1314,7 +1314,7 @@ fn lwe_fixture(name: &str) -> PathBuf {
 
 /// The worker was built with LWE (`--features` lists `lwe`); else the real-scene tests SKIP.
 fn worker_has_lwe() -> bool {
-    std::process::Command::new(env!("CARGO_BIN_EXE_lp-scene-worker"))
+    std::process::Command::new(env!("CARGO_BIN_EXE_liascape-scene-worker"))
         .arg("--features")
         .output()
         .ok()
@@ -1326,7 +1326,7 @@ fn worker_has_lwe() -> bool {
 fn empty_dir(name: &str) -> PathBuf {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let d = std::env::temp_dir().join(format!(
-        "lp-scene-test-{}-{name}-{}",
+        "liascape-scene-test-{}-{name}-{}",
         std::process::id(),
         N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
@@ -1342,7 +1342,7 @@ fn open_real(
     assets: Option<&Path>,
     tweak: impl FnOnce(&mut SceneOpts),
 ) -> SceneSource {
-    let mut o = SceneOpts::new(dir, env!("CARGO_BIN_EXE_lp-scene-worker"));
+    let mut o = SceneOpts::new(dir, env!("CARGO_BIN_EXE_liascape-scene-worker"));
     o.id = name.into();
     o.max_size = [640, 360];
     o.assets_dir = assets.map(|a| a.display().to_string());
@@ -1426,7 +1426,7 @@ fn min_scene_renders_through_the_worker() {
         return;
     };
     if !worker_has_lwe() {
-        println!("SKIP: lp-scene-worker built without LWE");
+        println!("SKIP: liascape-scene-worker built without LWE");
         return;
     }
     let assets = empty_dir("min");
@@ -1472,7 +1472,7 @@ fn renderer_build_failure_is_broken_not_a_segfault() {
         return;
     };
     if !worker_has_lwe() {
-        println!("SKIP: lp-scene-worker built without LWE");
+        println!("SKIP: liascape-scene-worker built without LWE");
         return;
     }
     let assets = empty_dir("failbuild");
@@ -1521,7 +1521,7 @@ fn missing_or_half_downloaded_scene_fails_cleanly() {
         return;
     };
     if !worker_has_lwe() {
-        println!("SKIP: lp-scene-worker built without LWE");
+        println!("SKIP: liascape-scene-worker built without LWE");
         return;
     }
     let assets = empty_dir("missing");
@@ -1561,37 +1561,37 @@ fn missing_or_half_downloaded_scene_fails_cleanly() {
     }
 }
 
-/// On-machine (D7): real Workshop scenes with the owner's WE assets, `LP_PLAYER_TEST_SCENES=<the
+/// On-machine (D7): real Workshop scenes with the owner's WE assets, `LIASCAPE_PLAYER_TEST_SCENES=<the
 /// 431960 folder>` (SFW: `~/.local/share/Steam/steamapps/workshop/content/431960`), else SKIP
-/// (FAIL under `LP_REQUIRE_SCENES=1`). Each: Ready ≤ 3 s (incl. the cold build), frames at 1 s
+/// (FAIL under `LIASCAPE_REQUIRE_SCENES=1`). Each: Ready ≤ 3 s (incl. the cold build), frames at 1 s
 /// and 3 s of scene time non-blank, opaque and different, exported at the cover size (never
-/// native), no GL error. Frames go to `LP_PLAYER_TEST_SCENES_OUT` (default
-/// `<tmp>/lp-real-scenes`).
+/// native), no GL error. Frames go to `LIASCAPE_PLAYER_TEST_SCENES_OUT` (default
+/// `<tmp>/liascape-real-scenes`).
 #[test]
 fn real_scenes_render_and_animate() {
     let _g = gpu_lock();
-    let require = std::env::var("LP_REQUIRE_SCENES").is_ok_and(|v| v == "1");
+    let require = std::env::var("LIASCAPE_REQUIRE_SCENES").is_ok_and(|v| v == "1");
     let skip = |why: &str| {
-        assert!(!require, "LP_REQUIRE_SCENES=1 but: {why}");
+        assert!(!require, "LIASCAPE_REQUIRE_SCENES=1 but: {why}");
         println!("SKIP: {why}");
     };
-    let Some(root) = std::env::var_os("LP_PLAYER_TEST_SCENES").map(PathBuf::from) else {
-        return skip("LP_PLAYER_TEST_SCENES is not set");
+    let Some(root) = std::env::var_os("LIASCAPE_PLAYER_TEST_SCENES").map(PathBuf::from) else {
+        return skip("LIASCAPE_PLAYER_TEST_SCENES is not set");
     };
     let Some(gfx) = common::headless_gl() else {
         return;
     };
     if !worker_has_lwe() {
-        return skip("lp-scene-worker built without LWE");
+        return skip("liascape-scene-worker built without LWE");
     }
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let assets = match lp_player::scene::assets::resolve(None, &home) {
+    let assets = match liascape_player::scene::assets::resolve(None, &home) {
         Ok(a) => a,
         Err(e) => return skip(&e),
     };
-    let out = std::env::var_os("LP_PLAYER_TEST_SCENES_OUT")
+    let out = std::env::var_os("LIASCAPE_PLAYER_TEST_SCENES_OUT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("lp-real-scenes"));
+        .unwrap_or_else(|| std::env::temp_dir().join("liascape-real-scenes"));
     std::fs::create_dir_all(&out).unwrap();
     for id in ["1726902114", "2371103399", "2134765860"] {
         let dir = root.join(id);
@@ -1623,7 +1623,7 @@ fn real_scenes_render_and_animate() {
             src.step_to(at);
             assert!(
                 pump(&gfx, &mut src, Duration::from_secs(5), |s| {
-                    s.step_status() == lp_player::sources::StepStatus::Done
+                    s.step_status() == liascape_player::sources::StepStatus::Done
                 }),
                 "{id}: frame at {at} s"
             );

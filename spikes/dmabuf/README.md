@@ -1,6 +1,6 @@
 # Spike: GPU frame sharing, worker → compositor, on NVIDIA proprietary
 
-Throwaway code for Phase 0 spike (b) of lp-player. Findings and verdict: `docs/player/spikes/dmabuf.md`.
+Throwaway code for Phase 0 spike (b) of liascape-player. Findings and verdict: `docs/player/spikes/dmabuf.md`.
 
 - `producer` plays the **worker**. It runs a surfaceless EGL desktop-GL 3.3 core context and renders 1920×1080
   frames into a 3-buffer ring:
@@ -9,7 +9,7 @@ Throwaway code for Phase 0 spike (b) of lp-player. Findings and verdict: `docs/p
 - `consumer` plays the **compositor**:
   - It puts a wlr-layer-shell surface on one output (default DP-2, layer BOTTOM, click-through), using desktop
     GL 3.3 core on EGL's Wayland platform.
-  - It spawns `producer` over a `SOCK_SEQPACKET` socketpair, the way lp-player will spawn workers.
+  - It spawns `producer` over a `SOCK_SEQPACKET` socketpair, the way liascape-player will spawn workers.
   - It presents on frame callbacks, checks every frame, and prints and logs the measurements.
 
 ## Build
@@ -21,7 +21,7 @@ env -u LD_LIBRARY_PATH nix develop -c make -C spikes/dmabuf
 The repo devShell has everything: gcc, wayland, wayland-scanner, libglvnd (EGL, GL, headers) and pkg-config.
 `protocol/` holds copies of three protocol XMLs:
 
-- `wlr-layer-shell-unstable-v1.xml` and `xdg-shell.xml`, from `src/native/lp-transition/protocol/`
+- `wlr-layer-shell-unstable-v1.xml` and `xdg-shell.xml`, from `src/native/liascape-transition/protocol/`
 - `presentation-time.xml`, from nixpkgs `wayland-protocols` 1.48, because the devShell has no wayland-protocols
 
 Build outputs, the generated protocol glue and `out/` are gitignored.
@@ -41,7 +41,7 @@ You can also run `consumer` directly. Run it from `spikes/dmabuf/`, because it e
 | --- | --- | --- |
 | `--mode` | `fence` `finish` `fdpoll` `shm` `nosync` `local` | transport. `fence`: dmabuf + `EGL_ANDROID_native_fence_sync` acquire and release fences. `finish`: dmabuf, worker `glFinish`es. `fdpoll`: dmabuf, the worker `poll()`s its own sync_file and hands over only finished frames, so no fence crosses processes. `shm`: CPU copy through a memfd. `nosync`: dmabuf with no acquire sync (negative control). `local`: no worker at all (present-cost baseline). |
 | `--latch` | `gpu-wait` `signaled` | `gpu-wait`: latch the newest frame at the next vblank and let the GPU wait on its fence with `eglWaitSync` (the brief's step 2). `signaled`: latch only frames whose sync_file already polls readable, otherwise reuse the previous frame. |
-| `--redraw` | `vblank` `new` | `vblank`: redraw on every frame callback (what lp-player does). `new`: draw only when a new frame arrived, throttled by frame callbacks. |
+| `--redraw` | `vblank` `new` | `vblank`: redraw on every frame callback (what liascape-player does). `new`: draw only when a new frame arrived, throttled by frame callbacks. |
 | `--seconds` / `--warmup` / `--fps` | `60` / `3` / `144` | measurement window, warm-up before it, worker frame rate |
 | `--output` / `--layer` | `DP-2` / `bottom` | where the test surface goes |
 | `--verify` | `on` `off` | the PBO readback checks (their CPU cost is measured separately) |
@@ -50,9 +50,9 @@ You can also run `consumer` directly. Run it from `spikes/dmabuf/`, because it e
 
 Environment variables:
 
-- `LP_SPIKE_WORK=N`: synthetic per-pixel GPU load in the producer. `2500` gives about 3.7 ms of GPU time per
+- `LIASCAPE_SPIKE_WORK=N`: synthetic per-pixel GPU load in the producer. `2500` gives about 3.7 ms of GPU time per
   frame.
-- `LP_SPIKE_CONSUMER_PRIO` and `LP_SPIKE_PRODUCER_PRIO`, set to `high`, `medium` or `low`: the
+- `LIASCAPE_SPIKE_CONSUMER_PRIO` and `LIASCAPE_SPIKE_PRODUCER_PRIO`, set to `high`, `medium` or `low`: the
   `EGL_IMG_context_priority` experiment.
 
 ## What gets checked, per frame

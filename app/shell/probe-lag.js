@@ -13,8 +13,8 @@ app.whenReady().then(async () => {
   const out = {};
 
   // library + autoplay gifs ON (lots of animating content behind any modal)
-  await js(`window.lpdbg.tab('library')`); await wait(1500);
-  await js(`window.lpdbg.gifs(true)`); await wait(2000);
+  await js(`window.liascapeDbg.tab('library')`); await wait(1500);
+  await js(`window.liascapeDbg.gifs(true)`); await wait(2000);
   out.anim = await js(`document.querySelectorAll('.thumb.anim').length`);
 
   out.idle = await fps();                                   // gifs animating, no modal

@@ -14,7 +14,7 @@ for framer-motion's "cool" ceiling. See memory `web-frontend-rewrite-idea`.
 - **`app/ui`** — Vite + React 19 + TS. `src/api` (client + events), `src/store` (zustand),
   `src/views` (Browse/Library/Settings), `src/components`, `src/index.css` (theme vars + glow).
 - **`app/shell`** — Electron: `main.js` spawns `livepaper --serve`, reads `serve.port`, loads the UI
-  same-origin (`LP_UI_DIR` → C# serves the dist). `probe.js` = headless self-test (offscreen window,
+  same-origin (`LIASCAPE_UI_DIR` → C# serves the dist). `probe.js` = headless self-test (offscreen window,
   counts rendered elements per tab — **use it to verify UI changes**, no GUI popup).
 
 ## API access
@@ -60,8 +60,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   first frame, with the card's own `anim()` URL (it used `thumb()` — another image, so it restarted, and
   it mounted only after the morph). Morphs out of / back into its Browse card (`data-morph-id="br-…"`,
   `.lifted` while previewing). Needs the `source` prop.
-- **Native pickers:** `app/shell/preload.js` exposes `window.lp.pickFolder()/pickFile()` →
-  `ipcMain "lp:pick"` → `dialog.showOpenDialog`. Settings "Browse" buttons use it; `window.lp` is
+- **Native pickers:** `app/shell/preload.js` exposes `window.liascape.pickFolder()/pickFile()` →
+  `ipcMain "liascape:pick"` → `dialog.showOpenDialog`. Settings "Browse" buttons use it; `window.liascape` is
   undefined in a plain browser → falls back to the text input.
 - **Animated library/strip previews (`MotionThumb.tsx`):** library items expose
   `animatedThumbnailPath` (the source preview **gif/webp**, persisted by the backend — see
@@ -133,7 +133,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   "is it playing" gate either (the store's `playingPath` is one side of a transition). Guard:
   `electron app/shell/probe-preview.js "http://localhost:5173/?api=<port>"` (stubs every write). Reset
   buttons persist immediately; unmount flushes a pending persist. **Speed slider is hidden for scenes
-  under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` lp-player it shows (a scene's speed scales its
+  under legacy** (LWE is 1×, so it'd be a no-op); with `playerEngine` liascape-player it shows (a scene's speed scales its
   animation and its pitch-kept sound — matrix `itemSpd:scene`; it was hidden for every engine).
 - **"Scene properties" in the item modal (`components/ScenePropsEditor.tsx`, `key={path}`; a scene item, not a
   multi-selection).** `api.sceneProps(path)` after the open-morph (`SETTINGS_MORPH.open` + 40 ms, like the duration row); one row per
@@ -209,9 +209,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   size / radius / shadow / filter / clip-path animation in a flight, nothing heavy mounting mid-flight.
 
 ## Hardware GL on NVIDIA (2026-10-28 — now the DEFAULT: ANGLE `gles-egl`)
-The owner ran `LP_HWGL=1 LP_ANGLE=gles-egl livepaper-ui` in the real Wayland session: the window shows, stays up, the
-morph is GPU-composited. So `main.js` now defaults NVIDIA to hardware GL via `--use-angle=gles-egl`; `LP_SOFTGL=1`
-brings back the SwiftShader path; `LP_ANGLE` overrides the backend. The log line "'--ozone-platform=wayland' is not
+The owner ran `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl livepaper-ui` in the real Wayland session: the window shows, stays up, the
+morph is GPU-composited. So `main.js` now defaults NVIDIA to hardware GL via `--use-angle=gles-egl`; `LIASCAPE_SOFTGL=1`
+brings back the SwiftShader path; `LIASCAPE_ANGLE` overrides the backend. The log line "'--ozone-platform=wayland' is not
 compatible with Vulkan" is harmless. History below.
 `main.js` still puts NVIDIA on `disable-gpu` + SwiftShader (memory `nixos-electron-ozone-x11`: native Wayland → the
 surface via Vulkan, rejected; XWayland → GPU-process segfault). Hermetic check (no display: `--ozone-platform=headless`,
@@ -221,7 +221,7 @@ crashes" — headless has no default GL), but **`--use-angle=gles-egl` (NVIDIA's
 `--use-angle=vulkan` bring up full GPU compositing + raster + WebGL with no GPU-process exit** on both versions. That
 does not exercise the window's presentation path (Wayland surface / XWayland present — where both crashes were), which
 can't be driven hermetically (no headless Wayland compositor here; Xvfb has no NVIDIA GL), so it's not proof and the
-default stays. To try it: `LP_HWGL=1 LP_ANGLE=gles-egl livepaper-ui` (both env vars already exist in `main.js`; EGL, not
+default stays. To try it: `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl livepaper-ui` (both env vars already exist in `main.js`; EGL, not
 Vulkan, for the surface); if the window shows and stays up, the GPU composites the UI and the CPU cost per frame measured above goes away.
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
@@ -251,7 +251,7 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   `restart:initDown` (the built UI from `file://…?api=<port>` — the dev topology — started while the backend is down).
   All three were RED before the fix.
 - **Origin**: production = `http://127.0.0.1:<backend port>`; `main.js` reuses the last port while free
-  (`LP_PORT`) so localStorage prefs survive a relaunch; WS connects to `location.origin` when `API` is "".
+  (`LIASCAPE_PORT`) so localStorage prefs survive a relaunch; WS connects to `location.origin` when `API` is "".
 - Guard: `scripts/test-ui-matrix.sh` (every control × every player state through the real UI, hermetic;
   `--jobs N` shards it, default 6 ≈ 10 min; **`--changed [<rev>]`** runs only the cells the change can affect —
   `scripts/matrix-cells-for.sh` maps changed files → cell families, central files → the full matrix, docs /
@@ -271,8 +271,8 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   **Scene cells (Phase 2 Task 12).** `test-ui-matrix.sh` seeds three synthetic WE scenes into the private library
   (`library/workshop/90000000{1,2,3}`, titled s1–s3 in that source's `index.json`, 320×180 previews; the worker's
   synthetic renderer: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashing 1.5 s after every start), runs its player with
-  `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LP_SCENE_WORKER_BIN` and `LP_PLAYER_VRAM_PROBE=fake:<file>` (healthy unless a
-  cell writes a worker's MiB into it; short `LP_PLAYER_VRAM_TIMING`). Scene support stays **off** in the baseline (the
+  `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` + `LIASCAPE_SCENE_WORKER_BIN` and `LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>` (healthy unless a
+  cell writes a worker's MiB into it; short `LIASCAPE_PLAYER_VRAM_TIMING`). Scene support stays **off** in the baseline (the
   library-stepping / random cells would land on scenes, s3 crashes) — the opt-in states `scene` (s1 alone), `sceneV`
   / `sceneS` / `sceneS2` (the playlist [k1, s1, s2, k2] at k1 / s1 / s2) and every scene control turn it on before
   the UI loads; each cell starts with the scenes unmarked (index rewritten) and the fake VRAM healthy. Cells (oracle in
@@ -286,7 +286,7 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   `settings:sceneFps` (Monitors → `out:VIRTUAL-1.scene_fps` 45 + `fps_target`), `settings:sceneThrottle|vramLimit|
   vramLowMode` (the GPU / VRAM group → `player.*`, same pid), `vram:exceeded` (the fake reports s1's worker at 2000 MiB
   > 1536 → the rotation advances, not marked crashed, the status bar's text), `playlist:sceneInterval` (a 4 s interval
-  advances off a scene), `restore:scene` (the backend restarted on the same port — `LP_PORT` — the scene stays, same
+  advances off a scene), `restore:scene` (the backend restarted on the same port — `LIASCAPE_PORT` — the scene stays, same
   worker; the probe kills only the backend the stack started and records its replacement in `backend2.pid` for the
   cleanup); **`sceneProp:set|switch|restart|reset`** (s1's project.json declares `color` — the synthetic renderer's
   WE-encoded colour, red by default —, `clock`, and `bars` shown while clock is on; oracle: a pixel of s1's own
@@ -313,16 +313,16 @@ after Z" (", scenes stay" for 0). Semantics: `player-adapter.md` § Rotation. Ma
 (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`); `playlist:sceneTiming` /
 `global:sceneTiming` the toggle + "Switch scenes after".
 
-## Settings page under lp-player (Phase 2 scenes)
+## Settings page under liascape-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;
-while `active === "lp-player"` (`lpActive`): "Scene transition delay" is hidden (the player switches once the
+while `active === "liascape-player"` (`liascapeActive`): "Scene transition delay" is hidden (the player switches once the
 scene's first frame is in — no lead), the Monitors (scenes) rows drop the **primary** radio (one scene worker
 for every output; its sound is one stream) and label the fps **"fps (live)"** (the backend sets
 `out:<name>.scene_fps` on save), and a scene that can't play shows `scenes.reason` under the toggle. Legacy:
-unchanged. **GPU / VRAM** (a section shown only under lp-player; every row live — `player-adapter.md` § Scenes):
+unchanged. **GPU / VRAM** (a section shown only under liascape-player; every row live — `player-adapter.md` § Scenes):
 "Auto-throttle scenes" (`sceneThrottle`), "Limit VRAM per scene" (`sceneVramLimitEnabled`) + "VRAM limit (MiB)"
 (`sceneVramLimitMib`, shown while it's on), "When VRAM runs low" Stop (free memory) / Pause / Off (`vramLowMode`); while
-Settings is open under lp-player it re-reads `/player-engine` every 5 s and says so when `vram.low_active` (the player's
+Settings is open under liascape-player it re-reads `/player-engine` every 5 s and says so when `vram.low_active` (the player's
 low-VRAM hold — not a user pause). WS `scene-vram-stopped` → the status bar: "<title>: stopped: used X MiB > limit Y
 MiB of VRAM" (`App.tsx`).
 

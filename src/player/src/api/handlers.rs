@@ -258,7 +258,7 @@ fn parse_kind(k: &str) -> Result<NodeKind, ApiError> {
         "effect" => Ok(NodeKind::Effect),
         "output" => Err(proto::unsupported(
             "outputs come from the compositor (Wayland) or headless.add_output".into(),
-            "headless: `lp-player ctl headless.add_output '{\"name\":\"VIRTUAL-3\",\"width\":\
+            "headless: `liascape-player ctl headless.add_output '{\"name\":\"VIRTUAL-3\",\"width\":\
              1920,\"height\":1080,\"hz\":60}'`",
         )),
         "player" => Err(proto::unsupported(
@@ -306,7 +306,7 @@ fn check_effect(rt: &Runtime, v: &Value) -> Result<(), ApiError> {
         Some(eid) if !eid.is_empty() && !rt.cat.ids().iter().any(|i| i == eid) => Err(ApiError {
             code: "no_such_effect",
             message: format!("effect_id {eid:?} is not in the catalogue"),
-            hint: hint("`lp-player ctl effects` lists every id; `effect_id: null` is a cut"),
+            hint: hint("`liascape-player ctl effects` lists every id; `effect_id: null` is a cut"),
         }),
         _ => Ok(()),
     }
@@ -318,7 +318,7 @@ fn destroy(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         Some(NodeKind::Output) => {
             return Err(proto::unsupported(
                 format!("{id} is an output; outputs follow the compositor"),
-                "headless: `lp-player ctl headless.remove_output '{\"name\":\"VIRTUAL-2\"}'`",
+                "headless: `liascape-player ctl headless.remove_output '{\"name\":\"VIRTUAL-2\"}'`",
             ));
         }
         Some(NodeKind::Layer) if id.ends_with(":main") => {
@@ -457,7 +457,7 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         return Err(ApiError {
             code: "no_such_node",
             message: format!("no such node: {node_ref:?}"),
-            hint: hint("run `lp-player ctl state` to see the live graph"),
+            hint: hint("run `liascape-player ctl state` to see the live graph"),
         });
     }
     // Validate every target first (numeric, writable, `to` in range) — all or nothing.
@@ -575,7 +575,7 @@ fn cancel(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
 // ---------------------------------------------------------------- capture
 
 /// `capture`: the GPU readback is started here, on the loop (`Gfx::start_read_back`, never
-/// waited for); the runtime maps it once the copy is done and `lp-capture` encodes and writes
+/// waited for); the runtime maps it once the copy is done and `lia-capture` encodes and writes
 /// it (`api::capture`). The reply is deferred until the file is complete (`None`; the runtime
 /// answers it, the client's later requests wait — per-client FIFO, like `step`). Errors (bad
 /// target/path, no frame) reply at once.
@@ -618,7 +618,7 @@ fn capture_start(
             return Err(ApiError {
                 code: "no_such_node",
                 message: format!("no output {name:?}"),
-                hint: hint("`lp-player ctl state` lists the outputs"),
+                hint: hint("`liascape-player ctl state` lists the outputs"),
             });
         };
         let spare = rt.capture.take_spare();
@@ -667,7 +667,7 @@ fn step_args(rt: &Runtime, args: &Value) -> Result<Duration, ApiError> {
     if !rt.stepped() {
         return Err(proto::unsupported(
             "step needs the stepped clock".into(),
-            "start the player with `lp-player serve --headless --clock stepped`",
+            "start the player with `liascape-player serve --headless --clock stepped`",
         ));
     }
     let ms = arg_f64(args, "ms")?;
@@ -682,7 +682,7 @@ fn step_args(rt: &Runtime, args: &Value) -> Result<Duration, ApiError> {
 fn headless_err() -> ApiError {
     proto::unsupported(
         "headless.* verbs need the headless backend".into(),
-        "start the player with `lp-player serve --headless`",
+        "start the player with `liascape-player serve --headless`",
     )
 }
 

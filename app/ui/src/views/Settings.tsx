@@ -13,7 +13,7 @@ import { TransitionPicker, type TransitionValue } from "../components/Transition
 import { PlayTimeInput, ROT_HINT } from "../components/PlayTimeInput";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
-const lp = (window as unknown as { lp?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).lp;
+const bridge = (window as unknown as { liascape?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).liascape;
 
 // reads/writes go through the store's settings object (camelCase, mirrors AppSettings).
 function useS() {
@@ -122,13 +122,13 @@ export const Settings = memo(function Settings() {
   const [wipeArm, setWipeArm] = useState(-1);   // same arming pattern for "Clear settings"
   // auto-detected outputs (hyprctl/sway): name + current refresh rate + which is focused/primary
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
-  // lp-player availability for the "Player engine" row (binary found? last start error?)
+  // liascape-player availability for the "Player engine" row (binary found? last start error?)
   const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null } | null>(null);
-  // lp-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
+  // liascape-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
   // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
-  const lpActive = engine?.active === "lp-player";
+  const liascapeActive = engine?.active === "liascape-player";
 
   useEffect(() => {
     let alive = true;
@@ -160,12 +160,12 @@ export const Settings = memo(function Settings() {
       engine === null ? 0 : 600);
     return () => clearTimeout(t);
   }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
-  // under lp-player: the low-VRAM status (GPU / VRAM section) follows the player while Settings is open
+  // under liascape-player: the low-VRAM status (GPU / VRAM section) follows the player while Settings is open
   useEffect(() => {
-    if (!lpActive) return;
+    if (!liascapeActive) return;
     const t = setInterval(() => api.playerEngine().then(setEngine).catch(() => {}), 5000);
     return () => clearInterval(t);
-  }, [lpActive]);
+  }, [liascapeActive]);
   // missing build pieces / tools (API: /health/features) → warning icons on the rows they break + the summary;
   // re-read after a change that can move them (engine, scenes, steamcmd) and every 15 s while open (a player that
   // started meanwhile reports its GPU interop / VRAM probe)
@@ -204,7 +204,7 @@ export const Settings = memo(function Settings() {
   // (live wallpaper bg is now rendered at App level via <WallpaperBg> — Settings always shows it, and
   // the "Live wallpaper behind all tabs" advanced toggle extends it to Browse/Library)
   const pickInto = async (key: string, kind: "folder" | "file") => {
-    const p = await (kind === "folder" ? lp?.pickFolder?.() : lp?.pickFile?.());
+    const p = await (kind === "folder" ? bridge?.pickFolder?.() : bridge?.pickFile?.());
     if (p) set(key, p);
   };
 
@@ -241,7 +241,7 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Disable cache" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>}
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}`} disabled={mute} rk="volume">
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
-        <Row label="Normalize audio" hint={"match perceived loudness across wallpapers (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." + (lpActive ? " A scene learns its loudness over its first minute of play, then is matched from that moment on." : "")} disabled={mute} rk="normalizeAudio">
+        <Row label="Normalize audio" hint={"match perceived loudness across wallpapers (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." + (liascapeActive ? " A scene learns its loudness over its first minute of play, then is matched from that moment on." : "")} disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
         {!mute && g("normalizeAudio", false) && <Row label="Target loudness" hint="LUFS (dB-referenced loudness); −14 = streaming standard, lower = quieter. Pick a preset or type your own. Every video is matched to this level." rk="normalizeTargetLufs">
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-100} max={0} step={1}
@@ -300,9 +300,9 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackBytes"><NumInput min={1} max={10000} value={g("demuxerMaxBackBytes", 5)} onChange={(v) => set("demuxerMaxBackBytes", v)} /></Row>}
       </Section>
 
-      {/* lp-player only (the player owns the GPU budget + both VRAM rules); every row applies live
+      {/* liascape-player only (the player owns the GPU budget + both VRAM rules); every row applies live
           (API: /settings → player.scene_throttle / scene_vram_limit_mib / vram_low_mode) */}
-      {lpActive && (
+      {liascapeActive && (
         <Section title="GPU / VRAM" icon={<Gauge size={15} />}>
           <Row label="Auto-throttle scenes" hint="lower a scene's frame rate while it makes the GPU miss frames, and restore it when it recovers — off: every scene renders at its fixed fps" rk="sceneThrottle">
             <input type="checkbox" checked={g("sceneThrottle", true)} onChange={(e) => set("sceneThrottle", e.target.checked)} /></Row>
@@ -342,8 +342,8 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Replace direct downloads with Workshop copies" hint="when a directly-downloaded wallpaper appears in the WE folder, swap to the WE symlink/copy & reclaim the duplicate's disk" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>}
         <Row label="Allow scene support" rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
         <Row label="Auto-add new WE wallpapers to library" rk="autoImportWallpaperEngine"><input type="checkbox" checked={g("autoImportWallpaperEngine", false)} onChange={(e) => set("autoImportWallpaperEngine", e.target.checked)} /></Row>
-        {!lpActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><NumInput min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(v) => set("sceneTransitionDelayMs", v)} /></Row>}
-        {lpActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
+        {!liascapeActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><NumInput min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(v) => set("sceneTransitionDelayMs", v)} /></Row>}
+        {liascapeActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
           <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
       </Section>
 
@@ -352,17 +352,17 @@ export const Settings = memo(function Settings() {
           <Help>Names of the monitors to play scenes on.{detected.length > 0
             ? <> Detected: {detected.map((d) => <code key={d.name} className="kb">{d.name} {d.refreshHz}Hz{d.primary ? " ★" : ""}</code>)} — type or pick below.</>
             : <> Auto-detect found none; on Hyprland run <code className="kb">hyprctl monitors</code> to list names (use the equivalent for your compositor).</>}</Help>
-          <datalist id="lp-monitors">{detected.map((d) => <option key={d.name} value={d.name} />)}</datalist>
+          <datalist id="liascape-monitors">{detected.map((d) => <option key={d.name} value={d.name} />)}</datalist>
           {monitors.map((m, i) => (
             <Row key={i} label={`Monitor ${i + 1}`}>
               <div className="hms">
-                <input className="text mon-name" list="lp-monitors" placeholder="e.g. DP-1" value={m.name}
+                <input className="text mon-name" list="liascape-monitors" placeholder="e.g. DP-1" value={m.name}
                   onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <NumInput min={1} max={480} value={m.fps}
-                  onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>{lpActive ? "fps (live)" : "fps"}</span>
+                  onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>{liascapeActive ? "fps (live)" : "fps"}</span>
                 {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section;
-                    legacy only (LWE's audio-owning instance) — lp-player runs one worker for every output */}
-                {!lpActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
+                    legacy only (LWE's audio-owning instance) — liascape-player runs one worker for every output */}
+                {!liascapeActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
                   onChange={() => setMonitors(monitors.map((x, j) => ({ ...x, isPrimary: j === i })))} /> primary</label>}
                 <button className="mini ico" title="Remove monitor" onClick={() => setMonitors(monitors.filter((_, j) => j !== i))}><X size={14} /></button>
               </div>
@@ -402,20 +402,20 @@ export const Settings = memo(function Settings() {
       <Section title="Advanced" icon={<Wrench size={15} />}>
         <Row label="Advanced settings" hint="show disable-cache, hardware decoding, demuxer, copy-files & the live command previews" rk="advancedSettings"><input type="checkbox" checked={adv} onChange={(e) => set("advancedSettings", e.target.checked)} /></Row>
         {adv && (() => {
-          const wantLp = g<string>("playerEngine", "legacy") === "lp-player";
+          const wantPlayer = g<string>("playerEngine", "legacy") === "liascape-player";
           // status not read yet → disabled ("checking…"); binary missing → disabled with the reason
           // (switching back to Legacy always stays possible)
           const loading = engine === null;
           const unavailable = !loading && !engine.available;
-          const off = loading || (unavailable && !wantLp);
-          const hint = loading ? "checking lp-player…"
-            : unavailable ? engine.reason ?? "lp-player is not available"
-            : wantLp && engine.active !== "lp-player" ? "lp-player selected but not running — " + (engine.reason ?? "starting…")
-            : wantLp && engine.reason ? engine.reason
-            : "which player draws the wallpaper. lp-player is the new all-in-one player (experimental — scenes need Wallpaper Engine installed for its assets). Switches live.";
+          const off = loading || (unavailable && !wantPlayer);
+          const hint = loading ? "checking liascape-player…"
+            : unavailable ? engine.reason ?? "liascape-player is not available"
+            : wantPlayer && engine.active !== "liascape-player" ? "liascape-player selected but not running — " + (engine.reason ?? "starting…")
+            : wantPlayer && engine.reason ? engine.reason
+            : "which player draws the wallpaper. liascape-player is the new all-in-one player (experimental — scenes need Wallpaper Engine installed for its assets). Switches live.";
           return <Row label="Player engine" hint={hint} disabled={off} rk="playerEngine">
             <Select value={g("playerEngine", "legacy")} disabled={off} onChange={(v) => set("playerEngine", v)}
-              options={[{ value: "legacy", label: "Legacy" }, { value: "lp-player", label: "lp-player (experimental)" }]} />
+              options={[{ value: "legacy", label: "Legacy" }, { value: "liascape-player", label: "liascape-player (experimental)" }]} />
           </Row>;
         })()}
         {adv && <Row label="Transition method" hint="how a wallpaper switch animates — Reveal: freeze the old, keep the new playing (recommended); Frozen: both sides still; Full-live: both play (heavy on 4K). Warp-style effects fall back to Frozen in Reveal." rk="transitionMethod">
@@ -430,7 +430,7 @@ export const Settings = memo(function Settings() {
             options={[{ value: "auto", label: "Auto" }, { value: "item", label: "This wallpaper" }, { value: "global", label: "Global" }]} />
         </Row>}
         {adv && <Row label="Live wallpaper behind all tabs" hint="show the live wallpaper behind the grid on Browse & Library (visible in the gaps between cards)" rk="wallpaperBgAllTabs"><input type="checkbox" checked={g("wallpaperBgAllTabs", false)} onChange={(e) => set("wallpaperBgAllTabs", e.target.checked)} /></Row>}
-        {adv && <Row label="Debug mode" hint="enable the lpdbg bridge + perf metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>}
+        {adv && <Row label="Debug mode" hint="enable the liascapeDbg bridge + perf metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>}
         {adv && g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics HUD" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
       </Section>
 

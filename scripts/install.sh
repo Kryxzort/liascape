@@ -7,12 +7,12 @@
 # Knobs (env):
 #   PREFIX       runtime install prefix        (default: $HOME/.local; packages use /usr)
 #   DESTDIR      staging root for packaging     (default: empty; PKGBUILD/AppImage set $pkgdir/$AppDir)
-#   LP_ELECTRON  electron binary the GUI runs   (default: 'electron' on PATH; AppImage sets a bundled one)
+#   LIASCAPE_ELECTRON  electron binary the GUI runs   (default: 'electron' on PATH; AppImage sets a bundled one)
 #   SKIP_BUILD   1 = don't compile, only stage  (unused split; reserved)
 #
 # Options:
-#   --no-scenes  build without Wallpaper Engine scene support under lp-player (no LWE core, no
-#                cmake/SDL2/freetype/glm/lz4 needed): lp-scene-worker plays nothing but test scenes
+#   --no-scenes  build without Wallpaper Engine scene support under liascape-player (no LWE core, no
+#                cmake/SDL2/freetype/glm/lz4 needed): liascape-scene-worker plays nothing but test scenes
 #
 # Paths: everything is staged under $DESTDIR but the wrappers reference the RUNTIME paths ($PREFIX...),
 # so a packaged tree works once installed to $PREFIX regardless of where it was staged.
@@ -34,7 +34,7 @@ LIBDIR="$PREFIX/lib/livepaper"           # runtime location of backend + ui + sh
 BINDIR="$PREFIX/bin"
 APPSDIR="$PREFIX/share/applications"
 # Fixed (NOT $PREFIX-relative) shared-assets location — matches the hardcoded candidate dir
-# TransitionService.cs and lp-player's Catalogue::resolve_dir already fall back to for
+# TransitionService.cs and liascape-player's Catalogue::resolve_dir already fall back to for
 # transitions/binaries installed outside the main $PREFIX tree.
 WEBDIR="$HOME/.local/share/livepaper-web"
 # staging (where we write now) = $DESTDIR + runtime path
@@ -43,17 +43,17 @@ S_BIN="$DESTDIR$BINDIR"
 S_APPS="$DESTDIR$APPSDIR"
 S_WEB="$DESTDIR$WEBDIR"
 
-# lp-player (the Rust Wayland compositor, src/player/) needs the Rust toolchain to build. Preflight
+# liascape-player (the Rust Wayland compositor, src/player/) needs the Rust toolchain to build. Preflight
 # this FIRST, before any build/publish side effect below — a missing toolchain must fail loud and
 # immediately, not after minutes of npm/dotnet work already done.
-echo "==> checking Rust toolchain (cargo/rustc — builds lp-player)"
+echo "==> checking Rust toolchain (cargo/rustc — builds liascape-player)"
 missing_rust=""
 command -v cargo >/dev/null 2>&1 || missing_rust="$missing_rust cargo"
 command -v rustc >/dev/null 2>&1 || missing_rust="$missing_rust rustc"
 if [ -n "$missing_rust" ]; then
   cat >&2 <<MSG
 ERROR: missing Rust toolchain:$missing_rust
-  lp-player (the Wayland wallpaper compositor) is built from source — install it and re-run:
+  liascape-player (the Wayland wallpaper compositor) is built from source — install it and re-run:
     Arch:   sudo pacman -S rust
     Debian: sudo apt install cargo rustc
     Fedora: sudo dnf install cargo rust
@@ -62,12 +62,12 @@ MSG
   exit 1
 fi
 
-# Native helpers are REQUIRED, not optional: lp-transition renders every wallpaper switch
-# (transitions are a core feature, never a no-op) and lp-audio gapless-crossfades scene audio.
+# Native helpers are REQUIRED, not optional: liascape-transition renders every wallpaper switch
+# (transitions are a core feature, never a no-op) and liascape-audio gapless-crossfades scene audio.
 # Preflight the toolchain and fail loudly with a fix — never silently ship a degraded build.
-# lp-player (Rust) links mpv/wayland/EGL/PipeWire/xkbcommon and runs bindgen (needs libclang).
+# liascape-player (Rust) links mpv/wayland/EGL/PipeWire/xkbcommon and runs bindgen (needs libclang).
 # Checked here, before any build/publish side effect below.
-echo "==> checking native build toolchain (lp-transition + lp-audio + lp-player)"
+echo "==> checking native build toolchain (liascape-transition + liascape-audio + liascape-player)"
 missing=""
 command -v cc            >/dev/null 2>&1 || missing="$missing cc"
 command -v make          >/dev/null 2>&1 || missing="$missing make"
@@ -78,14 +78,14 @@ if command -v pkg-config >/dev/null 2>&1; then
     pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
   done
 fi
-# bindgen (lp-player's libmpv bindings) loads libclang at build time
+# bindgen (liascape-player's libmpv bindings) loads libclang at build time
 if [ -z "${LIBCLANG_PATH:-}" ] && ! command -v clang >/dev/null 2>&1 && ! ldconfig -p 2>/dev/null | grep -q "libclang"; then
   missing="$missing libclang"
 fi
 if [ -n "$missing" ]; then
   cat >&2 <<MSG
 ERROR: missing native build dependencies:$missing
-  Transitions, scene-audio crossfade and the lp-player compositor are core, not optional — install these and re-run:
+  Transitions, scene-audio crossfade and the liascape-player compositor are core, not optional — install these and re-run:
     Arch:   sudo pacman -S base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang
     Debian: sudo apt install build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev
     Fedora: sudo dnf install gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel
@@ -94,7 +94,7 @@ MSG
   exit 1
 fi
 
-# Wallpaper Engine scenes under lp-player: the scene worker links LWE's core (linux-wallpaperengine
+# Wallpaper Engine scenes under liascape-player: the scene worker links LWE's core (linux-wallpaperengine
 # next-v2, built from source at third_party/lwe/PIN). Its build deps are required unless --no-scenes —
 # preflighted here too, before any build side effect (scripts/lwe.sh deps prints the package lines).
 if [ "$NO_SCENES" = 0 ]; then
@@ -136,39 +136,39 @@ if [ "$NO_SCENES" = 0 ]; then
   # fetched into ~/.cache/livepaper/src (git clone, once per pin), built in $ROOT/build/
   echo "==> building LWE core (Wallpaper Engine scenes) → $WEBDIR/lib"
   LWE_CORE="$ROOT/build/lwe-core"
-  LP_LWE_CORE_DIR="$LWE_CORE" bash "$ROOT/scripts/lwe.sh" fetch prepare build check
+  LIASCAPE_LWE_CORE_DIR="$LWE_CORE" bash "$ROOT/scripts/lwe.sh" fetch prepare build check
   mkdir -p "$S_WEB/lib"
   find "$S_WEB/lib" -maxdepth 1 -name 'liblinux-wallpaperengine-core.so*' -delete
   cp -P "$LWE_CORE"/lib/liblinux-wallpaperengine-core.so* "$S_WEB/lib/"
-  echo "==> building lp-player + lp-scene-worker (Rust compositor) → $WEBDIR/bin"
+  echo "==> building liascape-player + liascape-scene-worker (Rust compositor) → $WEBDIR/bin"
   # the worker finds the core next to it at runtime ($WEBDIR/bin/../lib), not in the build tree
-  (cd "$ROOT" && LP_LWE_CORE_DIR="$LWE_CORE" LP_LWE_RPATH='$ORIGIN/../lib' \
+  (cd "$ROOT" && LIASCAPE_LWE_CORE_DIR="$LWE_CORE" LIASCAPE_LWE_RPATH='$ORIGIN/../lib' \
     cargo build --release --locked --manifest-path src/player/Cargo.toml)
 else
-  echo "==> building lp-player + lp-scene-worker without scene support (--no-scenes) → $WEBDIR/bin"
+  echo "==> building liascape-player + liascape-scene-worker without scene support (--no-scenes) → $WEBDIR/bin"
   (cd "$ROOT" && cargo build --release --locked --no-default-features --manifest-path src/player/Cargo.toml)
 fi
-install -Dm755 "$ROOT/src/player/target/release/lp-player" "$S_WEB/bin/lp-player"
-install -Dm755 "$ROOT/src/player/target/release/lp-scene-worker" "$S_WEB/bin/lp-scene-worker"
+install -Dm755 "$ROOT/src/player/target/release/liascape-player" "$S_WEB/bin/liascape-player"
+install -Dm755 "$ROOT/src/player/target/release/liascape-scene-worker" "$S_WEB/bin/liascape-scene-worker"
 
 echo "==> ensuring Electron is available for the GUI"
 # The GUI runs: <electron> <shell-dir>. By default use a system 'electron' (PATH) — the bundled
 # prebuilt can't load its libs on some distros (NixOS) and pulls 200MB. Packages provide electron
-# their own way: AUR depends=(electron); AppImage bundles one and sets LP_ELECTRON. Only warn here.
-if [ -z "$LP_ELECTRON" ] && ! command -v electron >/dev/null 2>&1; then
+# their own way: AUR depends=(electron); AppImage bundles one and sets LIASCAPE_ELECTRON. Only warn here.
+if [ -z "$LIASCAPE_ELECTRON" ] && ! command -v electron >/dev/null 2>&1; then
   echo "    WARN: no 'electron' on PATH — install it (Arch: electron / Debian: apt has none, use the AppImage)"
-  echo "          or set LP_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
+  echo "          or set LIASCAPE_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
 fi
 
 mkdir -p "$S_BIN"
 echo "==> installing 'livepaper' (bare = GUI; flags = headless CLI)"
 cat > "$S_BIN/livepaper" <<WRAP
 #!/bin/bash
-export LP_UI_DIR="$LIBDIR/ui"
-export LP_TRANSITIONS_DIR="$LIBDIR/transitions"
-[ -x "$LIBDIR/lp-transition" ] && export LP_TRANSITION_BIN="$LIBDIR/lp-transition"
-[ -x "$LIBDIR/lp-audio" ] && export LP_AUDIO_BIN="$LIBDIR/lp-audio"
-[ -x "$WEBDIR/bin/lp-player" ] && export LP_PLAYER_BIN="$WEBDIR/bin/lp-player"
+export LIASCAPE_UI_DIR="$LIBDIR/ui"
+export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
+[ -x "$LIBDIR/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIBDIR/liascape-transition"
+[ -x "$LIBDIR/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIBDIR/liascape-audio"
+[ -x "$WEBDIR/bin/liascape-player" ] && export LIASCAPE_PLAYER_BIN="$WEBDIR/bin/liascape-player"
 [ \$# -eq 0 ] && exec "$BINDIR/livepaper-ui"
 exec "$LIBDIR/backend/livepaper" "\$@"
 WRAP
@@ -177,13 +177,13 @@ chmod 755 "$S_BIN/livepaper"
 echo "==> installing 'livepaper-ui' (GUI)"
 cat > "$S_BIN/livepaper-ui" <<WRAP
 #!/bin/bash
-export LP_BACKEND="$LIBDIR/backend/livepaper"
-export LP_UI_DIR="$LIBDIR/ui"
-export LP_TRANSITIONS_DIR="$LIBDIR/transitions"
-[ -x "$LIBDIR/lp-transition" ] && export LP_TRANSITION_BIN="$LIBDIR/lp-transition"
-[ -x "$LIBDIR/lp-audio" ] && export LP_AUDIO_BIN="$LIBDIR/lp-audio"
-[ -x "$WEBDIR/bin/lp-player" ] && export LP_PLAYER_BIN="$WEBDIR/bin/lp-player"
-exec "\${LP_ELECTRON:-electron}" "$LIBDIR/shell"
+export LIASCAPE_BACKEND="$LIBDIR/backend/livepaper"
+export LIASCAPE_UI_DIR="$LIBDIR/ui"
+export LIASCAPE_TRANSITIONS_DIR="$LIBDIR/transitions"
+[ -x "$LIBDIR/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIBDIR/liascape-transition"
+[ -x "$LIBDIR/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIBDIR/liascape-audio"
+[ -x "$WEBDIR/bin/liascape-player" ] && export LIASCAPE_PLAYER_BIN="$WEBDIR/bin/liascape-player"
+exec "\${LIASCAPE_ELECTRON:-electron}" "$LIBDIR/shell"
 WRAP
 chmod 755 "$S_BIN/livepaper-ui"
 

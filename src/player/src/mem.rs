@@ -137,16 +137,16 @@ pub fn trim() -> bool {
 /// those buffers out of the arenas: 380 MiB after 300 switches (+ the reaper's trim).
 pub const MMAP_THRESHOLD: usize = 128 * 1024;
 
-/// `LP_PLAYER_MALLOC=glibc` leaves glibc's defaults alone (A/B runs; the regression
+/// `LIASCAPE_PLAYER_MALLOC=glibc` leaves glibc's defaults alone (A/B runs; the regression
 /// test's RED evidence). Unset = the policy; any other value warns (`mem.policy` event)
 /// and also leaves the policy on.
-pub const POLICY_ENV: &str = "LP_PLAYER_MALLOC";
+pub const POLICY_ENV: &str = "LIASCAPE_PLAYER_MALLOC";
 
 static APPLIED: AtomicBool = AtomicBool::new(false);
 static THRESHOLD: AtomicUsize = AtomicUsize::new(0);
 /// The caller's own mmap threshold won (`MALLOC_MMAP_THRESHOLD_` / `GLIBC_TUNABLES`).
 static ENV_THRESHOLD: AtomicBool = AtomicBool::new(false);
-/// `LP_PLAYER_MALLOC` was set to something other than `glibc` (or unset).
+/// `LIASCAPE_PLAYER_MALLOC` was set to something other than `glibc` (or unset).
 static BAD_ENV: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static TRIM: AtomicBool = AtomicBool::new(false);
 static TRIMS: AtomicU64 = AtomicU64::new(0);

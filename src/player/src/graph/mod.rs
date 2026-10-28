@@ -112,7 +112,7 @@ fn no_such_node(id: &str) -> ApiError {
     ApiError {
         code: "no_such_node",
         message: format!("no such node: {id:?}"),
-        hint: "run `lp-player ctl state` to see the live graph".to_string(),
+        hint: "run `liascape-player ctl state` to see the live graph".to_string(),
     }
 }
 

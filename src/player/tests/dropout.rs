@@ -1,5 +1,5 @@
 //! Task 15: the reference-based dropout detector — synthetic-envelope tests of
-//! [`analyse`] (port of `scripts/lp_audiowatch.py`'s `refcheck`), plus one integration
+//! [`analyse`] (port of `scripts/liascape_audiowatch.py`'s `refcheck`), plus one integration
 //! test of [`expected_envelope`]'s `ffmpeg` decode path against a real synthetic clip.
 //! Pure-function unit tests of the gain-weighting math (`mix_envelope`, `gain_at`) and the
 //! runtime-wiring pieces (`GainHistory`, `PendingWindows`) live in
@@ -13,11 +13,11 @@ mod common;
 use std::time::Duration;
 
 use common::{ClipSpec, ensure_clip};
-use lp_player::probe::dropout::{
+use liascape_player::probe::dropout::{
     DropoutReport, FitStatus, GainSchedule, SourceWindow, analyse, analyse_with_fine,
     expected_envelope,
 };
-use lp_player::units::{SILENT_DB, db_to_lin};
+use liascape_player::units::{SILENT_DB, db_to_lin};
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -417,7 +417,7 @@ fn ramp_in_that_never_comes_is_still_a_drop() {
 #[test]
 fn meter_discontinuity_is_unmeasured_not_a_gap() {
     // Phase 2 Task 14 (on-machine): the bus meter's capture (then on the non-real-time
-    // `lp-bus` thread) missed graph cycles — its timestamps jump
+    // `lia-bus` thread) missed graph cycles — its timestamps jump
     // 2.3–22 ms and the blocks right after are −96 (silence PipeWire hands a stream that
     // missed its cycles). The bus itself never had a hole there; the detector must call that
     // stretch unmeasured, never a micro-gap or a drop.
@@ -497,7 +497,7 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
     // pre-downmix stream, the mono decode's peak comes out at `0.1*√2`, i.e. **+3.01 dB**
     // over the stereo peak — so the 10 ms power bin reads ≈ the ORIGINAL −20 dBFS peak's
     // own RMS, not −23. This is the exact `ffmpeg … -ac 1 …` command the brief and
-    // `scripts/lp_audiowatch.py` both specify (no extra `-af pan=…`), so the level is kept
+    // `scripts/liascape_audiowatch.py` both specify (no extra `-af pan=…`), so the level is kept
     // as ffmpeg really produces it rather than papering over the downmix with a filter
     // neither the brief nor the ported reference uses.
     let path = ensure_clip(

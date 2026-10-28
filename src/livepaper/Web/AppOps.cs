@@ -143,15 +143,15 @@ public static class AppOps
 
     // GET /library/scene-props: the scene's properties in display order, each with its effective value, default,
     // whether it's overridden and visible (its `condition` over the effective values). `live` = a change reaches
-    // the playing scene at once (lp-player); legacy applies them at the scene's next start (LWE --set-property).
+    // the playing scene at once (liascape-player); legacy applies them at the scene's next start (LWE --set-property).
     public static object SceneProps(string path)
     {
-        bool lp = PlayerEngine.IsLpPlayer;
+        bool onPlayer = PlayerEngine.IsLiascapePlayer;
         object props = IsSceneItem(path) ? SceneProperties.Describe(path, LibraryService.ReadSceneProps(path)) : Array.Empty<object>();
         return new
         {
-            path, engine = lp ? "lp-player" : "legacy", live = lp,
-            note = lp ? null : "Applied when the scene starts — the legacy engine can't change them while it plays",
+            path, engine = onPlayer ? "liascape-player" : "legacy", live = onPlayer,
+            note = onPlayer ? null : "Applied when the scene starts — the legacy engine can't change them while it plays",
             props,
         };
     }
@@ -246,7 +246,7 @@ public static class AppOps
     // The keybind actions (`--action=<name>`, forwarded to a running backend's `/action` — ActionForward).
     // null = done; else the reason it couldn't run. next-wallpaper/previous-wallpaper/random (and
     // play/toggle-play's Restore()) throw when the library/session has no item playable under the
-    // current engine (e.g. an all-scene library under lp-player, PlayerHelper.IsSkippedPath) — reported
+    // current engine (e.g. an all-scene library under liascape-player, PlayerHelper.IsSkippedPath) — reported
     // cleanly, same contract as the /next /prev /random HTTP routes.
     public static readonly string[] Actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
         "next-wallpaper", "previous-wallpaper", "random", "volume-up", "volume-down"];
@@ -376,11 +376,11 @@ public static class AppOps
         return batchDir;
     }
 
-    // what's on screen or about to be (lp-player: either output, the incoming side of a switch; legacy:
+    // what's on screen or about to be (liascape-player: either output, the incoming side of a switch; legacy:
     // the current file)
     private static List<string> ShownOrIncoming()
     {
-        if (PlayerEngine.IsLpPlayer) return LpPlayerMedia.ShownOrIncomingPaths();
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.ShownOrIncomingPaths();
         return PlayerHelper.QueryCurrentPath() is string p ? [p] : [];
     }
 

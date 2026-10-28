@@ -1,4 +1,4 @@
-//! `lp-scene-worker --fd N --parent-pid P [--stub]` — renders one WE scene for lp-player in its
+//! `liascape-scene-worker --fd N --parent-pid P [--stub]` — renders one WE scene for liascape-player in its
 //! own process (Phase 2; `.claude/rules/player-core.md` § Scene worker). Spawned by
 //! `worker::WorkerHost`, never by hand: fd `N` is its end of a `SOCK_SEQPACKET` socketpair
 //! (`worker::proto`), `P` the compositor's pid.
@@ -6,10 +6,10 @@
 //! First thing: `PR_SET_PDEATHSIG(SIGKILL)`, then `getppid() == P` (the parent may have died
 //! before the prctl) — a compositor killed outright never leaves a worker behind. Then a soft
 //! `RLIMIT_CORE` of 1 (`skip_core_handler`: a crashing scene never reaches systemd-coredump /
-//! a desktop crash popup; `LP_SCENE_WORKER_COREDUMP=1` opts out).
+//! a desktop crash popup; `LIASCAPE_SCENE_WORKER_COREDUMP=1` opts out).
 //!
 //! `--stub` (tests): no GPU, no scene — answers `Hello`/`Ping`/`Tick`, logs each `Start`'s
-//! position, scripted by `LP_SCENE_WORKER_TEST` (comma-separated): `crash_after_ms:N` (prints
+//! position, scripted by `LIASCAPE_SCENE_WORKER_TEST` (comma-separated): `crash_after_ms:N` (prints
 //! `stub: crashing` to stderr, then `abort()`), `hang_after_ms:N` (stops answering),
 //! `exit_code:N` (exit with N — at `crash_after_ms` if given, else right after `Hello`),
 //! `ignore_quit` (ignores `Quit` and EOF; only SIGKILL ends it), `spam_stderr:N` (N stderr
@@ -18,16 +18,16 @@
 //! Without `--stub`: the renderer (Task 4) — a surfaceless EGL context at LOW priority, a
 //! 3-slot ring exported as dmabufs (`ring.rs`), one frame per `Tick` into a free slot, an
 //! acquire fence (`sync: fence`) or a CPU wait on its own `sync_file` (`sync: fdpoll`, env
-//! `LP_SCENE_SYNC=fdpoll` or no `EGL_ANDROID_native_fence_sync`). It renders a real WE scene
+//! `LIASCAPE_SCENE_SYNC=fdpoll` or no `EGL_ANDROID_native_fence_sync`). It renders a real WE scene
 //! through LWE's core (`render.rs`, feature `lwe` — Task 7) or, in tests, the synthetic pattern
-//! (`synthetic.rs`, gated by `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`).
+//! (`synthetic.rs`, gated by `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`).
 //!
-//! Two threads (Task 7): the renderer (this one — GL, the ring, LWE) and `lp-scene-proto`, which
+//! Two threads (Task 7): the renderer (this one — GL, the ring, LWE) and `lia-scene-proto`, which
 //! reads the socket and hands messages over; while the renderer is inside a load + build (up to
 //! seconds for a cold LWE build) the protocol thread answers `Ping`s itself, so a slow load is
-//! never read as a hang (bounded: `LP_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
+//! never read as a hang (bounded: `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
 //!
-//! Task 6 adds a third, `lp-scene-audio` (`audio.rs`; started only once the loaded scene turns
+//! Task 6 adds a third, `lia-scene-audio` (`audio.rs`; started only once the loaded scene turns
 //! out to have a sound — a soundless scene has none): the scene's sound as a PipeWire stream
 //! on the player bus — pulled from LWE (or the synthetic tone), time-stretched to the scene's
 //! speed (`stretch.rs`), gated and gained in dB. The protocol thread applies `Gain`, `Paused`,
@@ -54,12 +54,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use lp_player::gfx::{Gfx, OffscreenOpts, Priority};
-use lp_player::scene::cover_size;
-use lp_player::scene::synthetic::{Fail, Pattern, SyntheticSpec, input_level};
-use lp_player::worker::proto::{self, FromWorker, ToWorker};
+use liascape_player::gfx::{Gfx, OffscreenOpts, Priority};
+use liascape_player::scene::cover_size;
+use liascape_player::scene::synthetic::{Fail, Pattern, SyntheticSpec, input_level};
+use liascape_player::worker::proto::{self, FromWorker, ToWorker};
 
-/// `LP_SCENE_WORKER_TEST`'s knobs (also honoured by the synthetic renderer's spec).
+/// `LIASCAPE_SCENE_WORKER_TEST`'s knobs (also honoured by the synthetic renderer's spec).
 #[derive(Debug, Default, Clone)]
 struct Knobs {
     crash_after_ms: Option<u64>,
@@ -80,7 +80,7 @@ impl Knobs {
                 "exit_code" => k.exit_code = val.parse().ok(),
                 "ignore_quit" => k.ignore_quit = true,
                 "spam_stderr" => k.spam_stderr = val.parse().unwrap_or(0),
-                other => warn(&format!("unknown LP_SCENE_WORKER_TEST knob {other:?}")),
+                other => warn(&format!("unknown LIASCAPE_SCENE_WORKER_TEST knob {other:?}")),
             }
         }
         k
@@ -88,11 +88,11 @@ impl Knobs {
 }
 
 fn warn(line: &str) {
-    let _ = writeln!(std::io::stderr(), "lp-scene-worker: {line}");
+    let _ = writeln!(std::io::stderr(), "liascape-scene-worker: {line}");
 }
 
 fn usage() -> ! {
-    warn("usage: lp-scene-worker --fd N --parent-pid P [--stub] (spawned by lp-player)");
+    warn("usage: liascape-scene-worker --fd N --parent-pid P [--stub] (spawned by liascape-player)");
     std::process::exit(2)
 }
 
@@ -102,7 +102,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--lwe-smoke") {
         lwe::smoke(&std::env::args().skip(1).collect::<Vec<_>>());
     }
-    // `lp-player scene-check` asks what this build can render.
+    // `liascape-player scene-check` asks what this build can render.
     if std::env::args().nth(1).as_deref() == Some("--features") {
         let mut f = vec!["stub", "synthetic"];
         if cfg!(feature = "lwe") {
@@ -138,7 +138,7 @@ fn main() {
     }
     skip_core_handler();
     let sock = unsafe { OwnedFd::from_raw_fd(fd) };
-    let knobs = Knobs::parse(&std::env::var("LP_SCENE_WORKER_TEST").unwrap_or_default());
+    let knobs = Knobs::parse(&std::env::var("LIASCAPE_SCENE_WORKER_TEST").unwrap_or_default());
     if stub {
         run_stub(sock, knobs)
     }
@@ -165,9 +165,9 @@ fn hello(sock: &OwnedFd, features: &[&str], sync: &str) {
 /// broken with a crash record + log tail) — not a desktop crash alert. Soft `RLIMIT_CORE` 1
 /// (never above the hard limit) makes the kernel skip a piped `core_pattern`: no
 /// systemd-coredump, no DrKonqi notification per crash (Task 13's corpus: 16 of them for 4
-/// broken scenes). `LP_SCENE_WORKER_COREDUMP=1` keeps the inherited limit (debugging LWE).
+/// broken scenes). `LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the inherited limit (debugging LWE).
 fn skip_core_handler() {
-    if std::env::var("LP_SCENE_WORKER_COREDUMP").is_ok_and(|v| v == "1") {
+    if std::env::var("LIASCAPE_SCENE_WORKER_COREDUMP").is_ok_and(|v| v == "1") {
         return;
     }
     unsafe {
@@ -304,7 +304,7 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
 const RING_SLOTS: u8 = 3;
 
 /// How long a load + build may take while the reader thread still answers pings for the
-/// renderer (`LP_SCENE_LOAD_TIMEOUT_MS`). A cold LWE build took up to 2.8 s; past this the
+/// renderer (`LIASCAPE_SCENE_LOAD_TIMEOUT_MS`). A cold LWE build took up to 2.8 s; past this the
 /// pings go to the (stuck) renderer, so the compositor's heartbeat sees a hang.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -322,7 +322,7 @@ struct LoadGate {
 
 impl LoadGate {
     fn new() -> LoadGate {
-        let timeout = std::env::var("LP_SCENE_LOAD_TIMEOUT_MS")
+        let timeout = std::env::var("LIASCAPE_SCENE_LOAD_TIMEOUT_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .map_or(LOAD_TIMEOUT, Duration::from_millis);
@@ -511,7 +511,7 @@ impl Renderer {
         }
         #[cfg(not(feature = "lwe"))]
         self.fatal(format!(
-            "can't play {}: lp-scene-worker was built without LWE (cargo feature `lwe`): only \
+            "can't play {}: liascape-scene-worker was built without LWE (cargo feature `lwe`): only \
              synthetic test scenes can play",
             s.path
         ))
@@ -572,13 +572,13 @@ impl Renderer {
 
     fn start_synthetic(&mut self, s: StartArgs) {
         let path = &s.path;
-        if std::env::var("LP_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() != Ok("1") {
+        if std::env::var("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() != Ok("1") {
             return self.fatal(
-                "synthetic scenes are test-only: LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 is not set"
+                "synthetic scenes are test-only: LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 is not set"
                     .into(),
             );
         }
-        let file = std::path::Path::new(path).join("lp-synthetic.json");
+        let file = std::path::Path::new(path).join("liascape-synthetic.json");
         let spec: SyntheticSpec = match std::fs::read(&file)
             .map_err(|e| e.to_string())
             .and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))
@@ -954,7 +954,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         }
     };
     let fdpoll =
-        std::env::var("LP_SCENE_SYNC").as_deref() == Ok("fdpoll") || !gfx.has_native_fences();
+        std::env::var("LIASCAPE_SCENE_SYNC").as_deref() == Ok("fdpoll") || !gfx.has_native_fences();
     hello(&sock, &features, if fdpoll { "fdpoll" } else { "fence" });
     let gate = Arc::new(LoadGate::new());
     let audio = Arc::new(audio::Control::default());
@@ -969,7 +969,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     {
         let (gate, audio) = (gate.clone(), audio.clone());
         if let Err(e) = std::thread::Builder::new()
-            .name("lp-scene-proto".into())
+            .name("lia-scene-proto".into())
             .spawn(move || reader(rsock, tx, gate, audio))
         {
             warn(&format!("start the protocol thread: {e}"));

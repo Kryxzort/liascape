@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lp-player Phase 2 on-machine battery (plan docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md
+# liascape-player Phase 2 on-machine battery (plan docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md
 # Task 14): scene workers on the REAL outputs (DP-1 143.98 Hz, DP-2 239.76 Hz). The report is
 # docs/player/reports/phase2.md. Also reachable as `battery.sh scenes <step…>`.
 #
@@ -13,14 +13,14 @@
 #   bash src/player/tests/onmachine/scenes.sh all            # 1–7 in order
 #
 # Options: --results DIR (default src/player/tests/onmachine/results/phase2-<stamp>, gitignored),
-# --bin DIR (lp-player + lp-scene-worker; default <crate>/target/release — build it first:
+# --bin DIR (liascape-player + liascape-scene-worker; default <crate>/target/release — build it first:
 # `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo build --release`), --switches N
 # (dropout, default 20 per cell), --minutes N (soak, default 60).
 #
 # Each step writes <results>/<step>.json ({checks: [{name, value, bound, pass}], …}) and a log.
 #
 # What it touches (the owner approved taking over the live session for these runs):
-# - draws on every monitor through its OWN `lp-player serve` (private XDG_RUNTIME_DIR/STATE/CACHE
+# - draws on every monitor through its OWN `liascape-player serve` (private XDG_RUNTIME_DIR/STATE/CACHE
 #   → its own socket + instance lock; RLIMIT_CORE 1 so deliberate crashes reach no core handler);
 #   the real Wayland session via an absolute WAYLAND_DISPLAY. It briefly puts its surfaces on the
 #   overlay layer for grim pixel checks (always back to background, also from the trap).
@@ -32,11 +32,11 @@
 # - warps the cursor over DP-1 (step 1's pointer check) and puts it back, also from the trap.
 # - the backend (`livepaper-watch`) must not drive a player meanwhile: stop it first
 #   (`systemctl --user stop livepaper-watch`); this script refuses to start while any other
-#   lp-player surface is mapped. It never touches settings.json, the library or the default sink.
+#   liascape-player surface is mapped. It never touches settings.json, the library or the default sink.
 # - kills only pids it started (its serve, the private PipeWire) and, for step 3, its own scene
 #   workers (looked up through its own player's `workers` probe).
 set -u -o pipefail
-# This machine's shells carry a stray LD_LIBRARY_PATH that breaks ffmpeg/pipewire/lp-player.
+# This machine's shells carry a stray LD_LIBRARY_PATH that breaks ffmpeg/pipewire/liascape-player.
 unset LD_LIBRARY_PATH
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -69,14 +69,14 @@ while (($#)); do
     shift
 done
 ((${#STEPS[@]})) || { echo "name a step (outputs|dropout|crash|budget|workers|pause|soak|all)" >&2; exit 2; }
-BIN=$BINDIR/lp-player
-WBIN=$BINDIR/lp-scene-worker
-[[ -x $BIN && -x $WBIN ]] || { echo "no lp-player/lp-scene-worker in $BINDIR (build release first)" >&2; exit 2; }
+BIN=$BINDIR/liascape-player
+WBIN=$BINDIR/liascape-scene-worker
+[[ -x $BIN && -x $WBIN ]] || { echo "no liascape-player/liascape-scene-worker in $BINDIR (build release first)" >&2; exit 2; }
 RESULTS=${RESULTS:-$HERE/results/phase2-$(date +%Y%m%dT%H%M%S)}
 mkdir -p "$RESULTS"
 RESULTS=$(cd "$RESULTS" && pwd -P) # absolute: `ctl capture` paths are the player's
 # Short paths: a unix socket path must stay < 108 bytes.
-SCRATCH=$(mktemp -d /tmp/lp-p2.XXXXXX)
+SCRATCH=$(mktemp -d /tmp/liascape-p2.XXXXXX)
 MEDIA=$RESULTS/media
 mkdir -p "$MEDIA"
 REAL_RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -176,7 +176,7 @@ PLAYER_PID=
 SERVE_MODE=
 lp() {
     env -u LD_LIBRARY_PATH -u PULSE_SERVER XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$SCRATCH/cache" \
-        PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LP_SCENE_WORKER_BIN="$WBIN" LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 "$BIN" "$@"
+        PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 "$BIN" "$@"
 }
 ctl() { lp ctl --timeout-ms "${CTL_MS:-10000}" "$@"; }
 # serve_up wayland|headless:<WxH@hz,…> [extra env assignments…]
@@ -193,8 +193,8 @@ serve_up() {
     pw_start
     local args=(serve --log-level debug) wl=(WAYLAND_DISPLAY="$WL")
     if [[ $mode == wayland ]]; then
-        hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "lp-player")] | length == 0' >/dev/null ||
-            die "another lp-player surface is mapped (stop the backend: systemctl --user stop livepaper-watch)"
+        hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "liascape-player")] | length == 0' >/dev/null ||
+            die "another liascape-player surface is mapped (stop the backend: systemctl --user stop livepaper-watch)"
     else
         args+=(--headless --outputs "${mode#headless:}" --debug)
         wl=(-u WAYLAND_DISPLAY)
@@ -202,11 +202,11 @@ serve_up() {
     SERVE_MODE=$mode
     prlimit --core=1:1 env "${wl[@]}" "$@" \
         env -u LD_LIBRARY_PATH -u PULSE_SERVER XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$SCRATCH/cache" \
-        PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LP_SCENE_WORKER_BIN="$WBIN" LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
+        PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
         "$BIN" "${args[@]}" >>"$RESULTS/serve-$STEP.log" 2>&1 &
     SERVE_PID=$!
     for _ in $(seq 150); do
-        [[ -S $RT/livepaper/lp-player.sock ]] && break
+        [[ -S $RT/livepaper/liascape-player.sock ]] && break
         kill -0 "$SERVE_PID" 2>/dev/null || die "serve exited early (log $RESULTS/serve-$STEP.log)"
         sleep 0.1
     done
@@ -252,8 +252,8 @@ cleanup() {
     [[ -n ${TONE_PID:-} ]] && kill "$TONE_PID" 2>/dev/null
     serve_down
     pw_stop
-    if hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "lp-player")] | length > 0' >/dev/null 2>&1; then
-        say "WARNING: an lp-player layer surface is still mapped"
+    if hyprctl layers -j | jq -e '[.. | objects | select(.namespace? == "liascape-player")] | length > 0' >/dev/null 2>&1; then
+        say "WARNING: an liascape-player layer surface is still mapped"
     fi
     say "results: $RESULTS"
     command -v trash >/dev/null && trash "$SCRATCH" 2>/dev/null
@@ -263,13 +263,13 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
 # ------------------------------------------------------------------ media
-# A synthetic scene folder (tests/common::synthetic_scene's layout). $2 = lp-synthetic.json.
+# A synthetic scene folder (tests/common::synthetic_scene's layout). $2 = liascape-synthetic.json.
 mk_scene() {
     local d=$MEDIA/scenes/$1
     mkdir -p "$d"
-    jq -nc --arg t "lp-player synthetic scene $1" '{type:"scene", title:$t, file:"scene.json", preview:"preview.png"}' >"$d/project.json"
+    jq -nc --arg t "liascape-player synthetic scene $1" '{type:"scene", title:$t, file:"scene.json", preview:"preview.png"}' >"$d/project.json"
     head -c 16 /dev/zero >"$d/scene.pkg"
-    echo "$2" >"$d/lp-synthetic.json"
+    echo "$2" >"$d/liascape-synthetic.json"
     [[ -f $d/preview.png ]] || ffmpeg -nostdin -v error -y -f lavfi -i color=c=0x404040:s=320x180 -frames:v 1 "$d/preview.png"
     echo "$d"
 }
@@ -362,7 +362,7 @@ on_overlay() { # put our surfaces on the overlay layer (owner's windows cover th
     for o in $OUT_A $OUT_B; do
         for _ in $(seq 30); do
             hyprctl layers -j | jq -e --arg o "$o" --argjson p "$PLAYER_PID" \
-                '.[$o].levels."3"[]? | select(.namespace == "lp-player" and .pid == $p)' >/dev/null && break
+                '.[$o].levels."3"[]? | select(.namespace == "liascape-player" and .pid == $p)' >/dev/null && break
             sleep 0.1
         done
     done

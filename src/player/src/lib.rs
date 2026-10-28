@@ -1,4 +1,4 @@
-//! lp-player library crate: modules shared between the `lp-player` binary and its tests.
+//! liascape-player library crate: modules shared between the `liascape-player` binary and its tests.
 //!
 //! Modules so far: the event log (`log`), audio units (`units`), the audio bus + meter
 //! (`audio`), clocks (`clock`), the Animator (`anim`), the node graph (`graph`), the GPU core

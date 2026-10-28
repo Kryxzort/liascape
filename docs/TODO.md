@@ -13,15 +13,15 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Options: (a) every user switch resumes playback (the legacy single-item feel; the playlist consumes the
       action at once and unpauses); (b) every user switch keeps the pause and shows B paused (a cut while
       paused, or the effect on the unpaused clock with both sides frozen); (c) leave it.
-- [x] **Approve the lp-player design** (`docs/superpowers/specs/2026-10-20-utopia-player-design.md`). Check the
+- [x] **Approve the liascape-player design** (`docs/superpowers/specs/2026-10-20-utopia-player-design.md`). Check the
       "Calls made by the designer" list at the end. Next step after approval: write the implementation plan.
       — approved 2026-10-20 (`TransitionMethod` kept, per the spec's own status line); implementation plan:
-      `docs/superpowers/plans/2026-10-20-lp-player-phase0-1.md`.
+      `docs/superpowers/plans/2026-10-20-liascape-player-phase0-1.md`.
 - [x] **Auto-mute, legacy quick win**: add `--latency-msec=10` to the `parec` spawn in `AudioMonitor.MonitorStreamAsync`.
-      Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in lp-player.
+      Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in liascape-player.
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
-- [ ] **LICENSE** for the repo. There is none today. lp-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 - [ ] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
@@ -41,10 +41,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       not pushed. The `fork` remote is SSH and there's no key on this box; push via `gh auth git-credential` over HTTPS,
       or run `gh auth setup-git`.
 - [ ] Measure the scene legs (V→S, S→V, S→S) of the cubic-volume crossfade fix (`6f0433a`). Only V→V is measured.
-- [x] Commit the reference-based audio monitor (`lp_audiowatch.py`, currently in a session scratchpad) into `scripts/`.
+- [x] Commit the reference-based audio monitor (`liascape_audiowatch.py`, currently in a session scratchpad) into `scripts/`.
       It captures the sink, rebuilds the expected mix from the source files at the logged positions, aligns latency,
       and flags dropouts and 1 ms micro-gaps. Make the ffmpeg path come from PATH.
-      — done in Task 15 (`scripts/lp_audiowatch.py`, lane B); not yet merged into this branch's history.
+      — done in Task 15 (`scripts/liascape_audiowatch.py`, lane B); not yet merged into this branch's history.
 - [x] Dev unit `~/.config/systemd/user/livepaper-watch.service`: drop `Environment=DISPLAY=:0` (wrong: the session is
       `:1`) and add `HYPRLAND_INSTANCE_SIGNATURE` to `PassEnvironment`. Also (2026-10-26):
       - **`dotnet watch --no-hot-reload`** — a hot-reload delta never runs a NEW static field's initializer: the
@@ -52,7 +52,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         `POST /settings` on a null map until a full restart (and a 2026-09 delta with a new static crashed the
         process). Every .cs change becoming a restart is the owner's stated preference anyway.
       - **The player must not die with the unit**: `systemctl --user restart livepaper-watch` kills the whole
-        cgroup — the backend-spawned lp-player with it (`setsid` doesn't leave the cgroup) → no wallpaper for
+        cgroup — the backend-spawned liascape-player with it (`setsid` doesn't leave the cgroup) → no wallpaper for
         ~17 s until the new backend built and replayed. `dotnet watch`'s own restarts don't (same cgroup lives
         on). Either spawn the player out of the unit's cgroup when `INVOCATION_ID` is set
         (`systemd-run --user --scope`), or don't restart the unit by hand.
@@ -72,14 +72,14 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [x] Remove the dead `LweSilent` setting (no consumers).
       — done 2026-10-26: gone from `AppSettings` and `session.md` (nothing in src/, app/, scripts/ read it). A
       settings.json that still has it loads (unknown keys are ignored) and the next save drops it.
-- [ ] Harden `AUDIO_SETTLE` in `lp-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
+- [ ] Harden `AUDIO_SETTLE` in `liascape-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
-- [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in lp-player.
+- [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in liascape-player.
 - [ ] Delete stale branches: `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 - [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
       owner's call.
 
-## lp-player (after design approval)
+## liascape-player (after design approval)
 - [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),
@@ -87,8 +87,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `player-adapter.md` § Rotation (was § Play-time limits; the minimum merged into the interval field since), UI `PlayTimeInput`. Guards: IT §
       "advance-on-end play-time limits" (RED on the base backend), self-test `PlayLimitAssertions`, settings-merge,
       matrix `playlist|global:minPlay|maxPlay`, `global:maxPlay:own`.
-  - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is lp-player-only (legacy's video-end
-        polling path untouched — owner: lp-player only).
+  - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is liascape-player-only (legacy's video-end
+        polling path untouched — owner: liascape-player only).
   - [x] Unify `PlayTimeInput` with the shared `NumInput` — now a thin h/m/s wrapper over it (rotation redesign below).
 - [x] **Rotation redesign** (owner-approved, 2026-10-28): "Switch when video ends" off → "Switch every" (a plain
       timer, unchanged); on → the SAME interval field is "Minimum play time" (play at least this long, then switch at
@@ -118,10 +118,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         `tests/sources.rs::fps_cap_never_stalls_an_image`, `tests/api.rs::fps_cap_never_stalls_a_still_any_kind`,
         the adapter IT's "VideoFps 30 × an image"; `test-settings-merge.sh` runs its image check with a cap again.
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
-      table in web-backend.md — lp-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
-      MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `lp-player health`; a warning
+      table in web-backend.md — liascape-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
+      MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `liascape-player health`; a warning
       icon with the reason on every affected Settings row (control kept), a summary of what's broken and in use.
-      Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LP_SCENE_WORKER_BIN=/nonexistent`), self-test.
+      Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LIASCAPE_SCENE_WORKER_BIN=/nonexistent`), self-test.
 - [ ] Health follow-ups: the playlist modal's Transitions button has no icon (the global row has); the PipeWire bus
       being down isn't reported (nothing stops working — audio goes to mpv's default device); Intel GPUs have no VRAM
       probe at all (an Intel-specific one would make the VRAM rules work there).
@@ -141,8 +141,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       420 ms; RED before 353–384 / 315–317). Not added: a reduced-motion branch (the app has none anywhere).
 - [x] **Auto-mute muted the wallpaper on our own switches** (owner, 2026-10-28: "auto mute is muting itself when
       transition is playing audio" — with both delays 0 a hitch, with a non-zero "unmute after" muted that long).
-      Not a missing identity: every own stream (each switch's incoming mpv `lp-player` / scene worker
-      `lp-player-scene.<id>` stream, the bus playback) carries `node.name`/`target.object`/`application.name` from its
+      Not a missing identity: every own stream (each switch's incoming mpv `liascape-player` / scene worker
+      `liascape-player-scene.<id>` stream, the bus playback) carries `node.name`/`target.object`/`application.name` from its
       first `new` event, and R69's filter said "ours" every time. `AudioMonitor` counted a stream's level BEFORE that
       verdict (checked 100 ms + a listing later) and every `change` (the uncork) re-added an excluded stream → B's
       ramp-in at ≈ −62 dB beat the −70 dB threshold. Fix: classify-then-count (parec warms up, the level counts once
@@ -150,10 +150,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       V/S-combo cells muted (frozen V→S / S→S happened not to), a foreign `paplay` muted in 54 ms; GREEN: 12/12 clean,
       the foreign stream as fast. Guard: adapter IT § "auto-mute never hears our own switches" (a private PipeWire +
       pipewire-pulse). Legacy shares `AudioMonitor` and gets the same classify-then-count (not separately tested — owner:
-      lp-player only). The in-player auto-mute Signal stays PARKED (below).
+      liascape-player only). The in-player auto-mute Signal stays PARKED (below).
 - [x] Write the implementation plan (Phase 0 spikes first: LWE `next-v2` core renders offscreen; worker → compositor
       dmabuf sharing on NVIDIA proprietary; libmpv core-profile GL + `volume-gain` crossfade).
-      `docs/superpowers/plans/2026-10-20-lp-player-phase0-1.md`.
+      `docs/superpowers/plans/2026-10-20-liascape-player-phase0-1.md`.
 - [x] **Phase 0 spikes** (Tasks 1–2): LWE `next-v2` core renders offscreen; dmabuf worker→compositor sharing on
       NVIDIA proprietary with correct sync. `docs/player/spikes/{lwe-core,dmabuf}.md`.
 - [x] **Phase 1 core** (Tasks 3–18, plus mini-tasks 16b "player-level pause" and 16c "onset-gated anticlick
@@ -161,7 +161,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       video/image/colour sources, all three transition methods (full-live/reveal/frozen) with align/interrupt,
       the runtime + headless mode, the Command API + `ctl`, Wayland outputs, the player audio bus, the
       supervisor + state snapshot/restore, the C# backend adapter behind `PlayerEngine`, and packaging
-      (flake + `install.sh`). Default engine stays `legacy`; `lp-player` is opt-in/experimental.
+      (flake + `install.sh`). Default engine stays `legacy`; `liascape-player` is opt-in/experimental.
       `docs/player/architecture.md`, `.claude/rules/player-core.md` / `player-adapter.md`.
 - [x] **Phase 1 on-machine battery + report** (Task 20): ≥ 50 switches × {method} × {mode} on the owner's
       machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` — done: dropout
@@ -170,7 +170,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal is PARKED; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
-  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): **all tasks
+  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`): **all tasks
     done** (Tasks 1–15, the Task 8 backend wiring, the properties editor and loudness learning). Task 14 — the
     on-machine battery — ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
     also `battery.sh scenes`); bar the owner's VT-switch/suspend check (Waiting on owner) only the findings below
@@ -208,7 +208,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           `unmeasured`; a meter that never misses (e.g. capturing the loopback's output port, or deriving block times
           from a frame counter instead of `pw_buffer.time`) would close that blind spot.
   - [x] **Phase 2 Task 15 — docs sweep** (2026-10-28): `docs/player/architecture.md` (process model with
-        `lp-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
+        `liascape-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
         never blocks the compositor) + #11 (a worker's audio is a gain on a stream that keeps running),
         `docs/player/debugging.md` § Scenes (black / frozen / silent / crash loop / throttled / VRAM / loudness,
         `probe workers {"log_tail":true}`), `.claude/rules/player-core.md` + `CLAUDE.md` consistency.
@@ -226,7 +226,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         measuring … when the scene is played in future (probably add a max cap …)"; same three docs): the compositor
         keeps the BS.1770 blocks as a 0.1 LU histogram (−70…+5 LUFS — the relative gate recomputed over every play),
         reports it (`state`) at the window, after each further 60 s of audible play, at the end of a play (≥ 5 s new)
-        and once at the cap (`LP_PLAYER_LOUDNESS_CAP_S`, 30 min of audible play over every play — then the worker
+        and once at the cap (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`, 30 min of audible play over every play — then the worker
         stops metering: `ToWorker::LoudnessMeter`, `PROTOCOL` 4); the backend stores the longest report
         (`loudnessState`), seeds every new source with it (`loudness_seed`, create only) and moves the applied
         `loudnessI`/`loudnessTP` → `gain.normalize` (500 ms ramp) only by ≥ 0.5 LU. Entries learned before: applied
@@ -264,12 +264,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         reset status 0; the idle audio thread 0.06 % — removed: a soundless scene starts none). The test now pins
         to the P-cores, takes the median of 1 s windows, and asserts the work (instructions, wake-ups) + the CPU
         budget, reporting an over-budget CPU figure with the work in budget as the machine.
-  - [x] **Phase 2 Task 11 — scenes playable under lp-player in the backend** (2026-10-28,
+  - [x] **Phase 2 Task 11 — scenes playable under liascape-player in the backend** (2026-10-28,
         `.claude/rules/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
-        capability (else `lp-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;
+        capability (else `liascape-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;
         `LweMonitors` fps live (`out:<c>.scene_fps`); `source.broken` → marked crashed (D6: skipped unless
         whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
-        Settings hides the scene delay + primary radio under lp-player. The player emits `source.broken` now
+        Settings hides the scene delay + primary radio under liascape-player. The player emits `source.broken` now
         (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
         scene in the snapshot); ~~Task 12 (matrix scene cells)~~ (done 2026-10-28, web-ui.md § Scene cells); ~~the Task 8 settings' backend wiring~~ (done
         2026-10-28, below); `player.scene_assets` has no
@@ -295,43 +295,43 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       residual ~6–25 ms per switch on the loop after I5) to a worker thread with a shared EGL context;
       `.claude/rules/player-core.md` § Runtime "Switch cost and the Phase 2 render worker".
       — done 2026-10-26 (`sources/render_worker.rs`, § Sources "Render worker"), **default on**
-      (`--render-worker off` / `LP_PLAYER_RENDER_WORKER=off` = the loop renderer): the switch loop's warm median
+      (`--render-worker off` / `LIASCAPE_PLAYER_RENDER_WORKER=off` = the loop renderer): the switch loop's warm median
       max_busy 16.3 → 1.3–3.6 ms; missed frames at 2× 1080p120 on a 240 Hz content-paced output 2.2/3.3/3.2 →
       1.8/2.0/2.5 per s (steady / ±0.05 / random 1.6–2.4×); full suite green with it on and off; UI matrix
-      682/0 with it on (an `lp-render` thread verified in the matrix's player); a nested sway on NVIDIA 595
+      682/0 with it on (an `lia-render` thread verified in the matrix's player); a nested sway on NVIDIA 595
       green both ways. Guards: torn-frame (RED with `publish-early`: 42/196 bad captures), switch-busy, death
       → exit 3 → supervisor restart, no-context → loop fallback, bounded quit. Bench:
       `cargo test --release --test api -- --ignored bench_render_worker_ab --nocapture`.
-- [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=lp-player`** (Task 20 battery,
+- [x] **`/next`/`/prev`/`/random` crash on a scene under `PlayerEngine=liascape-player`** (Task 20 battery,
       `docs/player/reports/phase1.md` §1.3) — fixed in Task 20c: `TryStepLibrary` steps past unplayable scenes,
       `ApplyRandom`/timed random drop them from the pool; an all-scene library → 409 (CLI: stderr + exit 1).
-- [x] **The owner's installed `livepaper` (NixOS package) predates lp-player entirely** — done 2026-10-25: `/etc/nixos/livepaper.nix` re-pinned to the local `lp-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
+- [x] **The owner's installed `livepaper` (NixOS package) predates liascape-player entirely** — done 2026-10-25: `/etc/nixos/livepaper.nix` re-pinned to the local `liascape-player` commit for testing (re-pin to the GitHub commit after the merge/push) (Task 20 battery,
       `docs/player/reports/phase1.md` §1.4): confirmed via `strings -el` on the installed `livepaper.dll` —
-      zero occurrences of `PlayerEngine`/`LP_PLAYER_BIN` anywhere, while the current dev build has both. So
+      zero occurrences of `PlayerEngine`/`LIASCAPE_PLAYER_BIN` anywhere, while the current dev build has both. So
       every one-shot CLI flag (`--restore`, `--random`, `--kill`, `--action=*`) silently runs legacy whenever
-      `lp-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
+      `liascape-player` is selected, even though the long-running `--serve` backend (what the UI talks to) is fine.
       Needs an actual rebuild from this branch, not a code change — **owner action:**
       `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
-- [x] **No explicit cap on concurrent `lp-open` worker threads** (final review I5's async mpv-core-open
+- [x] **No explicit cap on concurrent `lia-open` worker threads** (final review I5's async mpv-core-open
       mechanism, `.claude/rules/player-core.md` § Sources "Async opens") — a burst of near-simultaneous
-      switches/creates has no ceiling on how many `lp-open` threads it can spin up at once. Not exercised by
+      switches/creates has no ceiling on how many `lia-open` threads it can spin up at once. Not exercised by
       anything in Task 20's battery (every cell opens sources well below any plausible concurrency ceiling);
       worth a bound + a test before Phase 2 leans on this path harder.
-      — done: `host::OpenPool`, a FIFO queue on ≤ `MAX_OPEN_WORKERS` (2) on-demand `lp-open` threads; a job
+      — done: `host::OpenPool`, a FIFO queue on ≤ `MAX_OPEN_WORKERS` (2) on-demand `lia-open` threads; a job
       queued for a node destroyed meanwhile is skipped (no core made). Burst of 16 paused 1080p creates: all
       made + opened 61–80 ms (uncapped 23–70, cap 4 58–71), all ready ~0.5 s either way, the loop's longest
       open share 2–8 ms (uncapped 13–29). `tests/api.rs::i5_open_burst_is_capped_and_none_lost` (RED: 16 at
       once; GREEN: peak 2, the 3 destroyed while queued skipped, quit with a queued burst 40 ms, no straggler).
-- [x] **`LP_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
+- [x] **`LIASCAPE_REQUIRE_GPU` test mode** — every GPU-dependent test (`tests/common::headless_gl` et al.)
       currently just prints `"SKIP: no EGL device"` and returns on a GPU-less machine; there's no way to make
       a CI run that's *supposed* to have a GPU fail loudly instead of silently skipping everything. Not
       exercised in Task 20 (every run there had a real GPU) — worth adding before relying on CI coverage of
       this crate's GPU paths.
-      — done: `LP_REQUIRE_GPU=1` (anything but empty/`0`) turns every GPU-test skip into a failure via one
+      — done: `LIASCAPE_REQUIRE_GPU=1` (anything but empty/`0`) turns every GPU-test skip into a failure via one
       helper, `tests/common::skip_gpu` (`headless_gl`, `catalogue_dir` — the "no catalogue" skips too, since
       nearly every GPU test needs it — and the inline lib unit test); opt-in/non-GPU skips (Wayland, private
       PipeWire, credits) stay skips. GPU-less machine simulated (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no
-      file): the suite passed in ~3 s with 133 SKIPs; with `LP_REQUIRE_GPU=1` those 133 fail.
+      file): the suite passed in ~3 s with 133 SKIPs; with `LIASCAPE_REQUIRE_GPU=1` those 133 fail.
       `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (RED: the old binary passed).
       `player-core.md` § GFX / EGL.
 - [x] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
@@ -344,10 +344,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       — done (2026-10-27): a worker render context loads the GPU's interop (`cuda` on NVIDIA, `vaapi` on
       AMD/Intel; libcuda preloaded for the dev binary) for a source whose `hwdec` would use it, `hwdec` maps to
       the zero-copy decoder + its copy twin; loop-rendered sources keep the copy modes. The init blocks its
-      `lp-render` thread, so the worker runs three lanes (one froze the playing wallpaper 66–74 ms per switch).
+      `lia-render` thread, so the worker runs three lanes (one froze the playing wallpaper 66–74 ms per switch).
       Measured (A/B interleaved, medians): 4K60 49.4 → 6.8 % of a core, 1080p30 7.8 → 3.2 %; loop busy per
       switch 0.7 → 0.3 ms, first frame 330 → 326 ms, A's longest frame interval 34.8 → 34.3 ms; +60 MiB VRAM per
-      source. `LP_PLAYER_HWDEC_INTEROP=off` = the old behaviour. Vulkan stays copy (no GL interop; the
+      source. `LIASCAPE_PLAYER_HWDEC_INTEROP=off` = the old behaviour. Vulkan stays copy (no GL interop; the
       X-less driver lock is process-wide).
 - [ ] **8 h soak: does glibc's free heap plateau?** The final 1 h live soak (Task 20, `phase1.md` § 4)
       passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
@@ -391,7 +391,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       a real bug — a resuming pause gate was dropped on a second clock read after its last `ramp_db`, so
       `gain.pause` stayed a hair under 0 dB for good (−0.0003 measured; −0.04…−0.56 dB with a 2 ms stall
       injected, 4/4 RED). The drop now writes the exact 0 dB.
-      **Adapter IT (`scripts/test-lp-player-adapter.sh`) — fixed (2026-10-27).** Reproduced with the IT and 16
+      **Adapter IT (`scripts/test-liascape-player-adapter.sh`) — fixed (2026-10-27).** Reproduced with the IT and 16
       CPU burners pinned to 8 cores (`taskset`): 3, 1, 1 and 2 failures in 4 runs (16 unpinned burners at load 26:
       0). Causes, none a margin: fixed sleeps before reading a state that converges (the first `/apply` not on
       screen after 1 s; a setting not landed after 0.3 s); the pending B of the R61 section (dee, 10 s at 1.25×)
@@ -453,7 +453,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       **Round 2** (2026-10-25 night): `--jobs N` runs N hermetic stacks in parallel (default 6; full run
       40 min serial → 14.5 min at 4 → 10 min at 6 → 8.3 min at 8 but 13 cells timed out entering their state
       (all passed alone); ~0.8 GB each, capped by MemAvailable, the run stops under a 3 GB floor;
-      `LP_MATRIX_NICE=1` + `--jobs 2` next to someone working — 4 stacks lag the desktop); the window is
+      `LIASCAPE_MATRIX_NICE=1` + `--jobs 2` next to someone working — 4 stacks lag the desktop); the window is
       SHOWN on the private Xvfb — hidden it rendered no frames (rAF never ran: framer-motion/WAAPI exits never finished, dnd-kit's rAF-aligned pointermoves coalesced so a drop
       saw a stale target, gifs/the live bg sat paused unfocused). ~90 new cells, each only in the states its
       halves share: strip drag-reorder through real input events (`sendInputEvent`), remove (X / context
@@ -472,7 +472,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       own `prev` → an engine flip, the Steam tokens gone); an armed align:end switch kept the transition it
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
       the playing item from the strip restarted the rotation from the top (now: from its place).
-      `LP_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
+      `LIASCAPE_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
       **Round 3** (2026-10-26): 42 controls / 112 cells (full run now 709 cells: 681 pass, 28 structural skips,
       20m48s at `--jobs 4`). The rest of the global Settings page: Rotation
       wait-for-end / advance-on-end vs a playlist following the globals (`playlistGlobal` / `pendingGlobal`)
@@ -509,7 +509,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       outside `LibraryStore`'s lock — over an override saved meanwhile. `race:indexLostUpdate` (40 k1 volume saves
       while k4 is trashed + undone ×15): RED 3/40 and 2/40 lost; every index write now goes through
       `SetMeta`/`Remove`/`UpdateIndex` under the one lock (`SaveIndex` private) — GREEN 3/3 runs.
-      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (lp-player plays
+      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (liascape-player plays
       them since Phase 2 Task 11 — the matrix cells are Task 12), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
       private dbus-daemon + a fake player would make it hermetic; not built), Settings → Player engine (to
@@ -593,7 +593,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       keybind override, mute while paused. Make one function: live sources (source map) × (global, item
       override) → each source's desired `gain.user`/`speed`/`af`/…, diffed against what it runs; every path
       calls it. Matrix cells to keep green: `set:*`, `appear:*`, `cli:volume-*`, `globalDrag*`, `itemVol*`.
-      — done: `LpPlayerMedia.ResolveNow` (design note at the top of its code; player-adapter.md § Targeting):
+      — done: `LiascapePlayerMedia.ResolveNow` (design note at the top of its code; player-adapter.md § Targeting):
       the live sources (cached map: source id → item path) × (global, item overrides + loudness, mute, a
       request's transient values) → each source's `gain.user`/`speed`/`af`/`no_audio`/`hwdec`/`fps_cap`/
       `cache`/`demuxer_*`/`gain.mute` (+ the layer `fit`), diffed against a fresh `state` (full passes) or the
@@ -621,7 +621,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       defaults; settings-only → no paths) → GREEN; playlist families 173/0.
 - [x] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the strip
       stays stale and its next save writes itself back). Broadcast `playlist-changed` → `syncPlaylist()`.
-      — done: `playlist-changed {client}` + `X-LP-Client` (own echo skipped); `plState:partial` RED (stale strip) →
+      — done: `playlist-changed {client}` + `X-Liascape-Client` (own echo skipped); `plState:partial` RED (stale strip) →
       GREEN, playlist families 196/0.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 - [x] Zero-copy hwdec on the render worker (TODO item above) — optional. — done 2026-10-27.
@@ -636,11 +636,11 @@ Two bug classes kept recurring; fix the class, not the instance:
       IO load): the snapshot lagged a switch by 2.4 s (fsync under load), the supervised restart restored dee instead
       of `a`, and R81 re-applies only settings, never the wallpaper — the backend's model and the screen disagree.
       Fix idea: on `Restarted`, the adapter compares `cur:*.path` with what it switched to last and re-switches.
-      — done 2026-10-28: `LpPlayerMedia.ReconcileShown` (queued by `OnRestarted` before the waits fail) cuts back to
+      — done 2026-10-28: `LiascapePlayerMedia.ReconcileShown` (queued by `OnRestarted` before the waits fail) cuts back to
       the backend's last shown switch (`_intent`; unknown after another client's switch → nothing); an armed aligned
       switch is saved by the snapshot as A where it plays and re-armed by `DoVideoEndWait` (it switched NOW before).
       Player-side ordering considered: a switch's reply can't wait for an fsync, so the backend closes the window.
-      IT RED 5 → GREEN (a lagging snapshot via `LP_PLAYER_TEST_SNAPSHOT_WRITE_MS`; a crash while armed).
+      IT RED 5 → GREEN (a lagging snapshot via `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS`; a crash while armed).
 - [x] **In-place upgrade fails under IO load**: the old compositor's clean quit took 3.1–3.3 s, `UpgradeInPlace`'s fixed
       3 s wait gave up, and the backend fell back to a plain `serve` without `--restore`/`--headless`. Wait on the
       supervisor's exit / socket instead of a fixed 3 s, and keep the args on the fallback.
@@ -664,7 +664,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
       incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
-- [ ] **Matrix shard hung in `scene × sceneProp:restart`** (2026-10-28, the `--changed lp-player --jobs 2` run for the
+- [ ] **Matrix shard hung in `scene × sceneProp:restart`** (2026-10-28, the `--changed liascape-player --jobs 2` run for the
       fix above): shard 0 stopped after `sceneProp:set` for 30 min (stack healthy — backend `/health` 200, the player's
       `state` fine, the scene's worker running; the probe idle), killed by hand; the cell and every scene cell after it
       passed on a rerun (31/31). The probe has no per-cell deadline and two waits without one: `ctlClient`'s
@@ -686,9 +686,9 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
-      (audio follows the picture). Decide: primary output only / loudest / all / user choice. lp-player keeps a
+      (audio follows the picture). Decide: primary output only / loudest / all / user choice. liascape-player keeps a
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
-- [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + lp-player world (both still build the
+- [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world (both still build the
       pre-rewrite Avalonia app).
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
@@ -696,10 +696,10 @@ Two bug classes kept recurring; fix the class, not the instance:
       `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 92 ok, 1 static
       by design, 3 load_failed (3D) of 96 with LWE `40eacc9`; it was 86 ok, 1 blank, 4 load_failed, 4 broken with
       `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
-      LWE (fork) patch, none in the player — every one reproduces with `lp-scene-worker --lwe-smoke`, i.e. LWE's
+      LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
   - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
-        --ab-legacy --legacy-output DP-1 --reuse /tmp/lp-scene-corpus-<stamp>` (after `livepaper --kill`). Lists the
+        --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `livepaper --kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
         = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
   - [x] **LWE: catch exceptions at the wp_* C API** (2026-10-28, fork patch 0015) — the C entry points already
@@ -727,7 +727,7 @@ Two bug classes kept recurring; fix the class, not the instance:
         (`'v_Bounds' : undeclared identifier`, `missing #endif`) — needs a look at how WE resolves that shader
         (probably a newer stock godrays from `assets/` that LWE should prefer, or a compat rewrite).
   - [x] **`ctl capture` still encodes on the loop** (2026-10-28, player-core.md § GFX / EGL "`capture` never
-        stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lp-capture` maps → encodes → writes, the
+        stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lia-capture` maps → encodes → writes, the
         reply is deferred until written (like `step`'s). Loop max busy around a 3840×1080 capture 810 ms (debug)
         → 0.07–0.10 ms per repeat (4.5–5 ms the first at a size: the driver pins the buffer); guard
         `tests/api.rs::capture_encodes_off_the_loop`.

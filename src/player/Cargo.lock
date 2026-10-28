@@ -348,6 +348,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "liascape-player"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "calloop",
+ "glow",
+ "khronos-egl",
+ "libc",
+ "pipewire",
+ "pkg-config",
+ "png",
+ "serde",
+ "serde_json",
+ "smithay-client-toolkit",
+ "time",
+ "wayland-egl",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -401,25 +420,6 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
-
-[[package]]
-name = "lp-player"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "calloop",
- "glow",
- "khronos-egl",
- "libc",
- "pipewire",
- "pkg-config",
- "png",
- "serde",
- "serde_json",
- "smithay-client-toolkit",
- "time",
- "wayland-egl",
-]
 
 [[package]]
 name = "memchr"

@@ -1,5 +1,5 @@
 {
-	"title" : "lp-player case-scene (the project names its scene file in another case)",
+	"title" : "liascape-player case-scene (the project names its scene file in another case)",
 	"type" : "scene",
 	"file" : "Scene.JSON",
 	"general" : {}

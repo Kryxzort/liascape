@@ -1,7 +1,7 @@
 //! The scene worker's wire protocol (Phase 2 Task 3; `.claude/rules/player-core.md` § Scene
 //! worker): one JSON object per `SOCK_SEQPACKET` datagram (≤ [`MAX_MSG`] = 64 KiB), file
 //! descriptors (dmabuf planes, sync_file fences) riding `SCM_RIGHTS` on the same datagram.
-//! Both ends use these types — the compositor (`worker::WorkerHost`) and `lp-scene-worker`.
+//! Both ends use these types — the compositor (`worker::WorkerHost`) and `liascape-scene-worker`.
 //!
 //! JSON, not a fixed C struct like the spike's `common.h`: the messages are small and rare
 //! enough (one `Frame` per rendered frame, ~100 bytes) that serde costs nothing measurable,
@@ -27,8 +27,8 @@ pub const MAX_FDS: usize = 8;
 pub enum ToWorker {
     /// Load the scene at `path` (the item folder). `position` = scene time to start at;
     /// `max_size` = the largest output showing it (the ring is sized by `scene::cover_size`);
-    /// `synthetic` = render `lp-synthetic.json` instead of LWE (tests only — the worker also
-    /// requires `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its environment). `assets_dir` = WE's
+    /// `synthetic` = render `liascape-synthetic.json` instead of LWE (tests only — the worker also
+    /// requires `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its environment). `assets_dir` = WE's
     /// `assets/` (Task 7: resolved by the compositor, `scene::assets`); `steam_dir` = the
     /// Steam library the item lives in (`scene::assets::steam_root_of_item`), if any.
     /// `properties` = the scene's user properties (`project.json` `general.properties` name →
@@ -39,7 +39,7 @@ pub enum ToWorker {
     /// `gain_db` / `no_audio` / `speed` = the stream's starting state — every live `Gain`,
     /// `NoAudio` and `Speed` is folded in here too, so a restarted worker resumes at the same
     /// level (faded in by its own 30 ms gate) and speed. `id` = the source id (the stream's
-    /// `node.name` is `lp-player-scene.<id>`).
+    /// `node.name` is `liascape-player-scene.<id>`).
     Start {
         path: String,
         assets_dir: Option<String>,

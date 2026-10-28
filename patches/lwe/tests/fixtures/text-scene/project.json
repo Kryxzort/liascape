@@ -1,5 +1,5 @@
 {
-	"title" : "lp-player text-scene (text objects with fields in the shapes WE writes, and one it doesn't)",
+	"title" : "liascape-player text-scene (text objects with fields in the shapes WE writes, and one it doesn't)",
 	"type" : "scene",
 	"file" : "scene.json",
 	"general" : {}

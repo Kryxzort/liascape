@@ -12,22 +12,22 @@ using livepaper.Models;
 
 namespace livepaper.Player;
 
-// The media primitives PlayerHelper dispatches to under PlayerEngine=lp-player
+// The media primitives PlayerHelper dispatches to under PlayerEngine=liascape-player
 // (.claude/rules/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
 // a switch is ONE `transition` request (a cut when transitions are off); every setting reaches the live
 // sources through ONE resolver (`ResolveNow`, "the effective-settings resolver" below): each live source
 // — on screen, either side of an effect, a pending B — gets ITS OWN item's effective value, diffed
 // against what it runs; layer settings (fit) go to `lay:*:main`.
-public static class LpPlayerMedia
+public static class LiascapePlayerMedia
 {
-    private static LpPlayerClient? _hooked;
+    private static LiascapePlayerClient? _hooked;
     private static readonly object _hookLock = new();
 
-    private static LpPlayerClient C
+    private static LiascapePlayerClient C
     {
         get
         {
-            var c = LpPlayerClient.Shared;
+            var c = LiascapePlayerClient.Shared;
             lock (_hookLock)
             {
                 if (!ReferenceEquals(c, _hooked))
@@ -43,11 +43,11 @@ public static class LpPlayerMedia
         }
     }
 
-    // ---- the command queue: every lp-player MUTATION from PlayerHelper runs here ------------------
+    // ---- the command queue: every liascape-player MUTATION from PlayerHelper runs here ------------------
     // PlayerHelper calls its primitives while holding its _lock; nothing under that lock may wait on the
     // player (a stalled one would stall volume/speed/pause/tick). So switches, stop and property sets
     // are queued — one ordered worker, FIFO, off every caller's thread — and return at once. Queries stay
-    // synchronous with LpPlayerClient.QuickMs (≤ 300 ms, then the stall breaker fails them fast). Every
+    // synchronous with LiascapePlayerClient.QuickMs (≤ 300 ms, then the stall breaker fails them fast). Every
     // queued command's OWN player.Call also uses QuickMs (item 6) — a queued set is a single property
     // write, not worth 2000 ms; keeping it quick means a backlog (a stalled player) drains fast instead
     // of each item eating the full default timeout one after another.
@@ -120,7 +120,7 @@ public static class LpPlayerMedia
     private static Action Wrap(Action run, Action onThrow) => () =>
     {
         try { run(); }
-        catch (Exception e) { LpPlayerClient.Log($"queued lp-player command threw: {e.GetBaseException().Message}"); onThrow(); }
+        catch (Exception e) { LiascapePlayerClient.Log($"queued liascape-player command threw: {e.GetBaseException().Message}"); onThrow(); }
     };
 
     private static QItem MakeItem(Action run, string? key, bool essential) => new() { Run = run, Key = key, Essential = essential };
@@ -146,7 +146,7 @@ public static class LpPlayerMedia
                 }
             if (!replaced && !it.Essential && _pending.Count + (_running != null ? 1 : 0) >= MaxQueueDepth)
             {
-                LpPlayerClient.Log($"lp-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
+                LiascapePlayerClient.Log($"liascape-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
                 return false;
             }
             _pending.AddLast(it);
@@ -189,10 +189,10 @@ public static class LpPlayerMedia
 
     // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
     // `LweMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
-    // under lp-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
+    // under liascape-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
     // changed entry sets its fps, a removed one goes back to the player's default (30, D5). Coalescible
     // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
-    // fresh or restarted player runs them too. `IsPrimary` has no lp-player meaning (one worker per scene,
+    // fresh or restarted player runs them too. `IsPrimary` has no liascape-player meaning (one worker per scene,
     // every output shows it; its audio is one stream on the bus) — the UI hides it there.
     public const double DefaultSceneFps = 30;
 
@@ -207,7 +207,7 @@ public static class LpPlayerMedia
                 if (!want.ContainsKey(name)) QueueSceneFps(name, DefaultSceneFps);
     }
 
-    // `LweMonitors` names are compositor connector names; lp-player names its outputs the same, with
+    // `LweMonitors` names are compositor connector names; liascape-player names its outputs the same, with
     // `.`/`:`/`*`/whitespace → `-` (wl.rs `output_name`).
     private static Dictionary<string, double> SceneFpsMap(IEnumerable<LweMonitorSettings> monitors) =>
         monitors.Where(m => !string.IsNullOrWhiteSpace(m.Name))
@@ -220,17 +220,17 @@ public static class LpPlayerMedia
     private static void QueueSceneFps(string output, double fps) =>
         QueueSet("scene_fps:" + output, () => SetSceneFps(C, output, fps));
 
-    private static void SetSceneFps(LpPlayerClient client, string output, double fps)
+    private static void SetSceneFps(LiascapePlayerClient client, string output, double fps)
     {
         if (!client.SocketExists) return; // a new player gets them at its first switch
-        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"out:{output}.scene_fps", ["value"] = fps }, LpPlayerClient.QuickMs);
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"out:{output}.scene_fps", ["value"] = fps }, LiascapePlayerClient.QuickMs);
     }
 
     private static int _sceneFpsGen = -1;
 
     // every LweMonitors entry onto this player process (a monitor not plugged in: logged, harmless), and the
     // player-level GPU / VRAM settings (a fresh player starts at its own defaults)
-    private static void AssertSceneFps(LpPlayerClient client, AppSettings s)
+    private static void AssertSceneFps(LiascapePlayerClient client, AppSettings s)
     {
         foreach (var (name, fps) in SceneFpsMap(s.LweMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
@@ -259,10 +259,10 @@ public static class LpPlayerMedia
     private static void QueuePlayerProp(string prop, object v) =>
         QueueSet("player:" + prop, () => SetPlayerProp(C, prop, v));
 
-    private static void SetPlayerProp(LpPlayerClient client, string prop, object v)
+    private static void SetPlayerProp(LiascapePlayerClient client, string prop, object v)
     {
         if (!client.SocketExists) return; // a new player gets them at its first switch / reapply
-        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"player.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = $"player.{prop}", ["value"] = v }, LiascapePlayerClient.QuickMs);
     }
 
     // ---- transition outcomes, by corr (events + a log-poll safety net) ------------------------
@@ -285,19 +285,19 @@ public static class LpPlayerMedia
                 bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
                 var peak = Num("peak_dbfs");
                 JsonElement? state = e.TryGetProperty("state", out var sv) && sv.ValueKind == JsonValueKind.Object ? sv.Clone() : null;
-                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete, state); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
+                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete, state); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
             }
             return;
         }
-        // every subscribed kind (LpPlayerClient.Topics) may change which sources show which file
+        // every subscribed kind (LiascapePlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         if (kind == "source.broken")
         {
             // a scene's worker crashed past its restart budget: mark it crashed (skipped unless
             // whitelisted, D6), tell the UI, advance a rotation playing it — off this callback
             var broken = Str(e, "path");
-            LpPlayerClient.Log($"scene {Path.GetFileName(broken)} is broken ({Str(e, "reason")}; record {Str(e, "record")})");
-            if (broken.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneBroken(broken); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneBroken threw: {ex.Message}"); } });
+            LiascapePlayerClient.Log($"scene {Path.GetFileName(broken)} is broken ({Str(e, "reason")}; record {Str(e, "record")})");
+            if (broken.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneBroken(broken); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneBroken threw: {ex.Message}"); } });
             return;
         }
         if (kind == "scene.vram_exceeded")
@@ -307,8 +307,8 @@ public static class LpPlayerMedia
             var stopped = Str(e, "path");
             double used = e.TryGetProperty("used_mib", out var u) && u.ValueKind == JsonValueKind.Number ? u.GetDouble() : 0;
             double limit = e.TryGetProperty("limit_mib", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : 0;
-            LpPlayerClient.Log($"scene {Path.GetFileName(stopped)} stopped by the VRAM guard ({used:0} MiB > {limit:0} MiB)");
-            if (stopped.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneVramStopped(stopped, used, limit); } catch (Exception ex) { LpPlayerClient.Log($"OnSceneVramStopped threw: {ex.Message}"); } });
+            LiascapePlayerClient.Log($"scene {Path.GetFileName(stopped)} stopped by the VRAM guard ({used:0} MiB > {limit:0} MiB)");
+            if (stopped.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneVramStopped(stopped, used, limit); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneVramStopped threw: {ex.Message}"); } });
             return;
         }
         TrackIntent(kind, e);
@@ -332,7 +332,7 @@ public static class LpPlayerMedia
     {
         var (stored, applied) = LibraryService.StoreSceneLoudness(path, lufs, peak, seconds, complete, state);
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        LpPlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
+        LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
             + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
         if (applied) PlayerHelper.OnLoudnessMeasured(path);
     }
@@ -348,13 +348,13 @@ public static class LpPlayerMedia
     // all, player-core.md § Supervisor "Budget") — never from what the backend's MODEL says should be
     // showing. Re-apply every current effective setting through the ordered queue so neither gap can
     // leave a stale value on screen. Fire-and-forget: this runs ON the client's event-reading callback
-    // (inside LpPlayerClient.Call's lock for the request-connection case), so it must never block —
+    // (inside LiascapePlayerClient.Call's lock for the request-connection case), so it must never block —
     // Queue(...) returns at once; ReapplyAllNow runs later, on the thread pool.
     // The wallpaper too (`ReconcileShown`): queued FIRST — before the waits fail, so an aligned switch
     // the backend re-arms (DoVideoEndWait, "failed:player restarted") is requested after it.
     private static void OnRestarted()
     {
-        LpPlayerClient.Log("lp-player restarted (new pid) — pending switch waits end as failed");
+        LiascapePlayerClient.Log("liascape-player restarted (new pid) — pending switch waits end as failed");
         InvalidateSources();
         _recent.Clear();
         _startedAt.Clear();
@@ -419,12 +419,12 @@ public static class LpPlayerMedia
         if (intent.Path == null)
         {
             if (shown.Count == 0) return;
-            LpPlayerClient.Log($"lp-player restarted showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
+            LiascapePlayerClient.Log($"liascape-player restarted showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
             Stop();
             return;
         }
         if (shown.Contains(intent.Path)) return;
-        LpPlayerClient.Log($"lp-player restarted showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
+        LiascapePlayerClient.Log($"liascape-player restarted showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
             + $" (its snapshot was behind) — the backend last switched to {Path.GetFileName(intent.Path)}: switching back (cut)");
         Interlocked.Increment(ref _reconciles);
         Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
@@ -435,12 +435,12 @@ public static class LpPlayerMedia
     public static int Reconciles => Volatile.Read(ref _reconciles);
 
     // R81, the other half: a mutation made while the stall breaker was open is dropped, not queued
-    // (LpPlayerClient.QuickMs + the breaker — see the "Threading" section of player-adapter.md) and
+    // (LiascapePlayerClient.QuickMs + the breaker — see the "Threading" section of player-adapter.md) and
     // never replayed on its own. The breaker closing (the player answered again) is exactly the moment
     // to catch up — same fire-and-forget Queue, same reasoning as OnRestarted above.
     private static void OnRecovered()
     {
-        LpPlayerClient.Log("lp-player answered again after a stall — re-applying settings (R81)");
+        LiascapePlayerClient.Log("liascape-player answered again after a stall — re-applying settings (R81)");
         ReapplyAll();
     }
 
@@ -468,9 +468,9 @@ public static class LpPlayerMedia
         // in a separate one-shot CLI process, and a restarted backend has no memory of it, so any
         // copy kept here goes stale and flipped the pause on its own after a crash/stall.
         bool? paused = null;
-        try { paused = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value").ValueKind == JsonValueKind.True; }
-        catch (LpPlayerException) { }
-        LpPlayerClient.Log("lp-player: re-applied effective settings" + (cur != null ? $" for {Path.GetFileName(cur)}" : " (nothing playing)")
+        try { paused = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LiascapePlayerClient.QuickMs).GetProperty("value").ValueKind == JsonValueKind.True; }
+        catch (LiascapePlayerException) { }
+        LiascapePlayerClient.Log("liascape-player: re-applied effective settings" + (cur != null ? $" for {Path.GetFileName(cur)}" : " (nothing playing)")
             + $" (player.paused = {(paused is bool b ? b.ToString().ToLowerInvariant() : "?")}, kept)");
     }
 
@@ -540,7 +540,7 @@ public static class LpPlayerMedia
         }
     }
 
-    private static string? Poll(LpPlayerClient client, string corr, int gen0)
+    private static string? Poll(LiascapePlayerClient client, string corr, int gen0)
     {
         try
         {
@@ -550,8 +550,8 @@ public static class LpPlayerMedia
                 if (OutcomeOf(Str(ev, "kind"), ev) is { } o) return o;
             return null;
         }
-        catch (LpPlayerException e) when (e.Code == "io") { return client.SocketExists ? null : "failed:player gone"; }
-        catch (LpPlayerException) { return null; }
+        catch (LiascapePlayerException e) when (e.Code == "io") { return client.SocketExists ? null : "failed:player gone"; }
+        catch (LiascapePlayerException) { return null; }
     }
 
     // ---- switches --------------------------------------------------------------------------------
@@ -611,7 +611,7 @@ public static class LpPlayerMedia
 
     // ---- in-place upgrade -----------------------------------------------------------------------
     // A player older than its binary (rebuilt, reinstalled) restarts onto it with its snapshot
-    // (LpPlayerClient.UpgradeInPlace): before every switch (Switch above), and from this 10 s check
+    // (LiascapePlayerClient.UpgradeInPlace): before every switch (Switch above), and from this 10 s check
     // while nothing is switching — never across an armed align:end switch (the restart would drop it
     // and the rotation would switch early, failure path), so an advance-on-end playlist upgrades at
     // its next switch. Queued: ordered with switches, so one queued before the check runs first.
@@ -620,7 +620,7 @@ public static class LpPlayerMedia
 
     private static void UpgradeWatchTick()
     {
-        if (!PlayerEngine.IsLpPlayer) return;
+        if (!PlayerEngine.IsLiascapePlayer) return;
         var client = C;
         if (client.PlayerPid == null && !client.Reachable()) return; // a player started before this backend: learn its pid
         if (client.StaleReason() == null) return;
@@ -633,15 +633,15 @@ public static class LpPlayerMedia
     }
 
     // any transition not yet done (armed, waiting, running, handing off); unknown → treated as yes
-    private static bool Switching(LpPlayerClient client)
+    private static bool Switching(LiascapePlayerClient client)
     {
         try
         {
-            var st = client.Call("state", null, LpPlayerClient.QuickMs);
+            var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
             return st.TryGetProperty("transitions", out var t) && t.ValueKind == JsonValueKind.Array
                 && t.EnumerateArray().Any(x => Str(x, "phase") != "done");
         }
-        catch (LpPlayerException) { return true; }
+        catch (LiascapePlayerException) { return true; }
     }
 
     // `transition {outputs:"out:*", to:{path, props}, effect from Pick(tcfg) or null (cut), method, align}`.
@@ -660,7 +660,7 @@ public static class LpPlayerMedia
         client.StartEvents();
         // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
-        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LpPlayerClient.QuickMs);
+        client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LiascapePlayerClient.QuickMs);
         if (_sceneFpsGen != client.Generation) AssertSceneFps(client, s); // once per player process
         var req = new Dictionary<string, object?>
         {
@@ -679,15 +679,15 @@ public static class LpPlayerMedia
         else req["effect_id"] = null; // cut: 30 ms ramp A down, swap, 30 ms ramp B up
         _requesting = path; // its `transition.scheduled` is ours, even when it beats the reply
         try { return Requested(client.Call("transition", req), path, alignEnd); }
-        catch (LpPlayerException e) when (e.Code == "no_such_effect" && pick != null)
+        catch (LiascapePlayerException e) when (e.Code == "no_such_effect" && pick != null)
         {
-            LpPlayerClient.Log($"effect {pick.Value.effectId} not in lp-player's catalogue ({e.Hint}) → cut");
+            LiascapePlayerClient.Log($"effect {pick.Value.effectId} not in liascape-player's catalogue ({e.Hint}) → cut");
             req["effect_id"] = null;
             req.Remove("params"); req.Remove("duration_ms"); req.Remove("method");
             try { return Requested(client.Call("transition", req), path, alignEnd); }
-            catch (LpPlayerException e2) { LpPlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
+            catch (LiascapePlayerException e2) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
         }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
+        catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
         finally { _requesting = null; }
     }
 
@@ -732,7 +732,7 @@ public static class LpPlayerMedia
         finally { _onStarted.TryRemove(corr, out _); }
     }
 
-    private static async Task<string> WaitSwitch(LpPlayerClient client, string corr, bool alignEnd, double? remaining, double? lastPos, CancellationToken ct)
+    private static async Task<string> WaitSwitch(LiascapePlayerClient client, string corr, bool alignEnd, double? remaining, double? lastPos, CancellationToken ct)
     {
         int bound = alignEnd ? BackstopMs(remaining) : 60_000;
         string outcome;
@@ -749,16 +749,16 @@ public static class LpPlayerMedia
         }
         if (outcome == "timeout")
         {
-            LpPlayerClient.Log($"aligned switch {corr} not handed off within {bound} ms — cancelling it (the caller switches now)");
+            LiascapePlayerClient.Log($"aligned switch {corr} not handed off within {bound} ms — cancelling it (the caller switches now)");
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
-            catch (LpPlayerException) { } // already handed off / superseded meanwhile
+            catch (LiascapePlayerException) { } // already handed off / superseded meanwhile
             InvalidateSources();
         }
         if (outcome == "caller-cancelled")
         {
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
-            catch (LpPlayerException e) when (e.Code is "no_such_node" or "unsupported") { } // superseded / already handed off
-            catch (LpPlayerException e) { LpPlayerClient.Log($"cancel {corr} failed — {e}"); }
+            catch (LiascapePlayerException e) when (e.Code is "no_such_node" or "unsupported") { } // superseded / already handed off
+            catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"cancel {corr} failed — {e}"); }
             InvalidateSources();
         }
         return outcome;
@@ -766,9 +766,9 @@ public static class LpPlayerMedia
 
     // Seconds past A's remaining play time an aligned switch is waited for (M2) — behind the
     // player's own 10 s `align_fallback`, so the player normally resolves it first.
-    // LP_TEST_ALIGN_BACKSTOP_SLACK_SEC shortens it for scripts/test-lp-player-adapter.sh only.
+    // LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC shortens it for scripts/test-liascape-player-adapter.sh only.
     public static readonly double AlignBackstopSlackSec =
-        double.TryParse(Environment.GetEnvironmentVariable("LP_TEST_ALIGN_BACKSTOP_SLACK_SEC"),
+        double.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC"),
             System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var slack) && slack > 0
             ? slack : 15;
 
@@ -780,30 +780,30 @@ public static class LpPlayerMedia
     // and the switch stand still) → yes. Otherwise only while A (what `cur:*` shows) still plays on,
     // for its remaining time at its current speed + slack; A not moving since the last check (a
     // stall), or no answer → give up (cancel, the caller switches now).
-    private static (bool wait, int boundMs, double? pos) AlignedWaitCheck(LpPlayerClient client, double? lastPos)
+    private static (bool wait, int boundMs, double? pos) AlignedWaitCheck(LiascapePlayerClient client, double? lastPos)
     {
         if (!HasOutputs(client)) return (true, BackstopMs(0), lastPos);
         try
         {
-            if (client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs)
+            if (client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LiascapePlayerClient.QuickMs)
                     .GetProperty("value").ValueKind == JsonValueKind.True)
                 return (true, BackstopMs(0), lastPos);
         }
-        catch (LpPlayerException) { return (false, 0, lastPos); }
+        catch (LiascapePlayerException) { return (false, 0, lastPos); }
         if (Query("time_pos") is not double pos || TimeRemaining() is not double rem) return (false, 0, lastPos);
         if (lastPos is double lp && Math.Abs(pos - lp) < 1e-3) return (false, 0, pos);
         return (true, BackstopMs(rem), pos);
     }
 
     // Whether the player has any output (false = R60 parked: monitors off / unplugged).
-    private static bool HasOutputs(LpPlayerClient client)
+    private static bool HasOutputs(LiascapePlayerClient client)
     {
         try
         {
-            var st = client.Call("state", null, LpPlayerClient.QuickMs);
+            var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
             return st.TryGetProperty("outputs", out var o) && o.ValueKind == JsonValueKind.Array && o.GetArrayLength() > 0;
         }
-        catch (LpPlayerException) { return true; } // unknown → treat as shown (don't wait forever)
+        catch (LiascapePlayerException) { return true; } // unknown → treat as shown (don't wait forever)
     }
 
     // I4 (final review): consecutive switches that didn't hand off (refused / failed / timed out)
@@ -839,18 +839,18 @@ public static class LpPlayerMedia
         var client = C;
         _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
         _alignedCorrs.Clear();
-        if (client.SocketExists) client.TryCall("stop", null, LpPlayerClient.QuickMs); // item 6
+        if (client.SocketExists) client.TryCall("stop", null, LiascapePlayerClient.QuickMs); // item 6
         InvalidateSources();
     }
 
-    // Switching AWAY from lp-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
+    // Switching AWAY from liascape-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
     // queued runs (bounded), playback stops, the process is gone (quit → SIGTERM → SIGKILL) — so the
-    // other engine never starts while lp-player still shows something.
+    // other engine never starts while liascape-player still shows something.
     public static void StopAndQuit()
     {
         var client = C;
         try { Drain().Wait(3000); } catch { }
-        if (client.SocketExists) { try { client.Call("stop", null, LpPlayerClient.QuickMs); } catch (LpPlayerException) { } }
+        if (client.SocketExists) { try { client.Call("stop", null, LiascapePlayerClient.QuickMs); } catch (LiascapePlayerException) { } }
         client.QuitOrKill();
         InvalidateSources();
         _lastCorr = null;
@@ -1092,7 +1092,7 @@ public static class LpPlayerMedia
                 }
             }
             if (r.Fresh && (r.Props == null || r.Props.Contains("fit")) && live.LayerFit.Any(f => f != Fit(S())))
-                client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(S()) }, LpPlayerClient.QuickMs);
+                client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(S()) }, LiascapePlayerClient.QuickMs);
             if (!stale) return covered;
             InvalidateSources(); // a source went (a switch meanwhile): new ones may have come — once more, re-read
         }
@@ -1101,25 +1101,25 @@ public static class LpPlayerMedia
 
     // `set <id>.<prop>` (gain.mute: `animate` over 30 ms — never a step). item 6: QuickMs, never the
     // 2000 ms default — a queued property set.
-    private static Sent Send(LpPlayerClient client, string id, string prop, object v)
+    private static Sent Send(LiascapePlayerClient client, string id, string prop, object v)
     {
         try
         {
             if (prop == "gain.mute")
-                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = 30 }, LpPlayerClient.QuickMs);
+                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = 30 }, LiascapePlayerClient.QuickMs);
             else if (prop == "gain.normalize")
-                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = NormalizeRampMs }, LpPlayerClient.QuickMs);
+                client.Call("animate", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["to"] = v, ["duration_ms"] = NormalizeRampMs }, LiascapePlayerClient.QuickMs);
             else
-                client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LpPlayerClient.QuickMs);
+                client.Call("set", new Dictionary<string, object?> { ["path"] = $"{id}.{prop}", ["value"] = v }, LiascapePlayerClient.QuickMs);
             return Sent.Ok;
         }
-        catch (LpPlayerException e) when (e.Code == "no_such_node") { return Sent.Gone; }
-        catch (LpPlayerException e) when (e.Code is "timeout" or "io")
+        catch (LiascapePlayerException e) when (e.Code == "no_such_node") { return Sent.Gone; }
+        catch (LiascapePlayerException e) when (e.Code is "timeout" or "io")
         {
-            LpPlayerClient.Log($"set {id}.{prop} failed — {e} (rest of this pass skipped; R81 re-applies)");
+            LiascapePlayerClient.Log($"set {id}.{prop} failed — {e} (rest of this pass skipped; R81 re-applies)");
             return Sent.Stalled;
         }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"set {id}.{prop}={v} failed — {e}"); return Sent.Failed; }
+        catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"set {id}.{prop}={v} failed — {e}"); return Sent.Failed; }
     }
 
     private static bool Same(object? have, object want) => (have, want) switch
@@ -1162,8 +1162,8 @@ public static class LpPlayerMedia
         string path = prop is "fit" or "viewport" or "opacity" ? $"lay:*:main.{prop}"
             : prop == "player.paused" ? "player.paused"
             : $"srcs:*.{prop}";
-        try { return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = path, ["value"] = value }, LpPlayerClient.QuickMs)); }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"set {prop}={value} failed — {e}"); return []; }
+        try { return Targets(client.Call("set", new Dictionary<string, object?> { ["path"] = path, ["value"] = value }, LiascapePlayerClient.QuickMs)); }
+        catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"set {prop}={value} failed — {e}"); return []; }
     }
 
     // The mpv IPC args PlayerHelper.SendCommand/TrySendCommand still build. Property sets go through
@@ -1171,7 +1171,7 @@ public static class LpPlayerMedia
     // a resolver pass (every other source keeps its own — never a `srcs:*` broadcast); a mute change is a
     // forced resolver pass from PlayerHelper.IsMuted (SetMute / SetUserMute send exactly that); anything
     // else → `Set`. `cycle pause` toggles; mpv-playlist plumbing (loadfile/playlist-*/loop-file/
-    // loop-playlist) has no lp-player meaning — livepaper's timed machinery owns rotation and the
+    // loop-playlist) has no liascape-player meaning — livepaper's timed machinery owns rotation and the
     // transition recipe owns A's loop — so it's acknowledged and dropped.
     public static bool Mpv(object[] args)
     {
@@ -1214,20 +1214,20 @@ public static class LpPlayerMedia
         if (!client.SocketExists) return false;
         if (PlayerPaused(client) is not bool paused) return false;
         bool now = !paused;
-        return client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LpPlayerClient.QuickMs) != null;
+        return client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = now }, LiascapePlayerClient.QuickMs) != null;
     }
 
     // `get player.paused` (null = no player / no answer). Synchronous but quick (QuickMs).
     public static bool IsPlayerPaused() => C is { SocketExists: true } client && PlayerPaused(client) == true;
 
-    private static bool? PlayerPaused(LpPlayerClient client)
+    private static bool? PlayerPaused(LiascapePlayerClient client)
     {
         try
         {
-            var v = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LpPlayerClient.QuickMs).GetProperty("value");
+            var v = client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LiascapePlayerClient.QuickMs).GetProperty("value");
             return v.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null };
         }
-        catch (LpPlayerException) { return null; }
+        catch (LiascapePlayerException) { return null; }
     }
 
     // I1 (final review): a NEW wallpaper session (Apply / ApplyPlaylist / a cold Launch) starts
@@ -1238,7 +1238,7 @@ public static class LpPlayerMedia
     {
         var client = C;
         if (client.SocketExists)
-            client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = false }, LpPlayerClient.QuickMs);
+            client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = false }, LiascapePlayerClient.QuickMs);
     });
 
     // ---- queries -----------------------------------------------------------------------------------
@@ -1250,7 +1250,7 @@ public static class LpPlayerMedia
     public static double? Query(string prop) =>
         GetCur(prop) is JsonElement { ValueKind: JsonValueKind.Number } v ? v.GetDouble() : null;
 
-    // mpv property names the legacy queries use → lp-player
+    // mpv property names the legacy queries use → liascape-player
     public static double? QueryMpv(string mpvProp) => mpvProp switch
     {
         "time-pos" => Query("time_pos"),
@@ -1274,9 +1274,9 @@ public static class LpPlayerMedia
     {
         var client = C;
         if (!client.SocketExists) return null;
-        const int q = LpPlayerClient.QuickMs;
+        const int q = LiascapePlayerClient.QuickMs;
         try { return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:*.{prop}" }, q).GetProperty("value"); }
-        catch (LpPlayerException e) when (e.Code == "ambiguous")
+        catch (LiascapePlayerException e) when (e.Code == "ambiguous")
         {
             try
             {
@@ -1285,16 +1285,16 @@ public static class LpPlayerMedia
                 if (first == null) return null;
                 return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:{first}.{prop}" }, q).GetProperty("value");
             }
-            catch (LpPlayerException) { return null; }
+            catch (LiascapePlayerException) { return null; }
         }
-        catch (LpPlayerException) { return null; } // no_such_node = nothing shown; io = no player
+        catch (LiascapePlayerException) { return null; } // no_such_node = nothing shown; io = no player
     }
 
-    private static JsonElement? Graph(LpPlayerClient client)
+    private static JsonElement? Graph(LiascapePlayerClient client)
     {
         if (!client.SocketExists) return null;
-        try { return client.Call("state", null, LpPlayerClient.QuickMs).GetProperty("graph"); } // item 6
-        catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return null; }
+        try { return client.Call("state", null, LiascapePlayerClient.QuickMs).GetProperty("graph"); } // item 6
+        catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"state failed — {e}"); return null; }
     }
 
     // Paths on screen now or about to be: every layer's content (an effect's incoming side, never its
@@ -1313,12 +1313,12 @@ public static class LpPlayerMedia
     // One `state` read (no drain — ReconcileShown runs ON the queue's worker): every layer's content (an
     // effect's `to`), each requested switch's B unless it's an aligned one waiting for A's end, and with
     // `parked` the parked wallpaper (no output: what the next one shows). null = no answer.
-    private static List<string>? ShownOrIncoming(LpPlayerClient client, bool parked)
+    private static List<string>? ShownOrIncoming(LiascapePlayerClient client, bool parked)
     {
         var paths = new List<string>();
         JsonElement st;
-        try { st = client.Call("state", null, LpPlayerClient.QuickMs); }
-        catch (LpPlayerException e) { LpPlayerClient.Log($"state failed — {e}"); return null; }
+        try { st = client.Call("state", null, LiascapePlayerClient.QuickMs); }
+        catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"state failed — {e}"); return null; }
         if (!st.TryGetProperty("graph", out var g) || g.ValueKind != JsonValueKind.Object) return paths;
         string? PathOf(string id) =>
             id.Length > 0 && g.TryGetProperty(id, out var n) && Str(n, "kind") is not ("effect" or "layer") && Str(n, "path") is { Length: > 0 } p ? p : null;
@@ -1345,7 +1345,7 @@ public static class LpPlayerMedia
     // cancel/failure (B goes), a stop, an output's sources retired, a new player process (Generation).
     // Every one of those invalidates it: our own Switch/Stop/cancel/upgrade synchronously (they run on the
     // queue's worker, like every reader), the player's own changes through the subscribed events
-    // (LpPlayerClient.Topics), a restart through Generation + OnRestarted. It is only trusted while the
+    // (LiascapePlayerClient.Topics), a restart through Generation + OnRestarted. It is only trusted while the
     // event connection is live (a reconnect gap loses events → `Subscribed` invalidates), a read while an
     // invalidation happened is never stored (epoch), and a pass that finds a cached id gone
     // (`no_such_node`) invalidates and re-reads once. The VALUES are the resolver's diff for a cached pass
@@ -1374,7 +1374,7 @@ public static class LpPlayerMedia
     }
 
     // the cached live sources, else one `state` read
-    private static Live? CachedLive(LpPlayerClient client)
+    private static Live? CachedLive(LiascapePlayerClient client)
     {
         client.StartEvents(); // idempotent; the map is cached only once events flow
         lock (_srcLock)
@@ -1383,7 +1383,7 @@ public static class LpPlayerMedia
     }
 
     // one `state` read (null = no answer); stored as the cache unless something invalidated it meanwhile
-    private static Live? ReadLive(LpPlayerClient client)
+    private static Live? ReadLive(LiascapePlayerClient client)
     {
         client.StartEvents();
         int epoch;
@@ -1450,9 +1450,9 @@ public static class LpPlayerMedia
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
     // ---- auto-mute ownership (R69) ----------------------------------------------------------------
-    // A `pactl list sink-inputs` block belongs to lp-player when its process is the player (pid from
-    // `hello`), its node is one of the player's (`lp-player-bus*`, a scene worker's `lp-player-scene.<id>`),
-    // it targets the `lp-player-bus` sink, or its application.name is `lp-player` (the player's own mpv
+    // A `pactl list sink-inputs` block belongs to liascape-player when its process is the player (pid from
+    // `hello`), its node is one of the player's (`liascape-player-bus*`, a scene worker's `liascape-player-scene.<id>`),
+    // it targets the `liascape-player-bus` sink, or its application.name is `liascape-player` (the player's own mpv
     // streams and its scene workers' carry that too).
     public static bool IsOwnStream(string block, int? playerPid, string? busSinkIndex)
     {
@@ -1460,11 +1460,11 @@ public static class LpPlayerMedia
         {
             var t = raw.Trim();
             if (playerPid is int pid && Quoted(t, "application.process.id") == pid.ToString()) return true;
-            // the bus (`lp-player-bus*`) and, Phase 2, every scene worker's stream (`lp-player-scene.<id>` —
+            // the bus (`liascape-player-bus*`) and, Phase 2, every scene worker's stream (`liascape-player-scene.<id>` —
             // its own process, so the pid check above misses it)
-            if (Quoted(t, "node.name") is { } node && node.StartsWith("lp-player-", StringComparison.Ordinal)) return true;
-            if (Quoted(t, "target.object") == "lp-player-bus") return true;
-            if (Quoted(t, "application.name") == "lp-player") return true;
+            if (Quoted(t, "node.name") is { } node && node.StartsWith("liascape-player-", StringComparison.Ordinal)) return true;
+            if (Quoted(t, "target.object") == "liascape-player-bus") return true;
+            if (Quoted(t, "application.name") == "liascape-player") return true;
             if (busSinkIndex != null && t.StartsWith("Sink: ", StringComparison.Ordinal) && t[6..].Trim() == busSinkIndex) return true;
         }
         return false;
@@ -1476,12 +1476,12 @@ public static class LpPlayerMedia
         return line.StartsWith(prefix, StringComparison.Ordinal) ? line[prefix.Length..].TrimEnd('"') : null;
     }
 
-    // (player pid, index of the `lp-player-bus` sink) for IsOwnStream — both optional.
+    // (player pid, index of the `liascape-player-bus` sink) for IsOwnStream — both optional.
     public static Func<string, bool> OwnStreamFilter()
     {
         var client = C;
         int? pid = client.PlayerPid;
-        if (pid == null && client.SocketExists) { client.TryCall("hello", null, LpPlayerClient.QuickMs); pid = client.PlayerPid; }
+        if (pid == null && client.SocketExists) { client.TryCall("hello", null, LiascapePlayerClient.QuickMs); pid = client.PlayerPid; }
         string? bus = null;
         try
         {
@@ -1495,7 +1495,7 @@ public static class LpPlayerMedia
                 foreach (var line in o.Split('\n'))
                 {
                     var cols = line.Split('\t');
-                    if (cols.Length > 1 && cols[1].Trim() == "lp-player-bus") { bus = cols[0].Trim(); break; }
+                    if (cols.Length > 1 && cols[1].Trim() == "liascape-player-bus") { bus = cols[0].Trim(); break; }
                 }
             }
         }

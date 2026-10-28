@@ -14,7 +14,7 @@ namespace livepaper.Helpers;
 // rows carry as `rk`) it breaks — the UI puts a warning icon with the reason on each of those rows.
 // `ok`: true = works, false = won't work (reason says why + what to install), null = not known (e.g. the GPU interop
 // before a player ran). The player's own pieces come from its `hello.health` (player-core.md § health), else from
-// `lp-player health` / `scene-check` in this backend's environment (what a player it starts would see).
+// `liascape-player health` / `scene-check` in this backend's environment (what a player it starts would see).
 public static class FeatureHealth
 {
     // `inUse` = the user has the feature switched on / selected now (Report: InUse) — the UI's summary lists only what
@@ -23,40 +23,40 @@ public static class FeatureHealth
 
     // What one report is built from — gathered by Report(), a table in the self-test.
     public sealed record Inputs(
-        bool LpPlayer,                 // lp-player is the engine (what the user runs)
-        string? LpPlayerMissing,       // null = the binary resolves, else why not
-        JsonElement? PlayerHealth,     // hello.health / `lp-player health` (null: no answer)
+        bool LiascapePlayer,                 // liascape-player is the engine (what the user runs)
+        string? LiascapePlayerMissing,       // null = the binary resolves, else why not
+        JsonElement? PlayerHealth,     // hello.health / `liascape-player health` (null: no answer)
         (bool ok, string? reason) Scenes,
         Func<string, bool> OnPath,
         bool SteamCmdFound,
-        bool LegacyTransitions);       // legacy: lp-transition + the catalogue resolve
+        bool LegacyTransitions);       // legacy: liascape-transition + the catalogue resolve
 
     public static List<Feature> Report(AppSettings s)
     {
-        bool lp = PlayerEngine.Wants(s); // the engine the user picked (a missing binary is the first feature)
+        bool onPlayer = PlayerEngine.Wants(s); // the engine the user picked (a missing binary is the first feature)
         string? missing = PlayerEngine.ResolveBinary() == null ? PlayerEngine.UnavailableReason : null;
         JsonElement? ph = null;
         (bool, string?) scenes;
-        if (lp && missing == null)
+        if (onPlayer && missing == null)
         {
             // a probe that throws reads as unknown (the endpoint never 500s over one)
-            try { ph = LpPlayerClient.Shared.Health().Health; } catch (Exception e) { LpPlayerClient.Log($"/health/features: player health: {e.Message}"); }
+            try { ph = LiascapePlayerClient.Shared.Health().Health; } catch (Exception e) { LiascapePlayerClient.Log($"/health/features: player health: {e.Message}"); }
             // the running player's own word (its reason names what IT couldn't resolve), else the scene rule here
             if (Part(ph, "scenes") is (bool pok, var pwhy)) scenes = (pok, pwhy);
             else
-                try { var (ok, why, _) = LpPlayerClient.Shared.SceneStatus(withAssets: false); scenes = (ok, why); }
+                try { var (ok, why, _) = LiascapePlayerClient.Shared.SceneStatus(withAssets: false); scenes = (ok, why); }
                 catch (Exception e) { scenes = (false, $"couldn't check scene support: {e.Message}"); }
         }
-        else if (lp) scenes = (false, missing);
+        else if (onPlayer) scenes = (false, missing);
         else scenes = PlayerHelper.IsLweAvailable() ? (true, null) : (false, "linux-wallpaperengine not found in PATH — install it to use scenes");
-        bool legacyTr = !lp && TransitionService.ResolveDir() != null && TransitionService.ResolveBinary() != null;
-        return Build(new Inputs(lp, missing, ph, scenes, OnPath, WorkshopDownloader.FindSteamCmd(s.SteamCmdPath) != null, legacyTr))
+        bool legacyTr = !onPlayer && TransitionService.ResolveDir() != null && TransitionService.ResolveBinary() != null;
+        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, WorkshopDownloader.FindSteamCmd(s.SteamCmdPath) != null, legacyTr))
             .Select(f => f with { inUse = InUse(f.id, s) }).ToList();
     }
 
     public static bool InUse(string id, AppSettings s) => id switch
     {
-        "lp-player" => PlayerEngine.Wants(s),
+        "liascape-player" => PlayerEngine.Wants(s),
         "scenes" => s.AllowScenes,
         "transitions" => s.GlobalTransitionEnabled,
         "vram" => s.SceneVramLimitEnabled || !string.Equals(s.VramLowMode, "off", StringComparison.OrdinalIgnoreCase),
@@ -84,13 +84,13 @@ public static class FeatureHealth
     {
         var f = new List<Feature>
         {
-            new("lp-player", "lp-player (the wallpaper player)", i.LpPlayerMissing == null, i.LpPlayerMissing, ["playerEngine"]),
+            new("liascape-player", "liascape-player (the wallpaper player)", i.LiascapePlayerMissing == null, i.LiascapePlayerMissing, ["playerEngine"]),
             new("scenes", "Wallpaper Engine scenes", i.Scenes.ok,
                 i.Scenes.ok ? null : i.Scenes.reason ?? "scenes can't play here", ["allowScenes"]),
         };
-        if (i.LpPlayer)
+        if (i.LiascapePlayer)
         {
-            if (i.LpPlayerMissing == null)
+            if (i.LiascapePlayerMissing == null)
             {
                 var (eok, ewhy) = Part(i.PlayerHealth, "effects");
                 f.Add(new("transitions", "Transition effects", eok, eok == false ? ewhy : null,
@@ -104,7 +104,7 @@ public static class FeatureHealth
         }
         else
             f.Add(new("transitions", "Transition effects", i.LegacyTransitions,
-                i.LegacyTransitions ? null : "lp-transition or the transitions catalogue not found (install.sh builds it) — every switch is a cut",
+                i.LegacyTransitions ? null : "liascape-transition or the transitions catalogue not found (install.sh builds it) — every switch is a cut",
                 ["globalTransitionEnabled", "transitionMethod", "transitions"]));
         var am = new[] { "pactl", "parec" }.Where(t => !i.OnPath(t)).ToArray();
         f.Add(new("auto-mute", "Auto-mute", am.Length == 0,

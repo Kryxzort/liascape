@@ -35,12 +35,12 @@
 #   actually restarted) did not — see `check_onset_ramped` below.
 #   System state: the default sink is `easyeffects_sink` before and after (never changed
 #      by this script — only the bus's own re-target logic ever touches *its* routing, and
-#      nothing here triggers a default-sink change at all); no `lp-player-bus` sink is left
+#      nothing here triggers a default-sink change at all); no `liascape-player-bus` sink is left
 #      (serve owns it; serve is quit at the end; a trap covers failure/interrupt too).
 #
-# Isolation: its own temp XDG_RUNTIME_DIR (the lp-player socket) + XDG_STATE_HOME;
+# Isolation: its own temp XDG_RUNTIME_DIR (the liascape-player socket) + XDG_STATE_HOME;
 # PipeWire/Pulse still reach the owner's real session via PIPEWIRE_RUNTIME_DIR /
-# PULSE_SERVER; --headless with WAYLAND_DISPLAY unset. LP_PLAYER_BIN=<path> skips the
+# PULSE_SERVER; --headless with WAYLAND_DISPLAY unset. LIASCAPE_PLAYER_BIN=<path> skips the
 # build. DROPOUT_OUTPUT_HZ=<n> (default 60, Task 16d): the headless output's refresh —
 # R90's fast gain timer is independent of it, so every case here must report 0 drops/
 # micro_gaps the same at 240 Hz as at the default 60 Hz; the script is meant to be run at
@@ -59,28 +59,28 @@ fail() {
     exit 1
 }
 ok() { echo "ok: $*"; }
-sink_count() { pactl list sinks short | awk '$2=="lp-player-bus"' | wc -l; }
+sink_count() { pactl list sinks short | awk '$2=="liascape-player-bus"' | wc -l; }
 
 # ---------------------------------------------------------------- mute the test tones
 # Controller instruction: the owner hears these through the speakers otherwise. Mutes
-# ONLY the bus's own forwarding stream (`node.name == lp-player-bus.playback`) — never
-# the mpv streams feeding the bus (they carry `application.name lp-player` too, but are
+# ONLY the bus's own forwarding stream (`node.name == liascape-player-bus.playback`) — never
+# the mpv streams feeding the bus (they carry `application.name liascape-player` too, but are
 # upstream of the bus sink the meter actually reads; muting them would mute the
-# measurements themselves). The meter captures `lp-player-bus`'s own monitor, which sits
+# measurements themselves). The meter captures `liascape-player-bus`'s own monitor, which sits
 # *before* this playback/forwarding stream in the graph, so muting it leaves every
 # measurement in this script unaffected — verified directly: a run with muting on
 # reported the same tone levels (median ≈ −23 dBFS for a −20 dBFS tone, matching
-# `bus.sh`'s own documented ~−22.98…−23.03 figure) as a run with `LP_TEST_AUDIBLE=1`.
-# LP_TEST_AUDIBLE=1 skips all of this (kept audible, e.g. to sanity-check by ear).
+# `bus.sh`'s own documented ~−22.98…−23.03 figure) as a run with `LIASCAPE_TEST_AUDIBLE=1`.
+# LIASCAPE_TEST_AUDIBLE=1 skips all of this (kept audible, e.g. to sanity-check by ear).
 bus_playback_index() {
     pactl -f json list sink-inputs 2>/dev/null \
-        | jq -r '.[] | select(.properties["node.name"] == "lp-player-bus.playback") | .index' \
+        | jq -r '.[] | select(.properties["node.name"] == "liascape-player-bus.playback") | .index' \
         | head -1
 }
 MUTE_LOOP_PID=
 MUTE_STATE_FILE=
 start_mute_watcher() {
-    [[ -n ${LP_TEST_AUDIBLE:-} ]] && return
+    [[ -n ${LIASCAPE_TEST_AUDIBLE:-} ]] && return
     MUTE_STATE_FILE=$TMP/mute_state
     (
         recorded=0
@@ -89,7 +89,7 @@ start_mute_watcher() {
             if [[ -n $idx ]]; then
                 if [[ $recorded == 0 ]]; then
                     # A controller-side watcher may already be muting every
-                    # lp-player-bus.playback stream on this machine — record whether
+                    # liascape-player-bus.playback stream on this machine — record whether
                     # *we* are the one flipping it so cleanup only unmutes what we
                     # muted, never fighting an external watcher's own intent.
                     was_muted=$(pactl -f json list sink-inputs 2>/dev/null \
@@ -116,9 +116,9 @@ stop_mute_watcher_and_restore() {
 }
 
 # ---------------------------------------------------------------- build + preconditions
-BIN=${LP_PLAYER_BIN:-$REPO/src/player/target/debug/lp-player}
-if [[ -z ${LP_PLAYER_BIN:-} ]]; then
-    (cd "$REPO" && nix develop -c cargo build -q --manifest-path src/player/Cargo.toml --bin lp-player) \
+BIN=${LIASCAPE_PLAYER_BIN:-$REPO/src/player/target/debug/liascape-player}
+if [[ -z ${LIASCAPE_PLAYER_BIN:-} ]]; then
+    (cd "$REPO" && nix develop -c cargo build -q --manifest-path src/player/Cargo.toml --bin liascape-player) \
         2> >(grep -v "Git tree .* is dirty" >&2) || fail "build"
 fi
 [[ -x $BIN ]] || fail "no binary at $BIN"
@@ -130,7 +130,7 @@ if pgrep -x mpvpaper >/dev/null; then
     for _ in $(seq 30); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
 fi
 pgrep -x mpvpaper >/dev/null && fail "legacy mpvpaper still running"
-[[ $(sink_count) == 0 ]] || fail "an lp-player-bus sink already exists (another player?)"
+[[ $(sink_count) == 0 ]] || fail "an liascape-player-bus sink already exists (another player?)"
 
 ORIG=$(pactl get-default-sink)
 echo "default sink before: $ORIG"
@@ -138,7 +138,7 @@ echo "default sink before: $ORIG"
 (this check never changes it — fix the session first, or adjust the expectation if the \
 owner's default has genuinely changed)"
 
-TMP=$(mktemp -d /tmp/lp-dropout.XXXXXX)
+TMP=$(mktemp -d /tmp/liascape-dropout.XXXXXX)
 export XDG_RUNTIME_DIR=$TMP/run XDG_STATE_HOME=$TMP/state
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
@@ -157,10 +157,10 @@ cleanup() {
     SERVE_PID=
     for _ in $(seq 30); do [[ $(sink_count) == 0 ]] && break; sleep 0.1; done
     if [[ $(sink_count) != 0 ]]; then
-        echo "FAIL: an lp-player-bus sink is still loaded" >&2
+        echo "FAIL: an liascape-player-bus sink is still loaded" >&2
         rc=1
     else
-        echo "no lp-player-bus sink left"
+        echo "no liascape-player-bus sink left"
     fi
     local after
     after=$(pactl get-default-sink)
@@ -173,7 +173,7 @@ cleanup() {
         rm -rf "$TMP"
         echo PASS
     else
-        echo "kept $TMP (serve.err, state/livepaper/lp-player/events.jsonl)"
+        echo "kept $TMP (serve.err, state/livepaper/liascape-player/events.jsonl)"
     fi
     exit "$rc"
 }
@@ -199,7 +199,7 @@ done
 "$BIN" serve --headless --outputs "640x360@${OUTPUT_HZ}" --debug --log-level debug \
     >"$TMP/serve.out" 2>"$TMP/serve.err" &
 SERVE_PID=$!
-SOCK=$XDG_RUNTIME_DIR/livepaper/lp-player.sock
+SOCK=$XDG_RUNTIME_DIR/livepaper/liascape-player.sock
 for _ in $(seq 150); do [[ -S $SOCK ]] && break; sleep 0.1; done
 [[ -S $SOCK ]] || fail "serve never bound $SOCK: $(cat "$TMP/serve.err")"
 ctl hello >/dev/null || fail "hello"

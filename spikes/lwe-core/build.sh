@@ -14,8 +14,8 @@ REPO="$(cd "$HERE/../.." && pwd)"
 LWE_URL="https://github.com/Almamu/linux-wallpaperengine"
 LWE_REV="ddea3b493d2f4cca78a2e9547c4e61b92a14e0fc" # next-v2 head, 2026-08-03 "chore: formatting"
 
-if [[ "${LP_SPIKE_INNER:-}" != 1 ]]; then
-    exec env -u LD_LIBRARY_PATH LP_SPIKE_INNER=1 nix develop "$REPO" -c bash "$0" "$@"
+if [[ "${LIASCAPE_SPIKE_INNER:-}" != 1 ]]; then
+    exec env -u LD_LIBRARY_PATH LIASCAPE_SPIKE_INNER=1 nix develop "$REPO" -c bash "$0" "$@"
 fi
 
 LWE="$HERE/lwe"

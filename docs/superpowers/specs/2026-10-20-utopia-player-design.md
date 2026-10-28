@@ -1,4 +1,4 @@
-# lp-player — the "utopia player" — design
+# liascape-player — the "utopia player" — design
 
 Status: **approved by owner 2026-10-20** (with TransitionMethod kept) — next: implementation plan · Date: 2026-10-20 · Repo: livepaper-pro (branch `transitions-reveal`)
 
@@ -10,8 +10,8 @@ Everything else was stated or confirmed by the owner.
 ## 1. Intent — what this is and why
 
 livepaper plays live wallpapers today by orchestrating **four separate programs**: `mpvpaper` (videos),
-`lp-transition` (the transition overlay), one `linux-wallpaperengine` (LWE) process **per monitor** (scenes), and
-`lp-audio` (scene-audio volume control), all driven by the C# backend over sockets, files and process signals.
+`liascape-transition` (the transition overlay), one `linux-wallpaperengine` (LWE) process **per monitor** (scenes), and
+`liascape-audio` (scene-audio volume control), all driven by the C# backend over sockets, files and process signals.
 
 Every switch moves an *audible, visible* stream from one program to another (mpvpaper-A → overlay-A → overlay-B →
 mpvpaper-B), coordinated by wall-clock timing across processes. Each race in that handoff has needed its own
@@ -44,8 +44,8 @@ and visual seams cannot happen regardless of timing.
 ## 2. Goals, non-goals, anti-goals
 
 ### Goals
-1. **One player process** (`lp-player`, **my call** on the name) replacing mpvpaper, `lp-transition`, the per-monitor
-   LWE processes and `lp-audio`.
+1. **One player process** (`liascape-player`, **my call** on the name) replacing mpvpaper, `liascape-transition`, the per-monitor
+   LWE processes and `liascape-audio`.
 2. **Every wallpaper type as a texture source**: video, image, scene (WE scene via LWE), web (WE web wallpaper via
    Chromium/CEF), solid colour. All transitions work between any two types (V↔V, V↔S, S↔S, + image, + web) with any
    effect.
@@ -95,7 +95,7 @@ and visual seams cannot happen regardless of timing.
     missing, `install.sh` **hard-fails** with per-distro instructions, unless the user passes an explicit
     `--no-scenes`. That flag hides scenes in the UI, as `AllowScenes=false` does today.
   - The **web worker** (CEF, hundreds of MB) is **opt-in** (`--with-web`). Without it, web items stay hidden as today.
-- **Licence**: mpvpaper and linux-wallpaperengine are both **GPL-3.0** (verified in their `LICENSE` files). `lp-player`
+- **Licence**: mpvpaper and linux-wallpaperengine are both **GPL-3.0** (verified in their `LICENSE` files). `liascape-player`
   is therefore GPL-3.0. The C# backend talks to it over a socket and stays a separate program. *The livepaper repo
   currently has no LICENSE file at all — owner's decision, outside this design.*
 - **Project rules** (CLAUDE.md, apply to all of this): features must compose; settings apply live to the playing
@@ -118,7 +118,7 @@ and visual seams cannot happen regardless of timing.
 ### 4.1 Process model (decided — least interruption)
 
 ```
-┌──────────────────────────── lp-player (compositor, never runs risky code) ─────────────────────────────┐
+┌──────────────────────────── liascape-player (compositor, never runs risky code) ─────────────────────────────┐
 │ Outputs (one layer-shell surface per monitor) · Layers · Effects · Animator · Clocks · Gains · Probes   │
 │ In-process sources: Video/Image (libmpv render API), Colour                                            │
 │ Command API (unix socket) ◀───────────── livepaper backend (C#)                                        │
@@ -229,7 +229,7 @@ Windows; this is the Linux equivalent.
   sources ignore it.
 - **Present at the output's refresh rate**; sources update at their own rate. A missed source frame never stalls the
   compositor.
-- libmpv gotchas carried over from `lp-transition`: `vo=libmpv`, and free the render context with its GL context
+- libmpv gotchas carried over from `liascape-transition`: `vo=libmpv`, and free the render context with its GL context
   current.
 
 ### 5.2 Frames from workers
@@ -253,7 +253,7 @@ Windows; this is the Linux equivalent.
 - Each source owns its audio output stream (libmpv instance; LWE core audio in the scene worker; CEF audio in the web
   worker). PipeWire/PulseAudio mixes them.
 - **(my call) Player audio bus.**
-  - The player creates its own virtual sink, the *lp-player bus*. **Every** player audio stream targets it, both
+  - The player creates its own virtual sink, the *liascape-player bus*. **Every** player audio stream targets it, both
     in-process and from workers.
   - The bus forwards at 0 dB to the user's current default sink and follows default-sink changes, so chains such as
     EasyEffects keep working.
@@ -290,7 +290,7 @@ Windows; this is the Linux equivalent.
   limitation disappears.
 - Scene properties become live-settable from the UI later (a natural recipe; not required for parity).
 - **Today's scene machinery becomes obsolete**: per-monitor LWE processes, `--screenshot`/grim captures, the reveal-only
-  effect gate, `SceneTransitionDelayMs`, `lp-audio` + PID mapping + stream-restore correction, truncated-name and
+  effect gate, `SceneTransitionDelayMs`, `liascape-audio` + PID mapping + stream-restore correction, truncated-name and
   cmdline process matching, `_prelaunchPidsToKill`. A scene's `ready` event replaces the fixed load delay.
 
 ### 6.2 Web wallpapers — optional module, last
@@ -311,7 +311,7 @@ Windows; this is the Linux equivalent.
 ## 7. Upstream tracking layout
 
 ```
-src/player/                 lp-player compositor (our code)
+src/player/                 liascape-player compositor (our code)
 src/player-workers/scene/   scene worker (our code around LWE core)
 src/player-workers/web/     web worker (our code around LWE webhelper/CEF)
 third_party/lwe/            linux-wallpaperengine, vendored verbatim at a pinned upstream commit
@@ -346,7 +346,7 @@ UPSTREAM.md                 per vendored repo: URL, pinned commit, patch list, h
 - **mpvpaper**: absorbed, not vendored (small; its value is techniques). `UPSTREAM.md` records the mpvpaper commit
   last reviewed and which techniques were adopted, with GPL attribution (e.g. the 1.9 `glFenceSync` leak workaround
   if libmpv still needs it). A periodic review of mpvpaper's changelog replaces a code sync.
-- `lp-transition` and `lp-audio` are our own code and are retired by this project (their useful parts move into
+- `liascape-transition` and `liascape-audio` are our own code and are retired by this project (their useful parts move into
   `src/player/`).
 
 ---
@@ -382,7 +382,7 @@ Goal: a model can find out *what happened and why* from text, deterministically,
   - **dropout detector**: *observed* = the player bus monitor (§5.3). This is real post-server audio, so it catches
     what a gain-schedule check can't: buffer discontinuities, stream-create volume resets, stream-restore poisoning.
     *Expected* = the gain schedule × the sources' own content level. In debug/test mode the content level is decoded
-    from the source files at each source's logged positions, the method proven in `lp_audiowatch.py` (fit ±1.5 dB).
+    from the source files at each source's logged positions, the method proven in `liascape_audiowatch.py` (fit ±1.5 dB).
     Latency is aligned by cross-correlation; it is constant per stream, and simpler than today's because the bus
     holds only player audio. Flags runs ≥ 2 ms that sit ≥ 35 dB under expected, plus 10 ms bins ≥ 15 dB under.
     Content silence (e.g. an OP's silent tail) is never flagged, because the reference is silent too.
@@ -395,7 +395,7 @@ Goal: a model can find out *what happened and why* from text, deterministically,
   - a fake, steppable clock
   - render N frames to image files and audio to a WAV file
   - same inputs give the same outputs, so tests run without a monitor or the owner's session
-- **CLI** (`lp-player ctl …`): every command, query and event subscription from a shell, with JSON output.
+- **CLI** (`liascape-player ctl …`): every command, query and event subscription from a shell, with JSON output.
 - **Errors say what failed, with which inputs, and where to look** (doc anchor or log query).
 
 ---
@@ -462,7 +462,7 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
 
 ## 11. Switch-over bar (my proposal; owner deferred) and testing
 
-Switch the default to `lp-player` and delete the legacy path only when all of these hold on the owner's machine:
+Switch the default to `liascape-player` and delete the legacy path only when all of these hold on the owner's machine:
 
 1. **Zero dropouts** reported by the built-in detector across the compose matrix (§10), for ≥ 50 consecutive switches
    per mode, and zero visible seams by the seam probe.
@@ -476,7 +476,7 @@ Switch the default to `lp-player` and delete the legacy path only when all of th
    newly blank.
 
 **The owner has approved taking over the live wallpaper session for these batteries** (2026-10-20): starting and
-stopping lp-player, 50+ switches per mode, deliberate worker crashes, the 8 h soak. Leave the session in whatever
+stopping liascape-player, 50+ switches per mode, deliberate worker crashes, the 8 h soak. Leave the session in whatever
 state the tests end in (project memory "no restore after test"); report results.
 
 Testing approach: headless deterministic tests for blocks and recipes in CI-like local runs; on-machine probe-driven
@@ -488,7 +488,7 @@ results tracked per scene id).
 ## 12. Order of work and risks
 
 The project is several sub-projects, in this order. Each ships behind a backend setting (**(my call)**
-`PlayerEngine: legacy | lp-player`, default legacy) so today's player keeps working until the switch-over bar is met.
+`PlayerEngine: legacy | liascape-player`, default legacy) so today's player keeps working until the switch-over bar is met.
 
 0. **Spikes (throwaway, decide feasibility)**
    - (a) build LWE `next-v2` core and render one scene into our framebuffer offscreen
@@ -500,8 +500,8 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 3. **Programs and Signals in the player**: rotation, advance/wait-on-end, shuffle, history, restore,
    pause-when-covered (the in-player auto-mute Signal is **PARKED**, owner 2026-10-28); retire the timer, monitor and restart daemons, `pending_action.txt` and pid-file ownership.
 4. **Web worker** (optional module).
-5. **Switch-over**: meet §11, flip the default, delete legacy code and docs (mpvpaper launch path, `lp-transition`,
-   `lp-audio`, LWE process management, the related backend code).
+5. **Switch-over**: meet §11, flip the default, delete legacy code and docs (mpvpaper launch path, `liascape-transition`,
+   `liascape-audio`, LWE process management, the related backend code).
 6. **Scene compatibility programme** (ongoing): import worthwhile upstream PRs as patches, fix scenes from the
    corpus, track per-scene status.
 
@@ -549,7 +549,7 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 
 ## Calls made by the designer (please check)
 
-1. Name `lp-player`; source under `src/player/` + `src/player-workers/`; stays in the livepaper repo.
+1. Name `liascape-player`; source under `src/player/` + `src/player-workers/`; stays in the livepaper repo.
 2. Compositor in Rust; workers in C++. (Owner explicitly delegated the language choice to the designer.)
 3. Desktop OpenGL core profile (to host LWE core) instead of GLES.
 4. Videos/images in-process; scenes and web in isolated workers.

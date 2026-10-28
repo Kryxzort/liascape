@@ -1,5 +1,5 @@
-// Evaluate JS in the LIVE debug window via CDP (needs LP_DEBUG → remote-debugging-port 9222).
-// Usage: node app/shell/cdp.js "lpdbg.metrics()"
+// Evaluate JS in the LIVE debug window via CDP (needs LIASCAPE_DEBUG → remote-debugging-port 9222).
+// Usage: node app/shell/cdp.js "liascapeDbg.metrics()"
 const http = require("http");
 const expr = process.argv.slice(2).join(" ");
 http.get("http://localhost:9222/json", (res) => {

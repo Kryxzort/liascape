@@ -1,11 +1,11 @@
-//! The synthetic renderer (plan D7): draws `lp_player::scene::synthetic`'s patterns with one
+//! The synthetic renderer (plan D7): draws `liascape_player::scene::synthetic`'s patterns with one
 //! fragment shader — integer maths, so the probe pixels the tests predict are bit-exact.
 //! Image orientation as LWE's core (R25): image top at texture row 0 = `gl_FragCoord.y` 0,
 //! no flip anywhere.
 
 use glow::HasContext;
-use lp_player::gfx::{Fbo, Gfx};
-use lp_player::scene::synthetic::{Fail, Pattern, SyntheticSpec};
+use liascape_player::gfx::{Fbo, Gfx};
+use liascape_player::scene::synthetic::{Fail, Pattern, SyntheticSpec};
 
 const VS: &str = "#version 330 core
 void main() {

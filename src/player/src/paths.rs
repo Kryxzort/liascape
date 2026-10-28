@@ -1,39 +1,39 @@
 //! Where the player lives on disk (plan Global Constraints): the command socket
-//! `$XDG_RUNTIME_DIR/livepaper/lp-player.sock` (dir `0700`, socket `0600`) and the state
-//! dir (event log) `$XDG_STATE_HOME/livepaper/lp-player/` (default
-//! `~/.local/state/livepaper/lp-player/`). `LP_PLAYER_SOCKET` / `--socket` override the
+//! `$XDG_RUNTIME_DIR/livepaper/liascape-player.sock` (dir `0700`, socket `0600`) and the state
+//! dir (event log) `$XDG_STATE_HOME/livepaper/liascape-player/` (default
+//! `~/.local/state/livepaper/liascape-player/`). `LIASCAPE_PLAYER_SOCKET` / `--socket` override the
 //! socket path (both `serve` and `ctl`).
 
 use std::path::PathBuf;
 
-/// The command socket path: `$LP_PLAYER_SOCKET`, else `$XDG_RUNTIME_DIR/livepaper/
-/// lp-player.sock`, else `/run/user/<uid>/livepaper/lp-player.sock`.
+/// The command socket path: `$LIASCAPE_PLAYER_SOCKET`, else `$XDG_RUNTIME_DIR/livepaper/
+/// liascape-player.sock`, else `/run/user/<uid>/livepaper/liascape-player.sock`.
 pub fn socket() -> PathBuf {
-    if let Some(p) = std::env::var_os("LP_PLAYER_SOCKET").filter(|p| !p.is_empty()) {
+    if let Some(p) = std::env::var_os("LIASCAPE_PLAYER_SOCKET").filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
     let run = std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
-    run.join("livepaper/lp-player.sock")
+    run.join("livepaper/liascape-player.sock")
 }
 
-/// Whether [`socket`] is the default path (no `LP_PLAYER_SOCKET` override) — then its
+/// Whether [`socket`] is the default path (no `LIASCAPE_PLAYER_SOCKET` override) — then its
 /// directory (`…/livepaper`) is the player's own and may be `chmod 0700`-ed.
 pub fn socket_is_default() -> bool {
-    std::env::var_os("LP_PLAYER_SOCKET").is_none_or(|p| p.is_empty())
+    std::env::var_os("LIASCAPE_PLAYER_SOCKET").is_none_or(|p| p.is_empty())
 }
 
-/// The state dir: `$XDG_STATE_HOME/livepaper/lp-player`, else
-/// `$HOME/.local/state/livepaper/lp-player`.
+/// The state dir: `$XDG_STATE_HOME/livepaper/liascape-player`, else
+/// `$HOME/.local/state/livepaper/liascape-player`.
 pub fn state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("livepaper/lp-player")
+    base.join("livepaper/liascape-player")
 }
 
 /// Crash records of scene workers (Phase 2 Task 3): `<state>/crashes/`.
@@ -41,12 +41,12 @@ pub fn crash_dir() -> PathBuf {
     state_dir().join("crashes")
 }
 
-/// The scene worker binary: `$LP_SCENE_WORKER_BIN`, else `lp-scene-worker` next to this
+/// The scene worker binary: `$LIASCAPE_SCENE_WORKER_BIN`, else `liascape-scene-worker` next to this
 /// executable (`/proc/self/exe` — a dev build's `target/<profile>/`, the flake's `$out/bin`),
-/// else the first `lp-scene-worker` on `PATH`. `None` = scenes can't play here.
+/// else the first `liascape-scene-worker` on `PATH`. `None` = scenes can't play here.
 pub fn scene_worker_bin() -> Option<PathBuf> {
     resolve_scene_worker(
-        std::env::var_os("LP_SCENE_WORKER_BIN").map(PathBuf::from),
+        std::env::var_os("LIASCAPE_SCENE_WORKER_BIN").map(PathBuf::from),
         std::fs::read_link("/proc/self/exe").ok(),
         std::env::var_os("PATH"),
     )
@@ -59,7 +59,7 @@ pub fn resolve_scene_worker(
     exe: Option<PathBuf>,
     path_var: Option<std::ffi::OsString>,
 ) -> Option<PathBuf> {
-    const NAME: &str = "lp-scene-worker";
+    const NAME: &str = "liascape-scene-worker";
     let runnable = |p: &std::path::Path| {
         use std::os::unix::fs::PermissionsExt;
         std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
@@ -95,11 +95,11 @@ mod tests {
 
     #[test]
     fn scene_worker_resolution_order() {
-        let root = std::env::temp_dir().join(format!("lp-paths-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("liascape-paths-{}", std::process::id()));
         let exe_dir = root.join("bin");
         let path_dir = root.join("path");
-        let exe = exec_file(&exe_dir, "lp-player");
-        let on_path = exec_file(&path_dir, "lp-scene-worker");
+        let exe = exec_file(&exe_dir, "liascape-player");
+        let on_path = exec_file(&path_dir, "liascape-scene-worker");
         let path_var = Some(std::env::join_paths([&path_dir]).unwrap());
         // No sibling yet → PATH.
         assert_eq!(
@@ -107,7 +107,7 @@ mod tests {
             Some(on_path.clone())
         );
         // A sibling beats PATH.
-        let sib = exec_file(&exe_dir, "lp-scene-worker");
+        let sib = exec_file(&exe_dir, "liascape-scene-worker");
         assert_eq!(
             resolve_scene_worker(None, Some(exe.clone()), path_var.clone()),
             Some(sib)
@@ -123,6 +123,6 @@ mod tests {
         );
         // Nothing anywhere.
         assert_eq!(resolve_scene_worker(None, None, None), None);
-        assert!(crash_dir().ends_with("livepaper/lp-player/crashes"));
+        assert!(crash_dir().ends_with("livepaper/liascape-player/crashes"));
     }
 }

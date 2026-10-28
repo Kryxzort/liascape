@@ -54,10 +54,10 @@
 
       # 3) Native transition renderer (wlr-layer-shell + EGL/GLES3, libmpv full-live decode).
       # Absent → transitions no-op (instant cut); present → animated GLSL switches.
-      lp-transition = pkgs.stdenv.mkDerivation {
-        pname = "lp-transition";
+      liascape-transition = pkgs.stdenv.mkDerivation {
+        pname = "liascape-transition";
         inherit version;
-        src = ./src/native/lp-transition;
+        src = ./src/native/liascape-transition;
         nativeBuildInputs = [
           pkgs.pkg-config
           pkgs.wayland-scanner
@@ -69,21 +69,21 @@
         ];
         installPhase = ''
           runHook preInstall
-          install -Dm755 lp-transition $out/bin/lp-transition
+          install -Dm755 liascape-transition $out/bin/liascape-transition
           runHook postInstall
         '';
       };
 
       # 3b) Scene-audio crossfade helper (persistent libpulse context — event-driven volume).
-      lp-audio = pkgs.stdenv.mkDerivation {
-        pname = "lp-audio";
+      liascape-audio = pkgs.stdenv.mkDerivation {
+        pname = "liascape-audio";
         inherit version;
-        src = ./src/native/lp-audio;
+        src = ./src/native/liascape-audio;
         nativeBuildInputs = [ pkgs.pkg-config ];
         buildInputs = [ pkgs.libpulseaudio ];
         installPhase = ''
           runHook preInstall
-          install -Dm755 lp-audio $out/bin/lp-audio
+          install -Dm755 liascape-audio $out/bin/liascape-audio
           runHook postInstall
         '';
       };
@@ -94,7 +94,7 @@
       # as `git format-patch`; `scripts/lwe.sh verify` proves it). Fetched by hash, submodules
       # included; only the `linux-wallpaperengine-core` target is built (no CEF/webhelper, no GLFW
       # frontend). Output: lib/liblinux-wallpaperengine-core.so* + include/linux-wallpaperengine/*.h
-      # = what `LP_LWE_CORE_DIR` points at.
+      # = what `LIASCAPE_LWE_CORE_DIR` points at.
       lwePin = builtins.fromJSON (builtins.readFile ./third_party/lwe/PIN);
       lwe-src = pkgs.fetchFromGitHub {
         owner = lwePin.owner;
@@ -146,13 +146,13 @@
         '';
       };
 
-      # 3c) lp-player (Rust): the "utopia player" compositor that will replace mpvpaper +
-      # lp-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
+      # 3c) liascape-player (Rust): the "utopia player" compositor that will replace mpvpaper +
+      # liascape-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
       # .claude/rules/player-core.md. bindgenHook + pkg-config are wired now even though this
       # task doesn't bindgen anything yet, so Task 10 (libmpv FFI) doesn't have to touch the
       # flake again.
-      lp-player = pkgs.rustPlatform.buildRustPackage {
-        pname = "lp-player";
+      liascape-player = pkgs.rustPlatform.buildRustPackage {
+        pname = "liascape-player";
         inherit version;
         src = ./src/player;
         cargoLock.lockFile = ./src/player/Cargo.lock;
@@ -171,15 +171,15 @@
         # The dropout detector's tests decode reference audio with ffmpeg (CPU only — they run
         # in the sandbox; the GPU tests SKIP there without an EGL device).
         nativeCheckInputs = [ pkgs.ffmpeg ];
-        # feature `lwe` (default): lp-scene-worker links LWE's core (build.rs; RUNPATH = this)
-        LP_LWE_CORE_DIR = "${lwe-core}";
+        # feature `lwe` (default): liascape-scene-worker links LWE's core (build.rs; RUNPATH = this)
+        LIASCAPE_LWE_CORE_DIR = "${lwe-core}";
         # R86: libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
         # NixOS lives outside the Nix store at /run/opengl-driver/lib (the standard impure
         # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
         # (not --set) so a caller's own LD_LIBRARY_PATH is extended, not clobbered; harmless on
         # non-NVIDIA machines (the path simply doesn't exist, so the prefix contributes nothing).
         postInstall = ''
-          wrapProgram $out/bin/lp-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
+          wrapProgram $out/bin/liascape-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
             --suffix PATH : ${pkgs.ffmpeg}/bin
         '';
       };
@@ -209,21 +209,21 @@
           # GUI launcher: electron shell → spawns the backend (--serve) + loads the UI.
           makeWrapper ${pkgs.electron_42}/bin/electron $out/bin/livepaper-ui \
             --add-flags ${shellSrc} \
-            --set LP_BACKEND ${backend}/bin/livepaper \
-            --set LP_UI_DIR ${ui} \
-            --set LP_TRANSITIONS_DIR $out/share/livepaper/transitions \
-            --set LP_TRANSITION_BIN ${lp-transition}/bin/lp-transition \
-            --set LP_AUDIO_BIN ${lp-audio}/bin/lp-audio \
-            --set LP_PLAYER_BIN ${lp-player}/bin/lp-player \
+            --set LIASCAPE_BACKEND ${backend}/bin/livepaper \
+            --set LIASCAPE_UI_DIR ${ui} \
+            --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
+            --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
+            --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
+            --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           # Headless CLI (--restore/--action/daemons/--serve). Bare `livepaper` opens the GUI.
           makeWrapper ${backend}/bin/livepaper $out/bin/livepaper-cli \
-            --set LP_UI_DIR ${ui} \
-            --set LP_TRANSITIONS_DIR $out/share/livepaper/transitions \
-            --set LP_TRANSITION_BIN ${lp-transition}/bin/lp-transition \
-            --set LP_AUDIO_BIN ${lp-audio}/bin/lp-audio \
-            --set LP_PLAYER_BIN ${lp-player}/bin/lp-player \
+            --set LIASCAPE_UI_DIR ${ui} \
+            --set LIASCAPE_TRANSITIONS_DIR $out/share/livepaper/transitions \
+            --set LIASCAPE_TRANSITION_BIN ${liascape-transition}/bin/liascape-transition \
+            --set LIASCAPE_AUDIO_BIN ${liascape-audio}/bin/liascape-audio \
+            --set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           cat > $out/bin/livepaper <<EOF
@@ -260,10 +260,10 @@
         inherit
           ui
           backend
-          lp-transition
-          lp-audio
+          liascape-transition
+          liascape-audio
           lwe-core
-          lp-player
+          liascape-player
           livepaper
           ;
         default = livepaper;
@@ -274,19 +274,19 @@
       };
 
       # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make +
-      # `cargo build` for lp-player). `inputsFrom` the native + backend + lp-player derivations
+      # `cargo build` for liascape-player). `inputsFrom` the native + backend + liascape-player derivations
       # gives this shell their EXACT build env — pkg-config path AND the stdenv cc wrapper's RPATH
-      # injection, so the make'd lp-transition / lp-audio actually find mpv/wayland/GL at runtime
+      # injection, so the make'd liascape-transition / liascape-audio actually find mpv/wayland/GL at runtime
       # (a raw system gcc would not), and `cargo`/`rustc` resolve the same mpv-unwrapped/wayland/
-      # libGL/libxkbcommon/pipewire lp-player links against. Plus dotnet-sdk_10 + node + the
+      # libGL/libxkbcommon/pipewire liascape-player links against. Plus dotnet-sdk_10 + node + the
       # runtime tools the dev backend shells out to. On NixOS the systemd dev units run
       # `nix develop -c …`; run the whole thing with `nix develop -c bash scripts/dev.sh`.
       devShells.${system}.default = pkgs.mkShell {
         inputsFrom = [
           backend
-          lp-transition
-          lp-audio
-          lp-player
+          liascape-transition
+          liascape-audio
+          liascape-player
           lwe-core # cmake + SDL2/freetype/glm/lz4/zlib/GL: `scripts/lwe.sh build` for patch work
         ];
         packages = [
@@ -303,10 +303,10 @@
         # Shared compile cache (~/.cache/sccache): every git worktree (one per agent) has its own
         # target/, so without it each one recompiles all dependencies from scratch.
         RUSTC_WRAPPER = "sccache";
-        # `cargo build` links lp-scene-worker against the pinned core (feature `lwe`, default).
+        # `cargo build` links liascape-scene-worker against the pinned core (feature `lwe`, default).
         # Patch work on LWE: `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build`, then
-        # LP_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).
-        LP_LWE_CORE_DIR = "${lwe-core}";
+        # LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).
+        LIASCAPE_LWE_CORE_DIR = "${lwe-core}";
       };
     };
 }

@@ -69,7 +69,7 @@ pub(super) fn meter_window(rt: &mut Runtime, args: &Value) -> Result<Value, ApiE
         return Err(ApiError {
             code: "unsupported",
             message: format!("bus meter unavailable: {why}"),
-            hint: "`lp-player ctl probe '{\"name\":\"bus\"}'` shows the bus state and why; \
+            hint: "`liascape-player ctl probe '{\"name\":\"bus\"}'` shows the bus state and why; \
                    `ctl logs '{\"kind_prefix\":\"audio.\"}'` its events"
                 .into(),
         });

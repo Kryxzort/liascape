@@ -1,4 +1,4 @@
-# lp-scene-worker links these: the exports of LWE core at third_party/lwe/PIN (rev c5c2cad = next-v2 ddea3b4 + patches/lwe 0001-0006).
+# liascape-scene-worker links these: the exports of LWE core at third_party/lwe/PIN (rev c5c2cad = next-v2 ddea3b4 + patches/lwe 0001-0006).
 # 66 upstream + 4 from 0003 (wp_config_set_audio_output, wp_context_audio_pull/_stream_count/_driver_name).
 # Regenerate after a pin bump: nm -D --defined-only <core>.so | awk '$2 != "A" {sub(/@.*/, "", $3); print $3}' | sort
 wp_background_list_close

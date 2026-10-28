@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Speed storm: hammer playback speed on the LIVE session (PlayerEngine=lp-player) the way the UI
+"""Speed storm: hammer playback speed on the LIVE session (PlayerEngine=liascape-player) the way the UI
 does — per-item drag (/preview ~11/s + /library/speed persist), the global slider (/settings), and a
 raw flood (/preview 50/s) — while /next forces a transition every few seconds, so many speed
 changes land mid-transition. Records every player event, loop/frame health and the bus meter, then
 restores everything it changed (global speed, per-item overrides, user mute, bus playback mute).
 
-The owner hears nothing: the bus playback stream (lp-player-bus.playback) is muted for the run and
+The owner hears nothing: the bus playback stream (liascape-player-bus.playback) is muted for the run and
 the wallpaper's user mute is lifted so the meter sees real audio.
 
 Usage: python3 speedstorm.py <out-dir> [--phases control:60,drag:180,global:180,flood:120] [--next-every S]
@@ -20,7 +20,7 @@ Never prints /settings (it holds SteamRefreshToken); writes it nowhere either.
 import json, os, random, socket, subprocess, sys, threading, time, urllib.request
 
 U = "http://127.0.0.1:5174"
-SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "livepaper", "lp-player.sock")
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "livepaper", "liascape-player.sock")
 args = sys.argv[1:]
 OUT = args[0]
 def opt(name, default):
@@ -62,7 +62,7 @@ def sink_inputs():
     try: return json.loads(out)
     except Exception: return []  # noqa: BLE001
 
-def bus_playback(): return [si for si in sink_inputs() if si.get("properties", {}).get("node.name") == "lp-player-bus.playback"]
+def bus_playback(): return [si for si in sink_inputs() if si.get("properties", {}).get("node.name") == "liascape-player-bus.playback"]
 
 def mute_bus(v):
     for si in bus_playback():
@@ -79,7 +79,7 @@ def rec(**kw):
 
 # ---------------------------------------------------------------- preflight + originals
 eng = json.loads(http("GET", "/player-engine")[1])
-assert eng.get("active") == "lp-player", f"engine is {eng.get('active')}, not lp-player"
+assert eng.get("active") == "liascape-player", f"engine is {eng.get('active')}, not liascape-player"
 cur = json.loads(http("GET", "/current")[1])
 assert cur.get("path"), "nothing playing"
 st = json.loads(http("GET", "/playlist/state")[1]) or {}

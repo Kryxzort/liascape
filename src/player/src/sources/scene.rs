@@ -1,4 +1,4 @@
-//! `SceneSource` — a WE scene rendered by an `lp-scene-worker` process (Phase 2; `.claude/
+//! `SceneSource` — a WE scene rendered by an `liascape-scene-worker` process (Phase 2; `.claude/
 //! rules/player-core.md` § Scene worker). Task 4 built the **texture path**: spawn the
 //! worker ([`WorkerHost`]), import its exported ring once ([`ImportedRing`]), tick it, latch
 //! only frames whose fence already signalled ([`Latch`]) and return each replaced slot with a
@@ -191,8 +191,8 @@ pub struct SceneOpts {
     pub tick_hz: f64,
     /// The largest output's size (the ring is exported at `scene::cover_size`).
     pub max_size: [u32; 2],
-    /// Render `lp-synthetic.json` (tests; the worker also needs
-    /// `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`).
+    /// Render `liascape-synthetic.json` (tests; the worker also needs
+    /// `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`).
     pub synthetic: bool,
     /// Scene time at start (s).
     pub position: f64,
@@ -219,10 +219,10 @@ pub struct SceneOpts {
     /// and for a scene restored broken). Empty = none.
     pub preview: String,
     /// Scene loudness learning: seconds of audible play to learn over (`audio::loudness`,
-    /// `LP_PLAYER_LOUDNESS_WINDOW_S`; 60 by default).
+    /// `LIASCAPE_PLAYER_LOUDNESS_WINDOW_S`; 60 by default).
     pub loudness_window_s: f64,
     /// The total audible seconds (every play) after which nothing more is measured
-    /// (`LP_PLAYER_LOUDNESS_CAP_S`; 1800 by default).
+    /// (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`; 1800 by default).
     pub loudness_cap_s: f64,
     /// The measurement of earlier plays to continue (`loudness_seed`: the state the backend
     /// stored from the last `scene.loudness`), if any.
@@ -416,7 +416,7 @@ pub struct SceneSource {
 
 /// The hang-timeout knob (Task 10): a `Tick`/`Ping` unanswered this many ms = hung (tests
 /// set 300; production leaves it unset = [`HANG_TIMEOUT`], 2 s).
-pub const HANG_ENV: &str = "LP_SCENE_WORKER_HANG_MS";
+pub const HANG_ENV: &str = "LIASCAPE_SCENE_WORKER_HANG_MS";
 
 /// The hang timeout for the value of [`HANG_ENV`]: a positive whole number of ms, else
 /// [`HANG_TIMEOUT`].
@@ -458,7 +458,7 @@ impl SceneSource {
     /// `position`, `paused` — the effective one —, `speed`, the rest stored) and `base`
     /// (`SourceHost`'s base opts: `scene_worker` (the binary; else
     /// [`crate::paths::scene_worker_bin`]), `allow_synthetic` (a folder with
-    /// `lp-synthetic.json` plays the synthetic renderer, D7 — tests only), `scene_assets`,
+    /// `liascape-synthetic.json` plays the synthetic renderer, D7 — tests only), `scene_assets`,
     /// `scene_crash_dir`, `ao`/`audio_device` (the route), `stepped`). The worker is
     /// spawned at the first [`set_demand`](Self::set_demand) naming an output.
     pub fn open(
@@ -483,18 +483,18 @@ impl SceneSource {
             .or_else(crate::paths::scene_worker_bin)
             .ok_or_else(|| {
                 unsupported(
-                    "scenes need lp-scene-worker: none found (LP_SCENE_WORKER_BIN, next to \
-                     lp-player, PATH)",
+                    "scenes need liascape-scene-worker: none found (LIASCAPE_SCENE_WORKER_BIN, next to \
+                     liascape-player, PATH)",
                 )
             })?;
         let path = s("path");
         let allow_synthetic = bb("allow_synthetic");
         let mut o = SceneOpts::new(&path, bin);
         o.id = id.to_string();
-        o.synthetic = allow_synthetic && Path::new(&path).join("lp-synthetic.json").is_file();
+        o.synthetic = allow_synthetic && Path::new(&path).join("liascape-synthetic.json").is_file();
         if allow_synthetic {
             o.env
-                .push(("LP_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into()));
+                .push(("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into()));
         }
         o.position = f("position", 0.0);
         o.paused = matches!(get("paused"), Some(PropValue::Bool(true)));
@@ -1504,8 +1504,8 @@ impl SceneSource {
             .opts
             .env
             .iter()
-            .any(|(k, v)| k == "LP_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
-            && Path::new(&path).join("lp-synthetic.json").is_file();
+            .any(|(k, v)| k == "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
+            && Path::new(&path).join("liascape-synthetic.json").is_file();
         self.opts.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
             .map(|p| p.to_string_lossy().into_owned());
         self.wants_audio_input = false;
@@ -2319,7 +2319,7 @@ mod tests {
         assert!((c.now(at(10000)) - 2.0).abs() < 1e-9);
     }
 
-    /// Task 10: `LP_SCENE_WORKER_HANG_MS` sets the hang timeout (tests: 300); unset, empty,
+    /// Task 10: `LIASCAPE_SCENE_WORKER_HANG_MS` sets the hang timeout (tests: 300); unset, empty,
     /// zero or garbage → the production `HANG_TIMEOUT` (2 s).
     #[test]
     fn hang_timeout_knob() {

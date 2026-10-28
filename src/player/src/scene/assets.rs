@@ -4,7 +4,7 @@
 //! on this machine (and any with a second library) WE sits in another one, so the player
 //! resolves the dir itself and passes it to every worker.
 //!
-//! Order ([`resolve_with`]): an explicit dir (`player.scene_assets`) → `LP_WE_ASSETS_DIR` →
+//! Order ([`resolve_with`]): an explicit dir (`player.scene_assets`) → `LIASCAPE_WE_ASSETS_DIR` →
 //! every Steam root ([`steam_roots`]) and each library its `libraryfolders.vdf` lists →
 //! `<library>/steamapps/common/wallpaper_engine/assets`. A candidate counts only when it holds
 //! [`PROBE_FILE`] (an empty or half-installed dir would build no renderer — a 1×1 scene).
@@ -13,13 +13,13 @@
 use std::path::{Component, Path, PathBuf};
 
 /// The environment variable naming WE's `assets/` dir.
-pub const ASSETS_ENV: &str = "LP_WE_ASSETS_DIR";
+pub const ASSETS_ENV: &str = "LIASCAPE_WE_ASSETS_DIR";
 /// A file every scene's renderer needs (`genericimage2`, also pulled in by `general.bloom`).
 pub const PROBE_FILE: &str = "shaders/genericimage2.vert";
 /// Wallpaper Engine's Steam app id.
 pub const WE_APP_ID: &str = "431960";
 /// What the error hint tells the user to set.
-pub const HINT: &str = "set LP_WE_ASSETS_DIR (or the player prop player.scene_assets) to \
+pub const HINT: &str = "set LIASCAPE_WE_ASSETS_DIR (or the player prop player.scene_assets) to \
                         <steam library>/steamapps/common/wallpaper_engine/assets";
 
 /// Steam roots under `home`, in the order they're tried (native, the `~/.steam` aliases,
@@ -103,7 +103,7 @@ pub fn is_assets_dir(dir: &Path) -> bool {
     dir.join(PROBE_FILE).is_file()
 }
 
-/// [`resolve_with`] reading `LP_WE_ASSETS_DIR` from the environment (empty = unset).
+/// [`resolve_with`] reading `LIASCAPE_WE_ASSETS_DIR` from the environment (empty = unset).
 pub fn resolve(explicit: Option<&Path>, home: &Path) -> Result<PathBuf, String> {
     let env = std::env::var_os(ASSETS_ENV)
         .filter(|v| !v.is_empty())
@@ -186,7 +186,7 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("lp-assets-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("liascape-assets-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -279,14 +279,14 @@ mod tests {
             "/env/assets".into(),
             assets_in(&primary).display().to_string(),
             "/nonexistent/lib/steamapps/common/wallpaper_engine/assets".into(),
-            "LP_WE_ASSETS_DIR".into(),
+            "LIASCAPE_WE_ASSETS_DIR".into(),
             "player.scene_assets".into(),
         ] {
             assert!(e.contains(&want), "{want:?} not in {e}");
         }
         let e = resolve_with(None, None, &tmp("nosteam")).unwrap_err();
         assert!(e.contains("no Steam install"), "{e}");
-        assert!(e.contains("LP_WE_ASSETS_DIR"), "{e}");
+        assert!(e.contains("LIASCAPE_WE_ASSETS_DIR"), "{e}");
     }
 
     #[test]

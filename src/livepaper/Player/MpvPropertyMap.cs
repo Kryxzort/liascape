@@ -4,14 +4,14 @@ using System.Text.Json;
 
 namespace livepaper.Player;
 
-// Legacy mpv IPC property commands → lp-player graph properties (see .claude/rules/player-adapter.md
+// Legacy mpv IPC property commands → liascape-player graph properties (see .claude/rules/player-adapter.md
 // § Property map). PlayerHelper still speaks mpv (`SendCommand("set_property", "volume", 80)`); under
-// PlayerEngine=lp-player its dispatch hands those args here and LpPlayerMedia.Mpv routes the result
+// PlayerEngine=liascape-player its dispatch hands those args here and LiascapePlayerMedia.Mpv routes the result
 // (volume/speed/mute → the effective-settings resolver, layer props → `lay:*:main`, the rest → `srcs:*`).
 public static class MpvPropertyMap
 {
-    public const double SilentDb = -96.0;  // mpv volume-gain-min = lp-player's silent
-    private const double MaxDb = 12.0;      // lp-player gain clamp
+    public const double SilentDb = -96.0;  // mpv volume-gain-min = liascape-player's silent
+    private const double MaxDb = 12.0;      // liascape-player gain clamp
 
     // mpv's `volume` is CUBIC (50 → −18.06 dB, measured −18.07): gain = 60·log10(N/100) dB — the curve
     // users are used to. N ≤ 0 → silent (−96).
@@ -60,12 +60,12 @@ public static class MpvPropertyMap
             case "af": return ("af", Str(v) ?? "");
             case "aid": return ("no_audio", Str(v) is "no" or "false" || Bool(v) == false);
         }
-        return Unknown(mpvArgs, "no lp-player equivalent");
+        return Unknown(mpvArgs, "no liascape-player equivalent");
     }
 
     private static (string, object)? Unknown(object[] a, string why)
     {
-        LpPlayerClient.Log($"MpvPropertyMap: `{string.Join(" ", a)}` not translated ({why})");
+        LiascapePlayerClient.Log($"MpvPropertyMap: `{string.Join(" ", a)}` not translated ({why})");
         return null;
     }
 

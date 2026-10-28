@@ -1,6 +1,6 @@
 //! Scene worker protocol + process lifecycle (Phase 2 Task 3; `.claude/rules/player-core.md`
-//! § Scene worker). No GPU: every worker here is `lp-scene-worker --stub`, whose behaviour the
-//! `LP_SCENE_WORKER_TEST` knobs script (`crash_after_ms`, `hang_after_ms`, `exit_code`,
+//! § Scene worker). No GPU: every worker here is `liascape-scene-worker --stub`, whose behaviour the
+//! `LIASCAPE_SCENE_WORKER_TEST` knobs script (`crash_after_ms`, `hang_after_ms`, `exit_code`,
 //! `ignore_quit`, `spam_stderr`). Crash records go to a private dir under `temp_dir()`; the
 //! stub sets its own `RLIMIT_CORE` 1 before `abort()` (no systemd-coredump / DrKonqi popups).
 
@@ -9,15 +9,15 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use lp_player::worker::proto::{self, AudioRoute, FromWorker, Plane, ToWorker};
-use lp_player::worker::{
+use liascape_player::worker::proto::{self, AudioRoute, FromWorker, Plane, ToWorker};
+use liascape_player::worker::{
     RestartBudget, STOP_GRACE, WorkerEvent, WorkerHost, WorkerSpec, WorkerState,
 };
 
-const HELPER_ENV: &str = "LP_WORKER_TEST_HELPER";
+const HELPER_ENV: &str = "LIASCAPE_WORKER_TEST_HELPER";
 
 fn bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_lp-scene-worker"))
+    PathBuf::from(env!("CARGO_BIN_EXE_liascape-scene-worker"))
 }
 
 /// A fresh private directory under `temp_dir()` (crash records).
@@ -25,7 +25,7 @@ fn tmp_dir(name: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     let d = std::env::temp_dir().join(format!(
-        "lp-worker-test-{}-{name}-{}",
+        "liascape-worker-test-{}-{name}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::SeqCst)
     ));
@@ -55,7 +55,7 @@ fn start() -> ToWorker {
 fn stub_spec(id: &str, knobs: &str) -> WorkerSpec {
     let mut s = WorkerSpec::new(id, bin(), start());
     s.args = vec!["--stub".into()];
-    s.env = vec![("LP_SCENE_WORKER_TEST".into(), knobs.into())];
+    s.env = vec![("LIASCAPE_SCENE_WORKER_TEST".into(), knobs.into())];
     s.crash_dir = tmp_dir(id);
     s
 }
@@ -119,7 +119,7 @@ fn seqpacket_pair() -> (OwnedFd, OwnedFd) {
 }
 
 fn memfd_with(bytes: &[u8]) -> OwnedFd {
-    let fd = unsafe { libc::memfd_create(c"lp-test".as_ptr(), libc::MFD_CLOEXEC) };
+    let fd = unsafe { libc::memfd_create(c"liascape-test".as_ptr(), libc::MFD_CLOEXEC) };
     assert!(fd >= 0);
     let n = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
     assert_eq!(n as usize, bytes.len());
@@ -181,7 +181,7 @@ fn proto_roundtrip_with_fds() {
             input: Some((0..=255).cycle().take(1024).collect()),
         },
         ToWorker::Route {
-            audio: AudioRoute::Device("pipewire/lp-player-bus".into()),
+            audio: AudioRoute::Device("pipewire/liascape-player-bus".into()),
         },
         ToWorker::Quit,
     ];
@@ -542,7 +542,7 @@ fn log_tail_and_crash_records_are_bounded() {
         "{evs:?}"
     );
     let tail = host.log_tail();
-    assert_eq!(tail.len(), lp_player::worker::LOG_TAIL, "{tail:?}");
+    assert_eq!(tail.len(), liascape_player::worker::LOG_TAIL, "{tail:?}");
     assert!(tail[49].contains("stub: crashing"), "newest last: {tail:?}");
     // stderr and the socket's Log lines interleave arbitrarily; the spam lines kept are the
     // newest ones, in order, ending with the last.
@@ -580,7 +580,7 @@ fn log_tail_and_crash_records_are_bounded() {
         .count();
     assert_eq!(
         n,
-        lp_player::worker::MAX_CRASH_RECORDS,
+        liascape_player::worker::MAX_CRASH_RECORDS,
         "records in {crash_dir:?}"
     );
 }

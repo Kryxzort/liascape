@@ -596,7 +596,7 @@ fn api_err(code: &'static str, message: String) -> ApiError {
     ApiError {
         code,
         message,
-        hint: "see .claude/rules/player-core.md \u{a7} Transition recipe; `lp-player ctl state` \
+        hint: "see .claude/rules/player-core.md \u{a7} Transition recipe; `liascape-player ctl state` \
                shows the live graph"
             .to_string(),
     }

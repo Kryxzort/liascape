@@ -1,6 +1,6 @@
 //! The running player (spec §4.1/§4.2): one calloop loop that owns the graph, the
 //! animator, the clock, the live sources, the transition recipe, the compositor and the
-//! outputs, and serves the command API (`api/`). `lp-player serve` is [`serve`].
+//! outputs, and serves the command API (`api/`). `liascape-player serve` is [`serve`].
 //!
 //! **Loop sources.** The listening socket + one edge-triggered source per client
 //! (`api::server`), one level-triggered source per mpv wake eventfd (a `dup` of the
@@ -97,18 +97,18 @@ pub enum ClockMode {
     Stepped,
 }
 
-/// What `lp-player serve` was asked to run.
+/// What `liascape-player serve` was asked to run.
 #[derive(Debug, Clone)]
 pub struct ServeOpts {
     /// `(width, height, hz)` per virtual output (`--outputs`), headless only.
     pub outputs: Vec<(u32, u32, u32)>,
     pub clock: ClockMode,
     /// mpv `ao` for every source (`--ao null` in tests — R26); `None` = mpv's default
-    /// for lp-player (`pipewire`).
+    /// for liascape-player (`pipewire`).
     pub ao: Option<String>,
     pub socket: PathBuf,
     /// The socket's directory is ours to `chmod 0700` even if it exists (the default
-    /// `$XDG_RUNTIME_DIR/livepaper`); `false` for `--socket`/`LP_PLAYER_SOCKET`.
+    /// `$XDG_RUNTIME_DIR/livepaper`); `false` for `--socket`/`LIASCAPE_PLAYER_SOCKET`.
     pub own_socket_dir: bool,
     pub state_dir: PathBuf,
     pub log_level: Level,
@@ -127,21 +127,21 @@ pub struct ServeOpts {
     /// auto-trigger after every `transition.done`); equivalent to `set player.debug true`
     /// once running.
     pub debug: bool,
-    /// Phase 2 (`--render-worker on|off`, env `LP_PLAYER_RENDER_WORKER`): render mpv sources
-    /// on the `lp-render` worker thread (§ Sources "Render worker"). Real clock only — the
+    /// Phase 2 (`--render-worker on|off`, env `LIASCAPE_PLAYER_RENDER_WORKER`): render mpv sources
+    /// on the `lia-render` worker thread (§ Sources "Render worker"). Real clock only — the
     /// stepped clock renders on the loop whatever this says.
     pub render_worker: bool,
 }
 
 /// Phase 2: whether the render worker runs when neither `--render-worker` nor
-/// `LP_PLAYER_RENDER_WORKER` says (§ Sources "Render worker"). On since 2026-10-26: the
+/// `LIASCAPE_PLAYER_RENDER_WORKER` says (§ Sources "Render worker"). On since 2026-10-26: the
 /// switch loop's warm median max_busy 16.3 → 1.3–3.6 ms, missed frames at 2× content on a
 /// 240 Hz output 2.2–3.3 → 1.8–2.5/s, full suite green with it on and off, the UI matrix
 /// 682/0 with it on. `off` stays the escape hatch.
 pub const RENDER_WORKER_DEFAULT: bool = true;
 
 /// The env knob for the render worker (`on`/`off`); `--render-worker` wins over it.
-pub const RENDER_WORKER_ENV: &str = "LP_PLAYER_RENDER_WORKER";
+pub const RENDER_WORKER_ENV: &str = "LIASCAPE_PLAYER_RENDER_WORKER";
 
 /// `on|off` (also `1|0`, `true|false`, `yes|no`).
 pub fn parse_on_off(v: &str) -> Option<bool> {
@@ -152,7 +152,7 @@ pub fn parse_on_off(v: &str) -> Option<bool> {
     }
 }
 
-/// `--render-worker` (if given), else `LP_PLAYER_RENDER_WORKER` (an unparsable value is
+/// `--render-worker` (if given), else `LIASCAPE_PLAYER_RENDER_WORKER` (an unparsable value is
 /// ignored with a stderr note), else [`RENDER_WORKER_DEFAULT`].
 pub fn render_worker_enabled(flag: Option<bool>) -> bool {
     if let Some(f) = flag {
@@ -160,7 +160,7 @@ pub fn render_worker_enabled(flag: Option<bool>) -> bool {
     }
     match std::env::var(RENDER_WORKER_ENV) {
         Ok(v) if !v.is_empty() => parse_on_off(&v).unwrap_or_else(|| {
-            eprintln!("lp-player serve: {RENDER_WORKER_ENV}={v:?} ignored (expected on|off)");
+            eprintln!("liascape-player serve: {RENDER_WORKER_ENV}={v:?} ignored (expected on|off)");
             RENDER_WORKER_DEFAULT
         }),
         _ => RENDER_WORKER_DEFAULT,
@@ -426,7 +426,7 @@ pub struct Runtime {
     pub(crate) wake_pending: bool,
     step: Option<PendingStep>,
     step_queue: VecDeque<(u64, Value, Duration)>,
-    /// `capture`'s readbacks in flight + `lp-capture` (encode + write); its replies are
+    /// `capture`'s readbacks in flight + `lia-capture` (encode + write); its replies are
     /// deferred (`api::capture`).
     pub(crate) capture: crate::api::capture::Capturer,
     /// The 1 ms timer polling a capture's GPU readback is armed.
@@ -543,7 +543,7 @@ pub struct Runtime {
 
 /// Phase 2 Task 8: the runtime's side of `crate::vram` (`Runtime::vram_tick`).
 pub(crate) struct VramState {
-    /// The `lp-vram` sampler, while a rule needs it.
+    /// The `lia-vram` sampler, while a rule needs it.
     pub(crate) monitor: Option<crate::vram::Monitor>,
     pub(crate) timing: crate::vram::Timing,
     /// The last sample seen (`Monitor::latest`'s seq).
@@ -2199,7 +2199,7 @@ impl Runtime {
         if want.is_empty() {
             if let Some(m) = self.sysmon.take() {
                 let _ = std::thread::Builder::new()
-                    .name("lp-sysmon-stop".into())
+                    .name("lia-sysmon-stop".into())
                     .spawn(move || drop(m));
             }
             return;
@@ -2216,9 +2216,9 @@ impl Runtime {
     }
 
     /// Phase 2 Task 7: `player.scene_assets` → the scenes' base opts. Re-resolved whenever
-    /// the prop changes ("" = auto: `LP_WE_ASSETS_DIR`, then every Steam library); the result
+    /// the prop changes ("" = auto: `LIASCAPE_WE_ASSETS_DIR`, then every Steam library); the result
     /// is `player.scene_assets_resolved` ("" = none — a scene then errors naming
-    /// `LP_WE_ASSETS_DIR` / `player.scene_assets`, and `hello` offers no `scene`).
+    /// `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`, and `hello` offers no `scene`).
     pub(crate) fn update_scene_assets(&mut self) {
         let want = match self.graph.get(&p("player.scene_assets")) {
             Ok(PropValue::Str(s)) => s,
@@ -2263,7 +2263,7 @@ impl Runtime {
     pub fn scenes_available(&self) -> Result<(), String> {
         if crate::paths::scene_worker_bin().is_none() {
             return Err(
-                "lp-scene-worker not found (LP_SCENE_WORKER_BIN, next to lp-player, \
+                "liascape-scene-worker not found (LIASCAPE_SCENE_WORKER_BIN, next to liascape-player, \
                         PATH)"
                     .into(),
             );
@@ -2854,7 +2854,7 @@ impl Runtime {
         let kind = req.to.get("kind").and_then(Value::as_str).unwrap_or("");
         let path = req.to.get("path").and_then(Value::as_str).unwrap_or("");
         let hint =
-            "see .claude/rules/player-core.md \u{a7} Runtime \"Outputs\"; `lp-player ctl state`";
+            "see .claude/rules/player-core.md \u{a7} Runtime \"Outputs\"; `liascape-player ctl state`";
         if req.effect_id.as_deref() == Some("") {
             return Err(ApiError {
                 code: "out_of_range",
@@ -3737,7 +3737,7 @@ impl Runtime {
                     STEP_TIMEOUT.as_secs(),
                     pending.join(", ")
                 ),
-                hint: "`lp-player ctl probe '{\"name\":\"sources\"}'` shows each source's \
+                hint: "`liascape-player ctl probe '{\"name\":\"sources\"}'` shows each source's \
                        state; `ctl logs '{\"kind_prefix\":\"source.\"}'` its events"
                     .into(),
             })
@@ -3927,7 +3927,7 @@ impl Runtime {
             .any(|c| c.more_input && !c.awaiting && c.dead.is_none())
     }
 
-    /// Hand finished GPU readbacks of `capture` to `lp-capture`; while one is still on the
+    /// Hand finished GPU readbacks of `capture` to `lia-capture`; while one is still on the
     /// GPU a 1 ms timer re-polls it (a stepped loop has no tick to do it).
     pub(crate) fn pump_captures(&mut self) {
         self.capture.pump(&self.gfx, None);
@@ -3961,7 +3961,7 @@ impl Runtime {
         }
     }
 
-    /// Answer every `capture` whose file `lp-capture` finished writing (its buffer unmapped
+    /// Answer every `capture` whose file `lia-capture` finished writing (its buffer unmapped
     /// first); its client's later requests may proceed (a client has at most one deferred
     /// reply: nothing more is read from it meanwhile).
     pub(crate) fn finish_captures(&mut self) {
@@ -4033,7 +4033,7 @@ fn signal_fd() -> Result<OwnedFd, String> {
     }
 }
 
-/// `lp-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
+/// `liascape-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
 /// connection is lost — then every source is silenced and torn down, and it returns `Err`).
 pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     crate::mem::apply_policy(); // Task 20b: allocator policy, first thing (before the mpv cores exist)
@@ -4100,7 +4100,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
                 Level::Warn,
                 "effects.missing",
                 None,
-                json!({ "hint": "no transitions/ directory resolved (LP_TRANSITIONS_DIR, \
+                json!({ "hint": "no transitions/ directory resolved (LIASCAPE_TRANSITIONS_DIR, \
                                  ~/.local/share/livepaper-web/transitions, the repo); \
                                  only cuts are available" }),
             );
@@ -4143,7 +4143,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     // Phase 2 Task 5: `kind: scene` sources. The worker binary (none → a scene's open fails
     // naming it; `hello` has no `scene` capability), crash records under the state dir, and
     // the synthetic test renderer only when this process runs with
-    // `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (D7; production never sets it).
+    // `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (D7; production never sets it).
     if let Some(bin) = crate::paths::scene_worker_bin() {
         base.insert("scene_worker".into(), json!(bin));
     }
@@ -4151,7 +4151,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         "scene_crash_dir".into(),
         json!(opts.state_dir.join("crashes")),
     );
-    if std::env::var("LP_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1") {
+    if std::env::var("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1") {
         base.insert("allow_synthetic".into(), json!(true));
     }
     let clock = match opts.clock {
@@ -4169,7 +4169,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             (Box::new(h), None)
         }
     };
-    // `capture` encodes on `lp-capture`; a finished one wakes the loop, which answers it.
+    // `capture` encodes on `lia-capture`; a finished one wakes the loop, which answers it.
     let (capture_ping, capture_ping_src) =
         calloop::ping::make_ping().map_err(|e| format!("ping: {e}"))?;
     handle
@@ -4317,7 +4317,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| format!("event loop: {}", e.error))?;
         rt.host
             .set_async_open(Some(Arc::new(move || open_ping.ping())));
-        // Phase 2: render contexts (creation, first render, every frame) on `lp-render`.
+        // Phase 2: render contexts (creation, first render, every frame) on `lia-render`.
         // Real clock only, like the async opens it rides on.
         if opts.render_worker {
             match crate::sources::RenderWorker::start(&rt.gfx) {
@@ -4400,7 +4400,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             break;
         }
         rt.after_dispatch();
-        // Phase 2: the render worker died (a panic on `lp-render`): every mpv picture would
+        // Phase 2: the render worker died (a panic on `lia-render`): every mpv picture would
         // freeze and every open wait out the attach timeout — fail like a lost compositor
         // instead (silenced + torn down, exit 3: the supervisor restarts with `--restore`).
         if rt.quit_at.is_none()

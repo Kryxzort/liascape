@@ -440,7 +440,7 @@ fn encode_png(path: &Path, w: u32, h: u32, pixels: &[u8], flip: bool) -> io::Res
     encoder.set_depth(png::BitDepth::Eight);
     // fdeflate's PNG-tuned mode: the default (`Balanced`) took 820–875 ms for a 3840×1080
     // scene frame (Task 13, when `capture` still encoded on the loop); `Fast` 39–112 ms —
-    // still the reply's latency now that it encodes on `lp-capture`.
+    // still the reply's latency now that it encodes on `lia-capture`.
     encoder.set_compression(png::Compression::Fast);
     let mut writer = encoder.write_header().map_err(io::Error::other)?;
     writer.write_image_data(out).map_err(io::Error::other)?;

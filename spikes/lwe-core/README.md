@@ -1,6 +1,6 @@
 # Spike: LWE `next-v2` core, offscreen, in our GL context
 
-Throwaway code for Phase 0 spike (a) of lp-player. Findings: `docs/player/spikes/lwe-core.md`.
+Throwaway code for Phase 0 spike (a) of liascape-player. Findings: `docs/player/spikes/lwe-core.md`.
 
 It builds linux-wallpaperengine's `core` library from branch `next-v2` at `ddea3b4` and drives it from
 `host.cpp`. The host owns the surfaceless EGL desktop-GL 3.3 core context, the loop, the clock and the FBO.

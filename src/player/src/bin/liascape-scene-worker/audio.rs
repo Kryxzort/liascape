@@ -2,12 +2,12 @@
 //! § Scene worker → "Scene audio (Task 6)").
 //!
 //! One PipeWire playback stream per worker — F32 stereo 48 kHz, `node.latency 256/48000`,
-//! `node.name = lp-player-scene.<source id>`, `media.role = Wallpaper`, `target.object =
-//! lp-player-bus` when the route is the bus — run from its own thread (`lp-scene-audio`, its own
+//! `node.name = liascape-player-scene.<source id>`, `media.role = Wallpaper`, `target.object =
+//! liascape-player-bus` when the route is the bus — run from its own thread (`lia-scene-audio`, its own
 //! PipeWire main loop) with **`RT_PROCESS`**: the process callback runs on PipeWire's data
 //! thread (real-time priority through the client's `module-rt`, as mpv's AO does) — on the
 //! main-loop thread it missed graph cycles under CPU load (1.3 ms of silence on the bus at a
-//! 64-frame quantum: `pw-top` ERR on `lp-player-scene.*`, the `scene_gain_ramp_reaches_the_bus`
+//! 64-frame quantum: `pw-top` ERR on `liascape-player-scene.*`, the `scene_gain_ramp_reaches_the_bus`
 //! flake). The callback owns the [`Dsp`] (a mutex the main loop never takes while streaming) and
 //! hands the envelope + `AudioFlowing` to the main loop through [`Outbox`] (`try_lock` /
 //! atomics: never a wait on the main loop). The callback **pulls** the scene's mix
@@ -44,11 +44,11 @@ use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lp_player::audio::bus::{APP_NAME, MEDIA_ROLE, SINK_NAME};
-use lp_player::audio::loudness::{Segment, SegmentMeter};
-use lp_player::audio::meter::{BlockMeter, mono_ns};
-use lp_player::units::SILENT_DB;
-use lp_player::worker::proto::{self, AudioRoute, FromWorker, ToWorker};
+use liascape_player::audio::bus::{APP_NAME, MEDIA_ROLE, SINK_NAME};
+use liascape_player::audio::loudness::{Segment, SegmentMeter};
+use liascape_player::audio::meter::{BlockMeter, mono_ns};
+use liascape_player::units::SILENT_DB;
+use liascape_player::worker::proto::{self, AudioRoute, FromWorker, ToWorker};
 use pipewire as pw;
 use pw::context::ContextRc;
 use pw::main_loop::MainLoopRc;
@@ -493,7 +493,7 @@ fn log(sock: &OwnedFd, level: &str, line: String) {
 /// atomic).
 pub fn spawn(ctl: Arc<Control>, sock: OwnedFd) -> std::io::Result<()> {
     std::thread::Builder::new()
-        .name("lp-scene-audio".into())
+        .name("lia-scene-audio".into())
         .spawn(move || run(ctl, sock))
         .map(|_| ())
 }
@@ -587,14 +587,14 @@ fn run_pw(
         })
         .register();
     let id = ctl.id.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let name = format!("lp-player-scene.{id}");
+    let name = format!("liascape-player-scene.{id}");
     let latency = format!("{QUANTUM}/{RATE}");
     let mut props = properties! {
         "media.type" => "Audio",
         "media.category" => "Playback",
         "media.role" => MEDIA_ROLE,
         "node.name" => name.as_str(),
-        "node.description" => "lp-player scene",
+        "node.description" => "liascape-player scene",
         "application.name" => APP_NAME,
         "node.latency" => latency.as_str(),
         "state.restore-props" => "false",
@@ -658,7 +658,7 @@ fn run_pw(
         })
         .register()
         .map_err(|e| format!("stream listener: {e}"))?;
-    lp_player::audio::bus::connect_with(
+    liascape_player::audio::bus::connect_with(
         &stream,
         spa::utils::Direction::Output,
         pw::stream::StreamFlags::AUTOCONNECT
@@ -756,7 +756,7 @@ mod tests {
         assert!((gain_lin(-6.0206) - 0.5).abs() < 1e-6);
         assert!((gain_lin(0.0) - 1.0).abs() < 1e-9);
         assert!((gain_lin(-20.0) - 0.1).abs() < 1e-7);
-        assert!((gain_lin(-6.0206) as f64 - lp_player::units::db_to_lin(-6.0206)).abs() < 1e-6);
+        assert!((gain_lin(-6.0206) as f64 - liascape_player::units::db_to_lin(-6.0206)).abs() < 1e-6);
     }
 
     /// The envelope (1 ms max-channel RMS dBFS) of a full-scale sine is −3.01 dBFS, like the
@@ -774,7 +774,7 @@ mod tests {
         for (_, db) in &d.env {
             assert!((db + 3.0103).abs() < 0.05, "{db}");
         }
-        assert!((lp_player::audio::meter::dbfs_block(&out[..96], CH) + 3.0103).abs() < 0.05);
+        assert!((liascape_player::audio::meter::dbfs_block(&out[..96], CH) + 3.0103).abs() < 0.05);
     }
 
     /// Paused / `no_audio` with the stream already silent (the compositor ramped first): not
@@ -831,7 +831,7 @@ mod tests {
             d.process(&mut out, st(-40.0), Some(&mut tone), 0, true);
         }
         assert_eq!(d.segs.len(), 2, "{:?}", d.segs);
-        let l = lp_player::audio::loudness::lufs_of(d.segs[1].power);
+        let l = liascape_player::audio::loudness::lufs_of(d.segs[1].power);
         assert!((l + 20.0).abs() < 0.2, "pre-gain: {l}");
         d.segs.clear();
         let mut paused = st(-40.0);

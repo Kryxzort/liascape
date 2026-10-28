@@ -6,7 +6,7 @@
 //! - [`SnapshotSource`] (`snapshot.rs`) — a held still copy of another source's frame
 //!   (R34: what reveal/frozen show for an outgoing side that keeps playing elsewhere).
 //! - [`scene::SceneSource`] (`scene.rs`, Phase 2) — a WE scene rendered by an
-//!   `lp-scene-worker` process, its frames imported over dmabuf.
+//!   `liascape-scene-worker` process, its frames imported over dmabuf.
 //! - [`SourceHost`] (`host.rs`) — owns one live source per graph `Source` node: opens/
 //!   drops them as nodes come and go, forwards property changes, mirrors observed values
 //!   back into the graph, and collects events (R32).

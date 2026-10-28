@@ -1,12 +1,12 @@
 //! Task 16: the supervisor + the state snapshot, end to end. Every test spawns the real
-//! binary **supervised** (`lp-player serve --headless --outputs 640x360@60,320x180@60
+//! binary **supervised** (`liascape-player serve --headless --outputs 640x360@60,320x180@60
 //! --clock real --ao null`, no `--no-supervise`) with a temp `XDG_RUNTIME_DIR` /
 //! `XDG_STATE_HOME`, crashes or stops the compositor child (`hello.pid`), and checks what
 //! the restarted child shows. The guard kills the supervisor on drop (the child then gets
 //! its `PR_SET_PDEATHSIG` SIGTERM; it is SIGKILLed if it lingers), every spawned process
 //! has `PR_SET_PDEATHSIG(SIGKILL)` towards the test and `RLIMIT_CORE` 1 (the deliberate
 //! crashes reach no core dump handler). Skips (prints `SKIP: …`) only without an EGL device or a
-//! `transitions/` catalogue — fails instead under `LP_REQUIRE_GPU=1` (`common::skip_gpu`).
+//! `transitions/` catalogue — fails instead under `LIASCAPE_REQUIRE_GPU=1` (`common::skip_gpu`).
 //! One server at a time.
 
 mod common;
@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use common::{ClipSpec, ensure_clip, headless_gl};
 use serde_json::{Value, json};
 
-const BIN: &str = env!("CARGO_BIN_EXE_lp-player");
+const BIN: &str = env!("CARGO_BIN_EXE_liascape-player");
 static SERIAL: Mutex<()> = Mutex::new(());
 static N: AtomicU32 = AtomicU32::new(0);
 /// The brief: the restarted player answers `hello` within this.
@@ -33,21 +33,21 @@ const RESTART_BUDGET: Duration = Duration::from_millis(1500);
 /// dir): under IO load (other builds; 4 fsync writers) that took > 1 s — the old 300 ms / 1 s
 /// waits failed 11 of 14 runs there.
 const SNAPSHOT_WAIT: Duration = Duration::from_secs(20);
-/// `lp_player::supervise::TEST_CRASH_ENV` (black-box: spelled out).
-const TEST_CRASH_ENV: &str = "LP_PLAYER_TEST_CRASH";
-/// `lp_player::supervise::EXIT_GAVE_UP`.
+/// `liascape_player::supervise::TEST_CRASH_ENV` (black-box: spelled out).
+const TEST_CRASH_ENV: &str = "LIASCAPE_PLAYER_TEST_CRASH";
+/// `liascape_player::supervise::EXIT_GAVE_UP`.
 const EXIT_GAVE_UP: i32 = 4;
-/// `lp_player::supervise::TEST_COMPOSITOR_WAIT_ENV` (black-box: spelled out).
-const TEST_COMPOSITOR_WAIT_ENV: &str = "LP_PLAYER_TEST_COMPOSITOR_WAIT_MS";
+/// `liascape_player::supervise::TEST_COMPOSITOR_WAIT_ENV` (black-box: spelled out).
+const TEST_COMPOSITOR_WAIT_ENV: &str = "LIASCAPE_PLAYER_TEST_COMPOSITOR_WAIT_MS";
 
-/// `LP_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
+/// `LIASCAPE_REQUIRE_GPU=1` turns a skip into a failure (`common::skip_gpu`).
 fn can_run() -> bool {
     headless_gl().is_some() && common::catalogue_dir().is_some()
 }
 
 fn new_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "lp-sup-{}-{}",
+        "liascape-sup-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ));
@@ -58,7 +58,7 @@ fn new_root() -> PathBuf {
 }
 
 fn state_dir(root: &Path) -> PathBuf {
-    root.join("state/livepaper/lp-player")
+    root.join("state/livepaper/liascape-player")
 }
 
 /// `PR_SET_PDEATHSIG(SIGKILL)` (no stray supervisor outlives an aborted test run) and no
@@ -70,7 +70,7 @@ fn guard(c: &mut Command) {
     use std::os::unix::process::CommandExt;
     // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
     // that drives it sets `fake:<file>` after this).
-    c.env("LP_PLAYER_VRAM_PROBE", "none");
+    c.env("LIASCAPE_PLAYER_VRAM_PROBE", "none");
     unsafe {
         c.pre_exec(|| {
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
@@ -137,8 +137,8 @@ impl Sup {
         for (k, v) in env {
             c.env(k, v);
         }
-        let child = c.spawn().expect("spawn lp-player serve");
-        let sock = root.join("run/livepaper/lp-player.sock");
+        let child = c.spawn().expect("spawn liascape-player serve");
+        let sock = root.join("run/livepaper/liascape-player.sock");
         let mut s = Sup {
             child: Some(child),
             root,
@@ -601,7 +601,7 @@ fn clean_quit_not_restarted() {
     assert!(sup.kinds("supervisor.restart").is_empty());
 }
 
-/// Test knob `LP_PLAYER_TEST_CRASH=startup`: every child aborts at startup → 5 restarts
+/// Test knob `LIASCAPE_PLAYER_TEST_CRASH=startup`: every child aborts at startup → 5 restarts
 /// (the first three with `--restore`, then without), then `supervisor.giving_up` and exit
 /// 4.
 #[test]
@@ -675,7 +675,7 @@ fn gives_up_without_compositor_after_backoff() {
         .env_remove("WAYLAND_SOCKET")
         .stdin(Stdio::null());
     let t = Instant::now();
-    let out = c.output().expect("run lp-player");
+    let out = c.output().expect("run liascape-player");
     let elapsed = t.elapsed();
     println!("gave up without a compositor after {elapsed:?}");
     let err = String::from_utf8_lossy(&out.stderr);
@@ -740,7 +740,7 @@ fn sigterm_during_compositor_backoff_exits_at_once() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let mut child = c.spawn().expect("spawn lp-player");
+    let mut child = c.spawn().expect("spawn liascape-player");
     let log = state_dir(&root).join("events.jsonl");
     let t = Instant::now();
     loop {
@@ -1031,13 +1031,13 @@ fn scene_snapshot_restores_at_position() {
     let mut sup = Sup::spawn_in(
         new_root(),
         &[],
-        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
+        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
         Some(serial),
         true,
     );
     let dir = common::synthetic_scene(
         "sup-scene",
-        &lp_player::scene::synthetic::SyntheticSpec::default(),
+        &liascape_player::scene::synthetic::SyntheticSpec::default(),
     );
     let mut c = sup.client();
     let id = c.create(json!({"kind": "scene", "path": s(&dir), "position": 3.0}));
@@ -1121,14 +1121,14 @@ fn broken_scene_restores_as_preview() {
     let mut sup = Sup::spawn_in(
         new_root(),
         &[],
-        &[("LP_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
+        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
         Some(serial),
         true,
     );
     let png = common::solid_png("sup-t10-preview", [0, 255, 0]);
     let dir = common::synthetic_scene(
         "sup-t10-broken",
-        &lp_player::scene::synthetic::SyntheticSpec {
+        &liascape_player::scene::synthetic::SyntheticSpec {
             crash_after_ms: Some(0),
             ..Default::default()
         },

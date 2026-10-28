@@ -11,11 +11,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a s
 # exercises them too. The dotnet-watch backend runs with WorkingDirectory=repo and auto-discovers
 # these via its repo-relative fallback (TransitionService.RepoPath / PlayerHelper cwd path), so no
 # env wiring is needed. set -e aborts loudly if the toolchain is missing (same deps as install.sh).
-echo "==> building native helpers (lp-transition + lp-audio)"
-make -C "$ROOT/src/native/lp-transition" >/dev/null
-make -C "$ROOT/src/native/lp-audio" >/dev/null
+echo "==> building native helpers (liascape-transition + liascape-audio)"
+make -C "$ROOT/src/native/liascape-transition" >/dev/null
+make -C "$ROOT/src/native/liascape-audio" >/dev/null
 
-echo "==> building lp-player"
+echo "==> building liascape-player"
 cargo build --release --manifest-path "$ROOT/src/player/Cargo.toml" >/dev/null
 
 systemctl --user daemon-reload

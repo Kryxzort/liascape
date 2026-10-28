@@ -64,14 +64,14 @@ impl Drop for SocketFile {
     }
 }
 
-/// The lock file next to `socket`: `lp-player.sock` → `lp-player.lock`.
+/// The lock file next to `socket`: `liascape-player.sock` → `liascape-player.lock`.
 pub fn lock_path(socket: &Path) -> PathBuf {
     socket.with_extension("lock")
 }
 
 fn already_running(pid: &str, socket: &Path) -> String {
     format!(
-        "lp-player is already running (pid {pid}) on {}; stop it with `lp-player ctl quit`, \
+        "liascape-player is already running (pid {pid}) on {}; stop it with `liascape-player ctl quit`, \
          or give this one another --socket",
         socket.display()
     )
@@ -134,7 +134,7 @@ fn take_lock(socket: &Path) -> Result<std::fs::File, String> {
         return Ok(f);
     }
     Err(format!(
-        "lock file {} keeps being replaced; is another lp-player starting and stopping?",
+        "lock file {} keeps being replaced; is another liascape-player starting and stopping?",
         lp.display()
     ))
 }

@@ -1,14 +1,14 @@
-//! lp-player CLI entry point.
+//! liascape-player CLI entry point.
 //!
 //! ```text
-//! lp-player --version
-//! lp-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
+//! liascape-player --version
+//! liascape-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
 //!                 [--log-level error|warn|info|debug|trace] [--restore] [--debug]
 //!                 [--no-supervise] [--render-worker on|off]          (Wayland outputs)
-//! lp-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
+//! liascape-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
 //!                 [same options]
-//! lp-player ctl <verb> ['<json args>']
-//! lp-player ctl subscribe <prefix…>
+//! liascape-player ctl <verb> ['<json args>']
+//! liascape-player ctl subscribe <prefix…>
 //! ```
 //!
 //! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (Task 13,
@@ -27,11 +27,11 @@
 
 use std::process::ExitCode;
 
-use lp_player::log::Level;
-use lp_player::runtime::{ClockMode, ServeOpts, Supervised, serve};
-use lp_player::supervise::{self, RestartInfo};
+use liascape_player::log::Level;
+use liascape_player::runtime::{ClockMode, ServeOpts, Supervised, serve};
+use liascape_player::supervise::{self, RestartInfo};
 
-const SERVE_USAGE: &str = "usage: lp-player serve [--headless [--outputs WxH@HZ[,…]] \
+const SERVE_USAGE: &str = "usage: liascape-player serve [--headless [--outputs WxH@HZ[,…]] \
                            [--redraw-policy content|every_tick]] [--clock real|stepped] \
                            [--ao <mpv ao>] [--socket <path>] \
                            [--log-level error|warn|info|debug|trace] [--restore] \
@@ -93,7 +93,7 @@ fn serve_main(args: &[String]) -> ExitCode {
                 "--render-worker" => {
                     let v = val("--render-worker")?;
                     render_worker = Some(
-                        lp_player::runtime::parse_on_off(&v)
+                        liascape_player::runtime::parse_on_off(&v)
                             .ok_or_else(|| format!("--render-worker {v:?}: expected on|off"))?,
                     );
                 }
@@ -109,34 +109,34 @@ fn serve_main(args: &[String]) -> ExitCode {
             Ok(())
         })();
         if let Err(e) = r {
-            eprintln!("lp-player serve: {e}\n{SERVE_USAGE}");
+            eprintln!("liascape-player serve: {e}\n{SERVE_USAGE}");
             return ExitCode::from(2);
         }
     }
     if !headless && outputs_given {
         eprintln!(
-            "lp-player serve: --outputs only applies with --headless (Wayland outputs come \
+            "liascape-player serve: --outputs only applies with --headless (Wayland outputs come \
              from the compositor)\n{SERVE_USAGE}"
         );
         return ExitCode::from(2);
     }
     if !headless && redraw_content {
         eprintln!(
-            "lp-player serve: --redraw-policy only applies with --headless (Wayland outputs \
+            "liascape-player serve: --redraw-policy only applies with --headless (Wayland outputs \
              always use the content policy)\n{SERVE_USAGE}"
         );
         return ExitCode::from(2);
     }
     if restarted.is_some() && !supervised {
         eprintln!(
-            "lp-player serve: --restarted is internal (the supervisor passes it)\n{SERVE_USAGE}"
+            "liascape-player serve: --restarted is internal (the supervisor passes it)\n{SERVE_USAGE}"
         );
         return ExitCode::from(2);
     }
-    let outputs = match lp_player::headless::parse_outputs(&outputs) {
+    let outputs = match liascape_player::headless::parse_outputs(&outputs) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("lp-player serve: {e}\n{SERVE_USAGE}");
+            eprintln!("liascape-player serve: {e}\n{SERVE_USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -144,19 +144,19 @@ fn serve_main(args: &[String]) -> ExitCode {
         // The supervisor: nothing but fork + exec + wait from here on (no thread, no EGL,
         // no PipeWire, no socket — R72).
         let child: Vec<String> = args.iter().filter(|a| *a != "--restore").cloned().collect();
-        return supervise::run(child, restore, &lp_player::paths::state_dir());
+        return supervise::run(child, restore, &liascape_player::paths::state_dir());
     }
     if supervised {
         // Exec'd as /proc/self/exe: comm would be "exe".
-        unsafe { libc::prctl(libc::PR_SET_NAME, c"lp-player".as_ptr()) };
+        unsafe { libc::prctl(libc::PR_SET_NAME, c"liascape-player".as_ptr()) };
     }
     let opts = ServeOpts {
         outputs,
         clock,
         ao,
-        own_socket_dir: socket.is_none() && lp_player::paths::socket_is_default(),
-        socket: socket.unwrap_or_else(lp_player::paths::socket),
-        state_dir: lp_player::paths::state_dir(),
+        own_socket_dir: socket.is_none() && liascape_player::paths::socket_is_default(),
+        socket: socket.unwrap_or_else(liascape_player::paths::socket),
+        state_dir: liascape_player::paths::state_dir(),
         log_level: level,
         wayland: !headless,
         restore,
@@ -166,12 +166,12 @@ fn serve_main(args: &[String]) -> ExitCode {
         }),
         redraw_content,
         debug,
-        render_worker: lp_player::runtime::render_worker_enabled(render_worker),
+        render_worker: liascape_player::runtime::render_worker_enabled(render_worker),
     };
     match serve(opts) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("lp-player serve: {e}");
+            eprintln!("liascape-player serve: {e}");
             ExitCode::from(e.exit_code())
         }
     }
@@ -181,37 +181,37 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version") => {
-            println!("lp-player {}", env!("CARGO_PKG_VERSION"));
+            println!("liascape-player {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Some("serve") => serve_main(&args[1..]),
-        Some("ctl") => lp_player::ctl::main(&args[1..]),
+        Some("ctl") => liascape_player::ctl::main(&args[1..]),
         Some("scene-check") => scene_check(&args[1..]),
         Some("health") => {
             // `hello.health` for when no player runs (no render worker here: no hwdec interop);
             // the backend's capability report (/health/features) reads it, exit 0
             let out = serde_json::json!({
-                "effects": lp_player::health::effects_here(),
-                "vram": lp_player::health::vram_here(),
+                "effects": liascape_player::health::effects_here(),
+                "vram": liascape_player::health::vram_here(),
             });
             println!("{out}");
             ExitCode::SUCCESS
         }
         _ => {
             eprintln!(
-                "usage: lp-player --version | lp-player serve [--headless …] | lp-player ctl \
-                 <verb> ['<json args>'] | lp-player scene-check [--assets <dir>] | lp-player health"
+                "usage: liascape-player --version | liascape-player serve [--headless …] | liascape-player ctl \
+                 <verb> ['<json args>'] | liascape-player scene-check [--assets <dir>] | liascape-player health"
             );
             ExitCode::from(2)
         }
     }
 }
 
-/// `lp-player scene-check [--assets <dir>]` (Phase 2 Task 7): can scenes play here? One JSON
+/// `liascape-player scene-check [--assets <dir>]` (Phase 2 Task 7): can scenes play here? One JSON
 /// line `{worker, features, assets_dir, ok, reason}`, exit 0 = yes / 1 = no (the backend's
 /// adapter reads it when no player runs). The same rule as `hello`'s `scene` capability: the
 /// worker resolves and was built with LWE, and WE's assets dir resolves (`--assets`, else
-/// `LP_WE_ASSETS_DIR`, else every Steam library) — with `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1`
+/// `LIASCAPE_WE_ASSETS_DIR`, else every Steam library) — with `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`
 /// the assets are optional (hermetic tests).
 fn scene_check(args: &[String]) -> ExitCode {
     let mut explicit = None;
@@ -220,12 +220,12 @@ fn scene_check(args: &[String]) -> ExitCode {
         match a.as_str() {
             "--assets" => explicit = it.next().map(std::path::PathBuf::from),
             other => {
-                eprintln!("lp-player scene-check: unknown option {other:?}");
+                eprintln!("liascape-player scene-check: unknown option {other:?}");
                 return ExitCode::from(2);
             }
         }
     }
-    let worker = lp_player::paths::scene_worker_bin();
+    let worker = liascape_player::paths::scene_worker_bin();
     let features: Vec<String> = worker
         .as_ref()
         .and_then(|w| {
@@ -241,14 +241,14 @@ fn scene_check(args: &[String]) -> ExitCode {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
-    let assets = lp_player::scene::assets::resolve(explicit.as_deref(), &home);
-    let synthetic = std::env::var("LP_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1");
+    let assets = liascape_player::scene::assets::resolve(explicit.as_deref(), &home);
+    let synthetic = std::env::var("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1");
     let reason = if worker.is_none() {
-        Some("lp-scene-worker not found (LP_SCENE_WORKER_BIN, next to lp-player, PATH)".into())
+        Some("liascape-scene-worker not found (LIASCAPE_SCENE_WORKER_BIN, next to liascape-player, PATH)".into())
     } else if synthetic {
         None
     } else if !features.iter().any(|f| f == "lwe") {
-        Some("lp-scene-worker was built without LWE (install.sh --no-scenes)".to_string())
+        Some("liascape-scene-worker was built without LWE (install.sh --no-scenes)".to_string())
     } else {
         assets.as_ref().err().cloned()
     };

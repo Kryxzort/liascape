@@ -2,7 +2,7 @@
 //! `zwlr_layer_surface_v1` per `wl_output`, rendered through the one EGL context
 //! ([`Gfx::new_wayland`]) and presented on each output's own frame callbacks.
 //!
-//! - **Surface:** namespace `lp-player`, layer from `out:<c>.layer` (default `background`;
+//! - **Surface:** namespace `liascape-player`, layer from `out:<c>.layer` (default `background`;
 //!   moved live with `set_layer` — layer-shell v2+, else the surface is re-created),
 //!   anchored to all four edges, exclusive zone −1 (ignores other surfaces' zones, covers
 //!   the whole output), keyboard interactivity none, input region = the whole surface
@@ -65,8 +65,8 @@ use crate::gfx::{Fbo, Gfx, Tex, WindowTarget};
 use crate::headless::{FrameState, OutputBackend, OutputChange, OutputInfo, PointerSample};
 use crate::log::{self, Level};
 
-/// The layer-shell namespace every lp-player surface uses (`hyprctl layers`).
-pub const NAMESPACE: &str = "lp-player";
+/// The layer-shell namespace every liascape-player surface uses (`hyprctl layers`).
+pub const NAMESPACE: &str = "liascape-player";
 /// Pointer motion events logged per output at most this often.
 const MOTION_LOG_EVERY: Duration = Duration::from_millis(100);
 
@@ -345,7 +345,7 @@ impl Wayland {
             CompositorState::bind(&globals, &qh).map_err(|e| wl_err("wl_compositor", e))?;
         let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| {
             format!(
-                "the compositor has no zwlr_layer_shell_v1 ({e}); lp-player needs a \
+                "the compositor has no zwlr_layer_shell_v1 ({e}); liascape-player needs a \
                  wlr-layer-shell compositor (Hyprland, Sway, river, Wayfire, KDE) — or run \
                  `serve --headless`"
             )

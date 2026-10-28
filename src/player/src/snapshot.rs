@@ -29,7 +29,7 @@
 //! video plays, so a restart resumes ≤ 2 s (plus the restart) behind, never ahead.
 //!
 //! **Writing** (`Writer`): atomic — `snapshot.json.tmp` written + `fsync`ed, renamed over
-//! `snapshot.json`, the directory `fsync`ed — on a writer thread (`lp-snapshot`), so an
+//! `snapshot.json`, the directory `fsync`ed — on a writer thread (`lia-snapshot`), so an
 //! `fsync` never stalls the render loop. When to write is the runtime's call (§ Snapshot in
 //! `.claude/rules/player-core.md`): [`DEBOUNCE`] after the first unsaved graph change,
 //! every [`REFRESH`] while a video plays, and once more on a clean exit.
@@ -478,7 +478,7 @@ pub struct WriterStats {
 /// what an `fsync` under heavy I/O load costs (measured 0.1–11.8 s), deterministically.
 /// The adapter IT reproduces a snapshot that lags a switch and a slow clean quit with it.
 /// Never set it outside tests.
-pub const TEST_WRITE_DELAY_ENV: &str = "LP_PLAYER_TEST_SNAPSHOT_WRITE_MS";
+pub const TEST_WRITE_DELAY_ENV: &str = "LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS";
 
 /// The snapshot writer thread: the latest snapshot sent wins (older pending ones are
 /// skipped), each written atomically.
@@ -495,7 +495,7 @@ impl Writer {
         let stats = Arc::new(WriterStats::default());
         let (d, st) = (dir.to_path_buf(), stats.clone());
         let thread = std::thread::Builder::new()
-            .name("lp-snapshot".into())
+            .name("lia-snapshot".into())
             .spawn(move || writer_loop(rx, &d, &st))
             .map_err(|e| {
                 log::event(
@@ -902,7 +902,7 @@ mod tests {
 
     #[test]
     fn atomic_write_load_and_set_aside() {
-        let dir = std::env::temp_dir().join(format!("lp-snap-unit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("liascape-snap-unit-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(load(&dir).unwrap(), None, "no file: nothing to restore");
         let s = cap(&graph(), &Animator::new(), &[]);

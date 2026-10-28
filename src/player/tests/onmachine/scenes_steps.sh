@@ -459,7 +459,7 @@ step_crash() {
 # The `loop` probe keeps the last 8 tick durations + the tick counter, so polling it every
 # ~25 ms over the socket gives every tick exactly once (deduplicated by tick number).
 tick_stats() { # <seconds> → JSON {ticks, p50, p99, max}
-    python3 - "$RT/livepaper/lp-player.sock" "$1" <<'PY'
+    python3 - "$RT/livepaper/liascape-player.sock" "$1" <<'PY'
 import json, socket, sys, time
 path, secs = sys.argv[1], float(sys.argv[2])
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(path)
@@ -717,7 +717,7 @@ rss = hwm = None
 for line in open(f"/proc/{pid}/status"):
     if line.startswith("VmRSS:"): rss = int(line.split()[1])
     if line.startswith("VmHWM:"): hwm = int(line.split()[1])
-kids = subprocess.run(["pgrep", "-P", pid, "-x", "lp-scene-worker"], capture_output=True, text=True).stdout.split()
+kids = subprocess.run(["pgrep", "-P", pid, "-x", "liascape-scene-worker"], capture_output=True, text=True).stdout.split()
 print(json.dumps({"rss_kib": rss, "hwm_kib": hwm, "worker_children": [int(k) for k in kids]}))
 PY
 )
@@ -788,7 +788,7 @@ step_soak() {
     # Stop → no worker.
     ctl stop >/dev/null
     sleep 2
-    left=$(pgrep -P "$PLAYER_PID" -x lp-scene-worker | tr '\n' ' ')
+    left=$(pgrep -P "$PLAYER_PID" -x liascape-scene-worker | tr '\n' ' ')
     check "no worker after ctl stop (2 s)" "${left:-none}" "none" "$([[ -z $left ]] && echo 1 || echo 0)"
     a=$(python3 - "$samples" "$switches" <<'PY'
 import sys, json, statistics

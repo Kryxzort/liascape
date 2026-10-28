@@ -2,26 +2,26 @@
 # Task 14 on-machine check: the player audio bus + bus meter, with REAL audio on the owner's
 # PipeWire session (R56). Exit 0 = pass. Spec §5.3; .claude/rules/player-core.md § Audio bus.
 #
-#   1. `serve` creates the bus: `pactl list sinks short` has exactly one lp-player-bus; the
+#   1. `serve` creates the bus: `pactl list sinks short` has exactly one liascape-player-bus; the
 #      identity contract (pw-dump + `pactl list sink-inputs`); `pw-link -l` shows the bus
 #      playback linked to the default sink; Bus::latency() <= 1 quantum + 5 ms.
 #   2. A Solid clip (440 Hz, -20 dBFS peak) plays through the bus: `meter.window
 #      {last_ms:1000}` median within -23 +- 3 dBFS; its mpv runs
-#      audio-device=pipewire/lp-player-bus and audio-delay = -latency.
+#      audio-device=pipewire/liascape-player-bus and audio-delay = -latency.
 #   3. default_sink_change_retargets: `pactl set-default-sink <other>` -> the bus playback is
 #      linked to <other> within 1 s, `audio.bus.retargeting` -> `audio.bus.up` are logged, the
 #      meter's own timestamps show no gap > 50 ms across the switch; then back to the original.
 #   4. System state (R57): the default sink is restored exactly (trap ... EXIT, also on failure
-#      or interrupt) and no lp-player-bus sink is left (the bus belongs to serve; serve is
+#      or interrupt) and no liascape-player-bus sink is left (the bus belongs to serve; serve is
 #      stopped on exit). Every per-stream routing entry (default metadata `target.node` /
 #      `target.object` on any node serve owned — the bus re-targets set them) is cleared, also
-#      on failure. WirePlumber saved no stream target for lp-player from our re-targets (the
+#      on failure. WirePlumber saved no stream target for liascape-player from our re-targets (the
 #      bus streams carry state.restore-target=false — a saved target would pin every later
-#      lp-player/mpv stream to that sink); if one ever appears, the trap clears it too.
+#      liascape-player/mpv stream to that sink); if one ever appears, the trap clears it too.
 #
-# Isolation (R55): its own temp XDG_RUNTIME_DIR (the lp-player socket) + XDG_STATE_HOME;
+# Isolation (R55): its own temp XDG_RUNTIME_DIR (the liascape-player socket) + XDG_STATE_HOME;
 # PipeWire/Pulse still reach the owner's real session via PIPEWIRE_RUNTIME_DIR / PULSE_SERVER;
-# --headless with WAYLAND_DISPLAY unset. LP_PLAYER_BIN=<path> skips the build.
+# --headless with WAYLAND_DISPLAY unset. LIASCAPE_PLAYER_BIN=<path> skips the build.
 set -uo pipefail
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY
 
@@ -37,35 +37,35 @@ fail() {
 }
 ok() { echo "ok: $*"; }
 now_ms() { date +%s%3N; }
-sink_count() { pactl list sinks short | awk '$2=="lp-player-bus"' | wc -l; }
+sink_count() { pactl list sinks short | awk '$2=="liascape-player-bus"' | wc -l; }
 
 # The bus playback's FL and FR output ports both linked to sink $1 (`pw-link -l`).
 linked_to() {
     pw-link -l | awk -v sink="$1" '
         /^[^ ]/ { port = $0 }
         /^  \|-> / {
-            if (port ~ /^lp-player-bus\.playback:output_F[LR]$/) {
+            if (port ~ /^liascape-player-bus\.playback:output_F[LR]$/) {
                 split($2, a, ":"); if (a[1] == sink) n[port] = 1
             }
         }
-        END { exit !(("lp-player-bus.playback:output_FL" in n) && ("lp-player-bus.playback:output_FR" in n)) }'
+        END { exit !(("liascape-player-bus.playback:output_FL" in n) && ("liascape-player-bus.playback:output_FR" in n)) }'
 }
 
 # ---------------------------------------------------------------- mute the test tones
 # Controller instruction (same rationale as dropout.sh): mutes ONLY the bus's own
-# forwarding stream (`node.name == lp-player-bus.playback`) — never the mpv streams
+# forwarding stream (`node.name == liascape-player-bus.playback`) — never the mpv streams
 # feeding the bus — so the meter (which reads the bus sink's own monitor, upstream of
-# this forwarding stream) measures exactly what it would unmuted. LP_TEST_AUDIBLE=1
+# this forwarding stream) measures exactly what it would unmuted. LIASCAPE_TEST_AUDIBLE=1
 # skips this.
 bus_playback_index() {
     pactl -f json list sink-inputs 2>/dev/null \
-        | jq -r '.[] | select(.properties["node.name"] == "lp-player-bus.playback") | .index' \
+        | jq -r '.[] | select(.properties["node.name"] == "liascape-player-bus.playback") | .index' \
         | head -1
 }
 MUTE_LOOP_PID=
 MUTE_STATE_FILE=
 start_mute_watcher() {
-    [[ -n ${LP_TEST_AUDIBLE:-} ]] && return
+    [[ -n ${LIASCAPE_TEST_AUDIBLE:-} ]] && return
     MUTE_STATE_FILE=$TMP/mute_state
     (
         recorded=0
@@ -74,7 +74,7 @@ start_mute_watcher() {
             if [[ -n $idx ]]; then
                 if [[ $recorded == 0 ]]; then
                     # A controller-side watcher may already be muting every
-                    # lp-player-bus.playback stream — record whether *we* are the one
+                    # liascape-player-bus.playback stream — record whether *we* are the one
                     # flipping it so cleanup only unmutes what we muted.
                     was_muted=$(pactl -f json list sink-inputs 2>/dev/null \
                         | jq -r --argjson i "$idx" '.[] | select(.index==$i) | .mute')
@@ -100,9 +100,9 @@ stop_mute_watcher_and_restore() {
 }
 
 # ---------------------------------------------------------------- build + preconditions
-BIN=${LP_PLAYER_BIN:-$REPO/src/player/target/debug/lp-player}
-if [[ -z ${LP_PLAYER_BIN:-} ]]; then
-    (cd "$REPO" && nix develop -c cargo build -q --manifest-path src/player/Cargo.toml --bin lp-player) \
+BIN=${LIASCAPE_PLAYER_BIN:-$REPO/src/player/target/debug/liascape-player}
+if [[ -z ${LIASCAPE_PLAYER_BIN:-} ]]; then
+    (cd "$REPO" && nix develop -c cargo build -q --manifest-path src/player/Cargo.toml --bin liascape-player) \
         2> >(grep -v "Git tree .* is dirty" >&2) || fail "build"
 fi
 [[ -x $BIN ]] || fail "no binary at $BIN"
@@ -114,13 +114,13 @@ if pgrep -x mpvpaper >/dev/null; then
     for _ in $(seq 30); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
 fi
 pgrep -x mpvpaper >/dev/null && fail "legacy mpvpaper still running"
-[[ $(sink_count) == 0 ]] || fail "an lp-player-bus sink already exists (another player?)"
+[[ $(sink_count) == 0 ]] || fail "an liascape-player-bus sink already exists (another player?)"
 
 ORIG=$(pactl get-default-sink)
-[[ -n $ORIG && $ORIG != lp-player-bus ]] || fail "unexpected default sink '$ORIG'"
+[[ -n $ORIG && $ORIG != liascape-player-bus ]] || fail "unexpected default sink '$ORIG'"
 echo "default sink before: $ORIG"
 
-TMP=$(mktemp -d /tmp/lp-bus.XXXXXX)
+TMP=$(mktemp -d /tmp/lia-bus.XXXXXX)
 export XDG_RUNTIME_DIR=$TMP/run XDG_STATE_HOME=$TMP/state
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
@@ -156,17 +156,17 @@ clear_targets() {
     echo "$n"
 }
 wp_saved_target() {
-    [[ -f $WP_STATE ]] && grep -E '^[^=]*:application\.(name|id):lp-player=' "$WP_STATE" | grep -q '"target"'
+    [[ -f $WP_STATE ]] && grep -E '^[^=]*:application\.(name|id):liascape-player=' "$WP_STATE" | grep -q '"target"'
 }
-# WirePlumber saves "no target" for lp-player's key when a stream with that key gets
+# WirePlumber saves "no target" for liascape-player's key when a stream with that key gets
 # target.object = -1: a silent stream (/dev/zero, never restored/saved props of its own).
 wp_clear_saved_target() {
     timeout 8 pw-cat --playback --raw --rate 48000 --channels 2 --format f32 \
-        -P '{ application.name = lp-player node.name = lp-player-state-cleanup state.restore-props = false }' \
+        -P '{ application.name = liascape-player node.name = liascape-player-state-cleanup state.restore-props = false }' \
         /dev/zero >/dev/null 2>&1 &
     local pid=$! id=
     for _ in $(seq 30); do
-        id=$(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "lp-player-state-cleanup") | .id' | head -1)
+        id=$(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "liascape-player-state-cleanup") | .id' | head -1)
         [[ -n $id ]] && break
         sleep 0.1
     done
@@ -235,22 +235,22 @@ cleanup() {
     fi
     for _ in $(seq 30); do [[ $(sink_count) == 0 ]] && break; sleep 0.1; done
     if [[ $(sink_count) != 0 ]]; then
-        echo "FAIL: an lp-player-bus sink is still loaded" >&2
+        echo "FAIL: an liascape-player-bus sink is still loaded" >&2
         rc=1
     else
-        echo "no lp-player-bus sink left"
+        echo "no liascape-player-bus sink left"
     fi
     if wp_saved_target; then
-        echo "FAIL: WirePlumber had saved a stream target for lp-player; clearing it" >&2
+        echo "FAIL: WirePlumber had saved a stream target for liascape-player; clearing it" >&2
         rc=1
         wp_clear_saved_target
-        wp_saved_target && echo "FAIL: could not clear it: $(grep 'lp-player=' "$WP_STATE")" >&2
+        wp_saved_target && echo "FAIL: could not clear it: $(grep 'liascape-player=' "$WP_STATE")" >&2
     fi
     if [[ $rc == 0 ]]; then
         rm -rf "$TMP"
         echo PASS
     else
-        echo "kept $TMP (serve.err, state/livepaper/lp-player/events.jsonl)"
+        echo "kept $TMP (serve.err, state/livepaper/liascape-player/events.jsonl)"
     fi
     exit "$rc"
 }
@@ -269,7 +269,7 @@ ffmpeg -nostdin -hide_banner -loglevel error -y \
 # ---------------------------------------------------------------- 1. the bus exists
 "$BIN" serve --headless --outputs 640x360@60 --log-level debug >"$TMP/serve.out" 2>"$TMP/serve.err" &
 SERVE_PID=$!
-SOCK=$XDG_RUNTIME_DIR/livepaper/lp-player.sock
+SOCK=$XDG_RUNTIME_DIR/livepaper/liascape-player.sock
 for _ in $(seq 150); do [[ -S $SOCK ]] && break; sleep 0.1; done
 [[ -S $SOCK ]] || fail "serve never bound $SOCK: $(cat "$TMP/serve.err")"
 ctl hello >/dev/null || fail "hello"
@@ -277,7 +277,7 @@ note_nodes
 
 BUS=$(ctl probe '{"name":"bus"}') || fail "probe bus: $BUS"
 [[ $(jq -r .state <<<"$BUS") == up ]] || fail "bus not up: $BUS"
-[[ $(jq -r .device <<<"$BUS") == pipewire/lp-player-bus ]] || fail "device: $BUS"
+[[ $(jq -r .device <<<"$BUS") == pipewire/liascape-player-bus ]] || fail "device: $BUS"
 LAT=$(jq -r .latency_ms <<<"$BUS")
 QMS=$(jq -r .quantum_ms <<<"$BUS")
 echo "Bus::latency() = $LAT ms ($(jq -r .latency_samples <<<"$BUS") samples; quantum $QMS ms; target $(jq -r .target <<<"$BUS"))"
@@ -285,8 +285,8 @@ jq -e --argjson l "$LAT" --argjson q "$QMS" -n '$l <= $q + 5' >/dev/null \
     || fail "latency $LAT ms > 1 quantum ($QMS ms) + 5 ms"
 ok "latency gate: $LAT ms <= $QMS + 5 ms"
 
-[[ $(sink_count) == 1 ]] || fail "pactl list sinks short: $(sink_count) lp-player-bus sinks"
-ok "pactl list sinks short has lp-player-bus"
+[[ $(sink_count) == 1 ]] || fail "pactl list sinks short: $(sink_count) liascape-player-bus sinks"
+ok "pactl list sinks short has liascape-player-bus"
 
 DUMP=$(pw-dump)
 node_prop() { # node.name, prop
@@ -294,19 +294,19 @@ node_prop() { # node.name, prop
         '[.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == $n)]
          | if length == 1 then .[0].info.props[$p] // "<unset>" else "<\(length) nodes>" end' <<<"$DUMP"
 }
-[[ $(node_prop lp-player-bus.playback application.name) == lp-player ]] || fail "playback application.name: $(node_prop lp-player-bus.playback application.name)"
-[[ $(node_prop lp-player-bus.playback media.role) == Wallpaper ]] || fail "playback media.role: $(node_prop lp-player-bus.playback media.role)"
-[[ $(node_prop lp-player-bus.playback media.class) == Stream/Output/Audio ]] || fail "playback media.class: $(node_prop lp-player-bus.playback media.class)"
-[[ $(node_prop lp-player-bus media.class) == Audio/Sink ]] || fail "sink media.class: $(node_prop lp-player-bus media.class)"
-[[ $(node_prop lp-player-bus node.description) == "lp-player bus" ]] || fail "sink node.description: $(node_prop lp-player-bus node.description)"
-SI=$(pactl -f json list sink-inputs | jq -c '[.[] | select(.properties["node.name"] == "lp-player-bus.playback")]')
-[[ $(jq length <<<"$SI") == 1 ]] || fail "pactl sink-inputs with node.name lp-player-bus.playback: $SI"
-[[ $(jq -r '.[0].properties["application.name"]' <<<"$SI") == lp-player ]] || fail "sink-input application.name: $SI"
+[[ $(node_prop liascape-player-bus.playback application.name) == liascape-player ]] || fail "playback application.name: $(node_prop liascape-player-bus.playback application.name)"
+[[ $(node_prop liascape-player-bus.playback media.role) == Wallpaper ]] || fail "playback media.role: $(node_prop liascape-player-bus.playback media.role)"
+[[ $(node_prop liascape-player-bus.playback media.class) == Stream/Output/Audio ]] || fail "playback media.class: $(node_prop liascape-player-bus.playback media.class)"
+[[ $(node_prop liascape-player-bus media.class) == Audio/Sink ]] || fail "sink media.class: $(node_prop liascape-player-bus media.class)"
+[[ $(node_prop liascape-player-bus node.description) == "liascape-player bus" ]] || fail "sink node.description: $(node_prop liascape-player-bus node.description)"
+SI=$(pactl -f json list sink-inputs | jq -c '[.[] | select(.properties["node.name"] == "liascape-player-bus.playback")]')
+[[ $(jq length <<<"$SI") == 1 ]] || fail "pactl sink-inputs with node.name liascape-player-bus.playback: $SI"
+[[ $(jq -r '.[0].properties["application.name"]' <<<"$SI") == liascape-player ]] || fail "sink-input application.name: $SI"
 [[ $(jq -r '.[0].properties["media.role"]' <<<"$SI") == Wallpaper ]] || fail "sink-input media.role: $SI"
-ok "identity: playback {node.name lp-player-bus.playback, application.name lp-player, media.role Wallpaper}, sink {lp-player-bus, \"lp-player bus\"}"
+ok "identity: playback {node.name liascape-player-bus.playback, application.name liascape-player, media.role Wallpaper}, sink {liascape-player-bus, \"liascape-player bus\"}"
 
-linked_to "$ORIG" || fail "bus playback not linked to the default sink $ORIG: $(pw-link -l | grep -A2 'lp-player-bus.playback:')"
-ok "pw-link: lp-player-bus.playback -> $ORIG"
+linked_to "$ORIG" || fail "bus playback not linked to the default sink $ORIG: $(pw-link -l | grep -A2 'liascape-player-bus.playback:')"
+ok "pw-link: liascape-player-bus.playback -> $ORIG"
 
 # ---------------------------------------------------------------- 2. tone through the bus
 TR=$(ctl transition "{\"outputs\":\"out:*\",\"to\":{\"path\":\"$CLIP\",\"loop\":true}}") || fail "transition: $TR"
@@ -328,12 +328,12 @@ ok "meter median $MED dBFS within -23 +- 3"
 SP=$(ctl probe '{"name":"sources"}') || fail "probe sources"
 DEV=$(jq -r --arg s "$SRC" '.sources[] | select(.id == $s) | .mpv_audio_device' <<<"$SP")
 DLY=$(jq -r --arg s "$SRC" '.sources[] | select(.id == $s) | .mpv_audio_delay' <<<"$SP")
-[[ $DEV == pipewire/lp-player-bus ]] || fail "source mpv audio-device '$DEV'"
+[[ $DEV == pipewire/liascape-player-bus ]] || fail "source mpv audio-device '$DEV'"
 jq -e --argjson d "$DLY" --argjson l "$LAT" -n '(($d * 1000) + $l | fabs) < 0.01' >/dev/null \
     || fail "source mpv audio-delay $DLY s != -$LAT ms"
 ok "source mpv: audio-device $DEV, audio-delay $DLY s"
-pw-link -l | grep -A3 '^lp-player-bus:playback_FL$' | grep -q '|<-' || fail "nothing linked into lp-player-bus:playback_FL"
-ok "pw-link: a stream feeds lp-player-bus"
+pw-link -l | grep -A3 '^liascape-player-bus:playback_FL$' | grep -q '|<-' || fail "nothing linked into liascape-player-bus:playback_FL"
+ok "pw-link: a stream feeds liascape-player-bus"
 
 # ---------------------------------------------------------------- 3. default_sink_change_retargets
 # The bus re-points its playback at the new default (metadata target.object, like
@@ -341,7 +341,7 @@ ok "pw-link: a stream feeds lp-player-bus"
 # EasyEffects ("process all output streams") puts every output stream back on its sink. The
 # bus must not fight that: it reports `audio.bus.moved` + `overridden` and stops. A control
 # stream (silent, moved the same way) tells which case this session is in.
-OTHER=$(pactl list sinks short | awk -v a="$ORIG" '$2 != "lp-player-bus" && $2 != a { print $2; exit }')
+OTHER=$(pactl list sinks short | awk -v a="$ORIG" '$2 != "liascape-player-bus" && $2 != a { print $2; exit }')
 [[ -n $OTHER ]] || fail "no second sink to retarget to"
 
 # Names of the Audio/Sink nodes node $1 is linked into (pw-dump), space-separated.
@@ -358,11 +358,11 @@ CONTROL_PID= CONTROL_ID=
 # Where a plain output stream moved to sink $1 by metadata ends up after 1 s.
 control_sink() {
     timeout 10 pw-cat --playback --raw --rate 48000 --channels 2 --format f32 \
-        -P '{ node.name = lp-bus-test-control application.name = lp-bus-test state.restore-props = false state.restore-target = false }' \
+        -P '{ node.name = liascape-bus-test-control application.name = liascape-bus-test state.restore-props = false state.restore-target = false }' \
         /dev/zero >/dev/null 2>&1 &
     CONTROL_PID=$!
     for _ in $(seq 30); do
-        CONTROL_ID=$(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "lp-bus-test-control") | .id' | head -1)
+        CONTROL_ID=$(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "liascape-bus-test-control") | .id' | head -1)
         [[ -n $CONTROL_ID ]] && break
         sleep 0.1
     done
@@ -370,7 +370,7 @@ control_sink() {
     sleep 0.3
     pw-metadata -- "$CONTROL_ID" target.object "$(serial_of "$1")" Spa:Id >/dev/null
     sleep 1
-    sinks_of lp-bus-test-control
+    sinks_of liascape-bus-test-control
     pw-metadata -d -- "$CONTROL_ID" >/dev/null
     kill "$CONTROL_PID" 2>/dev/null
     wait "$CONTROL_PID" 2>/dev/null
@@ -383,13 +383,13 @@ control_sink() {
 created_link_to() {
     awk -v sink="$1" '
         $3 == "|->" || $3 == "|<-" || $2 == "|->" || $2 == "|<-" {
-            if ($1 == "+" && $3 == "|->" && port ~ /^lp-player-bus\.playback:output_F[LR]$/) {
+            if ($1 == "+" && $3 == "|->" && port ~ /^liascape-player-bus\.playback:output_F[LR]$/) {
                 split($5, a, ":"); if (a[1] == sink) n[port] = 1
             }
             next
         }
         $1 == "+" || $1 == "*" || $1 == "-" || $1 == "=" { port = $3 }
-        END { exit !(("lp-player-bus.playback:output_FL" in n) && ("lp-player-bus.playback:output_FR" in n)) }' "$2"
+        END { exit !(("liascape-player-bus.playback:output_FL" in n) && ("liascape-player-bus.playback:output_FR" in n)) }' "$2"
 }
 MON=$TMP/links.mon
 pw-link -m -l -I >"$MON" 2>/dev/null &
@@ -407,7 +407,7 @@ kill "$MON_PID" 2>/dev/null
 wait "$MON_PID" 2>/dev/null
 CREATED=no
 created_link_to "$OTHER" "$MON" && CREATED=yes
-STEADY=$(sinks_of lp-player-bus.playback)
+STEADY=$(sinks_of liascape-player-bus.playback)
 POLICY=$(control_sink "$OTHER") || fail "control stream never appeared"
 BUSP=$(ctl probe '{"name":"bus"}')
 echo "default -> $OTHER: links bus playback -> $OTHER created within 1 s: $CREATED (seen by polling after ${SEEN:-never} ms); at +1 s on '$STEADY'; a control stream moved to $OTHER ends on '$POLICY'"
@@ -454,17 +454,17 @@ EXPECT=$ORIG
 TM=$(ctl probe '{"name":"bus"}' | jq -r .now_ms)
 T0=$(now_ms)
 pactl set-default-sink "$ORIG"
-until [[ $(sinks_of lp-player-bus.playback) == "$EXPECT" ]] \
+until [[ $(sinks_of liascape-player-bus.playback) == "$EXPECT" ]] \
     && [[ $(ctl probe '{"name":"bus"}' | jq -r .requested) == "$ORIG" ]]; do
-    (($(now_ms) - T0 > 1000)) && fail "after the default went back to $ORIG: bus playback on '$(sinks_of lp-player-bus.playback)', bus $(ctl probe '{"name":"bus"}' | jq -c '{target, requested}')"
+    (($(now_ms) - T0 > 1000)) && fail "after the default went back to $ORIG: bus playback on '$(sinks_of liascape-player-bus.playback)', bus $(ctl probe '{"name":"bus"}' | jq -c '{target, requested}')"
     sleep 0.02
 done
 ok "default -> $ORIG: bus playback on $EXPECT after $(($(now_ms) - T0)) ms, requested $ORIG"
 sleep 1.5 # WirePlumber saves stream state after a timeout
-if [[ -f $WP_STATE ]] && grep -E '^[^=]*:application\.(name|id):lp-player=' "$WP_STATE" | grep -q '"target"'; then
-    fail "WirePlumber saved a stream target for lp-player: $(grep 'lp-player=' "$WP_STATE")"
+if [[ -f $WP_STATE ]] && grep -E '^[^=]*:application\.(name|id):liascape-player=' "$WP_STATE" | grep -q '"target"'; then
+    fail "WirePlumber saved a stream target for liascape-player: $(grep 'liascape-player=' "$WP_STATE")"
 fi
-ok "WirePlumber saved no lp-player stream target"
+ok "WirePlumber saved no liascape-player stream target"
 note_nodes
 # shellcheck disable=SC2086
 N=$(clear_targets $OWNED)

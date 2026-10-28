@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// base relative so the built bundle loads under the C# server's origin (served from LP_UI_DIR).
+// base relative so the built bundle loads under the C# server's origin (served from LIASCAPE_UI_DIR).
 export default defineConfig({
   base: "./",
   plugins: [react()],

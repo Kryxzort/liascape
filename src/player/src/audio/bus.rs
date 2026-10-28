@@ -1,21 +1,21 @@
 //! The player audio bus (spec §5.3 "(my call) Player audio bus"; Task 14). One in-process
 //! PipeWire loopback (`libpipewire-module-loopback`) owned by the player: a virtual sink,
-//! `lp-player-bus`, that every wallpaper stream plays into, forwarded at 0 dB to the user's
+//! `liascape-player-bus`, that every wallpaper stream plays into, forwarded at 0 dB to the user's
 //! current default sink (so chains such as EasyEffects keep working) and re-targeted when
 //! the default changes.
 //!
 //! ```text
-//!  mpv (src1) ─┐                 ┌─ lp-player-bus.playback ──▶ default sink (EasyEffects…)
-//!  mpv (src2) ─┼─▶ lp-player-bus ┤   (Stream/Output/Audio, node.target = default,
+//!  mpv (src1) ─┐                 ┌─ liascape-player-bus.playback ──▶ default sink (EasyEffects…)
+//!  mpv (src2) ─┼─▶ liascape-player-bus ┤   (Stream/Output/Audio, node.target = default,
 //!     …       ─┘   (Audio/Sink)  │    re-targeted on default.audio.sink changes)
-//!                                └─ monitor ──▶ lp-player-bus.meter (the Meter)
+//!                                └─ monitor ──▶ liascape-player-bus.meter (the Meter)
 //! ```
 //!
 //! **Identity contract (auto-mute relies on it verbatim, Task 17):** the playback stream is
-//! `node.name = lp-player-bus.playback`, `application.name = lp-player`, `media.role =
-//! Wallpaper`; the sink is `node.name = lp-player-bus`, `node.description = "lp-player bus"`.
+//! `node.name = liascape-player-bus.playback`, `application.name = liascape-player`, `media.role =
+//! Wallpaper`; the sink is `node.name = liascape-player-bus`, `node.description = "liascape-player bus"`.
 //!
-//! Everything PipeWire runs on one thread ("lp-bus") with its own main loop + context +
+//! Everything PipeWire runs on one thread ("lia-bus") with its own main loop + context +
 //! core: the module's nodes, the registry/metadata watch, the latency measurement and the
 //! meter's capture stream (only the meter's capture uses `RT_PROCESS` — its process callback
 //! runs on PipeWire's real-time data thread, Phase 2 Task 14; every other callback runs on
@@ -56,19 +56,19 @@ use super::meter::{MeterRt, MeterShared, mono_ns};
 use crate::log::{self, Level};
 
 /// The bus sink's `node.name` (identity contract).
-pub const SINK_NAME: &str = "lp-player-bus";
+pub const SINK_NAME: &str = "liascape-player-bus";
 /// The bus sink's `node.description` (identity contract).
-pub const SINK_DESCRIPTION: &str = "lp-player bus";
+pub const SINK_DESCRIPTION: &str = "liascape-player bus";
 /// The loopback playback stream's `node.name` (identity contract).
-pub const PLAYBACK_NAME: &str = "lp-player-bus.playback";
-/// `application.name` of every lp-player bus stream (identity contract).
-pub const APP_NAME: &str = "lp-player";
+pub const PLAYBACK_NAME: &str = "liascape-player-bus.playback";
+/// `application.name` of every liascape-player bus stream (identity contract).
+pub const APP_NAME: &str = "liascape-player";
 /// `media.role` of the bus playback stream (identity contract).
 pub const MEDIA_ROLE: &str = "Wallpaper";
 /// The meter's capture stream.
-pub const METER_NAME: &str = "lp-player-bus.meter";
+pub const METER_NAME: &str = "liascape-player-bus.meter";
 /// mpv `audio-device` that plays into the bus (`ao=pipewire`).
-pub const DEVICE: &str = "pipewire/lp-player-bus";
+pub const DEVICE: &str = "pipewire/liascape-player-bus";
 /// The bus format: 48 kHz, F32, stereo.
 pub const RATE: u32 = 48_000;
 /// The latency probes' quantum request: 10 ms. The meter no longer requests one (R68 fix
@@ -170,10 +170,10 @@ impl Bus {
     /// the latency. Measured ~0.2 s; gives up after [`SETUP_LIMIT`] (the thread stops at
     /// its next wait). `Err(reason)` → the caller falls back to direct streams
     /// (sources keep mpv's default device) and logs `audio.bus.down {reason}`.
-    /// `LP_PLAYER_BUS=off` disables it (reason says so).
+    /// `LIASCAPE_PLAYER_BUS=off` disables it (reason says so).
     pub fn create() -> Result<Bus, String> {
-        if std::env::var("LP_PLAYER_BUS").is_ok_and(|v| v == "off") {
-            return Err("disabled by LP_PLAYER_BUS=off".into());
+        if std::env::var("LIASCAPE_PLAYER_BUS").is_ok_and(|v| v == "off") {
+            return Err("disabled by LIASCAPE_PLAYER_BUS=off".into());
         }
         let shared = Arc::new(Shared {
             info: Mutex::new(BusInfo {
@@ -199,7 +199,7 @@ impl Bus {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let sh = shared.clone();
         let thread = std::thread::Builder::new()
-            .name("lp-bus".into())
+            .name("lia-bus".into())
             .spawn(move || {
                 let r = run(&sh, rx, &ready_tx);
                 if let Err(e) = r {
@@ -285,7 +285,7 @@ impl Drop for Bus {
             );
             self.shared.update(|i| {
                 i.state = BusState::Down;
-                i.reason = Some(format!("lp-bus thread panicked: {msg}"));
+                i.reason = Some(format!("lia-bus thread panicked: {msg}"));
             });
         }
     }
@@ -423,7 +423,7 @@ fn spa_str(s: &str) -> String {
 }
 
 /// WirePlumber's stream-state hooks key saved volumes/targets by `application.name` — the
-/// same key as every mpv source (`audio-client-name=lp-player`). The bus streams opt out of
+/// same key as every mpv source (`audio-client-name=liascape-player`). The bus streams opt out of
 /// both, so the bus always starts at 0 dB and our own re-targets (metadata `target.object`)
 /// are never saved as a "user choice" that WirePlumber would later apply to an mpv stream.
 const NO_RESTORE: &str = "state.restore-props = false state.restore-target = false";
@@ -447,7 +447,7 @@ fn loopback_args(target: Option<&str>) -> String {
         sink = SINK_NAME,
         app = APP_NAME,
         pb = PLAYBACK_NAME,
-        pbdesc = spa_str("lp-player bus (to the default sink)"),
+        pbdesc = spa_str("liascape-player bus (to the default sink)"),
         role = MEDIA_ROLE,
         nr = NO_RESTORE,
     )
@@ -723,12 +723,12 @@ fn measure_latency(
     let shot = Rc::new(Shot::default());
     let out = StreamRc::new(
         core.clone(),
-        "lp-player-bus.latency-probe",
+        "liascape-player-bus.latency-probe",
         properties! {
             "media.type" => "Audio",
             "media.category" => "Playback",
-            "node.name" => "lp-player-bus.latency-probe",
-            "node.description" => "lp-player bus latency probe",
+            "node.name" => "liascape-player-bus.latency-probe",
+            "node.description" => "liascape-player bus latency probe",
             "application.name" => APP_NAME,
             "target.object" => SINK_NAME,
             "node.latency" => latency_str(),
@@ -779,8 +779,8 @@ fn measure_latency(
 
     let mut caps = Vec::new();
     for (name, target, monitor) in [
-        ("lp-player-bus.latency-in", SINK_NAME, true),
-        ("lp-player-bus.latency-out", PLAYBACK_NAME, false),
+        ("liascape-player-bus.latency-in", SINK_NAME, true),
+        ("liascape-player-bus.latency-out", PLAYBACK_NAME, false),
     ] {
         let s = capture_stream(core, name, target, monitor, Some(&latency_str()))?;
         let sh = shot.clone();
@@ -819,10 +819,10 @@ fn measure_latency(
     // running (a few cycles in); then three impulses.
     let wired = |s: &Seen| {
         let cap = |n: &str| s.node(n, "Stream/Input/Audio");
-        s.linked(s.sink(), cap("lp-player-bus.latency-in"))
-            && s.linked(s.playback(), cap("lp-player-bus.latency-out"))
+        s.linked(s.sink(), cap("liascape-player-bus.latency-in"))
+            && s.linked(s.playback(), cap("liascape-player-bus.latency-out"))
             && s.linked(
-                s.node("lp-player-bus.latency-probe", "Stream/Output/Audio"),
+                s.node("liascape-player-bus.latency-probe", "Stream/Output/Audio"),
                 s.sink(),
             )
     };
@@ -1604,7 +1604,7 @@ mod tests {
             parse_default(Some(r#"{"name":"easyeffects_sink"}"#)).as_deref(),
             Some("easyeffects_sink")
         );
-        assert_eq!(parse_default(Some(r#"{"name":"lp-player-bus"}"#)), None);
+        assert_eq!(parse_default(Some(r#"{"name":"liascape-player-bus"}"#)), None);
         assert_eq!(parse_default(Some("garbage")), None);
         assert_eq!(parse_default(None), None);
     }
@@ -1618,7 +1618,7 @@ mod tests {
             serial: Some(serial),
         };
         // id 136 = the bus sink; serial 136 = easyeffects_sink (ids and serials overlap).
-        s.nodes.insert(136, node("lp-player-bus", 4100));
+        s.nodes.insert(136, node("liascape-player-bus", 4100));
         s.nodes.insert(117, node("easyeffects_sink", 136));
         assert_eq!(s.name_of_target("136").as_deref(), Some("easyeffects_sink"));
         assert_eq!(s.name_of_target("117"), None);
@@ -1715,11 +1715,11 @@ mod tests {
         let a = loopback_args(Some("easy\"sink"));
         for want in [
             "media.class = Audio/Sink",
-            "node.name = lp-player-bus ",
-            "node.description = \"lp-player bus\"",
+            "node.name = liascape-player-bus ",
+            "node.description = \"liascape-player bus\"",
             "audio.position = [ FL FR ]",
-            "node.name = lp-player-bus.playback",
-            "application.name = lp-player",
+            "node.name = liascape-player-bus.playback",
+            "application.name = liascape-player",
             "media.role = Wallpaper",
             "node.target = \"easy\\\"sink\"",
             "state.restore-target = false",

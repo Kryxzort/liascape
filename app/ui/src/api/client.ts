@@ -1,8 +1,8 @@
 // API: typed client for the C# --serve backend. The Electron shell launches the window with
 // ?api=<port> (read from ~/.config/livepaper/serve.port); browser dev: append ?api=PORT.
 const params = new URLSearchParams(location.search);
-const port = params.get("api") || localStorage.getItem("lp_api_port") || "";
-if (port) localStorage.setItem("lp_api_port", port);
+const port = params.get("api") || localStorage.getItem("liascape_api_port") || "";
+if (port) localStorage.setItem("liascape_api_port", port);
 export const API = port ? `http://127.0.0.1:${port}` : "";
 
 // route remote thumbs/gifs through the proxy (UA + Referer + CORS); local files via /media
@@ -130,7 +130,7 @@ export const api = {
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
   saveSettings: (s: Record<string, unknown>) => jpost("/settings", s),
   mpvPreview: () => fetch(`${API}/mpv-preview`).then((r) => r.text()),
-  // Player engine row: asked-for vs running engine, whether lp-player can run (+ why not)
+  // Player engine row: asked-for vs running engine, whether liascape-player can run (+ why not)
   playerEngine: () => jget<{ engine: string; active: string; available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null }>("/player-engine"),

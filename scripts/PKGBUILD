@@ -12,7 +12,7 @@ url="https://github.com/Kryxzort/livepaper-pro"
 license=('GPL-3.0-only' 'MIT')
 # Runtime: backend is published --self-contained (bundles .NET) so no dotnet-runtime needed.
 depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron')
-# Build: .NET SDK + Node for the app; C toolchain + wayland/EGL/mpv/pulse headers for lp-transition/lp-audio.
+# Build: .NET SDK + Node for the app; C toolchain + wayland/EGL/mpv/pulse headers for liascape-transition/liascape-audio.
 makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'base-devel' 'wayland' 'wayland-protocols' 'libglvnd')
 optdepends=('linux-wallpaperengine: Wallpaper Engine scene support'
             'playerctl: MPRIS-aware Auto-Mute')

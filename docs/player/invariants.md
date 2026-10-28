@@ -1,4 +1,4 @@
-# lp-player invariants
+# liascape-player invariants
 
 Numbered, load-bearing rules the player must never violate. Each has a reason and the
 thing that currently stops a regression — honest about what's enforced today versus what
@@ -250,7 +250,7 @@ ends with the session.**
   `KeepPauseOnSwitch` setting — keeps it: the switch is then a cut, and a cut whose A is already
   silent (the pause gate holds a playing A at −96) swaps at once instead of waiting for the resume
   (`tests/api.rs::cut_while_paused_swaps_at_once`). Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
-  (now: torn down while still paused), `scripts/test-lp-player-adapter.sh` (I1 cases).
+  (now: torn down while still paused), `scripts/test-liascape-player-adapter.sh` (I1 cases).
 - **The low-VRAM hold is a pause too (Phase 2 Task 8).** While the GPU's VRAM is low
   (`player.vram_low_mode` `stop`/`pause`, `crate::vram`), the runtime's effective player pause is
   `player.paused || vram hold` — so every rule above applies unchanged (gates ramp out, time and
@@ -396,7 +396,7 @@ that source's own `source.audio_flowing`).
 ## 9. A crashed scene keeps its picture, resumes where it froze, and touches nothing else
 
 **Why:** spec §6.3 / the Phase 2 crash policy. A scene renders in a separate process
-(`lp-scene-worker`) precisely so that LWE crashing, hanging or losing its GL context can't take
+(`liascape-scene-worker`) precisely so that LWE crashing, hanging or losing its GL context can't take
 the wallpaper — or anything else — down with it. The picture must never go black or jump: the
 source keeps the last frame it latched (or, if none ever arrived, the item's preview image),
 the scene clock stops at that frame for the outage so the restarted worker continues exactly

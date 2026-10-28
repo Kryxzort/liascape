@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
-# Hermetic integration test of the backend's lp-player adapter (PlayerEngine=lp-player).
+# Hermetic integration test of the backend's liascape-player adapter (PlayerEngine=liascape-player).
 # See .claude/rules/player-adapter.md § Integration test.
 #
-# It runs the REAL `livepaper --serve` backend against a PRIVATE `lp-player serve --headless --clock
+# It runs the REAL `livepaper --serve` backend against a PRIVATE `liascape-player serve --headless --clock
 # real --ao null` (SUPERVISED — `$SP` is the supervisor, `$CP`/`comp_pid` is its compositor child, see
-# player-core.md § Supervisor) and drives everything over HTTP, checking the result with `lp-player ctl`:
+# player-core.md § Supervisor) and drives everything over HTTP, checking the result with `liascape-player ctl`:
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
-#   engine lp-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
+#   engine liascape-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
 #   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker) ·
 #   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse).
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
-# XDG_STATE_HOME (so its own settings.json, library, lp-player socket + event log) and its own random
+# XDG_STATE_HOME (so its own settings.json, library, liascape-player socket + event log) and its own random
 # backend port. It never talks to another backend (e.g. the dev one on :5174), never reads the real
-# settings.json, never connects to the real lp-player socket, never starts or kills mpvpaper (it aborts
-# before any playback call unless the backend reports `active: lp-player`). Display/compositor env is
+# settings.json, never connects to the real liascape-player socket, never starts or kills mpvpaper (it aborts
+# before any playback call unless the backend reports `active: liascape-player`). Display/compositor env is
 # unset; audio is `--ao null` (but the auto-mute section's, on its own private PipeWire). Everything it started is stopped and its temp dir removed on every exit
 # path (EXIT/INT/TERM/HUP trap; a SIGSTOPped compositor is SIGCONTed first; cleanup kills the SUPERVISOR
 # `$SP` — never just a compositor pid, which would only make it restart again).
 #
 # Usage (from anywhere; uses the binaries of the tree this script lives in):
-#   scripts/test-lp-player-adapter.sh             # builds lp-player (cargo, via the flake devShell when
+#   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
-#   scripts/test-lp-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
+#   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
 # Needs: dotnet (or DOTNET=/path/to/dotnet), ffmpeg, jq, curl, python3. Exit 0 = all pass.
 # Last line: `RESULT pass=N fail=M`.
 set -u
@@ -34,9 +34,9 @@ BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 for t in ffmpeg jq curl python3; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
-B=$ROOT/src/player/target/debug/lp-player
-# LP_IT_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks)
-DLL=${LP_IT_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll}
+B=$ROOT/src/player/target/debug/liascape-player
+# LIASCAPE_IT_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks)
+DLL=${LIASCAPE_IT_DLL:-$ROOT/src/livepaper/bin/Debug/net10.0/livepaper.dll}
 
 if [ $BUILD = 1 ]; then
   echo "== build"
@@ -49,7 +49,7 @@ if [ $BUILD = 1 ]; then
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
-[ -x "${B%/*}/lp-scene-worker" ] || { echo "not built: ${B%/*}/lp-scene-worker (drop --no-build)"; exit 2; }
+[ -x "${B%/*}/liascape-scene-worker" ] || { echo "not built: ${B%/*}/liascape-scene-worker (drop --no-build)"; exit 2; }
 
 # Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
 # bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
@@ -68,21 +68,21 @@ snapshot_backend() {   # $1 = destination dir → prints the copied DLL's path
   done
   return 1
 }
-T=$(mktemp -d /tmp/lpit-XXXXXX)   # short: a unix socket path must be < 108 bytes
+T=$(mktemp -d /tmp/liascape-it-XXXXXX)   # short: a unix socket path must be < 108 bytes
 DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
 mkdir -p "$T/home/.config/livepaper" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st" "$T/bin"
 # the backend's player binary: a link to this build, replaced by a copy to stand in for a rebuild (upgrade test)
-ln -s "$B" "$T/bin/lp-player"
+ln -s "$B" "$T/bin/liascape-player"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
-export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$T/bin/lp-player LP_TRANSITIONS_DIR=$ROOT/transitions
+export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 # Phase 2 scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
-# finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/lp-player)
-export LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LP_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/lp-scene-worker
-# The adapter's aligned-switch backstop slack (LpPlayerMedia.AlignBackstopSlackSec, 15 s in production),
+# finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/liascape-player)
+export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/liascape-scene-worker
+# The adapter's aligned-switch backstop slack (LiascapePlayerMedia.AlignBackstopSlackSec, 15 s in production),
 # shortened so the speed-drop / long-pause scenarios below reach it in seconds.
-export LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
-unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
+export LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
+unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 unset PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
 # Audio: every libpulse client (the backend's auto-mute pactl/parec, this script's own) and PipeWire client can only
 # ever reach THIS test's private servers — the auto-mute section's PipeWire + pipewire-pulse in $XDG_RUNTIME_DIR. An
@@ -103,8 +103,8 @@ cleanup() {
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
   for p in $PWP; do kill -9 "$p" 2>/dev/null; done   # the auto-mute section's private audio daemons
-  [ -n "${LP_IT_KEEP:-}" ] && { echo "kept $T"; return; }
-  case "$T" in /tmp/lpit-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
+  [ -n "${LIASCAPE_IT_KEEP:-}" ] && { echo "kept $T"; return; }
+  case "$T" in /tmp/liascape-it-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
@@ -128,7 +128,7 @@ clip "$E1" testsrc2 330 12; clip "$E2" smptebars 770 12; clip "$P1" rgbtestsrc 8
 L1=$T/l1.mp4; clip "$L1" testsrc2 360 20   # outlasts the 10 s stale check while an end-of-video switch is armed
 
 cat > "$XDG_CONFIG_HOME/livepaper/settings.json" <<EOF
-{"PlayerEngine":"lp-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
+{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
  "GlobalAdvanceOnVideoEnd":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
  "RestartIntervalSeconds":600}
@@ -190,7 +190,7 @@ stop_now() { post /stop '{}' >/dev/null; waitfor $WAIT nothing_shown || bad "/st
 nows() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.align=="now")] | length'; }
 handed_more() { [ "$(handoffs)" -gt "$1" ]; }
 corr_has() { ctl logs "{\"corr\":\"$1\",\"kind_prefix\":\"transition.$2\"}" | jq '.events|length'; }
-reapplies() { grep -c "re-applied effective settings" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
+reapplies() { grep -c "re-applied effective settings" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
 reapplied_since() { [ "$(reapplies)" -gt "$1" ]; }
 # A reapply after a restart: its own log line (count > $1) — or, since the adapter log drops a line
 # identical to one written < 10 s earlier, that identical line. It happens when the restarted player
@@ -199,16 +199,16 @@ reapplied_since() { [ "$(reapplies)" -gt "$1" ]; }
 # line ("… for dee.mp4 (player.paused = false, kept)") repeats the stall-recovery one 2.7 s before.
 reapply_seen() {
   reapplied_since "$1" && return 0
-  grep -q "lp-player restarted (new pid)" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || return 1
-  python3 - "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" \
-    "lp-player: re-applied effective settings for $(basename "$(cur path)") (player.paused = $(playerPaused), kept)" <<'PY'
+  grep -q "liascape-player restarted (new pid)" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || return 1
+  python3 - "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" \
+    "liascape-player: re-applied effective settings for $(basename "$(cur path)") (player.paused = $(playerPaused), kept)" <<'PY'
 import re, sys
 log, want = sys.argv[1], sys.argv[2]
 def t(line):
-    m = re.match(r"\[lp-player (\d+):(\d+):([\d.]+)\] ", line)
+    m = re.match(r"\[liascape-player (\d+):(\d+):([\d.]+)\] ", line)
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else None
 lines = open(log).read().splitlines()
-restart = [t(l) for l in lines if "lp-player restarted (new pid)" in l][-1]
+restart = [t(l) for l in lines if "liascape-player restarted (new pid)" in l][-1]
 same = [t(l) for l in lines if l.endswith("] " + want) and t(l) is not None and t(l) <= restart]
 sys.exit(0 if same and restart - same[-1] < 10 else 1)
 PY
@@ -225,11 +225,11 @@ handed_to_before() {
   local to; to=$(ctl logs '{"kind_prefix":"transition.handoff","limit":10000}' | jq -r --argjson n "$1" --argjson t "$2" "[.events[\$n:][] | select($EV_MS < \$t)][-1].to // empty")
   [ -n "$to" ] && ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg to "$to" '[.events[] | select(.to == $to)][-1].path // empty'
 }
-SNAP=$XDG_STATE_HOME/livepaper/lp-player/snapshot.json
+SNAP=$XDG_STATE_HOME/livepaper/liascape-player/snapshot.json
 snap_paused() { jq -e --argjson v "$1" '.player.paused == $v' "$SNAP" >/dev/null 2>&1; }
 
 PE=$(curl -sf -m 5 "$U/player-engine"); echo "player-engine: $PE"
-[ "$(echo "$PE" | jq -r .active)" = "lp-player" ] || { echo "ABORT: backend not on lp-player — refusing to touch any legacy player"; exit 1; }
+[ "$(echo "$PE" | jq -r .active)" = "liascape-player" ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
 
 echo "== apply / transition"
 post /apply "{\"path\":\"$A\"}" >/dev/null
@@ -640,7 +640,7 @@ waitfor $WAIT handed_more "$nh0" && ok "rotation resumes after the replug" || ba
 stop_now
 ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
 
-echo "== Task 20c: /next /prev /random skip scenes under lp-player (never a 500, never land on one)"
+echo "== Task 20c: /next /prev /random skip scenes under liascape-player (never a 500, never land on one)"
 # Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (library.md /
 # player.md): a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
 # what IsSceneFolder checks, and exactly what makes PlayerHelper.IsScenePath (no media extension) true
@@ -696,24 +696,24 @@ code=$(postcode /prev)
 mv "$T/removed-sv1" "$LIB/imported/sv1"; mv "$T/removed-sv2" "$LIB/imported/sv2"; mv "$T/removed-sv3" "$LIB/imported/sv3"
 mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
 # The legacy-engine "scenes still reachable when AllowScenes=true" decision-point check lives in the
-# self-test instead (LpPlayerSelfTest.SceneSkipAssertions) — this IT script stays on lp-player
-# throughout by design (see header: "it aborts before any playback call unless active: lp-player"),
+# self-test instead (LiascapePlayerSelfTest.SceneSkipAssertions) — this IT script stays on liascape-player
+# throughout by design (see header: "it aborts before any playback call unless active: liascape-player"),
 # and switching the live engine to legacy here while something is playing would try to launch a real
 # mpvpaper/LWE, which this hermetic sandbox explicitly never does.
 stop_now
 
-echo "== Phase 2: scenes under lp-player (synthetic scenes — the player runs with LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1)"
-# Synthetic scene items the way lp-player's tests write them (tests/common::synthetic_scene): a workshop item
-# folder with project.json type scene + scene.pkg + preview.png + lp-synthetic.json (the worker's synthetic
+echo "== Phase 2: scenes under liascape-player (synthetic scenes — the player runs with LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1)"
+# Synthetic scene items the way liascape-player's tests write them (tests/common::synthetic_scene): a workshop item
+# folder with project.json type scene + scene.pkg + preview.png + liascape-synthetic.json (the worker's synthetic
 # renderer; only with the env gate — WE's assets are proprietary, no real scene renders hermetically).
-mk_scene() {   # $1 = item folder, $2 = lp-synthetic.json
+mk_scene() {   # $1 = item folder, $2 = liascape-synthetic.json
   mkdir -p "$1"
   printf '{"type":"scene","title":"%s","file":"scene.json","preview":"preview.png"}' "$(basename "$1")" > "$1/project.json"
   head -c 16 /dev/zero > "$1/scene.pkg"
-  printf '%s' "$2" > "$1/lp-synthetic.json"
+  printf '%s' "$2" > "$1/liascape-synthetic.json"
   echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC | base64 -d > "$1/preview.png"
 }
-# Task 20c's fake scenes have no lp-synthetic.json (they'd need WE's assets): out of the library meanwhile
+# Task 20c's fake scenes have no liascape-synthetic.json (they'd need WE's assets): out of the library meanwhile
 mv "$LIB/imported/ss1" "$T/removed-ss1"; mv "$LIB/imported/ss2" "$T/removed-ss2"
 S1=$LIB/workshop/900000001; S2=$LIB/workshop/900000002; S3=$LIB/workshop/900000003; S4=$LIB/workshop/900000004
 mk_scene "$S1" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}'
@@ -1021,13 +1021,13 @@ lib_steps_no_scene "AllowScenes=false"
 setting '.AllowScenes = true'
 
 echo "== Phase 2 Task 8: scene GPU budget + VRAM settings (live, re-applied onto a fresh player; a fake VRAM probe)"
-# The player measures VRAM through LP_PLAYER_VRAM_PROBE=fake:<file> (read at every sample: {total_mib, free_mib,
+# The player measures VRAM through LIASCAPE_PLAYER_VRAM_PROBE=fake:<file> (read at every sample: {total_mib, free_mib,
 # procs: {"<pid>": MiB}}) with short holds (interval 200, enter 600, resume 2000, settle 300, scene hold 600 ms) —
 # deterministic, never this machine's GPU. 6000 of 8192 MiB free: the low-VRAM rule never engages here.
 VR=$T/vram.json
 vram_fake() { printf '{"total_mib":8192,"free_mib":6000,"procs":{%s}}' "$1" > "$VR.tmp" && mv "$VR.tmp" "$VR"; }
 vram_fake ""
-VRAM_ENV=(LP_PLAYER_VRAM_PROBE=fake:$VR LP_PLAYER_VRAM_TIMING=200,600,2000,300,600)
+VRAM_ENV=(LIASCAPE_PLAYER_VRAM_PROBE=fake:$VR LIASCAPE_PLAYER_VRAM_TIMING=200,600,2000,300,600)
 restart_player 8 "${VRAM_ENV[@]}"
 pget() { ctl get "{\"path\":\"player.$1\"}" | jq -r '.value | if type == "number" then (. * 1000 | round / 1000) else . end'; }   # 0.0 → 0
 p_is() { [ "$(pget "$1")" = "$2" ]; }
@@ -1099,9 +1099,9 @@ kill "$WSP" 2>/dev/null; WSP=""
 setting '.SceneVramLimitEnabled = false'
 
 echo "== Phase 2: scene loudness learned on first play (scene.loudness → the index → gain.normalize, live)"
-# A player whose learning window is 3 s of audible play (LP_PLAYER_LOUDNESS_WINDOW_S; 60 in production, a partial
+# A player whose learning window is 3 s of audible play (LIASCAPE_PLAYER_LOUDNESS_WINDOW_S; 60 in production, a partial
 # from a third of it). S5: a stereo 1 kHz tone at −20 dBFS peak = −20 LUFS; S6: no sound; S7: −26 dBFS.
-restart_player 8c LP_PLAYER_LOUDNESS_WINDOW_S=3
+restart_player 8c LIASCAPE_PLAYER_LOUDNESS_WINDOW_S=3
 S5=$LIB/workshop/900000005; S6=$LIB/workshop/900000006; S7=$LIB/workshop/900000007
 mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-20}'
 mk_scene "$S6" '{"pattern":"solid","rgb":[0,255,255],"native":[640,360]}'
@@ -1160,7 +1160,7 @@ waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000
   && ok "the index refined: $(idx_loud 900000005) — loudnessI kept at $I5 (moved < 0.5 LU)" || bad "second play: index $(idx_loud 900000005) (was $I5 over ${S5s} s)"
 A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
 [ "$A5b" = 0 ] && near "$(cur gain.normalize)" "$W5" 0.01 && ok "…gain.normalize untouched ($(cur gain.normalize), no ramp)" || bad "a sub-0.5 refinement moved gain.normalize: $(cur gain.normalize), ramps $A5b"
-grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
+grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
 # a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU →
 # gain.normalize ramps to it — same source, same worker
 stop_now
@@ -1200,17 +1200,17 @@ stop_now
 setting '.NormalizeAudio = false'
 mv "$S5" "$S6" "$S7" "$T/"   # out of the library: the sections below step through it
 
-restart_player 9 LP_SCENE_WORKER_BIN=/nonexistent
-ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose lp-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
+restart_player 9 LIASCAPE_SCENE_WORKER_BIN=/nonexistent
+ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose liascape-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"
 pe_off() { curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false and (.scenes.reason | type == "string" and length > 0)' >/dev/null; }
 waitfor $WAIT pe_off && ok "/player-engine.scenes: unavailable, with a reason: $(curl -sf -m 5 "$U/player-engine" | jq -r .scenes.reason)" || bad "/player-engine.scenes: $(pe_scenes)"
 # "missing libraries fail loudly" (FeatureHealth): the running player's hello.health and /health/features say so
-ctl hello | jq -e '.health.scenes.ok == false and (.health.scenes.reason | test("lp-scene-worker not found")) and .health.effects.ok == true' >/dev/null \
-  && ok "hello.health: scenes not ok (lp-scene-worker not found), effects ok" || bad "hello.health: $(ctl hello | jq -c .health)"
-hf_scenes() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "scenes") | .ok == false and (.reason | test("lp-scene-worker")) and (.affects | index("allowScenes") != null)' >/dev/null; }
+ctl hello | jq -e '.health.scenes.ok == false and (.health.scenes.reason | test("liascape-scene-worker not found")) and .health.effects.ok == true' >/dev/null \
+  && ok "hello.health: scenes not ok (liascape-scene-worker not found), effects ok" || bad "hello.health: $(ctl hello | jq -c .health)"
+hf_scenes() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "scenes") | .ok == false and (.reason | test("liascape-scene-worker")) and (.affects | index("allowScenes") != null)' >/dev/null; }
 waitfor $WAIT hf_scenes && ok "/health/features: scenes not ok with the reason, affects allowScenes" \
   || bad "/health/features: $(curl -sf -m 10 "$U/health/features" | jq -c '.features[] | select(.id == "scenes")')"
-lib_steps_no_scene "no lp-scene-worker"
+lib_steps_no_scene "no liascape-scene-worker"
 restart_player 10
 setting '.AllowScenes = false'
 mv "$T/removed-ss1" "$LIB/imported/ss1"; mv "$T/removed-ss2" "$LIB/imported/ss2"
@@ -1236,7 +1236,7 @@ stop_now
 aligned_corr() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" '[.events[] | select(.align=="end" and .path==$p)][-1].corr // empty'; }
 armed_for() { ac=$(aligned_corr "$1"); [ -n "$ac" ]; }
 nsched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
-backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
+backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
 # `ac` handed off; to what — from its handoff event (B is a short clip whose own aligned switch starts
 # ~0.3 s before ITS end, so reading `cur:*` after a slow poll could already show the next one)
 handed_off() {
@@ -1273,7 +1273,7 @@ nst_=$(n_before transition.started "$ac" "$t_check"); nn_=$(n_before transition.
   || bad "speed drop: corr=$ac cancelled=$nc_ handoff=$nh_ new switches=$nn_ by +$(( t_check - t_arm )) ms"
 # E1 on screen then = no effect had started from it (mid-effect `cur:*` is the incoming side) and nothing replaced it
 [ "$nst_" = 0 ] && [ "$nn_" = 0 ] && ok "E1 still on screen (not cut before its end)" || bad "speed drop: $ac started=$nst_, new switches=$nn_ by +$(( t_check - t_arm )) ms — E1 was cut early"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -1)"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -1)"
 setting '.Speed = 4'
 cp=""; waitfor 20000 handed_off   # E1's rest at 4×: ≤ 3 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$E2" ] && ok "back at 4x: the same aligned switch handed off to E2 at E1's end" || bad "after 4x: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -1291,7 +1291,7 @@ pp=$(playerPaused); nc_=$(corr_has "$ac" cancelled); nn_=$(( $(nsched) - ns0 ));
 [ "$pp" = true ] && [ -n "$ac" ] && [ "$nc_" = 0 ] && [ "$nn_" = 0 ] && [ "$cp" = "$P1" ] \
   && ok "8 s paused: aligned switch $ac still waiting, P1 on screen, no new switch" \
   || bad "long pause: paused=$pp corr=$ac cancelled=$nc_ new switches=$nn_ cur $(basename "$cp") (paused at P1 ${p_pause} s)"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -1)"
+[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -1)"
 post /pause '{}' >/dev/null
 cp=""; waitfor 20000 handed_off   # P1's rest: < 4 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$P2" ] && ok "resumed: the same aligned switch handed off to P2 at P1's end" || bad "after resume: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -1360,7 +1360,7 @@ time.sleep(120)
 PY
 ws_up() { grep -q " 101 " "$T/ws.log"; }
 waitfor $WAIT ws_up && ok "a WebSocket client holds the backend open (like the UI)" || bad "WebSocket upgrade: $(cat "$T/ws.log")"
-storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
+storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
 port_moved() { [ "$(cat "$XDG_CONFIG_HOME/livepaper/serve.port" 2>/dev/null)" != "$1" ]; }
 healthy() { curl -sf -m 2 "$U/health" >/dev/null; }
 new_backend_up() {   # $1 = the old port; sets U
@@ -1391,7 +1391,7 @@ kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; OLD1=$BP; sleep 1.5
 new_backend_up "$port0"
 kill -0 "$OLD1" 2>/dev/null && ok "the old backend is still shutting down (WebSocket open) while the new one runs" || echo "  note the old backend already exited — the overlap this tests didn't happen"
 e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one aligned advance
-[ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -3 | tr '\n' ' ')"
+[ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
 [ "$(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/livepaper/gui_timer.pid" 2>/dev/null) (new backend $BP)"
@@ -1487,10 +1487,10 @@ nh=$(handoffs); [ "$nh" = 1 ] && [ "$(cur path)" = "$E2" ] && [ "$(nows)" = 0 ] 
 stop_now
 
 echo "== a crash whose snapshot lags the last switch (an fsync under I/O load): the backend puts back what it switched to"
-# Every snapshot write takes 4 s here (LP_PLAYER_TEST_SNAPSHOT_WRITE_MS — what an fsync took under load): a crash
+# Every snapshot write takes 4 s here (LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS — what an fsync took under load): a crash
 # right after a switch restores the wallpaper before it. R81 re-applied settings only, never the wallpaper — the
 # screen kept a, while the backend (and every UI) said c.
-restart_player 4 LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
+restart_player 4 LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
 snap_shows() { jq -e --arg p "$1" '[.outputs[].content as $k | .sources[$k].path] | length > 0 and all(. == $p)' "$SNAP" >/dev/null 2>&1; }
 post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → cur $(cur path)"
 waitfor 20000 snap_shows "$A" || bad "precondition: the snapshot never showed a"
@@ -1508,9 +1508,9 @@ echo "== a rebuilt player binary: the backend restarts the player onto it, keepi
 # Every snapshot write of the old player takes 4 s (an fsync under I/O load): its clean quit — the pause's write
 # still in flight, then the final snapshot — takes seconds. The upgrade waited 1.5 s, SIGTERMed, SIGKILLed at 3 s
 # (killing the final snapshot: the new player restored an older one) and then gave up on the new one after 3 s.
-restart_player 5 LP_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
-kills() { grep -cE "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null || true; }
-rebuild() { cp "$B" "$T/bin/lp-player.new" && mv -f "$T/bin/lp-player.new" "$T/bin/lp-player"; }
+restart_player 5 LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
+kills() { grep -cE "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null || true; }
+rebuild() { cp "$B" "$T/bin/liascape-player.new" && mv -f "$T/bin/liascape-player.new" "$T/bin/liascape-player"; }
 post /apply "{\"path\":\"$D\"}" >/dev/null; waitfor $WAIT shows "$D" || bad "/apply d → cur $(cur path)"
 post /pause '{}' >/dev/null; waitfor $WAIT paused_is true || bad "/pause → player.paused $(playerPaused)"
 CP0=$(comp_pid); SP0=$(sup_pid); k0=$(kills)
@@ -1519,10 +1519,10 @@ rebuild
 waitfor 60000 newcomp "$CP0"   # ≤ the 10 s check + 2 s settle + the old player's slow quit (≤ 2 writes of 4 s)
 CP=$(comp_pid); SP=$(sup_pid)
 [ -n "$CP" ] && [ "$CP" != "$CP0" ] && [ -n "$SP" ] && [ "$SP" != "$SP0" ] && ok "idle player upgraded: compositor $CP0 → $CP, supervisor $SP0 → $SP" || bad "no upgrade: compositor $CP0 → $CP, supervisor $SP0 → $SP"
-[ "$(readlink "/proc/$CP/exe")" = "$T/bin/lp-player" ] && ok "it runs the new build" || bad "it runs $(readlink "/proc/$CP/exe")"
+[ "$(readlink "/proc/$CP/exe")" = "$T/bin/liascape-player" ] && ok "it runs the new build" || bad "it runs $(readlink "/proc/$CP/exe")"
 [ "$(cur path)" = "$D" ] && [ "$(playerPaused)" = true ] && ok "same wallpaper, still paused" || bad "after the upgrade: cur $(basename "$(cur path)") paused=$(playerPaused)"
 [ "$(ctl logs '{"kind_prefix":"snapshot.restored"}' | jq '.events|length')" -ge 1 ] && ok "restored from its snapshot" || bad "no snapshot.restored on the new player"
-[ "$(kills)" = "$k0" ] && ok "the old player's slow clean quit was waited for (never signalled)" || bad "the upgrade signalled the quitting player: $(grep -E "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" | tail -2 | tr '\n' ' ')"
+[ "$(kills)" = "$k0" ] && ok "the old player's slow clean quit was waited for (never signalled)" || bad "the upgrade signalled the quitting player: $(grep -E "did not quit|ignored SIGTERM" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" | tail -2 | tr '\n' ' ')"
 sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
 case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "the new player got the old one's arguments + --restore" ;; *) bad "the new supervisor runs: $sa" ;; esac
 curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && ok "/player-engine: current again" || bad "still stale: $(curl -sf -m 5 "$U/player-engine" | jq -c .running)"
@@ -1569,8 +1569,8 @@ stop_now
 
 echo "== auto-mute never hears our own switches (a private PipeWire + pipewire-pulse; the player on its real audio bus)"
 # Owner report: with AutoMute on (both delays 0) every switch muted the wallpaper for a hitch — for the whole
-# "unmute after" delay when that's > 0. The incoming source's own stream (mpv's `lp-player` node / a scene worker's
-# `lp-player-scene.<id>`) was MONITORED from its first event and only classified as ours ~120 ms later, and each
+# "unmute after" delay when that's > 0. The incoming source's own stream (mpv's `liascape-player` node / a scene worker's
+# `liascape-player-scene.<id>`) was MONITORED from its first event and only classified as ours ~120 ms later, and each
 # `change` event (its uncork) re-opened that window. Here: AutoMute on, 0/0 delays, −70 dB, every switch combo with
 # each method → no `gain.mute` −96 anywhere; then a foreign stream still mutes, as fast as before.
 # The daemons get their own config/state dirs (no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth device
@@ -1666,15 +1666,15 @@ else
   echo "  SKIP (pipewire / pipewire-pulse / wireplumber / pactl / paplay / parec not all found)"
 fi
 
-echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
+echo "== engine switch liascape-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"
-kill -0 "$SP" 2>/dev/null && bad "lp-player supervisor still running after the switch away" || ok "lp-player supervisor quit on switch away"
-kill -0 "$CP" 2>/dev/null && bad "lp-player compositor still running after the switch away" || ok "lp-player compositor quit on switch away"
+kill -0 "$SP" 2>/dev/null && bad "liascape-player supervisor still running after the switch away" || ok "liascape-player supervisor quit on switch away"
+kill -0 "$CP" 2>/dev/null && bad "liascape-player compositor still running after the switch away" || ok "liascape-player compositor quit on switch away"
 [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "no mpvpaper started/killed" || bad "mpvpaper count changed"
-grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
+grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 
 echo "== adapter log (tail)"
-tail -n 8 "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+tail -n 8 "$XDG_CACHE_HOME/livepaper/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]
