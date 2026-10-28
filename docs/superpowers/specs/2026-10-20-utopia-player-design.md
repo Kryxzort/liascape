@@ -469,7 +469,8 @@ Switch the default to `lp-player` and delete the legacy path only when all of th
 3. **Crash isolation proven**: a deliberately crashing scene worker never changes the other output's frames or audio
    (probe-verified), and recovery works.
 4. **Soak**: 8 h mixed playlist with flat RSS/VRAM (this retires the restart daemon) and no stuck states.
-4b. **Auto-mute reaction ≤ 100 ms** (probe-measured, delay setting 0), and never triggered by the player's own audio.
+4b. ~~**Auto-mute reaction ≤ 100 ms**~~ — **PARKED (owner, 2026-10-28)**: auto-mute stays the backend's `AudioMonitor`
+    (legacy quick win: ~65–76 ms to first audio); not part of the switch-over bar while parked.
 5. **Scene corpus**: the scene test set renders at least as well as current LWE: same set of scenes start, none
    newly blank.
 
@@ -495,8 +496,8 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 1. **Compositor + video/image/colour sources**: outputs, layers, effects, gains, animator, clocks, command API, debug
    mode and headless mode, transitions V↔V, per-monitor; backend adapter behind the setting.
 2. **Scene worker**: LWE core, dmabuf frames, scene audio as a gain, crash policy; all transitions with scenes.
-3. **Programs and Signals in the player**: rotation, advance/wait-on-end, shuffle, history, restore, auto-mute,
-   pause-when-covered; retire the timer, monitor and restart daemons, `pending_action.txt` and pid-file ownership.
+3. **Programs and Signals in the player**: rotation, advance/wait-on-end, shuffle, history, restore,
+   pause-when-covered (the in-player auto-mute Signal is **PARKED**, owner 2026-10-28); retire the timer, monitor and restart daemons, `pending_action.txt` and pid-file ownership.
 4. **Web worker** (optional module).
 5. **Switch-over**: meet §11, flip the default, delete legacy code and docs (mpvpaper launch path, `lp-transition`,
    `lp-audio`, LWE process management, the related backend code).
@@ -551,7 +552,7 @@ The project is several sub-projects, in this order. Each ships behind a backend 
 2. Compositor in Rust; workers in C++. (Owner explicitly delegated the language choice to the designer.)
 3. Desktop OpenGL core profile (to host LWE core) instead of GLES.
 4. Videos/images in-process; scenes and web in isolated workers.
-5. Playlists, rotation and auto-mute move into the player (Phase 3), retiring the backend daemons.
+5. Playlists and rotation move into the player (Phase 3; auto-mute parked), retiring the backend daemons.
 6. ~~`TransitionMethod` retired~~ → **owner: keep all three modes**, with audio following the picture (held = silent).
    My calls within that: in reveal, B's audio rises with the reveal; ≤ 30 ms anti-click ramps at hold boundaries.
 7. Switch-over bar as in §11, including the 8 h soak that retires the restart daemon.
