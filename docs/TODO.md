@@ -97,7 +97,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`): Tasks 1–8 + 11
-    done (+ 9, and the Task 8 backend wiring); 10, 12–15, properties editor, loudness learning left.
+    done (+ 9, 12, and the Task 8 backend wiring); 10, 13–15, properties editor, loudness learning left.
   - [ ] `tests/scene.rs::transport_meets_the_spike_budget` (worker CPU < 5 % at 144 fps) is red in most full-suite
         runs since Task 7–8: 4.4–6.8 % at load 3–11 in both render modes, passes ~2/3 alone. Settle in Task 14 on
         a quiet machine: real cost (audio thread / GPU timer) → re-budget with numbers; noise → measure steadier
@@ -109,7 +109,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
         Settings hides the scene delay + primary radio under lp-player. The player emits `source.broken` now
         (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
-        scene in the snapshot); Task 12 (matrix scene cells); ~~the Task 8 settings' backend wiring~~ (done
+        scene in the snapshot); ~~Task 12 (matrix scene cells)~~ (done 2026-10-28, web-ui.md § Scene cells); ~~the Task 8 settings' backend wiring~~ (done
         2026-10-28, below); `player.scene_assets` has no
         setting yet (auto-resolve only); the scene properties editor (`scene_props`) is its own task; a
         hotplugged output that's in `LweMonitors` gets its fps only at the next player process or `/settings`

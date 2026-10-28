@@ -916,15 +916,32 @@ library before the backend starts: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashin
 `LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1` for the private player), `app/shell/probe-matrix.js`,
 `scripts/matrix-cells-for.sh` (`sources/scene.rs`, `worker/`, `scene/`, `bin/lp-scene-worker/` → the scene family)
 
-- [ ] **Step 1:** Add cells, each with a `ctl`/probe oracle: `apply:scene` (idle/single/playlist), `next:v→s`,
+- [x] **Step 1:** Add cells, each with a `ctl`/probe oracle: `apply:scene` (idle/single/playlist), `next:v→s`,
   `next:s→v`, `next:s→s` × TransitionMethod, `pause:scene` (two captures 500 ms apart equal, `gain.pause` −96),
   `mute:scene`, `volume:scene`, `itemVol:scene`, `noAudio:scene`, `trash:playingScene`, `crash:scene` (s3 →
   broken → `crashed` card + strip advanced), `noOutput:scene`, `settings:sceneFps` (same pid, new rate),
   `playlist:sceneInterval` (3 s interval advances off a scene), `restore:scene` (backend restart → same scene).
-- [ ] **Step 2:** `scripts/test-ui-matrix.sh --changed` → the scene cells run, FAIL where the UI hides scenes.
-- [ ] **Step 3:** fix what they find. **Step 4:** full matrix green (Phase 1 baseline 681 pass / 28 structural
+- [x] **Step 2:** `scripts/test-ui-matrix.sh --changed` → the scene cells run, FAIL where the UI hides scenes.
+- [x] **Step 3:** fix what they find. **Step 4:** full matrix green (Phase 1 baseline 681 pass / 28 structural
   skips, plus the new cells).
-- [ ] **Step 5:** Commit `Cover Scenes In The UI Matrix`.
+- [x] **Step 5:** Commit `Cover Scenes In The UI Matrix`.
+
+**Done (2026-10-28)** (`.claude/rules/web-ui.md` § "Scene cells"): 29 scene cells — the plan's list + `itemSpd:scene`,
+`settings:sceneThrottle|vramLimit|vramLowMode` (Task 8's settings), `vram:exceeded` (the fake VRAM probe), `trash:
+playingScene` in a playlist too. **Deviations:** scene support stays OFF in the baseline settings (with it on, the
+library-stepping / random cells landed on scenes nondeterministically, s3 included) — the opt-in scene states
+(`scene`, `sceneV`/`sceneS`/`sceneS2` = the playlist [k1, s1, s2, k2] at each) and each scene control turn it on; s3
+crashes 1.5 s after every start (not 400 ms: the strip-click switch's 1.2 s fade must hand off first); the interval
+cell uses 4 s (3 s raced the checks' settle); `restore:scene` restarts the backend on the same port from the probe
+(`LP_PORT`, recorded for the cleanup) — the scene stays on the same worker. **Bugs found + fixed (UI):** a crashed
+scene's card wasn't marked until a library reload (WS `scene-crashed` unhandled → now `hasCrashed`); the VRAM stop's
+status line was overwritten at once by the now-playing line of the switch it caused (→ a held status); the item
+modal hid the speed slider for every scene (legacy's 1× rule) though lp-player plays scenes at speed. Fixture:
+previews are 320×180 (a 1×1 PNG made `/still` 502 — ffmpeg can't scale it; real previews never are). Two existing
+cells assumed the library held k1–k4 only (`selAll+Delete+undo`'s count, `selRange+Delete`'s neighbour → a title
+mapping). RED (scene cells against the base UI): crash card, `itemSpd` slider "not found", the status line;
+`playlist × apply:scene` and `playlist:sceneInterval` failed once at load 8 and passed alone and in two later runs.
+Full matrix (`--jobs 2`): first 744 pass / 3 fail / 29 skip (the two fixture assumptions, fixed and re-run green); final 745 pass / 1 fail / 1 setup / 29 skip in 32 min at load 4–5.5 — `paused × appear:theme` ("wasn't saved") and `pausedEffect × set:normalizeOff` (state not reached), both passing 2/2 alone and in the first full run (load).
 
 **Size: M** (≈ 1 day + run time).
 

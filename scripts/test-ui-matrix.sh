@@ -117,6 +117,7 @@ if [ $BUILD = 1 ]; then
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
+[ -x "${B%/*}/lp-scene-worker" ] || { echo "not built: ${B%/*}/lp-scene-worker (drop --no-build)"; exit 2; }
 
 # Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
 # bin/Debug whenever a build here touches obj/, and mid-rebuild livepaper.runtimeconfig.json is briefly
@@ -241,6 +242,12 @@ fi
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LP_PLAYER_BIN=$B LP_TRANSITIONS_DIR=$ROOT/transitions LP_UI_DIR=$T/ui
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
+# Phase 2 scenes: the private player (and any the backend starts) plays synthetic scene folders with this build's worker,
+# and measures VRAM through a fake probe the scene cells drive (healthy by default: 6000 of 8192 MiB free — the
+# low-VRAM rule never engages; never this machine's GPU) with short holds (interval, enter, resume, settle, scene hold)
+export LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LP_SCENE_WORKER_BIN=${B%/*}/lp-scene-worker
+export LP_PLAYER_VRAM_PROBE=fake:$T/vram.json LP_PLAYER_VRAM_TIMING=200,600,2000,300,600
+printf '{"total_mib":8192,"free_mib":6000,"procs":{}}' > "$T/vram.json"
 unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_PORT
 # audio: every pulse client of the stack (the backend's pactl/parec, the probe's paplay) resolves the PRIVATE server
 # started below ($XDG_RUNTIME_DIR/pulse/native) — never the session's
@@ -251,6 +258,13 @@ cleanup() {
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
   [ -n "$PA" ] && kill "$PA" 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
+  # a backend the probe started in place of $BP (restore:scene restarts it) — only one whose HOME is this stack's
+  if [ -s "$T/backend2.pid" ]; then
+    b2=$(cat "$T/backend2.pid")
+    if tr '\0' '\n' < "/proc/$b2/environ" 2>/dev/null | grep -qx "HOME=$T/home"; then
+      kill "$b2" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$b2" 2>/dev/null || break; sleep 0.1; done; kill -9 "$b2" 2>/dev/null
+    fi
+  fi
   # a stopping backend hands a running timed playlist / restart timer / auto-mute to detached daemons (setsid: out of
   # this stack's process group) — one outlived its stack for 35 min, its HOME gone, writing timed_state.json relative
   # to the cwd. Stop them by their pid files, and only a pid whose HOME is this stack's.
@@ -297,6 +311,26 @@ if [ -n "$PULSEAUDIO" ] && [ -x "$PULSEAUDIO" ] && command -v pactl >/dev/null &
   else echo "(no private PulseAudio — the auto-mute cells skip)"; tail -3 "$T/pulse.log"; kill "$PA" 2>/dev/null; PA=""; fi
 else echo "(pulseaudio / pactl / paplay / parec not found — the auto-mute cells skip)"; fi
 
+# Synthetic WE scenes in the private library (the adapter IT's mk_scene; the worker's synthetic renderer — gated by
+# LP_PLAYER_ALLOW_SYNTHETIC_SCENES): s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashing 1.5 s after each start (→ broken
+# after 3 restarts). Titled s1..s3 in the source's index (the cards' titles). Scene support stays OFF in the baseline
+# (the library-stepping / random cells would land on them); the scene cells turn it on (probe-matrix.js).
+SCENES=()
+mk_scene() {   # $1 = item folder, $2 = lp-synthetic.json, $3 = its preview's colour (a real-sized 320×180 still)
+  mkdir -p "$1"
+  printf '{"type":"scene","title":"%s","file":"scene.json","preview":"preview.png"}' "$(basename "$1")" > "$1/project.json"
+  head -c 16 /dev/zero > "$1/scene.pkg"
+  printf '%s' "$2" > "$1/lp-synthetic.json"
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=$3:s=320x180" -frames:v 1 "$1/preview.png"
+  SCENES+=("$1")
+}
+SLIB=$XDG_DATA_HOME/livepaper/library/workshop
+mk_scene "$SLIB/900000001" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}' red
+mk_scene "$SLIB/900000002" '{"pattern":"solid","rgb":[0,0,255],"native":[640,360],"has_audio":true,"tone_hz":660}' blue
+mk_scene "$SLIB/900000003" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":1500}' green
+printf '{"900000001":{"title":"s1","isScene":true,"workshopId":"900000001"},"900000002":{"title":"s2","isScene":true,"workshopId":"900000002"},"900000003":{"title":"s3","isScene":true,"workshopId":"900000003"}}' > "$SLIB/index.json"
+SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
+
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
@@ -340,6 +374,7 @@ if [ $MODE = FUZZ ]; then echo "== fuzz${FREPLAY:+ (replay)}"; else echo "== mat
   LP_FUZZ_STEPS="$FUZZ" LP_FUZZ_SEED="$FSEED" LP_FUZZ_RUNS="$FRUNS" LP_FUZZ_REPLAY="$FREPLAY" \
   LP_ADAPTER_LOG="$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" LP_BACKEND_LOG="$T/backend.log" \
   LP_USER_MUTE="$XDG_CONFIG_HOME/livepaper/user_mute.state" LP_PULSE="$LP_PULSE" \
+  LP_SCENES="$SCENES_JSON" LP_VRAM_FAKE="$T/vram.json" LP_BACKEND_PID="$BP" LP_BACKEND_PID_FILE="$T/backend2.pid" \
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
 rc=$?
 echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/livepaper/lp-player-adapter.log" 2>/dev/null | sed 's/^/     /'

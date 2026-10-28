@@ -34,6 +34,8 @@ export function LibrarySettingsModal({
   const [dur, setDur] = useState("");
   const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
+  // lp-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
+  const sceneSpeed = useStore((s) => s.settings?.playerEngine === "lp-player");
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
   const prevRef = useRef<{ vol: number | null; spd: number | null; last: number; tm: number | null }>({ vol: null, spd: null, last: 0, tm: null });
   // one pending persist PER FIELD — a shared one let a speed drag replace a volume drag's save
@@ -174,8 +176,8 @@ export function LibrarySettingsModal({
           <div className="srow"><div className="slabel">Volume {volOv ? "" : "(global)"}<span className="shint">{vol}</span></div>
             <div className="sctl"><input type="range" min={0} max={100} value={vol} onChange={(e) => setVolume(+e.target.value)} />
               {volOv && <button className="mini ico" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
-          {/* scenes always render at 1× (linux-wallpaperengine has no speed control) → hide the no-op slider */}
-          {!item.isScene && (
+          {/* legacy scenes render at 1× (linux-wallpaperengine has no speed control) → hide the no-op slider there */}
+          {(!item.isScene || sceneSpeed) && (
             <div className="srow"><div className="slabel">Speed {spdOv ? "" : "(global)"}<span className="shint">{spd}×</span></div>
               <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} onChange={(e) => setSpeed(+e.target.value)} />
                 {spdOv && <button className="mini ico" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
