@@ -159,7 +159,7 @@ outside the player, for both engines.
 
 ## 3. One wallpaper switch, end to end
 
-Every switch — a manual next/prev, a timed tick, a video-end advance, `--restore` — goes through
+Every switch — a manual next/prev, a timed tick, a video-end advance, `liascape restore` — goes through
 the exact same path: the backend never talks to a source directly, only to the recipe via the
 Command API.
 
@@ -251,7 +251,7 @@ reply is sent. The backend's `LiascapePlayerClient` background event connection
 | The audio bus, re-targeting, the meter | `src/player/src/audio/{bus,meter}.rs` | § Audio bus | `src/player/tests/onmachine/bus.sh`, `src/player/tests/api.rs::bus_*` |
 | Crash restart, startup-failure classification | `src/player/src/supervise.rs` | § Supervisor | `src/player/tests/supervise.rs` |
 | State persistence / `--restore` | `src/player/src/snapshot.rs` | § Snapshot | `src/player/tests/supervise.rs` (restore cases) |
-| The C# side of a setting / dispatch point | `src/backend/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-liascape-player-adapter.sh`, `--liascape-player-selftest` |
+| The C# side of a setting / dispatch point | `src/backend/Player/*.cs` | `.claude/rules/player-adapter.md` | `scripts/test-liascape-player-adapter.sh`, `player-selftest` |
 | Reference-based dropout detection | `src/player/src/probe/dropout.rs`, `scripts/liascape_audiowatch.py` | `docs/player/debugging.md` | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
 | Process memory, the glibc allocator policy, the `memory` probe | `src/player/src/mem.rs`, `src/player/src/probe/memory.rs`, `src/player/src/sources/reaper.rs` | `.claude/rules/player-core.md` § Memory | `src/player/tests/api.rs::t20b_switch_loop_rss_stays_flat`, `battery.sh soak --hermetic` |
 | Wayland EGL driver environment (NVIDIA explicit sync), libwayland default-queue drain | `src/player/src/wl.rs` (`apply_driver_env`, `Wayland::dispatch_default_queue`) | `.claude/rules/player-core.md` § Wayland → NVIDIA notes | `src/player/tests/api.rs::t20e_wayland_present_heap_stays_flat` (opt-in `LIASCAPE_PLAYER_TEST_WAYLAND`) |
@@ -353,7 +353,7 @@ audio bus, crash recovery, and the backend adapter; Phase 2 added WE scenes — 
   optional build module (CEF is hundreds of MB), gated on resolving the NVIDIA LINEAR-dmabuf
   external-only risk the design spec flags for it.
 - **Programs and Signals stay in the C# backend.** Rotation, advance/wait-on-end, shuffle,
-  history, `--restore` replay and auto-mute are still driven by the backend adapter
+  history, `liascape restore` replay and auto-mute are still driven by the backend adapter
   (`.claude/rules/player-adapter.md`) over the Command API, not by an in-process `Program`/`Signal`. **Phase 3**
   moves them into the player (retiring the backend's timer/monitor/restart daemons,
   `pending_action.txt`, pid-file ownership). The in-player auto-mute Signal (per-stream metering, the player's

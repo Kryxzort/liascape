@@ -11,11 +11,9 @@ OUTPUT="$ROOT/liascape-x86_64.AppImage"
 
 echo "==> staging app into AppDir (via install.sh)"
 rm -rf "$APPDIR"
-# Stage the full tree under AppDir/usr. install.sh's own /usr wrappers are ignored here — AppImages
-# mount at a random path, so AppRun below launches with $APPDIR-relative paths instead.
+# Stage the full tree under AppDir/usr. AppImages mount at a random path — fine: usr/bin/liascape
+# resolves libexec/ and lib/ relative to itself; AppRun only adds the bundled electron.
 DESTDIR="$APPDIR" PREFIX=/usr bash "$ROOT/scripts/install.sh"
-
-LIB="$APPDIR/usr/lib/liascape"
 
 echo "==> bundling Electron (portable — no system electron needed)"
 (cd "$ROOT/app/shell" && npm install >/dev/null 2>&1 || true)
@@ -27,17 +25,10 @@ cp -r "$ELECTRON_DIST"/. "$APPDIR/usr/lib/electron/"
 echo "==> writing AppRun (relocatable — resolves paths from the mount point)"
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/bash
+# the AppImage's own electron; scripts/liascape (usr/bin) finds everything else relative to itself
 HERE="$(dirname "$(readlink -f "$0")")"
-LIB="$HERE/usr/lib/liascape"
-export LIASCAPE_UI_DIR="$LIB/ui"
-export LIASCAPE_TRANSITIONS_DIR="$LIB/transitions"
-[ -x "$LIB/liascape-transition" ] && export LIASCAPE_TRANSITION_BIN="$LIB/liascape-transition"
-[ -x "$LIB/liascape-audio" ] && export LIASCAPE_AUDIO_BIN="$LIB/liascape-audio"
-export LIASCAPE_BACKEND="$LIB/backend/liascape-backend"
-export LIASCAPE_ELECTRON="$HERE/usr/lib/electron/electron"
-# bare → GUI (electron shell); any flag → headless backend
-if [ $# -eq 0 ]; then exec "$LIASCAPE_ELECTRON" "$LIB/shell"; fi
-exec "$LIB/backend/liascape-backend" "$@"
+export LIASCAPE_ELECTRON="${LIASCAPE_ELECTRON:-$HERE/usr/lib/electron/electron}"
+exec "$HERE/usr/bin/liascape" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 

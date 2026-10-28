@@ -116,7 +116,7 @@ The web UI animates library/strip cards from the source's **preview gif/webp** (
 - `~/.config/liascape/user_mute.state` — presence = user muted (guards auto-unmute)
 - `~/.cache/liascape/playlist_observer_paths.json` — shuffled order for playlist observer reconnection
 - `~/.cache/liascape/we_thumbs/<workshopId>.jpg` — static frame extracted from GIF thumbnails
-- `~/.config/liascape/serve.port` — the `--serve` backend's chosen port (Electron reads it)
+- `~/.config/liascape/serve.port` — the `serve` backend's chosen port (Electron reads it)
 - `~/.config/liascape/workshop_unsub.json` — durable "Delete from Source" unsubscribe queue (below)
 
 ## Delete vs Delete from Source (workshop items)

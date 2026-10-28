@@ -49,7 +49,7 @@ public static class PlayerEngine
     }
 
     public static string UnavailableReason =>
-        "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
+        "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape-backend, <prefix>/libexec/liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
 
     // Can a scene item play right now? Scene support on, and the engine that runs can play one: liascape-player
     // (Phase 2) when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
@@ -108,7 +108,7 @@ public static class PlayerEngine
         return ok ? null : $"liascape-player can't play scenes here: {why}";
     }
 
-    // env LIASCAPE_PLAYER_BIN → next to the running liascape executable → the repo dev tree
+    // env LIASCAPE_PLAYER_BIN → next to the running liascape-backend / libexec/liascape/ → the repo dev tree
     // src/player/target/{release,debug}/liascape-player → PATH (release first: debug is opt-level 0 and the
     // player mixes audio itself). Cached until the next Refresh, or `fresh` (the upgrade check).
     public static string? ResolveBinary(bool fresh = false)
@@ -131,7 +131,11 @@ public static class PlayerEngine
             if (Exe(env)) return Path.GetFullPath(env);
             LiascapePlayerClient.Log($"LIASCAPE_PLAYER_BIN={env} does not exist — trying the other locations");
         }
-        foreach (var dir in new[] { Path.GetDirectoryName(Environment.ProcessPath), AppContext.BaseDirectory })
+        // next to this executable, or the installed layout's libexec/liascape/ (this backend runs from
+        // <prefix>/lib/liascape/backend/ — scripts/liascape sets LIASCAPE_PLAYER_BIN, this covers a bare start)
+        var here = Path.GetDirectoryName(Environment.ProcessPath);
+        foreach (var dir in new[] { here, AppContext.BaseDirectory,
+                     here == null ? null : Path.Combine(here, "..", "..", "..", "libexec", "liascape") })
         {
             if (string.IsNullOrEmpty(dir)) continue;
             var cand = Path.Combine(dir, "liascape-player");

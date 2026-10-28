@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test of read-modify-writes across liascape PROCESSES: the in-process locks (SettingsService's,
 # LibraryStore's) don't reach the CLI or the daemons, so a keybind run locally (no backend answers) or
-# --restore's WE sync could lose an update another process saved meanwhile. Fires N concurrent
-# `--action=volume-up` with no backend running — each one a local load → +5 → save of settings.json — and
+# `liascape restore`'s WE sync could lose an update another process saved meanwhile. Fires N concurrent
+# `liascape volume-up` with no backend running — each one a local load → +5 → save of settings.json — and
 # expects every step to land. Temp HOME + every XDG dir; never touches the real settings, a backend or a
 # player (no serve.port → nothing to forward to; no player socket → the live push is a no-op).
 #
@@ -39,11 +39,11 @@ N=16
 for round in 1 2 3; do
   echo '{"Volume":0,"VolumeKeyTarget":"global","PlayerEngine":"legacy","AutoMute":false}' > "$SJ"
   pids=()
-  for _ in $(seq 1 $N); do "$DOTNET" "$DLL" --action=volume-up >>"$T/cli.log" 2>&1 & pids+=($!); done
+  for _ in $(seq 1 $N); do "$DOTNET" "$DLL" volume-up >>"$T/cli.log" 2>&1 & pids+=($!); done
   codes=0; for p in "${pids[@]}"; do wait "$p" || codes=$((codes+1)); done
   v=$(jq -r '.Volume' "$SJ" 2>/dev/null)
   want=$((N*5))
-  [ "$codes" = 0 ] || bad "round $round: $codes of $N --action runs exited non-zero ($(tail -2 "$T/cli.log" | tr '\n' ' '))"
+  [ "$codes" = 0 ] || bad "round $round: $codes of $N command runs exited non-zero ($(tail -2 "$T/cli.log" | tr '\n' ' '))"
   if [ "$v" = "$want" ]; then ok "round $round: $N concurrent local volume-ups → $v"
   else bad "round $round: $N concurrent local volume-ups → $v, expected $want (lost $(( (want - ${v:-0}) / 5 )))"; fi
 done

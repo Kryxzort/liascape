@@ -2,7 +2,7 @@
 # Hermetic integration test of the backend's liascape-player adapter (PlayerEngine=liascape-player).
 # See .claude/rules/player-adapter.md § Integration test.
 #
-# It runs the REAL `liascape --serve` backend against a PRIVATE `liascape-player serve --headless --clock
+# It runs the REAL `liascape serve` backend against a PRIVATE `liascape-player serve --headless --clock
 # real --ao null` (SUPERVISED — `$SP` is the supervisor, `$CP`/`comp_pid` is its compositor child, see
 # player-core.md § Supervisor) and drives everything over HTTP, checking the result with `liascape-player ctl`:
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
@@ -97,7 +97,7 @@ cleanup() {
   [ -n "$SP" ] && kill -CONT "$SP" 2>/dev/null
   [ -n "${WSP:-}" ] && kill "$WSP" 2>/dev/null
   for bp in "$BP" ${BP_OLD:-}; do [ -n "$bp" ] && { kill "$bp" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$bp" 2>/dev/null || break; sleep 0.1; done; kill -9 "$bp" 2>/dev/null; }; done
-  # a `--timer-daemon` a stopping backend handed the playlist to (the restart test below)
+  # a `timer-daemon` a stopping backend handed the playlist to (the restart test below)
   [ -s "$XDG_CONFIG_HOME/liascape/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/liascape/timer.pid")" 2>/dev/null
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
@@ -151,7 +151,7 @@ for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done
 CP=$(comp_pid)   # the compositor — `$SP` (spawned by `start_player`) is its SUPERVISOR, a different pid
 [ -n "$CP" ] && [ "$CP" != "$SP" ] && ok "hello.pid ($CP) is the compositor, != the spawned supervisor $SP" || bad "hello.pid = $CP, spawned supervisor = $SP"
 [ "$(sup_pid)" = "$SP" ] && ok "hello.supervisor_pid == spawned supervisor $SP" || bad "hello.supervisor_pid $(sup_pid) != spawned $SP"
-"$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
@@ -595,8 +595,8 @@ stop_now
 echo "== I3: a keybind's toggle-pause (a separate one-shot CLI process) survives a compositor restart"
 post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → cur $(cur path)"
 pp=$(playerPaused); [ "$pp" = false ] && ok "a new session (/apply) plays" || bad "/apply left player.paused $pp"
-"$DOTNET" "$DLL" --action=toggle-pause > "$T/cli1.log" 2>&1
-waitfor $WAIT paused_is true && ok "CLI --action=toggle-pause → player.paused" || bad "CLI toggle → $(playerPaused)"
+"$DOTNET" "$DLL" toggle-pause > "$T/cli1.log" 2>&1
+waitfor $WAIT paused_is true && ok "CLI toggle-pause → player.paused" || bad "CLI toggle → $(playerPaused)"
 # Precondition: the player's snapshot carries the pause (written 250 ms after a change — a fixed 0.6 s
 # wait didn't always cover it under load, and a crash before it restores the player unpaused).
 waitfor $WAIT snap_paused true || bad "the snapshot never recorded player.paused=true: $(jq -c .player "$SNAP" 2>&1)"
@@ -606,7 +606,7 @@ for _ in $(seq 1 30); do CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$oldCP" ] &
 # the backend's OnRestarted reapply must have RUN before this proves it didn't flip the pause
 waitfor $WAIT reapply_seen "$re0" || bad "no reapply after the restart (compositor $oldCP → $CP)"
 pp=$(playerPaused); [ "$pp" = true ] && ok "pause survived the restart + the backend's reapply (not flipped)" || bad "after restart: player.paused $pp"
-"$DOTNET" "$DLL" --action=toggle-pause > "$T/cli2.log" 2>&1
+"$DOTNET" "$DLL" toggle-pause > "$T/cli2.log" 2>&1
 waitfor $WAIT paused_is false && ok "a second CLI toggle resumes" || bad "second CLI toggle → $(playerPaused)"
 
 echo "== I1: pause → /stop → /apply: the new session plays (legacy semantics)"
@@ -1344,7 +1344,7 @@ stop_now
 
 armed_only() { for _ in $(seq 1 80); do ctl state | jq -e '[.transitions[] | select(.phase != "done")] | length == 1 and .[0].phase == "waiting_start"' >/dev/null && return; sleep 0.1; done; echo "  note: no lone armed switch within 8 s: $(ctl state | jq -c '[.transitions[] | .phase]')"; }
 echo "== a backend restart hands the playlist over without two timers (dotnet watch / app relaunch)"
-# A stopping backend hands its timed playlist to a detached --timer-daemon, but kept ticking itself until
+# A stopping backend hands its timed playlist to a detached timer-daemon, but kept ticking itself until
 # the process exited — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket holds it open — and a
 # new backend then resumed the playlist too: two or three owners each armed an aligned switch and
 # superseded the others' (a switch every 1–16 s, "cancelled:superseded → switching in N s" storm).
@@ -1387,7 +1387,7 @@ one_advance() {   # exactly one handoff (after index h0) before tw, and it hande
 # the play's own switch has handed off and only the next aligned one is armed (a baseline to count from)
 st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); pe=$(tpos 0); te=$(ms_now)
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; OLD1=$BP; sleep 1.5
-"$DOTNET" "$DLL" --serve > "$T/backend2.log" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$T/backend2.log" 2>&1 & BP=$!
 new_backend_up "$port0"
 kill -0 "$OLD1" 2>/dev/null && ok "the old backend is still shutting down (WebSocket open) while the new one runs" || echo "  note the old backend already exited — the overlap this tests didn't happen"
 e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one aligned advance
@@ -1395,7 +1395,7 @@ e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one alig
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
 [ "$(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
-tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no --timer-daemon left running" || bad "a --timer-daemon (pid $tp) runs next to the new backend"
+tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no timer-daemon left running" || bad "a timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
 for _ in $(seq 1 50); do kill -0 "$OLD1" 2>/dev/null || break; sleep 0.1; done
 stop_now
@@ -1411,7 +1411,7 @@ port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 2
 BLOG=$T/backend-limits.log   # the running backend's log (the next section greps it)
-"$DOTNET" "$DLL" --serve > "$BLOG" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$BLOG" 2>&1 & BP=$!
 new_backend_up "$port0"; t_up=$(ms_now)
 swr=none; waitfor 15000 sw_seen "$m0" "$E2"
 echo "     the new backend answered $(( t_up - $(t0w) )) ms after e1 showed"
@@ -1427,7 +1427,7 @@ port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 1
 BLOG=$T/backend-limits2.log
-"$DOTNET" "$DLL" --serve > "$BLOG" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$BLOG" 2>&1 & BP=$!
 new_backend_up "$port0"; t_up=$(ms_now)
 swr=none; waitfor 20000 sw_seen "$m0" "$P2"
 echo "     the new backend answered $(( t_up - $(t0w) )) ms after p1 showed"
@@ -1445,7 +1445,7 @@ port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
 kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 sleep 1
 BLOG=$T/backend-limits3.log
-"$DOTNET" "$DLL" --serve > "$BLOG" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$BLOG" 2>&1 & BP=$!
 new_backend_up "$port0"; t_up=$(ms_now)
 swr=none; waitfor 20000 sw_seen "$m0" "$E1"
 echo "     the new backend answered $(( t_up - $(t0w) )) ms after s1 showed"
@@ -1457,7 +1457,7 @@ echo "== a second backend started while the first runs takes the playlist over (
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 armed_only
 st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); first=$BP; pe=$(tpos 0); te=$(ms_now)
-"$DOTNET" "$DLL" --serve > "$T/backend3.log" 2>&1 & BP=$!; BP_OLD="$BP_OLD $first"
+"$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1 & BP=$!; BP_OLD="$BP_OLD $first"
 new_backend_up "$port0"
 e1_window "$te" "$pe"
 [ "$(storms)" = "$st0" ] && [ "$(nows)" = "$nw0" ] && ok "two live backends: no storm, no immediate switch" || bad "two live backends: $(( $(storms) - st0 )) failed aligned switches, $(( $(nows) - nw0 )) align:now"

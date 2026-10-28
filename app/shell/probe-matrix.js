@@ -1,7 +1,7 @@
 // UI × player-state matrix driver (run by scripts/test-ui-matrix.sh, which builds the hermetic stack:
 // a private backend + headless liascape-player + the UI bundle served by that backend). For every cell
 // (state × control): reset everything to a baseline, reload the UI, bring the player into the state
-// through the backend, operate the control through the real DOM (or a `--action=` keybind), then check
+// through the backend, operate the control through the real DOM (or a keybind command), then check
 // with the ORACLE what every live source of the player runs:
 //   gain.user / speed   = the source's OWN item's override ?? the global setting (whatever else is live)
 //   no_audio, hwdec, fps_cap, cache, demuxer_* = the globals; gain.mute = the user mute (or an auto-mute)
@@ -89,7 +89,7 @@ const post = (p, b = {}) => http("POST", p, b);
 const getSettings = async () => (await http("GET", "/settings")).json;
 function cli(action) {
   const t0 = Date.now();
-  return new Promise((res) => cp.execFile(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, `--action=${action}`], { timeout: 40000 }, (err, out, errOut) =>
+  return new Promise((res) => cp.execFile(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, action], { timeout: 40000 }, (err, out, errOut) =>
     res({ code: err ? err.code ?? (err.killed ? `killed (${err.signal}) after ${Date.now() - t0} ms` : 1) : 0, out: String(out) + String(errOut), ms: Date.now() - t0 })));
 }
 
@@ -699,20 +699,20 @@ function pausedSwitch(c) {
 // aligned switch — alone (it used to relaunch the playing item and cancel the armed switch)
 function prevCheck(c) {
   if (!c.before.cur?.path) return [];
-  if (!c.fresh) return [...stayed(c, "previous-wallpaper"), ...pausedSwitch(c)];
+  if (!c.fresh) return [...stayed(c, "previous"), ...pausedSwitch(c)];
   const v = [];
   if (c.after.cur?.path !== c.before.cur.path) v.push(`previous at the first item switched to ${TITLE(c.after.cur?.path)}`);
   for (const e of c.evs) if (e.event === "transition.scheduled" || e.event === "transition.cancelled") v.push(`previous at the first item: ${e.event} ${e.corr} ${TITLE(e.path) ?? ""}`);
   return v;
 }
 const SWITCHES = {
-  "next-wallpaper": (c) => [...stayed(c, "next-wallpaper"), ...pausedSwitch(c)],
-  "previous-wallpaper": prevCheck,
+  "next": (c) => [...stayed(c, "next"), ...pausedSwitch(c)],
+  "previous": prevCheck,
   random: (c) => [...stayed(c, "random"), ...pausedSwitch(c)],
 };
 for (const [a, check] of Object.entries(SWITCHES)) {
   // a user switch from a pause resumes (default) or keeps it (-keep); in a fresh session's no-op previous it keeps it either way
-  const userSwitch = (keep) => (c) => { c.wasPaused = !!c.exp.paused; c.keep = keep; if (c.wasPaused && !keep && !(a === "previous-wallpaper" && c.fresh)) c.exp.paused = false; };
+  const userSwitch = (keep) => (c) => { c.wasPaused = !!c.exp.paused; c.keep = keep; if (c.wasPaused && !keep && !(a === "previous" && c.fresh)) c.exp.paused = false; };
   C[`cli:${a}`] = { switch: true, async run(c) { userSwitch(false)(c); c.cli = await cli(a); }, check };
   C[`cli:${a}-keep`] = { switch: true,
     async pre() { const s = await getSettings(); s.keepPauseOnSwitch = true; await post("/settings", s); },
@@ -786,7 +786,7 @@ C["seq:stripDrag+next"] = { states: ["playlist", "effect"], switch: true, async 
     const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
     await stripDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
     c.target = succ(c.want, c.before.cur?.path);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check: (c) => [...expectShown(c, c.target, { effect: true })] };
 
 // --- remove from the playlist (the X, or the context menu) — the shown item, the incoming/armed one, another
@@ -814,7 +814,7 @@ for (const t of ["shown", "other"]) C[`seq:stripRemove+next:${t}`] = { states: t
     const now = old.filter((p) => p !== c.target);
     c.want = cur === c.target ? [...old.slice(i + 1), ...old.slice(0, i)].find((p) => now.includes(p)) : succ(now, cur);
     await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check: (c) => [...expectShown(c, c.want, { effect: true }), ...((c.after.ps?.videoPaths || []).includes(c.target) ? [`${TITLE(c.target)} still in the playlist`] : [])] };
 
 // --- saved playlists (the strip's Save / Load modals → /playlist/save, /playlist/load)
@@ -850,7 +850,7 @@ C["plLoad"] = { states: ["idle", "single", ...PL_STATES], async pre() { await po
     return [...v, ...armedCheck(c, null)];
   } };
 C["seq:plLoad+next"] = { states: ["playlist", "effect"], switch: true, async pre() { await post("/playlist/save", { name: "mx-load", playlist: LOADED() }); },
-  async run(c) { await loadIt(c); await sleep(1200); c.want = succ(LOADED().videoPaths, c.before.cur?.path); await cliStep(c, "next-wallpaper"); },
+  async run(c) { await loadIt(c); await sleep(1200); c.want = succ(LOADED().videoPaths, c.before.cur?.path); await cliStep(c, "next"); },
   check(c) { const v = expectShown(c, c.want, { effect: true }); const d = lastSwitch(c)?.duration_ms;
     if (d !== undefined && d !== 900) v.push(`the switch after loading took ${d} ms, the loaded playlist says 900`); return v; } };
 
@@ -953,9 +953,9 @@ for (const [k, tr] of Object.entries(TR)) {
       if (armed && !(req && tr.want(req))) v.push(`the armed switch still runs ${fmtSw(req)}, the playlist now says ${tr.what}`);
       return v;
     } };
-  C[`seq:plTr${k}+next`] = { states: PL_STATES, switch: true, async run(c) { await ui(drive); await sleep(700); await cliStep(c, "next-wallpaper"); },
+  C[`seq:plTr${k}+next`] = { states: PL_STATES, switch: true, async run(c) { await ui(drive); await sleep(700); await cliStep(c, "next"); },
     check(c) {
-      const v = [...stayed(c, "next-wallpaper")];
+      const v = [...stayed(c, "next")];
       const e = lastSwitch(c);
       if (!e || !tr.want(e)) v.push(`the next switch ran ${fmtSw(e)}, the playlist says ${tr.what}`);
       if (!tr.saved(c.after.ps?.settings)) v.push("playlist settings didn't take the change");
@@ -971,10 +971,10 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.2
       c.target = pick(c, t); if (!c.target) return c.skip = "no target";
       await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(${idx}), ${from}, ${to}, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
       await sleep(900);
-      await cliStep(c, "next-wallpaper");
+      await cliStep(c, "next");
     }, check(c) {
       const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.[field];
-      return [...stayed(c, "next-wallpaper"), ...(ov === to ? [] : [`${TITLE(c.target)} ${field} ${ov}, expected ${to}`])];
+      return [...stayed(c, "next"), ...(ov === to ? [] : [`${TITLE(c.target)} ${field} ${ov}, expected ${to}`])];
     } };
 }
 // pause (keybind), then play from a strip item: a new session — it resumes and switches with the transition
@@ -985,20 +985,20 @@ C["seq:pause+stripClick"] = { states: PL_STATES, switch: true, async run(c) {
   }, exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
 // mute (keybind), then next: B comes up muted too
 C["seq:mute+next"] = { states: ["single", ...PL_STATES], switch: true, async run(c) {
-    await cliStep(c, "toggle-mute"); await sleep(300); await cliStep(c, "next-wallpaper");
-  }, exp: { muted: true }, check: (c) => stayed(c, "next-wallpaper") };
+    await cliStep(c, "toggle-mute"); await sleep(300); await cliStep(c, "next");
+  }, exp: { muted: true }, check: (c) => stayed(c, "next") };
 // a global setting changed (Settings page), then next: B takes the new global (the other live item keeps its override)
 for (const [name, key, value, drive] of [["volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`],
   ["speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`]]) {
   C[`seq:set:${name}+next`] = { states: name === "noAudio" ? ["playlist", "effect"] : ["single", ...PL_STATES], switch: true,
     async pre(c) { if (c.other) await post("/library/volume", { path: c.other, intValue: 30 }); },
-    async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next-wallpaper"); },
-    check: (c) => [...stayed(c, "next-wallpaper"), ...(JSON.stringify(c.after.s[key]) === JSON.stringify(value) ? [] : [`settings.${key} = ${JSON.stringify(c.after.s[key])}, expected ${JSON.stringify(value)}`])] };
+    async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next"); },
+    check: (c) => [...stayed(c, "next"), ...(JSON.stringify(c.after.s[key]) === JSON.stringify(value) ? [] : [`settings.${key} = ${JSON.stringify(c.after.s[key])}, expected ${JSON.stringify(value)}`])] };
 }
 // next twice quickly (two keybinds back to back): both count — two steps along the strip (a lost one = one step)
 C["seq:next+next"] = { states: ["single", ...PL_STATES, "paused"], switch: true, async run(c) {
     c.wasPaused = !!c.exp.paused; if (c.wasPaused) c.exp.paused = false;
-    await cliStep(c, "next-wallpaper"); await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next"); await cliStep(c, "next");
   }, check(c) {
     const v = [];
     const cur = c.before.cur?.path;
@@ -1009,7 +1009,7 @@ C["seq:next+next"] = { states: ["single", ...PL_STATES, "paused"], switch: true,
     return v;
   } };
 // next then previous: back where it was
-C["seq:next+prev"] = { states: PL_STATES, switch: true, async run(c) { await cliStep(c, "next-wallpaper"); await sleep(250); await cliStep(c, "previous-wallpaper"); },
+C["seq:next+prev"] = { states: PL_STATES, switch: true, async run(c) { await cliStep(c, "next"); await sleep(250); await cliStep(c, "previous"); },
   check: (c) => (c.after.cur?.path === c.before.cur?.path ? [] : [`next then previous from ${TITLE(c.before.cur?.path)} landed on ${TITLE(c.after.cur?.path)}`]) };
 // the modal's speed slider dragged, the modal closed, reopened: it shows what was set, the source still runs it, and
 // reopening/closing it again sends nothing stale
@@ -1490,7 +1490,7 @@ C["seq3:gAdvanceOff+On+next"] = { states: ["pendingGlobal"], rearms: true, switc
     await ui(`m.setCheck(m.input("Switch when video ends"), true, "advance");`); await sleep(1200);
     c.onArmed = armedTo(await ctl.call("state"));
     c.want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check(c) {
     const v = [];
     if (c.offArmed.length) v.push(`advance-on-end off (the playlist follows the globals): still armed ${JSON.stringify(c.offArmed.map(TITLE))}`);
@@ -1523,16 +1523,16 @@ C["set:normalizeFresh"] = { states: ["single", "playlist", "effect"], async pre(
   }, check: (c) => normMeasured(c) };
 // on, then next: B comes up normalized (its own measurement)
 C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async pre(c) { c.measured = await measureAll(); },
-  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); await cliStep(c, "next-wallpaper"); },
-  check: (c) => [...normMeasured(c), ...stayed(c, "next-wallpaper")] };
+  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); await cliStep(c, "next"); },
+  check: (c) => [...normMeasured(c), ...stayed(c, "next")] };
 // normalization on; Mute audio on → next (B starts with no audio: no filter) → Mute audio off: B's audio comes back
 // normalized — not only at its next switch
 C["seq3:normalize+noAudio+next+noAudioOff"] = { states: ["single", "playlist", "effect"], switch: true, async pre(c) { c.measured = await measureAll(); await normOn(); },
   async run(c) {
     await ui(settingsTab(`m.setCheck(m.input("Mute audio"), true, "Mute audio");`)); await sleep(900);
-    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
     await ui(`m.setCheck(m.input("Mute audio"), false, "Mute audio");`); await sleep(900);
-  }, check: (c) => [...normMeasured(c), ...stayed(c, "next-wallpaper"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
+  }, check: (c) => [...normMeasured(c), ...stayed(c, "next"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
 
 // --- Settings → Appearance (theme / thumbnail aspect / card size / gif autoplay): UI-only — it must not touch
 // playback. Every source sampled back to back while the change saves (/settings posts the whole object): no
@@ -1641,12 +1641,12 @@ C["autoMute:tone+next"] = { states: ["single", "playlist", "effect", "pending"],
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
     c.during = await ctl.call("state"); c.duringTone = tones.size > 0;
     await stopTones();
     c.unmuted = await waitFor(() => muteNow(false), 5000, 50);
   }, check(c) {
-    const v = [...amReadyCheck(c), ...stayed(c, "next-wallpaper")];
+    const v = [...amReadyCheck(c), ...stayed(c, "next")];
     if (!c.muted1) v.push("not auto-muted before the next");
     if (!c.duringTone) v.push("the 10 s stream ended before the switch settled");
     else if (!allMuted(c.during, true)) v.push(`after next, the stream still playing: ${JSON.stringify(muteOf(c.during))} — not all muted`);
@@ -1745,7 +1745,7 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
 // before the first full cycle; previous walks back through what actually played. Sequential = the strip's order.
 const plSeg = (label) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(label)}), ${JSON.stringify(label)}); ${plClose}`;
 // `n` next keybinds, each settled: the item each one put on screen
-async function nexts(c, n, a = "next-wallpaper") {
+async function nexts(c, n, a = "next") {
   const out = [];
   for (let i = 0; i < n; i++) { await cliStep(c, a); await sleep(300); await waitSettled(8000); out.push((await http("GET", "/current")).json?.path ?? null); }
   return out;
@@ -1823,7 +1823,7 @@ C["shuffle:offMidSession"] = { states: ["playlist4"], switch: true, async run(c)
 C["shuffle:prev+next"] = { states: ["playlist4"], switch: true, async run(c) {
     await ui(plSeg("Shuffle")); await sleep(500);
     c.fwd = [c.before.cur?.path, ...(await nexts(c, 2))];
-    c.back = await nexts(c, 2, "previous-wallpaper");
+    c.back = await nexts(c, 2, "previous");
     c.again = await nexts(c, 1);
   }, check(c) {
     const T = (l) => JSON.stringify(l.map(TITLE)), v = [];
@@ -1841,7 +1841,7 @@ C["seq5:stripDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], s
     c.first = (await nexts(c, 1))[0];
     await cliStep(c, "toggle-pause"); await sleep(600); c.pausedMid = !!(await ctl.call("state")).graph.player?.paused;
     await cliStep(c, "toggle-pause"); await sleep(300);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, exp: { paused: false }, check(c) {
     const v = [...expectShownN(c, c.t2, 2)];
     if (c.first !== c.t1) v.push(`the first next after the drag played ${TITLE(c.first)}, expected ${TITLE(c.t1)} (the new order)`);
@@ -1853,17 +1853,17 @@ C["seq5:stripDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], s
 // mute → next → unmute: B came up muted, and everything is unmuted at the end
 C["seq3:mute+next+unmute"] = { states: ["single", ...PL_STATES], switch: true, async run(c) {
     await cliStep(c, "toggle-mute"); await sleep(300);
-    await cliStep(c, "next-wallpaper"); await sleep(400); await waitSettled(8000);
+    await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
     c.midSt = await ctl.call("state");
     await cliStep(c, "toggle-mute");
-  }, exp: { muted: false }, check: (c) => [...stayed(c, "next-wallpaper"), ...(allMuted(c.midSt, true) ? [] : [`muted, then next: ${JSON.stringify(muteOf(c.midSt))} — not all muted`])] };
+  }, exp: { muted: false }, check: (c) => [...stayed(c, "next"), ...(allMuted(c.midSt, true) ? [] : [`muted, then next: ${JSON.stringify(muteOf(c.midSt))} — not all muted`])] };
 // trash the other live item → Undo → next: the undone item is back in its place and the next follows the restored strip
 C["seq3:trash+undo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     c.target = c.other; c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(900); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
     await sleep(900);
     c.want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check(c) {
     const at = (c.after.ps?.videoPaths || []).indexOf(c.target);
     return [...(at === c.idx ? [] : [`${TITLE(c.target)} back at playlist index ${at}, was ${c.idx}`]), ...expectShownN(c, c.want, 1), ...armedCheck(c)];
@@ -1888,7 +1888,7 @@ C["seq3:set:speed+next+prev"] = { states: ["playlist", "effect"], switch: true,
   async pre(c) { if (c.other) await post("/library/speed", { path: c.other, doubleValue: 0.8 }); },
   async run(c) {
     await ui(settingsTab(`m.setValue(m.input("Speed"), 1.5, "Speed");`)); await sleep(900);
-    await nexts(c, 1); await cliStep(c, "previous-wallpaper");
+    await nexts(c, 1); await cliStep(c, "previous");
   }, check: (c) => [...(c.after.cur?.path === c.before.cur?.path ? [] : [`speed → next → previous from ${TITLE(c.before.cur?.path)} landed on ${TITLE(c.after.cur?.path)}`]),
     ...(c.after.s.speed === 1.5 ? [] : [`settings.speed ${c.after.s.speed}, expected 1.5`])] };
 // next → pause → next: the second next (a user switch from a pause) resumes and switches with its transition
@@ -1896,7 +1896,7 @@ C["seq3:next+pause+next"] = { states: ["playlist", "pending"], switch: true, asy
     const s = c.before.ps?.videoPaths || []; c.want = succ(s, succ(s, c.before.cur?.path));
     await nexts(c, 1);
     await cliStep(c, "toggle-pause"); await sleep(500); c.pausedMid = !!(await ctl.call("state")).graph.player?.paused;
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, exp: { paused: false }, check: (c) => [...expectShownN(c, c.want, 2), ...(c.pausedMid ? [] : ["toggle-pause between the nexts didn't pause"]), ...armedCheck(c)] };
 // pause → trash what plays → Undo: the session plays on from the next item (a new session: the pause ends), the
 // trashed item is back in its place in the strip, and what plays now stays
@@ -1937,11 +1937,11 @@ const randomLanded = (c) => [...(c.midV || []), ...(c.landed === c.target ? [] :
 C["seq:random+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
     c.want = succ(c.before.ps?.videoPaths, c.target);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.want, c.tries + 1), ...armedCheck(c)] };
 C["seq:random+prev"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
-    await cliStep(c, "previous-wallpaper");
+    await cliStep(c, "previous");
   }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.from, c.tries + 1), ...armedCheck(c, c.landed)] }; // history: next after previous = the pick again
 // a playlist that only advances at each video's end (interval 0 — no countdown) played, then next: it's taken. The tick
 // (which takes every queued next / previous / random) only started with an interval, so the keybind and the UI's
@@ -1950,13 +1950,13 @@ C["seq:plPlayAdvanceOnly+next"] = { states: ["pending"], switch: true, async run
     await post("/playlist/play", { ...PENDING_PL(), settings: PS({ advanceOnVideoEnd: true, transitionDurationMs: 600, intervalSeconds: 0 }) });
     await sleep(500); await waitSettled(8000);
     c.mid = (await http("GET", "/current")).json?.path ?? null; c.want = succ(c.before.ps?.videoPaths, c.mid);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check: (c) => [...expectShownN(c, c.want, 2), ...armedCheck(c)] };
 // a timed playlist of ONE item (600 s), then next / random: the tick takes it (a switch to that item — the strip's next
 // and the only pick), and nothing rotates by itself. The tick that takes every queued next / previous / random started
 // only for > 1 item: the keybind queued pending_action.txt for nobody, and a tick started later (the list grew) threw
 // it away
-for (const a of ["next-wallpaper", "random"]) C[`seq:plPlayOne+${a === "random" ? "random" : "next"}`] = { states: ["single"], switch: true, async run(c) {
+for (const a of ["next", "random"]) C[`seq:plPlayOne+${a === "random" ? "random" : "next"}`] = { states: ["single"], switch: true, async run(c) {
     await playFast(c, [K[1]], PS()); c.exp.paused = false; // (+ /playlist/state: the strip follows it)
     await sleep(600);
     c.tStep = Date.now();
@@ -1972,7 +1972,7 @@ for (const a of ["next-wallpaper", "random"]) C[`seq:plPlayOne+${a === "random" 
 // remove the other item from the strip (the session plays on with two), trash what plays (it plays on from the one
 // survivor: a one-item session) → Undo (both back) → next: the rotation still takes it. A one-item session started no
 // tick and putting items back never started one — the queued next (pending_action.txt) was never taken while
-// /current said timed (fuzz: playlist → stripRemove:other → trashUndo:shown → cli:next-wallpaper)
+// /current said timed (fuzz: playlist → stripRemove:other → trashUndo:shown → cli:next)
 C["seq3:stripRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     c.removed = c.other; if (!c.removed || !(await stripHas(c, c.removed))) return c.skip = "not in strip";
     await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.removed))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
@@ -1982,7 +1982,7 @@ C["seq3:stripRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch
     c.mid = (await http("GET", "/current")).json?.path ?? null;
     c.midPs = (await http("GET", "/playlist/state")).json?.videoPaths || [];
     c.want = succ(c.midPs, c.mid);
-    await cliStep(c, "next-wallpaper");
+    await cliStep(c, "next");
   }, check(c) {
     const v = [];
     if (!c.midPs.includes(c.target)) v.push(`${TITLE(c.target)} not back in the playlist after Undo (${JSON.stringify(c.midPs.map(TITLE))})`);
@@ -2047,7 +2047,7 @@ for (const [combo, st] of [["v→s", "sceneV"], ["s→s", "sceneS"], ["s→v", "
     async pre() { await scenesOn({ transitionMethod: m }); },
     async run(c) {
       c.from = c.before.cur?.path; c.want = succ(c.before.ps?.videoPaths, c.from); c.aPid = workerOf(c.before.st, c.from)?.pid;
-      c.cli = await cli("next-wallpaper");
+      c.cli = await cli("next");
       // the outgoing scene's worker is reaped once the switch has handed off
       if (c.aPid) { await waitSettled(12000, c.want); c.aGone = await waitFor(() => !pidAlive(c.aPid), 3000, 100); }
     },
@@ -2406,7 +2406,7 @@ async function startBackend() {
   const env = { ...process.env, LIASCAPE_PORT: new URL(U).port };
   for (const k of ["DISPLAY", "LIASCAPE_URL", "LIASCAPE_CLIPS", "LIASCAPE_OUT", "LIASCAPE_ONLY", "LIASCAPE_SHARD"]) delete env[k];
   const log = fs.openSync(E.LIASCAPE_BACKEND_LOG, "a");
-  const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "--serve"], { env, stdio: ["ignore", log, log] });
+  const ch = cp.spawn(E.LIASCAPE_DOTNET, [E.LIASCAPE_DLL, "serve"], { env, stdio: ["ignore", log, log] });
   fs.closeSync(log);
   backendPid = ch.pid; if (E.LIASCAPE_BACKEND_PID_FILE) fs.writeFileSync(E.LIASCAPE_BACKEND_PID_FILE, String(ch.pid));
   return waitFor(async () => (await http("GET", "/health")).json?.ok === true, 40000, 200);
@@ -2693,9 +2693,9 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   const strip = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (strip && JSON.stringify(strip) !== JSON.stringify(want)) v.push(`UI strip ${JSON.stringify(strip)}, backend playlist ${JSON.stringify(want)}`);
-  if (c.cli && c.cli.code !== 0) v.push(`--action exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
+  if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
   // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
-  const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`--action took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
+  const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`the command took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
   lap("post");
   // a failed switch: the player's own story of it (ctl logs {corr}) + what each source was doing, while the stack lives
   let player;

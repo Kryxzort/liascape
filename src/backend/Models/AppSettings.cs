@@ -110,7 +110,7 @@ public class AppSettings
     // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
     // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/player-adapter.md.
     public string PlayerEngine { get; set; } = "legacy";
-    // What the volume keybinds (`--action=volume-up|down`, `/volume {delta}`) move — Advanced setting:
+    // What the volume keybinds (`liascape volume up|down`, `/volume {delta}`) move — Advanced setting:
     // "auto" = the playing wallpaper's own volume when it has one, else the global; "item" = always the
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own
     // volume doesn't move). PlayerHelper.AdjustVolume.

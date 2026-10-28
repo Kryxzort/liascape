@@ -189,7 +189,7 @@ actions into player commands. The player owns playback state, including the sess
 replays. **(my call)** Playlist/rotation logic moves into the player as a Program (Phase 3), which retires the timer
 daemon, `pending_action.txt`, `timer.pid`/`gui_timer.pid` ownership and the restart daemon. Until Phase 3 the
 backend drives rotation through the Command API and the player's events. Auto-mute detection (today's
-`AudioMonitor` + detached `--monitor` daemon) also becomes a player Signal in Phase 3. It must exclude the player's
+`AudioMonitor` + detached `monitor-daemon` daemon) also becomes a player Signal in Phase 3. It must exclude the player's
 own audio streams.
 
 **Auto-mute must react in ≤ 100 ms (owner: "wallpaper engine had it almost instant").** Measured cause of today's
@@ -407,8 +407,8 @@ Map every current capability to properties/recipes. Today's sources of truth: `.
 
 - **Modes**: single apply, Play All playlist, timed playlist (interval), advance-on-video-end, wait-for-video-end,
   combined interval + advance, shuffle (no immediate repeat), random, `--restore`, history prev/next.
-- **Keybind actions**: `toggle-mute`, `toggle-pause`, `stop`, `play`, `toggle-play`, `next-wallpaper`,
-  `previous-wallpaper`, `random`, `volume-up`/`volume-down` (±5, persisted).
+- **Keybind actions**: `toggle-mute`, `toggle-pause`, `stop`, `play`, `toggle-play`, `next`,
+  `previous`, `random`, `volume-up`/`volume-down` (±5, persisted).
 - **Playback settings, all live**: Loop; NoAudio; Volume; Speed; per-item volume/speed overrides (effective =
   override ?? global); VideoScale fill/fit; VideoFps cap; HwDec; DisableCache; demuxer max/back bytes; loudness
   normalisation and target LUFS; AutoMute (+ delays, threshold, MPRIS-only); user mute vs auto-mute semantics.

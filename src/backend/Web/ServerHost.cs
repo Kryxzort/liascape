@@ -76,14 +76,14 @@ public static class ServerHost
         var port = new Uri(app.Urls.First()).Port;
         Directory.CreateDirectory(ConfigDir);
         AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
-        Console.WriteLine($"liascape --serve listening on 127.0.0.1:{port}");
+        Console.WriteLine($"liascape serve listening on 127.0.0.1:{port}");
 
         // The serve backend owns the AudioMonitor in-process while running: take over from any detached
-        // `--monitor` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand
-        // back to a detached `--monitor` on shutdown so mute survives app close.
+        // `monitor-daemon` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand
+        // back to a detached `monitor-daemon` on shutdown so mute survives app close.
         AudioMonitor.KillDetachedMonitor();
-        // Same ownership handoff for the TIMED-PLAYLIST timer: `--serve` runs the timer IN-PROCESS, so it
-        // must KILL any detached `--timer-daemon` (e.g. one spawned at boot by `--restore`) — otherwise
+        // Same ownership handoff for the TIMED-PLAYLIST timer: `serve` runs the timer IN-PROCESS, so it
+        // must KILL any detached `timer-daemon` (e.g. one spawned at boot by `liascape restore`) — otherwise
         // BOTH own mpvpaper and the daemon keeps cycling its own (stale) playlist over ours ("creep") —
         // and CLAIM ownership (WriteGuiTimerPid) so SpawnTimerDaemon's IsGuiTimerAlive guard skips while we
         // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
@@ -105,9 +105,9 @@ public static class ServerHost
             var s = SettingsService.Load();
             AudioMonitor.Stop();
             if (s.AutoMute && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
-            // Release timer ownership, then hand the timed playlist back to a detached `--timer-daemon`
+            // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
             // so it keeps cycling after the app closes (the Electron shell only kills the backend — it
-            // doesn't run `--restore`). Stop our own ticking first: this process may live on for a while
+            // doesn't run `liascape restore`). Stop our own ticking first: this process may live on for a while
             // (Kestrel waits for open WebSockets), and two owners supersede each other's switches.
             // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
             PlayerHelper.ReleaseTimer();
@@ -519,8 +519,8 @@ public static class ServerHost
             try { p = JsonMerge.Over(PlaylistService.LoadCurrentState(), body); }
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             AppOps.SavePlaylistState(p);
-            // the saving page's id (X-LP-Client): it skips its own echo, every other page re-reads the strip
-            EventBus.Broadcast("playlist-changed", new { client = req.Headers["X-LP-Client"].FirstOrDefault() });
+            // the saving page's id (X-Liascape-Client): it skips its own echo, every other page re-reads the strip
+            EventBus.Broadcast("playlist-changed", new { client = req.Headers["X-Liascape-Client"].FirstOrDefault() });
             return Results.Ok();
         });
         app.MapGet("/playlist/names", () => Results.Json(PlaylistService.ListNames()));
@@ -580,7 +580,7 @@ public static class ServerHost
             return Results.Ok();
         });
         app.MapPost("/stop", () => { PlayerHelper.Stop(); return Results.Ok(); });
-        // `--action=<name>` (keybinds) forwarded by the one-shot CLI process (ActionForward): run here, on
+        // `liascape <action>` (keybinds) forwarded by the one-shot CLI process (ActionForward): run here, on
         // this backend's own session state, so the UI hears about it. 409 {error} = couldn't run.
         app.MapPost("/action", (NameReq r) =>
         {

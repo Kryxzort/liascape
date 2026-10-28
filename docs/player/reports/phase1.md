@@ -220,7 +220,7 @@ first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out 
 1. `restore_cli_invoke()` always used `command -v liascape` (`/usr/bin/liascape`, the owner's
    installed NixOS package). `strace`'d it directly: it execs through 4 wrapper layers down to
    `.../liascape-backend-0.1.0/lib/liascape-backend/liascape`, which then runs `setsid
-   mpvpaper ...` — the **legacy** path — even though the already-running `--serve` backend's own
+   mpvpaper ...` — the **legacy** path — even though the already-running `serve` backend's own
    `PlayerEngine` is `liascape-player`. First hypothesis: a binary-resolution gap (the wrapper exports
    `LIASCAPE_TRANSITION_BIN`/`LIASCAPE_AUDIO_BIN` but not `LIASCAPE_PLAYER_BIN`, and doesn't bundle `liascape-player`
    next to itself) — tried exporting `LIASCAPE_PLAYER_BIN` into the one-shot process and `strace -v`
@@ -236,11 +236,11 @@ first re-run (`task20-rerun-script-fixes/`) after a first hypothesis turned out 
    into that binary.
 
 **Confirmed fix, live:** priming the session (`POST /apply`) then running
-`$DOTNET $DLL --restore` (the current dev build — the exact DLL `liascape-watch` already runs)
+`$DOTNET $DLL restore` (the current dev build — the exact DLL `liascape-watch` already runs)
 instead of the installed CLI produced a real `transition.scheduled`/`.handoff` immediately.
 
 **Fix applied** (`battery.sh`, `restore_cli_invoke()`, live branch): use `"$DOTNET" "$DLL"
---restore` (the dev build already resolved at the top of the script) instead of `command -v
+restore` (the dev build already resolved at the top of the script) instead of `command -v
 liascape`. This is a battery-script workaround for testing purposes only — it does **not** fix
 the underlying gap, which is that the owner's actually-installed `liascape` (what runs for
 real, outside this test harness, for every one-shot CLI flag) has no liascape-player code in it at
@@ -259,9 +259,9 @@ all.
 §1.1's "what's left is not a bug".)
 
 **Severity note for the owner:** while `liascape-player` is selected, the installed `liascape`
-binary's one-shot flags (`--restore`, `--random`, `--kill`, `--action=*`) all silently run
-legacy instead — including `--restore` itself, used on every boot/session-resume. The
-long-running `--serve` backend (what the Electron UI actually talks to) is unaffected (it
+binary's one-shot commands (`restore`, `random`, `kill`, a keybind action) all silently run
+legacy instead — including `restore` itself, used on every boot/session-resume. The
+long-running `serve` backend (what the Electron UI actually talks to) is unaffected (it
 resolves `liascape-player` fine via its own dev-tree path walk) — but the owner should rebuild/
 reinstall the NixOS `liascape` package from this branch before relying on `liascape-player` day to
 day, tracked in `docs/TODO.md`.
@@ -329,7 +329,7 @@ the compositor child, new compositor answered `hello` **152 ms** later, both out
 pixel), background layer re-verified. Final cleanup: monitor layout and workspaces restored
 exactly, no `liascape-player` layer/process left, legacy `pgrep -x mpvpaper` empty throughout,
 default sink (`easyeffects_sink`) unchanged. This run used its own private `liascape-player serve`
-instance (own `XDG_RUNTIME_DIR`) and never touched the `--serve` backend's `PlayerEngine`
+instance (own `XDG_RUNTIME_DIR`) and never touched the `serve` backend's `PlayerEngine`
 setting at all.
 
 ## 4. Soak (1 h)

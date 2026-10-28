@@ -8,7 +8,7 @@ namespace Liascape.Helpers;
 
 // A lock shared with every liascape PROCESS: an exclusive flock on `<file>.lock` next to the state file. The
 // in-process locks (SettingsService's, LibraryStore's) don't reach the CLI (a keybind run locally when no backend
-// answers, --restore's WE sync) or the daemons, which read-modify-write the same files: 16 concurrent local
+// answers, `liascape restore`'s WE sync) or the daemons, which read-modify-write the same files: 16 concurrent local
 // volume-ups kept ONE of them (scripts/test-cross-process.sh). .NET takes the flock itself when a file is opened
 // FileShare.None — non-blocking, a held lock throws — so this retries. Released on dispose, or by the kernel when
 // the holder dies (never a stale lock). A holder that never lets go (a hung process) costs a wait of `MaxWaitMs`,

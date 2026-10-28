@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # liascape-player Phase 1 on-machine battery (Task 20, docs/superpowers/sdd/2026-10-20-liascape-player-phase0-1/
-# task-20-brief.md). Drives the REAL C# backend (`liascape --serve`, PlayerEngine=liascape-player) over
+# task-20-brief.md). Drives the REAL C# backend (`liascape serve`, PlayerEngine=liascape-player) over
 # HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
 # same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
 # `src/player/tests/onmachine/bus.sh`, whose patterns this reuses (temp dirs for --hermetic, a
@@ -688,7 +688,7 @@ EOF
   ctl hello >/dev/null 2>&1 || { err "hermetic liascape-player did not start, see $HERMETIC_T/serve.log"; exit 1; }
   PLAYER_SP=$(sup_pid)
 
-  "$DOTNET" "$DLL" --serve > "$HERMETIC_T/backend.log" 2>&1 & BP=$!
+  "$DOTNET" "$DLL" serve > "$HERMETIC_T/backend.log" 2>&1 & BP=$!
   for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
   [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { err "hermetic backend did not start, see $HERMETIC_T/backend.log"; tail -5 "$HERMETIC_T/backend.log" >&2; exit 1; }
   API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")"
@@ -834,7 +834,7 @@ cell_already_attempted() {
 
 restore_cli_invoke() {
   if [ "$HERMETIC" = 1 ]; then
-    "$DOTNET" "$DLL" --restore > "$HERMETIC_T/restore-$(date +%s%N).log" 2>&1
+    "$DOTNET" "$DLL" restore > "$HERMETIC_T/restore-$(date +%s%N).log" 2>&1
   else
     # battery-script fix (task20-final-run: restore-replay failed its FIRST switch in all 3
     # methods, "no new transition corr observed", every time). Root cause confirmed live, in two
@@ -849,13 +849,13 @@ restore_cli_invoke() {
     # finds both -- the NixOS-packaged `liascape` is a STALE BUILD that predates liascape-player/
     # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LIASCAPE_PLAYER_BIN`
     # could ever have fixed. Confirmed the actual fix: priming the SAME session then invoking
-    # `$DOTNET $DLL --restore` (the current dev build, what --serve itself runs) produces a real
+    # `$DOTNET $DLL restore` (the current dev build, what serve itself runs) produces a real
     # new transition.scheduled corr immediately. This is a packaging/deployment gap (the owner's
     # installed system package needs rebuilding from this branch) -- not a bug in the restore
     # mechanism, this script's corr-detection, or anything fixable by this script choosing a
     # different binary on PATH. Using the dev build here is what actually exercises what this
     # cell is supposed to test; flagged for the owner in docs/player/reports/phase1.md + TODO.md.
-    "$DOTNET" "$DLL" --restore >/dev/null 2>&1
+    "$DOTNET" "$DLL" restore >/dev/null 2>&1
   fi
 }
 

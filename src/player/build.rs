@@ -45,7 +45,7 @@ fn main() {
 /// compositor binary never does (`rustc-link-arg-bin`). The core is `$LIASCAPE_LWE_CORE_DIR/lib`:
 /// the flake's `lwe-core` (its devShell and the `liascape-player` package set it), or
 /// `scripts/lwe.sh build` (`build/lwe-core`). The worker's RUNPATH is that dir, or
-/// `$LIASCAPE_LWE_RPATH` when set (`install.sh`: `$ORIGIN/../lib`, the core installed beside it).
+/// `$LIASCAPE_LWE_RPATH` when set (`install.sh`: `$ORIGIN/../../lib/liascape`, the core installed in lib/liascape/ beside libexec/liascape/).
 fn lwe_link() {
     println!("cargo::rerun-if-env-changed=LIASCAPE_LWE_CORE_DIR");
     println!("cargo::rerun-if-env-changed=LIASCAPE_LWE_RPATH");

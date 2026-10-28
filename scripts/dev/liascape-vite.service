@@ -1,0 +1,14 @@
+# Template — scripts/dev.sh installs it into ~/.config/systemd/user/ with @ROOT@ = the repo's physical path.
+[Unit]
+Description=Liascape Vite dev server (React HMR)
+After=default.target
+
+[Service]
+WorkingDirectory=@ROOT@/app/ui
+# NixOS: run inside the flake devShell so node/npm are present (login shell = `nix` on PATH)
+ExecStart=/bin/bash -lc 'exec nix develop @ROOT@ -c npm run dev'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

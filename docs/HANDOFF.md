@@ -30,10 +30,10 @@ liascape-player..HEAD`, `git diff`), then finish it yourself or brief a FRESH ag
 
 ## Parked brief — the two fuzz-found playlist bugs (not started)
 Both reproduce through the real UI on a hermetic stack via `scripts/test-ui-matrix.sh --fuzz-replay '…'`:
-1. `pending:cli:random,cli:next-wallpaper` — advance-on-end playlist [k4,k1,k2] with an aligned switch armed; when
-   random lands on k2, every re-arm targets k2 itself, so next-wallpaper stays on k2 (2/3 replays; passes when random
+1. `pending:cli:random,cli:next` — advance-on-end playlist [k4,k1,k2] with an aligned switch armed; when
+   random lands on k2, every re-arm targets k2 itself, so next stays on k2 (2/3 replays; passes when random
    picks k1). Expected: next = the item after k2 in playlist order.
-2. `playlist:stripRemove:other,trashUndo:shown,cli:next-wallpaper` — 2-item timed playlist; trash the playing item
+2. `playlist:stripRemove:other,trashUndo:shown,cli:next` — 2-item timed playlist; trash the playing item
    (plays on with 1 item), Undo puts it back → the tick is dead: `pending_action.txt` ("next") never consumed while
    `/current` says `timed=true`. Every time; without trash+undo next works. Suspect (unverified): a 1-item session
    starts no tick and Undo never restarts it.
@@ -56,9 +56,9 @@ scene advances).
 1. Fork: OK — done.
 2. Model/effort: "whatever you think is best balance" → hard work (Phase 2 tracks, hunts) Opus high effort;
    chores (flakes, docs, merges, gate runs) Sonnet.
-3. Push/merge + re-pin: OK. `liascape-player` is PUSHED to `Kryxzort/liascape` (remote `origin` since 2026-10-28 — upstream is `upstream`, push disabled; SSH has no key in the
+3. Push/merge + re-pin: OK. `lp-player` (the branch) is PUSHED to `Kryxzort/liascape` (remote `origin` since 2026-10-28 — upstream is `upstream`, push disabled; SSH has no key in the
    agent shell → push with `git -c credential.helper= -c credential.helper='!gh auth git-credential' push
-   https://github.com/Kryxzort/liascape.git liascape-player`). **Merge into `main` only after a quiet full-matrix
+   https://github.com/Kryxzort/liascape.git lp-player`). **Merge into `main` only after a quiet full-matrix
    gate** (finishing-a-development-branch), push main, then give the owner the `/etc/nixos/liascape.nix` re-pin to
    GitHub (never commit in /etc/nixos; the owner runs `nixos-rebuild`).
 
@@ -69,12 +69,12 @@ lifecycle, dmabuf transport, synthetic renderer; `lwe` feature default off), tes
 stepped-mode fix (`eb2b251`), the two fuzz playlist bugs (`8c83331` random re-seats the rotation, `90caefe`
 `EnsureTimedTick`). Worktrees of finished agents can be removed. Running: Phase 2 Track A (LWE fork build + patches,
 pushes a branch to `Kryxzort/linux-wallpaperengine`). Gate for `main`: full matrix + adapter + settings-merge on the
-merged tree (then merge `liascape-player` → `main`, push, re-pin instructions below).
+merged tree (then merge `lp-player` → `main`, push, re-pin instructions below).
 
 ## `main` merged (2026-10-27 night)
 `main` fast-forwarded to `b33eec9` and pushed to `Kryxzort/liascape` after a quiet gate on that exact tip:
 matrix 716/0 (load 2), adapter IT 118/0 ×2, settings-merge 53/0, player crate suites green in both render modes.
-**Owner: re-pin NixOS** — in `/etc/nixos/liascape.nix` replace the `git+file…ref=liascape-player&rev=3ae0937…` line with
+**Owner: re-pin NixOS** — in `/etc/nixos/liascape.nix` replace the `git+file…ref=lp-player&rev=3ae0937…` line with
 ```nix
   liascapeFlake = builtins.getFlake "github:Kryxzort/liascape/b33eec9d772682285287914020cb8be9158a6b89";
 ```

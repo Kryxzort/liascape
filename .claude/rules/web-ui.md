@@ -13,7 +13,7 @@ for framer-motion's "cool" ceiling. See memory `web-frontend-rewrite-idea`.
 ## Layout
 - **`app/ui`** — Vite + React 19 + TS. `src/api` (client + events), `src/store` (zustand),
   `src/views` (Browse/Library/Settings), `src/components`, `src/index.css` (theme vars + glow).
-- **`app/shell`** — Electron: `main.js` spawns `liascape --serve`, reads `serve.port`, loads the UI
+- **`app/shell`** — Electron: `main.js` spawns `liascape serve`, reads `serve.port`, loads the UI
   same-origin (`LIASCAPE_UI_DIR` → C# serves the dist). `probe.js` = headless self-test (offscreen window,
   counts rendered elements per tab — **use it to verify UI changes**, no GUI popup).
 
@@ -209,7 +209,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   size / radius / shadow / filter / clip-path animation in a flight, nothing heavy mounting mid-flight.
 
 ## Hardware GL on NVIDIA (2026-10-28 — now the DEFAULT: ANGLE `gles-egl`)
-The owner ran `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl liascape-ui` in the real Wayland session: the window shows, stays up, the
+The owner ran `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl liascape` in the real Wayland session: the window shows, stays up, the
 morph is GPU-composited. So `main.js` now defaults NVIDIA to hardware GL via `--use-angle=gles-egl`; `LIASCAPE_SOFTGL=1`
 brings back the SwiftShader path; `LIASCAPE_ANGLE` overrides the backend. The log line "'--ozone-platform=wayland' is not
 compatible with Vulkan" is harmless. History below.
@@ -221,7 +221,7 @@ crashes" — headless has no default GL), but **`--use-angle=gles-egl` (NVIDIA's
 `--use-angle=vulkan` bring up full GPU compositing + raster + WebGL with no GPU-process exit** on both versions. That
 does not exercise the window's presentation path (Wayland surface / XWayland present — where both crashes were), which
 can't be driven hermetically (no headless Wayland compositor here; Xvfb has no NVIDIA GL), so it's not proof and the
-default stays. To try it: `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl liascape-ui` (both env vars already exist in `main.js`; EGL, not
+default stays. To try it: `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl liascape` (both env vars already exist in `main.js`; EGL, not
 Vulkan, for the surface); if the window shows and stays up, the GPU composites the UI and the CPU cost per frame measured above goes away.
 
 ## Backend-owned state the store mirrors (UI × player-state matrix findings)
@@ -231,7 +231,7 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
 - **Playlist strip**: trash/undo change the backend's playlist → `trashItems` drops the items first (a
   pending strip save can't put them back), both re-read it via `syncPlaylist()`. Another client's
   `POST /playlist/state` (a script, an agent) → WS `playlist-changed {client}` → `syncPlaylist()`; every POST
-  carries the page's `X-LP-Client` id (`api/client.ts` `CLIENT_ID`) so a page skips the echo of its own save.
+  carries the page's `X-Liascape-Client` id (`api/client.ts` `CLIENT_ID`) so a page skips the echo of its own save.
 - **Backend restart under an open page → `store.resync()`** (2026-10-28: "Library is empty" while a wallpaper played).
   Everything the store mirrors — sources, themes, settings (+ theme vars), `/current`, library, strip (paths +
   settings + name), playlist names, undo depth, Steam status — is read by ONE `resync()` (`readBackend`): at start
@@ -382,6 +382,6 @@ duration clamped to 50).
 
 ## Build / run / verify
 - `cd app/ui && npm run build` (or `npm run dev` + `?api=<port>` in browser).
-- Backend: `dotnet run --project src/backend -- --serve` (writes `serve.port`).
+- Backend: `dotnet run --project src/backend -- serve` (writes `serve.port`).
 - App: Electron `main.js` (dev uses `demos/shell/node_modules/electron`); package via electron-builder (Phase 7).
 - **Self-test:** `electron app/shell/probe.js http://127.0.0.1:<port>` → prints PROBE_BROWSE/LIBRARY/SETTINGS counts.

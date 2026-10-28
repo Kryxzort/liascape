@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UI × player-state matrix (PlayerEngine=liascape-player): every playback-relevant UI control (and every
-# `--action=` keybind) exercised in every player state — idle, playing, playlist, an effect running,
+# keybind command) exercised in every player state — idle, playing, playlist, an effect running,
 # an align:end switch pending, paused, paused mid-effect, no output, muted — through the REAL UI
 # (headless Electron clicking the built bundle), checking after each step what every live source of
 # the player actually runs. Driver + oracle: app/shell/probe-matrix.js.
@@ -338,7 +338,7 @@ SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
 
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
-"$DOTNET" "$DLL" --serve > "$T/backend.log" 2>&1 & BP=$!
+"$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")

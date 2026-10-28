@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# liascape — the one command users type. Installed as <prefix>/bin/liascape by every package (install.sh,
+# the PKGBUILD and the AppImage through it, the Nix flake); it finds everything relative to itself:
+#
+#   <prefix>/bin/liascape                          this launcher
+#   <prefix>/libexec/liascape/liascape-backend     the C# backend: serve (the app's API), the CLI, the daemons
+#   <prefix>/libexec/liascape/liascape-player      the Rust compositor (`liascape ctl …` talks to it)
+#   <prefix>/libexec/liascape/liascape-scene-worker  one per Wallpaper Engine scene (the player starts them)
+#   <prefix>/libexec/liascape/liascape-transition  legacy engine: the transition renderer
+#   <prefix>/libexec/liascape/liascape-audio       legacy engine: the scene-audio crossfade helper
+#   <prefix>/lib/liascape/{ui,shell,transitions}   the React UI, the Electron shell, the effect catalogue
+#
+#   liascape                 open the app (Electron: $LIASCAPE_ELECTRON, else `electron` on PATH)
+#   liascape ctl <verb> …    the running player's control socket (state, logs, probe, …)
+#   liascape <command> …     everything else goes to the backend (`liascape help` lists it)
+#
+# Any LIASCAPE_* variable already set wins (dev trees, tests).
+set -euo pipefail
+
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+prefix="$(cd "$(dirname "$self")/.." && pwd -P)"
+libexec="$prefix/libexec/liascape"
+lib="$prefix/lib/liascape"
+
+export LIASCAPE_UI_DIR="${LIASCAPE_UI_DIR:-$lib/ui}"
+export LIASCAPE_TRANSITIONS_DIR="${LIASCAPE_TRANSITIONS_DIR:-$lib/transitions}"
+export LIASCAPE_BACKEND="${LIASCAPE_BACKEND:-$libexec/liascape-backend}"
+# the helpers are optional (a --no-scenes build has a worker that plays test scenes only; a build may leave
+# the legacy helpers out): only point at the ones that are there, the backend reports what's missing
+for helper in player:PLAYER scene-worker:SCENE_WORKER transition:TRANSITION audio:AUDIO; do
+  var="LIASCAPE_${helper#*:}_BIN"
+  [ -z "${!var:-}" ] && [ -x "$libexec/liascape-${helper%%:*}" ] && export "$var=$libexec/liascape-${helper%%:*}"
+done
+
+case "${1-}" in
+  "")
+    exec "${LIASCAPE_ELECTRON:-electron}" "$lib/shell" ;;
+  ctl)
+    shift
+    [ -n "${LIASCAPE_PLAYER_BIN:-}" ] || { echo "liascape ctl: no liascape-player in $libexec" >&2; exit 1; }
+    exec "$LIASCAPE_PLAYER_BIN" ctl "$@" ;;
+  *)
+    exec "$LIASCAPE_BACKEND" "$@" ;;
+esac

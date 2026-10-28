@@ -12,8 +12,10 @@ url="https://github.com/Kryxzort/liascape"
 license=('GPL-3.0-only' 'MIT')
 # Runtime: backend is published --self-contained (bundles .NET) so no dotnet-runtime needed.
 depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron')
-# Build: .NET SDK + Node for the app; C toolchain + wayland/EGL/mpv/pulse headers for liascape-transition/liascape-audio.
-makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'base-devel' 'wayland' 'wayland-protocols' 'libglvnd')
+# Build: .NET SDK + Node for the app; Rust + clang (bindgen) for liascape-player; C toolchain + wayland/EGL/mpv/
+# pulse/PipeWire headers for the native helpers + the player; cmake + SDL2/freetype/glm/lz4 for LWE's core (scenes).
+makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'base-devel' 'rust' 'clang' 'wayland' 'wayland-protocols' 'libglvnd'
+             'pipewire' 'libxkbcommon' 'cmake' 'sdl2' 'freetype2' 'glm' 'lz4' 'zlib')
 optdepends=('linux-wallpaperengine: Wallpaper Engine scene support'
             'playerctl: MPRIS-aware Auto-Mute')
 provides=('liascape')

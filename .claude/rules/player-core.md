@@ -579,7 +579,7 @@ small compatibility prelude), never in `transitions/` itself.
 **Directory resolution** (`Catalogue::resolve_dir`), in order:
 
 1. `LIASCAPE_TRANSITIONS_DIR` env var.
-2. `~/.local/share/liascape-web/transitions` (the Electron UI's installed copy).
+2. `~/.local/lib/liascape/transitions` (the default install, `install.sh`).
 3. The repo's own `transitions/`, found by walking up from the current exe's path and,
    failing that, from `CARGO_MANIFEST_DIR` (a build-time constant — this is what makes
    `cargo test` find it even before any exe-relative candidate would resolve).
@@ -3137,8 +3137,8 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   Nix: `scripts/lwe.sh fetch prepare build` (clone into `~/.cache/liascape/src/lwe-<rev>`,
   every submodule verified against the PIN; a copy without VCS dirs in `build/lwe-src-<rev>`;
   built in `build/lwe-build-<rev>`; installed to `build/lwe-core`, `-j${LWE_JOBS:-8}`).
-  `install.sh` does that, copies the `.so*` into `~/.local/share/liascape-web/lib/` and builds
-  the worker with `LIASCAPE_LWE_RPATH='$ORIGIN/../lib'`.
+  `install.sh` does that, copies the `.so*` into `<prefix>/lib/liascape/` and builds
+  the worker with `LIASCAPE_LWE_RPATH='$ORIGIN/../../lib/liascape'`.
 - **Patch work.** `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test` builds a working
   tree in place (`build/lwe-build-dev`, incremental; `REV` = `dev:<dir>`, which
   `core_is_the_pinned_one` skips), then `LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core cargo …`.
