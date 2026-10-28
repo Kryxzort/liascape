@@ -11,3 +11,8 @@ Read this when the owner asks "anything I should know". Append during unattended
   (`docs/superpowers/plans/2026-10-28-liascape-rename.md`) → one-off migration of the owner's config/library (backup
   first) → branch cleanup → Phase 2 Task 14 (on-machine battery) → anything else worthwhile.
 - No redirect needed from the old repo name (owner).
+- Merged + pushed the rotation redesign (`13ee4d5`) and loudness refinement (merged locally, push after checks).
+  Your rotation answer → a follow-up agent: 0 = off for min AND max (max off = a 10 h video plays to its end; min off =
+  switch at every end), plus a **"Separate timing for scenes"** toggle with one "Switch scenes after" field (a scene
+  never ends, so min/max make no sense for it). Your config migration will keep today's behaviour exactly: min 0,
+  scenes switch after your 20 s.
