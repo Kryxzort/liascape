@@ -109,8 +109,8 @@ player: liascape-player's pieces come from the running player's `hello.health` (
 | `liascape-player` | the `liascape-player` binary (`PlayerEngine.ResolveBinary`) | the engine falls back to legacy | `playerEngine` |
 | `scenes` | liascape-player: `liascape-scene-worker` (built with LWE's core) + WE's assets dir (player's `hello.health.scenes` / `scene-check`); legacy: `linux-wallpaperengine` | scenes are skipped | `allowScenes` |
 | `transitions` | liascape-player: the effects catalogue the player loaded (`transitions/`); legacy: `liascape-transition` + the catalogue | every switch is a cut | `globalTransitionEnabled`, `transitionMethod`, `transitions` |
-| `vram` (lp) | a VRAM probe — NVML (`libnvidia-ml`), AMD DRM sysfs, or `nvidia-smi` (Intel: none) | the per-scene VRAM limit and the low-VRAM rule can't act | `limitVramPerScene`, `sceneVramLimitMib`, `vramLowMode` |
-| `hwdec-interop` (lp) | the render worker's GL interop (CUDA on NVIDIA, VA-API on AMD/Intel) — running player only (null otherwise) | hardware decoding copies every frame through the CPU | `hwDec` |
+| `vram` (liascape-player) | a VRAM probe — NVML (`libnvidia-ml`), AMD DRM sysfs, or `nvidia-smi` (Intel: none) | the per-scene VRAM limit and the low-VRAM rule can't act | `limitVramPerScene`, `sceneVramLimitMib`, `vramLowMode` |
+| `hwdec-interop` (liascape-player) | the render worker's GL interop (CUDA on NVIDIA, VA-API on AMD/Intel) — running player only (null otherwise) | hardware decoding copies every frame through the CPU | `hwDec` |
 | `auto-mute` | `pactl` + `parec` | auto-mute can't hear other apps | `autoMute` |
 | `mpris` | `playerctl` | "Only if MPRIS player active" never sees a player | `autoMuteOnlyIfMprisActive` |
 | `ffmpeg` | `ffmpeg` + `ffprobe` | no loudness measurement, imports / thumbnails / durations fail | `normalizeAudio` |
