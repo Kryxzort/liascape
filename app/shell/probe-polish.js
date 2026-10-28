@@ -1,5 +1,5 @@
 // Parity-polish self-test: asserts the new DOM (compact lib card title overlay, ring/check toggle,
-// strip title bar + context menu, Save/Load modals, lucide icons, preview meta rows, settings help).
+// playlistBar title bar + context menu, Save/Load modals, lucide icons, preview meta rows, settings help).
 // electron app/shell/probe-polish.js http://127.0.0.1:<port>
 const { app, BrowserWindow } = require("electron");
 const url = process.argv[2];
@@ -48,20 +48,20 @@ app.whenReady().then(async () => {
     noBelowTitle: !document.querySelector('.card.lib > .title'),
   }))()`).catch((e) => ({ error: String(e) }));
 
-  // --- STRIP: title bar + context menu (fixed, opens on contextmenu) ---
-  out.strip = await js(`(() => ({
+  // --- PLAYLIST_BAR: title bar + context menu (fixed, opens on contextmenu) ---
+  out.playlistBar = await js(`(() => ({
     items: document.querySelectorAll('.pl-item').length,
     titleBar: !!document.querySelector('.pl-item .pl-title'),
     removeIcon: !!document.querySelector('.pl-item .pl-remove svg.lucide'),
   }))()`).catch((e) => ({ error: String(e) }));
-  // open strip context menu on first item
-  out.strip.ctxOpens = await js(`(() => {
+  // open playlistBar context menu on first item
+  out.playlistBar.ctxOpens = await js(`(() => {
     const it = document.querySelector('.pl-item'); if(!it) return false;
     it.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:600}));
     return true;
   })()`);
   await wait(400);
-  out.strip.ctxMenu = await js(`(() => {
+  out.playlistBar.ctxMenu = await js(`(() => {
     const m = document.querySelector('.ctx-menu.pl-ctx');
     return m ? [...m.querySelectorAll('button')].map(b=>b.textContent) : null;
   })()`);
@@ -69,13 +69,13 @@ app.whenReady().then(async () => {
   await wait(300);
 
   // --- SAVE / LOAD playlist modals ---
-  await js(`[...document.querySelectorAll('.strip-head .mini')].find(b=>b.title==='Save playlist')?.click()`);
+  await js(`[...document.querySelectorAll('.playlist-bar-head .mini')].find(b=>b.title==='Save playlist')?.click()`);
   await wait(400);
   out.saveModal = await js(`(() => { const m=document.querySelector('.pl-modal');
     return m ? { title: m.querySelector('h2')?.textContent, hasInput: !!m.querySelector('input.text') } : null; })()`);
   await js(`document.querySelector('.modal-backdrop')?.click()`);
   await wait(300);
-  await js(`[...document.querySelectorAll('.strip-head .mini')].find(b=>b.title==='Load playlist')?.click()`);
+  await js(`[...document.querySelectorAll('.playlist-bar-head .mini')].find(b=>b.title==='Load playlist')?.click()`);
   await wait(400);
   out.loadModal = await js(`(() => { const m=document.querySelector('.pl-modal');
     return m ? { title: m.querySelector('h2')?.textContent, loadDisabled: m.querySelector('.btn.accent')?.disabled } : null; })()`);

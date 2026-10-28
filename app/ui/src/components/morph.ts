@@ -1,10 +1,10 @@
-// COOL: the card → modal morph (LibrarySettingsModal, PreviewModal — the useMorph hook). A source surface
-// (library card `.thumb-wrap`, playlist-strip `.pl-item`, Browse card) carries `data-morph-id`; the modal's
+// COOL: the card → modal morph (CardSettingsModal, PreviewModal — the useMorph hook). A source surface
+// (library card `.thumb-wrap`, playlist-bar `.pl-item`, Browse card) carries `data-morph-id`; the modal's
 // media box flies from that surface's visible crop to its own place — the picture with ONE uniform scale (it
 // never stretches) while its crop grows from the card's cover-crop to the image's own aspect — the panel's
 // chrome (its `::before`: background, border, shadow) grows from the card to the panel, and the body is
 // clipped to it. framer's layoutId scaled one <img> between a 16:9 crop and the natural aspect (stretched
-// mid-flight), flew a low-res still, and couldn't fly back out of the strip's scroll row (clipped there).
+// mid-flight), flew a low-res still, and couldn't fly back out of the playlist bar's scroll row (clipped there).
 //
 // PERF: every flight animates `transform` (+ the body's opacity) ONLY — compositor work, no layout, no
 // repaint. The owner's NVIDIA box renders the UI in software (main.js: disable-gpu), where the old flight
@@ -29,7 +29,7 @@ export function sourceEl(morphId: string | null): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-morph-id="${CSS.escape(morphId)}"]`);
 }
 
-// on screen at all (a card scrolled away, a collapsed strip → no flight, just a fade)
+// on screen at all (a card scrolled away, a collapsed playlistBar → no flight, just a fade)
 export function onScreen(b: Box): boolean {
   return b.w > 4 && b.h > 4 && b.x + b.w > 0 && b.y + b.h > 0 && b.x < innerWidth && b.y < innerHeight;
 }
@@ -121,7 +121,7 @@ export const PREVIEW_MORPH: MorphTiming = {
   open: { duration: 430, bezier: [0.2, 0.9, 0.22, 1] },
   close: { duration: 340, bezier: [0.45, 0, 0.2, 1] },
 };
-// COOL: TUNE HERE — the per-item settings modal's flight (owner 2026-10-28: 430 ms "snap" → 620 ms "still too
+// COOL: TUNE HERE — the per-card settings modal's flight (owner 2026-10-28: 430 ms "snap" → 620 ms "still too
 // snappy"): slow and soft, one symmetric ease-in-out (sine-like: 25 % of the time → 15 % of the travel, the
 // middle fastest, the landing as gentle as the take-off) both ways, the close a little quicker than the open.
 // Things that wait for the open to land (the duration row, the scene properties, the video preview, App's

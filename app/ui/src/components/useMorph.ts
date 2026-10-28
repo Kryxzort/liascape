@@ -91,7 +91,7 @@ export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVI
   // unmount one frame after landing, so the landing pose itself gets painted
   const land = (a: Animation) => a.finished.then(() => requestAnimationFrame(() => onClose()), onClose);
 
-  // back into the source — wherever it is NOW (the strip may have scrolled); gone/offscreen → fade out
+  // back into the source — wherever it is NOW (the playlist bar may have scrolled); gone/offscreen → fade out
   const requestClose = () => {
     if (closingRef.current) return;
     closingRef.current = true;

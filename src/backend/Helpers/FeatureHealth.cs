@@ -59,11 +59,11 @@ public static class FeatureHealth
         "liascape-player" => PlayerEngine.Wants(s),
         "scenes" => s.AllowScenes,
         "transitions" => s.GlobalTransitionEnabled,
-        "vram" => s.SceneVramLimitEnabled || !string.Equals(s.VramLowMode, "off", StringComparison.OrdinalIgnoreCase),
+        "vram" => s.LimitVramPerScene || !string.Equals(s.VramLowMode, "off", StringComparison.OrdinalIgnoreCase),
         "hwdec-interop" => !string.Equals(s.HwDec, "no", StringComparison.OrdinalIgnoreCase),
         "auto-mute" => s.AutoMute,
         "mpris" => s.AutoMute && s.AutoMuteOnlyIfMprisActive,
-        "steamcmd" => s.WorkshopAcquireMode == "steamcmd",
+        "steamcmd" => s.WorkshopDownloadMode == "steamcmd",
         _ => true, // ffmpeg: imports, thumbnails, durations — always
     };
 
@@ -97,7 +97,7 @@ public static class FeatureHealth
                     ["globalTransitionEnabled", "transitionMethod", "transitions"]));
                 var (vok, vwhy) = Part(i.PlayerHealth, "vram");
                 f.Add(new("vram", "VRAM measurement", vok, vok == false ? vwhy : null,
-                    ["sceneVramLimitEnabled", "sceneVramLimitMib", "vramLowMode"]));
+                    ["limitVramPerScene", "sceneVramLimitMib", "vramLowMode"]));
                 var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
                 f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
             }
@@ -119,7 +119,7 @@ public static class FeatureHealth
             ["normalizeAudio"]));
         f.Add(new("steamcmd", "steamcmd", i.SteamCmdFound,
             i.SteamCmdFound ? null : "steamcmd not found (set its path, or install it) — \"Download via steamcmd\" can't download",
-            ["workshopAcquireMode", "steamCmdPath"]));
+            ["workshopDownloadMode", "steamCmdPath"]));
         return f;
     }
 }

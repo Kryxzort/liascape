@@ -3805,7 +3805,7 @@ fn i2_pause_while_align_end_pending_is_ramped_both_ways() {
     assert_eq!(st["graph"][&a]["gain_effective_db"], json!(0.0), "{st}");
 }
 
-/// `KeepPauseOnSwitch` (the backend's "stay paused" on a user switch): a cut requested while
+/// `StayPausedWhenSwitching` (the backend's "stay paused" on a user switch): a cut requested while
 /// the player is paused swaps at once and B shows its first frame, still paused. A's 30 ms
 /// anti-click ramp ran on the frozen clock, so the swap — and the picture — waited for the
 /// resume; an A the pause gate already holds silent needs no ramp. Then a second cut while
@@ -8664,7 +8664,7 @@ fn scene_loudness_survives_a_worker_restart() {
 
 // ---------------------------------------------------------------- the fps cap on stills
 
-/// An fps cap (`fps_cap`, the backend's `VideoFps`, sent to `srcs:*` and in every create) never
+/// An fps cap (`fps_cap`, the backend's `VideoFpsCap`, sent to `srcs:*` and in every create) never
 /// stalls a still: a transition to an image B with the cap on readies and hands off, the image
 /// is on screen; a colour and a scene B with the cap behave as without it; a capped video still
 /// plays. Both clocks. RED before the fix: the image B stayed `ready: false` and the switch sat

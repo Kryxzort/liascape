@@ -137,7 +137,7 @@ export const Settings = memo(function Settings() {
       api.lwePreview().then((x) => alive && setLwe(x));
     }, 200);
     return () => { alive = false; clearTimeout(t); };
-  }, [g("loop", true), g("noAudio", false), g("disableCache", false), g("volume", 100), g("speed", 1), g("hwDec", "auto"), g("videoScale", "fill"), g("demuxerMaxBytes", 20), g("demuxerMaxBackBytes", 5), JSON.stringify(g("lweMonitors", []))]); // eslint-disable-line
+  }, [g("loop", true), g("noAudio", false), g("disableCache", false), g("volume", 100), g("speed", 1), g("hwDec", "auto"), g("videoScale", "fill"), g("demuxerMaxMib", 20), g("demuxerMaxBackMib", 5), JSON.stringify(g("sceneMonitors", []))]); // eslint-disable-line
 
   useEffect(() => {
     if (clearArm <= 0) return;
@@ -175,7 +175,7 @@ export const Settings = memo(function Settings() {
     const read = () => api.featureHealth().then((r) => alive && setFeatures(r.features ?? [])).catch(() => {});
     const t0 = setTimeout(read, 300), t = setInterval(read, 15000);
     return () => { alive = false; clearTimeout(t0); clearInterval(t); };
-  }, [g("playerEngine", "legacy"), g("allowScenes", false), g("steamCmdPath", ""), g("workshopAcquireMode", "subscribe")]); // eslint-disable-line
+  }, [g("playerEngine", "legacy"), g("allowScenes", false), g("steamCmdPath", ""), g("workshopDownloadMode", "subscribe")]); // eslint-disable-line
   const warnings = useMemo(() => healthWarnings(features), [features]);
   // the summary: what breaks something switched on / selected now (the row icons show regardless)
   const broken = features.filter((f) => f.ok === false && f.inUse !== false);
@@ -183,13 +183,13 @@ export const Settings = memo(function Settings() {
   // the rotation: "Switch when video ends" off → the interval is "Switch every" (a plain timer); on → the SAME field
   // is "Minimum play time", with "Maximum play time" right below, then "Separate timing for scenes" (+ "Switch scenes
   // after" while it's on) — player-adapter.md § Rotation. Every limit: 0 = off.
-  const aoe = g("globalAdvanceOnVideoEnd", true);
+  const aoe = g("globalSwitchWhenVideoEnds", true);
   const sepScenes = g("globalSeparateSceneTiming", true);
 
   const adv = g("advancedSettings", false); // gates demuxer / hw-decode / cache / copy-files / live previews
   type Mon = { name: string; fps: number; isPrimary: boolean };
-  const monitors = g<Mon[]>("lweMonitors", []);
-  const setMonitors = (m: Mon[]) => set("lweMonitors", m);
+  const monitors = g<Mon[]>("sceneMonitors", []);
+  const setMonitors = (m: Mon[]) => set("sceneMonitors", m);
   // Auto-populate the scene monitor list from detected outputs the first time scenes are enabled
   // (empty list). First detected output = primary. Won't clobber a list the user already configured.
   useEffect(() => {
@@ -197,7 +197,7 @@ export const Settings = memo(function Settings() {
     setMonitors(detected.map((d) => ({ name: d.name, fps: d.refreshHz, isPrimary: d.primary })));
   }, [detected, g("allowScenes", false)]); // eslint-disable-line
 
-  const mode = g<string>("workshopAcquireMode", "subscribe");
+  const mode = g<string>("workshopDownloadMode", "subscribe");
   const mute = g("noAudio", false);          // disables the volume row (parity: muted = no volume)
   const am = g("autoMute", false);           // gates the auto-mute children
 
@@ -248,15 +248,15 @@ export const Settings = memo(function Settings() {
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
-        {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="keepPauseOnSwitch">
-          <input type="checkbox" checked={g("keepPauseOnSwitch", false)} onChange={(e) => set("keepPauseOnSwitch", e.target.checked)} /></Row>}
-        <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartIntervalSeconds"><NumInput min={0} max={3600} value={g("restartIntervalSeconds", 600)} onChange={(v) => set("restartIntervalSeconds", v)} /></Row>
-        {adv && <Row label="Restart only at playlist changeover" hint="defer the restart to the next video change (no mid-video flash); lone videos still restart" rk="restartOnSwitchOnly"><input type="checkbox" checked={g("restartOnSwitchOnly", false)} onChange={(e) => set("restartOnSwitchOnly", e.target.checked)} /></Row>}
+        {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="stayPausedWhenSwitching">
+          <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>}
+        <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartMpvpaperEverySeconds"><NumInput min={0} max={3600} value={g("restartMpvpaperEverySeconds", 600)} onChange={(v) => set("restartMpvpaperEverySeconds", v)} /></Row>
+        {adv && <Row label="Restart only at playlist changeover" hint="defer the restart to the next video change (no mid-video flash); lone videos still restart" rk="restartOnlyAtPlaylistChangeover"><input type="checkbox" checked={g("restartOnlyAtPlaylistChangeover", false)} onChange={(e) => set("restartOnlyAtPlaylistChangeover", e.target.checked)} /></Row>}
         <Help>Kills and relaunches mpvpaper periodically to prevent memory leaks.</Help>
       </Section>
 
       <Section title="Rotation (global)" icon={<Repeat size={15} />}>
-        <Row label="Switch when video ends" rk="globalAdvanceOnVideoEnd"><input type="checkbox" checked={aoe} onChange={(e) => set("globalAdvanceOnVideoEnd", e.target.checked)} /></Row>
+        <Row label="Switch when video ends" rk="globalSwitchWhenVideoEnds"><input type="checkbox" checked={aoe} onChange={(e) => set("globalSwitchWhenVideoEnds", e.target.checked)} /></Row>
         {aoe ? <>
           <Row label="Minimum play time" hint={ROT_HINT.min + (sepScenes ? "" : ROT_HINT.minScenes)} rk="globalIntervalSeconds">
             <PlayTimeInput label="Minimum play time" zeroText="off" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
@@ -281,7 +281,7 @@ export const Settings = memo(function Settings() {
         <Row label="Only if MPRIS player active" disabled={!am} rk="autoMuteOnlyIfMprisActive"><input type="checkbox" disabled={!am} checked={g("autoMuteOnlyIfMprisActive", false)} onChange={(e) => set("autoMuteOnlyIfMprisActive", e.target.checked)} /></Row>
         <Row label="Mute after (ms)" disabled={!am} rk="autoMuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoMuteDelayMs", 200)} onChange={(v) => set("autoMuteDelayMs", v)} /></Row>
         <Row label="Unmute after (ms)" disabled={!am} rk="autoUnmuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(v) => set("autoUnmuteDelayMs", v)} /></Row>
-        <Row label="Min level (dB)" disabled={!am} rk="autoMuteThresholdDb"><NumInput disabled={!am} min={-80} max={0} value={g("autoMuteThresholdDb", -70)} onChange={(v) => set("autoMuteThresholdDb", v)} /></Row>
+        <Row label="Min level (dB)" disabled={!am} rk="autoMuteMinLevelDb"><NumInput disabled={!am} min={-80} max={0} value={g("autoMuteMinLevelDb", -70)} onChange={(v) => set("autoMuteMinLevelDb", v)} /></Row>
       </Section>
 
       <Section title="Rendering & Memory" icon={<Cpu size={15} />}>
@@ -295,20 +295,20 @@ export const Settings = memo(function Settings() {
           <Select value={g("videoScale", "fill")} onChange={(v) => set("videoScale", v)}
             options={[{ value: "fill", label: "fill" }, { value: "fit", label: "fit" }]} />
         </Row>
-        <Row label="Video FPS cap" hint="0 = native · applies to videos, not scenes" rk="videoFps"><NumInput min={0} max={480} value={g("videoFps", 0)} onChange={(v) => set("videoFps", v)} /></Row>
-        {adv && <Row label="Demuxer max (MiB)" rk="demuxerMaxBytes"><NumInput min={1} max={10000} value={g("demuxerMaxBytes", 20)} onChange={(v) => set("demuxerMaxBytes", v)} /></Row>}
-        {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackBytes"><NumInput min={1} max={10000} value={g("demuxerMaxBackBytes", 5)} onChange={(v) => set("demuxerMaxBackBytes", v)} /></Row>}
+        <Row label="Video FPS cap" hint="0 = native · applies to videos, not scenes" rk="videoFpsCap"><NumInput min={0} max={480} value={g("videoFpsCap", 0)} onChange={(v) => set("videoFpsCap", v)} /></Row>
+        {adv && <Row label="Demuxer max (MiB)" rk="demuxerMaxMib"><NumInput min={1} max={10000} value={g("demuxerMaxMib", 20)} onChange={(v) => set("demuxerMaxMib", v)} /></Row>}
+        {adv && <Row label="Demuxer max back (MiB)" rk="demuxerMaxBackMib"><NumInput min={1} max={10000} value={g("demuxerMaxBackMib", 5)} onChange={(v) => set("demuxerMaxBackMib", v)} /></Row>}
       </Section>
 
       {/* liascape-player only (the player owns the GPU budget + both VRAM rules); every row applies live
           (API: /settings → player.scene_throttle / scene_vram_limit_mib / vram_low_mode) */}
       {liascapeActive && (
         <Section title="GPU / VRAM" icon={<Gauge size={15} />}>
-          <Row label="Auto-throttle scenes" hint="lower a scene's frame rate while it makes the GPU miss frames, and restore it when it recovers — off: every scene renders at its fixed fps" rk="sceneThrottle">
-            <input type="checkbox" checked={g("sceneThrottle", true)} onChange={(e) => set("sceneThrottle", e.target.checked)} /></Row>
-          <Row label="Limit VRAM per scene" hint="stop a scene that uses more video memory than the limit (a playlist moves on; a single wallpaper keeps its last frame) — it isn't marked crashed" rk="sceneVramLimitEnabled">
-            <input type="checkbox" checked={g("sceneVramLimitEnabled", false)} onChange={(e) => set("sceneVramLimitEnabled", e.target.checked)} /></Row>
-          {g("sceneVramLimitEnabled", false) && <Row label="VRAM limit (MiB)" hint="per scene · ~1536 suits most scenes" rk="sceneVramLimitMib">
+          <Row label="Auto-throttle scenes" hint="lower a scene's frame rate while it makes the GPU miss frames, and restore it when it recovers — off: every scene renders at its fixed fps" rk="autoThrottleScenes">
+            <input type="checkbox" checked={g("autoThrottleScenes", true)} onChange={(e) => set("autoThrottleScenes", e.target.checked)} /></Row>
+          <Row label="Limit VRAM per scene" hint="stop a scene that uses more video memory than the limit (a playlist moves on; a single wallpaper keeps its last frame) — it isn't marked crashed" rk="limitVramPerScene">
+            <input type="checkbox" checked={g("limitVramPerScene", false)} onChange={(e) => set("limitVramPerScene", e.target.checked)} /></Row>
+          {g("limitVramPerScene", false) && <Row label="VRAM limit (MiB)" hint="per scene · ~1536 suits most scenes" rk="sceneVramLimitMib">
             <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 1536)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
           <Row label="When VRAM runs low" hint="when the GPU's free video memory runs out (a game took it): Stop frees the wallpaper's GPU memory and shows its last frame, Pause only pauses — either resumes once memory is free again" rk="vramLowMode">
             <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
@@ -335,13 +335,13 @@ export const Settings = memo(function Settings() {
 
       <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
         <Row label="Workshop folder">
-          <input className="text" value={g("wallpaperEnginePath", "")} onChange={(e) => set("wallpaperEnginePath", e.target.value)} />
-          <button className="btn ghost ico" title="Choose folder" onClick={() => pickInto("wallpaperEnginePath", "folder")}><FolderOpen size={14} /> Browse</button>
+          <input className="text" value={g("workshopFolder", "")} onChange={(e) => set("workshopFolder", e.target.value)} />
+          <button className="btn ghost ico" title="Choose folder" onClick={() => pickInto("workshopFolder", "folder")}><FolderOpen size={14} /> Browse</button>
         </Row>
-        {adv && <Row label="Copy files instead of symlinking" rk="weCopyFiles"><input type="checkbox" checked={g("weCopyFiles", false)} onChange={(e) => set("weCopyFiles", e.target.checked)} /></Row>}
+        {adv && <Row label="Copy files instead of symlinking" rk="copyFilesInsteadOfSymlinking"><input type="checkbox" checked={g("copyFilesInsteadOfSymlinking", false)} onChange={(e) => set("copyFilesInsteadOfSymlinking", e.target.checked)} /></Row>}
         {adv && <Row label="Replace direct downloads with Workshop copies" hint="when a directly-downloaded wallpaper appears in the WE folder, swap to the WE symlink/copy & reclaim the duplicate's disk" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>}
         <Row label="Allow scene support" rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
-        <Row label="Auto-add new WE wallpapers to library" rk="autoImportWallpaperEngine"><input type="checkbox" checked={g("autoImportWallpaperEngine", false)} onChange={(e) => set("autoImportWallpaperEngine", e.target.checked)} /></Row>
+        <Row label="Auto-add new WE wallpapers to library" rk="autoAddWeWallpapersToLibrary"><input type="checkbox" checked={g("autoAddWeWallpapersToLibrary", false)} onChange={(e) => set("autoAddWeWallpapersToLibrary", e.target.checked)} /></Row>
         {!liascapeActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><NumInput min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(v) => set("sceneTransitionDelayMs", v)} /></Row>}
         {liascapeActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
           <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
@@ -378,9 +378,9 @@ export const Settings = memo(function Settings() {
 
       <Section title="Workshop download mode" icon={<Download size={15} />}>
         <Row label="Subscribe via Steam" hint="keeps synced + auto-updates">
-          <input type="radio" checked={mode === "subscribe"} onChange={() => set("workshopAcquireMode", "subscribe")} /></Row>
-        <Row label="Download via steamcmd" hint="snapshot, no sync" wk="workshopAcquireMode">
-          <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopAcquireMode", "steamcmd")} /></Row>
+          <input type="radio" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
+        <Row label="Download via steamcmd" hint="snapshot, no sync" wk="workshopDownloadMode">
+          <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "subscribe"
           ? <Row label="Steam">
               {steam?.signedIn
@@ -422,14 +422,14 @@ export const Settings = memo(function Settings() {
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>}
-        {adv && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live A-sync offset" hint="Full-live only: aim the outgoing video this many ms vs the live wallpaper at the cover, to cancel per-machine sync drift (negative = aim ahead). If you see a slight rewind raise it toward 0; a slight skip-ahead lower it. ~-30 here." rk="transitionLagOffsetMs">
-          <NumInput min={-200} max={200} step={5} value={g("transitionLagOffsetMs", -30)} onChange={(v) => set("transitionLagOffsetMs", v)} /><span>ms</span>
+        {adv && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live A-sync offset" hint="Full-live only: aim the outgoing video this many ms vs the live wallpaper at the cover, to cancel per-machine sync drift (negative = aim ahead). If you see a slight rewind raise it toward 0; a slight skip-ahead lower it. ~-30 here." rk="fullLiveSyncOffsetMs">
+          <NumInput min={-200} max={200} step={5} value={g("fullLiveSyncOffsetMs", -30)} onChange={(v) => set("fullLiveSyncOffsetMs", v)} /><span>ms</span>
         </Row>}
         {adv && <Row label="Volume keys adjust" hint="what the volume-up / volume-down keybinds change — Auto: the playing wallpaper's own volume if it has one, else the global; This wallpaper: always the playing wallpaper's own volume (gives it one); Global: always the global (a wallpaper with its own volume doesn't change)" rk="volumeKeyTarget">
           <Select value={g("volumeKeyTarget", "auto")} onChange={(v) => set("volumeKeyTarget", v)}
             options={[{ value: "auto", label: "Auto" }, { value: "item", label: "This wallpaper" }, { value: "global", label: "Global" }]} />
         </Row>}
-        {adv && <Row label="Live wallpaper behind all tabs" hint="show the live wallpaper behind the grid on Browse & Library (visible in the gaps between cards)" rk="wallpaperBgAllTabs"><input type="checkbox" checked={g("wallpaperBgAllTabs", false)} onChange={(e) => set("wallpaperBgAllTabs", e.target.checked)} /></Row>}
+        {adv && <Row label="Live wallpaper behind all tabs" hint="show the live wallpaper behind the grid on Browse & Library (visible in the gaps between cards)" rk="liveWallpaperBehindAllTabs"><input type="checkbox" checked={g("liveWallpaperBehindAllTabs", false)} onChange={(e) => set("liveWallpaperBehindAllTabs", e.target.checked)} /></Row>}
         {adv && <Row label="Debug mode" hint="enable the liascapeDbg bridge + perf metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>}
         {adv && g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics HUD" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
       </Section>

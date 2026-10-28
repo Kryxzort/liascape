@@ -25,7 +25,7 @@ mpvpaper -o "<mpv-options>" '*' /path/to/wallpaper.mp4
 **Playlist (Play All / Shuffle):**
 - Shuffle **pre-applied** to path array in `ApplyPlaylist()` (not via `--shuffle`) so order is known for `playlist_observer_paths.json`
 - Single video → `Launch(opts, path)` directly
-- Multi-video → `ApplyTimedPlaylist(intervalSeconds, advanceOnVideoEnd: true)` (the interval = the minimum play time) — liascape-owned; **no `--playlist=file` or `--loop-playlist=inf`**
+- Multi-video → `ApplyTimedPlaylist(intervalSeconds, switchWhenVideoEnds: true)` (the interval = the minimum play time) — liascape-owned; **no `--playlist=file` or `--loop-playlist=inf`**
 - Scenes present + playable → the same (with "Separate timing for scenes" on — the default — a scene / still image moves on after "Switch scenes after", 0 = never; off: at the minimum, else the maximum, else a user switch — `player-adapter.md` § Rotation; the old fallback to `GlobalIntervalSeconds` is gone)
 - Multi-video playlists are liascape-owned through the timed machinery (no `playlist.txt` / `--playlist=file`)
 
@@ -190,13 +190,13 @@ constrained** — it can't be a live GL texture: a scene **A** → LWE `--screen
 
 ## Restart Daemon
 
-mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `restart-daemon` periodically kills and relaunches mpvpaper to work around it. Interval configured via `RestartIntervalSeconds` (default 600s, min 5, max 3600) in Settings → Playback.
+mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `restart-daemon` periodically kills and relaunches mpvpaper to work around it. Interval configured via `RestartMpvpaperEverySeconds` (default 600s, min 5, max 3600) in Settings → Playback.
 
 **In-process (GUI open)**: `UpdateRestartTimer()` starts a `System.Threading.Timer`. No-op when `_daemonMode = true` so the timer daemon doesn't start a competing in-process timer. Timer stops in `TeardownTimer()` (called by `Stop()` and before each new session). Restarted via `UpdateRestartTimer()` after every `Apply`/`ApplyPlaylist`/`ApplyTimedPlaylist`/`ResumeTimedTimer`/`RestoreTimedPlaylist`.
 
 **Detached daemon (GUI closed)**: `SpawnRestartDaemon()` launches `liascape restart-daemon` via `setsid`, writes PID to `restart.pid`. Bails if `IsGuiTimerAlive()` (mirrors timer-daemon guard). Killed on GUI open, by `Stop()`, and by `kill`.
 
-**Restart disabled**: `RestartIntervalSeconds <= 0` → all restart paths (`SpawnRestartDaemon`, `UpdateRestartTimer`, daemon loop) bail immediately with no-op. Restart is fully off when interval is 0.
+**Restart disabled**: `RestartMpvpaperEverySeconds <= 0` → all restart paths (`SpawnRestartDaemon`, `UpdateRestartTimer`, daemon loop) bail immediately with no-op. Restart is fully off when interval is 0.
 
 **Timed playlist coordination**: `RestartCurrent()` writes `"restart"` to `pending_action.txt` instead of cold-restarting directly. The tick owner dispatches to `RestartCurrentAndLaunch()` which kills and relaunches the current wallpaper without advancing or resetting the countdown. Skipped when `_timedTimerPaused` is true (daemon also checks `IsTimedPlaylistPaused()` from the state file) to avoid queuing a restart that fires immediately on unpause.
 
@@ -206,7 +206,7 @@ mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `restart-daemon` periodical
 
 **`ArmVideoEndWait(string next, bool prevIsVideo = true)`** — canonical way to start a `DoVideoEndWait` task. Sets `_waitingForVideoEnd = true`, creates and assigns `_waitCts`, spawns task. Always use this — never inline the 3-line pattern.
 
-**`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. Resets the item's play time and `_timedRemainingMs`; if `_advanceOnVideoEnd && !IsScenePath(path) && CanRotate`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
+**`PostSwitch(string path)`** — called after every wallpaper switch in timed machinery. Resets the item's play time and `_timedRemainingMs`; if `_switchWhenVideoEnds && !IsScenePath(path) && CanRotate`: calls `AdvanceToNext()` and `ArmVideoEndWait`. Always calls `SaveTimedState()`. Used in `LaunchAndReset` and both `DoVideoEndWait` completion paths.
 
 **`PlayingHistoryIndex`** (private property) — when `_waitingForVideoEnd = true`, `_historyIndex` is pre-fetched one step ahead; actual playing item is at `_historyIndex - 1`. Property returns `_historyIndex - 1` when `_waitingForVideoEnd && _historyIndex > 0`, else `_historyIndex`. Use this everywhere "current playing index" is needed. Under liascape-player an aligned switch's B counts as playing from its `transition.started` (its effect runs, `cur:*` = B) — `DoVideoEndWait` commits it then, not at the handoff, like legacy at its overlay's start (player-adapter.md, `DoVideoEndWait` row); a next/prev/random mid-effect steps from B.
 
@@ -215,7 +215,7 @@ one, whatever its interval and whatever its length (it takes the queued next/pre
 advance-on-end session, a 1-item session and one grown back by an Undo had none, so every queued switch sat untaken
 until a later tick's start threw it away). A 1-item session takes a next / random (a switch to its one item, with its
 transition) and legacy's leak `restart`, but **never rotates by itself** (`CanRotate` = > 1 item: its interval only
-starts over, `PostSwitch` arms no aligned switch to itself — as `ApplyTimedPlaylist`/`RearmAdvanceOnVideoEnd` already
+starts over, `PostSwitch` arms no aligned switch to itself — as `ApplyTimedPlaylist`/`RearmSwitchWhenVideoEnds` already
 did). Shared by both engines. Call it wherever the list or rotation changes; `takeBack: false` for live edits (no
 restart after `ReleaseTimer`). Details: `session.md` § Timed Playlist.
 

@@ -13,7 +13,7 @@ public class LibraryItem
     public string? SourceId { get; init; }
     public bool IsScene { get; init; }
     public string? WorkshopId { get; init; }
-    // Non-null when WeCopyFiles=true and the scene data was copied to the library.
+    // Non-null when CopyFilesInsteadOfSymlinking=true and the scene data was copied to the library.
     // Contains the full path to the copied workshop directory inside LibraryPath.
     public string? CopiedSceneDir { get; init; }
     public bool HasCrashed { get; init; }

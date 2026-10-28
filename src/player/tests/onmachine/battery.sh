@@ -678,7 +678,7 @@ setup_hermetic_backend() {
   cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["$EFFECT_ID"],"GlobalTransitionDurationMs":$EFFECT_DURATION_MS,"TransitionMethod":"full-live",
- "GlobalAdvanceOnVideoEnd":false,"GlobalWaitForVideoEnd":false,"GlobalIntervalSeconds":1800,"RestartIntervalSeconds":600,"AutoMute":false}
+ "GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":false,"GlobalIntervalSeconds":1800,"RestartMpvpaperEverySeconds":600,"AutoMute":false}
 EOF
 
   OUTA=VIRTUAL-1; OUTB=VIRTUAL-2
@@ -930,7 +930,7 @@ run_cell() {
       esac
       [ "${#paths[@]}" -ge 2 ] || { err "cell $cell: fewer than 2 media paths available"; return 1; }
       settings=$(jq -nc --argjson iv "$interval" --argjson adv "$advance" --argjson w "$wait_end" \
-        '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, AdvanceOnVideoEnd:$adv, WaitForVideoEnd:$w}')
+        '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, SwitchWhenVideoEnds:$adv, WaitForVideoEnd:$w}')
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       local auto_timeout; auto_timeout=$(python3 -c "print(int($interval) + 15)")
@@ -981,7 +981,7 @@ run_realism_cell() {
   term=$(term_timeout)
   build_alt_targets
   paths=("${ALT_TARGETS[@]}")
-  settings=$(jq -nc '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:5, AdvanceOnVideoEnd:false, WaitForVideoEnd:false}')
+  settings=$(jq -nc '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:5, SwitchWhenVideoEnds:false, WaitForVideoEnd:false}')
   post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
   sleep 1.5
   local prev cell_failed=0 i
@@ -1038,7 +1038,7 @@ run_extra_cell() {
       fi
       # interval (35 s) > the 30 s effect so every tick's transition actually completes before
       # the next one fires, instead of racing R35/R36's commit path (that's long-interrupt's job).
-      settings=$(jq -nc --argjson adv "$advance" '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:35, AdvanceOnVideoEnd:$adv, WaitForVideoEnd:false}')
+      settings=$(jq -nc --argjson adv "$advance" '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:35, SwitchWhenVideoEnds:$adv, WaitForVideoEnd:false}')
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       prev=$(last_corr)
@@ -1279,7 +1279,7 @@ run_soak() {
     setting_set '.hwDec = $hw' --arg hw "$SOAK_HWDEC" || exit 1   # camelCase on the wire (see the R-note near snapshot_owner_settings)
     log "soak (hermetic): ${#soak[@]} 1080p clips, a switch every ${SOAK_INTERVAL}s, HwDec=$SOAK_HWDEC"
     post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${soak[@]}")" --argjson iv "$SOAK_INTERVAL" \
-      '{paths:$p, settings:{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, AdvanceOnVideoEnd:false,
+      '{paths:$p, settings:{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, SwitchWhenVideoEnds:false,
         WaitForVideoEnd:false, TransitionEnabled:true, TransitionEffectIds:["fade","crosswarp","dissolve","wind"],
         TransitionDurationMs:1000}}')" >/dev/null
   else

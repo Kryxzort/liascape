@@ -22,9 +22,9 @@ function fmtDur(s: number): string {
 
 // library card "Settings" — per-wallpaper volume/speed overrides (+ ↺ Global),
 // whitelist a crashed scene, copy workshop id. Persists via /library/volume|speed|whitelist.
-// COOL: morphs out of the surface that opened it (a library card or a strip item) and back into it —
+// COOL: morphs out of the surface that opened it (a library card or a playlist bar item) and back into it —
 // components/morph.ts; its preview keeps playing (the card's gif, or the video from where the card was).
-export function LibrarySettingsModal({
+export function CardSettingsModal({
   item, siblings, morphId, source, globalVolume, globalSpeed, onClose,
 }: { item: LibraryItem | null; siblings: LibraryItem[]; morphId: string | null; source: MorphSource | null; globalVolume: number; globalSpeed: number; onClose: () => void }) {
   const [vol, setVol] = useState(0);

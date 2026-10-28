@@ -83,13 +83,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 /* ---- grid ---- */
 .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--gap); }
-/* library scroll sits BEHIND the overlaid playlist strip — pad the bottom so the collapsed bar
+/* library scroll sits BEHIND the overlaid playlist bar — pad the bottom so the collapsed bar
    never permanently hides the last row (expanding the bar covers cards by design: cards sit behind). */
-/* pad by the strip's live height (--strip-h, set by PlaylistStrip) + a gap so the last row clears the
+/* pad by the playlist bar's live height (--playlist-bar-h, set by PlaylistBar) + a gap so the last row clears the
    bar whether it's collapsed or expanded. */
-/* end the scroll ABOVE the strip (margin, not padding) so no cards render behind the translucent strip
+/* end the scroll ABOVE the playlist bar (margin, not padding) so no cards render behind the translucent playlistBar
    — it then shows the fixed wallpaper video directly as its translucent bg, not the grid scrolling under. */
-.lib-scroll { margin-bottom: var(--strip-h, 60px); padding-bottom: 16px; }
+.lib-scroll { margin-bottom: var(--playlist-bar-h, 60px); padding-bottom: 16px; }
 /* --cols is set per scroll container by useGridFit (derived from window size + target count + aspect)
    so visible count stays ~constant on resize while cards keep --thumb-aspect. */
 .grid { display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: var(--gap); }
@@ -222,8 +222,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
 /* PERF: while a modal is open, the grid sits behind an opaque backdrop — freeze its (invisible) gif
    overlays so they stop decoding/compositing and don't jank the morph. Pure CSS = no re-render. */
-body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { display: none; }
-/* COOL: the surface a settings modal morphed out of (card / strip item) — lifted out until it morphs back */
+body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim { display: none; }
+/* COOL: the surface a settings modal morphed out of (card / playlistBar item) — lifted out until it morphs back */
 .thumb-wrap.lifted, .pl-item.lifted { visibility: hidden; }
 .card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
@@ -271,18 +271,18 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 .err-modal h2 { margin: 0 0 8px; font-size: 17px; color: var(--danger); }
 .err-text { color: var(--subtext); font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
 
-/* ---- playlist strip ---- */
+/* ---- playlist bar ---- */
 /* overlaid at the bottom (cards scroll BEHIND it) so collapse/expand never resizes .scroll →
    useGridFit doesn't recompute → no card reflow. Opaque bg (no backdrop blur: it'd repaint over the
    animating gif grid every frame — the documented lag trap). */
-.strip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+.playlist-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
   border-top: 1px solid var(--surface1);
-  /* fully transparent bg → the live wallpaper video shows at 100% behind the strip (the scroll ends
+  /* fully transparent bg → the live wallpaper video shows at 100% behind the playlist bar (the scroll ends
      above it via .lib-scroll margin, so no cards are behind it). Thumbnails + chrome stay opaque/visible. */
   background: transparent; padding: 8px 12px 0; }
-.strip-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.strip-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
-.strip-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
+.playlist-bar-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.playlist-bar-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
+.playlist-bar-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
 .mini { padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   transition: color .12s, background .15s, box-shadow .2s; }
@@ -293,10 +293,10 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
   font-weight: 800; box-shadow: var(--glow-sm); transition: box-shadow .2s, transform .08s; }
 .play-btn:hover:not(:disabled) { box-shadow: var(--glow); }
 .play-btn:disabled { opacity: .4; box-shadow: none; }
-.strip-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+.playlist-bar-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 /* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
-   escapes the row's clip. Side margins cancel .strip's 12px padding so items sit flush left/right. */
-.strip-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; margin: 0 -12px; }
+   escapes the row's clip. Side margins cancel .playlist-bar's 12px padding so items sit flush left/right. */
+.playlist-bar-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; margin: 0 -12px; }
 .pl-item { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
   overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
   transition: box-shadow .2s, transform .12s; }
@@ -304,7 +304,7 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 /* absolutely fill the box (like the animated layer) — an in-flow img leaves a 1px sub-pixel gap that
    the dark bg shows through at the top, worsened by the hover lift. */
 .pl-item .thumb { position: absolute; inset: 0; }
-/* COOL: hover glow as a fixed overlay (portal'd to body) → floats over the strip chrome, not clipped */
+/* COOL: hover glow as a fixed overlay (portal'd to body) → floats over the playlist bar chrome, not clipped */
 .pl-hover-glow { position: fixed; z-index: 45; pointer-events: none; border-radius: 8px;
   box-shadow: var(--glow); animation: pl-glow-in .15s ease both; }
 @keyframes pl-glow-in { from { opacity: 0; } to { opacity: 1; } }
@@ -315,10 +315,10 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
   filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); display: grid; place-items: center; }
 .pl-item:hover .pl-remove { opacity: 1; }
 .pl-remove:hover { color: var(--danger); filter: drop-shadow(0 0 5px var(--danger)); }
-/* #99000000 strip-item title bar */
+/* #99000000 playlist-bar-item title bar */
 .pl-title { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: rgba(0,0,0,.6);
   color: #fff; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-/* strip context menu — fixed at cursor, opens upward (strip sits at the bottom) */
+/* playlistBar context menu — fixed at cursor, opens upward (playlistBar sits at the bottom) */
 .pl-ctx { position: fixed; top: auto; right: auto; transform: translateY(-100%); }
 
 /* ---- preview modal ---- */
@@ -348,7 +348,7 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 /* library Settings modal: image-led + narrower so the thumbnail (often square) fills the width
    instead of floating centered with empty side gaps. Image shows at its OWN aspect, uncropped. */
 .modal.lib-settings { width: min(460px, 92vw); }
-/* the item modal's "Scene properties" (components/ScenePropsEditor.tsx) */
+/* the card settings modal's "Scene properties" (components/ScenePropsEditor.tsx) */
 .scene-props { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--surface0); }
 .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .sp-title { font-size: 14px; font-weight: 600; }
@@ -408,7 +408,7 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
    blur). Fixed → stays put while content scrolls. */
 .settings-bg { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0;
   pointer-events: none; }
-/* COOL: accent-tinted section cards — left glow strip, glowing icon chip, lift+glow on hover,
+/* COOL: accent-tinted section cards — left glow playlistBar, glowing icon chip, lift+glow on hover,
    staggered fade-in. Brings the bland settings list to life without animating expensive properties. */
 .ssection {
   position: relative; overflow: hidden; z-index: 1; /* above the live-wallpaper bg layer */
@@ -421,7 +421,7 @@ body.modal-open .scroll .thumb.anim, body.modal-open .strip .thumb.anim { displa
 }
 .ssection:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface1));
   box-shadow: 0 8px 26px rgba(0,0,0,.4), var(--glow-sm); }
-/* glowing accent strip down the left edge */
+/* glowing accent playlistBar down the left edge */
 .ssection::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2;
   background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
   box-shadow: 0 0 12px -1px var(--accent); opacity: .55; transition: opacity .25s; }
@@ -604,7 +604,7 @@ input[type=range]:focus-visible { outline: none; }
 /* a rotation duration (PlayTimeInput, h/m/s): "none" / "off" next to it while it is 0 */
 .hms .playtime-zero { margin-left: 4px; font-style: italic; }
 
-/* context menus are portal'd to <body> → fixed at the cursor (escape card/strip containment) */
+/* context menus are portal'd to <body> → fixed at the cursor (escape card/playlistBar containment) */
 .lib-ctx, .pl-ctx { position: fixed; top: auto; right: auto; }
 .pl-ctx { transform: translateY(-100%); }
 

@@ -1,11 +1,11 @@
 // Settings-modal morph probe — `scripts/test-ui-matrix.sh --probe probe-morph.js` (same hermetic stack as
 // the matrix: private backend + headless liascape-player + this tree's UI bundle, on a private Xvfb). Opens the
-// per-item settings modal from a library card and from a playlist-strip item and samples the modal media's
+// per-card settings modal from a library card and from a playlist-bar item and samples the modal media's
 // on-screen box every frame through the open and the close (its transform AND its clip-path crop):
-//   - it starts and ends ON the source's visible thumbnail (the card / strip crop), whatever the aspects
+//   - it starts and ends ON the source's visible thumbnail (the card / playlistBar crop), whatever the aspects
 //   - one uniform scale all the way: the picture never stretches (its aspect stays the image's own)
 //   - smooth (no frame jumps a large share of the distance), it lands and stays
-//   - the close lands on the source — from the strip too (it used to just vanish)
+//   - the close lands on the source — from the playlist bar too (it used to just vanish)
 //   - an animated preview keeps animating inside the modal (gif → the same /anim image; a video item →
 //     its video playing) — it used to freeze on a still
 // k1 = a square preview + gif (like a Wallpaper Engine item; the harness writes them), k2 = video only.
@@ -34,8 +34,8 @@ const PAGE = `window.__mo = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
   card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === t); },
-  strip(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
-  source(surface, t) { return surface === "pl" ? this.strip(t) : this.card(t)?.querySelector(".thumb-wrap"); }, // lib + br: a .card.lib
+  playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
+  source(surface, t) { return surface === "pl" ? this.playlistBar(t) : this.card(t)?.querySelector(".thumb-wrap"); }, // lib + br: a .card.lib
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; },
   ctx(el) { const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   modal() { return document.querySelector(".modal-backdrop .modal"); },
@@ -71,7 +71,7 @@ const PAGE = `window.__mo = {
   async open(surface, t, ms) {
     const src = this.source(surface, t); if (!src) throw new Error("no source " + surface + " " + t);
     const S = this.rect(src);
-    // Browse: right-click opens the preview itself; library / strip: their menu's Settings item
+    // Browse: right-click opens the preview itself; library / playlistBar: their menu's Settings item
     let btn = null;
     if (surface !== "br") {
       this.ctx(src); await this.sleep(250);
@@ -279,7 +279,7 @@ app.whenReady().then(async () => {
     ff(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(we, "we1.mp4")]);
     fs.writeFileSync(path.join(we, "project.json"), JSON.stringify({ title: "we1", type: "video", file: "we1.mp4", preview: "preview.jpg" }));
     const s0 = (await http("GET", "/settings")).json;
-    await post("/settings", { ...s0, wallpaperEnginePath: path.dirname(we), autoImportWallpaperEngine: false });
+    await post("/settings", { ...s0, workshopFolder: path.dirname(we), autoAddWeWallpapersToLibrary: false });
     const srcs = (await http("GET", "/sources")).json;
     const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
     await page(`m.byText(".tab", "Browse").click(); await m.sleep(500); m.byText(".pill", ${JSON.stringify(weName)}).click();`);

@@ -44,11 +44,11 @@ public static class LiascapePlayerSelfTest
     private static void PlayLimitAssertions(List<string> fails)
     {
         // effective: the playlist's own rotation only when it overrides the global one
-        var g = new AppSettings { GlobalIntervalSeconds = 30, GlobalAdvanceOnVideoEnd = true, GlobalMaxPlaySeconds = 600,
+        var g = new AppSettings { GlobalIntervalSeconds = 30, GlobalSwitchWhenVideoEnds = true, GlobalMaxPlaySeconds = 600,
                                   GlobalSeparateSceneTiming = true, GlobalSwitchScenesAfterSeconds = 90 };
-        var own = new PlaylistSettings { OverrideGlobalSettings = true, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 0,
+        var own = new PlaylistSettings { OverrideGlobalSettings = true, IntervalSeconds = 5, SwitchWhenVideoEnds = false, MaxPlaySeconds = 0,
                                          SeparateSceneTiming = false, SwitchScenesAfterSeconds = 12 };
-        var follows = new PlaylistSettings { OverrideGlobalSettings = false, IntervalSeconds = 5, AdvanceOnVideoEnd = false, MaxPlaySeconds = 7,
+        var follows = new PlaylistSettings { OverrideGlobalSettings = false, IntervalSeconds = 5, SwitchWhenVideoEnds = false, MaxPlaySeconds = 7,
                                              SeparateSceneTiming = false, SwitchScenesAfterSeconds = 12 };
         void Eff(PlaylistSettings? p, (int, bool, int, bool, int) want, string what)
         {
@@ -65,12 +65,12 @@ public static class LiascapePlayerSelfTest
         // the defaults (2026-10-28, "0 = off unless set"): a video plays to its end however long — no minimum, no
         // maximum —, a scene / still image (they never end) switches after its own 30 min; globally and per playlist
         var d = new AppSettings(); var dp = new PlaylistSettings();
-        var dG = (d.GlobalIntervalSeconds, d.GlobalAdvanceOnVideoEnd, d.GlobalMaxPlaySeconds, d.GlobalSeparateSceneTiming, d.GlobalSwitchScenesAfterSeconds);
-        var dP = (dp.IntervalSeconds, dp.AdvanceOnVideoEnd, dp.MaxPlaySeconds, dp.SeparateSceneTiming, dp.SwitchScenesAfterSeconds);
+        var dG = (d.GlobalIntervalSeconds, d.GlobalSwitchWhenVideoEnds, d.GlobalMaxPlaySeconds, d.GlobalSeparateSceneTiming, d.GlobalSwitchScenesAfterSeconds);
+        var dP = (dp.IntervalSeconds, dp.SwitchWhenVideoEnds, dp.MaxPlaySeconds, dp.SeparateSceneTiming, dp.SwitchScenesAfterSeconds);
         if (dG != (0, true, 0, true, 1800)) fails.Add($"default global rotation = {dG}, want (0, True, 0, True, 1800)");
         if (dP != (0, true, 0, true, 1800)) fails.Add($"default playlist rotation = {dP}, want (0, True, 0, True, 1800)");
         // a file written before the scene toggle loads with its defaults; an explicit value loads as written
-        var pre = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":0,"GlobalAdvanceOnVideoEnd":true,"GlobalMaxPlaySeconds":0}""")!;
+        var pre = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":0,"GlobalSwitchWhenVideoEnds":true,"GlobalMaxPlaySeconds":0}""")!;
         if ((pre.GlobalSeparateSceneTiming, pre.GlobalSwitchScenesAfterSeconds) != (true, 1800))
             fails.Add($"a settings.json without the scene keys loads them as {(pre.GlobalSeparateSceneTiming, pre.GlobalSwitchScenesAfterSeconds)}, want (True, 1800)");
         var exp = JsonSerializer.Deserialize<PlaylistSettings>("""{"SeparateSceneTiming":false,"SwitchScenesAfterSeconds":45}""")!;
@@ -80,9 +80,9 @@ public static class LiascapePlayerSelfTest
         foreach (var t in new[] { typeof(AppSettings), typeof(PlaylistSettings), typeof(LastSession) })
             foreach (var name in new[] { "GlobalWaitForVideoEnd", "PlaylistWaitForVideoEnd", "WaitForVideoEnd", "GlobalMinPlaySeconds", "MinPlaySeconds" })
                 if (t.GetProperty(name) != null) fails.Add($"{t.Name}.{name} still exists (the rotation redesign removed it)");
-        var old = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":20,"GlobalAdvanceOnVideoEnd":true,"GlobalWaitForVideoEnd":true,"GlobalMinPlaySeconds":9,"GlobalMaxPlaySeconds":0}""")!;
-        if ((old.GlobalIntervalSeconds, old.GlobalAdvanceOnVideoEnd, old.GlobalMaxPlaySeconds) != (20, true, 0))
-            fails.Add($"an old-model settings.json loads as {(old.GlobalIntervalSeconds, old.GlobalAdvanceOnVideoEnd, old.GlobalMaxPlaySeconds)}, want (20, True, 0) — its removed keys ignored");
+        var old = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":20,"GlobalSwitchWhenVideoEnds":true,"GlobalWaitForVideoEnd":true,"GlobalMinPlaySeconds":9,"GlobalMaxPlaySeconds":0}""")!;
+        if ((old.GlobalIntervalSeconds, old.GlobalSwitchWhenVideoEnds, old.GlobalMaxPlaySeconds) != (20, true, 0))
+            fails.Add($"an old-model settings.json loads as {(old.GlobalIntervalSeconds, old.GlobalSwitchWhenVideoEnds, old.GlobalMaxPlaySeconds)}, want (20, True, 0) — its removed keys ignored");
         // the maximum is clamped 0…359999 (negative = off)
         foreach (var (v, want) in new[] { (-5, 0), (0, 0), (90, 90), (359999, 359999), (400000, 359999) })
         {
@@ -173,12 +173,12 @@ public static class LiascapePlayerSelfTest
         }
         Want("scenes", false, "liascape-scene-worker", "allowScenes");
         Want("transitions", false, "no catalogue", "globalTransitionEnabled");
-        Want("vram", false, "VRAM", "sceneVramLimitEnabled");
+        Want("vram", false, "VRAM", "limitVramPerScene");
         Want("hwdec-interop", null, null, "hwDec");
         Want("auto-mute", false, "pactl", "autoMute");
         Want("mpris", false, "playerctl", "autoMuteOnlyIfMprisActive");
         Want("ffmpeg", false, "ffprobe", "normalizeAudio");
-        Want("steamcmd", false, "steamcmd", "workshopAcquireMode");
+        Want("steamcmd", false, "steamcmd", "workshopDownloadMode");
         if ((F(none, "auto-mute").reason ?? "").Contains("parec")) fails.Add("health: auto-mute names parec, which is present");
         var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, true, false));
         if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
@@ -269,9 +269,9 @@ public static class LiascapePlayerSelfTest
         string G(AppSettings s) => string.Join(" ", LiascapePlayerMedia.GpuProps(s).Select(p => $"{p.prop}={p.value}"));
         foreach (var (s, want) in new (AppSettings, string)[] {
             (new AppSettings(), "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
-            (new AppSettings { SceneThrottle = false, SceneVramLimitEnabled = true, SceneVramLimitMib = 1536, VramLowMode = "pause" }, "scene_throttle=False scene_vram_limit_mib=1536 vram_low_mode=pause"),
+            (new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, VramLowMode = "pause" }, "scene_throttle=False scene_vram_limit_mib=1536 vram_low_mode=pause"),
             (new AppSettings { SceneVramLimitMib = 2048, VramLowMode = "bogus" }, "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
-            (new AppSettings { SceneVramLimitEnabled = true, SceneVramLimitMib = 1, VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 vram_low_mode=off") })
+            (new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 1, VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 vram_low_mode=off") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
         // ScenesPlayable: AllowScenes × engine × (liascape-player: the player's `scene` capability | legacy: LWE)
         foreach (var allow in new[] { false, true })
@@ -866,18 +866,18 @@ public static class LiascapePlayerSelfTest
                 if (Cur("kind") != "scene" || Cur("ready") != "true" || Cur("preview") != Path.Combine(scene, "preview.png"))
                     fails.Add($"the scene folder plays as kind={Cur("kind")} ready={Cur("ready")} preview={Cur("preview")}, want scene/true/its preview.png");
                 else Phase("clip→scene fade: kind scene, ready, preview set");
-                LiascapePlayerMedia.ApplySceneFps([], [new LweMonitorSettings { Name = "VIRTUAL-1", Fps = 45 }]);
+                LiascapePlayerMedia.ApplySceneFps([], [new SceneMonitor { Name = "VIRTUAL-1", Fps = 45 }]);
                 LiascapePlayerMedia.Drain().Wait(2000);
                 double Fps() => client.Call("get", new Dictionary<string, object?> { ["path"] = "out:VIRTUAL-1.scene_fps" }).GetProperty("value").GetDouble();
                 if (Math.Abs(Fps() - 45) > 1e-6) fails.Add($"ApplySceneFps(VIRTUAL-1 45) → out:VIRTUAL-1.scene_fps {Fps()}, want 45");
-                LiascapePlayerMedia.ApplySceneFps([new LweMonitorSettings { Name = "VIRTUAL-1", Fps = 45 }], []);
+                LiascapePlayerMedia.ApplySceneFps([new SceneMonitor { Name = "VIRTUAL-1", Fps = 45 }], []);
                 LiascapePlayerMedia.Drain().Wait(2000);
-                if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from LweMonitors → scene_fps {Fps()}, want the default 30");
+                if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 30");
                 else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 30 when removed");
                 // Task 8: the GPU / VRAM settings → the player props, live, diffed
                 string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
                 var g0 = new AppSettings();
-                var g1 = new AppSettings { SceneThrottle = false, SceneVramLimitEnabled = true, SceneVramLimitMib = 1536, VramLowMode = "pause" };
+                var g1 = new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, VramLowMode = "pause" };
                 LiascapePlayerMedia.ApplyGpuSettings(g0, g1); LiascapePlayerMedia.Drain().Wait(2000);
                 string Gpu() => $"{PlayerProp("scene_throttle")} {PlayerProp("scene_vram_limit_mib")} {PlayerProp("vram_low_mode")}";
                 if (Gpu() != "false 1536.0 pause" && Gpu() != "false 1536 pause") fails.Add($"ApplyGpuSettings → {Gpu()}, want false 1536 pause");

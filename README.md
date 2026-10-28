@@ -171,11 +171,11 @@ Downloaded wallpapers are saved to `~/.local/share/liascape/library/`. Use the L
 
 ## Playlists
 
-Build a custom playlist by clicking the **+** button on any library card. The playlist strip at the bottom of the Library tab supports drag-and-drop reordering. Click any thumbnail to play from that wallpaper, or use the **−** button to remove it from the playlist.
+Build a custom playlist by clicking the **+** button on any library card. The playlist bar at the bottom of the Library tab supports drag-and-drop reordering. Click any thumbnail to play from that wallpaper, or use the **−** button to remove it from the playlist.
 
 The ⚙ settings popup controls Sequential/Shuffle ordering. Rotation cadence (timer interval or advance-on-video-end) defaults to your global preference; tick **Override global rotation settings** to give a specific playlist its own interval or behaviour.
 
-Save and load named playlists via the toolbar above the strip — playlists are stored in `~/.local/share/liascape/playlists/` as JSON.
+Save and load named playlists via the toolbar above the playlist bar — playlists are stored in `~/.local/share/liascape/playlists/` as JSON.
 
 ## Settings
 

@@ -68,15 +68,15 @@ app.whenReady().then(async () => {
     return svg ? { hasRectOrMask: !!svg.querySelector('mask') || !!svg.querySelector('rect') } : { noToggle: true };
   })()`);
 
-  // PLAYLIST strip: items use --thumb-aspect; settings/save/load open centered (portal'd to body)
-  out.strip = await js(`(() => {
+  // PLAYLIST playlistBar: items use --thumb-aspect; settings/save/load open centered (portal'd to body)
+  out.playlistBar = await js(`(() => {
     const it = document.querySelector('.pl-item');
     const aspect = it ? getComputedStyle(it).aspectRatio : null;
-    document.querySelector('.strip-head .mini[title="Playlist settings"]')?.click();
+    document.querySelector('.playlist-bar-head .mini[title="Playlist settings"]')?.click();
     return { items: document.querySelectorAll('.pl-item').length, aspect };
   })()`);
   await wait(400);
-  out.strip.settingsModal = await js(`(() => {
+  out.playlistBar.settingsModal = await js(`(() => {
     const m = document.querySelector('.pl-modal');
     if (!m) return null;
     const r = m.getBoundingClientRect();

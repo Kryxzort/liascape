@@ -70,7 +70,7 @@ EOF
 echo "library: $N items, index.json $(stat -c %s "$LIB/index.json") bytes"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
- "GlobalTransitionEnabled":false,"RestartIntervalSeconds":600}
+ "GlobalTransitionEnabled":false,"RestartMpvpaperEverySeconds":600}
 EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do ctl hello >/dev/null 2>&1 && break; sleep 0.1; done

@@ -36,10 +36,10 @@ export const Library = memo(function Library() {
   const removeManyFromPlaylist = useStore((s) => s.removeManyFromPlaylist);
   const deleteFromSource = useStore((s) => s.deleteFromSource);
   const openExternal = useStore((s) => s.openExternal);
-  const openItemSettings = useStore((s) => s.openItemSettings);
+  const openCardSettings = useStore((s) => s.openCardSettings);
   const setStatus = useStore((s) => s.setStatus);
   const refreshPlayingStatus = useStore((s) => s.refreshPlayingStatus);
-  const autoImport = useStore((s) => !!(s.settings?.autoImportWallpaperEngine));
+  const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
 
@@ -134,7 +134,7 @@ export const Library = memo(function Library() {
             onToggle={() => doToggle(it)}
             onDeleteSource={() => deleteFromSource(targetsFor(it).filter((i) => i.workshopId))}
             onReveal={() => openExternal({ path: it.videoPath, reveal: true, isScene: it.isScene, workshopId: it.workshopId, copiedSceneDir: it.copiedSceneDir })}
-            onSettings={() => openItemSettings(it, targetsFor(it), `lib-${it.videoPath}`)} />
+            onSettings={() => openCardSettings(it, targetsFor(it), `lib-${it.videoPath}`)} />
         ))}
       </div>
     </div>

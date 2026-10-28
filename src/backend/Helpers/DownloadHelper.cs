@@ -29,8 +29,8 @@ public static class DownloadHelper
             key = detail.WorkshopId!;
             weSteamDir = detail.IsScene ? (Directory.Exists(detail.DownloadUrl) ? detail.DownloadUrl : null)
                                         : Path.GetDirectoryName(detail.DownloadUrl);
-            bool underWeDir = weSteamDir != null && !string.IsNullOrEmpty(settings.WallpaperEnginePath)
-                && Path.GetFullPath(weSteamDir).StartsWith(Path.GetFullPath(settings.WallpaperEnginePath), StringComparison.Ordinal);
+            bool underWeDir = weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)
+                && Path.GetFullPath(weSteamDir).StartsWith(Path.GetFullPath(settings.WorkshopFolder), StringComparison.Ordinal);
             source = underWeDir ? LibraryStore.Local : LibraryStore.Workshop;
         }
         else
@@ -206,7 +206,7 @@ public static class DownloadHelper
             CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
     }
 
-    // Name files the Wallpaper Engine way (LibraryService.SanitizeName): STRIP invalid chars rather than
+    // Name files the Wallpaper Engine way (LibraryService.SanitizeName): PLAYLIST_BAR invalid chars rather than
     // replacing them with '_', so a directly-downloaded workshop item and its later WE-dir copy share a
     // name → the reconcile is a clean in-place backing swap, no rename/repoint.
     private static string SanitizeName(string name)

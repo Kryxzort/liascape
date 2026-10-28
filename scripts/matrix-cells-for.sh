@@ -23,11 +23,11 @@ else
 fi
 
 # control families (matched anywhere after "× ", so the seq:/seq3:/seq5: chains that contain them run too)
-LIB='itemVol|itemSpd|stripVol|trash|sel[A-Z]|cardToggle|cardApply|race:index|normalize|cli:volume'
-PL='pl[A-Z]|strip|race:playlist|shuffle|cardToggle'
+LIB='itemVol|itemSpd|playlistBarVol|trash|sel[A-Z]|cardToggle|cardApply|race:index|normalize|cli:volume'
+PL='pl[A-Z]|playlistBar|race:playlist|shuffle|cardToggle'
 SET='set:|g[A-Z]|globalDrag|appear|noop|race:settings|cli:volume|autoMute|normalize'
 AUTOMUTE='autoMute|mute'
-MODAL='itemVol|itemSpd|stripVol|selVol|previewDrag|globalDrag'
+MODAL='itemVol|itemSpd|playlistBarVol|selVol|previewDrag|globalDrag'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'
 # the scene cells (Phase 2 Task 12): every control on a scene, the scene switches, the GPU / VRAM settings
 SCENE='[sS]cene|vram|next:[sv]→[sv]'
@@ -58,7 +58,7 @@ for f in $FILES; do
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
     # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
-    app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
+    app/ui/src/components/CardSettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f" ;;

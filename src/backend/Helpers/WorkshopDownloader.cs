@@ -25,15 +25,15 @@ public static class WorkshopDownloader
         // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
         // Subscribe mode still subscribes below so the item is tracked online even if present.
         bool alreadyHave = false;
-        foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
+        foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
         {
             if (IsWorkshopDirReady(dir)) { alreadyHave = true; break; }
         }
 
-        if (settings.WorkshopAcquireMode == "steamcmd")
+        if (settings.WorkshopDownloadMode == "steamcmd")
         {
             if (alreadyHave)
-                foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
+                foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
                     if (IsWorkshopDirReady(dir)) return dir;
             return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
         }
@@ -64,7 +64,7 @@ public static class WorkshopDownloader
         while (waited < maxWaitMs)
         {
             ct.ThrowIfCancellationRequested();
-            foreach (var dir in ExistingWorkshopDirs(settings.WallpaperEnginePath, workshopId))
+            foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
             {
                 var media = TryGetMediaPath(dir);
                 if (media == null) continue;
@@ -231,7 +231,7 @@ public static class WorkshopDownloader
     /// libraryfolders.vdf once and does a few Directory.Exists per blocked id.
     public static void PruneBlocked(AppSettings settings)
     {
-        var roots = WorkshopContentRoots(settings.WallpaperEnginePath);
+        var roots = WorkshopContentRoots(settings.WorkshopFolder);
         WorkshopUnsubQueue.PruneBlocked(id => WorkshopFolderExists(roots, id));
     }
 

@@ -57,7 +57,7 @@ public static class SettingsService
 
     // POST /settings has PATCH semantics. Its body used to be bound as the whole AppSettings, so a partial
     // one ({"Volume": 50} from an agent) reset every field it left out to its C# default — ~15 once,
-    // LweMonitors and PlayerEngine among them (→ a live engine switch). The API's own binding options
+    // SceneMonitors and PlayerEngine among them (→ a live engine switch). The API's own binding options
     // (web defaults: camelCase or PascalCase keys, numbers in strings) bind each key it does have.
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private static readonly Dictionary<string, PropertyInfo> Fields = typeof(AppSettings)
@@ -86,7 +86,7 @@ public static class SettingsService
     // value. The body is bound exactly like the old whole-body binding (same deserializer + options: the
     // setters' clamps, a bad value throws JsonException) and only the keys it HAS are copied over — so the
     // UI's whole copy still gives exactly what it gave before. A value replaces its field as a unit: an array
-    // (LweMonitors, GlobalTransitionEffectIds) is the whole new list, never merged by element; an object
+    // (SceneMonitors, GlobalTransitionEffectIds) is the whole new list, never merged by element; an object
     // (LastSession) the whole new object. An explicit null sets null (on a value-type field it's a bad
     // value). Unknown keys are ignored, as before (e.g. the removed LweSilent). `saved` is never touched.
     public static AppSettings Merge(AppSettings saved, JsonElement body)

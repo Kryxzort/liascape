@@ -72,7 +72,7 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
 
-A scene's `project.json` → `general.properties` (colours, sliders, toggles, combos, text) — the item settings modal's
+A scene's `project.json` → `general.properties` (colours, sliders, toggles, combos, text) — the card settings modal's
 "Scene properties" (web-ui.md). **Overrides live per item in `LibMeta.SceneProps`** (`name → value`, absent = every
 property at the scene's own default), in **WE's own encoding**: bool `true/false`, slider a number, colour `"r g b"`
 (0–1 floats), combo the option's key (a string; a numeric option value as LWE keys it — `std::to_string(int)`), text
@@ -101,7 +101,7 @@ it with the rest of the `LibMeta`.
 
 ## Animated preview
 
-The web UI animates library/strip cards from the source's **preview gif/webp** (not a transcode). It lives **inside the item folder** — `preview.gif`/`webp` (workshop/local) or `<key>.gif`/`webp` (web). `FindAnimated` resolves it → `LibraryItem.AnimatedThumbnailPath`; `DownloadHelper.SaveAnimatedPreviewAsync` persists an animated download URL (gif/webp/apng only). Items with no gif asset → the UI plays the local video on hover.
+The web UI animates library/playlist bar cards from the source's **preview gif/webp** (not a transcode). It lives **inside the item folder** — `preview.gif`/`webp` (workshop/local) or `<key>.gif`/`webp` (web). `FindAnimated` resolves it → `LibraryItem.AnimatedThumbnailPath`; `DownloadHelper.SaveAnimatedPreviewAsync` persists an animated download URL (gif/webp/apng only). Items with no gif asset → the UI plays the local video on hover.
 
 ## Soft delete / trash / restore
 
@@ -123,7 +123,7 @@ The web UI animates library/strip cards from the source's **preview gif/webp** (
 
 Orchestrated in **`Web/AppOps.cs`**:
 
-- **Delete** (`AppOps.Trash`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription. **Exception:** when `AutoImportWallpaperEngine` is on, a plain delete of a workshop item would be re-imported next launch, so it enqueues the unsubscribe for any item with a `WorkshopId`.
+- **Delete** (`AppOps.Trash`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription. **Exception:** when `AutoAddWeWallpapersToLibrary` is on, a plain delete of a workshop item would be re-imported next launch, so it enqueues the unsubscribe for any item with a `WorkshopId`.
 - **Delete from Source** (`AppOps.DeleteFromSource`, `POST /workshop/delete-from-source`): enqueues the workshop id + soft-deletes. Applies to any workshop item — symlink OR copy (`WorkshopId != null`); the drain works by id. The UI hides this when auto-import is on (the trash button already does it).
 
 **We never delete the workshop folder ourselves.** Unsubscribing makes Steam remove the folder + its `appworkshop_431960.acf` entry together on its next sync. A `blocked` set keeps AutoImport from resurrecting the lingering folder until Steam cleans it.

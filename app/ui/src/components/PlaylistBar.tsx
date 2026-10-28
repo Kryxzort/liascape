@@ -22,13 +22,13 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
   const openExternal = useStore((s) => s.openExternal);
-  const openItemSettings = useStore((s) => s.openItemSettings);
+  const openCardSettings = useStore((s) => s.openCardSettings);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState(false);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
-  // a position:fixed layer portal'd to <body> at the item's rect → it floats OVER the strip chrome with
+  // a position:fixed layer portal'd to <body> at the item's rect → it floats OVER the playlist bar chrome with
   // zero row padding. rAF-throttled rect tracking so it follows the item while the row scrolls.
   const [glow, setGlow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const rafRef = useRef(0);
@@ -37,9 +37,9 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const onEnter = (e: React.MouseEvent<HTMLDivElement>) => { setHover(true); place(e.currentTarget); };
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => { const el = e.currentTarget; if (rafRef.current) return; rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; place(el); }); };
   const onLeave = () => { setHover(false); setGlow(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } };
-  // COOL: this strip item's settings modal morphed out of it (pl- ≠ the library card's lib- for the same
+  // COOL: this playlist bar item's settings modal morphed out of it (pl- ≠ the library card's lib- for the same
   // wallpaper) → lifted out (hidden) until the modal morphs back in; the modal plays the preview meanwhile
-  const lifted = useStore((s) => s.settingsMorphId === `pl-${path}`);
+  const lifted = useStore((s) => s.cardSettingsMorphId === `pl-${path}`);
   const active = !!item && !lifted && (hover || (autoPlayGifs && hasGifAsset(item)));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
@@ -63,10 +63,10 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
           onContextMenu={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}>
           <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-          {/* portal'd: the strip's backdrop-filter would otherwise trap position:fixed */}
+          {/* portal'd: the playlist bar's backdrop-filter would otherwise trap position:fixed */}
           <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={() => setMenu(null)}>
             <button onClick={() => removeFromPlaylist(path)}>Remove from playlist</button>
-            <button onClick={() => openItemSettings(item, [item], `pl-${path}`)}>Settings (volume / speed)</button>
+            <button onClick={() => openCardSettings(item, [item], `pl-${path}`)}>Settings (volume / speed)</button>
             <button onClick={() => openExternal({ path: item.videoPath, reveal: true, isScene: item.isScene, workshopId: item.workshopId, copiedSceneDir: item.copiedSceneDir })}>Open in file manager</button>
           </div>
         </div>, document.body)}
@@ -75,7 +75,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
 }
 
 // The thing shown floating under the cursor while dragging — rendered in a DragOverlay portal'd to
-// <body>, so it sits ABOVE all UI (not clipped by the strip's overflow / backdrop-filter containing block).
+// <body>, so it sits ABOVE all UI (not clipped by the playlist bar's overflow / backdrop-filter containing block).
 function PlItemOverlay({ item }: { item?: LibraryItem }) {
   return (
     <div className="pl-item dragging" style={{ cursor: "grabbing", boxShadow: "0 12px 28px rgba(0,0,0,.5)", transform: "scale(1.05)" }}>
@@ -85,7 +85,7 @@ function PlItemOverlay({ item }: { item?: LibraryItem }) {
   );
 }
 
-export function PlaylistStrip() {
+export function PlaylistBar() {
   const playlist = useStore((s) => s.playlist);
   const items = useStore((s) => s.libraryItems);
   const playingPath = useStore((s) => s.playingPath);
@@ -96,7 +96,7 @@ export function PlaylistStrip() {
   const names = useStore((s) => s.playlistNames);
   const saveAs = useStore((s) => s.savePlaylistAs);
   const loadNamed = useStore((s) => s.loadNamedPlaylist);
-  const collapsed = useStore((s) => !!(s.settings?.isPlaylistCollapsed));
+  const collapsed = useStore((s) => !!(s.settings?.isPlaylistBarCollapsed));
   const autoAdd = useStore((s) => !!(s.settings?.autoAddLibraryToPlaylist));
   const setSetting = useStore((s) => s.setSetting);
 
@@ -108,17 +108,17 @@ export function PlaylistStrip() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const rowRef = useRef<HTMLDivElement>(null);
   useSmoothScroll(rowRef, "x");
-  // expose the strip's live height as --strip-h so the library scroll can pad its bottom enough to
+  // expose the playlist bar's live height as --playlist-bar-h so the library scroll can pad its bottom enough to
   // reveal the last row above the bar — whether it's collapsed or expanded.
-  const stripRef = useRef<HTMLDivElement>(null);
+  const playlistBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const el = stripRef.current;
+    const el = playlistBarRef.current;
     if (!el) return;
-    const apply = () => document.documentElement.style.setProperty("--strip-h", `${Math.round(el.offsetHeight)}px`);
+    const apply = () => document.documentElement.style.setProperty("--playlist-bar-h", `${Math.round(el.offsetHeight)}px`);
     apply();
     const ro = new ResizeObserver(apply);
     ro.observe(el);
-    return () => { ro.disconnect(); document.documentElement.style.removeProperty("--strip-h"); };
+    return () => { ro.disconnect(); document.documentElement.style.removeProperty("--playlist-bar-h"); };
   }, []);
 
   const onDragStart = (e: DragStartEvent) => setDragId(String(e.active.id));
@@ -136,12 +136,12 @@ export function PlaylistStrip() {
   const onDragCancel = () => { setDragId(null); (document.activeElement as HTMLElement | null)?.blur?.(); };
 
   return (
-    <div className="strip" ref={stripRef}>
-      <div className="strip-head">
+    <div className="playlist-bar" ref={playlistBarRef}>
+      <div className="playlist-bar-head">
         <button className="mini" title={collapsed ? "Expand" : "Collapse"}
-          onClick={() => setSetting("isPlaylistCollapsed", !collapsed)}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
-        <span className="strip-label">PLAYLIST</span>
-        <span className="strip-count">{playlist.length}</span>
+          onClick={() => setSetting("isPlaylistBarCollapsed", !collapsed)}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
+        <span className="playlist-bar-label">PLAYLIST</span>
+        <span className="playlist-bar-count">{playlist.length}</span>
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
@@ -150,22 +150,22 @@ export function PlaylistStrip() {
       </div>
 
       {!collapsed && (playlist.length === 0 ? (
-        <div className="strip-empty">Add wallpapers with the toggle on library cards</div>
+        <div className="playlist-bar-empty">Add wallpapers with the toggle on library cards</div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
           <SortableContext items={playlist} strategy={horizontalListSortingStrategy}>
-            <div className="strip-row" ref={rowRef}>
+            <div className="playlist-bar-row" ref={rowRef}>
               {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath} />)}
             </div>
           </SortableContext>
-          {/* DragOverlay portal'd to <body> → the picked-up item floats ABOVE all UI (the strip's
+          {/* DragOverlay portal'd to <body> → the picked-up item floats ABOVE all UI (the playlist bar's
               overflow + backdrop-filter would otherwise clip an in-place transform) */}
           {createPortal(<DragOverlay>{dragId ? <PlItemOverlay item={byPath[dragId]} /> : null}</DragOverlay>, document.body)}
         </DndContext>
       ))}
 
-      {/* portal'd to body so the strip's backdrop-filter containing block doesn't pin them off-screen */}
+      {/* portal'd to body so the playlist bar's backdrop-filter containing block doesn't pin them off-screen */}
       {createPortal(<>
         <PlaylistSettingsModal open={showSettings} ps={ps} setPS={setPS}
           autoAdd={autoAdd} setAutoAdd={(v) => setSetting("autoAddLibraryToPlaylist", v)} onClose={() => setShowSettings(false)} />

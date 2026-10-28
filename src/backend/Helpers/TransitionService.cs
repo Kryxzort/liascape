@@ -291,7 +291,7 @@ public static class TransitionService
                 // what V→V does — B never advances during the effect, so there's no position to match/repeat).
                 if (!toScene) { args.Add("--to-video"); args.Add(toPath); args.Add("--to-start"); args.Add("0"); args.Add("--to-paused"); }
                 args.Add("--audio-volume"); args.Add(audioVol.ToString());
-                args.Add("--lag-offset"); args.Add((aset.TransitionLagOffsetMs / 1000.0).ToString(inv)); // A-sync aim (per-machine)
+                args.Add("--lag-offset"); args.Add((aset.FullLiveSyncOffsetMs / 1000.0).ToString(inv)); // A-sync aim (per-machine)
                 // normalize the overlay's OWN audio during the effect (mpvpaper-B only takes over at
                 // teardown), so the crossfade is leveled too — same loudnorm filter, per measured side.
                 if (aset.NormalizeAudio && !aset.NoAudio)
@@ -306,7 +306,7 @@ public static class TransitionService
                 // effective speed (the A-sync is speed-aware), the fps cap, and the hwdec mode.
                 if (!fromScene) { args.Add("--from-speed"); args.Add((LibraryService.ReadSpeedOverride(fromPath!) ?? aset.Speed).ToString(inv)); }
                 if (!toScene)   { args.Add("--to-speed");   args.Add((LibraryService.ReadSpeedOverride(toPath)   ?? aset.Speed).ToString(inv)); }
-                if (aset.VideoFps > 0) { args.Add("--fps"); args.Add(aset.VideoFps.ToString()); }
+                if (aset.VideoFpsCap > 0) { args.Add("--fps"); args.Add(aset.VideoFpsCap.ToString()); }
                 if (!string.IsNullOrWhiteSpace(aset.HwDec)) { args.Add("--hwdec"); args.Add(aset.HwDec); }
             }
             // frozen / full-live / reveal-a with a video B → renderer unpauses mpvpaper's paused-frame0 B

@@ -9,11 +9,11 @@ public class AppSettings
     public bool Loop { get; set; } = true;
     public bool NoAudio { get; set; } = true;
     public bool DisableCache { get; set; } = false;
-    public int DemuxerMaxBytes { get; set; } = 20;
-    public int DemuxerMaxBackBytes { get; set; } = 5;
+    public int DemuxerMaxMib { get; set; } = 20;
+    public int DemuxerMaxBackMib { get; set; } = 5;
     public string HwDec { get; set; } = "auto";
     public string VideoScale { get; set; } = "fill";
-    public int VideoFps { get; set; } = 0; // cap mpv video playback fps (0 = native). Scenes (LWE) unaffected.
+    public int VideoFpsCap { get; set; } = 0; // cap mpv video playback fps (0 = native). Scenes (LWE) unaffected.
     private int _volume = 100;
     public int Volume
     {
@@ -38,44 +38,44 @@ public class AppSettings
         // unity (≤100) mean the output can't clip — extremes just land very loud-but-limited or silent.
         set => _normTarget = Math.Clamp(value, -100.0, 0.0);
     }
-    public string WallpaperEnginePath { get; set; } = System.IO.Path.Combine(
+    public string WorkshopFolder { get; set; } = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".local/share/Steam/steamapps/workshop/content/431960");
-    public bool WeCopyFiles { get; set; } = false;
+    public bool CopyFilesInsteadOfSymlinking { get; set; } = false;
     public bool ResumeFromLast { get; set; } = true;
     public bool AllowScenes { get; set; } = false;
     public int LweVolume { get; set; } = 100;
-    public List<LweMonitorSettings> LweMonitors { get; set; } = [];
+    public List<SceneMonitor> SceneMonitors { get; set; } = [];
     public int SceneTransitionDelayMs { get; set; } = 1000;
     public bool AutoMute { get; set; } = false;
     public int AutoMuteDelayMs { get; set; } = 200;
     public int AutoUnmuteDelayMs { get; set; } = 2000;
-    public double AutoMuteThresholdDb { get; set; } = -70.0;
+    public double AutoMuteMinLevelDb { get; set; } = -70.0;
     public bool AutoMuteOnlyIfMprisActive { get; set; } = false;
     public string ThumbnailAspect { get; set; } = "1:1";
     public string CardSize { get; set; } = "Medium";
     public bool AutoPlayGifs { get; set; } = false;
     public bool AdvancedSettings { get; set; } = false;      // UI: reveal power-user settings rows
-    public bool WallpaperBgAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
+    public bool LiveWallpaperBehindAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
-    public bool RestartOnSwitchOnly { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
-    public bool KeepPauseOnSwitch { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
+    public bool RestartOnlyAtPlaylistChangeover { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
+    public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
-    // The global rotation (PlayerHelper § Rotation): GlobalAdvanceOnVideoEnd ("Switch when video ends") off →
+    // The global rotation (PlayerHelper § Rotation): GlobalSwitchWhenVideoEnds ("Switch when video ends") off →
     // GlobalIntervalSeconds is a plain timer ("Switch every"); on → it is the minimum play time and
     // GlobalMaxPlaySeconds the maximum (below), and GlobalSeparateSceneTiming gives scenes + still images (they never
     // end) their own GlobalSwitchScenesAfterSeconds instead. Every limit is 0 = off. Defaults: a video plays to its
     // end however long (no minimum, no maximum); a scene / still image switches after 30 min.
     public int GlobalIntervalSeconds { get; set; } = 0;
-    public bool GlobalAdvanceOnVideoEnd { get; set; } = true;
+    public bool GlobalSwitchWhenVideoEnds { get; set; } = true;
     public string Theme { get; set; } = "Catppuccin Mocha";
-    private int _restartIntervalSeconds = 600;
-    public int RestartIntervalSeconds
+    private int _restartMpvpaperEverySeconds = 600;
+    public int RestartMpvpaperEverySeconds
     {
-        get => _restartIntervalSeconds;
-        set => _restartIntervalSeconds = Math.Clamp(value, 0, 3600);
+        get => _restartMpvpaperEverySeconds;
+        set => _restartMpvpaperEverySeconds = Math.Clamp(value, 0, 3600);
     }
     // The maximum play time under advance-on-end (wall-clock seconds, 0 = off): the playing item — a video mid-clip,
     // a scene / still image unless they have their own timing — advances once it played that long (a cap beats the
@@ -105,7 +105,7 @@ public class AppSettings
     // Full-live only: aim the outgoing (A) decoder this many ms relative to the live wallpaper at the
     // cover, to cancel the per-machine settling drift (negative = aim slightly ahead). The renderer
     // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
-    public int TransitionLagOffsetMs { get; set; } = -30;
+    public int FullLiveSyncOffsetMs { get; set; } = -30;
     // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE) or "liascape-player" (the
     // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
     // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/player-adapter.md.
@@ -116,13 +116,13 @@ public class AppSettings
     // volume doesn't move). PlayerHelper.AdjustVolume.
     public string VolumeKeyTarget { get; set; } = "auto";
     // liascape-player GPU / VRAM (Phase 2 Task 8 — all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
-    // SceneThrottle: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
+    // AutoThrottleScenes: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
     // scene at its fixed fps) → `player.scene_throttle`.
-    public bool SceneThrottle { get; set; } = true;
+    public bool AutoThrottleScenes { get; set; } = true;
     // The per-scene VRAM guard: a scene worker using more than SceneVramLimitMib of VRAM is stopped (a rotation
     // advances, a single wallpaper keeps its last frame; never marked crashed) → `player.scene_vram_limit_mib`
     // (the MiB while enabled, else 0 = off). The MiB value is kept while off (the toggle restores it).
-    public bool SceneVramLimitEnabled { get; set; } = false;
+    public bool LimitVramPerScene { get; set; } = false;
     private int _sceneVramLimitMib = 1536;
     public int SceneVramLimitMib
     {
@@ -138,10 +138,10 @@ public class AppSettings
         set => _vramLowMode = value is "stop" or "pause" or "off" ? value : "stop";
     }
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
-    public bool AutoImportWallpaperEngine { get; set; } = false;
-    public bool IsPlaylistCollapsed { get; set; } = false;
+    public bool AutoAddWeWallpapersToLibrary { get; set; } = false;
+    public bool IsPlaylistBarCollapsed { get; set; } = false;
     // "subscribe" (real Steam subscription via community endpoint) or "steamcmd" (direct download).
-    public string WorkshopAcquireMode { get; set; } = "subscribe";
+    public string WorkshopDownloadMode { get; set; } = "subscribe";
     // QR sign-in: refresh token (~1yr) + steamid; access token (~24h) cached + auto-minted.
     public string SteamRefreshToken { get; set; } = "";
     public ulong SteamId { get; set; } = 0;
@@ -161,10 +161,10 @@ public class AppSettings
         else parts.Add($"--volume={Volume}");
         if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
         if (DisableCache) parts.Add("--cache=no");
-        if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
-        if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
+        if (DemuxerMaxMib > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxMib}MiB");
+        if (DemuxerMaxBackMib > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackMib}MiB");
         if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
-        if (VideoFps > 0) parts.Add($"--vf=fps={VideoFps}"); // cap playback fps (video only)
+        if (VideoFpsCap > 0) parts.Add($"--vf=fps={VideoFpsCap}"); // cap playback fps (video only)
         if (VideoScale == "fill") parts.Add("--panscan=1.0");
         parts.Add("--image-display-duration=inf");
         return string.Join(" ", parts);
@@ -178,10 +178,10 @@ public class AppSettings
         else parts.Add($"--volume={Volume}");
         if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
         if (DisableCache) parts.Add("--cache=no");
-        if (DemuxerMaxBytes > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxBytes}MiB");
-        if (DemuxerMaxBackBytes > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackBytes}MiB");
+        if (DemuxerMaxMib > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxMib}MiB");
+        if (DemuxerMaxBackMib > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackMib}MiB");
         if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
-        if (VideoFps > 0) parts.Add($"--vf=fps={VideoFps}"); // cap playback fps (video only)
+        if (VideoFpsCap > 0) parts.Add($"--vf=fps={VideoFpsCap}"); // cap playback fps (video only)
         if (VideoScale == "fill") parts.Add("--panscan=1.0");
         parts.Add("--image-display-duration=10");
         return string.Join(" ", parts);
@@ -191,11 +191,11 @@ public class AppSettings
     // Mirrors PlayerHelper.SpawnLweProcesses exactly. Uses a <monitor> placeholder when none set.
     public string BuildLweOptions()
     {
-        var monitors = LweMonitors.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToList();
+        var monitors = SceneMonitors.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToList();
         bool anyPrimary = monitors.Any(m => m.IsPrimary);
         var src = monitors.Count > 0
             ? monitors
-            : new List<LweMonitorSettings> { new() { Name = "<monitor>", Fps = 60, IsPrimary = true } };
+            : new List<SceneMonitor> { new() { Name = "<monitor>", Fps = 60, IsPrimary = true } };
         var lines = new List<string>();
         foreach (var m in src)
         {

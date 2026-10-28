@@ -247,7 +247,7 @@ ends with the session.**
 - **`stop` clears `player.paused`** (legacy semantics: a stop ends the session), and the backend
   clears it for a new session (Apply / ApplyPlaylist / a cold Launch); a rotation keeps it. A user
   next/prev/random made while paused resumes first (the owner's default) or — with the
-  `KeepPauseOnSwitch` setting — keeps it: the switch is then a cut, and a cut whose A is already
+  `StayPausedWhenSwitching` setting — keeps it: the switch is then a cut, and a cut whose A is already
   silent (the pause gate holds a playing A at −96) swaps at once instead of waiting for the resume
   (`tests/api.rs::cut_while_paused_swaps_at_once`). Tests: `tests/api.rs::i1_pause_stop_then_switch_plays`, `r93_destroy_mid_gate_never_leaks`
   (now: torn down while still paused), `scripts/test-liascape-player-adapter.sh` (I1 cases).

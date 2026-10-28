@@ -20,7 +20,7 @@ public static class SteamOps
             signedIn = !string.IsNullOrEmpty(s.SteamRefreshToken),
             accountName = s.SteamAccountName,
             daysLeft = SteamAuthService.RefreshTokenDaysRemaining(s),
-            mode = s.WorkshopAcquireMode,
+            mode = s.WorkshopDownloadMode,
         };
     }
 

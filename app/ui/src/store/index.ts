@@ -26,7 +26,7 @@ function applyThemeVars(t: Theme) {
 }
 
 const DEFAULT_PS: PlaylistSettings = {
-  order: 0, overrideGlobalSettings: false, intervalSeconds: 0, advanceOnVideoEnd: true, maxPlaySeconds: 0,
+  order: 0, overrideGlobalSettings: false, intervalSeconds: 0, switchWhenVideoEnds: true, maxPlaySeconds: 0,
   separateSceneTiming: true, switchScenesAfterSeconds: 1800,
   transitionEnabled: false, transitionEffectIds: [], transitionDurationMs: 600, transitionDurationMaxMs: 0, transitionShuffle: true,
 };
@@ -47,10 +47,10 @@ interface State {
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
   status: string; error: string | null;
-  // per-wallpaper settings modal (lifted so library cards AND the playlist strip can open it)
-  settingsItem: LibraryItem | null; settingsSiblings: LibraryItem[];
-  settingsMorphId: string | null; // the surface the modal morphs FROM/back to (`data-morph-id`: lib-… or pl-…) — hidden while open
-  settingsSource: MorphSource | null; // that surface's picture state at the click (components/morph.ts)
+  // per-wallpaper settings modal (lifted so library cards AND the playlist bar can open it)
+  cardSettingsItem: LibraryItem | null; cardSettingsSiblings: LibraryItem[];
+  cardSettingsMorphId: string | null; // the surface the modal morphs FROM/back to (`data-morph-id`: lib-… or pl-…) — hidden while open
+  cardSettingsSource: MorphSource | null; // that surface's picture state at the click (components/morph.ts)
   // PERF/FREEZE: false when the window is hidden OR unfocused (you fullscreened another app over it).
   // On X11 an occluded window often never fires visibilitychange, so Chromium keeps decoding all the
   // autoplay gifs for hours → ThreadPool decode backlog saturates → main thread stalls (futex_wait) →
@@ -89,7 +89,7 @@ interface State {
   setQrPng(png: string): void; onSignedIn(s: State["steam"]): void;
   setUnsub(u: State["unsub"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
-  openItemSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeItemSettings(): void;
+  openCardSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeCardSettings(): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
   refreshPlayingStatus(): void;
@@ -101,8 +101,8 @@ let stateTimer: ReturnType<typeof setTimeout>;
 let settingsTimer: ReturnType<typeof setTimeout>;
 let statusTimer: ReturnType<typeof setTimeout>;
 let statusHeldUntil = 0;
-// a strip / settings edit whose debounced save hasn't fired yet: a resync keeps the local copy (that save is on its way)
-let stripSavePending = false;
+// a playlist bar / settings edit whose debounced save hasn't fired yet: a resync keeps the local copy (that save is on its way)
+let playlistBarSavePending = false;
 let settingsSavePending = false;
 let resyncing: Promise<boolean> | null = null;
 let resyncAgain = false;
@@ -110,20 +110,20 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 
 // Reset-to-defaults for the playback/mpv fields.
 // Mirrors AppSettings defaults (the user-editable subset — NOT daemon-owned fields like lastSession
-// or steam tokens). Used for the per-setting reset icon + "Clear settings". wallpaperEnginePath is
+// or steam tokens). Used for the per-setting reset icon + "Clear settings". workshopFolder is
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFps: 0, wallpaperBgAllTabs: false,
-  debugMode: false, debugOverlay: true, restartOnSwitchOnly: false, keepPauseOnSwitch: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartIntervalSeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
-  globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
+  loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
+  debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
+  globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
-  globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", transitionLagOffsetMs: -30,
-  autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 200, autoUnmuteDelayMs: 2000, autoMuteThresholdDb: -70,
-  hwDec: "auto", videoScale: "fill", demuxerMaxBytes: 20, demuxerMaxBackBytes: 5, playerEngine: "legacy",
-  sceneThrottle: true, sceneVramLimitEnabled: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
+  globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", fullLiveSyncOffsetMs: -30,
+  autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 200, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
+  hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
+  autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false,
-  weCopyFiles: false, allowScenes: false, autoImportWallpaperEngine: false, sceneTransitionDelayMs: 1000, lweMonitors: [],
-  workshopAcquireMode: "subscribe", steamCmdPath: "", steamUsername: "",
+  copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
+  workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   resumeFromLast: true, theme: "Catppuccin Mocha",
 };
 
@@ -134,7 +134,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null,
   themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
-  settingsItem: null, settingsSiblings: [], settingsMorphId: null, settingsSource: null, appActive: true,
+  cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -233,11 +233,11 @@ export const useStore = create<State>((set, get) => ({
   // reflect a change instantly without waiting for a full library reload.
   patchLibraryItem(path, partial) { set((s) => ({ libraryItems: s.libraryItems.map((i) => i.videoPath === path ? { ...i, ...partial } : i) })); },
   // API: `library-item-changed` — the backend changed an item itself (a volume keybind on a wallpaper with its
-  // own volume, `VolumeKeyTarget`): the grid's copy AND an open settings modal's (it re-inits from settingsItem),
+  // own volume, `VolumeKeyTarget`): the grid's copy AND an open settings modal's (it re-inits from cardSettingsItem),
   // else the modal shows — and its next slider save restores — the old value
   itemChangedByBackend(path, partial) {
     const p = (i: LibraryItem) => (i.videoPath === path ? { ...i, ...partial } : i);
-    set((s) => ({ libraryItems: s.libraryItems.map(p), settingsItem: s.settingsItem && p(s.settingsItem), settingsSiblings: s.settingsSiblings.map(p) }));
+    set((s) => ({ libraryItems: s.libraryItems.map(p), cardSettingsItem: s.cardSettingsItem && p(s.cardSettingsItem), cardSettingsSiblings: s.cardSettingsSiblings.map(p) }));
   },
   async applyItem(path) {
     await api.apply(path); set({ playingPath: path });
@@ -245,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
     get().setStatus(`Applied: ${t}`);
   },
   // API: the backend takes trashed items out of the playlist (live, undo puts them back) — drop them
-  // here first so a pending strip save can't put them back, then take the backend's playlist.
+  // here first so a pending playlistBar save can't put them back, then take the backend's playlist.
   async trashItems(items) {
     if (items.length === 0) return;
     const gone = new Set(items.map((i) => i.videoPath));
@@ -321,7 +321,7 @@ export const useStore = create<State>((set, get) => ({
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
     settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
-    if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalAdvanceOnVideoEnd", "globalIntervalSeconds", "globalMaxPlaySeconds",
+    if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
       get().refreshPlayingStatus();
   },
@@ -353,10 +353,10 @@ export const useStore = create<State>((set, get) => ({
 
   openExternal(body) { api.open(body).catch(() => {}); },
 
-  openItemSettings(item, siblings, morphId) {
-    set({ settingsItem: item, settingsSiblings: siblings ?? [item], settingsMorphId: morphId ?? null, settingsSource: captureSource(morphId ?? null) });
+  openCardSettings(item, siblings, morphId) {
+    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: morphId ?? null, cardSettingsSource: captureSource(morphId ?? null) });
   },
-  closeItemSettings() { set({ settingsItem: null, settingsSiblings: [], settingsMorphId: null, settingsSource: null }); get().loadLibrary(); },
+  closeCardSettings() { set({ cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null }); get().loadLibrary(); },
 
   // ---- shared ----
   applyTheme(name) {
@@ -395,7 +395,7 @@ function buildPlayingStatus(get: () => State): string {
   const parts: string[] = [];
   const pl = st.playlist, ps = st.playlistSettings;
   const inPl = pl.length > 1 && pl.includes(st.playingPath);
-  const advance = ps.overrideGlobalSettings ? ps.advanceOnVideoEnd : ((set.globalAdvanceOnVideoEnd as boolean) ?? true);
+  const advance = ps.overrideGlobalSettings ? ps.switchWhenVideoEnds : ((set.globalSwitchWhenVideoEnds as boolean) ?? true);
   const interval = ps.overrideGlobalSettings ? ps.intervalSeconds : ((set.globalIntervalSeconds as number) ?? 0);
   const maxPlay = ps.overrideGlobalSettings ? ps.maxPlaySeconds : ((set.globalMaxPlaySeconds as number) ?? 0);
   const sepScenes = ps.overrideGlobalSettings ? (ps.separateSceneTiming ?? true) : ((set.globalSeparateSceneTiming as boolean) ?? true);
@@ -423,9 +423,9 @@ function buildPlayingStatus(get: () => State): string {
 }
 
 function savePlaylistDebounced(get: () => State) {
-  clearTimeout(stateTimer); stripSavePending = true;
+  clearTimeout(stateTimer); playlistBarSavePending = true;
   stateTimer = setTimeout(() => {
-    stripSavePending = false;
+    playlistBarSavePending = false;
     const { playlist, playlistSettings, playlistName } = get();
     api.savePlaylistState({ videoPaths: playlist, settings: playlistSettings, name: playlistName }).catch(() => {});
   }, 200);
@@ -463,7 +463,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   }
   if (cur) p.playingPath = cur.v?.path ?? null;
   if (lib) p.libraryItems = lib.v;
-  if (pstate && !stripSavePending) {
+  if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
   }
   if (names) p.playlistNames = names.v;

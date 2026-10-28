@@ -5,7 +5,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 
 ## Waiting on owner
 - [x] **Pause × a user switch** — owner (2026-10-25): an Advanced toggle, resume by default →
-      `KeepPauseOnSwitch` (Settings → Playback "Stay paused when switching"). Was: (UI × player-state matrix,
+      `StayPausedWhenSwitching` (Settings → Playback "Stay paused when switching"). Was: (UI × player-state matrix,
       `KNOWN` cells). Paused, then next/previous/random:
       a single wallpaper **unpauses** and switches (`TryStepLibrary` → `Apply` = a new session, I1); a playlist
       **keeps** the pause but its tick holds the action until the resume and switches then (the player clock is
@@ -35,7 +35,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         ≤ 30 ms anti-click fade on A, and B rising with the reveal (or full from the start, if the owner prefers).
       - **Frozen** is already silent through the effect, which is correct; it needs only the ≤ 30 ms anti-click ramps.
 - [ ] `nix flake update` → mpvpaper **1.9** (PR #132 `glFenceSync` leak fix; flake.lock still pins 1.8). Owner's
-      `RestartIntervalSeconds` is **0**, so it's leaking now (1.66 GB RSS after 42 min on 1.8). After the bump, soak and
+      `RestartMpvpaperEverySeconds` is **0**, so it's leaking now (1.66 GB RSS after 42 min on 1.8). After the bump, soak and
       check RSS; if flat, the restart daemon's default can go to 0.
 - [ ] Push `transitions-reveal`: `6f0433a` (cubic volume), `04533a8` (silence flicker) and the design + this TODO are
       not pushed. The `fork` remote is SSH and there's no key on this box; push via `gh auth git-credential` over HTTPS,
@@ -57,7 +57,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         on). Either spawn the player out of the unit's cgroup when `INVOCATION_ID` is set
         (`systemd-run --user --scope`), or don't restart the unit by hand.
 - [x] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
-      (bit an agent on 2026-10-22: ~15 fields incl. LweMonitors). Make it merge (PATCH semantics) or reject partial bodies.
+      (bit an agent on 2026-10-22: ~15 fields incl. SceneMonitors). Make it merge (PATCH semantics) or reject partial bodies.
       — done 2026-10-26: it merges (`SettingsService.Patch` → `Merge`, `web-backend.md`): keys in the body overwrite
       the saved values, the rest are kept; an array or object replaces its field whole, an explicit null sets null,
       unknown keys are ignored, a bad value is a 400 that saves nothing; one poster at a time. RED before: a partial
@@ -65,9 +65,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `scripts/test-settings-merge.sh` (hermetic): partial / full / null / unknown key / 400 / parallel bodies, and a
       partial body applying live (Volume, Speed, NoAudio, VideoScale, override ?? global, rotation interval, engine).
 - [x] `POST /playlist/state` binds its whole `CustomPlaylist` (`videoPaths` + `settings` + `name`), same hazard as
-      `/settings` had: a body without `videoPaths` saves an empty strip (a running rotation keeps its own list — the
+      `/settings` had: a body without `videoPaths` saves an empty playlist bar (a running rotation keeps its own list — the
       live reorder skips an empty one), a partial `settings` resets the rest to their defaults (override off →
-      the rotation follows the globals live, transitions off). The UI always posts the whole strip; decide merge vs
+      the rotation follows the globals live, transitions off). The UI always posts the whole playlist bar; decide merge vs
       reject (`/playlist/play`'s `settings` is per-play by design — defaults intended there).
 - [x] Remove the dead `LweSilent` setting (no consumers).
       — done 2026-10-26: gone from `AppSettings` and `session.md` (nothing in src/, app/, scripts/ read it). A
@@ -110,13 +110,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       a copy of `~/.config/liascape` + `~/.local/share/liascape/playlists` (the app stopped), check the printed
       rotations, copy `out/` over the originals.
   - [x] **An fps cap stalls a still image** (found 2026-10-28 by `test-settings-merge.sh`; fixed 2026-10-28): with
-        `VideoFps` > 0 (`fps_cap` 98) a `kind: image` source stayed `ready: false` (width 0) and its switch sat in
+        `VideoFpsCap` > 0 (`fps_cap` 98) a `kind: image` source stayed `ready: false` (width 0) and its switch sat in
         `waiting_ready` — nothing showed. Root cause: mpv's `fps` vf never emits the one frame of a still shown
         with `image-display-duration=inf` (`filter input EOF` → `filter output EOF`). The player now never sends
         the `vf` to a still (the extension's guess, corrected by mpv's image flag); the node keeps `fps_cap`.
         Scenes/colours only store it. `player-core.md` § Sources "An fps cap never reaches a still"; guards
         `tests/sources.rs::fps_cap_never_stalls_an_image`, `tests/api.rs::fps_cap_never_stalls_a_still_any_kind`,
-        the adapter IT's "VideoFps 30 × an image"; `test-settings-merge.sh` runs its image check with a cap again.
+        the adapter IT's "VideoFpsCap 30 × an image"; `test-settings-merge.sh` runs its image check with a cap again.
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
       table in web-backend.md — liascape-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `liascape-player health`; a warning
@@ -135,7 +135,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Chromium's focus ring. `hooks/rangeDrag.ts` swallows keys during a range drag (shortcuts, Escape, arrows) and
       blurs a keyed slider on release; ranges show the accent glow for keyboard focus, never the system ring.
       Guard: matrix `keys:sliderHeld` (RED: outline `auto`, Escape closed the modal).
-- [x] **Slow down morph** (owner todo, 2026-10-28): the item settings modal's card → modal flight (and back) is
+- [x] **Slow down morph** (owner todo, 2026-10-28): the card settings modal's card → modal flight (and back) is
       `SETTINGS_MORPH` (open 620 ms with an ease that spreads the travel, close 500 ms) instead of the Browse
       preview's 430 / 340 ms; the Browse preview is unchanged. Guard: `--probe probe-morph.js` (moving time ≥ 520 /
       420 ms; RED before 353–384 / 315–317). Not added: a reduced-motion branch (the app has none anywhere).
@@ -244,7 +244,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         the IT check races. Fix candidates: the IT waits for the index to stop growing before the reopen, or the
         backend waits briefly for a just-retired source's final report before seeding.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
-        web-ui.md): a WE scene's `project.json` `general.properties` in the item modal (bool / slider / colour /
+        web-ui.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on
         the scene's source(s) (`scene_props`, the resolver — at every open, R81, a reset sends the default), a
         no-persist drag twin; legacy: LWE `--set-property` at launch only. **Open:** `scenetexture` / `file` /
@@ -267,7 +267,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [x] **Phase 2 Task 11 — scenes playable under liascape-player in the backend** (2026-10-28,
         `.claude/rules/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
         capability (else `liascape-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;
-        `LweMonitors` fps live (`out:<c>.scene_fps`); `source.broken` → marked crashed (D6: skipped unless
+        `SceneMonitors` fps live (`out:<c>.scene_fps`); `source.broken` → marked crashed (D6: skipped unless
         whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
         Settings hides the scene delay + primary radio under liascape-player. The player emits `source.broken` now
         (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
@@ -275,10 +275,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         2026-10-28, below); `player.scene_assets` has no
         setting yet (auto-resolve only); ~~the scene properties editor (`scene_props`) is its own task~~ (done
         2026-10-28, below); a
-        hotplugged output that's in `LweMonitors` gets its fps only at the next player process or `/settings`
+        hotplugged output that's in `SceneMonitors` gets its fps only at the next player process or `/settings`
         change (the player remembers connectors it saw).
   - [x] **Phase 2 Task 8's settings wired in the backend** (2026-10-28, player-adapter.md § Scenes → "GPU / VRAM
-        settings"): `SceneThrottle`, `SceneVramLimitEnabled` + `SceneVramLimitMib`, `VramLowMode` → the player
+        settings"): `AutoThrottleScenes`, `LimitVramPerScene` + `SceneVramLimitMib`, `VramLowMode` → the player
         props, live and re-asserted per player process; `scene.vram_exceeded` → WS `scene-vram-stopped` + the
         rotation advances, never marked crashed; `/player-engine.vram`; Settings → "GPU / VRAM". **Open:** a scene
         pending B (armed for A's end) stopped by the guard fails that switch and the fallback switches to it now —
@@ -446,7 +446,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       trash left items in the playlist (a rotation played the missing file; an armed switch still fired to
       it), trashing an item whose switch was requested but not yet running kept it playing, undo didn't put
       it back; keybind next/prev/random on a single wallpaper switched behind the UI (now forwarded to the
-      running backend); keybind volume reverted by the next UI save; play-from saved the strip reordered; Play
+      running backend); keybind volume reverted by the next UI save; play-from saved the playlist bar reordered; Play
       / play-from while paused stayed paused; `previous` at the first item with an armed advance relaunched
       the current one; mute while paused never reached a source (setting ramps on the frozen clock); the
       installed app got no WS events and lost its localStorage prefs every launch (random port = new origin).
@@ -456,7 +456,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `LIASCAPE_MATRIX_NICE=1` + `--jobs 2` next to someone working — 4 stacks lag the desktop); the window is
       SHOWN on the private Xvfb — hidden it rendered no frames (rAF never ran: framer-motion/WAAPI exits never finished, dnd-kit's rAF-aligned pointermoves coalesced so a drop
       saw a stale target, gifs/the live bg sat paused unfocused). ~90 new cells, each only in the states its
-      halves share: strip drag-reorder through real input events (`sendInputEvent`), remove (X / context
+      halves share: playlist bar drag-reorder through real input events (`sendInputEvent`), remove (X / context
       menu) of the shown / incoming / other item, Save / Load modals, the playlist-settings modal (interval,
       0 s on the way, wait-for-end, shuffle, transition off / duration / effect), the global Rotation section
       + transition method + global interval vs a playlist following the globals (opt-in states
@@ -465,13 +465,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Delete key; Ctrl+A + Delete + Undo), the card's own toggle, a
       saved playlist overwritten, two controls in a row (slider drag → next, pause → play-from, mute →
       next, a global setting → next, next+next, next+prev, preview drag → close → reopen, remove / drag /
-      load / transition change → next, two card applies / strip clicks in quick succession, two trashes + two
+      load / transition change → next, two card applies / playlist bar clicks in quick succession, two trashes + two
       undos, pause → interval change: the rotation holds until the resume, a slider drag closed with Escape
       at once), a settings save/load race. Fixed: settings.json was written in
       place — a read mid-write got the C# defaults, applied live and saved back over everything (/settings'
       own `prev` → an engine flip, the Steam tokens gone); an armed align:end switch kept the transition it
       was armed with (playlist + global transitions, method) — it fired the old effect at A's end; removing
-      the playing item from the strip restarted the rotation from the top (now: from its place).
+      the playing item from the playlist bar restarted the rotation from the top (now: from its place).
       `LIASCAPE_MATRIX_DLL=<older build>` / `--ui-dir` show a fix RED.
       **Round 3** (2026-10-26): 42 controls / 112 cells (full run now 709 cells: 681 pass, 28 structural skips,
       20m48s at `--jobs 4`). The rest of the global Settings page: Rotation
@@ -487,7 +487,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       while muted, mpv's own stream and one under the level threshold never mute, mute / unmute delays. The
       order a shuffle plays (the backend's contract: each cycle one pass in a fresh order, no repeat across
       cycles, shuffle on mid-session plays the rest once first, previous walks back through what played,
-      Sequential again = the strip's order). Seven chains of three or more controls. The volume keybinds with
+      Sequential again = the playlist bar's order). Seven chains of three or more controls. The volume keybinds with
       overridden items. Read-while-save races on playlist_state.json and index.json. Fixed: normalization reached `cur:*` only — an effect's A, a pending B and every
       source while no output shows one kept the old `af` (RED 9 of 20); a loudness measurement landing while
       its item played was never applied, it played un-normalized until its next switch (RED 3 of 3); every
@@ -503,7 +503,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       of 360 reads per run; now atomic (`AtomicFile`, temp + rename) with a retried parse. Still in place:
       `SaveTimedState`'s timed_state.json (its other two writers already rename) and legacy's
       playlist_observer_paths.json — no cell reaches them (read by the daemons / the next process).
-      Then the LOST update (the likely cause of the merged run's `paused × itemVol|stripVol:other` — "k3
+      Then the LOST update (the likely cause of the merged run's `paused × itemVol|playlistBarVol:other` — "k3
       volumeOverride null" under load, both passed alone 3/3; inferred, not reproduced in those cells): trash,
       undo, the WE sync and the direct-download reconcile loaded index.json, worked, and saved their copy back
       outside `LibraryStore`'s lock — over an override saved meanwhile. `race:indexLostUpdate` (40 k1 volume saves
@@ -563,7 +563,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
   - [ ] **Missed frames scale with content fps** (render worker: 2.2–3.3 → 1.8–2.5/s at 2× 1080p120 — better, not
         gone; what's left is the loop's own compose/present): steady 2× → 0.0/s, 2× ±0.05 every 90 ms → 0.65/s on the
         240 Hz output; random 0.25–4× (up to 240 fps content) 1–1.4/s vs 0.16/s at 1×. Phase 2 render worker.
-  - [x] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-item modal
+  - [x] **Global speed slider has no live drag preview** (UI debounces `/settings` 250 ms; the per-card settings modal
         previews) and a no-op `POST /settings` costs ~150 ms in the backend — profile it.
         — done: the cost was the loudness backfill's library scan running synchronously on the request thread
         (and parsing index.json twice per item): 330–550 ms → median 8 ms with 300 items
@@ -619,9 +619,9 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [x] **`/playlist/state` binds the whole `CustomPlaylist`** — same hazard `/settings` had; merge like `SettingsService.Patch`.
       — done: `JsonMerge.Over` (nested `settings` merge by key). `plState:partial` RED (paths-only → settings at the C#
       defaults; settings-only → no paths) → GREEN; playlist families 173/0.
-- [x] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the strip
+- [x] **The UI isn't told about another client's playlist edits** (a script/agent POSTs /playlist/state: the playlist bar
       stays stale and its next save writes itself back). Broadcast `playlist-changed` → `syncPlaylist()`.
-      — done: `playlist-changed {client}` + `X-Liascape-Client` (own echo skipped); `plState:partial` RED (stale strip) →
+      — done: `playlist-changed {client}` + `X-Liascape-Client` (own echo skipped); `plState:partial` RED (stale playlist bar) →
       GREEN, playlist families 196/0.
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 - [x] Zero-copy hwdec on the render worker (TODO item above) — optional. — done 2026-10-27.
@@ -659,7 +659,7 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [x] **"Library is empty" after a backend restart under the open app** (owner, 2026-10-28 13:11): a cherry-pick
       changed `api/client.ts` + the backend → Vite's HMR re-created the store and re-ran `init` while `dotnet watch`
       had the backend down; `init` failed (the library read became `[]`) and nothing ever re-read it. A plain restart
-      under a production page left the library / strip / settings stale too (whatever changed in the gap).
+      under a production page left the library / playlist bar / settings stale too (whatever changed in the gap).
       — done 2026-10-28: `store.resync()` (one read of everything mirrored, each piece applied only when its read
       succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR

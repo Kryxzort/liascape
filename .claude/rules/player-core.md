@@ -950,7 +950,7 @@ reads the picked track id, e.g. `"1"` — `options/aid` reads `"auto"`); `audio_
 frame only once it knows how long it lasts — the next frame's pts or a timed EOF; an image shown with
 `image-display-duration=inf` gives neither, so its one frame went in and the chain reported EOF with
 no frame out (mpv `--msg-level=vf=v`: `filter input EOF` → `filter output EOF`, nothing rendered).
-With `VideoFps` > 0 every image item stayed `ready: false` (size 0) and its switch sat in
+With `VideoFpsCap` > 0 every image item stayed `ready: false` (size 0) and its switch sat in
 `waiting_ready` until the 10 s failure. Now `MpvSource::want_vf` sends `fps=<n>` only when the
 current load isn't a still (`vf_still`: the `kind` at open, `infer_kind` of a new `path` — set before
 its `loadfile`, async requests run in order —, then mpv's `current-tracks/video/image` flag, which
@@ -3932,7 +3932,7 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
 | setting (UI) | player-side | type / unit | default | notes |
 |---|---|---|---|---|
 | GPU budget: auto-throttle on/off | `player.scene_throttle` | bool | `true` | off = fixed fps; a cap in force lifts at once |
-| per-monitor scene fps (`LweMonitors[*].Fps`) | `out:<connector>.scene_fps` | f64 fps, 0–480, 0 = the output's refresh | `30` | per output, live (already Task 5); the backend's coalescible `scene_fps:<name>` |
+| per-monitor scene fps (`SceneMonitors[*].Fps`) | `out:<connector>.scene_fps` | f64 fps, 0–480, 0 = the output's refresh | `30` | per output, live (already Task 5); the backend's coalescible `scene_fps:<name>` |
 | VRAM guard: toggle + limit | `player.scene_vram_limit_mib` | f64 MiB, 0–1048576, **0 = off** | `0` | toggle off → send 0; on → the limit (owner's suggestion 1536) |
 | when the GPU's VRAM runs low | `player.vram_low_mode` | enum `stop` \| `pause` \| `off` | `stop` | thresholds fixed in the player (above) |
 

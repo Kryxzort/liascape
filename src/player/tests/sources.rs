@@ -1410,7 +1410,7 @@ fn snapshot_copies_frame_and_orientation() {
     );
 }
 
-/// An fps cap (`fps_cap`, the backend's `VideoFps`) never stalls a still image (TODO "An fps
+/// An fps cap (`fps_cap`, the backend's `VideoFpsCap`) never stalls a still image (TODO "An fps
 /// cap stalls a still image"): mpv's `fps` filter emits a frame only once it knows how long it
 /// lasts, and a still shown with `image-display-duration=inf` never tells it — the image stayed
 /// `ready: false` with no texture. A still runs no `vf` whatever the cap; a video keeps it.

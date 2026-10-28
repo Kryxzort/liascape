@@ -17,7 +17,7 @@ export function PlaylistSettingsModal({
   autoAdd: boolean; setAutoAdd: (v: boolean) => void; onClose: () => void;
 }) {
   const ovr = ps.overrideGlobalSettings;
-  const aoe = ps.advanceOnVideoEnd;
+  const aoe = ps.switchWhenVideoEnds;
   const sep = ps.separateSceneTiming ?? true;
   const [picker, setPicker] = useState(false);
   const trN = ps.transitionEffectIds?.length ?? 0;
@@ -41,7 +41,7 @@ export function PlaylistSettingsModal({
               <label className="ck"><input type="checkbox" checked={ovr} onChange={(e) => setPS({ overrideGlobalSettings: e.target.checked })} /> Override global rotation settings</label>
 
               <div className={`ovr${ovr ? "" : " dim"}`}>
-                <label className="ck"><input type="checkbox" disabled={!ovr} checked={aoe} onChange={(e) => setPS({ advanceOnVideoEnd: e.target.checked })} /> Switch when video ends</label>
+                <label className="ck"><input type="checkbox" disabled={!ovr} checked={aoe} onChange={(e) => setPS({ switchWhenVideoEnds: e.target.checked })} /> Switch when video ends</label>
                 {/* one interval field: "Switch every" (a timer) — or, under "Switch when video ends", the minimum play
                     time, with the maximum right below */}
                 <div className="field-label" title={aoe ? ROT_HINT.min + (sep ? "" : ROT_HINT.minScenes) : ROT_HINT.every}>{aoe ? "MINIMUM PLAY TIME" : "SWITCH EVERY"}</div>

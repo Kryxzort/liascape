@@ -35,7 +35,7 @@ export const thumb = (u: string, referer?: string) =>
   /^https?:/i.test(u) ? img(u, referer) : media(u);
 
 // API: this page's id on every POST (X-Liascape-Client) — a state broadcast names the client that made the change, so a
-// page ignores the echo of its own save (a resync over a pending strip edit) and follows everyone else's
+// page ignores the echo of its own save (a resync over a pending playlistBar edit) and follows everyone else's
 export const CLIENT_ID = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 
 async function jget<T>(path: string): Promise<T> {
@@ -90,10 +90,10 @@ export interface LibraryItem {
 }
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
-  // the rotation: advanceOnVideoEnd off → intervalSeconds is a timer; on → it is the minimum play time and
+  // the rotation: switchWhenVideoEnds off → intervalSeconds is a timer; on → it is the minimum play time and
   // maxPlaySeconds the maximum, and separateSceneTiming gives scenes + still images their own
   // switchScenesAfterSeconds (wall-clock seconds, 0 = off everywhere) — player-adapter.md § Rotation
-  advanceOnVideoEnd: boolean; maxPlaySeconds: number; separateSceneTiming: boolean; switchScenesAfterSeconds: number;
+  switchWhenVideoEnds: boolean; maxPlaySeconds: number; separateSceneTiming: boolean; switchScenesAfterSeconds: number;
   // WE-style transitions (gated by overrideGlobalSettings; else the globalTransition* fallbacks).
   transitionEnabled: boolean; transitionEffectIds: string[];
   transitionDurationMs: number; transitionDurationMaxMs: number; transitionShuffle: boolean;

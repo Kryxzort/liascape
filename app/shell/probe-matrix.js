@@ -153,10 +153,10 @@ function oracle(snap, exp) {
     if (n.no_audio !== !!s.noAudio) v.push(`${who} no_audio ${n.no_audio} ≠ NoAudio ${s.noAudio}`);
     const hw = (s.hwDec ?? "").trim() || "no";
     if (n.hwdec !== hw) v.push(`${who} hwdec ${n.hwdec} ≠ ${hw}`);
-    if (!near(n.fps_cap, Math.max(0, s.videoFps ?? 0), 0.001)) v.push(`${who} fps_cap ${n.fps_cap} ≠ ${s.videoFps}`);
+    if (!near(n.fps_cap, Math.max(0, s.videoFpsCap ?? 0), 0.001)) v.push(`${who} fps_cap ${n.fps_cap} ≠ ${s.videoFpsCap}`);
     if (n.cache !== !s.disableCache) v.push(`${who} cache ${n.cache} ≠ !DisableCache(${s.disableCache})`);
-    if (!near(n.demuxer_max_mib, Math.max(0, s.demuxerMaxBytes ?? 0), 0.001)) v.push(`${who} demuxer_max_mib ${n.demuxer_max_mib} ≠ ${s.demuxerMaxBytes}`);
-    if (!near(n.demuxer_back_mib, Math.max(0, s.demuxerMaxBackBytes ?? 0), 0.001)) v.push(`${who} demuxer_back_mib ${n.demuxer_back_mib} ≠ ${s.demuxerMaxBackBytes}`);
+    if (!near(n.demuxer_max_mib, Math.max(0, s.demuxerMaxMib ?? 0), 0.001)) v.push(`${who} demuxer_max_mib ${n.demuxer_max_mib} ≠ ${s.demuxerMaxMib}`);
+    if (!near(n.demuxer_back_mib, Math.max(0, s.demuxerMaxBackMib ?? 0), 0.001)) v.push(`${who} demuxer_back_mib ${n.demuxer_back_mib} ≠ ${s.demuxerMaxBackMib}`);
     if (!s.normalizeAudio && (n.af ?? "") !== "") v.push(`${who} af "${n.af}" with normalization off`);
     // normalization on (audio on): a measured item's every source runs ITS OWN loudnorm at the target
     // (unmeasured: nothing to check — the backend measures it in the background)
@@ -190,11 +190,11 @@ const PAGE = `window.__mx = {
   click(el, what) { if (!el) throw new Error("not found: " + what); el.click(); },
   tab(name) { this.click(this.byText(".tab", name), "tab " + name); },
   card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === t); },
-  strip(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
+  playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   async cardMenu(t, label) { this.ctx(this.card(t)?.querySelector(".thumb-wrap"), "card " + t); await this.sleep(250); this.click(this.byText(".lib-ctx button", label), label); },
-  async stripMenu(t, label) { this.ctx(this.strip(t), "strip " + t); await this.sleep(250); this.click(this.byText(".pl-ctx button", label), label); },
+  async playlistBarMenu(t, label) { this.ctx(this.playlistBar(t), "playlistBar " + t); await this.sleep(250); this.click(this.byText(".pl-ctx button", label), label); },
   // a real drag: many input events over time (the throttled preview + debounced persist interleave)
   async drag(el, from, to, steps, ms, what) { for (let i = 1; i <= steps; i++) { this.setValue(el, +(from + (to - from) * i / steps).toFixed(2), what); await this.sleep(ms); } },
   setValue(el, v, what) { if (!el) throw new Error("not found: " + what); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
@@ -207,7 +207,7 @@ const PAGE = `window.__mx = {
   modalReset(i) { return [...document.querySelectorAll(".lib-settings .srow")].filter((r) => r.querySelector("input[type=range]"))[i]?.querySelector("button"); },
   closeModal() { const b = [...document.querySelectorAll(".modal-backdrop")].pop(); this.click(b, "modal backdrop"); },
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
-  playing() { return { strip: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.title) }; },
+  playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.title) }; },
 }; true`;
 async function loadUi() {
   await win.loadURL(U + "/");
@@ -253,7 +253,7 @@ let BASE_SETTINGS;
 const EFFECT_MS = 2500;
 // the rotation (player-adapter.md § Rotation): advance-on-end off → intervalSeconds is the timer; on → it is the minimum
 // play time and maxPlaySeconds the maximum (0 = off)
-const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, advanceOnVideoEnd: false, maxPlaySeconds: 0,
+const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, switchWhenVideoEnds: false, maxPlaySeconds: 0,
   transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
 // Getting INTO a state isn't what a cell tests: its entry switches run as ENTRY_MS fades BEFORE the UI loads (the
 // app opened onto a playing wallpaper, as in real use), then the configured durations go back — so the UI reads
@@ -305,7 +305,7 @@ function resetScenes() {
 const readScIndex = () => { try { return JSON.parse(fs.readFileSync(SC_INDEX, "utf8")); } catch { return {}; } };
 async function scenesOn(extra = {}) { const s = await getSettings(); await post("/settings", { ...s, allowScenes: true, ...extra }); }
 const rot = (a, i) => [...a.slice(i), ...a.slice(0, i)];
-// the scene playlist [k1, s1, s2, k2], entered at index i (the strip in play order: next = the item after)
+// the scene playlist [k1, s1, s2, k2], entered at index i (the playlist bar in play order: next = the item after)
 const SC_PL = () => [K[0], SC[0], SC[1], K[1]];
 // the live source(s) / scene worker of a path, from a `state`
 const srcIdsOf = (st, p) => sourcesOf(st).filter(([, n]) => n.path === p).map(([id]) => id);
@@ -328,7 +328,7 @@ function sceneShown(c, p) {
 }
 
 // advance-on-end with no minimum (the interval field IS the minimum there): k4's switch is armed for its end at once
-const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
+const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
 const STATES = {
   // roles: which item is on screen (`shown`) and which other item is live in the state (`other`: the
   // incoming B of an effect, the pending B of an end-wait) or, with nothing else live, an off-screen one
@@ -360,7 +360,7 @@ const STATES = {
   // like `pending`, but the playlist FOLLOWS the global rotation + transitions (no override) — opt-in: only
   // the controls that list it run here. Its globals go in before the UI loads (the UI saves its whole copy).
   pendingGlobal: { optIn: true, exp: { paused: false }, roles: () => [K[3], K[0]], playlist: () => ({ ...PENDING_PL(), settings: PS({ overrideGlobalSettings: false, intervalSeconds: 0 }) }),
-    async pre() { const s = await getSettings(); Object.assign(s, { globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalTransitionDurationMs: 600 }); await post("/settings", s); },
+    async pre() { const s = await getSettings(); Object.assign(s, { globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalTransitionDurationMs: 600 }); await post("/settings", s); },
     async enter(c) { c.playlist = true; c.fresh = true;
       await post("/playlist/play", STATES.pendingGlobal.playlist());
       c.ok = (await waitSettled(12000, K[3])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
@@ -384,7 +384,7 @@ const STATES = {
   // the scene playlist at s1 FOLLOWING the global rotation: advance-on-end, no minimum / maximum, "Separate timing for
   // scenes" off — nothing moves the scene (opt-in: the global scene-timing cell)
   sceneSGlobal: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS({ overrideGlobalSettings: false }) }),
-    async pre() { await scenesOn({ globalAdvanceOnVideoEnd: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
+    async pre() { await scenesOn({ globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
     async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS({ overrideGlobalSettings: false })); } },
 };
 
@@ -430,11 +430,11 @@ for (const t of itemTargets) {
       const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
       return ov == null ? [] : [`${TITLE(c.target)} volumeOverride ${ov} after reset`];
     } };
-  C[`stripVol:${t}`] = { async run(c) {
+  C[`playlistBarVol:${t}`] = { async run(c) {
     c.target = pick(c, t);
-    const inStrip = await ui(`return !!m.strip(${JSON.stringify(TITLE(c.target))});`);
-    if (!c.target || !inStrip) return c.skip = "target not in the strip";
-    await ui(`await m.stripMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
+    const inPlaylistBar = await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`);
+    if (!c.target || !inPlaylistBar) return c.skip = "target not in the playlist bar";
+    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
     await sleep(700); await ui(`m.closeModal();`);
   }, check(c) {
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -516,15 +516,15 @@ setting("speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`);
 setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
 setting("loopOff", "loop", false, `m.setCheck(m.input("Loop"), false, "Loop");`);
 setting("scaleFit", "videoScale", "fit", `await m.select("Video scale", "fit");`);
-setting("fps24", "videoFps", 24, `m.setValue(m.input("Video FPS cap"), 24, "fps");`);
+setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video FPS cap"), 24, "fps");`);
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
 setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable cache"), true, "Disable cache");`);
-setting("demux64", "demuxerMaxBytes", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
+setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
 // numeric settings fields type freely and snap on blur (owner: "everything should let you empty out the field
 // entirely and only snap back to minimum when you focus out" — components/NumInput.tsx): focused, the field keeps
 // exactly what was typed (empty / past the max) and nothing is saved; blur → clamped to min / max, saved
-for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demuxer max (MiB)", "demuxerMaxBytes", 40, "", 1, true],
-  ["overToMax", "Video FPS cap", "videoFps", 24, "999", 480, false]]) {
+for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demuxer max (MiB)", "demuxerMaxMib", 40, "", 1, true],
+  ["overToMax", "Video FPS cap", "videoFpsCap", 24, "999", 480, false]]) {
   C[`num:${name}`] = { states: ["idle", "single"], noSwitch: true,
     async pre() { await post("/settings", { [key]: start, ...(adv ? { advancedSettings: true } : {}) }); },
     async run(c) {
@@ -547,33 +547,33 @@ for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demux
 // (neither side of a running effect: a fuzz chain's incoming B can be k3)
 C["cardApply"] = { switch: true, async run(c) { c.target = [K[2], K[1], K[3]].find((p) => p !== c.shown && p !== c.before.cur?.path); await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".thumb-wrap"), "card");`); },
   exp: { paused: false }, check: (c) => expectShown(c, c.target, { effect: true }) };
-C["stripClick"] = { switch: true, async run(c) {
-    for (const k of [K[2], K[1], K[0]]) if (k !== c.shown && (await ui(`return !!m.strip(${JSON.stringify(TITLE(k))});`))) { c.target = k; break; }
-    if (!c.target) return c.skip = "no other item in the strip";
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}), "strip item");`); },
+C["playlistBarClick"] = { switch: true, async run(c) {
+    for (const k of [K[2], K[1], K[0]]) if (k !== c.shown && (await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(k))});`))) { c.target = k; break; }
+    if (!c.target) return c.skip = "no other item in the playlist bar";
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}), "playlistBar item");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
-C["stripPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
+C["playlistBarPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.after.ps?.videoPaths?.[0], { effect: !!c.before.cur?.path }), ...psKept(c)] };
 C["stopButton"] = { switch: true, async run(c) { const has = await ui(`return !!m.byText(".topbar button", "Stop");`); if (!has) return c.skip = "no Stop button (nothing playing)"; await ui(`m.click(m.byText(".topbar button", "Stop"), "Stop");`); },
   exp: { paused: false }, check: (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after Stop`] : []) };
 // playlist edits
-C["stripRemove:other"] = { async run(c) { c.target = c.other; if (!c.target || !(await ui(`return !!m.strip(${JSON.stringify(TITLE(c.target))});`))) return c.skip = "not in strip";
-  await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); },
+C["playlistBarRemove:other"] = { async run(c) { c.target = c.other; if (!c.target || !(await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`))) return c.skip = "not in playlist bar";
+  await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); },
   check: afterRemove };
-C["stripRemove:shown"] = { async run(c) { c.target = c.shown; if (!c.target || !(await ui(`return !!m.strip(${JSON.stringify(TITLE(c.target))});`))) return c.skip = "not in strip";
-  await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); },
+C["playlistBarRemove:shown"] = { async run(c) { c.target = c.shown; if (!c.target || !(await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`))) return c.skip = "not in playlist bar";
+  await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); },
   check: afterRemove };
 // what plays after trashing `p`: on screen (or incoming — /current is the incoming side) → a playlist plays on
-// from the next surviving strip item after it, a single item stops; anything else → no switch at all
+// from the next surviving playlistBar item after it, a single item stops; anything else → no switch at all
 function afterTrash(c, p) {
   const v = [...notTargeted(c, p, { gone: true })];
-  const was = c.before.cur?.path, now = c.after.cur?.path, strip = c.before.ps?.videoPaths || [];
+  const was = c.before.cur?.path, now = c.after.cur?.path, playlistBar = c.before.ps?.videoPaths || [];
   if (now === p) v.push(`trashed ${TITLE(p)} still on screen`);
   if (c.noOutput) return v;
   let want = was;
   if (was === p) {
-    const i = strip.indexOf(p);
-    want = c.playlist && i >= 0 ? [...strip.slice(i + 1), ...strip.slice(0, i)][0] ?? null : null;
+    const i = playlistBar.indexOf(p);
+    want = c.playlist && i >= 0 ? [...playlistBar.slice(i + 1), ...playlistBar.slice(0, i)][0] ?? null : null;
   }
   if ((now ?? null) !== (want ?? null)) v.push(`after trashing ${TITLE(p)}: /current ${TITLE(now)}, expected ${TITLE(want)}`);
   return v;
@@ -586,7 +586,7 @@ C["trash:other"] = { switch: true, async run(c) { c.target = c.other; if (!c.tar
 C["trash:shown"] = { switch: true, async run(c) { c.target = c.shown; if (!c.target) return c.skip = "nothing shown"; trashEndsPause(c);
   await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash");`); await sleep(900); },
   check: (c) => afterTrash(c, c.target) };
-// trash then Undo: back in the library AND in the playlist where it was (the strip shows it)
+// trash then Undo: back in the library AND in the playlist where it was (the playlist bar shows it)
 for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async run(c) {
     c.target = t === "shown" ? c.shown : c.other; if (!c.target) return c.skip = "no target"; trashEndsPause(c);
     c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
@@ -597,7 +597,7 @@ for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async 
     if (!(c.after.lib || []).some((i) => i.videoPath === c.target)) v.push(`${TITLE(c.target)} not back in the library`);
     const at = (c.after.ps?.videoPaths || []).indexOf(c.target);
     if (c.idx >= 0 && at !== c.idx) v.push(`${TITLE(c.target)} back at playlist index ${at}, was ${c.idx}`);
-    return [...v, ...armedCheck(c)]; // an armed switch goes to the strip's next again — the undone item when it's that
+    return [...v, ...armedCheck(c)]; // an armed switch goes to the playlist bar's next again — the undone item when it's that
   } };
 // keybind volume-up, then any UI settings save: the keybind's volume must survive (the UI posts its whole copy)
 C["cli:volume-up+uiSave"] = { async run(c) {
@@ -607,7 +607,7 @@ C["cli:volume-up+uiSave"] = { async run(c) {
 C["plAdvanceOff"] = { async run(c) {
   await ui(`m.click(document.querySelector('button[title="Playlist settings"]'), "pl settings"); await m.sleep(500); m.setCheck(m.plCheck("Switch when video ends"), false, "advance"); await m.sleep(400); m.click(m.byText(".pl-modal button", "Close"), "close");`);
   await sleep(900); },
-  check(c) { const v = []; if (c.after.ps?.settings?.advanceOnVideoEnd !== false) v.push(`playlist advanceOnVideoEnd ${c.after.ps?.settings?.advanceOnVideoEnd}`);
+  check(c) { const v = []; if (c.after.ps?.settings?.switchWhenVideoEnds !== false) v.push(`playlist switchWhenVideoEnds ${c.after.ps?.settings?.switchWhenVideoEnds}`);
     if (c.pending && (c.after.st.transitions || []).some((t) => t.phase === "waiting_start")) v.push("advance-on-end turned off but the aligned switch is still armed");
     return v; } };
 // keybinds (a separate one-shot CLI process each, like a real keybind)
@@ -683,7 +683,7 @@ C["cli:volume-up:modalOpen"] = { states: ["single", "playlist"],
     if (ovOf(c, c.shown) !== 35) v.push(`${TITLE(c.shown)}'s own volume ${ovOf(c, c.shown)} after the keybind + closing the modal, expected 35`);
     return v;
   } };
-// user switches — paused: KeepPauseOnSwitch off (default) resumes and switches with the transition; on
+// user switches — paused: StayPausedWhenSwitching off (default) resumes and switches with the transition; on
 // (the `-keep` cells) stays paused and cuts to B's first frame
 const stayed = (c, a) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`${a} stayed on ${TITLE(c.before.cur.path)}`] : []);
 function pausedSwitch(c) {
@@ -715,18 +715,18 @@ for (const [a, check] of Object.entries(SWITCHES)) {
   const userSwitch = (keep) => (c) => { c.wasPaused = !!c.exp.paused; c.keep = keep; if (c.wasPaused && !keep && !(a === "previous" && c.fresh)) c.exp.paused = false; };
   C[`cli:${a}`] = { switch: true, async run(c) { userSwitch(false)(c); c.cli = await cli(a); }, check };
   C[`cli:${a}-keep`] = { switch: true,
-    async pre() { const s = await getSettings(); s.keepPauseOnSwitch = true; await post("/settings", s); },
+    async pre() { const s = await getSettings(); s.stayPausedWhenSwitching = true; await post("/settings", s); },
     async run(c) { userSwitch(true)(c); if (c.wasPaused) c.noSettle = true; c.cli = await cli(a); },
-    check: (c) => [...check(c), ...(c.after.s.keepPauseOnSwitch ? [] : ["keepPauseOnSwitch not set"])] };
+    check: (c) => [...check(c), ...(c.after.s.stayPausedWhenSwitching ? [] : ["stayPausedWhenSwitching not set"])] };
 }
 action("stop", (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after stop`] : []), { switch: true, exp: { paused: false } });
 
-// ---------------------------------------------------------------- the playlist strip + two controls in a row
+// ---------------------------------------------------------------- the playlist bar + two controls in a row
 // (each control lists its `states` — the ones where its two halves share state; not a full cross product)
 const PL_STATES = ["playlist", "effect", "pending"];
 const succ = (list, p) => { const i = (list || []).indexOf(p); return i < 0 ? list?.[0] : list[(i + 1) % list.length]; };
 const armedTo = (st) => (st.transitions || []).filter((t) => t.phase === "waiting_start").map((t) => st.graph[t.to]?.path ?? t.to);
-// an advance-on-end session (the `pending` state) keeps exactly one aligned switch armed, to the strip's next
+// an advance-on-end session (the `pending` state) keeps exactly one aligned switch armed, to the playlist bar's next
 // item after what plays (`want`; null = none may stay armed)
 function armedCheck(c, want = succ(c.after.ps?.videoPaths, c.after.cur?.path)) {
   if (!c.pending || c.noOutput) return [];
@@ -734,12 +734,12 @@ function armedCheck(c, want = succ(c.after.ps?.videoPaths, c.after.cur?.path)) {
   const a = armedTo(c.after.st);
   if (want === null) return a.length ? [`an aligned switch is still armed (to ${a.map(TITLE)})`] : [];
   if (a.length !== 1) return [`${a.length} aligned switches armed (${a.map(TITLE)}), expected one to ${TITLE(want)}`];
-  return a[0] === want ? [] : [`the armed switch goes to ${TITLE(a[0])}, expected ${TITLE(want)} (the strip's next after ${TITLE(c.after.cur?.path)})`];
+  return a[0] === want ? [] : [`the armed switch goes to ${TITLE(a[0])}, expected ${TITLE(want)} (the playlist bar's next after ${TITLE(c.after.cur?.path)})`];
 }
 // a playlist edit never switches by itself (re-arming an aligned switch for A's end is fine)
 const noSwitchNow = (c) => c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end").map((e) => `a switch was requested (to ${TITLE(e.path)}, align ${e.align})`);
 const keptShown = (c) => (c.noOutput || (c.after.cur?.path ?? null) === (c.before.cur?.path ?? null) ? [] : [`/current ${TITLE(c.before.cur?.path)} → ${TITLE(c.after.cur?.path)} after a playlist edit`]);
-const stripHas = (c, p) => ui(`return !!m.strip(${JSON.stringify(TITLE(p))});`);
+const playlistBarHas = (c, p) => ui(`return !!m.playlistBar(${JSON.stringify(TITLE(p))});`);
 // every switch the cell requested, in order (B's path)
 const switchesTo = (c) => c.evs.filter((e) => e.event === "transition.scheduled").map((e) => e.path);
 async function cliStep(c, a) { const r = await cli(a); if (!c.cli || r.code !== 0) c.cli = r; return r; }
@@ -748,9 +748,9 @@ const lastSwitch = (c) => c.evs.filter((e) => e.event === "transition.scheduled"
 
 // --- drag-reorder: REAL input events (Chromium makes the pointer events dnd-kit's PointerSensor listens to:
 // pointerdown on the item, pointermove past its 6 px activation distance, pointerup over the drop target)
-async function stripDrag(fromTitle, toTitle) {
-  const r = await ui(`const a = m.strip(${JSON.stringify(fromTitle)}), b = m.strip(${JSON.stringify(toTitle)});
-    if (!a || !b) throw new Error("strip item not found"); a.scrollIntoView({ block: "nearest", inline: "nearest" }); await m.sleep(150);
+async function playlistBarDrag(fromTitle, toTitle) {
+  const r = await ui(`const a = m.playlistBar(${JSON.stringify(fromTitle)}), b = m.playlistBar(${JSON.stringify(toTitle)});
+    if (!a || !b) throw new Error("playlistBar item not found"); a.scrollIntoView({ block: "nearest", inline: "nearest" }); await m.sleep(150);
     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
     return { ax: ra.x + ra.width / 2, ay: ra.y + ra.height / 2, bx: rb.x + rb.width / 2, by: rb.y + rb.height / 2 };`);
   const send = (e) => win.webContents.sendInputEvent(e);
@@ -764,37 +764,37 @@ async function stripDrag(fromTitle, toTitle) {
   }
   await sleep(250); // dnd-kit's sortable settles over the target
   send({ type: "mouseUp", ...at(r.bx, r.by), button: "left", clickCount: 1 });
-  await sleep(900); // the strip's debounced /playlist/state save (200 ms) + the backend's live reorder
+  await sleep(900); // the playlist bar's debounced /playlist/state save (200 ms) + the backend's live reorder
 }
-const stripTitles = () => ui(`return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`);
+const playlistBarTitles = () => ui(`return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`);
 const moved = (list, from, to) => { const l = [...list]; const [x] = l.splice(from, 1); l.splice(to, 0, x); return l; };
 for (const [name, fromIdx, toIdx] of [["lastToSecond", -1, 1], ["firstToEnd", 0, -1]]) {
   const plan = (c) => { const s = c.before.ps?.videoPaths || []; const f = fromIdx < 0 ? s.length + fromIdx : fromIdx, t = toIdx < 0 ? s.length + toIdx : toIdx; return { s, f, t, want: moved(s, f, t) }; };
-  C[`stripDrag:${name}`] = { states: PL_STATES, async run(c) {
+  C[`playlistBarDrag:${name}`] = { states: PL_STATES, async run(c) {
       const { s, f, t, want } = plan(c); c.want = want;
-      await stripDrag(TITLE(s[f]), TITLE(s[t]));
-      c.uiStrip = await stripTitles();
+      await playlistBarDrag(TITLE(s[f]), TITLE(s[t]));
+      c.uiPlaylistBar = await playlistBarTitles();
     }, check(c) {
       const v = [...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
       const got = (c.after.ps?.videoPaths || []).map(TITLE), w = c.want.map(TITLE);
-      if (JSON.stringify(got) !== JSON.stringify(w)) v.push(`playlist ${JSON.stringify(got)} after dragging, expected ${JSON.stringify(w)} (UI strip right after the drop: ${JSON.stringify(c.uiStrip)})`);
+      if (JSON.stringify(got) !== JSON.stringify(w)) v.push(`playlist ${JSON.stringify(got)} after dragging, expected ${JSON.stringify(w)} (UI playlistBar right after the drop: ${JSON.stringify(c.uiPlaylistBar)})`);
       return v;
     } };
 }
 // drag, then next: the next item is the new order's (not the old one's)
-C["seq:stripDrag+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
+C["seq:playlistBarDrag+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
     const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
-    await stripDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
+    await playlistBarDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
     c.target = succ(c.want, c.before.cur?.path);
     await cliStep(c, "next");
   }, check: (c) => [...expectShown(c, c.target, { effect: true })] };
 
 // --- remove from the playlist (the X, or the context menu) — the shown item, the incoming/armed one, another
-const stripOff = (c) => (c.before.ps?.videoPaths || []).find((p) => p !== c.shown && p !== c.other);
-const removeTarget = (c, t) => (t === "shown" ? c.shown : t === "other" ? c.other : stripOff(c));
+const playlistBarOff = (c) => (c.before.ps?.videoPaths || []).find((p) => p !== c.shown && p !== c.other);
+const removeTarget = (c, t) => (t === "shown" ? c.shown : t === "other" ? c.other : playlistBarOff(c));
 function afterRemove(c) {
   const v = [...notTargeted(c, c.target), ...noSwitchNow(c), ...keptShown(c)];
-  // what the rotation plays next: the strip's next item after what plays — after the REMOVED one when that
+  // what the rotation plays next: the playlist bar's next item after what plays — after the REMOVED one when that
   // was what played (its old successor that's still there), like trash does
   const old = c.before.ps?.videoPaths || [], now = c.after.ps?.videoPaths || [], cur = c.after.cur?.path;
   let want = succ(now, cur);
@@ -802,22 +802,22 @@ function afterRemove(c) {
   return [...v, ...armedCheck(c, want)];
 }
 for (const t of ["shown", "other", "off"]) {
-  if (t === "off") C["stripRemove:off"] = { states: PL_STATES, async run(c) { c.target = stripOff(c); if (!c.target || !(await stripHas(c, c.target))) return c.skip = "not in strip";
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); }, check: afterRemove };
-  C[`stripRemoveMenu:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await stripHas(c, c.target))) return c.skip = "not in strip";
-    await ui(`await m.stripMenu(${JSON.stringify(TITLE(c.target))}, "Remove from playlist");`); await sleep(900); }, check: afterRemove };
+  if (t === "off") C["playlistBarRemove:off"] = { states: PL_STATES, async run(c) { c.target = playlistBarOff(c); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); }, check: afterRemove };
+  C[`playlistBarRemoveMenu:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
+    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Remove from playlist");`); await sleep(900); }, check: afterRemove };
 }
-// remove what plays (or is incoming), then next: the rotation goes on from the removed item's place in the strip
-for (const t of ["shown", "other"]) C[`seq:stripRemove+next:${t}`] = { states: t === "shown" ? PL_STATES : ["effect"], switch: true, async run(c) {
-    c.target = removeTarget(c, t); if (!c.target || !(await stripHas(c, c.target))) return c.skip = "not in strip";
+// remove what plays (or is incoming), then next: the rotation goes on from the removed item's place in the playlist bar
+for (const t of ["shown", "other"]) C[`seq:playlistBarRemove+next:${t}`] = { states: t === "shown" ? PL_STATES : ["effect"], switch: true, async run(c) {
+    c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
     const old = c.before.ps?.videoPaths || [], cur = c.before.cur?.path, i = old.indexOf(cur);
     const now = old.filter((p) => p !== c.target);
     c.want = cur === c.target ? [...old.slice(i + 1), ...old.slice(0, i)].find((p) => now.includes(p)) : succ(now, cur);
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
     await cliStep(c, "next");
   }, check: (c) => [...expectShown(c, c.want, { effect: true }), ...((c.after.ps?.videoPaths || []).includes(c.target) ? [`${TITLE(c.target)} still in the playlist`] : [])] };
 
-// --- saved playlists (the strip's Save / Load modals → /playlist/save, /playlist/load)
+// --- saved playlists (the playlist bar's Save / Load modals → /playlist/save, /playlist/load)
 C["plSave"] = { states: ["idle", "playlist", "pending"], noSwitch: true, async run(c) {
     c.name = `mx-${c.state}`;
     await ui(`m.click(document.querySelector('button[title="Save playlist"]'), "save"); await m.sleep(500);
@@ -829,8 +829,8 @@ C["plSave"] = { states: ["idle", "playlist", "pending"], noSwitch: true, async r
     const v = [];
     if (!(c.names || []).includes(c.name)) v.push(`/playlist/names ${JSON.stringify(c.names)} has no ${c.name}`);
     const a = (c.saved?.videoPaths || []).map(TITLE), b = (c.before.ps?.videoPaths || []).map(TITLE);
-    if (JSON.stringify(a) !== JSON.stringify(b)) v.push(`saved ${JSON.stringify(a)}, the strip was ${JSON.stringify(b)}`);
-    for (const k of ["order", "intervalSeconds", "advanceOnVideoEnd", "transitionEnabled", "transitionDurationMs"])
+    if (JSON.stringify(a) !== JSON.stringify(b)) v.push(`saved ${JSON.stringify(a)}, the playlist bar was ${JSON.stringify(b)}`);
+    for (const k of ["order", "intervalSeconds", "switchWhenVideoEnds", "transitionEnabled", "transitionDurationMs"])
       if (JSON.stringify(c.saved?.settings?.[k]) !== JSON.stringify(c.before.ps?.settings?.[k])) v.push(`saved ${k} ${JSON.stringify(c.saved?.settings?.[k])}, the playlist's ${JSON.stringify(c.before.ps?.settings?.[k])}`);
     return [...v, ...keptShown(c), ...armedCheck(c)];
   } };
@@ -839,12 +839,12 @@ const LOADED = () => ({ videoPaths: [K[2], K[1], K[3]], settings: PS({ intervalS
 const loadIt = (c) => ui(`m.click(document.querySelector('button[title="Load playlist"]'), "load"); await m.sleep(500);
   m.click(m.byText(".pl-modal .pl-name", "mx-load"), "mx-load"); await m.sleep(150); m.click(m.byText(".pl-modal button", "Load"), "Load");`);
 C["plLoad"] = { states: ["idle", "single", ...PL_STATES], async pre() { await post("/playlist/save", { name: "mx-load", playlist: LOADED() }); },
-  async run(c) { await loadIt(c); await sleep(1200); c.uiStrip = await stripTitles(); },
+  async run(c) { await loadIt(c); await sleep(1200); c.uiPlaylistBar = await playlistBarTitles(); },
   check(c) {
     const v = [...noSwitchNow(c), ...keptShown(c)];
     const want = LOADED().videoPaths.map(TITLE), got = (c.after.ps?.videoPaths || []).map(TITLE);
     if (JSON.stringify(got) !== JSON.stringify(want)) v.push(`playlist ${JSON.stringify(got)} after loading, expected ${JSON.stringify(want)}`);
-    if (JSON.stringify(c.uiStrip) !== JSON.stringify(want)) v.push(`UI strip ${JSON.stringify(c.uiStrip)} after loading, expected ${JSON.stringify(want)}`);
+    if (JSON.stringify(c.uiPlaylistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(c.uiPlaylistBar)} after loading, expected ${JSON.stringify(want)}`);
     if (c.after.ps?.settings?.intervalSeconds !== 300) v.push(`playlist interval ${c.after.ps?.settings?.intervalSeconds} after loading, expected 300`);
     // the loaded rotation has no advance-on-end: nothing may stay armed (an armed switch to k1 played an item the playlist no longer holds)
     return [...v, ...armedCheck(c, null)];
@@ -902,7 +902,7 @@ C["plAdvanceRelabel"] = { states: ["playlist"], async run(c) {
   }, check(c) {
     const v = [];
     const s = c.after.ps?.settings;
-    if (!s?.advanceOnVideoEnd || s?.intervalSeconds !== 4) v.push(`playlist advance ${s?.advanceOnVideoEnd} interval (minimum) ${s?.intervalSeconds}, expected true / 4`);
+    if (!s?.switchWhenVideoEnds || s?.intervalSeconds !== 4) v.push(`playlist advance ${s?.switchWhenVideoEnds} interval (minimum) ${s?.intervalSeconds}, expected true / 4`);
     if (!c.ui?.lab?.includes("MINIMUM PLAY TIME") || c.ui?.lab?.includes("SWITCH EVERY")) v.push(`modal labels ${JSON.stringify(c.ui?.lab)}: expected "MINIMUM PLAY TIME" in place of "SWITCH EVERY"`);
     if (JSON.stringify(c.ui?.min) !== '["0","10","0"]') v.push(`the minimum shows ${JSON.stringify(c.ui?.min)} — expected the same field's 600 s (0 h 10 m 0 s)`);
     if (!c.ui?.lab?.includes("MAXIMUM PLAY TIME") || (c.ui?.max ?? []).length !== 3) v.push(`no "MAXIMUM PLAY TIME" h/m/s field under the minimum (${JSON.stringify(c.ui)})`);
@@ -918,8 +918,8 @@ C["plShuffle"] = { states: ["playlist", "pending"], async run(c) {
   }, check(c) {
     const v = [...noSwitchNow(c), ...keptShown(c)];
     if (c.after.ps?.settings?.order !== 1) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 1 (shuffle)`);
-    const strip = c.after.ps?.videoPaths || [];
-    if (c.pending) { const a = armedTo(c.after.st); if (a.length !== 1 || !strip.includes(a[0]) || a[0] === c.after.cur?.path) v.push(`armed after shuffling: ${JSON.stringify(a.map(TITLE))}`); }
+    const playlistBar = c.after.ps?.videoPaths || [];
+    if (c.pending) { const a = armedTo(c.after.st); if (a.length !== 1 || !playlistBar.includes(a[0]) || a[0] === c.after.cur?.path) v.push(`armed after shuffling: ${JSON.stringify(a.map(TITLE))}`); }
     return v;
   } };
 // the transition picker (playlist): off / a duration / another effect — then the next switch uses it; with an
@@ -977,11 +977,11 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.2
       return [...stayed(c, "next"), ...(ov === to ? [] : [`${TITLE(c.target)} ${field} ${ov}, expected ${to}`])];
     } };
 }
-// pause (keybind), then play from a strip item: a new session — it resumes and switches with the transition
-C["seq:pause+stripClick"] = { states: PL_STATES, switch: true, async run(c) {
+// pause (keybind), then play from a playlist bar item: a new session — it resumes and switches with the transition
+C["seq:pause+playlistBarClick"] = { states: PL_STATES, switch: true, async run(c) {
     await cliStep(c, "toggle-pause"); await sleep(300);
-    for (const k of [K[2], K[1], K[0], K[3]]) if (k !== c.before.cur?.path && (await stripHas(c, k))) { c.target = k; break; }
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.target))}), "strip item");`);
+    for (const k of [K[2], K[1], K[0], K[3]]) if (k !== c.before.cur?.path && (await playlistBarHas(c, k))) { c.target = k; break; }
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}), "playlistBar item");`);
   }, exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
 // mute (keybind), then next: B comes up muted too
 C["seq:mute+next"] = { states: ["single", ...PL_STATES], switch: true, async run(c) {
@@ -995,7 +995,7 @@ for (const [name, key, value, drive] of [["volume", "volume", 55, `m.setValue(m.
     async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next"); },
     check: (c) => [...stayed(c, "next"), ...(JSON.stringify(c.after.s[key]) === JSON.stringify(value) ? [] : [`settings.${key} = ${JSON.stringify(c.after.s[key])}, expected ${JSON.stringify(value)}`])] };
 }
-// next twice quickly (two keybinds back to back): both count — two steps along the strip (a lost one = one step)
+// next twice quickly (two keybinds back to back): both count — two steps along the playlist bar (a lost one = one step)
 C["seq:next+next"] = { states: ["single", ...PL_STATES, "paused"], switch: true, async run(c) {
     c.wasPaused = !!c.exp.paused; if (c.wasPaused) c.exp.paused = false;
     await cliStep(c, "next"); await cliStep(c, "next");
@@ -1003,7 +1003,7 @@ C["seq:next+next"] = { states: ["single", ...PL_STATES, "paused"], switch: true,
     const v = [];
     const cur = c.before.cur?.path;
     if (c.playlist || c.pending) { const s = c.before.ps?.videoPaths || []; const want = succ(s, succ(s, cur));
-      if (!c.noOutput && c.after.cur?.path !== want) v.push(`two nexts from ${TITLE(cur)}: /current ${TITLE(c.after.cur?.path)}, expected ${TITLE(want)} (strip ${JSON.stringify(s.map(TITLE))})`); }
+      if (!c.noOutput && c.after.cur?.path !== want) v.push(`two nexts from ${TITLE(cur)}: /current ${TITLE(c.after.cur?.path)}, expected ${TITLE(want)} (playlistBar ${JSON.stringify(s.map(TITLE))})`); }
     else if (c.after.cur?.path === cur) v.push(`two nexts stayed on ${TITLE(cur)}`);
     const n = switchesTo(c).length; if (n > 3) v.push(`${n} switches requested (storm?)`);
     return v;
@@ -1045,18 +1045,18 @@ C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
   }, check: (c) => [...(c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /settings during saves were not the settings: ${JSON.stringify(c.race.first)}, saved ${JSON.stringify(c.want)}`] : []),
     ...(c.after.s.playerEngine !== c.want.playerEngine || c.after.s.volume !== c.want.volume ? [`after the saves: engine ${c.after.s.playerEngine} volume ${c.after.s.volume}`] : [])] };
 
-// The same race for the other shared state files: the current playlist (playlist_state.json — the strip saves it on
+// The same race for the other shared state files: the current playlist (playlist_state.json — the playlist bar saves it on
 // every edit; the UI's init, the tick's transition config and /settings read it) and a library index (index.json —
 // every override / loudness write rewrites it; every switch, /settings and /library read it). A read mid-save must
-// still see the file: a null playlist gave the UI an empty strip + the DEFAULT playlist settings (its next save
+// still see the file: a null playlist gave the UI an empty playlist bar + the DEFAULT playlist settings (its next save
 // wrote those over the real ones), an empty index made every override read "follows the global".
 C["race:playlistSaveLoad"] = { states: ["idle"], async run(c) {
-    const pl = { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null };
+    const pl = { videoPaths: [K[0], K[1], K[2]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 321 }), name: null };
     let bad = 0, n = 0, first = null;
     await post("/playlist/state", pl); // the saves below write what's already there: any other read is a torn one
     const writers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 25; i++) await post("/playlist/state", pl); });
     const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const g = (await http("GET", "/playlist/state")).json; n++;
-      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.advanceOnVideoEnd !== true) { bad++; first ??= g ? { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds } : "null"; } } });
+      if (!g || g.videoPaths?.length !== 3 || g.settings?.intervalSeconds !== 321 || g.settings?.switchWhenVideoEnds !== true) { bad++; first ??= g ? { n: g.videoPaths?.length, iv: g.settings?.intervalSeconds } : "null"; } } });
     await Promise.all([...writers, ...readers]);
     c.race = { bad, n, first };
   }, check: (c) => (c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /playlist/state during saves were not the playlist: ${JSON.stringify(c.race.first)}`] : []) };
@@ -1112,17 +1112,17 @@ C["race:saveAfterTrash"] = { states: ["idle"],
 // POST /playlist/state with only some keys (a script, an agent): the rest of the saved playlist stays — like /settings
 // (a body of just the paths reset its rotation + transitions to the C# defaults); a nested `settings` merges by key
 C["plState:partial"] = { states: ["idle"], async run(c) {
-    await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS({ advanceOnVideoEnd: true, intervalSeconds: 321 }), name: null });
+    await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 321 }), name: null });
     await post("/playlist/state", { videoPaths: [K[1], K[0]] });
     c.a = (await http("GET", "/playlist/state")).json;
     await post("/playlist/state", { settings: { intervalSeconds: 77 } });
     c.b = (await http("GET", "/playlist/state")).json;
-    await sleep(400); // the page follows another client's edit (WS playlist-changed → re-read); the shared strip check sees it
+    await sleep(400); // the page follows another client's edit (WS playlist-changed → re-read); the shared playlistBar check sees it
   }, check(c) {
     const v = [], a = c.a?.settings, b = c.b?.settings;
     if (JSON.stringify(c.a?.videoPaths) !== JSON.stringify([K[1], K[0]])) v.push(`paths-only body: paths ${JSON.stringify(c.a?.videoPaths?.map(TITLE))}`);
-    if (!(a?.intervalSeconds === 321 && a?.advanceOnVideoEnd === true && a?.transitionDurationMs === PS().transitionDurationMs)) v.push(`paths-only body reset the playlist settings: ${JSON.stringify({ iv: a?.intervalSeconds, adv: a?.advanceOnVideoEnd, ms: a?.transitionDurationMs })}`);
-    if (!(b?.intervalSeconds === 77 && b?.advanceOnVideoEnd === true && JSON.stringify(c.b?.videoPaths) === JSON.stringify([K[1], K[0]]))) v.push(`a settings-only body lost the rest: ${JSON.stringify({ iv: b?.intervalSeconds, adv: b?.advanceOnVideoEnd, n: c.b?.videoPaths?.length })}`);
+    if (!(a?.intervalSeconds === 321 && a?.switchWhenVideoEnds === true && a?.transitionDurationMs === PS().transitionDurationMs)) v.push(`paths-only body reset the playlist settings: ${JSON.stringify({ iv: a?.intervalSeconds, adv: a?.switchWhenVideoEnds, ms: a?.transitionDurationMs })}`);
+    if (!(b?.intervalSeconds === 77 && b?.switchWhenVideoEnds === true && JSON.stringify(c.b?.videoPaths) === JSON.stringify([K[1], K[0]]))) v.push(`a settings-only body lost the rest: ${JSON.stringify({ iv: b?.intervalSeconds, adv: b?.switchWhenVideoEnds, n: c.b?.videoPaths?.length })}`);
     return v;
   } };
 
@@ -1179,7 +1179,7 @@ C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async
     if (c.after.s.transitionMethod !== "frozen") v.push(`transitionMethod ${c.after.s.transitionMethod}`);
     if (!(req && req.method === "frozen")) v.push(`the armed switch still runs method ${req?.method}, the setting says frozen`); return v; } };
 C["gAdvanceOff"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); m.setCheck(m.input("Switch when video ends"), false, "advance");`); await sleep(1200); },
-  check(c) { const v = c.after.s.globalAdvanceOnVideoEnd === false ? [] : ["globalAdvanceOnVideoEnd not saved off"];
+  check(c) { const v = c.after.s.globalSwitchWhenVideoEnds === false ? [] : ["globalSwitchWhenVideoEnds not saved off"];
     // following the globals: nothing stays armed; with its own override: the playlist still advances at A's end
     return [...v, ...armedCheck(c, c.state === "pendingGlobal" ? null : undefined)]; } };
 
@@ -1201,15 +1201,15 @@ C["gInterval8s"] = { states: ["playlist", "playlistGlobal"], rearms: true, async
 // --- multi-select (Ctrl+click cards): a card action on a selected card applies to the whole selection
 const ctrlClick = (p) => `m.card(${JSON.stringify(TITLE(p))})?.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true })); await m.sleep(150);`;
 // what plays after trashing the set `ps`: what was on screen (or incoming) trashed → a playlist plays on from the
-// next strip item after it that survives, a single item stops; else nothing switches
+// next playlistBar item after it that survives, a single item stops; else nothing switches
 function afterTrashMany(c, ps) {
   const del = new Set(ps), v = [];
   for (const p of ps) v.push(...notTargeted(c, p, { gone: true }));
-  const was = c.before.cur?.path, now = c.after.cur?.path, strip = c.before.ps?.videoPaths || [];
+  const was = c.before.cur?.path, now = c.after.cur?.path, playlistBar = c.before.ps?.videoPaths || [];
   if (del.has(now)) v.push(`trashed ${TITLE(now)} still on screen`);
   if (c.noOutput) return v;
   let want = was;
-  if (del.has(was)) { const i = strip.indexOf(was); want = c.playlist && i >= 0 ? [...strip.slice(i + 1), ...strip.slice(0, i)].find((p) => !del.has(p)) ?? null : null; }
+  if (del.has(was)) { const i = playlistBar.indexOf(was); want = c.playlist && i >= 0 ? [...playlistBar.slice(i + 1), ...playlistBar.slice(0, i)].find((p) => !del.has(p)) ?? null : null; }
   if ((now ?? null) !== (want ?? null)) v.push(`after trashing ${ps.map(TITLE)}: /current ${TITLE(now)}, expected ${TITLE(want)}`);
   return v;
 }
@@ -1233,14 +1233,14 @@ C["selTrashUndo:shown+other"] = { states: SEL_STATES, switch: true, async run(c)
   } };
 // toggle on a selected card: adds the whole selection when that card isn't in the playlist, removes it when it is
 C["selToggle:add"] = { states: PL_STATES, rearms: true, async run(c) {
-    const strip = c.before.ps?.videoPaths || []; c.add = K.find((p) => !strip.includes(p)); c.also = c.shown;
+    const playlistBar = c.before.ps?.videoPaths || []; c.add = K.find((p) => !playlistBar.includes(p)); c.also = c.shown;
     await ui(`${[c.add, c.also].map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.add))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900);
   }, check(c) {
     const want = [...(c.before.ps?.videoPaths || []), c.add].map(TITLE), got = (c.after.ps?.videoPaths || []).map(TITLE);
     return [...(JSON.stringify(got) === JSON.stringify(want) ? [] : [`playlist ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`]), ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
   } };
 C["selToggle:remove"] = { states: PL_STATES, rearms: true, async run(c) {
-    const strip = c.before.ps?.videoPaths || []; c.out = K.find((p) => !strip.includes(p)); c.target = c.other;
+    const playlistBar = c.before.ps?.videoPaths || []; c.out = K.find((p) => !playlistBar.includes(p)); c.target = c.other;
     await ui(`${[c.out, c.target].map(ctrlClick).join(" ")} m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900);
   }, check(c) {
     const want = (c.before.ps?.videoPaths || []).filter((p) => p !== c.target).map(TITLE), got = (c.after.ps?.videoPaths || []).map(TITLE);
@@ -1260,7 +1260,7 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
     return v;
   } };
 // keys pressed while a slider is HELD (owner: "make F not do yellow outline when holding slider"): a real mouse
-// press on the item modal's volume slider (two library cards selected), then F, Delete, Escape and an arrow key
+// press on the card settings modal's volume slider (two library cards selected), then F, Delete, Escape and an arrow key
 // while it's held. Nothing may react — no focus ring / outline on the held slider (Chromium flips a mouse-focused
 // control to keyboard focus on any key: the system ring), the selection isn't trashed, the modal stays open, the
 // value doesn't step — and after the release the slider shows no keyboard-focus ring either
@@ -1296,11 +1296,11 @@ C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c
 // the card's own toggle (one item): take what plays out of the playlist / put another one in
 C["cardToggle:shown"] = { states: PL_STATES, rearms: true, async run(c) { c.target = c.shown;
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900); }, check: afterRemove };
-C["cardToggle:add"] = { states: PL_STATES, rearms: true, async run(c) { const strip = c.before.ps?.videoPaths || []; c.add = K.find((p) => !strip.includes(p));
+C["cardToggle:add"] = { states: PL_STATES, rearms: true, async run(c) { const playlistBar = c.before.ps?.videoPaths || []; c.add = K.find((p) => !playlistBar.includes(p));
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.add))})?.querySelector(".pl-toggle"), "toggle");`); await sleep(900); },
   check(c) { const got = (c.after.ps?.videoPaths || []).map(TITLE), want = [...(c.before.ps?.videoPaths || []), c.add].map(TITLE);
     return [...(JSON.stringify(got) === JSON.stringify(want) ? [] : [`playlist ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`]), ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)]; } };
-// a saved playlist overwritten (Save → click its name → Save): loading it gives the current strip
+// a saved playlist overwritten (Save → click its name → Save): loading it gives the current playlist bar
 C["plSaveOverwrite"] = { states: ["playlist"], noSwitch: true,
   async pre() { await post("/playlist/save", { name: "mx-over", playlist: { videoPaths: [K[1]], settings: PS(), name: "mx-over" } }); },
   async run(c) {
@@ -1308,17 +1308,17 @@ C["plSaveOverwrite"] = { states: ["playlist"], noSwitch: true,
       m.click(m.byText(".pl-modal .pl-name", "mx-over"), "mx-over"); await m.sleep(150); m.click(m.byText(".pl-modal button", "Save"), "Save");`);
     await sleep(900); c.saved = (await post("/playlist/load", { name: "mx-over" })).json;
   }, check(c) { const a = (c.saved?.videoPaths || []).map(TITLE), b = (c.before.ps?.videoPaths || []).map(TITLE);
-    return JSON.stringify(a) === JSON.stringify(b) ? [] : [`mx-over holds ${JSON.stringify(a)} after overwriting, the strip was ${JSON.stringify(b)}`]; } };
+    return JSON.stringify(a) === JSON.stringify(b) ? [] : [`mx-over holds ${JSON.stringify(a)} after overwriting, the playlist bar was ${JSON.stringify(b)}`]; } };
 
 // --- the same switch control twice quickly: the second one wins, no storm
 C["seq:cardApply×2"] = { states: ["single", "playlist", "effect"], switch: true, async run(c) {
     const [a, b] = [K[2], K[3]].map((p) => (p === c.before.cur?.path ? K[1] : p)); c.target = b;
     await ui(`m.click(m.card(${JSON.stringify(TITLE(a))})?.querySelector(".thumb-wrap"), "card"); await m.sleep(120); m.click(m.card(${JSON.stringify(TITLE(b))})?.querySelector(".thumb-wrap"), "card");`);
   }, check: (c) => expectShown(c, c.target, { effect: true }) };
-C["seq:stripClick×2"] = { states: PL_STATES, switch: true, async run(c) {
-    const strip = c.before.ps?.videoPaths || []; const others = strip.filter((p) => p !== c.before.cur?.path);
-    if (others.length < 2) return c.skip = "needs two other strip items"; c.target = others[1];
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(others[0]))}), "strip"); await m.sleep(120); m.click(m.strip(${JSON.stringify(TITLE(others[1]))}), "strip");`);
+C["seq:playlistBarClick×2"] = { states: PL_STATES, switch: true, async run(c) {
+    const playlistBar = c.before.ps?.videoPaths || []; const others = playlistBar.filter((p) => p !== c.before.cur?.path);
+    if (others.length < 2) return c.skip = "needs two other playlistBar items"; c.target = others[1];
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(others[0]))}), "playlistBar"); await m.sleep(120); m.click(m.playlistBar(${JSON.stringify(TITLE(others[1]))}), "playlistBar");`);
   }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
 // two trashes, two undos: both back where they were (the undo stack runs newest first)
 C["seq:trash×2+undo×2"] = { states: ["playlist", "pending"], switch: true, async run(c) {
@@ -1363,7 +1363,7 @@ C["selRange+Delete"] = { states: SEL_STATES, switch: true, async run(c) {
     await ui(`${ctrlClick(c.shown)} ${shift} ${key("Delete")}`); await sleep(900);
   }, check: (c) => [...afterTrashMany(c, c.targets), ...armedCheck(c)] };
 C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async run(c) {
-    c.exp.paused = false; c.strip = c.before.ps?.videoPaths || [];
+    c.exp.paused = false; c.playlistBar = c.before.ps?.videoPaths || [];
     await ui(`${key("a", { ctrlKey: true })} ${key("Delete")}`); await sleep(1200);
     c.midState = { lib: ((await http("GET", "/library")).json || []).length, cur: (await http("GET", "/current")).json?.path ?? null };
     await ui(`m.click(m.byText(".topbar button", "Undo"), "Undo");`); await sleep(1200);
@@ -1371,13 +1371,13 @@ C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async
     const v = [];
     if (c.midState.lib !== 0 || c.midState.cur) v.push(`after Ctrl+A, Delete: ${c.midState.lib} library items, /current ${TITLE(c.midState.cur)}`);
     if ((c.after.lib || []).length !== (c.before.lib || []).length) v.push(`${(c.after.lib || []).length} library items after the undo, expected ${(c.before.lib || []).length} (all of them back)`); // k1–k4 + the scene items
-    const got = (c.after.ps?.videoPaths || []).map(TITLE), want = c.strip.map(TITLE);
+    const got = (c.after.ps?.videoPaths || []).map(TITLE), want = c.playlistBar.map(TITLE);
     if (JSON.stringify(got) !== JSON.stringify(want)) v.push(`playlist ${JSON.stringify(got)} after the undo, was ${JSON.stringify(want)}`);
     if (c.after.cur?.path) v.push(`${TITLE(c.after.cur.path)} plays after deleting everything + undo (the delete stopped playback)`);
     return v;
   } };
 
-// --- the item settings modal closed with Escape the instant a drag ends (its persist is still pending): the last
+// --- the card settings modal closed with Escape the instant a drag ends (its persist is still pending): the last
 // value is saved and stays live — closing must flush, never drop or revert it
 for (const t of ["shown", "other"]) C[`itemVolDragEsc:${t}`] = { states: ["single", "effect", "pending"], async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
@@ -1431,7 +1431,7 @@ C["gAdvanceRelabel"] = { states: ["playlist", "playlistGlobal"], rearms: true, a
     c.armedSt = await ctl.call("state");
   }, check(c) {
     const v = [];
-    if (c.after.s.globalAdvanceOnVideoEnd !== true || c.after.s.globalIntervalSeconds !== 4) v.push(`globalAdvanceOnVideoEnd ${c.after.s.globalAdvanceOnVideoEnd} / globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected true / 4`);
+    if (c.after.s.globalSwitchWhenVideoEnds !== true || c.after.s.globalIntervalSeconds !== 4) v.push(`globalSwitchWhenVideoEnds ${c.after.s.globalSwitchWhenVideoEnds} / globalIntervalSeconds ${c.after.s.globalIntervalSeconds}, expected true / 4`);
     if ("globalWaitForVideoEnd" in c.after.s) v.push("GET /settings still has globalWaitForVideoEnd");
     const want = ["Switch when video ends", "Minimum play time", "Maximum play time"];
     if (JSON.stringify(c.ui?.rows) !== JSON.stringify(want)) v.push(`rotation rows ${JSON.stringify(c.ui?.rows)}, expected ${JSON.stringify(want)}`);
@@ -1446,13 +1446,13 @@ C["gAdvanceRelabel"] = { states: ["playlist", "playlistGlobal"], rearms: true, a
     return [...v, ...keptShown(c)];
   } };
 // advance-on-end on: following the globals → the old 600 s interval is now the minimum (k1, 30 s, loops: nothing
-// requested yet), then the minimum → 0 → one aligned switch armed to the strip's next; its own rotation → nothing
+// requested yet), then the minimum → 0 → one aligned switch armed to the playlist bar's next; its own rotation → nothing
 C["gAdvanceOn"] = { states: ["playlist", "playlistGlobal"], rearms: true, async run(c) {
     await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), true, "advance");`)); await sleep(1500);
     c.heldArmed = armedTo(await ctl.call("state"));
     await ui(`m.setValue(m.row("Minimum play time").querySelectorAll(".hms input")[1], 0, "m");`); await sleep(1200);
   }, check(c) {
-    const v = c.after.s.globalAdvanceOnVideoEnd === true && c.after.s.globalIntervalSeconds === 0 ? [] : [`globalAdvanceOnVideoEnd ${c.after.s.globalAdvanceOnVideoEnd} / minimum ${c.after.s.globalIntervalSeconds}, expected true / 0`];
+    const v = c.after.s.globalSwitchWhenVideoEnds === true && c.after.s.globalIntervalSeconds === 0 ? [] : [`globalSwitchWhenVideoEnds ${c.after.s.globalSwitchWhenVideoEnds} / minimum ${c.after.s.globalIntervalSeconds}, expected true / 0`];
     const a = armedTo(c.after.st), want = succ(c.after.ps?.videoPaths, c.after.cur?.path);
     if (c.heldArmed.length) v.push(`a 600 s minimum on a 30 s clip: a switch was requested already (${JSON.stringify(c.heldArmed.map(TITLE))}) — it must hold until the loop that reaches it`);
     if (c.state === "playlistGlobal" && (a.length !== 1 || a[0] !== want)) v.push(`following the globals: armed ${JSON.stringify(a.map(TITLE))} after advance-on-end on + minimum 0, expected one to ${TITLE(want)}`);
@@ -1468,7 +1468,7 @@ C["plOverrideOff"] = { states: ["pending"], rearms: true, async run() {
     return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c, null)];
   } };
 // following the globals (advance-on-end on, armed) → override on (its own rotation: a 0 s timer, advance off):
-// disarmed → its own "Switch when video ends" on: armed again to the strip's next, with ITS transition (fade, PS()'s duration)
+// disarmed → its own "Switch when video ends" on: armed again to the playlist bar's next, with ITS transition (fade, PS()'s duration)
 C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, async run(c) {
     await ui(`${plOpen} m.setCheck(m.plCheck("Override global rotation settings"), true, "override"); await m.sleep(1200);`);
     c.midArmed = armedTo(await ctl.call("state"));
@@ -1477,13 +1477,13 @@ C["seq:plOverrideOn+advanceOn"] = { states: ["pendingGlobal"], rearms: true, asy
     const v = [];
     if (c.midArmed.length) v.push(`override on (its own rotation: no advance-on-end): still armed ${JSON.stringify(c.midArmed.map(TITLE))}`);
     const s = c.after.ps?.settings;
-    if (s?.overrideGlobalSettings !== true || s?.advanceOnVideoEnd !== true) v.push(`playlist override ${s?.overrideGlobalSettings} advance ${s?.advanceOnVideoEnd}, expected true / true`);
+    if (s?.overrideGlobalSettings !== true || s?.switchWhenVideoEnds !== true) v.push(`playlist override ${s?.overrideGlobalSettings} advance ${s?.switchWhenVideoEnds}, expected true / true`);
     const req = armedReq(c);
     const own = PS().transitionDurationMs;
     if (req && !(req.effect_id === "fade" && req.duration_ms === own)) v.push(`the armed switch runs ${fmtSw(req)}, the playlist's own transition is fade ${own} ms`);
     return [...v, ...noSwitchNow(c), ...keptShown(c), ...armedCheck(c)];
   } };
-// advance-on-end off → on → next, following the globals: disarmed, re-armed to the strip's next, next plays it and arms the one after
+// advance-on-end off → on → next, following the globals: disarmed, re-armed to the playlist bar's next, next plays it and arms the one after
 C["seq3:gAdvanceOff+On+next"] = { states: ["pendingGlobal"], rearms: true, switch: true, async run(c) {
     await ui(settingsTab(`m.setCheck(m.input("Switch when video ends"), false, "advance");`)); await sleep(1200);
     c.offArmed = armedTo(await ctl.call("state"));
@@ -1565,13 +1565,13 @@ const APPEAR = {
   "appear:aspect": { drive: () => `await m.select("Thumbnail aspect", "16:9");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
   "appear:gifs": { drive: () => `m.setCheck(m.input("Autoplay GIF thumbnails"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
-  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.wallpaperBgAllTabs === true },
+  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
   // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
   // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
-  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartIntervalSeconds === 2 },
+  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
   "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
     drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Restart only at playlist changeover"), true, "changeover");`,
-    saved: (c) => c.after.s.restartIntervalSeconds === 2 && c.after.s.restartOnSwitchOnly === true },
+    saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 && c.after.s.restartOnlyAtPlaylistChangeover === true },
 };
 for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effect", "pending"], noSwitch: true,
   async pre(c) { if (c.other) { await post("/library/volume", { path: c.other, intValue: 30 }); await post("/library/speed", { path: c.other, doubleValue: 0.8 }); } },
@@ -1703,7 +1703,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
     const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => (n.gain?.mute ?? 0) < -1));
     if (m.length) v.push(`a −12 dBFS stream under a −6 dB threshold auto-muted (${m.length}/${c.samples.length} samples)`);
     if (c.mutedMs == null) v.push(`the threshold back to −70 while the stream plays: not muted within 4 s${c.duringTone ? "" : " (the stream had ended)"}`);
-    if (c.after.s.autoMuteThresholdDb !== -70) v.push(`autoMuteThresholdDb ${c.after.s.autoMuteThresholdDb}`);
+    if (c.after.s.autoMuteMinLevelDb !== -70) v.push(`autoMuteMinLevelDb ${c.after.s.autoMuteMinLevelDb}`);
     return v;
   } };
 // Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
@@ -1742,7 +1742,7 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
 // --- the order a shuffle plays. Contract (session.md § Timed Playlist, PlayerHelper.AdvanceToNext): each CYCLE plays
 // every item of the playlist once, in a fresh random order; a new cycle never starts with the item the last one ended
 // on (no immediate repeat); turning Shuffle on mid-session keeps what plays and plays the REST once (in random order)
-// before the first full cycle; previous walks back through what actually played. Sequential = the strip's order.
+// before the first full cycle; previous walks back through what actually played. Sequential = the playlist bar's order.
 const plSeg = (label) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(label)}), ${JSON.stringify(label)}); ${plClose}`;
 // `n` next keybinds, each settled: the item each one put on screen
 async function nexts(c, n, a = "next") {
@@ -1761,9 +1761,9 @@ function shuffleOrder(plays, items, first = 0) {
   }
   return [...new Set(v)];
 }
-const notStripOrder = (plays, strip, first) => {
-  const cyc = []; for (let at = first; at + strip.length <= plays.length; at += strip.length) cyc.push(plays.slice(at, at + strip.length));
-  return cyc.length >= 3 && cyc.every((x) => JSON.stringify(x) === JSON.stringify(strip)) ? [`shuffle on, but ${cyc.length} cycles all played the strip's order`] : [];
+const notPlaylistBarOrder = (plays, playlistBar, first) => {
+  const cyc = []; for (let at = first; at + playlistBar.length <= plays.length; at += playlistBar.length) cyc.push(plays.slice(at, at + playlistBar.length));
+  return cyc.length >= 3 && cyc.every((x) => JSON.stringify(x) === JSON.stringify(playlistBar)) ? [`shuffle on, but ${cyc.length} cycles all played the playlist bar's order`] : [];
 };
 // Shuffle chosen in the playlist modal, then Play, then 11 nexts: 12 plays = three full cycles over the 4 clips
 C["shuffle:play+next×11"] = { states: ["idle"], switch: true,
@@ -1773,10 +1773,10 @@ C["shuffle:play+next×11"] = { states: ["idle"], switch: true,
     await ui(`m.click(document.querySelector(".play-btn"), "Play");`); await sleep(400); await waitSettled(10000);
     c.plays = [(await http("GET", "/current")).json?.path ?? null, ...(await nexts(c, 11))];
   }, check(c) {
-    const strip = [K[0], K[1], K[2], K[3]];
-    const v = [...shuffleOrder(c.plays, strip), ...notStripOrder(c.plays, strip, 0)];
+    const playlistBar = [K[0], K[1], K[2], K[3]];
+    const v = [...shuffleOrder(c.plays, playlistBar), ...notPlaylistBarOrder(c.plays, playlistBar, 0)];
     if (c.after.ps?.settings?.order !== 1) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 1 (shuffle)`);
-    if (JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE)) !== JSON.stringify(strip.map(TITLE))) v.push(`the strip ${JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE))} — shuffling reordered it`);
+    if (JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE)) !== JSON.stringify(playlistBar.map(TITLE))) v.push(`the playlist bar ${JSON.stringify((c.after.ps?.videoPaths || []).map(TITLE))} — shuffling reordered it`);
     return v;
   } };
 // the same order contract for the rotation itself: Shuffle + a 2 s interval, Play, 11 interval switches
@@ -1791,35 +1791,35 @@ C["shuffle:rotation"] = { states: ["idle"], switch: true,
     c.plays = sched().slice(0, 12).map((e) => e.path);
     await post("/stop"); // the 2 s rotation would go on switching through the snapshot
   }, exp: { paused: false }, check(c) {
-    const strip = [K[0], K[1], K[2], K[3]];
+    const playlistBar = [K[0], K[1], K[2], K[3]];
     const v = c.done ? [] : [`only ${c.plays.length} switches in 45 s with a 2 s interval`];
-    return [...v, ...shuffleOrder(c.plays, strip), ...notStripOrder(c.plays, strip, 0)];
+    return [...v, ...shuffleOrder(c.plays, playlistBar), ...notPlaylistBarOrder(c.plays, playlistBar, 0)];
   } };
 // Shuffle turned on mid-session (playing k1 of k1..k4): the other three once each, then full cycles
 C["shuffle:onMidSession"] = { states: ["playlist4"], switch: true, async run(c) {
     await ui(plSeg("Shuffle")); await sleep(500);
     c.plays = [c.before.cur?.path, ...(await nexts(c, 11))];
   }, check(c) {
-    const strip = c.before.ps?.videoPaths || [];
-    const v = [...shuffleOrder(c.plays, strip, 4)];
-    const rest = c.plays.slice(1, strip.length);
-    if (new Set(rest).size !== strip.length - 1 || rest.includes(c.plays[0])) v.push(`after Shuffle on, the rest of the cycle ${JSON.stringify(rest.map(TITLE))} isn't the other ${strip.length - 1} items once each`);
+    const playlistBar = c.before.ps?.videoPaths || [];
+    const v = [...shuffleOrder(c.plays, playlistBar, 4)];
+    const rest = c.plays.slice(1, playlistBar.length);
+    if (new Set(rest).size !== playlistBar.length - 1 || rest.includes(c.plays[0])) v.push(`after Shuffle on, the rest of the cycle ${JSON.stringify(rest.map(TITLE))} isn't the other ${playlistBar.length - 1} items once each`);
     return [...v, ...psKept(c)];
   } };
-// Shuffle on, 2 nexts, Sequential, 4 nexts: from where it is, the strip's order (wrapping)
+// Shuffle on, 2 nexts, Sequential, 4 nexts: from where it is, the playlist bar's order (wrapping)
 C["shuffle:offMidSession"] = { states: ["playlist4"], switch: true, async run(c) {
     await ui(plSeg("Shuffle")); await sleep(500);
     c.shuffled = await nexts(c, 2);
     await ui(plSeg("Sequential")); await sleep(500);
     c.plays = await nexts(c, 4);
   }, check(c) {
-    const strip = c.before.ps?.videoPaths || [], v = [];
+    const playlistBar = c.before.ps?.videoPaths || [], v = [];
     let prev = c.shuffled[c.shuffled.length - 1];
-    c.plays.forEach((p, i) => { const want = succ(strip, prev); if (p !== want) v.push(`Sequential again, next #${i + 1} from ${TITLE(prev)}: ${TITLE(p)}, expected ${TITLE(want)} (the strip's order)`); prev = p; });
+    c.plays.forEach((p, i) => { const want = succ(playlistBar, prev); if (p !== want) v.push(`Sequential again, next #${i + 1} from ${TITLE(prev)}: ${TITLE(p)}, expected ${TITLE(want)} (the playlist bar's order)`); prev = p; });
     if (c.after.ps?.settings?.order !== 0) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 0`);
     return v;
   } };
-// shuffled: previous walks back through what played (not the strip's previous), next forward again
+// shuffled: previous walks back through what played (not the playlist bar's previous), next forward again
 C["shuffle:prev+next"] = { states: ["playlist4"], switch: true, async run(c) {
     await ui(plSeg("Shuffle")); await sleep(500);
     c.fwd = [c.before.cur?.path, ...(await nexts(c, 2))];
@@ -1834,9 +1834,9 @@ C["shuffle:prev+next"] = { states: ["playlist4"], switch: true, async run(c) {
 
 // --- three or more controls in a row (each in the states where all of them share state)
 // drag → next → pause → resume → next: both nexts follow the dragged order, the pause in between holds and ends
-C["seq5:stripDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
+C["seq5:playlistBarDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
     const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
-    await stripDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
+    await playlistBarDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
     c.t1 = succ(c.want, c.before.cur?.path); c.t2 = succ(c.want, c.t1);
     c.first = (await nexts(c, 1))[0];
     await cliStep(c, "toggle-pause"); await sleep(600); c.pausedMid = !!(await ctl.call("state")).graph.player?.paused;
@@ -1857,7 +1857,7 @@ C["seq3:mute+next+unmute"] = { states: ["single", ...PL_STATES], switch: true, a
     c.midSt = await ctl.call("state");
     await cliStep(c, "toggle-mute");
   }, exp: { muted: false }, check: (c) => [...stayed(c, "next"), ...(allMuted(c.midSt, true) ? [] : [`muted, then next: ${JSON.stringify(muteOf(c.midSt))} — not all muted`])] };
-// trash the other live item → Undo → next: the undone item is back in its place and the next follows the restored strip
+// trash the other live item → Undo → next: the undone item is back in its place and the next follows the restored playlistBar
 C["seq3:trash+undo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     c.target = c.other; c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(900); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
@@ -1899,7 +1899,7 @@ C["seq3:next+pause+next"] = { states: ["playlist", "pending"], switch: true, asy
     await cliStep(c, "next");
   }, exp: { paused: false }, check: (c) => [...expectShownN(c, c.want, 2), ...(c.pausedMid ? [] : ["toggle-pause between the nexts didn't pause"]), ...armedCheck(c)] };
 // pause → trash what plays → Undo: the session plays on from the next item (a new session: the pause ends), the
-// trashed item is back in its place in the strip, and what plays now stays
+// trashed item is back in its place in the playlist bar, and what plays now stays
 C["seq3:pause+trash:shown+undo"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     await cliStep(c, "toggle-pause"); await sleep(300);
     c.target = c.shown; c.idx = (c.before.ps?.videoPaths || []).indexOf(c.target);
@@ -1912,13 +1912,13 @@ C["seq3:pause+trash:shown+undo"] = { states: ["playlist", "pending"], switch: tr
     if (!(c.after.lib || []).some((i) => i.videoPath === c.target)) v.push(`${TITLE(c.target)} not back in the library`);
     return [...v, ...expectShownN(c, c.want, 1), ...armedCheck(c)];
   } };
-// random (keybind), then next / previous: the rotation goes on from the random pick's place in the strip — next =
+// random (keybind), then next / previous: the rotation goes on from the random pick's place in the playlist bar — next =
 // the item after it (it used to keep the rotation's old position: next replayed the pick itself, or the item after
 // what played before), and an advance-on-end session re-arms to that item; previous = back to what played before
 // (the pick replaced the pre-fetched, never-played next — previous went to that instead) and the next after that
 // is the pick again (history forward, like next after any previous). Random excludes what plays, so it's repeated
 // until it lands on the item two after the starting one (the pick where the old position's successor isn't the
-// pick's: the fuzz found it 2 of 3 times in `pending`); an advance-on-end session must re-arm to the strip's next
+// pick's: the fuzz found it 2 of 3 times in `pending`); an advance-on-end session must re-arm to the playlist bar's next
 // after every pick (`c.midV`).
 async function randomTo(c) {
   const s = c.before.ps?.videoPaths || [], i = s.indexOf(c.before.cur?.path);
@@ -1947,17 +1947,17 @@ C["seq:random+prev"] = { states: ["playlist", "pending"], switch: true, async ru
 // (which takes every queued next / previous / random) only started with an interval, so the keybind and the UI's
 // next queued pending_action.txt for nobody
 C["seq:plPlayAdvanceOnly+next"] = { states: ["pending"], switch: true, async run(c) {
-    await post("/playlist/play", { ...PENDING_PL(), settings: PS({ advanceOnVideoEnd: true, transitionDurationMs: 600, intervalSeconds: 0 }) });
+    await post("/playlist/play", { ...PENDING_PL(), settings: PS({ switchWhenVideoEnds: true, transitionDurationMs: 600, intervalSeconds: 0 }) });
     await sleep(500); await waitSettled(8000);
     c.mid = (await http("GET", "/current")).json?.path ?? null; c.want = succ(c.before.ps?.videoPaths, c.mid);
     await cliStep(c, "next");
   }, check: (c) => [...expectShownN(c, c.want, 2), ...armedCheck(c)] };
-// a timed playlist of ONE item (600 s), then next / random: the tick takes it (a switch to that item — the strip's next
+// a timed playlist of ONE item (600 s), then next / random: the tick takes it (a switch to that item — the playlist bar's next
 // and the only pick), and nothing rotates by itself. The tick that takes every queued next / previous / random started
 // only for > 1 item: the keybind queued pending_action.txt for nobody, and a tick started later (the list grew) threw
 // it away
 for (const a of ["next", "random"]) C[`seq:plPlayOne+${a === "random" ? "random" : "next"}`] = { states: ["single"], switch: true, async run(c) {
-    await playFast(c, [K[1]], PS()); c.exp.paused = false; // (+ /playlist/state: the strip follows it)
+    await playFast(c, [K[1]], PS()); c.exp.paused = false; // (+ /playlist/state: the playlist bar follows it)
     await sleep(600);
     c.tStep = Date.now();
     await cliStep(c, a);
@@ -1969,13 +1969,13 @@ for (const a of ["next", "random"]) C[`seq:plPlayOne+${a === "random" ? "random"
     if (!c.noOutput && c.after.cur?.path !== K[1]) v.push(`expected ${TITLE(K[1])} on screen, /current says ${TITLE(c.after.cur?.path)}`);
     return v;
   } };
-// remove the other item from the strip (the session plays on with two), trash what plays (it plays on from the one
+// remove the other item from the playlist bar (the session plays on with two), trash what plays (it plays on from the one
 // survivor: a one-item session) → Undo (both back) → next: the rotation still takes it. A one-item session started no
 // tick and putting items back never started one — the queued next (pending_action.txt) was never taken while
-// /current said timed (fuzz: playlist → stripRemove:other → trashUndo:shown → cli:next)
-C["seq3:stripRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
-    c.removed = c.other; if (!c.removed || !(await stripHas(c, c.removed))) return c.skip = "not in strip";
-    await ui(`m.click(m.strip(${JSON.stringify(TITLE(c.removed))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
+// /current said timed (fuzz: playlist → playlistBarRemove:other → trashUndo:shown → cli:next)
+C["seq3:playlistBarRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
+    c.removed = c.other; if (!c.removed || !(await playlistBarHas(c, c.removed))) return c.skip = "not in playlist bar";
+    await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.removed))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
     c.target = c.shown; c.exp.paused = false;
     await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".del"), "trash"); await m.sleep(1200); m.click(m.byText(".topbar button", "Undo"), "Undo");`);
     await sleep(900); await waitSettled(8000);
@@ -2004,9 +2004,9 @@ function expectShown(c, want, { effect }) {
 function psKept(c) {
   const s = c.after.ps?.settings; const want = c.before.ps?.settings;
   if (!s || !want) return [];
-  const v = ["transitionEnabled", "transitionDurationMs", "advanceOnVideoEnd", "intervalSeconds"].filter((k) => JSON.stringify(s[k]) !== JSON.stringify(want[k]))
+  const v = ["transitionEnabled", "transitionDurationMs", "switchWhenVideoEnds", "intervalSeconds"].filter((k) => JSON.stringify(s[k]) !== JSON.stringify(want[k]))
     .map((k) => `playlist ${k} ${JSON.stringify(want[k])} → ${JSON.stringify(s[k])}`);
-  // playing from an item mustn't reorder the strip (it's saved: the next launch showed the play order)
+  // playing from an item mustn't reorder the playlist bar (it's saved: the next launch showed the play order)
   const a = (c.before.ps?.videoPaths || []).map(TITLE), b = (c.after.ps?.videoPaths || []).map(TITLE);
   if (JSON.stringify(a) !== JSON.stringify(b)) v.push(`playlist order ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
   return v;
@@ -2139,13 +2139,13 @@ C["trash:playingScene"] = { states: ["scene", "sceneS"], switch: true, async run
     c.aGone = await waitFor(() => !pidAlive(c.aPid), 3000, 100);
   }, check: (c) => [...afterTrash(c, SC[0]), ...(c.aGone ? [] : [`s1's worker ${c.aPid} still runs after it was trashed`])] };
 
-// a scene that crashes (s3: 1.5 s after every start) played from the strip: broken after 3 restarts → marked
-// crashed in its index entry, its card shows it, the rotation advances to the strip's next (s1)
+// a scene that crashes (s3: 1.5 s after every start) played from the playlist bar: broken after 3 restarts → marked
+// crashed in its index entry, its card shows it, the rotation advances to the playlist bar's next (s1)
 C["crash:scene"] = { states: ["scene"], switch: true, exp: { paused: false },
   allowErr: (e) => String(e.reason ?? "").includes(SC_KEY(SC[2])), // "scene worker broken (crash record …/900000003-….json)"
   async pre() { await post("/playlist/state", { videoPaths: [SC[2], SC[0]], settings: PS(), name: null }); },
   async run(c) {
-    await ui(`m.click(m.strip("s3"), "strip s3");`);
+    await ui(`m.click(m.playlistBar("s3"), "playlistBar s3");`);
     c.marked = await waitFor(() => readScIndex()[SC_KEY(SC[2])]?.crashed === true, 30000, 200);
     c.advanced = await waitSettled(12000, SC[0]);
     c.card = await waitFor(() => ui(`return !!m.card("s3")?.classList.contains("crashed");`), 5000, 100);
@@ -2155,7 +2155,7 @@ C["crash:scene"] = { states: ["scene"], switch: true, exp: { paused: false },
     if (!c.broken.length) v.push("no source.broken for s3");
     if (!c.marked) v.push(`s3 not marked crashed in its index entry (${JSON.stringify(readScIndex()[SC_KEY(SC[2])])})`);
     if (!c.card) v.push("the UI doesn't show s3's card as crashed");
-    if (c.after.cur?.path !== SC[0]) v.push(`after s3 broke: /current ${TITLE(c.after.cur?.path)}, expected s1 (the strip's next)`);
+    if (c.after.cur?.path !== SC[0]) v.push(`after s3 broke: /current ${TITLE(c.after.cur?.path)}, expected s1 (the playlist bar's next)`);
     return v;
   } };
 
@@ -2185,8 +2185,8 @@ C["settings:sceneFps"] = { states: ["scene"], async run(c) {
     await waitWorker(SC[0], (w) => near(w.fps_target, 45, 0.5), 3000);
   }, check(c) {
     const v = [];
-    const m = (c.after.s.lweMonitors || []).find((x) => x.name === "VIRTUAL-1");
-    if (!m || m.fps !== 45) v.push(`settings.lweMonitors ${JSON.stringify(c.after.s.lweMonitors)}, expected VIRTUAL-1 at 45`);
+    const m = (c.after.s.sceneMonitors || []).find((x) => x.name === "VIRTUAL-1");
+    if (!m || m.fps !== 45) v.push(`settings.sceneMonitors ${JSON.stringify(c.after.s.sceneMonitors)}, expected VIRTUAL-1 at 45`);
     if (!c.fps) v.push("out:VIRTUAL-1.scene_fps never became 45");
     const w = workerOf(c.after.st, SC[0]);
     if (!near(w?.fps_target, 45, 0.5)) v.push(`s1's worker fps_target ${w?.fps_target}, expected 45`);
@@ -2195,9 +2195,9 @@ C["settings:sceneFps"] = { states: ["scene"], async run(c) {
 
 // the GPU / VRAM group (liascape-player): each control → its player prop, live, the scene on the same worker
 for (const [name, prop, want, drive, saved] of [
-  ["sceneThrottle", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.sceneThrottle === false],
+  ["autoThrottleScenes", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.autoThrottleScenes === false],
   ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Limit VRAM per scene")} m.setCheck(m.input("Limit VRAM per scene"), true, "VRAM limit"); await m.sleep(300);
-    for (let i = 0; i < 30 && !m.input("VRAM limit (MiB)"); i++) await m.sleep(100); m.setValue(m.input("VRAM limit (MiB)"), 2048, "MiB");`, (s) => s.sceneVramLimitEnabled === true && s.sceneVramLimitMib === 2048],
+    for (let i = 0; i < 30 && !m.input("VRAM limit (MiB)"); i++) await m.sleep(100); m.setValue(m.input("VRAM limit (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
   ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When VRAM runs low")} await m.select("When VRAM runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
 ]) {
   C[`settings:${name}`] = { states: ["scene"], async run(c) {
@@ -2208,7 +2208,7 @@ for (const [name, prop, want, drive, saved] of [
     }, check(c) {
       const v = [];
       if (!c.ok) v.push(`${prop} ${JSON.stringify(c.was)} → never ${JSON.stringify(want)}`);
-      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ sceneThrottle: c.after.s.sceneThrottle, sceneVramLimitEnabled: c.after.s.sceneVramLimitEnabled, sceneVramLimitMib: c.after.s.sceneVramLimitMib, vramLowMode: c.after.s.vramLowMode })})`);
+      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ autoThrottleScenes: c.after.s.autoThrottleScenes, limitVramPerScene: c.after.s.limitVramPerScene, sceneVramLimitMib: c.after.s.sceneVramLimitMib, vramLowMode: c.after.s.vramLowMode })})`);
       if (c.lowActive !== false) v.push(`player.vram_low_active ${c.lowActive} (the fake VRAM sample is healthy)`);
       return [...v, ...samePid(c, SC[0])];
     } };
@@ -2218,7 +2218,7 @@ for (const [name, prop, want, drive, saved] of [
 // the rotation advances at once, the UI says why — and it is NOT marked crashed
 C["vram:exceeded"] = { states: ["sceneS"], switch: true,
   allowErr: (e) => String(e.reason ?? "").includes("vram_exceeded"),
-  async pre() { await scenesOn({ sceneVramLimitEnabled: true, sceneVramLimitMib: 1536 }); },
+  async pre() { await scenesOn({ limitVramPerScene: true, sceneVramLimitMib: 1536 }); },
   async run(c) {
     c.pid = workerOf(c.before.st, SC[0])?.pid;
     vramFake({ [c.pid]: 2000 });
@@ -2295,7 +2295,7 @@ for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [w
 // a global maximum on a playlist with its OWN rotation (no limits): nothing switches now
 C["global:maxPlay:own"] = { states: ["pending"],
   // (the global maximum's row shows with the global advance-on-end; the playlist's own rotation doesn't read it)
-  async pre() { const s = await getSettings(); await post("/settings", { ...s, globalAdvanceOnVideoEnd: true }); },
+  async pre() { const s = await getSettings(); await post("/settings", { ...s, globalSwitchWhenVideoEnds: true }); },
   async run(c) {
     c.k4 = await k4LoopEnd(c, 4500); if (!c.k4) return;
     await ui(limitDrive("global", "maximum", 2)); c.tChange = Date.now();
@@ -2314,13 +2314,13 @@ C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
     c.tChange = Date.now();
     c.sw = await waitFor(async () => events.some((e) => e._t >= c.tChange - 500 && e.event === "transition.scheduled" && e.path === SC[1]), 9000, 100);
     await waitSettled(8000, SC[1]);
-    // stop rotating before the checks (another client's save: the strip re-syncs)
+    // stop rotating before the checks (another client's save: the playlist bar re-syncs)
     await post("/playlist/state", { settings: { intervalSeconds: 600 } }); await sleep(500);
   }, check(c) {
     const v = [];
     if (c.saved !== 4) v.push(`playlist interval ${c.saved} after the UI change, expected 4`);
     if (!c.sw) v.push("no switch off the scene within 9 s of a 4 s interval");
-    if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the strip's next after s1)`);
+    if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the playlist bar's next after s1)`);
     const e = c.evs.find((x) => x.event === "transition.scheduled" && x.path === SC[1]);
     if (e && e.effect_id == null) v.push("the interval's switch off the scene was a cut (transitions are on)");
     return v;
@@ -2340,7 +2340,7 @@ const sceneTimingCheck = (c, savedOn, savedSecs) => {
     if (c.sw.align === "end") v.push("the scene's switch was align:end (a scene never ends — it must switch now)");
     if (c.sw.effect_id == null) v.push("the scene's switch was a cut (transitions are on)");
   }
-  if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the strip's next after s1)`);
+  if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the playlist bar's next after s1)`);
   return v;
 };
 const sceneSecsTo4 = (group) => `const iv = ${group}.querySelectorAll("input"); m.setValue(iv[0], 0, "h"); m.setValue(iv[1], 0, "m"); await m.sleep(200);
@@ -2361,7 +2361,7 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     await post("/playlist/state", { settings: { switchScenesAfterSeconds: 0 } }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
-    if (c.saved?.advanceOnVideoEnd !== true) v.push(`playlist advanceOnVideoEnd ${c.saved?.advanceOnVideoEnd}, expected true`);
+    if (c.saved?.switchWhenVideoEnds !== true) v.push(`playlist switchWhenVideoEnds ${c.saved?.switchWhenVideoEnds}, expected true`);
     if (c.lab0?.some((l) => /separate timing|switch scenes after/i.test(l))) v.push(`scene timing shown with "Switch when video ends" off: ${JSON.stringify(c.lab0)}`);
     if (!c.lab1?.includes("Separate timing for scenes") || !c.lab1?.includes("SWITCH SCENES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes" + "SWITCH SCENES AFTER"`);
     return v;
@@ -2424,7 +2424,7 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
 // The backend restarted UNDER AN OPEN PAGE (the owner's incident: `dotnet watch` restarted the dev backend on a
 // cherry-pick while the app stayed open, and Vite's HMR of the same change re-ran the store's init into the outage —
 // the Library tab said "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
-// up everything it mirrors from the backend by itself — no reload: the library (cards), the strip, the settings
+// up everything it mirrors from the backend by itself — no reload: the library (cards), the playlist bar, the settings
 // (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
 const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/liascape (settings.json, playlist_state.json)
 const K5 = () => path.join(path.dirname(path.dirname(K[0])), "k5", "k5.mp4");
@@ -2436,7 +2436,7 @@ function editJson(file, fn) {
 const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name[0].toUpperCase() + name.slice(1);
 // what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
 const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.title).sort(),
-  empty: !!document.querySelector(".center-msg"), strip: [...document.querySelectorAll(".pl-item")].map((e) => e.title),
+  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].map((e) => e.title),
   aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
 const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
 // k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)
@@ -2449,7 +2449,7 @@ C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run
     await stopBackend(3000);
     try {
       // while it's down, what another process changes (a CLI's WE sync, a hand edit, the next build's startup): an item
-      // added, the thumbnail aspect flipped, the strip rewritten
+      // added, the thumbnail aspect flipped, the playlist bar rewritten
       fs.mkdirSync(path.dirname(K5()), { recursive: true }); fs.copyFileSync(K[3], K5());
       editJson(path.join(CFG, "settings.json"), (s) => { const k = keyIn(s, "thumbnailAspect"); c.aspect = (s[k] ?? "1:1") === "16:9" ? "1:1" : "16:9"; s[k] = c.aspect; });
       editJson(path.join(CFG, "playlist_state.json"), (p) => { p[keyIn(p, "videoPaths")] = [K[2], K[0]]; });
@@ -2457,8 +2457,8 @@ C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run
       c.up = await startBackend();
       c.firstLib = await libTitles(); // the new backend's first /library: whole, never an empty list while it loads
       c.recovered = await waitFor(async () => { const d = (c.page = await pageData());
-        return JSON.stringify(d.cards) === JSON.stringify(wantTitles) && JSON.stringify(d.strip) === '["k3","k1"]' && d.aspect === ASPECT_CSS[c.aspect]; }, 12000, 200);
-      c.want = { cards: wantTitles, strip: ["k3", "k1"], aspect: ASPECT_CSS[c.aspect] };
+        return JSON.stringify(d.cards) === JSON.stringify(wantTitles) && JSON.stringify(d.playlistBar) === '["k3","k1"]' && d.aspect === ASPECT_CSS[c.aspect]; }, 12000, 200);
+      c.want = { cards: wantTitles, playlistBar: ["k3", "k1"], aspect: ASPECT_CSS[c.aspect] };
     } finally { await dropK5(); }
   }, check(c) {
     const v = [];
@@ -2499,7 +2499,7 @@ C["restart:midLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
 C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     const wantTitles = await libTitles();
     const ps = (await http("GET", "/playlist/state")).json;
-    c.want = { cards: wantTitles, strip: (ps?.videoPaths || []).map(TITLE), aspect: ASPECT_CSS[BASE_SETTINGS.thumbnailAspect ?? "1:1"] };
+    c.want = { cards: wantTitles, playlistBar: (ps?.videoPaths || []).map(TITLE), aspect: ASPECT_CSS[BASE_SETTINGS.thumbnailAspect ?? "1:1"] };
     await win.loadURL("about:blank");
     await stopBackend();
     await win.loadURL(`file://${E.LIASCAPE_UI_DIR}/index.html?api=${new URL(U).port}`);
@@ -2507,7 +2507,7 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     c.during = await pageData();
     c.up = await startBackend();
     c.recovered = await waitFor(async () => { const d = (c.page = await pageData());
-      return JSON.stringify(d.cards) === JSON.stringify(c.want.cards) && JSON.stringify(d.strip) === JSON.stringify(c.want.strip) && d.aspect === c.want.aspect; }, 12000, 200);
+      return JSON.stringify(d.cards) === JSON.stringify(c.want.cards) && JSON.stringify(d.playlistBar) === JSON.stringify(c.want.playlistBar) && d.aspect === c.want.aspect; }, 12000, 200);
     await js(PAGE);
   }, check(c) {
     const v = [];
@@ -2516,7 +2516,7 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// a scene's user properties (the item modal's "Scene properties"): s1's project.json declares `color` (the synthetic
+// a scene's user properties (the card settings modal's "Scene properties"): s1's project.json declares `color` (the synthetic
 // renderer's colour, WE-encoded — red by default), `clock` (bool) and `bars` (shown while clock is on). Oracle: s1's own
 // picture (a pixel of its source), its source's scene_props, the worker's `properties` answer, the index, the modal.
 const SP_GREEN = "0 255 0", SP_RED = "255 0 0";
@@ -2644,7 +2644,7 @@ async function runCell(stateName, ctlName) {
 // After a control ran (c.before taken; `t0` / `h0` marked as it started): settle the way the control asks, snapshot, then
 // EVERY check — the oracle against the expectations (the state's, the control's `exp` / flipPause / flipMute, what its
 // `run` set), the control's own `check`, the events (a failed / errored switch, a rejected property, an unexpected cancel,
-// a switch from a noSwitch control), HTTP errors, the CLI's exit, and the UI's playing mark + strip against the backend.
+// a switch from a noSwitch control), HTTP errors, the CLI's exit, and the UI's playing mark + playlistBar against the backend.
 // Shared by a matrix cell (runCell) and every fuzz step (fuzzStep).
 // `fuzz`: in a chain an armed advance-on-end switch can fire ON ITS OWN mid-step (k4 is 10 s) — `rotated`. What that makes
 // unknowable from outside is skipped: the control's own check (its before/after comparisons) and the "no switch" / "no
@@ -2679,7 +2679,7 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
     if (e.event === "source.error" && !K_.expectFail && !(K_.allowErr && K_.allowErr(e))) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
     if (e.event === "source.rejected") v.push(`source.rejected ${e.prop}: ${e.reason}`);
     if (rotated) continue;
-    if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("strip") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
+    if (e.event === "transition.cancelled" && !K_.switch && !K_.rearms && !ctlName.startsWith("pl") && !ctlName.startsWith("playlistBar") && !ctlName.startsWith("trash")) v.push(`a switch was cancelled (${e.corr}, ${e.reason})`);
     if (e.event === "transition.scheduled" && K_.noSwitch) v.push(`a switch was requested (${TITLE(e.path)})`);
   }
   const asset = /\/(media|img|anim|assets|transitions)\b|favicon|icons\.svg/;
@@ -2689,10 +2689,10 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
     const cur = c.after.cur?.path ? TITLE(c.after.cur.path) : null;
     if (p && cur && !p.cards.includes(cur)) v.push(`UI marks ${JSON.stringify(p.cards)} as playing, backend plays ${cur}`);
   }
-  // the strip the UI shows == the backend's playlist (a stale strip saves itself back over it)
-  const strip = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
+  // the playlist bar the UI shows == the backend's playlist (a stale playlistBar saves itself back over it)
+  const playlistBar = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
-  if (strip && JSON.stringify(strip) !== JSON.stringify(want)) v.push(`UI strip ${JSON.stringify(strip)}, backend playlist ${JSON.stringify(want)}`);
+  if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
   // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`the command took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
@@ -2730,7 +2730,7 @@ function rotatedDuring(before, evs) {
 //     noOutput > pausedEffect > effect > paused > muted > pending(Global) > playlist(Global) > single — a control's
 //     `states` must list it; an unrestricted control runs under every label: the matrix leaves its opt-in states to the
 //     controls that list them only to bound its size), the roles (shown = on screen / the outgoing A, other = the
-//     incoming B / the armed B / the strip's next / an off-screen item) and the flags the checks read (playlist, pending
+//     incoming B / the armed B / the playlist bar's next / an off-screen item) and the flags the checks read (playlist, pending
 //     = advance-on-end, fresh = at the session's first history item, mid = mid-effect, cutsOk = a transition is off).
 //   - The EXPECTATIONS carry across steps instead: paused / muted go from the start state's `exp` through every control's
 //     exp / flipPause / flipMute / what its run set, exactly as in a cell — a pause or mute silently lost still fails;
@@ -2746,14 +2746,14 @@ function rotatedDuring(before, evs) {
 // Which controls a chain may use, and when — the first matching rule wins; every other control: any step its `states`
 // allow.  exclude: never.  last: only as a run's LAST step — what it leaves behind, the later controls' expectations
 // can't follow.  when(x): only while x (the derived context) holds — the control's drive or check assumes a starting
-// value.  shrinks: takes an item out of the strip — only while it holds ≥ 3 (never below 2: a one-item playlist has
+// value.  shrinks: takes an item out of the playlist bar — only while it holds ≥ 3 (never below 2: a one-item playlist has
 // nowhere to go next, an empty one isn't specified).  removes(x): the item it takes out — when that's what a running
 // playlist plays, only as the last step (the backend goes on from the removed item's old place, which no later "the
-// strip's next" expectation can know).
+// playlistBar's next" expectation can know).
 const sameIds = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const ownTr = (x, ids, ms) => x.ps.transitionEnabled !== false && sameIds(x.ps.transitionEffectIds, ids) && (ms === undefined || x.ps.transitionDurationMs === ms);
 const gTrOn = (x) => x.s.globalTransitionEnabled !== false;
-const notInStrip = (x) => K.some((p) => !x.strip.includes(p));
+const notInPlaylistBar = (x) => K.some((p) => !x.playlistBar.includes(p));
 // an item control's check wants its value saved as the item's own — one equal to the global is saved as "follows the
 // global" instead (LibraryService.SaveVolumeOverride/SaveSpeedOverride), so only while the global is something else
 const offGlobal = (vol, spd) => (x) => (vol === undefined || ![].concat(vol).includes(x.s.volume)) && (spd === undefined || Math.abs(x.s.speed - spd) > 1e-6);
@@ -2767,9 +2767,9 @@ const FUZZ_RULES = [
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
-  [/^plShuffle$/, { last: "a shuffled order makes every later 'the strip's next' expectation (armedCheck, *+next) unknowable" }],
+  [/^plShuffle$/, { last: "a shuffled order makes every later 'the playlist bar's next' expectation (armedCheck, *+next) unknowable" }],
   [/^(plInterval|plIntervalZero|plAdvanceRelabel|gInterval8s|gAdvanceRelabel|seq:pause\+plInterval)$/, { last: "leaves a 4–8 s rotation switching on its own between the later steps" }],
-  [/-keep$/, { last: "KeepPauseOnSwitch stays on — every later switch from a pause expects it to resume" }],
+  [/-keep$/, { last: "StayPausedWhenSwitching stays on — every later switch from a pause expects it to resume" }],
   [/^cli:volume-(up|down):global$/, { last: "VolumeKeyTarget stays global — the later volume keys expect auto", when: (x) => offGlobal(30)(x) }], // its pre: own 30
   [/^cli:volume-(up|down):item$/, { last: "VolumeKeyTarget stays item — the later volume keys expect auto",
     when: (x) => [x.cur, x.shown, x.other].every((p) => !p || x.ownVol(p) == null) }], // its check: nothing live had its own volume
@@ -2780,16 +2780,16 @@ const FUZZ_RULES = [
   [/^(gTrOff|gTrDuration|gTrShort|gTrZero|gMethodFrozen)$/, { when: (x) => (x.label === "pending" ? ownTr(x, ["fade"], 600) : gTrOn(x)) }],
   [/^seq:plOverrideOn\+advanceOn$/, { when: (x) => ownTr(x, ["fade"], PS().transitionDurationMs) }], // its check: PS()'s own transition
   [/^plAdvanceOff$/, { when: (x) => x.ps.overrideGlobalSettings !== false }], // the modal's checkbox is disabled while the playlist follows the globals
-  [/^(selToggle:add|cardToggle:add)$/, { when: notInStrip }], // adds an item the strip doesn't hold
-  [/^selToggle:remove$/, { when: notInStrip, shrinks: true, removes: (x) => x.other }],
-  [/^(stripRemove|stripRemoveMenu):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
+  [/^(selToggle:add|cardToggle:add)$/, { when: notInPlaylistBar }], // adds an item the playlist bar doesn't hold
+  [/^selToggle:remove$/, { when: notInPlaylistBar, shrinks: true, removes: (x) => x.other }],
+  [/^(playlistBarRemove|playlistBarRemoveMenu):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
-  [/^seq:stripRemove\+next:/, { shrinks: true }],
-  [/^seq3:stripRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
+  [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
+  [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
   // Settings → "Mute audio" on disables the Volume slider and "Normalize audio" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
-  [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^stripVol:/, { when: offGlobal(42) }],
+  [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^playlistBarVol:/, { when: offGlobal(42) }],
   [/^itemVolDrag:/, { when: offGlobal(20) }], [/^itemSpdDrag:/, { when: offGlobal(undefined, 2.6) }], [/^itemVolDragEsc:/, { when: offGlobal(30) }],
   [/^selVol:/, { when: offGlobal(33) }], [/^seq:itemVolDrag\+next:/, { when: offGlobal(25) }], [/^seq:itemSpdDrag\+next:/, { when: offGlobal(undefined, 2.2) }],
   [/^seq3:pause\+itemVolDrag\+resume$/, { when: offGlobal(25) }], [/^seq:previewDrag\+reopen$/, { when: offGlobal(undefined, 1.8) }],
@@ -2801,7 +2801,7 @@ function fuzzEligible(n, x, last) {
   if (r.exclude || (r.last && !last)) return false;
   if (states && !states.includes(x.label)) return false;
   if (r.when && !r.when(x)) return false;
-  if (r.shrinks && x.strip.length < 3) return false;
+  if (r.shrinks && x.playlistBar.length < 3) return false;
   if (r.removes && !last && x.playlist && r.removes(x, n) === x.cur) return false;
   return true;
 }
@@ -2820,19 +2820,19 @@ function fuzzContext(snap, fz) {
   const live = !!snap.cur?.path || (fz.noOutput && sourcesOf(st).length > 0);
   const playlist = live && !!snap.cur?.timed;
   const ts = playlist ? readTimed() : null;
-  const pending = playlist && !!ts?.AdvanceOnVideoEnd;
+  const pending = playlist && !!ts?.SwitchWhenVideoEnds;
   const hi = ts ? (ts.WaitingForVideoEnd && ts.HistoryIndex > 0 ? ts.HistoryIndex - 1 : ts.HistoryIndex) : -1; // PlayerHelper.PlayingHistoryIndex
   const cur = snap.cur?.path ?? (live ? (playlist ? ts?.History?.[hi] : snap.s.lastSession?.paths?.[0]) ?? null : null);
-  const strip = snap.ps?.videoPaths || [], ps = snap.ps?.settings || {}, own = ps.overrideGlobalSettings !== false;
+  const playlistBar = snap.ps?.videoPaths || [], ps = snap.ps?.settings || {}, own = ps.overrideGlobalSettings !== false;
   let shown = cur, other = null;
   if (midT) { other = pathOf(midT.to) ?? cur; shown = [...midT.from.map(pathOf), ...sourcesOf(st).map(([, n]) => n.path)].find((p) => p && p !== other) ?? cur; }
   else if (armedT) other = pathOf(armedT.to);
-  else if (playlist) other = succ(strip, cur);
+  else if (playlist) other = succ(playlistBar, cur);
   if (!live) shown = other = null;
   else if (!other || other === shown) other = [K[2], K[1], K[3], K[0]].find((p) => p !== shown);
   const label = !live ? "idle" : fz.noOutput ? "noOutput" : midT ? (paused ? "pausedEffect" : "effect") : paused ? "paused" : snap.muted ? "muted"
     : pending && armedT ? (own ? "pending" : "pendingGlobal") : playlist ? (own ? "playlist" : "playlistGlobal") : "single";
-  return { label, cur, shown, other, playlist, pending, fresh: playlist && hi === 0, mid: !!midT, strip, ps, s: snap.s, before: snap,
+  return { label, cur, shown, other, playlist, pending, fresh: playlist && hi === 0, mid: !!midT, playlistBar, ps, s: snap.s, before: snap,
     ownVol: (p) => (snap.lib || []).find((i) => i.videoPath === p)?.volumeOverride ?? null,
     cutsOk: snap.s.globalTransitionEnabled === false || ps.transitionEnabled === false };
 }
@@ -2864,7 +2864,7 @@ async function fuzzStep(name, x, fz) {
   fz.exp = { paused: c.exp.paused, muted: c.exp.muted };
   return { ...base, result: a.violations.length ? "FAIL" : "PASS", violations: a.violations.length ? a.violations : undefined, rotated: a.rotated || undefined,
     warnings: a.warnings, target: c.target ? TITLE(c.target) : undefined, exp: { ...fz.exp },
-    after: { cur: TITLE(c.after.cur?.path ?? null), strip: (c.after.ps?.videoPaths || []).map(TITLE), paused: !!c.after.st.graph.player?.paused, muted: c.after.muted },
+    after: { cur: TITLE(c.after.cur?.path ?? null), playlistBar: (c.after.ps?.videoPaths || []).map(TITLE), paused: !!c.after.st.graph.player?.paused, muted: c.after.muted },
     logs: a.logs, player: a.player, http: a.http, events: a.events };
 }
 

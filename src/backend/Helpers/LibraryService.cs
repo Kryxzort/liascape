@@ -447,7 +447,7 @@ public static class LibraryService
     }
 
     // ---------- WE auto-import → local/<id> ----------
-    public static List<string> SyncWallpaperEngine(string workshopPath, bool allowScenes, bool weCopyFiles)
+    public static List<string> SyncWallpaperEngine(string workshopPath, bool allowScenes, bool copyFilesInsteadOfSymlinking)
     {
         var added = new List<string>();
         if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return added;
@@ -509,7 +509,7 @@ public static class LibraryService
     }
 
     // ---------- replace a direct-DL with the WE-dir copy when it appears ----------
-    public static void ReconcileDirectDownloads(string workshopPath, bool weCopyFiles)
+    public static void ReconcileDirectDownloads(string workshopPath, bool copyFilesInsteadOfSymlinking)
     {
         if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return;
         var workshopLib = LibraryStore.SourceDir(LibraryStore.Workshop);

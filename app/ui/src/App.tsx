@@ -5,9 +5,9 @@ import { useStore } from "./store";
 import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
-import { PlaylistStrip } from "./components/PlaylistStrip";
+import { PlaylistBar } from "./components/PlaylistBar";
 import { PreviewModal } from "./components/PreviewModal";
-import { LibrarySettingsModal } from "./components/LibrarySettingsModal";
+import { CardSettingsModal } from "./components/CardSettingsModal";
 import { SETTINGS_MORPH } from "./components/morph";
 import type { Wallpaper } from "./api/client";
 import { CLIENT_ID } from "./api/client";
@@ -57,7 +57,7 @@ export default function App() {
     // a scene broke for good (liascape-player: past its restart budget) — the backend marked it crashed in its index:
     // its card shows it at once (it used to wait for the next library reload)
     else if (e.type === "scene-crashed") s.itemChangedByBackend(e.payload.path, { hasCrashed: true });
-    // another client (a script, a second window) saved the playlist: a stale strip would save itself back over it
+    // another client (a script, a second window) saved the playlist: a stale playlistBar would save itself back over it
     else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
   }, []); // eslint-disable-line
   // the backend came back (a restart under the open page): re-read everything it mirrors; a Browse list the outage
@@ -92,10 +92,10 @@ export default function App() {
   // Keep frozen through the close-morph too (the slower settings one covers the preview's) or the gifs resume
   // mid-morph-back → jank.
   useEffect(() => {
-    if (s.settingsItem || preview) { document.body.classList.add("modal-open"); return; }
+    if (s.cardSettingsItem || preview) { document.body.classList.add("modal-open"); return; }
     const t = setTimeout(() => document.body.classList.remove("modal-open"), SETTINGS_MORPH.close.duration + 40);
     return () => clearTimeout(t);
-  }, [s.settingsItem, preview]);
+  }, [s.cardSettingsItem, preview]);
 
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
@@ -107,8 +107,8 @@ export default function App() {
   // Chrome (bars/modals/dropdowns) goes translucent ONLY when the live wallpaper is behind every tab;
   // otherwise it's fully opaque. Drives the :root.bg-live translucency vars (--tr / --tr-strong).
   useEffect(() => {
-    document.documentElement.classList.toggle("bg-live", !!s.settings?.wallpaperBgAllTabs);
-  }, [s.settings?.wallpaperBgAllTabs]);
+    document.documentElement.classList.toggle("bg-live", !!s.settings?.liveWallpaperBehindAllTabs);
+  }, [s.settings?.liveWallpaperBehindAllTabs]);
 
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,7 +120,7 @@ export default function App() {
   const src = s.sources[s.activeSource];
   const gVol = (s.settings?.volume as number) ?? 100;
   const gSpd = (s.settings?.speed as number) ?? 1;
-  const bgAllTabs = !!(s.settings?.wallpaperBgAllTabs);
+  const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
     <div className="app">
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
@@ -184,13 +184,13 @@ export default function App() {
         {tab === "library" && <Library />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
 
-        {tab === "library" && <PlaylistStrip />}
+        {tab === "library" && <PlaylistBar />}
 
         <PreviewModal w={preview} source={s.activeSource} onClose={() => setPreview(null)}
           onDownload={(w) => s.download(s.activeSource, w, true)} />
-        {/* lifted: library cards AND strip items open it; it morphs out of / back into them (components/morph.ts) */}
-        <LibrarySettingsModal item={s.settingsItem} siblings={s.settingsSiblings} morphId={s.settingsMorphId} source={s.settingsSource}
-          globalVolume={gVol} globalSpeed={gSpd} onClose={s.closeItemSettings} />
+        {/* lifted: library cards AND playlistBar items open it; it morphs out of / back into them (components/morph.ts) */}
+        <CardSettingsModal item={s.cardSettingsItem} siblings={s.cardSettingsSiblings} morphId={s.cardSettingsMorphId} source={s.cardSettingsSource}
+          globalVolume={gVol} globalSpeed={gSpd} onClose={s.closeCardSettings} />
       </LayoutGroup>
       <Suspense fallback={null}>
         <SteamModal />

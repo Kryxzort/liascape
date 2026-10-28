@@ -53,7 +53,7 @@ task text where they differ:
   align:end uses it like a video's. Scenes still never emit `Ended`. **+M task.**
 - **Mouse interaction on** (as planned, Task 7).
 - **Scene properties editor IN Phase 2**: read each scene's `project.json` `general.properties` (types: color,
-  slider, bool, combo, text, …), show them in the item settings modal, apply live (`wp_project_property_set_*`
+  slider, bool, combo, text, …), show them in the card settings modal, apply live (`wp_project_property_set_*`
   through the worker protocol), persist per item in the library index (`LibMeta`), re-applied at every open. Matrix
   cells for set → live → persisted → survives a switch/restart. **+L task** (backend + worker + UI).
   **Done (2026-10-28)** — the worker side was Task 7's `scene_props`; this added the rest
@@ -72,7 +72,7 @@ task text where they differ:
   with `a. value` and `ds+media.value`), adapter IT § scene properties (RED on the base backend: 15 failing, the rest
   175 pass; GREEN 189/0), matrix `sceneProp:set|switch|restart|reset` (RED on the base backend + UI: 2 fail + 2
   error; GREEN 4/4). Full matrix (`--changed liascape-player`, every cell — central files changed, `--jobs 2`, 33 min, load
-  5–9 with other agents' runs): 748 pass / 1 fail / 2 error / 29 skip — `playlist × stripVol:other`,
+  5–9 with other agents' runs): 748 pass / 1 fail / 2 error / 29 skip — `playlist × playlistBarVol:other`,
   `globalDragVol`, `globalDragSpd` (a Settings slider "not found" / an override not saved in time), each passing 2/2
   alone (load). `test-settings-merge.sh` 53/0, `player-selftest` PASS.
 - **Install: hard-fail with per-distro package lines**, `--no-scenes` to build without (as planned).
@@ -129,7 +129,7 @@ The original recommendations follow for reference.
 2. **D2 — Worker language:** Rust binary `liascape-scene-worker` in the liascape-player crate, calling LWE's C API. **Recommend this.** Alternative: C++ (spec §13's note).
 3. **D3 — LWE source:** pin + fetch at build (`third_party/lwe/PIN`, patches in `patches/lwe/`). **Recommend this.** Alternative: the spec's verbatim `third_party/lwe/` tree (~125 MB with submodules).
 4. **D4 — Visualiser input:** the default sink's monitor (system audio, as LWE's frontend and WE do). **Recommend this.** Alternative: the player bus (wallpaper audio only, spike §6).
-5. **D5 — Scene fps for an output with no `LweMonitors` entry:** 30 (LWE's default). **Recommend this.** Alternative: the output's refresh.
+5. **D5 — Scene fps for an output with no `SceneMonitors` entry:** 30 (LWE's default). **Recommend this.** Alternative: the output's refresh.
 6. **D6 — Crashed scenes:** skip a scene marked crashed unless whitelisted (what the UI already promises; nothing enforces it today). **Recommend this.** Alternative: report only.
 7. **D7 — Hermetic test scene:** the worker's synthetic renderer behind a test-only gate; real LWE is covered on-machine with `431960` scenes. **Recommend this.** (WE's `assets/` are proprietary, so no real scene renders hermetically.)
 
@@ -139,8 +139,8 @@ The original recommendations follow for reference.
 | D2 | One wire protocol as shared Rust types (`worker::proto`), reuses `gfx::egl`, `log`, `units`, pipewire-rs; LWE's API is plain C (~25 calls + ours), no C++ needed outside the patches. The compositor binary never links LWE (`rustc-link-arg-bin` targets the worker only). | Worker becomes `src/player-workers/scene/` (C++, CMake); `worker::proto` is mirrored in a C header and a protocol test checks both encodings. +~1 day. |
 | D3 | Spec §7's goals (mechanical rebases, credited patches) hold; the repo doesn't grow by ~125 MB of glslang/SPIRV-Cross/json/Catch2 sources. The flake fetch is hash-pinned; `install.sh` already needs network (npm, dotnet). | Task 1 commits the tree via `scripts/lwe.sh vendor` instead of `fetch`; the flake uses `./third_party/lwe`. Same patches. |
 | D4 | WE and LWE's own frontend (`frontend/.../Pulseaudio.cpp`: "output monitor" of the default sink) feed visualisers system audio, so bars move with your music. | `audio::sysmon` taps the bus monitor instead; bars react to wallpaper audio only. |
-| D5 | LWE's own default and `LweMonitorSettings.Fps`'s default; the UI pre-fills listed monitors with their refresh anyway. | Schema default of `out:<c>.scene_fps` becomes 0 (= refresh). |
-| D6 | `LibrarySettingsModal` shows "Scene crashed — won't be played" + a whitelist box, but `MarkCrashed` has no caller and nothing skips. Inert for legacy (nothing marks there). | `source.broken` only marks + notifies; `IsSkippedPath` unchanged. |
+| D5 | LWE's own default and `SceneMonitor.Fps`'s default; the UI pre-fills listed monitors with their refresh anyway. | Schema default of `out:<c>.scene_fps` becomes 0 (= refresh). |
+| D6 | `CardSettingsModal` shows "Scene crashed — won't be played" + a whitelist box, but `MarkCrashed` has no caller and nothing skips. Inert for legacy (nothing marks there). | `source.broken` only marks + notifies; `IsSkippedPath` unchanged. |
 | D7 | Every real scene needs WE's `assets/shaders/*`; CI/sandbox has none. Task 1 Step 6 still checks whether an assets-free scene renders; if one does it becomes a second fixture. | Hermetic tests cover only protocol/lifecycle; all rendering tests become on-machine. |
 
 ---
@@ -175,7 +175,7 @@ The original recommendations follow for reference.
   alpha is 0 in every core pixel → the worker forces alpha = 1.
 - **Build (spec §3):** the scene worker builds by default; `install.sh` hard-fails with per-distro package lines when
   its dependencies are missing unless `--no-scenes`, which hides scenes like `AllowScenes=false`. The flake builds it.
-- **Settings apply live:** `LweMonitors` fps becomes the live `out:<c>.scene_fps`; under liascape-player it is no longer
+- **Settings apply live:** `SceneMonitors` fps becomes the live `out:<c>.scene_fps`; under liascape-player it is no longer
   the launch-only exception. Scenes are 1×: `speed`/`loop` and the video-only props are accepted, stored, ignored;
   a scene never emits `Ended`.
 - `PlayerEngine` stays `legacy` by default; legacy behaviour must not change.
@@ -879,13 +879,13 @@ GPU context losses (the record's `reason` starts "GL context lost").
   from `hello`; `ScenesAvailable` = `scene` capability when connected, else `liascape-player scene-check` cached 30 s;
   `Topics` += `source.broken`), `LiascapePlayerMedia.cs` (`SourceProps`: a scene folder → `kind: "scene"` + `preview` =
   the item's `ThumbnailPath`, `af` ""; `OwnStreamFilter` also matches `node.name` prefix `liascape-player-`;
-  `ApplySceneFps(LweMonitors)` → `set out:<name>.scene_fps` per entry, queued coalescible `scene_fps:<name>`;
+  `ApplySceneFps(SceneMonitors)` → `set out:<name>.scene_fps` per entry, queued coalescible `scene_fps:<name>`;
   `OnEvent("source.broken")` → `PlayerHelper.OnSceneBroken(path)`), `Helpers/PlayerHelper.cs` (`Apply(scene)` goes
   through `ScenesPlayable` with liascape-player reasons — no WE assets / built `--no-scenes` / scene support off — instead
   of always throwing; `IsSkippedPath` = scene && (!playable || (`HasCrashed` && !`IsWhitelisted`)) (D6);
   `OnSceneBroken(path)`: `LibraryService.MarkCrashed`, `OnSceneCrashed`, and if it is the playing item of a timed
   playlist, advance now (the legacy tick's crash branch); the V→S lead and `SceneTransitionDelayMs` stay
-  legacy-only), `Web/ServerHost.cs` (`/settings`: a `LweMonitors` diff → `ApplySceneFps` live; `/player-engine` +
+  legacy-only), `Web/ServerHost.cs` (`/settings`: a `SceneMonitors` diff → `ApplySceneFps` live; `/player-engine` +
   `scenes {available, reason, assets_dir}`), `app/ui/src/views/Settings.tsx` (under liascape-player: hide "Scene
   transition delay" and the primary radio, label the fps "fps (live)"), `Player/LiascapePlayerSelfTest.cs`,
   `scripts/test-liascape-player-adapter.sh`, `.claude/rules/player-adapter.md`
@@ -905,7 +905,7 @@ setting → `get player.<prop>` live; with `LIASCAPE_PLAYER_VRAM_PROBE=fake:<fil
 advances the rotation without a crash mark.
 
 - [x] **Done (2026-10-28), commit `Wire Scene GPU Budget And VRAM Settings`** (`.claude/rules/player-adapter.md` §
-  Scenes → "GPU / VRAM settings"): `AppSettings.SceneThrottle` (true), `SceneVramLimitEnabled` (false) +
+  Scenes → "GPU / VRAM settings"): `AppSettings.AutoThrottleScenes` (true), `LimitVramPerScene` (false) +
   `SceneVramLimitMib` (1536, 64–1048576, kept while off), `VramLowMode` (`stop`); `/settings` diff →
   `LiascapePlayerMedia.ApplyGpuSettings` (coalescible `player:<prop>`), re-asserted per player process with the scene fps;
   `scene.vram_exceeded` subscribed → `PlayerHelper.OnSceneVramStopped` (WS `scene-vram-stopped`, the shared
@@ -922,7 +922,7 @@ advances the rotation without a crash mark.
   - adapter IT (hermetic, synthetic scenes, `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`): `/apply` a scene →
     `cur:*.kind == scene`, ready ≤ 3 s; `/next` V→S and S→V full-live fades → `transition.handoff`; Volume 50 →
     the scene's `gain.user` −18.06; `/library/volume` on the playing scene moves that source only; NoAudio toggles
-    its `no_audio` live, same worker pid; a `LweMonitors` fps change → `out:<c>.scene_fps`, same pid; a crashing
+    its `no_audio` live, same worker pid; a `SceneMonitors` fps change → `out:<c>.scene_fps`, same pid; a crashing
     scene in a timed playlist → WS `scene-crashed`, index `Crashed: true`, advanced ≤ 2 s, skipped by `/next`,
     whitelisted → plays again; missing folder → `transition.failed`, not marked crashed; `AllowScenes=false` →
     `/next` skips scenes; `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` → scenes skipped and `/player-engine.scenes.available
@@ -964,7 +964,7 @@ library before the backend starts: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashin
 - [x] **Step 1:** Add cells, each with a `ctl`/probe oracle: `apply:scene` (idle/single/playlist), `next:v→s`,
   `next:s→v`, `next:s→s` × TransitionMethod, `pause:scene` (two captures 500 ms apart equal, `gain.pause` −96),
   `mute:scene`, `volume:scene`, `itemVol:scene`, `noAudio:scene`, `trash:playingScene`, `crash:scene` (s3 →
-  broken → `crashed` card + strip advanced), `noOutput:scene`, `settings:sceneFps` (same pid, new rate),
+  broken → `crashed` card + playlist bar advanced), `noOutput:scene`, `settings:sceneFps` (same pid, new rate),
   `playlist:sceneInterval` (3 s interval advances off a scene), `restore:scene` (backend restart → same scene).
 - [x] **Step 2:** `scripts/test-ui-matrix.sh --changed` → the scene cells run, FAIL where the UI hides scenes.
 - [x] **Step 3:** fix what they find. **Step 4:** full matrix green (Phase 1 baseline 681 pass / 28 structural
@@ -972,11 +972,11 @@ library before the backend starts: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashin
 - [x] **Step 5:** Commit `Cover Scenes In The UI Matrix`.
 
 **Done (2026-10-28)** (`.claude/rules/web-ui.md` § "Scene cells"): 29 scene cells — the plan's list + `itemSpd:scene`,
-`settings:sceneThrottle|vramLimit|vramLowMode` (Task 8's settings), `vram:exceeded` (the fake VRAM probe), `trash:
+`settings:autoThrottleScenes|vramLimit|vramLowMode` (Task 8's settings), `vram:exceeded` (the fake VRAM probe), `trash:
 playingScene` in a playlist too. **Deviations:** scene support stays OFF in the baseline settings (with it on, the
 library-stepping / random cells landed on scenes nondeterministically, s3 included) — the opt-in scene states
 (`scene`, `sceneV`/`sceneS`/`sceneS2` = the playlist [k1, s1, s2, k2] at each) and each scene control turn it on; s3
-crashes 1.5 s after every start (not 400 ms: the strip-click switch's 1.2 s fade must hand off first); the interval
+crashes 1.5 s after every start (not 400 ms: the playlist bar-click switch's 1.2 s fade must hand off first); the interval
 cell uses 4 s (3 s raced the checks' settle); `restore:scene` restarts the backend on the same port from the probe
 (`LIASCAPE_PORT`, recorded for the cleanup) — the scene stays on the same worker. **Bugs found + fixed (UI):** a crashed
 scene's card wasn't marked until a library reload (WS `scene-crashed` unhandled → now `hasCrashed`); the VRAM stop's
@@ -1074,7 +1074,7 @@ corpus-runner fix; open findings in `docs/TODO.md` → "Phase 2 battery findings
 `docs/player/debugging.md` (rows: scene black → `probe workers`/`source.error`; scene frozen → `latched` vs
 `stale_reuses`; scene silent → bus links + `has_audio`; crash loop → `crashes/*.json`; throttled →
 `scene.throttled`), `.claude/rules/player-core.md` (§ Scene worker, § Sources scene rows — each earlier task already
-added its own), `CLAUDE.md` (scenes play under liascape-player; `LweMonitors` is no longer launch-only there; the new
+added its own), `CLAUDE.md` (scenes play under liascape-player; `SceneMonitors` is no longer launch-only there; the new
 build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items and the deferred items below)
 
 - [x] **Step 1:** Update the files; `cargo test -q --test credits` PASS.

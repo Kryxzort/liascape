@@ -33,7 +33,7 @@ app.whenReady().then(async () => {
   const after = await js(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);
   out.accentBefore = before; out.accentAfter = after; out.accentChanged = before !== after;
 
-  // C. library tab → toggle first card into playlist → strip count rises
+  // C. library tab → toggle first card into playlist → playlistBar count rises
   await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Library')?.click()`);
   await wait(1200);
   const plBefore = await js(`document.querySelectorAll('.pl-item').length`);

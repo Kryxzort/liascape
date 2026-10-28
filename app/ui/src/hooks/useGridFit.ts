@@ -22,7 +22,7 @@ export function useGridFit(ref: RefObject<HTMLElement | null>) {
       const cs = getComputedStyle(el);
       const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
       // use the TOP padding for both sides — the bottom padding is dynamic (reserves space for the
-      // overlaid playlist strip via --strip-h); counting it would resize cards when the bar expands.
+      // overlaid playlist bar via --playlist-bar-h); counting it would resize cards when the bar expands.
       const padTop = parseFloat(cs.paddingTop) || 0;
       const gap = parseFloat(cs.getPropertyValue("--gap")) || 14;
       const w = el.clientWidth - padX;

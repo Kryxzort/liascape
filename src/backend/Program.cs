@@ -129,10 +129,10 @@ sealed class Program
             // independent of auto-import: swap any direct-DL copy whose workshop ID now lives in the WE dir
             // for a symlink/copy of the WE file (in place → playlists/session stay valid; reclaims disk).
             if (settings.ReplaceDirectWithWorkshop)
-                LibraryService.ReconcileDirectDownloads(settings.WallpaperEnginePath, settings.WeCopyFiles);
-            if (!settings.AutoImportWallpaperEngine) return;
+                LibraryService.ReconcileDirectDownloads(settings.WorkshopFolder, settings.CopyFilesInsteadOfSymlinking);
+            if (!settings.AutoAddWeWallpapersToLibrary) return;
             var newPaths = LibraryService.SyncWallpaperEngine(
-                settings.WallpaperEnginePath, settings.AllowScenes, settings.WeCopyFiles);
+                settings.WorkshopFolder, settings.AllowScenes, settings.CopyFilesInsteadOfSymlinking);
             if (newPaths.Count == 0) return;
             if (!settings.AutoAddLibraryToPlaylist) return;
 
