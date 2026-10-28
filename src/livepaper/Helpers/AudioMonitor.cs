@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -114,52 +113,92 @@ public static class AudioMonitor
         }
     }
 
-    // Watches pactl subscribe and maintains one parec --monitor-stream per non-mpv stream.
-    // Parses stream IDs directly from event lines for immediate start; verifies non-mpv in background.
+    // One watched sink-input: its parec monitor runs from the stream's first event (parec needs ~65-76 ms to its
+    // first chunk, so it warms up meanwhile), but its level COUNTS only once the stream is classified foreign.
+    private sealed class StreamWatch(CancellationTokenSource cts)
+    {
+        public readonly CancellationTokenSource Cts = cts;
+        public volatile bool Foreign;
+    }
+
+    // Watches pactl subscribe and maintains one parec --monitor-stream per foreign (not-ours) stream.
+    // Classify-then-count: a stream's level never counts before `ClassifyAsync` says it isn't ours, and a stream
+    // classified ours is remembered until its `remove` — its later `change` events (uncork, relink, a volume or
+    // property change) never open another window. Before (owner report, 2026-10-28): a new stream was counted at
+    // once and checked 100 ms later, and every `change` re-added an already-checked own stream → each switch's
+    // incoming source (lp-player's mpv `lp-player` / scene worker `lp-player-scene.<id>` stream, ramping in at
+    // −62 dB > the −70 dB threshold) auto-muted the wallpaper for a hitch — for the whole unmute delay when > 0.
     private static async Task WatchStreamsAsync(double thresholdDb, CancellationToken ct)
     {
         Interlocked.Exchange(ref _aboveThresholdCount, 0);
-        var activeMonitors = new ConcurrentDictionary<uint, CancellationTokenSource>();
+        var watches = new Dictionary<uint, StreamWatch>();
+        var own = new HashSet<uint>();   // classified ours; forgotten at `remove` (a sink-input index can be reused)
+        var gate = new object();
 
-        void StartMonitor(uint id)
+        static void Drop(StreamWatch w)
         {
-            var streamCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            if (!activeMonitors.TryAdd(id, streamCts))
+            w.Cts.Cancel();
+            w.Cts.Dispose();
+        }
+
+        void OnStream(uint id, bool? knownForeign = null)
+        {
+            StreamWatch w;
+            lock (gate)
             {
-                streamCts.Dispose();
-                return;
+                if (own.Contains(id) || watches.ContainsKey(id)) return;
+                w = new StreamWatch(CancellationTokenSource.CreateLinkedTokenSource(ct)) { Foreign = knownForeign == true };
+                watches[id] = w;
             }
-            _ = Task.Run(() => MonitorStreamAsync(id, thresholdDb, streamCts.Token));
-            // Verify not mpv in background; cancel + remove if it is
+            var token = w.Cts.Token;
+            _ = Task.Run(() => MonitorStreamAsync(id, thresholdDb, w, token));
+            if (knownForeign == true) return;
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await Task.Delay(100, ct);
-                    var nonMpv = await GetNonMpvStreamIdsAsync(ct);
-                    if (!nonMpv.Contains(id) && activeMonitors.TryRemove(id, out var cts))
+                    // a stream not listed yet (its event raced the listing) is asked again a few times, never counted
+                    for (int attempt = 0; attempt < 4; attempt++)
                     {
-                        cts.Cancel();
-                        cts.Dispose();
+                        if (attempt > 0) await Task.Delay(50, token);
+                        var verdict = await ClassifyAsync(id, token);
+                        if (verdict == null) continue;
+                        lock (gate)
+                        {
+                            if (!watches.TryGetValue(id, out var cur) || cur != w) return;   // removed meanwhile
+                            if (verdict == true) { w.Foreign = true; return; }
+                            watches.Remove(id);
+                            own.Add(id);
+                        }
+                        Drop(w);
+                        return;
                     }
+                    lock (gate) { if (watches.TryGetValue(id, out var cur) && cur == w) watches.Remove(id); else return; }
+                    Drop(w);   // never listed: gone before it could be judged
                 }
                 catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }   // removed (cancelled + disposed) mid-classification
             });
         }
 
-        void StopMonitor(uint id)
+        void OnRemove(uint id)
         {
-            if (activeMonitors.TryRemove(id, out var cts))
+            StreamWatch? w;
+            lock (gate)
             {
-                cts.Cancel();
-                cts.Dispose();
+                own.Remove(id);
+                if (!watches.Remove(id, out w)) return;
             }
+            Drop(w);
         }
 
         // Initial reconciliation for streams already active before we started
-        var initial = await GetNonMpvStreamIdsAsync(ct);
-        foreach (var id in initial)
-            StartMonitor(id);
+        var (listed, foreign) = await ListStreamsAsync(ct);
+        foreach (var id in listed)
+        {
+            if (foreign.Contains(id)) OnStream(id, knownForeign: true);
+            else lock (gate) own.Add(id);
+        }
 
         var psi = new ProcessStartInfo("pactl")
         {
@@ -183,26 +222,32 @@ public static class AudioMonitor
                 if (!line.Contains("sink-input")) continue;
 
                 if ((line.Contains("'new'") || line.Contains("'change'")) && TryParseStreamId(line, out uint newId))
-                    StartMonitor(newId);
+                    OnStream(newId);
                 else if (line.Contains("'remove'") && TryParseStreamId(line, out uint removeId))
-                    StopMonitor(removeId);
+                    OnRemove(removeId);
             }
         }
         catch (OperationCanceledException) { }
         finally
         {
-            foreach (var (_, cts) in activeMonitors)
-            {
-                cts.Cancel();
-                cts.Dispose();
-            }
+            List<StreamWatch> left;
+            lock (gate) { left = [.. watches.Values]; watches.Clear(); own.Clear(); }
+            foreach (var w in left) Drop(w);
             try { proc.Kill(); } catch { }
             proc.Dispose();
         }
     }
 
+    // true = foreign (counts), false = ours (never counts), null = not listed (yet).
+    private static async Task<bool?> ClassifyAsync(uint id, CancellationToken ct)
+    {
+        var (listed, foreign) = await ListStreamsAsync(ct);
+        return !listed.Contains(id) ? null : foreign.Contains(id);
+    }
+
     // Monitors a single stream's actual audio level via parec --monitor-stream.
-    private static async Task MonitorStreamAsync(uint streamId, double thresholdDb, CancellationToken ct)
+    // Its level counts toward `_aboveThresholdCount` only while `watch.Foreign` (classified not ours).
+    private static async Task MonitorStreamAsync(uint streamId, double thresholdDb, StreamWatch watch, CancellationToken ct)
     {
         var psi = new ProcessStartInfo("parec")
         {
@@ -248,7 +293,7 @@ public static class AudioMonitor
                     if (s > peak) peak = s;
                 }
                 double db = peak > 1e-9f ? 20.0 * Math.Log10(peak) : -100.0;
-                bool nowAbove = db > thresholdDb;
+                bool nowAbove = watch.Foreign && db > thresholdDb;
 
                 if (nowAbove && !isAbove) { Interlocked.Increment(ref _aboveThresholdCount); isAbove = true; }
                 else if (!nowAbove && isAbove) { Interlocked.Decrement(ref _aboveThresholdCount); isAbove = false; }
@@ -350,7 +395,10 @@ public static class AudioMonitor
         catch { return false; }
     }
 
-    private static async Task<List<uint>> GetNonMpvStreamIdsAsync(CancellationToken ct)
+    // Every listed sink-input + the foreign ones among them (one `pactl list sink-inputs`; lp-player's ownership
+    // filter — itself a `pactl list short sinks` + maybe a `hello` — and the LWE client ids built concurrently, so
+    // classifying costs one round trip, inside parec's own start-up).
+    private static async Task<(HashSet<uint> listed, HashSet<uint> foreign)> ListStreamsAsync(CancellationToken ct)
     {
         var psi = new ProcessStartInfo("pactl")
         {
@@ -361,28 +409,37 @@ public static class AudioMonitor
         psi.ArgumentList.Add("list");
         psi.ArgumentList.Add("sink-inputs");
 
+        // lp-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
+        var isOwnTask = livepaper.Player.PlayerEngine.IsLpPlayer
+            ? Task.Run<Func<string, bool>?>(livepaper.Player.LpPlayerMedia.OwnStreamFilter, ct)
+            : Task.FromResult<Func<string, bool>?>(null);
+        var lweTask = Task.Run(PlayerHelper.GetLweClientObjectIds, ct);
         Process? proc;
         try { proc = Process.Start(psi); }
-        catch { return []; }
-        if (proc == null) return [];
+        catch { return ([], []); }
+        if (proc == null) return ([], []);
 
         using (proc)
         {
             var output = await proc.StandardOutput.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
-            var lweClientIds = PlayerHelper.GetLweClientObjectIds();
-            // lp-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
-            var isOwn = livepaper.Player.PlayerEngine.IsLpPlayer ? livepaper.Player.LpPlayerMedia.OwnStreamFilter() : null;
-            return ParseNonMpvStreamIds(output, lweClientIds, isOwn);
+            HashSet<string>? lweClientIds;
+            try { lweClientIds = await lweTask; } catch (OperationCanceledException) { throw; } catch { lweClientIds = null; }
+            Func<string, bool>? isOwn;
+            try { isOwn = await isOwnTask; } catch (OperationCanceledException) { throw; } catch { isOwn = null; }
+            return ParseStreams(output, lweClientIds, isOwn);
         }
     }
 
-    private static List<uint> ParseNonMpvStreamIds(string output, HashSet<string>? lweClientIds = null, Func<string, bool>? isOwn = null)
+    internal static (HashSet<uint> listed, HashSet<uint> foreign) ParseStreams(string output, HashSet<string>? lweClientIds = null, Func<string, bool>? isOwn = null)
     {
-        var result = new List<uint>();
+        var listed = new HashSet<uint>();
+        var result = new HashSet<uint>();
         var blocks = output.Split("Sink Input #", StringSplitOptions.RemoveEmptyEntries);
         foreach (var block in blocks)
         {
+            if (!uint.TryParse(block.Split('\n')[0].Trim(), out uint blockId)) continue;
+            listed.Add(blockId);
             if (block.Contains("application.process.binary = \"mpv\"")) continue;
             if (block.Contains("application.name = \"mpv\"")) continue;
             if (block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
@@ -402,11 +459,9 @@ public static class AudioMonitor
                 }
                 if (clientId != null && lweClientIds.Contains(clientId)) continue;
             }
-            var firstLine = block.Split('\n')[0].Trim();
-            if (uint.TryParse(firstLine, out uint id))
-                result.Add(id);
+            result.Add(blockId);
         }
-        return result;
+        return (listed, result);
     }
 
     // Parses "Event 'new' on sink-input #42" → 42

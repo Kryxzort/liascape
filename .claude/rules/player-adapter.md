@@ -222,6 +222,22 @@ in-process inside the compositor, never the supervisor, so this is the right pid
 `lp-player-scene.<source id>` — their own process, so the pid check misses them),
 `target.object`/`Sink:` = the `lp-player-bus` sink (index via `pactl list short sinks`), or
 `application.name == "lp-player"` (an extra match, not the only one). Legacy: unchanged.
+**Timing, not just identity (owner report 2026-10-28: "auto mute is muting itself when a transition plays").**
+Every own stream carries those properties from its first `new` event on (measured on a private PipeWire: mpv's
+`node.name = "lp-player"`, `application.name = "lp-player"`, `target.object = "lp-player-bus"`, pid = the
+compositor; a scene worker's `lp-player-scene.<id>`; the bus playback; no event ever lacked them) — the filter
+was right every time, but `AudioMonitor` COUNTED a new stream's level at once and classified it ~120 ms later
+(100 ms delay + the listing), and every `change` event (the uncork ~200 ms after `new`) re-added an already-
+excluded stream for another window. Each switch's incoming B (a video's mpv stream, or a scene's worker stream —
+every method, every V/S combo, the first `/apply` too) ramps in at ≈ −62 dB, over the −70 dB default threshold →
+with a 0 ms mute delay `gain.mute` −96 on every source for a hitch (~20–60 ms), and for the whole unmute delay
+when that's > 0. Fix: **classify, then count** (`AudioMonitor.WatchStreamsAsync`, player.md § Auto-Mute): parec
+starts at once (warm-up) but its level counts only once the stream is classified foreign (one listing, ~25 ms,
+inside parec's own ~65–76 ms to first data — a foreign stream mutes as fast as before), and an id classified ours
+is never re-watched until its `remove`. Guard: IT § "auto-mute never hears our own switches" — a private
+PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/0 ms at −70 dB, V→V/V→S/S→S/S→V ×
+full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
+unmutes when it ends.
 
 ## Scenes (Phase 2 Task 11; plan `docs/superpowers/plans/2026-10-27-lp-player-phase2-scene-worker.md`)
 A WE scene item's play path is its **folder** (`IsScenePath`, library.md); lp-player plays it as a `kind:
@@ -586,6 +602,11 @@ green live on the same worker, `workers.properties.color.ok`, the index `scenePr
 a slider clamps; a bad combo value / a usershortcut / an unknown name → 400; the preview twin → live, nothing saved;
 switched away and back → a new source opens green; a compositor `kill -9` → the restored scene green; reset one → red
 live (the default sent), dropped from the index, same worker; reset all → no `sceneProps`. RED on the base backend.
+**Auto-mute vs our own audio** (near the end, before the engine switch; SKIPs without pipewire / pipewire-pulse /
+wireplumber / pactl / paplay / parec): the only section with real audio — a private PipeWire + WirePlumber (`policy`,
+one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR`; the whole IT
+exports `PULSE_SERVER` at that socket (libpulse can't fall back to another server or autospawn one); a player WITHOUT
+`--ao null` (its bus on the private PipeWire), then back to the `--ao null` one. Checks § Auto-mute above.
 `LP_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test

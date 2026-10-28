@@ -10,14 +10,15 @@
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
 #   engine lp-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
-#   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker).
+#   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker) ·
+#   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse).
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
 # XDG_STATE_HOME (so its own settings.json, library, lp-player socket + event log) and its own random
 # backend port. It never talks to another backend (e.g. the dev one on :5174), never reads the real
 # settings.json, never connects to the real lp-player socket, never starts or kills mpvpaper (it aborts
 # before any playback call unless the backend reports `active: lp-player`). Display/compositor env is
-# unset; audio is `--ao null`. Everything it started is stopped and its temp dir removed on every exit
+# unset; audio is `--ao null` (but the auto-mute section's, on its own private PipeWire). Everything it started is stopped and its temp dir removed on every exit
 # path (EXIT/INT/TERM/HUP trap; a SIGSTOPped compositor is SIGCONTed first; cleanup kills the SUPERVISOR
 # `$SP` — never just a compositor pid, which would only make it restart again).
 #
@@ -82,7 +83,12 @@ export LP_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LP_SCENE_WORKER_BIN=$ROOT/src/player/t
 # shortened so the speed-drop / long-pause scenarios below reach it in seconds.
 export LP_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 unset LP_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LP_UI_DIR LP_PORT
-SP=""; CP=""; BP=""
+unset PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
+# Audio: every libpulse client (the backend's auto-mute pactl/parec, this script's own) and PipeWire client can only
+# ever reach THIS test's private servers — the auto-mute section's PipeWire + pipewire-pulse in $XDG_RUNTIME_DIR. An
+# explicit PULSE_SERVER also means libpulse never falls back to another server or autospawns one while none runs.
+export PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native
+SP=""; CP=""; BP=""; PWP=""
 cleanup() {
   trap - EXIT INT TERM HUP
   # SIGCONT both the compositor (it may be SIGSTOPped by the stall test) and the supervisor (no-op if
@@ -96,6 +102,7 @@ cleanup() {
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
+  for p in $PWP; do kill -9 "$p" 2>/dev/null; done   # the auto-mute section's private audio daemons
   [ -n "${LP_IT_KEEP:-}" ] && { echo "kept $T"; return; }
   case "$T" in /tmp/lpit-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
@@ -1200,6 +1207,105 @@ SP=$(sup_pid); CP=$(comp_pid)
 sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
 case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "started with the gone supervisor's arguments + --restore" ;; *) bad "the new supervisor ($SP) runs: $sa" ;; esac
 stop_now
+
+echo "== auto-mute never hears our own switches (a private PipeWire + pipewire-pulse; the player on its real audio bus)"
+# Owner report: with AutoMute on (both delays 0) every switch muted the wallpaper for a hitch — for the whole
+# "unmute after" delay when that's > 0. The incoming source's own stream (mpv's `lp-player` node / a scene worker's
+# `lp-player-scene.<id>`) was MONITORED from its first event and only classified as ours ~120 ms later, and each
+# `change` event (its uncork) re-opened that window. Here: AutoMute on, 0/0 delays, −70 dB, every switch combo with
+# each method → no `gain.mute` −96 anywhere; then a foreign stream still mutes, as fast as before.
+# The daemons get their own config/state dirs (no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth device
+# monitor, one null sink): sockets in this test's $XDG_RUNTIME_DIR, where the backend's pactl/parec (PULSE_SERVER,
+# exported above) and the player's PipeWire client look. The owner's audio server is never involved.
+if command -v pipewire >/dev/null && command -v pipewire-pulse >/dev/null && command -v wireplumber >/dev/null \
+   && command -v pactl >/dev/null && command -v paplay >/dev/null && command -v parec >/dev/null; then
+  PW=$T/pw; mkdir -p "$PW/cfg/wireplumber/wireplumber.conf.d" "$PW/state"
+  cat > "$PW/pw.conf" <<'EOF'
+context.properties = { core.daemon = true core.name = pipewire-0
+  default.clock.rate = 48000 support.dbus = false log.level = 1 }
+context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
+context.modules = [
+  { name = libpipewire-module-protocol-native } { name = libpipewire-module-profiler }
+  { name = libpipewire-module-access } { name = libpipewire-module-metadata }
+  { name = libpipewire-module-spa-device-factory } { name = libpipewire-module-spa-node-factory }
+  { name = libpipewire-module-client-node } { name = libpipewire-module-client-device }
+  { name = libpipewire-module-adapter } { name = libpipewire-module-link-factory } ]
+context.objects = [
+  { factory = spa-node-factory args = { factory.name = support.node.driver node.name = Dummy-Driver
+      node.group = pipewire.dummy priority.driver = 20000 } }
+  { factory = adapter args = { factory.name = support.null-audio-sink node.name = it-sink
+      node.description = "it sink" media.class = Audio/Sink audio.position = [ FL FR ]
+      monitor.channel-volumes = true node.group = pipewire.dummy priority.driver = 21000 } } ]
+EOF
+  echo 'wireplumber.profiles = { policy = { support.reserve-device = disabled monitor.alsa.reserve-device = disabled support.portal-permissionstore = disabled script.client.access-portal = disabled support.logind = disabled monitor.bluez.seat-monitoring = disabled hooks.device.profile.state = disabled hooks.device.routes.state = disabled } }' \
+    > "$PW/cfg/wireplumber/wireplumber.conf.d/99-hermetic.conf"
+  # `exec`: $! must be the daemon itself, or the kills below would only hit a wrapping subshell
+  pwd_start() { local log=$1; shift
+    (exec env XDG_CONFIG_HOME="$PW/cfg" XDG_STATE_HOME="$PW/state" DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent "$@" > "$log" 2>&1) &
+    PWP="$PWP $!"; }
+  pwd_start "$PW/pipewire.log" pipewire -c "$PW/pw.conf"
+  waitfor 5000 test -e "$XDG_RUNTIME_DIR/pipewire-0" || bad "the private pipewire never made its socket"
+  pwd_start "$PW/wireplumber.log" wireplumber -p policy
+  pwd_start "$PW/pipewire-pulse.log" pipewire-pulse
+  waitfor 5000 test -S "$XDG_RUNTIME_DIR/pulse/native" || bad "the private pipewire-pulse never made its socket"
+  # a player WITH audio (no --ao null): its bus + mpv/scene streams on the private PipeWire
+  "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
+  for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$SP" 2>/dev/null && kill -9 "$SP"
+  (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real > "$T/serve-am.log" 2>&1) & SP=$!
+  waitfor $WAIT eval 'ctl hello >/dev/null 2>&1'; CP=$(comp_pid)
+  bus_up() { [ "$(ctl probe '{"name":"bus"}' | jq -r .state)" = up ]; }
+  waitfor $WAIT bus_up && ok "the player's audio bus is up on the private PipeWire ($(ctl probe '{"name":"bus"}' | jq -r .target))" \
+    || bad "bus: $(ctl probe '{"name":"bus"}' | jq -c '{state, reason}')"
+  setting '.AutoMute = true | .AutoMuteDelayMs = 0 | .AutoUnmuteDelayMs = 0 | .AutoMuteThresholdDb = -70 | .AutoMuteOnlyIfMprisActive = false
+           | .AllowScenes = true | .NoAudio = false | .Volume = 100 | .Speed = 1 | .NormalizeAudio = false
+           | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 600'
+  # the backend's stream watch (`pactl subscribe`) is a client of the private server
+  am_ready() { [ "$(pactl list clients 2>/dev/null | grep -c 'application.process.binary = "pactl"')" -ge 2 ]; }
+  waitfor $WAIT am_ready && ok "auto-mute watches the private server" || bad "auto-mute's pactl subscribe never connected: $(pactl list short clients 2>&1 | head -3)"
+  amutes() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)] | length'; }
+  sinks_log() { pactl list sink-inputs 2>/dev/null | grep -E 'Sink Input #|node.name|application.name|application.process.id|target.object' | tr -s ' \t' ' ' | paste -sd' ' | sed 's/Sink Input/\n     Sink Input/g'; }
+  post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → $(cur path)"
+  sleep 1
+  for meth in full-live reveal frozen; do
+    setting ".TransitionMethod = \"$meth\""
+    for step in "V→V:$Bc" "V→S:$S1" "S→S:$S2" "S→V:$A"; do
+      lbl=${step%%:*}; to=${step#*:}; m0=$(amutes); n0=$(nsch)
+      post /apply "{\"path\":\"$to\"}" >/dev/null
+      waitfor $WAIT eval 'shows "$to" && switched_to "$to" "$n0"' || bad "$meth $lbl: never handed off to $(basename "$to") (cur $(basename "$(cur path)"))"
+      sleep 0.5   # the incoming stream's events (new, uncork) and the outgoing one's removal are all past
+      m1=$(amutes)
+      [ "$m1" = "$m0" ] && ok "$meth $lbl ($(method_of "$(corr_to "$to" "$n0" now)")): our own audio never auto-muted" \
+        || bad "$meth $lbl: auto-mute fired on our own switch ($((m1 - m0)) gain.mute −96 ramps); streams:$(sinks_log)"
+    done
+  done
+  # a FOREIGN stream still mutes every source — as fast as before — and unmutes when it ends
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=3" -af volume=-12dB "$PW/tone.wav"
+  m0=$(amutes); t0=$(ms_now)
+  paplay --property=application.name=it-foreign "$PW/tone.wav" & TP=$!
+  muted_now() { [ "$(amutes)" -gt "$m0" ]; }
+  if waitfor 3000 muted_now; then
+    tm=$(ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq -r '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)][-1].t_wall')
+    lat=$(python3 -c "import datetime,sys; t=datetime.datetime.fromisoformat(sys.argv[1][:26]+'+00:00'); print(int(t.timestamp()*1000)-$t0)" "$tm")
+    [ "$lat" -le 1000 ] && ok "a foreign stream (paplay) auto-mutes in ${lat} ms (paplay start → the player's mute ramp)" || bad "a foreign stream muted only after ${lat} ms"
+  else bad "a foreign stream played but nothing was auto-muted; streams:$(sinks_log)"; fi
+  wait "$TP" 2>/dev/null
+  unmuted_now() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain.mute] | length > 0 and all(. > -1)' >/dev/null; }
+  waitfor 3000 unmuted_now && ok "…and unmutes when it ends" || bad "still muted after the foreign stream ended: $(ctl state | jq -c '[.graph[] | select(.gain.mute != null) | .gain.mute]')"
+  setting '.AutoMute = false'
+  stop_now
+  # back to the --ao null player the rest of the test expects; the audio daemons go
+  "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
+  for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$SP" 2>/dev/null && kill -9 "$SP"
+  for p in $PWP; do kill "$p" 2>/dev/null; done
+  pw_gone() { for p in $PWP; do kill -0 "$p" 2>/dev/null && return 1; done; return 0; }
+  waitfor 5000 pw_gone && ok "the private audio daemons are gone" || { bad "a private audio daemon outlived its TERM: $(for p in $PWP; do ps -o pid=,comm= -p "$p"; done)"; for p in $PWP; do kill -9 "$p" 2>/dev/null; done; }
+  PWP=""
+  start_player am2; waitfor $WAIT eval 'ctl hello >/dev/null 2>&1'; CP=$(comp_pid)
+else
+  echo "  SKIP (pipewire / pipewire-pulse / wireplumber / pactl / paplay / parec not all found)"
+fi
 
 echo "== engine switch lp-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
