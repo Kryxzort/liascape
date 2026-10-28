@@ -27,6 +27,7 @@ public static class LpPlayerSelfTest
             OwnershipAssertions(fails);
             SceneSkipAssertions(fails);
             SceneAdapterAssertions(fails);
+            ScenePropertyAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -149,6 +150,169 @@ public static class LpPlayerSelfTest
             if (vid["kind"] as string != "video" || vid.ContainsKey("preview")) fails.Add($"SourceProps(.mp4) = kind {vid["kind"]}, preview {(vid.ContainsKey("preview") ? "set" : "absent")}; want video, absent");
         }
         finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
+    }
+
+    // ---- scene user properties (SceneProperties): parsing, values, conditions, encodings ------
+    // A project.json with the corpus's odd cases (96 SFW scenes surveyed: a BOM, untyped / "Text" HTML labels,
+    // `ui_*` keys, combo values as numbers, slider fraction false, 0–255 colours, conditions with || ( ) ! and a
+    // stray `=`, usershortcut / scenetexture, order vs index, a trailing comma); then — when the SFW Workshop
+    // folder exists (read-only) — every real scene's properties: parse, defaults round-trip, conditions parse.
+    private static void ScenePropertyAssertions(List<string> fails)
+    {
+        const string pj = "﻿{\"type\":\"Scene\",\"general\":{\"properties\":{"
+            + "\"schemecolor\":{\"order\":0,\"text\":\"ui_browse_properties_scheme_color\",\"type\":\"color\",\"value\":\"0.5 0.25 1\"},"
+            + "\"clock\":{\"order\":101,\"text\":\"<hr><h4>Show clock</h4><hr>\",\"type\":\"bool\",\"value\":true},"
+            + "\"style\":{\"order\":102,\"text\":\"Style\",\"type\":\"combo\",\"value\":2,\"options\":[{\"label\":\"A\",\"value\":1},{\"label\":\"B\",\"value\":2},{\"label\":\"C &amp; D\",\"value\":\"x\"}],\"condition\":\"clock.value\"},"
+            + "\"bars\":{\"order\":103,\"text\":\"Bar Count\",\"type\":\"slider\",\"value\":64,\"min\":16,\"max\":64,\"fraction\":false,\"condition\":\"clock.value && style.value == 2\"},"
+            + "\"opacity\":{\"order\":104,\"text\":\"Opacity\",\"type\":\"slider\",\"value\":0.85,\"min\":0,\"max\":1,\"step\":0.01,\"precision\":3,\"fraction\":true,\"condition\":\"(clock.value || style.value == 'x') && !hidden.value\"},"
+            + "\"name\":{\"index\":5,\"text\":\"Name\",\"type\":\"textinput\",\"value\":\"YOURNAME\"},"
+            + "\"hdr\":{\"order\":99,\"text\":\"<a href='https://x'><img src='https://y'></a>\"},"
+            + "\"lbl\":{\"order\":98,\"text\":\"<p>Info&nbsp;text</p>\",\"type\":\"Text\"},"
+            + "\"grp\":{\"order\":97,\"text\":\"Clock\",\"type\":\"group\",\"value\":\"\"},"
+            + "\"launch\":{\"order\":110,\"text\":\"‎ ‎ <small>#1</small>\",\"type\":\"usershortcut\",\"value\":\"\"},"
+            + "\"tex\":{\"order\":111,\"text\":\"Custom\",\"type\":\"scenetexture\",\"value\":\"\"},"
+            + "\"tint\":{\"order\":112,\"text\":\"Tint\",\"type\":\"color\",\"value\":\"255 0 0\",\"condition\":\"rain.value=true\"},"
+            + "\"weird\":{\"order\":113,\"text\":\"W\",\"type\":\"hologram\",\"value\":1},"
+            + "}}}";
+        var props = SceneProperties.Parse(pj);
+        SceneProp? P(string n) => props.FirstOrDefault(p => p.Name == n);
+        string order = string.Join(",", props.Select(p => p.Name));
+        const string wantOrder = "schemecolor,name,grp,lbl,clock,style,bars,opacity,launch,tex,tint,weird";
+        if (order != wantOrder) fails.Add($"scene props order {order}, want {wantOrder} (`order`, else `index`; \"hdr\": an image-only label is dropped)");
+        void Is(string n, string type, string label, bool editable, string? def)
+        {
+            if (P(n) is not { } p) { fails.Add($"scene prop {n}: missing"); return; }
+            var d = p.Default?.ToJsonString();
+            if (p.Type != type || p.Label != label || p.Editable != editable || d != def)
+                fails.Add($"scene prop {n}: type {p.Type} label \"{p.Label}\" editable {p.Editable} default {d}; want {type} \"{label}\" {editable} {def}");
+        }
+        Is("schemecolor", "color", "Scheme color", true, "\"0.5 0.25 1\"");
+        Is("clock", "bool", "Show clock", true, "true");
+        Is("style", "combo", "Style", true, "\"2\"");
+        Is("bars", "slider", "Bar Count", true, "64");
+        Is("opacity", "slider", "Opacity", true, "0.85");
+        Is("name", "textinput", "Name", true, "\"YOURNAME\"");
+        Is("lbl", "text", "Info text", false, null);
+        Is("grp", "group", "Clock", false, null);
+        Is("launch", "usershortcut", "#1", false, null);
+        Is("tex", "scenetexture", "Custom", false, null);
+        Is("tint", "color", "Tint", true, "\"1 0 0\""); // a 0–255 colour → 0–1
+        Is("weird", "hologram", "W", false, null);
+        if (P("style")?.Options is not { } so || string.Join("|", so.Select(o => $"{o.Label}={o.Value}")) != "A=1|B=2|C & D=x")
+            fails.Add($"combo options {string.Join("|", P("style")?.Options?.Select(o => $"{o.Label}={o.Value}") ?? [])}, want A=1|B=2|C & D=x");
+        if (P("bars") is { Fraction: true } || P("opacity") is not { Precision: 3, Step: 0.01 })
+            fails.Add("slider fraction/precision/step not parsed");
+        if (P("launch")?.Unsupported == null || P("tex")?.Unsupported == null) fails.Add("usershortcut / scenetexture need an unsupported reason");
+        if (SceneProperties.Parse("{not json").Count != 0 || SceneProperties.Parse("{\"general\":{\"properties\":[1]}}").Count != 0)
+            fails.Add("a malformed project.json must parse to no properties, never throw");
+
+        // values: Coerce (UI → WE encoding), ToPlayer (→ scene_props), ToCli (→ LWE --set-property)
+        void Co(string n, string json, string? want, string? player = null, string? cli = null)
+        {
+            var p = P(n)!;
+            var (v, err) = SceneProperties.Coerce(p, JsonDocument.Parse(json).RootElement);
+            var got = err != null ? null : v?.ToJsonString();
+            if (got != want) { fails.Add($"Coerce({n}, {json}) = {got ?? "error: " + err}, want {want ?? "an error"}"); return; }
+            if (v == null) return;
+            var pl = JsonSerializer.Serialize(SceneProperties.ToPlayer(p, v));
+            if (player != null && pl != player) fails.Add($"ToPlayer({n}, {got}) = {pl}, want {player}");
+            var c = SceneProperties.ToCli(p, v);
+            if (cli != null && c != cli) fails.Add($"ToCli({n}, {got}) = {c}, want {cli}");
+        }
+        Co("clock", "false", "false", "false", "false");
+        Co("clock", "\"1\"", "true", "true", "true");
+        Co("clock", "\"maybe\"", null);
+        Co("bars", "70", "64", "64", "64");            // clamped to max
+        Co("bars", "20.6", "21", "21", "21");          // fraction false → whole
+        Co("opacity", "\"0.5\"", "0.5", "0.5", "0.5");
+        Co("opacity", "\"x\"", null);
+        Co("schemecolor", "\"#ff8000\"", "\"1 0.501961 0\"", "[1,0.501961,0]", "1 0.501961 0");
+        Co("schemecolor", "[0, 1, 0]", "\"0 1 0\"", "[0,1,0]", "0 1 0");
+        Co("schemecolor", "\"0 128 255\"", "\"0 0.501961 1\"");
+        Co("schemecolor", "\"red\"", null);
+        Co("style", "1", "\"1\"", "\"1\"", "1");
+        Co("style", "\"x\"", "\"x\"", "\"x\"", "x");
+        Co("style", "\"3\"", null);
+        Co("name", "\"Ada\"", "\"Ada\"", "\"Ada\"", "Ada");
+        Co("name", "5", null);
+        if (SceneProperties.Coerce(P("launch")!, JsonDocument.Parse("\"x\"").RootElement).Error == null) fails.Add("a usershortcut must refuse a value");
+        if (!SceneProperties.SameValue(P("schemecolor")!, System.Text.Json.Nodes.JsonValue.Create("0.5 0.25 1.0"), P("schemecolor")!.Default))
+            fails.Add("SameValue: \"0.5 0.25 1.0\" vs the default \"0.5 0.25 1\" must be equal");
+
+        // conditions over the effective values (defaults here: clock true, style "2", hidden unknown)
+        var eff = SceneProperties.Effective(props, null);
+        void Vis(string? cond, bool want, Dictionary<string, System.Text.Json.Nodes.JsonNode?>? vals = null)
+        {
+            bool got = SceneProperties.Visible(cond, vals ?? eff);
+            if (got != want) fails.Add($"Visible(\"{cond}\") = {got}, want {want}");
+        }
+        Vis(null, true);
+        Vis("clock.value", true);
+        Vis("clock.value && style.value == 2", true);       // combo key "2" == 2 (loose)
+        Vis("style.value === 2", false);                     // strict: "2" !== 2
+        Vis("style.value == \"2\" && bars.value >= 64", true);
+        Vis("(clock.value || style.value == 'x') && !hidden.value", true);
+        Vis("!clock.value", false);
+        Vis("!dibu.value==0", false);                        // (!undefined) == 0 → true == 0 → false
+        Vis("clock.value == true", true);
+        Vis("clock.value == false", false);
+        Vis("raineffects.value=true", true);                  // WE's JS: an assignment → its value
+        Vis("false", false);
+        Vis("opacity.value < 0.5 || opacity.value > 0.8", true);
+        Vis("clock.value &&", true);                          // unparseable → shown
+        Vis("clock. value == true && style .value == 2", true); // JS allows whitespace around `.` (corpus)
+        Vis("ds+media.value", true);                          // a bare identifier (a ReferenceError in JS) → shown
+        Vis("clock.value + 1 == 2", true);                    // true + 1 == 2
+        if (SceneProperties.ConditionParses("a.value &&") || !SceneProperties.ConditionParses("ds+media.value"))
+            fails.Add("ConditionParses: syntax only (a bare identifier parses, a dangling && doesn't)");
+        var off = new Dictionary<string, System.Text.Json.Nodes.JsonNode?>(eff) { ["clock"] = false };
+        Vis("clock.value && style.value == 2", false, off);
+        Vis("sds.value && (clock.value || date.value)", false, off);
+
+        // legacy launch args, only for overrides that name an editable property
+        var dir = Path.Combine("/tmp", "lpst-props-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "project.json"), pj);
+            var ov = new Dictionary<string, JsonElement>
+            {
+                ["clock"] = JsonDocument.Parse("false").RootElement, ["schemecolor"] = JsonDocument.Parse("\"0 1 0\"").RootElement,
+                ["launch"] = JsonDocument.Parse("\"x\"").RootElement, ["gone"] = JsonDocument.Parse("1").RootElement,
+            };
+            var cli = string.Join(" ", SceneProperties.CliArgs(dir, ov));
+            if (cli != "--set-property schemecolor=0 1 0 --set-property clock=false")
+                fails.Add($"CliArgs = \"{cli}\", want \"--set-property schemecolor=0 1 0 --set-property clock=false\"");
+            var map = JsonSerializer.Serialize(SceneProperties.PlayerMap(dir, ov));
+            if (map != "{\"clock\":false,\"schemecolor\":[0,1,0]}") fails.Add($"PlayerMap = {map}, want {{\"clock\":false,\"schemecolor\":[0,1,0]}}");
+            if (JsonSerializer.Serialize(SceneProperties.PlayerDefault(dir, "schemecolor")) != "[0.5,0.25,1]") fails.Add("PlayerDefault(schemecolor) wrong");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+
+        // the real corpus (read-only; skipped without it) — never the steamcmd cache
+        var corpus = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/share/Steam/steamapps/workshop/content/431960");
+        if (!Directory.Exists(corpus)) return;
+        int scenes = 0, n = 0, conds = 0;
+        foreach (var d in Directory.EnumerateDirectories(corpus))
+        {
+            var f = Path.Combine(d, "project.json");
+            string text;
+            try { text = File.ReadAllText(f); } catch { continue; }
+            if (!text.Contains("\"scene\"", StringComparison.OrdinalIgnoreCase)) continue;
+            List<SceneProp> ps;
+            try { ps = SceneProperties.Parse(text); } catch (Exception e) { fails.Add($"corpus {Path.GetFileName(d)}: Parse threw {e.Message}"); continue; }
+            scenes++;
+            foreach (var p in ps)
+            {
+                n++;
+                if (p.Condition is { } c) { conds++; if (!SceneProperties.ConditionParses(c)) fails.Add($"corpus {Path.GetFileName(d)}/{p.Name}: condition \"{c}\" doesn't parse"); }
+                if (!p.Editable) continue;
+                var (v, err) = SceneProperties.Coerce(p, JsonSerializer.SerializeToElement(p.Default));
+                if (err != null || !SceneProperties.SameValue(p, v, p.Default))
+                    fails.Add($"corpus {Path.GetFileName(d)}/{p.Name} ({p.Type}): default {p.Default?.ToJsonString()} doesn't round-trip ({err})");
+            }
+        }
+        Console.WriteLine($"scene properties corpus: {scenes} project.json, {n} properties, {conds} conditions — all parsed");
     }
 
     // ---- Task 20c: next/prev/random's scene-skip decision point ------------------------------

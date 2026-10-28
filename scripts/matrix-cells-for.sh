@@ -51,7 +51,9 @@ for f in $FILES; do
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/lp-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE" "$f" ;;
-    app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL" "$f" ;;
+    # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
+    src/livepaper/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
+    app/ui/src/components/LibrarySettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear" "$f" ;;

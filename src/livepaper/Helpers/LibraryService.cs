@@ -55,6 +55,38 @@ public static class LibraryService
         LibraryStore.SetMeta(mediaPath, m => m.Speed = speed);
     }
 
+    // ---------- scene user properties (SceneProperties; library.md § "Scene properties") ----------
+    public static Dictionary<string, JsonElement>? ReadSceneProps(string scenePath) => LibraryStore.GetMeta(scenePath)?.SceneProps;
+
+    // One property's override (`value` null = back to the scene's default), or every one (`name` null). A value
+    // equal to the default drops the override. Field-level, inside the index lock. Returns an error or null.
+    public static string? SaveSceneProp(string scenePath, string? name, JsonElement? value)
+    {
+        if (name == null)
+        {
+            LibraryStore.SetMeta(scenePath, m => m.SceneProps = null);
+            return null;
+        }
+        var p = SceneProperties.Find(scenePath, name);
+        if (p == null) return $"{name}: no such property in this scene's project.json";
+        System.Text.Json.Nodes.JsonNode? v = null;
+        if (value is JsonElement e)
+        {
+            var (c, err) = SceneProperties.Coerce(p, e);
+            if (err != null) return err;
+            if (!SceneProperties.SameValue(p, c, p.Default)) v = c;
+        }
+        else if (!p.Editable) return $"{name}: can't be set";
+        LibraryStore.SetMeta(scenePath, m =>
+        {
+            var d = m.SceneProps ?? new Dictionary<string, JsonElement>();
+            if (v == null) d.Remove(name);
+            else d[name] = JsonSerializer.SerializeToElement(v);
+            m.SceneProps = d.Count == 0 ? null : d;
+        });
+        return null;
+    }
+
     public static void SetWhitelisted(string mediaPath, bool whitelisted) =>
         LibraryStore.SetMeta(mediaPath, m => m.Whitelist = whitelisted);
 

@@ -316,16 +316,20 @@ else echo "(pulseaudio / pactl / paplay / parec not found — the auto-mute cell
 # after 3 restarts). Titled s1..s3 in the source's index (the cards' titles). Scene support stays OFF in the baseline
 # (the library-stepping / random cells would land on them); the scene cells turn it on (probe-matrix.js).
 SCENES=()
-mk_scene() {   # $1 = item folder, $2 = lp-synthetic.json, $3 = its preview's colour (a real-sized 320×180 still)
+mk_scene() {   # $1 = item folder, $2 = lp-synthetic.json, $3 = its preview's colour (a real-sized 320×180 still), $4 = user properties
+  local props=${4:-}; [ -n "$props" ] || props='{}'
   mkdir -p "$1"
-  printf '{"type":"scene","title":"%s","file":"scene.json","preview":"preview.png"}' "$(basename "$1")" > "$1/project.json"
+  printf '{"type":"scene","title":"%s","file":"scene.json","preview":"preview.png","general":{"properties":%s}}' "$(basename "$1")" "$props" > "$1/project.json"
   head -c 16 /dev/zero > "$1/scene.pkg"
   printf '%s' "$2" > "$1/lp-synthetic.json"
   ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=$3:s=320x180" -frames:v 1 "$1/preview.png"
   SCENES+=("$1")
 }
 SLIB=$XDG_DATA_HOME/livepaper/library/workshop
-mk_scene "$SLIB/900000001" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}' red
+# s1's user properties (the sceneProp cells): `color` is the synthetic renderer's WE-encoded colour (red by default,
+# like its rgb), `clock` a bool that `bars` depends on (`condition`)
+S1_PROPS='{"color":{"order":0,"text":"ui_browse_properties_scheme_color","type":"color","value":"1 0 0"},"clock":{"order":1,"text":"Show clock","type":"bool","value":true},"bars":{"order":2,"text":"Bars","type":"slider","value":32,"min":16,"max":64,"fraction":false,"condition":"clock.value"}}'
+mk_scene "$SLIB/900000001" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}' red "$S1_PROPS"
 mk_scene "$SLIB/900000002" '{"pattern":"solid","rgb":[0,0,255],"native":[640,360],"has_audio":true,"tone_hz":660}' blue
 mk_scene "$SLIB/900000003" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":1500}' green
 printf '{"900000001":{"title":"s1","isScene":true,"workshopId":"900000001"},"900000002":{"title":"s2","isScene":true,"workshopId":"900000002"},"900000003":{"title":"s3","isScene":true,"workshopId":"900000003"}}' > "$SLIB/index.json"

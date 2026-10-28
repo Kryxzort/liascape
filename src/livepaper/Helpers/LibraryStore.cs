@@ -27,6 +27,10 @@ public sealed class LibMeta
     public bool? LoudnessSkip { get; set; }     // true = no audio track → nothing to normalize, don't retry
     public bool Crashed { get; set; }
     public bool Whitelist { get; set; }
+    // A scene's user-property overrides (project.json general.properties → name → value in WE's encoding:
+    // bool, number, "r g b", combo key, text — SceneProperties). null/absent = every property at the scene's
+    // own default. Sent to the player at every open + live (`scene_props`); legacy: LWE --set-property.
+    public Dictionary<string, JsonElement>? SceneProps { get; set; }
     public string? Resolution { get; set; }
     public string? AgeRating { get; set; }
     public string? YoutubeUrl { get; set; }

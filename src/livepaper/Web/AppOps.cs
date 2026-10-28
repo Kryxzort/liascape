@@ -145,6 +145,49 @@ public static class AppOps
     }
 
     // ffprobe the video length in seconds.
+    // ---- scene user properties (the item settings modal's "Scene properties"; library.md) ----
+    private static bool IsSceneItem(string path) =>
+        !string.IsNullOrEmpty(path) && PlayerHelper.IsScenePath(path) && Directory.Exists(path);
+
+    // GET /library/scene-props: the scene's properties in display order, each with its effective value, default,
+    // whether it's overridden and visible (its `condition` over the effective values). `live` = a change reaches
+    // the playing scene at once (lp-player); legacy applies them at the scene's next start (LWE --set-property).
+    public static object SceneProps(string path)
+    {
+        bool lp = PlayerEngine.IsLpPlayer;
+        object props = IsSceneItem(path) ? SceneProperties.Describe(path, LibraryService.ReadSceneProps(path)) : Array.Empty<object>();
+        return new
+        {
+            path, engine = lp ? "lp-player" : "legacy", live = lp,
+            note = lp ? null : "Applied when the scene starts — the legacy engine can't change them while it plays",
+            props,
+        };
+    }
+
+    // POST /library/scene-props: save (field-level, the index lock), then live. Returns an error or null.
+    public static string? SetSceneProp(ServerHost.ScenePropReq r)
+    {
+        if (!IsSceneItem(r.Path)) return "not a scene item folder";
+        string? err;
+        if (r.Name == null) err = r.Reset ? LibraryService.SaveSceneProp(r.Path, null, null) : "name (or reset) required";
+        else if (r.Reset) err = LibraryService.SaveSceneProp(r.Path, r.Name, null);
+        else if (r.Value is not { } v || v.ValueKind == System.Text.Json.JsonValueKind.Undefined) err = "value required (or reset: true)";
+        else err = LibraryService.SaveSceneProp(r.Path, r.Name, v);
+        if (err == null) PlayerHelper.ApplyScenePropsLive(r.Path);
+        return err;
+    }
+
+    // POST /library/scene-props/preview: the drag twin — this value on the item's live source(s), nothing saved.
+    public static string? PreviewSceneProp(ServerHost.ScenePropReq r)
+    {
+        if (!IsSceneItem(r.Path)) return "not a scene item folder";
+        if (r.Name == null || r.Value is not { } v) return "name and value required";
+        if (SceneProperties.Find(r.Path, r.Name) is not { } p) return $"{r.Name}: no such property in this scene's project.json";
+        if (SceneProperties.Coerce(p, v).Error is string e) return e;
+        PlayerHelper.ApplyScenePropsLive(r.Path, new Dictionary<string, System.Text.Json.JsonElement> { [r.Name] = v });
+        return null;
+    }
+
     public static double GetDurationSeconds(string path)
     {
         try

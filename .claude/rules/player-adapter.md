@@ -241,7 +241,21 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   player.scene_assets_resolved`; `assets_dir` from the running player's `player.scene_assets_resolved`).
 - **Create props** (`SourceProps`): `kind: "scene"`, `preview` = the item's preview image
   (`LibraryService.PreviewImageOf`: `preview.jpg|png|jpeg`, else `preview.gif|webp`) — what the player shows
-  while no worker frame exists (Task 10). `scene_props` (the properties editor) is a later task.
+  while no worker frame exists (Task 10), and `scene_props` (below).
+- **Scene user properties (the item modal's editor; library.md § "Scene properties").** `scene_props` is one more
+  per-source value of the resolver (`Desired`, scene paths only): `SceneProperties.PlayerMap(path, its index
+  overrides, a drag's transient values)` — so a new source opens with them (`SourceProps`; the worker applies them
+  after the load, before the first frame) and every Fresh pass (`/settings`, R81's reapply after a player restart)
+  re-asserts them. Diffed as JSON (`JsonSame`: numbers within 1e-6, objects by key set — `ValuesOf` keeps a Map prop
+  as a cloned `JsonElement`). **A reset sends the default** (`WithResets`): the player keeps a removed key's value
+  until the next open (LWE has no reset), so a key the source still runs that the overrides dropped goes out as its
+  project.json default. Callers: `/library/scene-props` (saved first) → `PlayerHelper.ApplyScenePropsLive(path)` →
+  `ApplySceneProps` — queue key `sceneprops:<path>`, that item's sources only, `scene_props` only, cached;
+  `/library/scene-props/preview` (the drag twin) → `PreviewSceneProps(path, {name: value})` — key
+  `preview:scene_props:<path>:<names>`, the value as the item's transient, nothing saved. The worker's answer
+  (`PropertySet`) is the player's `scene.property` event / `workers.properties` (not subscribed — a refused name only
+  logs there). Legacy: launch-only (`--set-property`). Live on the same worker, every switch combo, across a
+  switch-away-and-back and a player restart (IT + matrix `sceneProp:*`).
 - **Per-monitor scene fps — live** (`LpPlayerMedia.ApplySceneFps(prev, cur)`): `LweMonitors[].Fps` →
   `set out:<name>.scene_fps` (name mapped like the player's `output_name`: `.`/`:`/`*`/whitespace → `-`;
   0–480, 0 = the output's refresh), queued coalescible per output (`scene_fps:<name>`); `/settings` diffs prev
@@ -323,6 +337,8 @@ computed for the playing item at request time landed on whatever played when it 
   | `/library/volume\|speed`, volume key on an item → `ApplyOverride(path)` | `override:<path>` | that item's | gain.user, speed | — | cached |
   | `/preview {paths}` → `Preview` | `preview:<prop>:<paths>` | those items' (none → the playing item's) | the dragged one | the value, for those items | cached |
   | `/preview {global}` → `PreviewGlobal` | `preview-global:<prop>` | all | the dragged one | the value, as the global | cached |
+  | `/library/scene-props` → `ApplySceneProps(path)` | `sceneprops:<path>` | that item's | scene_props | — | cached |
+  | `/library/scene-props/preview` → `PreviewSceneProps` | `preview:scene_props:<path>:<names>` | that item's | scene_props | the dragged values | cached |
   | an mpv volume/speed literal (`/volume {value}`) → `Mpv` | `set:<prop>` | all | that one | the value, for the playing item | cached |
   | a mute change (SetMute / SetUserMute → mpv `mute`) → `Mpv` | `set:gain.mute` | all | gain.mute | — | Force |
 
@@ -531,12 +547,24 @@ machine's GPU): a fresh player's defaults; `SceneThrottle` / the VRAM limit togg
 `scene.vram_exceeded`, the rotation advanced ≤ 2 s after it (event clocks), WS `scene-vram-stopped` with the text,
 not marked crashed (no `source.broken`), `/next` plays it again; a single scene over the limit → no switch in 2 s, still
 shown, not marked (RED on the base backend: 12 checks failing — every prop at its default, no stop, no WS event).
+**Scene properties** (scene 1's project.json gets `color` — the synthetic renderer's WE-encoded colour, red by
+default —, a bool, a dependent combo/slider, text, a label and a usershortcut): `GET /library/scene-props` (order,
+types, labels, defaults, condition visibility, the usershortcut not editable); set `color` → the scene's pixel
+green live on the same worker, `workers.properties.color.ok`, the index `sceneProps`; a bool hides its dependants;
+a slider clamps; a bad combo value / a usershortcut / an unknown name → 400; the preview twin → live, nothing saved;
+switched away and back → a new source opens green; a compositor `kill -9` → the restored scene green; reset one → red
+live (the default sent), dropped from the index, same worker; reset all → no `sceneProps`. RED on the base backend.
 `LP_IT_DLL=<livepaper.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
 `LP_PLAYER_BIN=<repo>/src/player/target/debug/lp-player dotnet run --project src/livepaper --
 --lp-player-selftest` → `PASS` / `FAIL <reasons>`, exit 0/1: MpvPropertyMap assertions, R69 ownership
-assertions on synthetic `pactl` blocks, **item 6's queue-depth-cap assertions** (needs no player at
+assertions on synthetic `pactl` blocks, **`ScenePropertyAssertions`** (a project.json with the corpus's odd cases —
+BOM, untyped / `"Text"` HTML labels, `ui_*` keys, numeric combo values, `fraction: false`, a 0–255 colour, conditions
+with `|| ( ) !` and a stray `=`, usershortcut / scenetexture, `order` vs `index` —: order, types, labels, defaults;
+`Coerce` / `ToPlayer` / `ToCli` tables; `Visible` over JS-ish conditions; `CliArgs` / `PlayerMap`; then, when
+`~/.local/share/Steam/steamapps/workshop/content/431960` exists, every real scene's properties: no throw, every
+default round-trips, every condition parses — 96 files, 2066 properties, 868 conditions), **item 6's queue-depth-cap assertions** (needs no player at
 all — a single artificially slow `Queue(...)` item clogs the one-worker FIFO deterministically, so a
 burst of `MaxQueueDepth + 60` enqueued right behind it piles up instead of racing the drain: enqueueing
 all of them must stay fast (≤ 500 ms, never blocking the caller) and `QueueDepth` must never exceed the

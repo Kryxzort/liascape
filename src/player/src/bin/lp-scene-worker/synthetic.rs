@@ -83,6 +83,37 @@ fn rgb(c: [u8; 3]) -> (f32, f32, f32) {
     )
 }
 
+/// `[r, g, b]` × `scale` → 0–255 bytes (`scale` 1 for 0–255 values, 255 for WE's 0–1 colours).
+fn parse_rgb(name: &str, value: &serde_json::Value, scale: f64) -> Result<[u8; 3], String> {
+    let range = if scale == 1.0 { "0–255" } else { "0–1" };
+    let err = || format!("{name}: expected [r, g, b] ({range}), got {value}");
+    let a = value.as_array().filter(|a| a.len() == 3).ok_or_else(err)?;
+    let mut c = [0u8; 3];
+    for (i, v) in a.iter().enumerate() {
+        c[i] = v
+            .as_f64()
+            .map(|x| (x * scale).round().clamp(0.0, 255.0) as u8)
+            .ok_or_else(err)?;
+    }
+    Ok(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_rgb;
+    use serde_json::json;
+
+    #[test]
+    fn colour_props_take_bytes_or_we_unit_floats() {
+        assert_eq!(parse_rgb("rgb", &json!([0, 128, 255]), 1.0), Ok([0, 128, 255]));
+        // WE's colour encoding (`color`): 0–1 floats
+        assert_eq!(parse_rgb("color", &json!([0.0, 0.5, 1.0]), 255.0), Ok([0, 128, 255]));
+        assert_eq!(parse_rgb("color", &json!([2, -1, 1]), 255.0), Ok([255, 0, 255]));
+        assert!(parse_rgb("color", &json!("0 1 0"), 255.0).is_err());
+        assert!(parse_rgb("color", &json!([0, 1]), 255.0).is_err());
+    }
+}
+
 impl Synthetic {
     /// `fail: build` refuses like a scene whose first render produced nothing.
     /// Task 8 (tests): the GPU time every frame reports instead of the measured one.
@@ -107,25 +138,15 @@ impl Synthetic {
     }
 
     /// Task 7: the synthetic scene's user properties — `rgb` / `rgb2` (`[r, g, b]`, 0–255)
-    /// recolour the pattern live, anything else is refused like LWE's unknown property.
+    /// recolour the pattern live; `color` is `rgb` in WE's own colour encoding (`[r, g, b]`
+    /// 0–1, what the backend's properties editor sends for a `color` property, and what LWE's
+    /// `wp_project_property_set_color_by_name` takes); anything else is refused like LWE's
+    /// unknown property.
     pub fn set_property(&mut self, name: &str, value: &serde_json::Value) -> Result<(), String> {
-        let rgb = || -> Result<[u8; 3], String> {
-            let a = value
-                .as_array()
-                .filter(|a| a.len() == 3)
-                .ok_or_else(|| format!("{name}: expected [r, g, b] (0–255), got {value}"))?;
-            let mut c = [0u8; 3];
-            for (i, v) in a.iter().enumerate() {
-                c[i] = v
-                    .as_f64()
-                    .map(|x| x.round().clamp(0.0, 255.0) as u8)
-                    .ok_or_else(|| format!("{name}: expected [r, g, b] (0–255), got {value}"))?;
-            }
-            Ok(c)
-        };
         match name {
-            "rgb" => self.spec.rgb = rgb()?,
-            "rgb2" => self.spec.rgb2 = rgb()?,
+            "rgb" => self.spec.rgb = parse_rgb(name, value, 1.0)?,
+            "rgb2" => self.spec.rgb2 = parse_rgb(name, value, 1.0)?,
+            "color" => self.spec.rgb = parse_rgb(name, value, 255.0)?,
             _ => {
                 return Err(format!(
                     "{name}: refused by the scene (no such property, or a value of another type)"

@@ -454,6 +454,13 @@ public static class ServerHost
             if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
         });
         app.MapPost("/library/whitelist", (WhitelistReq r) => { LibraryService.SetWhitelisted(r.Path, r.Value); return Results.Ok(); });
+        // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
+        // item in its index, then live on its source(s) under lp-player), and the drag twin (live, nothing saved)
+        app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));
+        app.MapPost("/library/scene-props", (ScenePropReq r) => AppOps.SetSceneProp(r) is string err
+            ? Results.BadRequest(new { error = err }) : Results.Json(AppOps.SceneProps(r.Path)));
+        app.MapPost("/library/scene-props/preview", (ScenePropReq r) => AppOps.PreviewSceneProp(r) is string err
+            ? Results.BadRequest(new { error = err }) : Results.Ok());
         app.MapPost("/library/sync", () =>
         {
             var s = SettingsService.Load();
@@ -783,6 +790,8 @@ public static class ServerHost
     // Paths = the item(s) being edited (the per-wallpaper modal); none = whatever is playing.
     public record PreviewReq(int? Volume, double? Speed, List<string>? Paths = null, bool? Global = null);
     public record WhitelistReq(string Path, bool Value);
+    // Name + Value = set one; Name + Reset = back to its default; Reset alone = every property back to default.
+    public record ScenePropReq(string Path, string? Name = null, System.Text.Json.JsonElement? Value = null, bool Reset = false);
     public record ValueReq(int? Delta, int? Value);
     public record MuteReq(bool User, bool Value);
     public record TrashReq(List<LibraryItem> Items);
