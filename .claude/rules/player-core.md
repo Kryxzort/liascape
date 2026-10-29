@@ -3656,7 +3656,16 @@ scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`
   then the process exits once the stream's level (`applied × gate`) is exactly 0 — on `Quit`,
   on EOF, and on a quit during a load (`_exit` after it). The compositor's retire ramp
   normally made it silent already: destroy of a playing tone scene measured 28 ms from −1 dB to
-  silence on the bus, then the node is gone.
+  silence on the bus, then the node is gone. **Then the stream leaves the graph before the exit
+  (F7):** `set_active(false)` + a core roundtrip, `SETTLE_INACTIVE` 20 ms, `disconnect` + a
+  roundtrip (all within `CLOSE_MAX` 200 ms — under the host's `STOP_GRACE`; the audio thread then
+  parks, never reconnecting). Exiting with the stream active in the graph cost the bus whole graph
+  cycles of exact silence at the sink in *every* S→S switch (B's sound: 64–384 samples; frozen 60/61,
+  full-live 30/30 — `tests/onmachine/scenes.sh onsetrec` records the sink independently); a bare
+  disconnect of the active stream still 18/60; deactivate-first leaves 2–8 single cycles per 60
+  full-live/reveal switches (0/121 frozen), at the deactivation — PipeWire's graph change through
+  the in-process loopback (TODO F7). Test `tests/api.rs::scene_worker_exit_never_skips_bus_cycles`
+  (RED 6/6 switches).
 - **Envelope → dropout reference.** 1 ms max-channel RMS dBFS of the gated, pre-gain samples
   (`audio::meter::BlockMeter`; `meter::dbfs_block` is the shared one-block form), batched every
   50 blocks, stamped with the buffer's play time (`CLOCK_MONOTONIC` now + one buffer). The

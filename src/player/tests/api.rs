@@ -7621,6 +7621,119 @@ fn scene_crossfades_are_equal_power_on_the_bus() {
     println!("crossfade curve error, all combos: ±{worst_all:.2} dB");
 }
 
+/// F7 (Phase 2 battery, `docs/player/reports/phase2.md` § 10): a scene worker that exits must
+/// leave the graph cleanly first — it used to `exit` with its stream still connected, and the
+/// bus then skipped whole graph cycles: an independent `pw-record` of the sink held 64–384
+/// samples of exact silence once per switch, in B's sound, as A's worker went (frozen S→S at
+/// 240 Hz: 60 of 61 switches). Frozen S→S switches between two tone scenes (A's worker exits
+/// at each handoff while B ramps in), the private sink recorded throughout: no run of exact
+/// silence inside sound (bar one single cycle, below). RED before the worker's clean leave
+/// (`audio::Control::quit`).
+#[test]
+fn scene_worker_exit_never_skips_bus_cycles() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root.clone(), serial);
+    let mut c = srv.client();
+    let wav = root.join("sink.wav");
+    let mut rec = pw.command("pw-record");
+    rec.args([
+        "--target",
+        "hermetic-sink",
+        "-P",
+        "{ stream.capture.sink = true }",
+        "--rate",
+        "48000",
+        "--channels",
+        "2",
+        "--format",
+        "f32",
+        wav.to_str().unwrap(),
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
+    let mut rec = rec.spawn().expect("pw-record");
+    std::thread::sleep(Duration::from_millis(500));
+    let s1 = common::synthetic_scene("api-exit-s1", &tone_scene(660.0));
+    let s2 = common::synthetic_scene("api-exit-s2", &tone_scene(550.0));
+    let a = create_src(&mut c, json!({"kind": "scene", "path": s(&s1)}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(10), "the first tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -30.0).then_some(())
+    });
+    const SWITCHES: usize = 6;
+    for i in 0..SWITCHES {
+        let to = if i % 2 == 0 { &s2 } else { &s1 };
+        let corr = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(to)},
+                   "effect_id": "fade", "duration_ms": 300, "method": "frozen"}),
+        )["corr"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        wait_for(Duration::from_secs(10), "transition.done", || {
+            c.ok(
+                "logs",
+                json!({"corr": corr, "kind_prefix": "transition.done", "limit": 10}),
+            )["events"]
+                .as_array()
+                .is_some_and(|e| !e.is_empty())
+                .then_some(())
+        });
+        // A's worker is gone well within this (its stream leaves at its exit).
+        std::thread::sleep(Duration::from_millis(600));
+    }
+    unsafe { libc::kill(rec.id() as i32, libc::SIGINT) };
+    let _ = rec.wait();
+    let raw = std::fs::read(&wav).expect("the recording");
+    let k = raw
+        .windows(4)
+        .position(|w| w == b"data")
+        .expect("a wav data chunk");
+    let left: Vec<f32> = raw[k + 8..]
+        .chunks_exact(8)
+        .map(|f| f32::from_le_bytes([f[0], f[1], f[2], f[3]]))
+        .collect();
+    // Runs of exact silence (≥ 16 samples, < 100 ms: the frozen gap between A's ramp-out and
+    // B's onset is 300 ms) with sound on both sides.
+    let sound = |r: std::ops::Range<usize>| left[r].iter().any(|v| *v != 0.0);
+    let mut runs = Vec::new();
+    let mut i = 200;
+    while i + 200 < left.len() {
+        if left[i] != 0.0 {
+            i += 1;
+            continue;
+        }
+        let mut e = i;
+        while e < left.len() && left[e] == 0.0 {
+            e += 1;
+        }
+        if (16..4800).contains(&(e - i)) && e + 200 < left.len() && sound(i - 200..i) && sound(e..e + 200)
+        {
+            runs.push((i as f64 / 48_000.0, e - i));
+        }
+        i = e;
+    }
+    let audible = left.iter().filter(|v| v.abs() > 0.01).count();
+    println!(
+        "F7: {SWITCHES} frozen S→S, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
+        left.len() as f64 / 48_000.0,
+        audible as f64 / 48_000.0
+    );
+    assert!(audible > 48_000, "the recording holds the tones");
+    // RED: one run per switch (6 of 6, 64–192 samples). What is left after the clean leave is
+    // a rare single 64-frame cycle at the stream's deactivation (a PipeWire graph change seen
+    // through the in-process bus loopback — ~1 in 15 full-live switches, 0 in 121 frozen ones
+    // in release; once in 18 here): at most one, never longer than one cycle.
+    assert!(
+        runs.len() <= 1 && runs.iter().all(|(_, n)| *n <= 64),
+        "skipped graph cycles at the sink: {runs:?}"
+    );
+}
+
 /// The loudest 1 ms block 150–450 ms after now (the bus meter).
 fn loudest_after(c: &mut Client, what: &str) -> f64 {
     let t = bus_now(c);

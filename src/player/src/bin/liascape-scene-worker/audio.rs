@@ -71,6 +71,10 @@ const NULL_PERIOD: Duration = Duration::from_millis(5);
 const RETRY: Duration = Duration::from_secs(1);
 /// The loop's wake-up period (commands, outbox).
 const ITERATE: Duration = Duration::from_millis(5);
+/// F7: the longest a quit waits for the server to drop the disconnected stream.
+const CLOSE_MAX: Duration = Duration::from_millis(200);
+/// F7: how long a quitting stream stays connected but inactive before it disconnects.
+const SETTLE_INACTIVE: Duration = Duration::from_millis(20);
 
 /// A dB gain as the stream's amplitude: ≤ −96 dB is exactly 0.
 pub fn gain_lin(db: f64) -> f32 {
@@ -122,6 +126,12 @@ pub struct Control {
     /// Bumped on every arming change (see the module doc).
     arm: AtomicU64,
     quitting: AtomicBool,
+    /// F7: the quit's second half — the audio thread disconnects its PipeWire stream and waits
+    /// for the server to answer (`closed`) before the process exits.
+    close_req: AtomicBool,
+    closed: AtomicBool,
+    /// A PipeWire stream is connected (only then does a quit wait for `closed`).
+    stream_live: AtomicBool,
     route: Mutex<(u64, AudioRoute)>,
     id: Mutex<String>,
     /// The scene's sound, once loaded. Locked by the callback for one pull; the renderer
@@ -146,6 +156,9 @@ impl Default for Control {
             meter: AtomicBool::new(true),
             arm: AtomicU64::new(0),
             quitting: AtomicBool::new(false),
+            close_req: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            stream_live: AtomicBool::new(false),
             route: Mutex::new((0, AudioRoute::Null)),
             id: Mutex::new(String::new()),
             source: Mutex::new(None),
@@ -228,10 +241,29 @@ impl Control {
     /// Fade the stream out (the gate, ≤ 30 ms — at once if it's silent already) and wait
     /// until its level is exactly 0, at most `max`: the process may then exit without
     /// cutting an audible stream.
+    ///
+    /// **F7:** then the stream leaves the graph before the caller exits — deactivated, given
+    /// [`SETTLE_INACTIVE`], disconnected, each step answered by a server roundtrip (all ≤
+    /// [`CLOSE_MAX`]). A process that exited with its stream still active in the graph cost
+    /// the player bus (`liascape-player-bus`, a loopback in the compositor) whole graph cycles:
+    /// an independent recording of the sink (`scenes.sh onsetrec`, 240 Hz) held 64–384 samples
+    /// of exact silence in **every** S→S switch, in B's sound (frozen: 60 of 61, 10–37 ms
+    /// into B's ramp-in; full-live: 30 of 30, B at full level). Disconnecting an active stream
+    /// still cost one cycle in 18 of 60; deactivating first leaves 2–8 single cycles in 60
+    /// (full-live / reveal; frozen 0 of 121), at the deactivation itself — a PipeWire graph
+    /// change seen through the in-process loopback (TODO F7).
     pub fn quit(&self, max: Duration) {
         self.quitting.store(true, Ordering::SeqCst);
         let end = Instant::now() + max;
         while self.level() > 0.0 && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !self.stream_live.load(Ordering::SeqCst) {
+            return;
+        }
+        self.close_req.store(true, Ordering::SeqCst);
+        let end = Instant::now() + CLOSE_MAX;
+        while !self.closed.load(Ordering::SeqCst) && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
@@ -575,8 +607,17 @@ fn run_pw(
         .connect_rc(None)
         .map_err(|e| format!("can't connect ({e})"))?;
     let core_error: Rc<RefCell<Option<String>>> = Rc::default();
+    let done_seq: Rc<std::cell::Cell<Option<i32>>> = Rc::default();
     let _core_l = core
         .add_listener_local()
+        .done({
+            let d = done_seq.clone();
+            move |id, seq| {
+                if id == pw::core::PW_ID_CORE {
+                    d.set(Some(seq.seq()));
+                }
+            }
+        })
         .error({
             let ce = core_error.clone();
             move |id, _seq, res, msg| {
@@ -674,11 +715,48 @@ fn run_pw(
         ),
     );
     let mut close_by: Option<Instant> = None;
+    ctl.stream_live.store(true, Ordering::SeqCst);
+    // Whatever way this returns, a quit no longer waits for this stream.
+    struct Live<'a>(&'a Control);
+    impl Drop for Live<'_> {
+        fn drop(&mut self) {
+            self.0.stream_live.store(false, Ordering::SeqCst);
+        }
+    }
+    let _live = Live(ctl);
     loop {
         ml.loop_().iterate(pw::loop_::Timeout::Finite(ITERATE));
         flush(sock, &outbox);
         if let Some(e) = core_error.borrow_mut().take() {
             return Err(format!("connection error: {e}"));
+        }
+        if ctl.close_req.load(Ordering::SeqCst) && ctl.level() == 0.0 {
+            // F7 (`Control::quit`): leave the graph cleanly before the process exits —
+            // deactivate (the node stops being scheduled, its links stay), then disconnect;
+            // each answered by one roundtrip (the server has handled it once it answers).
+            let end = Instant::now() + CLOSE_MAX;
+            let roundtrip = || {
+                if let Ok(seq) = core.sync(0) {
+                    let want = seq.seq();
+                    while done_seq.get() != Some(want) && Instant::now() < end {
+                        ml.loop_().iterate(pw::loop_::Timeout::Finite(ITERATE));
+                    }
+                }
+            };
+            let _ = stream.set_active(false);
+            roundtrip();
+            // A few graph cycles inactive before the links go.
+            let settle = Instant::now() + SETTLE_INACTIVE;
+            while Instant::now() < settle {
+                ml.loop_().iterate(pw::loop_::Timeout::Finite(ITERATE));
+            }
+            let _ = stream.disconnect();
+            roundtrip();
+            ctl.closed.store(true, Ordering::SeqCst);
+            // The process is about to exit: never reconnect.
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+            }
         }
         if ctl.route_gen() != rgen {
             // Fade out (≤ 30 ms of callbacks), bounded — a stalled graph never holds us.
