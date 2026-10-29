@@ -93,3 +93,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   rule per the recon first) → T7 → … ; second slot: the offline loudness estimator's backend wiring (TODO design).
   Auto-mute (T14): latency must be ≤ today's p50/p95 (no 100 ms slack), and NO default exclusions (rules feature
   may default-exclude notifications only).
+- **LWE B1 done** (`7528abf`, fork `e78d94d` pushed): property scripts run — init/update/applyUserProperties,
+  thisLayer/thisObject, scale/angles/visible drive the layer; WE's own JS classes load at run time from the user's
+  WE install (nothing copied). Also fixed: solid layers vanishing at random (uninitialised config). Corpus 92 ok,
+  0 blank/broken/timeout (2 former timeouts now ok). Port now PARKED (B2+ wait).
