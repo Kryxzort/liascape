@@ -82,6 +82,13 @@ pub enum Align {
     End,
 }
 
+/// `TransitionReq::origin` of a client's `transition` verb.
+pub const ORIGIN_API: &str = "api";
+
+fn origin_api() -> String {
+    ORIGIN_API.to_string()
+}
+
 /// One transition request (the command API's `transition` verb, Task 12).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionReq {
@@ -100,6 +107,10 @@ pub struct TransitionReq {
     pub method: Method,
     #[serde(default)]
     pub align: Align,
+    /// Who asked (Phase 3): `"api"` — a client's `transition` (the verb always sets it) — or
+    /// `"program:<id>"`, a program's switch. Reported in `transition.scheduled`.
+    #[serde(default = "origin_api")]
+    pub origin: String,
 }
 
 /// Where a transition is in its life (module doc diagram).
@@ -167,6 +178,8 @@ pub enum TransitionEventKind {
         align: Align,
         effect_id: Option<String>,
         duration_ms: u32,
+        /// [`TransitionReq::origin`].
+        origin: String,
     },
     #[serde(rename = "transition.started")]
     Started {
@@ -827,6 +840,7 @@ impl Transitions {
                 align: req.align,
                 effect_id: req.effect_id,
                 duration_ms: req.duration_ms,
+                origin: req.origin,
             },
         );
         self.active.push(tr);

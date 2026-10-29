@@ -62,7 +62,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-pub use props::{Fit, PropDef, PropType, PropValue};
+pub use props::{Fit, ProgramItem, PropDef, PropType, PropValue};
 
 use crate::anim::PropPath;
 use crate::units::{GainSlot, Gains};
@@ -77,6 +77,9 @@ pub enum NodeKind {
     Layer,
     Source,
     Effect,
+    /// Phase 3: a rotation (`prog:<name>`, `recipes::program`) — configuration and observed
+    /// state only; it never shows anything itself.
+    Program,
 }
 
 impl NodeKind {
@@ -87,6 +90,7 @@ impl NodeKind {
             NodeKind::Layer => "layer",
             NodeKind::Source => "source",
             NodeKind::Effect => "effect",
+            NodeKind::Program => "program",
         }
     }
 }
@@ -195,7 +199,7 @@ fn moves_demand(kind: NodeKind, prop: &str) -> bool {
         NodeKind::Effect => matches!(prop, "from" | "to"),
         NodeKind::Source => prop == "kind",
         NodeKind::Output => matches!(prop, "width" | "height" | "refresh_hz" | "scene_fps"),
-        NodeKind::Player => false,
+        NodeKind::Player | NodeKind::Program => false,
     }
 }
 
@@ -207,6 +211,7 @@ pub struct Graph {
     next_src: u64,
     next_lay: u64,
     next_fx: u64,
+    next_prog: u64,
     changes: Vec<(PropPath, PropValue)>,
     /// `out:<connector>` → sources in-flight transitions on that output hold (pending B,
     /// held A's) — the non-layer half of the `srcs:` alias (see the module doc).
@@ -251,6 +256,7 @@ impl Graph {
             next_src: 0,
             next_lay: 0,
             next_fx: 0,
+            next_prog: 0,
             changes: Vec::new(),
             tr_sources: BTreeMap::new(),
             tr_graves: BTreeSet::new(),
@@ -323,8 +329,10 @@ impl Graph {
             }
         }
         self.nodes.insert(new_id.clone(), node);
-        self.picture_rev += 1;
-        self.demand_rev += 1;
+        if kind != NodeKind::Program {
+            self.picture_rev += 1;
+            self.demand_rev += 1;
+        }
 
         if kind == NodeKind::Output {
             let connector = new_id.strip_prefix("out:").unwrap_or(&new_id);
@@ -383,6 +391,11 @@ impl Graph {
                 self.next_fx += 1;
                 Ok(format!("fx{}", self.next_fx))
             }
+            (NodeKind::Program, Some(id)) => Ok(id),
+            (NodeKind::Program, None) => {
+                self.next_prog += 1;
+                Ok(format!("prog{}", self.next_prog))
+            }
             (NodeKind::Player, _) => unreachable!("guarded by the caller"),
         }
     }
@@ -395,8 +408,10 @@ impl Graph {
             return Err(unsupported("the player singleton cannot be destroyed"));
         }
         let node = self.nodes.remove(id).ok_or_else(|| no_such_node(id))?;
-        self.picture_rev += 1;
-        self.demand_rev += 1;
+        if node.kind != NodeKind::Program {
+            self.picture_rev += 1;
+            self.demand_rev += 1;
+        }
         if node.kind == NodeKind::Output {
             let connector = id.strip_prefix("out:").unwrap_or(id);
             self.nodes.remove(&format!("lay:{connector}:main"));

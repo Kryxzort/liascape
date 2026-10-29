@@ -16,7 +16,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::{ApiError, NodeKind};
 use crate::units::GainSlot;
@@ -34,7 +34,28 @@ pub enum PropValue {
     Str(String),
     List(Vec<f64>),
     Map(serde_json::Map<String, Value>),
+    /// A program's `items` (Phase 3).
+    Items(Vec<ProgramItem>),
 }
+
+/// One item of a program (Phase 3, `prog:<name>.items`): a file, the `Source` create props
+/// where it differs from the program's `defaults` (B's props = `defaults` with these merged
+/// over them, shallowly), and whether the rotation passes it over.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramItem {
+    pub path: String,
+    #[serde(default)]
+    pub props: Map<String, Value>,
+    #[serde(default)]
+    pub skip: bool,
+}
+
+/// The most items a program holds.
+pub const PROGRAM_ITEMS_MAX: usize = 10_000;
+
+/// The longest program interval / limit (the backend's 0…359 999 s clamp), in ms.
+pub const PROGRAM_MS_MAX: f64 = 359_999_000.0;
 
 impl PropValue {
     /// Converts to the `serde_json::Value` the command API sends over the wire.
@@ -46,6 +67,7 @@ impl PropValue {
             PropValue::Str(s) => Value::String(s.clone()),
             PropValue::List(v) => serde_json::json!(v),
             PropValue::Map(m) => Value::Object(m.clone()),
+            PropValue::Items(v) => serde_json::to_value(v).unwrap_or(Value::Null),
         }
     }
 }
@@ -67,6 +89,13 @@ pub enum PropType {
     /// `[0,1]`, `w,h > 0`) applied by [`check_list`] — the only `List4`-typed property.
     List4,
     Map,
+    /// A program's item list ([`ProgramItem`]s, ≤ [`PROGRAM_ITEMS_MAX`]; each `props` key a
+    /// `Source` create prop, typed as a create would type it).
+    Items,
+    /// A map of `Source` create props (a program's `defaults`), checked like an item's.
+    SourceProps,
+    /// A program's `transition` (`recipes::program::TransitionCfg::from_map`).
+    Transition,
 }
 
 /// One property's full schema entry: its shape, whether `set` may touch it, its numeric
@@ -346,6 +375,68 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
             ),
         ],
+        // Phase 3: a rotation (`recipes::program`). Settable props are the program's live
+        // configuration; the observed ones are what it does now (read-only).
+        NodeKind::Program => {
+            let ms = |d: f64| ranged(PropType::F64, (0.0, PROGRAM_MS_MAX), "0–359999000", PropValue::F64(d));
+            let mut transition = Map::new();
+            transition.insert("enabled".into(), Value::Bool(false));
+            vec![
+                // which outputs it switches; fixed after create
+                (
+                    "outputs",
+                    def(PropType::Str, true, PropValue::Str("out:*".to_string())),
+                ),
+                ("items", def(PropType::Items, false, PropValue::Items(Vec::new()))),
+                (
+                    "defaults",
+                    def(PropType::SourceProps, false, PropValue::Map(Map::new())),
+                ),
+                (
+                    "order",
+                    def(
+                        PropType::Enum(&["sequential", "shuffle"]),
+                        false,
+                        PropValue::Str("sequential".to_string()),
+                    ),
+                ),
+                (
+                    "mode",
+                    def(
+                        PropType::Enum(&["timer", "on_end"]),
+                        false,
+                        PropValue::Str("on_end".to_string()),
+                    ),
+                ),
+                ("interval_ms", ms(0.0)),
+                ("max_ms", ms(0.0)),
+                (
+                    "separate_scenes",
+                    def(PropType::Bool, false, PropValue::Bool(true)),
+                ),
+                ("scenes_after_ms", ms(1_800_000.0)),
+                (
+                    "transition",
+                    def(PropType::Transition, false, PropValue::Map(transition)),
+                ),
+                // the RNG seed (shuffles, random picks, effect picks); `create` mints one
+                // from the wall clock when none is given
+                ("seed", def(PropType::I64, false, PropValue::I64(0))),
+                // observed
+                (
+                    "phase",
+                    def(PropType::Str, true, PropValue::Str("idle".to_string())),
+                ),
+                ("index", def(PropType::I64, true, PropValue::I64(-1))),
+                ("path", def(PropType::Str, true, PropValue::Str(String::new()))),
+                (
+                    "next_path",
+                    def(PropType::Str, true, PropValue::Str(String::new())),
+                ),
+                ("played_ms", def(PropType::F64, true, PropValue::F64(0.0))),
+                ("remaining_ms", def(PropType::F64, true, PropValue::F64(0.0))),
+            ]
+        }
         NodeKind::Effect => vec![
             (
                 "effect_id",
@@ -453,9 +544,63 @@ fn check_type_and_range(prop: &str, pd: &PropDef, value: &PropValue) -> Result<(
             PropValue::Map(_) => Ok(()),
             _ => Err(bad_type(prop, "an object")),
         },
+        PropType::Items => match value {
+            PropValue::Items(items) => check_items(prop, items),
+            _ => Err(bad_type(prop, "a list of {path, props?, skip?}")),
+        },
+        PropType::SourceProps => match value {
+            PropValue::Map(m) => check_source_props(prop, m),
+            _ => Err(bad_type(prop, "an object of Source props")),
+        },
+        PropType::Transition => match value {
+            PropValue::Map(m) => crate::recipes::program::TransitionCfg::from_map(m).map(|_| ()),
+            _ => Err(bad_type(prop, "an object")),
+        },
         PropType::List3 => check_list(prop, value, 3, false),
         PropType::List4 => check_list(prop, value, 4, true),
     }
+}
+
+/// A program's items: at most [`PROGRAM_ITEMS_MAX`], each with a non-empty path and valid
+/// `Source` create props. Every error names the item (`items[3].props: …`).
+fn check_items(prop: &str, items: &[ProgramItem]) -> Result<(), ApiError> {
+    if items.len() > PROGRAM_ITEMS_MAX {
+        return Err(out_of_range(prop, "at most 10000 items"));
+    }
+    for (i, it) in items.iter().enumerate() {
+        if it.path.is_empty() {
+            return Err(bad_type(&format!("{prop}[{i}].path"), "a non-empty path"));
+        }
+        check_source_props(&format!("{prop}[{i}].props"), &it.props)?;
+    }
+    Ok(())
+}
+
+/// Every key a `Source` create prop (`gain.<slot>` included), its value typed and
+/// range-checked as a `Source` create would check it (read-only props may be seeded, as at
+/// create). The error's message is prefixed with `at`.
+fn check_source_props(at: &str, m: &Map<String, Value>) -> Result<(), ApiError> {
+    for (k, v) in m {
+        let typed = if let Some(slot) = k.strip_prefix("gain.") {
+            if slot.parse::<GainSlot>().is_err() {
+                Err(no_such_prop(k))
+            } else {
+                from_json(k, PropType::F64, v)
+            }
+        } else {
+            match schema_for(NodeKind::Source, k) {
+                None => Err(no_such_prop(k)),
+                Some(pd) => from_json(k, pd.ty, v),
+            }
+        };
+        typed
+            .and_then(|pv| validate_value(NodeKind::Source, k, &pv, false))
+            .map_err(|mut e| {
+                e.message = format!("{at}: {}", e.message);
+                e
+            })?;
+    }
+    Ok(())
 }
 
 fn numeric_f64(value: &PropValue) -> Option<f64> {
@@ -530,11 +675,29 @@ pub fn from_json(prop: &str, ty: PropType, v: &Value) -> Result<PropValue, ApiEr
                 Err(bad_type(prop, "an integer"))
             }
         }
-        PropType::Map => v
+        PropType::Map | PropType::SourceProps | PropType::Transition => v
             .as_object()
             .cloned()
             .map(PropValue::Map)
             .ok_or_else(|| bad_type(prop, "an object")),
+        PropType::Items => {
+            let arr = v
+                .as_array()
+                .ok_or_else(|| bad_type(prop, "a list of {path, props?, skip?}"))?;
+            let mut items = Vec::with_capacity(arr.len());
+            for (i, it) in arr.iter().enumerate() {
+                if !it.is_object() {
+                    return Err(bad_type(&format!("{prop}[{i}]"), "an object {path, props?, skip?}"));
+                }
+                items.push(serde_json::from_value(it.clone()).map_err(|e| {
+                    bad_type(
+                        &format!("{prop}[{i}]"),
+                        &format!("{{path: string, props?: object, skip?: bool}} ({e})"),
+                    )
+                })?);
+            }
+            Ok(PropValue::Items(items))
+        }
         PropType::List3 => json_to_list(prop, v, 3),
         PropType::List4 => json_to_list(prop, v, 4),
     }
