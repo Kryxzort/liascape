@@ -48,7 +48,7 @@ public class AppSettings
     public List<SceneMonitor> SceneMonitors { get; set; } = [];
     public int SceneTransitionDelayMs { get; set; } = 1000;
     public bool AutoMute { get; set; } = false;
-    public int AutoMuteDelayMs { get; set; } = 200;
+    public int AutoMuteDelayMs { get; set; } = 500;
     public int AutoUnmuteDelayMs { get; set; } = 2000;
     public double AutoMuteMinLevelDb { get; set; } = -70.0;
     public bool AutoMuteOnlyIfMprisActive { get; set; } = false;

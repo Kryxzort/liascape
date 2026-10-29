@@ -238,6 +238,14 @@ pub fn pick(cfg: &TransitionCfg, last_effect: Option<&str>, defaults_of: &dyn Fn
 - [ ] **Step 4:** same command → PASS. Then the full crate suite in both render modes.
 - [ ] **Step 5:** Commit `Add The Program Rotation Rules`.
 
+> **Implementer note 2026-10-29 (Task 1):**
+> - No seedable RNG was in the tree; rather than add `rand`/`rand_pcg` (a new crate in `Cargo.lock` and the flake's vendored deps) `recipes/program/mod.rs` has a 30-line SplitMix64 `Rng` (`new(seed)`, `below(n)`, `shuffle`). Signatures take `rng: &mut Rng` instead of `impl Rng`.
+> - `Order::plan_play` returns `Option<Step>` (`None` for an empty order; the index is clamped), not `Step`.
+> - `min_reached(played, None, min)` is `played ≥ min` as specified here; the C# added the 150 ms slack there too (its ≤ 1 s poll's tolerance) — at most 150 ms later for a still image.
+> - `still_min_reached`: a scene needs `min > 0` (`SceneMinReached`); an image with min 0 is reached at once (`HoldForMinPlay`).
+> - `Order` keeps the last item list it was given (`bar`) as `ReorderPlaylist`'s `previousPaths`; a step planned before a reorder and committed after it re-seats the cursor at its path.
+> - `Pick` gains `picked: Option<String>` — the program's next `last_effect` (`PickEffect` moves the cycle even when the duration then makes it a cut; a single effect is not recorded, as in C#).
+
 **Size: M.**
 
 ### Task 2: The `program` node, its verbs and events
@@ -724,7 +732,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 **Files:**
 - Create: `src/player/src/signal/automute.rs`, `src/player/src/audio/foreign.rs`
 - Modify: `src/player/src/graph/props.rs`:
-  - Player `automute` Bool (false), `automute_delay_ms` F64 (200), `autounmute_delay_ms` F64 (2000), `automute_min_level_db` F64 (−70), `automute_only_if_mpris` Bool (false).
+  - Player `automute` Bool (false), `automute_delay_ms` F64 (500), `autounmute_delay_ms` F64 (2000), `automute_min_level_db` F64 (−70), `automute_only_if_mpris` Bool (false).
   - Observed `automute_active` Bool.
 - Modify: `hello.capabilities` + `automute` (bus up). Probe `automute`: the streams it meters with their verdicts and levels, the MPRIS state, decisions with timestamps.
 - Modify: `src/backend/Player/LiascapePlayerMedia.cs` (`ApplyAutoMuteSettings`, coalescible, re-asserted per process), `src/backend/Helpers/{AudioMonitor.cs, PlayerHelper.cs}` (the engine gate `AutoMuteInPlayer` = liascape-player && capability && the parity flag `AutoMuteParityPassed`, a constant flipped in this task's last commit only if step 4 passes; the user-mute vs auto-mute logic reads `player.automute_active`), `src/backend/Web/ServerHost.cs` (no `AudioMonitor.Start` / `SpawnDetachedMonitor` while the gate is on), `scripts/measure-automute-latency.py` (both engines, same harness), `scripts/test-liascape-player-adapter.sh` § auto-mute (run once per engine).
@@ -736,6 +744,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
    - It never hears the player's own audio: V→V/V→S/S→V/S→S × full-live/reveal/frozen → 0 mutes (today's "auto-mute never hears our own switches" section).
    - An `mpv` the user runs **is** heard (today's `application.name = "mpv"` filter ignores it — the spec calls that a bug). This is the one intended difference — **confirmed by the owner 2026-10-29** ("new behaviour ofc, current is just a flaw").
 3. **Mute latency as good or lower** (owner 2026-10-29: "should react as good or lower"): first audible foreign sample → every source at −96 dB, with delay 0. p50 and p95 over 30 trials **≤ today's (65–76 ms measured)** — a hard bar, not a target of 100 ms. Aim far lower: the floor is one PipeWire quantum to see the sample plus the anti-click ramp (sub-1 ms is not physically reachable — audio arrives in quanta of ~1–21 ms); report where the time goes.
+   - **The user's delay must be what they get** (owner 2026-10-29: "aim as low as possible so the delay people set is actually accurate"): measure the overhead = actual mute time − configured `automute_delay_ms`, at 0 / 500 / 2000 ms; report p50/p95; minimise it (target: a few ms). Same for the unmute delay (criterion 4). Default mute delay is now **500 ms** (owner: "something reasonable like 500ms or 1000ms"; was 200), unmute 2000 ms.
    - **Default exclusions: none** (owner 2026-10-29: "make it not ignore anything by default"). Auto-mute hears every foreign stream, voice chat and notifications included, by default; only the player's own streams are excluded (by ownership). Per-app / per-role exceptions belong to the rules feature, whose shipped default may exclude notifications only (`media.role=Notification`) — the owner's Wallpaper Engine rule list was personal taste, not a default (most users won't want wallpaper audio during calls).
 4. **Unmute timing at least as accurate:** silence → unmute at the configured delay ± 20 ms (± today's measured error, whichever is larger).
 5. **Works with the app closed** (no backend process) and across a player crash restart (the settings are in the snapshot's player props).
