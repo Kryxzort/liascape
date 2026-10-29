@@ -381,7 +381,10 @@ mod tests {
         let s = o.plan_back().unwrap();
         assert_eq!(s.path, "a");
         o.commit(s);
-        assert!(o.plan_back().is_none(), "previous at the session's first item");
+        assert!(
+            o.plan_back().is_none(),
+            "previous at the session's first item"
+        );
         let s = o.plan_next(&none, &mut rng).unwrap();
         assert_eq!((s.path.as_str(), s.why), ("b", StepWhy::HistoryForward));
         o.commit(s);
@@ -410,12 +413,19 @@ mod tests {
             let pick = s.path.clone();
             assert_ne!(pick, "b", "never the current item");
             o.commit(s);
-            assert_eq!(o.history().0, &[v(&["a", "b"]), vec![pick.clone()]].concat()[..]);
+            assert_eq!(
+                o.history().0,
+                &[v(&["a", "b"]), vec![pick.clone()]].concat()[..]
+            );
             assert_eq!(o.history().1, 2);
             let at = items.iter().position(|p| *p == pick).unwrap();
             let s = o.plan_next(&none, &mut rng).unwrap();
             assert_eq!(s.why, StepWhy::Forward, "the forward history is gone");
-            assert_eq!(s.path, items[(at + 1) % items.len()], "next follows the pick's place");
+            assert_eq!(
+                s.path,
+                items[(at + 1) % items.len()],
+                "next follows the pick's place"
+            );
         }
     }
 
@@ -534,7 +544,10 @@ mod tests {
             o.reorder(&items, true, &mut rng);
             assert!(o.shuffle());
             let mut rest: Vec<String> = (0..5).map(|_| next(&mut o, &mut rng)).collect();
-            assert!(!rest.contains(&"b".to_string()), "b doesn't repeat before the rest");
+            assert!(
+                !rest.contains(&"b".to_string()),
+                "b doesn't repeat before the rest"
+            );
             rest.sort();
             assert_eq!(rest, v(&["a", "c", "d", "e", "f"]));
         }

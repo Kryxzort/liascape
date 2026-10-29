@@ -140,7 +140,11 @@ pub fn pick(
         0 => return cut(None),
         1 => (ids[0], None),
         _ if cfg.shuffle => {
-            let pool: Vec<&str> = ids.iter().copied().filter(|i| Some(*i) != last_effect).collect();
+            let pool: Vec<&str> = ids
+                .iter()
+                .copied()
+                .filter(|i| Some(*i) != last_effect)
+                .collect();
             let pool = if pool.is_empty() { ids.clone() } else { pool };
             let e = pool[rng.below(pool.len())];
             (e, Some(e.to_string()))
@@ -228,17 +232,24 @@ mod tests {
             assert_ne!(w[0].effect_id, w[1].effect_id);
         }
         // unknown ids are dropped (and duplicates)
-        let got: Vec<_> = run(&cfg(&["nope", "wipe", "wipe", "fade"], false, 500, 0), 3, &mut rng)
-            .into_iter()
-            .map(|p| p.effect_id.unwrap())
-            .collect();
+        let got: Vec<_> = run(
+            &cfg(&["nope", "wipe", "wipe", "fade"], false, 500, 0),
+            3,
+            &mut rng,
+        )
+        .into_iter()
+        .map(|p| p.effect_id.unwrap())
+        .collect();
         assert_eq!(got, ["wipe", "fade", "wipe"]);
         // params = the catalogue's defaults; method = the cfg's
         let p = pick(&cfg(&["wipe"], false, 500, 0), None, &catalogue, &mut rng);
         assert_eq!(p.params, catalogue("wipe").unwrap());
         assert_eq!(p.method, Method::FullLive);
         assert_eq!(p.duration_ms, 500);
-        assert_eq!(p.picked, None, "a single effect isn't recorded (PickEffect)");
+        assert_eq!(
+            p.picked, None,
+            "a single effect isn't recorded (PickEffect)"
+        );
     }
 
     #[test]
@@ -248,9 +259,17 @@ mod tests {
         assert_eq!(pick(&c, None, &catalogue, &mut rng).effect_id, None, "0 ms");
         c.duration_ms = 500;
         c.enabled = false;
-        assert_eq!(pick(&c, None, &catalogue, &mut rng).effect_id, None, "disabled");
+        assert_eq!(
+            pick(&c, None, &catalogue, &mut rng).effect_id,
+            None,
+            "disabled"
+        );
         let c = cfg(&["nope"], false, 500, 0);
-        assert_eq!(pick(&c, None, &catalogue, &mut rng).effect_id, None, "no known effect");
+        assert_eq!(
+            pick(&c, None, &catalogue, &mut rng).effect_id,
+            None,
+            "no known effect"
+        );
         // a 0 ms cut still moves the cycle (PickEffect runs before PickDuration)
         let c = cfg(&["fade", "wipe"], false, 0, 0);
         let p = pick(&c, Some("fade"), &catalogue, &mut rng);
@@ -297,8 +316,15 @@ mod tests {
                 method: Method::Frozen,
             }
         );
-        assert_eq!(TransitionCfg::from_map(&Map::new()).unwrap(), TransitionCfg::default());
-        let err = |v: Value| TransitionCfg::from_map(v.as_object().unwrap()).unwrap_err().code;
+        assert_eq!(
+            TransitionCfg::from_map(&Map::new()).unwrap(),
+            TransitionCfg::default()
+        );
+        let err = |v: Value| {
+            TransitionCfg::from_map(v.as_object().unwrap())
+                .unwrap_err()
+                .code
+        };
         assert_eq!(err(json!({"enabled": 1})), "bad_type");
         assert_eq!(err(json!({"effects": [1]})), "bad_type");
         assert_eq!(err(json!({"method": "slide"})), "out_of_range");

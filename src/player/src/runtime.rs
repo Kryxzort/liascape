@@ -1333,6 +1333,7 @@ impl Runtime {
             return;
         }
         let parked = self.graph.ids_of(NodeKind::Output).is_empty();
+        let active: Vec<CorrId> = self.tr.status().into_iter().map(|s| s.corr).collect();
         let cat = &self.cat;
         let acts = self.programs.tick(
             &mut self.graph,
@@ -1340,6 +1341,7 @@ impl Runtime {
             src_events,
             now,
             parked,
+            &active,
             &|id| cat.defaults(id),
         );
         self.run_program_actions(acts);
@@ -1363,21 +1365,28 @@ impl Runtime {
                     let parked = req.outputs.starts_with("out:")
                         && self.graph.ids_of(NodeKind::Output).is_empty();
                     let res = if parked {
-                        self.transition_parked(req).map(|(c, _)| c)
+                        self.transition_parked(req).map(|(c, b)| (c, Some(b)))
                     } else {
                         let now = self.now();
-                        self.tr.start(req, &mut self.graph, &mut self.anim, now)
+                        self.tr
+                            .start(req, &mut self.graph, &mut self.anim, now)
+                            .map(|c| (c, None))
                     };
+                    let now = self.now();
                     match res {
-                        Ok(corr) => {
-                            let now = self.now();
-                            self.programs.on_requested(&id, corr.clone(), step, reason, parked, now);
+                        Ok((corr, parked_b)) => {
+                            self.programs.on_requested(
+                                &id,
+                                corr.clone(),
+                                step,
+                                reason,
+                                parked_b,
+                                &self.graph,
+                                now,
+                            );
                             last = Some((corr, path));
                         }
-                        Err(e) => {
-                            let now = self.now();
-                            self.programs.on_request_failed(&id, step, reason, &e, now);
-                        }
+                        Err(e) => self.programs.on_request_failed(&id, step, &e, now),
                     }
                 }
                 ProgramAction::Cancel { corr } => {

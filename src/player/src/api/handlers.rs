@@ -626,7 +626,9 @@ fn opt_bool(args: &Value, key: &str) -> Result<bool, ApiError> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(false),
         Some(Value::Bool(b)) => Ok(*b),
-        Some(other) => Err(bad_request(format!("args.{key} must be a bool, got {other}"))),
+        Some(other) => Err(bad_request(format!(
+            "args.{key} must be a bool, got {other}"
+        ))),
     }
 }
 
@@ -637,12 +639,20 @@ fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, Api
     let keep_pause = opt_bool(args, "keep_pause")?;
     let index = match opt_f64(args, "index")? {
         Some(i) if i < 0.0 || i.fract() != 0.0 => {
-            return Err(bad_request(format!("args.index {i}: a non-negative integer")));
+            return Err(bad_request(format!(
+                "args.index {i}: a non-negative integer"
+            )));
         }
         Some(i) => Some(i as usize),
         None => None,
     };
-    let acts = rt.programs.verb(verb, &id, index, keep_pause, &rt.graph)?;
+    let now = rt.now();
+    let cat = &rt.cat;
+    let acts = rt
+        .programs
+        .verb(verb, &id, index, keep_pause, &rt.graph, now, &|e| {
+            cat.defaults(e)
+        })?;
     let out = rt.run_program_actions(acts);
     Ok(rt.programs.verb_reply(&id, out))
 }

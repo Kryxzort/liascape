@@ -18,9 +18,10 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use crate::anim::PropPath;
 use crate::graph::{ApiError, Graph, ProgramItem, PropValue};
 use crate::log::{self, CorrId, Level};
-use crate::recipes::transition::{Align, TransitionEvent, TransitionReq};
+use crate::recipes::transition::{Align, TransitionEvent, TransitionEventKind, TransitionReq};
 use crate::sources::SourceEvent;
 
 pub use order::{Order, Step, StepWhy};
@@ -71,6 +72,10 @@ impl Rng {
 
 // ---------------------------------------------------------------- the program nodes
 
+/// The failure ladder (designer call 8): the backoff after the n-th switch failure in a row,
+/// then 30 s for as long as failures continue. A handoff resets it.
+pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];
+
 /// What a program is doing (`prog:<id>.phase`, `state.programs[].phase`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,7 +92,7 @@ pub enum ProgPhase {
     Switching,
     /// Failed switches in a row: waiting out the backoff.
     Backoff,
-    /// No output shows the program's outputs (R60).
+    /// No output exists (R60): the program's item is parked.
     Parked,
     /// Nothing playable.
     Empty,
@@ -134,7 +139,7 @@ pub struct ProgramStatus {
     pub backoff_ms: u64,
     pub failures: u32,
     pub last_effect: Option<String>,
-    /// Items marked broken (a broken scene): passed over until the list changes them.
+    /// Items marked broken (a broken scene): passed over from then on.
     pub broken: Vec<String>,
 }
 
@@ -198,18 +203,22 @@ impl ProgCfg {
     }
 }
 
-/// One program's live state.
-#[derive(Debug)]
-struct Prog {
-    cfg: ProgCfg,
-    order: Order,
-    #[allow(dead_code)] // the engine's (Task 3)
-    rng: Rng,
-    played_ms: f64,
-    remaining_ms: f64,
-    last_effect: Option<String>,
-    failures: u32,
-    broken: BTreeSet<String>,
+/// A rotation's play clock: the player clock's advance since the last tick
+/// (`Runtime::now` — monotonic, `CLOCK_MONOTONIC`-based, so it excludes suspend, and
+/// pause-excised). Play time and the countdown add exactly this; a wall-clock jump never
+/// reaches them.
+#[derive(Debug, Clone, Default)]
+pub struct PlayClock {
+    last: Option<Duration>,
+}
+
+impl PlayClock {
+    /// The player-clock time since the previous call (zero on the first).
+    pub fn advance(&mut self, now: Duration) -> Duration {
+        let d = self.last.map(|l| now.saturating_sub(l)).unwrap_or_default();
+        self.last = Some(now);
+        d
+    }
 }
 
 /// Why a program switched (`program.current.reason`).
@@ -230,6 +239,25 @@ pub enum Reason {
     Items,
 }
 
+impl Reason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::Play => "play",
+            Reason::Timer => "timer",
+            Reason::End => "end",
+            Reason::Max => "max",
+            Reason::ScenesAfter => "scenes_after",
+            Reason::Next => "next",
+            Reason::Prev => "prev",
+            Reason::Random => "random",
+            Reason::Broken => "broken",
+            Reason::Vram => "vram",
+            Reason::FailedSkip => "failed_skip",
+            Reason::Items => "items",
+        }
+    }
+}
+
 /// An action the runtime runs for a program (never a second code path: `Start` goes through
 /// `Transitions::start`, or `Runtime::transition_parked` with no output).
 #[derive(Debug)]
@@ -243,6 +271,49 @@ pub enum ProgramAction {
     },
     /// Cancel a pre-Running switch (the abort restores A's loop).
     Cancel { corr: CorrId },
+}
+
+/// A switch requested and not started yet.
+#[derive(Debug, Clone)]
+struct Pending {
+    /// `None` until the runtime reports it ([`Programs::on_requested`]).
+    corr: Option<CorrId>,
+    step: Step,
+    reason: Reason,
+    align: Align,
+}
+
+/// One program's live state.
+#[derive(Debug)]
+struct Prog {
+    cfg: ProgCfg,
+    /// Paths with `skip: true`.
+    skips: BTreeSet<String>,
+    order: Order,
+    rng: Rng,
+    /// A play happened and the program follows what it shows.
+    started: bool,
+    /// The source showing the current item (B of the last committed switch).
+    cur_src: Option<String>,
+    /// The committed switch while its effect runs (until its handoff).
+    running: Option<CorrId>,
+    pending: Option<Pending>,
+    /// A video held below its minimum (`program.held` logged).
+    held: bool,
+    clock: PlayClock,
+    played_ms: f64,
+    remaining_ms: f64,
+    last_effect: Option<String>,
+    failures: u32,
+    backoff_ms: u64,
+    /// The backoff's end and the reason the switch after it gets.
+    backoff_until: Option<Duration>,
+    /// Items whose switch failed (passed over until the items change, or every item failed).
+    failed: BTreeSet<String>,
+    /// Items whose source broke (a broken scene; passed over from then on).
+    broken: BTreeSet<String>,
+    empty_logged: bool,
+    parked: bool,
 }
 
 fn no_program(id: &str) -> ApiError {
@@ -263,10 +334,634 @@ fn empty_program(id: &str) -> ApiError {
     }
 }
 
+fn src_str(g: &Graph, id: &str, prop: &str) -> String {
+    match g.get(&PropPath(format!("{id}.{prop}"))) {
+        Ok(PropValue::Str(s)) => s,
+        _ => String::new(),
+    }
+}
+
+fn src_f64(g: &Graph, id: &str, prop: &str) -> Option<f64> {
+    match g.get(&PropPath(format!("{id}.{prop}"))) {
+        Ok(PropValue::F64(f)) => Some(f),
+        Ok(PropValue::I64(i)) => Some(i as f64),
+        _ => None,
+    }
+}
+
+/// What the source plays, for its rule (`PlayerHelper.PlayKindOf`): the graph's `kind`
+/// (the live source corrects an image's), else the path's extension.
+fn play_kind(g: &Graph, src: &str) -> PlayKind {
+    match src_str(g, src, "kind").as_str() {
+        "scene" => PlayKind::Scene,
+        "image" | "color" | "snapshot" => PlayKind::Image,
+        "video" if crate::sources::mpv::infer_kind(&src_str(g, src, "path")) == "image" => {
+            PlayKind::Image
+        }
+        _ => PlayKind::Video,
+    }
+}
+
+/// What is left of the source's current loop, wall clock at its speed (ms); `None` = no
+/// end known yet (`LiascapePlayerMedia.TimeRemaining`).
+fn loop_remaining_ms(g: &Graph, src: &str) -> Option<u64> {
+    let dur = src_f64(g, src, "duration").filter(|d| *d > 0.0)?;
+    let tp = src_f64(g, src, "time_pos").unwrap_or(0.0);
+    let speed = src_f64(g, src, "speed").filter(|s| *s > 0.0).unwrap_or(1.0);
+    Some((((dur - tp).max(0.0) / speed) * 1000.0) as u64)
+}
+
+impl Prog {
+    fn new(cfg: ProgCfg) -> Prog {
+        let skips = cfg
+            .items
+            .iter()
+            .filter(|i| i.skip)
+            .map(|i| i.path.clone())
+            .collect();
+        let order = Order::new(cfg.paths(), 0, cfg.shuffle);
+        let rng = Rng::new(cfg.seed);
+        Prog {
+            cfg,
+            skips,
+            order,
+            rng,
+            started: false,
+            cur_src: None,
+            running: None,
+            pending: None,
+            held: false,
+            clock: PlayClock::default(),
+            played_ms: 0.0,
+            remaining_ms: 0.0,
+            last_effect: None,
+            failures: 0,
+            backoff_ms: 0,
+            backoff_until: None,
+            failed: BTreeSet::new(),
+            broken: BTreeSet::new(),
+            empty_logged: false,
+            parked: false,
+        }
+    }
+
+    fn can_rotate(&self) -> bool {
+        self.cfg.items.len() > 1
+    }
+
+    fn index_of(&self, path: &str) -> i64 {
+        self.cfg
+            .items
+            .iter()
+            .position(|i| i.path == path)
+            .map(|i| i as i64)
+            .unwrap_or(-1)
+    }
+
+    fn phase(&self) -> ProgPhase {
+        if !self.started {
+            return ProgPhase::Idle;
+        }
+        if self.backoff_until.is_some() {
+            return ProgPhase::Backoff;
+        }
+        if let Some(p) = &self.pending {
+            return match p.align {
+                Align::End => ProgPhase::Armed,
+                Align::Now => ProgPhase::Switching,
+            };
+        }
+        if self.empty_logged {
+            return ProgPhase::Empty;
+        }
+        if self.parked {
+            return ProgPhase::Parked;
+        }
+        if self.held {
+            return ProgPhase::Holding;
+        }
+        ProgPhase::Playing
+    }
+
+    /// The order's next playable item (`None` = nothing playable: `program.empty` once). A
+    /// stretch where every playable item failed logs `empty` and starts the ladder over them
+    /// again (the backoff keeps it from spinning).
+    fn plan_next(&mut self, id: &str, now: Duration) -> Option<Step> {
+        let (skips, broken, failed) = (&self.skips, &self.broken, &self.failed);
+        let skip = |p: &str| skips.contains(p) || broken.contains(p) || failed.contains(p);
+        if let Some(s) = self.order.plan_next(&skip, &mut self.rng) {
+            return Some(s);
+        }
+        if !self.empty_logged {
+            self.empty_logged = true;
+            log::event(
+                "program",
+                Level::Warn,
+                "program.empty",
+                None,
+                json!({ "id": id }),
+            );
+        }
+        if !self.failed.is_empty() {
+            // every playable item failed: retry them, at the ladder's pace
+            self.failed.clear();
+            if self.backoff_until.is_none() {
+                self.backoff_until = Some(now + Duration::from_millis(self.backoff_ms.max(1000)));
+            }
+        }
+        None
+    }
+
+    /// B's create props (`defaults` ∪ the item's props, item wins; its path; `loop` while an
+    /// on-end minimum may hold it) and the transition picked for it.
+    fn request(
+        &mut self,
+        id: &str,
+        step: &Step,
+        align: Align,
+        cut: bool,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+    ) -> TransitionReq {
+        let mut to = self.cfg.defaults.clone();
+        if let Some(item) = self.cfg.items.iter().find(|i| i.path == step.path) {
+            for (k, v) in &item.props {
+                to.insert(k.clone(), v.clone());
+            }
+        }
+        to.insert("path".into(), Value::String(step.path.clone()));
+        if self.cfg.on_end && self.cfg.interval_ms > 0 && self.can_rotate() {
+            // a clip shorter than the minimum loops on until the loop that reaches it
+            to.insert("loop".into(), Value::Bool(true));
+        }
+        let p = pick::pick(
+            &self.cfg.transition,
+            self.last_effect.as_deref(),
+            defaults_of,
+            &mut self.rng,
+        );
+        if let Some(e) = &p.picked {
+            self.last_effect = Some(e.clone());
+        }
+        let (effect_id, params, duration_ms) = if cut {
+            (None, Map::new(), 0)
+        } else {
+            (p.effect_id, p.params, p.duration_ms)
+        };
+        TransitionReq {
+            outputs: self.cfg.outputs.clone(),
+            to,
+            effect_id,
+            params,
+            duration_ms,
+            method: p.method,
+            align,
+            origin: format!("program:{id}"),
+        }
+    }
+
+    fn start(
+        &mut self,
+        id: &str,
+        step: Step,
+        reason: Reason,
+        align: Align,
+        cut: bool,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+    ) -> ProgramAction {
+        let req = self.request(id, &step, align, cut, defaults_of);
+        self.pending = Some(Pending {
+            corr: None,
+            step: step.clone(),
+            reason,
+            align,
+        });
+        self.held = false;
+        ProgramAction::Start {
+            id: id.to_string(),
+            req,
+            step,
+            reason,
+        }
+    }
+
+    /// B became current: the step is committed, the play time starts at 0.
+    fn commit(&mut self, id: &str, b: Option<String>, corr: &CorrId, g: &Graph, now: Duration) {
+        let Some(p) = self.pending.take() else { return };
+        let from = self.order.current().map(str::to_string);
+        let path = p.step.path.clone();
+        self.order.commit(p.step);
+        self.cur_src = b;
+        self.played_ms = 0.0;
+        self.remaining_ms = self.cfg.interval_ms as f64;
+        self.held = false;
+        self.empty_logged = false;
+        self.started = true;
+        log::event(
+            "program",
+            Level::Info,
+            "program.current",
+            Some(corr.clone()),
+            json!({ "id": id, "index": self.index_of(&path), "path": path, "from": from,
+                    "reason": p.reason.as_str(), "corr": corr.0,
+                    "at_ms": now.as_secs_f64() * 1000.0,
+                    "source": self.cur_src, "source_kind": self.cur_src.as_deref().map(|s| src_str(g, s, "kind")) }),
+        );
+    }
+
+    fn fail(&mut self, id: &str, path: &str, reason: &str, now: Duration) {
+        self.pending = None;
+        self.failures += 1;
+        self.backoff_ms = BACKOFF_MS[(self.failures as usize - 1).min(BACKOFF_MS.len() - 1)];
+        self.backoff_until = Some(now + Duration::from_millis(self.backoff_ms));
+        self.failed.insert(path.to_string());
+        log::event(
+            "program",
+            Level::Warn,
+            "program.failed",
+            None,
+            json!({ "id": id, "path": path, "reason": reason, "backoff_ms": self.backoff_ms,
+                    "failures": self.failures }),
+        );
+    }
+
+    fn mark_broken(&mut self, id: &str, path: &str, why: &str) {
+        if self.broken.insert(path.to_string()) {
+            log::event(
+                "program",
+                Level::Info,
+                "program.skipped",
+                None,
+                json!({ "id": id, "path": path, "why": why }),
+            );
+        }
+    }
+
+    /// The source the program's first output shows now (`cur:<c>`).
+    fn shown(&self, g: &Graph) -> Option<String> {
+        let out = g.resolve(&self.cfg.outputs).into_iter().next()?;
+        let c = out.strip_prefix("out:")?;
+        g.resolve(&format!("cur:{c}")).into_iter().next()
+    }
+
+    fn set_observed(&self, id: &str, g: &mut Graph) {
+        let path = self.order.current().filter(|_| self.started).unwrap_or("");
+        let next = self
+            .pending
+            .as_ref()
+            .map(|p| p.step.path.as_str())
+            .unwrap_or("");
+        let vals = [
+            ("phase", PropValue::Str(self.phase().as_str().to_string())),
+            (
+                "index",
+                PropValue::I64(if path.is_empty() {
+                    -1
+                } else {
+                    self.index_of(path)
+                }),
+            ),
+            ("path", PropValue::Str(path.to_string())),
+            ("next_path", PropValue::Str(next.to_string())),
+            ("played_ms", PropValue::F64(self.played_ms.round())),
+            ("remaining_ms", PropValue::F64(self.remaining_ms.round())),
+        ];
+        for (k, v) in vals {
+            let _ = g.set_observed_on(id, k, v);
+        }
+    }
+
+    fn status(&self, id: &str) -> ProgramStatus {
+        let (history, hi) = self.order.history();
+        let path = self
+            .order
+            .current()
+            .filter(|_| self.started)
+            .map(str::to_string);
+        ProgramStatus {
+            id: id.to_string(),
+            phase: self.phase(),
+            index: path.as_deref().map(|p| self.index_of(p)).unwrap_or(-1),
+            path,
+            next: self.pending.as_ref().map(|p| p.step.path.clone()),
+            corr: self
+                .pending
+                .as_ref()
+                .and_then(|p| p.corr.as_ref())
+                .map(|c| c.0.clone()),
+            armed_align: self.pending.as_ref().map(|p| p.align),
+            items: self.cfg.items.len(),
+            order: self.order.items().to_vec(),
+            history: history.to_vec(),
+            history_index: hi,
+            played_ms: self.played_ms.round(),
+            remaining_ms: self.remaining_ms.round(),
+            backoff_ms: self.backoff_ms,
+            failures: self.failures,
+            last_effect: self.last_effect.clone(),
+            broken: self.broken.iter().cloned().collect(),
+        }
+    }
+
+    /// One tick of this program (see [`Programs::tick`]).
+    #[allow(clippy::too_many_arguments)]
+    fn tick(
+        &mut self,
+        id: &str,
+        g: &mut Graph,
+        tr_events: &[TransitionEvent],
+        src_events: &[(String, SourceEvent)],
+        now: Duration,
+        parked: bool,
+        foreign_busy: bool,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+    ) -> Vec<ProgramAction> {
+        let mut acts = Vec::new();
+        let mut dt = self.clock.advance(now).as_secs_f64() * 1000.0;
+        self.parked = parked;
+        let cur_before = self.cur_src.clone();
+
+        // 1. the transitions' outcomes
+        for ev in tr_events {
+            let ours = self
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.corr.as_ref() == Some(&ev.corr));
+            match &ev.kind {
+                TransitionEventKind::Started { b, .. } if ours => {
+                    self.commit(id, Some(b.id.clone()), &ev.corr, g, now);
+                    self.running = Some(ev.corr.clone());
+                }
+                TransitionEventKind::Handoff { to, .. } => {
+                    if ours {
+                        // a missed `started` (cut short by a newer request)
+                        self.commit(id, Some(to.clone()), &ev.corr, g, now);
+                    }
+                    if ours || self.running.as_ref() == Some(&ev.corr) {
+                        self.running = None;
+                        self.failures = 0;
+                        self.backoff_ms = 0;
+                    }
+                }
+                TransitionEventKind::Cancelled { reason } if ours => {
+                    // another client's request or `cancel` (the program's own supersedes
+                    // replace `pending` before their events arrive): A stays
+                    self.pending = None;
+                    self.held = false;
+                    if !self.cfg.on_end {
+                        self.remaining_ms = self.cfg.interval_ms as f64;
+                    }
+                    log::event(
+                        "program",
+                        Level::Debug,
+                        "program.request_cancelled",
+                        Some(ev.corr.clone()),
+                        json!({ "id": id, "reason": reason }),
+                    );
+                }
+                TransitionEventKind::Cancelled { .. }
+                    if self.running.as_ref() == Some(&ev.corr) =>
+                {
+                    self.running = None;
+                }
+                TransitionEventKind::Failed { path, reason } if ours => {
+                    let path = if path.is_empty() {
+                        self.pending
+                            .as_ref()
+                            .map(|p| p.step.path.clone())
+                            .unwrap_or_default()
+                    } else {
+                        path.clone()
+                    };
+                    self.fail(id, &path, reason, now);
+                }
+                _ => {}
+            }
+        }
+        if !self.started {
+            self.set_observed(id, g);
+            return acts;
+        }
+
+        // 2. the current item's source broke (a broken scene, a VRAM stop, a dead file)
+        let mut broke: Option<Reason> = None;
+        if let Some(cur) = self.cur_src.clone() {
+            for (sid, ev) in src_events {
+                if sid != &cur {
+                    continue;
+                }
+                if let SourceEvent::Error { reason } = ev {
+                    let path = self.order.current().unwrap_or("").to_string();
+                    if reason.contains("(vram_exceeded)") {
+                        broke = Some(Reason::Vram);
+                    } else {
+                        self.mark_broken(id, &path, "broken");
+                        broke = Some(Reason::Broken);
+                    }
+                }
+            }
+        }
+
+        // 3. what the outputs show: another client's switch took over
+        if broke.is_none()
+            && !parked
+            && self.pending.is_none()
+            && self.running.is_none()
+            && let (Some(cur), Some(shown)) = (self.cur_src.clone(), self.shown(g))
+            && shown != cur
+        {
+            let path = src_str(g, &shown, "path");
+            self.held = false;
+            if self.index_of(&path) >= 0 {
+                // an item: it becomes current (the cursor re-seats there)
+                if let Some(step) = self.order.plan_play(self.index_of(&path) as usize) {
+                    self.pending = Some(Pending {
+                        corr: None,
+                        step,
+                        reason: Reason::Items,
+                        align: Align::Now,
+                    });
+                    let corr = CorrId(String::new());
+                    self.commit(id, Some(shown), &corr, g, now);
+                }
+            } else {
+                self.started = false;
+                self.cur_src = None;
+                log::event(
+                    "program",
+                    Level::Info,
+                    "program.idle",
+                    None,
+                    json!({ "id": id, "shown": path }),
+                );
+                self.set_observed(id, g);
+                return acts;
+            }
+        }
+
+        // 4. the clocks: play time (wall clock, never speed-scaled) and the countdown (scaled
+        // by what plays). B counts from its effect's start — a commit this tick starts at 0.
+        if self.cur_src != cur_before {
+            dt = 0.0;
+        }
+        if self.cur_src.is_some() {
+            self.played_ms += dt;
+            if !self.cfg.on_end {
+                let speed = self
+                    .cur_src
+                    .as_deref()
+                    .and_then(|s| src_f64(g, s, "speed"))
+                    .filter(|s| *s > 0.0)
+                    .unwrap_or(1.0);
+                self.remaining_ms -= dt * speed;
+            }
+        }
+
+        // 5. a broken current item moves on at once
+        if let Some(reason) = broke {
+            if let Some(p) = self.pending.take()
+                && let Some(c) = p.corr
+            {
+                acts.push(ProgramAction::Cancel { corr: c });
+            }
+            if let Some(step) = self.plan_next(id, now) {
+                acts.push(self.start(id, step, reason, Align::Now, false, defaults_of));
+            }
+            self.set_observed(id, g);
+            return acts;
+        }
+
+        // 6. the failure ladder
+        if let Some(until) = self.backoff_until {
+            if now < until {
+                self.set_observed(id, g);
+                return acts;
+            }
+            self.backoff_until = None;
+            if self.pending.is_none()
+                && let Some(step) = self.plan_next(id, now)
+            {
+                acts.push(self.start(id, step, Reason::FailedSkip, Align::Now, false, defaults_of));
+            }
+            self.set_observed(id, g);
+            return acts;
+        }
+
+        // 7. the rotation rules (player-adapter.md § Rotation)
+        let in_flight_now = self.pending.as_ref().is_some_and(|p| p.align == Align::Now);
+        if !in_flight_now && !foreign_busy && self.cur_src.is_some() {
+            let can_rotate = self.can_rotate();
+            let played = self.played_ms.max(0.0) as u64;
+            if !self.cfg.on_end {
+                // the plain timer ("Switch every"): align now, even mid-video
+                if self.cfg.interval_ms > 0 && self.remaining_ms <= 0.0 {
+                    if !can_rotate {
+                        self.remaining_ms = self.cfg.interval_ms as f64;
+                    } else if self.pending.is_none()
+                        && let Some(step) = self.plan_next(id, now)
+                    {
+                        acts.push(self.start(
+                            id,
+                            step,
+                            Reason::Timer,
+                            Align::Now,
+                            false,
+                            defaults_of,
+                        ));
+                    }
+                }
+            } else {
+                let cur = self.cur_src.clone().unwrap_or_default();
+                let kind = play_kind(g, &cur);
+                let rule = rule::item_rule(
+                    kind,
+                    self.cfg.interval_ms,
+                    self.cfg.max_ms,
+                    self.cfg.separate_scenes,
+                    self.cfg.scenes_after_ms,
+                );
+                if rule::max_reached(true, can_rotate, played, rule.max_ms) {
+                    // the cap: now, with its transition; an armed end switch's B is taken
+                    let armed = self.pending.take();
+                    let step = match armed {
+                        Some(p) => Some(p.step),
+                        None => self.plan_next(id, now),
+                    };
+                    if let Some(step) = step {
+                        acts.push(self.start(
+                            id,
+                            step,
+                            Reason::Max,
+                            Align::Now,
+                            false,
+                            defaults_of,
+                        ));
+                    }
+                } else if kind != PlayKind::Video {
+                    if self.pending.is_none()
+                        && rule::still_min_reached(true, can_rotate, kind, played, rule.min_ms)
+                        && let Some(step) = self.plan_next(id, now)
+                    {
+                        let reason = if self.cfg.separate_scenes {
+                            Reason::ScenesAfter
+                        } else {
+                            Reason::End
+                        };
+                        acts.push(self.start(id, step, reason, Align::Now, false, defaults_of));
+                    }
+                } else if can_rotate && self.pending.is_none() && self.running.is_none() && !parked
+                {
+                    // a video: its end, once this loop reaches the minimum
+                    if rule::min_reached(played, loop_remaining_ms(g, &cur), rule.min_ms) {
+                        if let Some(step) = self.plan_next(id, now) {
+                            let path = step.path.clone();
+                            acts.push(self.start(
+                                id,
+                                step,
+                                Reason::End,
+                                Align::End,
+                                false,
+                                defaults_of,
+                            ));
+                            log::event(
+                                "program",
+                                Level::Info,
+                                "program.armed",
+                                None,
+                                json!({ "id": id, "next": path, "align": "end" }),
+                            );
+                        }
+                    } else if !self.held {
+                        self.held = true;
+                        if !matches!(
+                            g.get(&PropPath(format!("{cur}.loop"))),
+                            Ok(PropValue::Bool(true))
+                        ) {
+                            let _ = g.set(&PropPath(format!("{cur}.loop")), PropValue::Bool(true));
+                        }
+                        log::event(
+                            "program",
+                            Level::Debug,
+                            "program.held",
+                            None,
+                            json!({ "id": id, "path": self.order.current(),
+                                    "until_played_ms": rule.min_ms }),
+                        );
+                    }
+                }
+            }
+        }
+        self.set_observed(id, g);
+        acts
+    }
+}
+
 /// Every live program, by node id.
 #[derive(Debug, Default)]
 pub struct Programs {
     progs: BTreeMap<String, Prog>,
+    /// Every switch a program requested that may still be in flight (to tell another
+    /// client's transitions from the programs' own; pruned to the live ones each tick).
+    issued: std::collections::HashSet<CorrId>,
 }
 
 impl Programs {
@@ -286,169 +981,302 @@ impl Programs {
         self.progs.keys().cloned().collect()
     }
 
-    /// After a create or any `set` on `id`'s node: (re)read its configuration.
+    /// After a create or any `set` on `id`'s node: (re)read its configuration. Live: a new
+    /// interval keeps the elapsed time (`retime_remaining`), new items or order reorder the
+    /// play order (`Order::reorder`, the current item kept); the rest is read where it is
+    /// used.
     pub fn configure(&mut self, id: &str, g: &mut Graph) -> Vec<ProgramAction> {
         let Some(cfg) = ProgCfg::read(g, id) else {
             return Vec::new();
         };
         match self.progs.get_mut(id) {
             Some(p) => {
-                p.cfg = cfg;
+                let old = std::mem::replace(&mut p.cfg, cfg);
+                if old.interval_ms != p.cfg.interval_ms && !p.cfg.on_end {
+                    p.remaining_ms = rule::retime_remaining(
+                        old.interval_ms,
+                        p.remaining_ms.max(0.0) as u64,
+                        p.cfg.interval_ms,
+                    ) as f64;
+                }
+                if old.on_end && !p.cfg.on_end {
+                    p.remaining_ms = p.cfg.interval_ms as f64;
+                }
+                if old.items != p.cfg.items || old.shuffle != p.cfg.shuffle {
+                    p.skips = p
+                        .cfg
+                        .items
+                        .iter()
+                        .filter(|i| i.skip)
+                        .map(|i| i.path.clone())
+                        .collect();
+                    if old.paths() != p.cfg.paths() {
+                        p.failed.clear();
+                        p.empty_logged = false;
+                    }
+                    let paths = p.cfg.paths();
+                    if p.started {
+                        p.order.reorder(&paths, p.cfg.shuffle, &mut p.rng);
+                    } else {
+                        p.order = Order::new(paths, 0, p.cfg.shuffle);
+                    }
+                }
+                p.set_observed(id, g);
             }
             None => {
-                let order = Order::new(cfg.paths(), 0, cfg.shuffle);
-                let rng = Rng::new(cfg.seed);
-                self.progs.insert(
-                    id.to_string(),
-                    Prog {
-                        cfg,
-                        order,
-                        rng,
-                        played_ms: 0.0,
-                        remaining_ms: 0.0,
-                        last_effect: None,
-                        failures: 0,
-                        broken: BTreeSet::new(),
-                    },
+                let p = Prog::new(cfg);
+                p.set_observed(id, g);
+                self.progs.insert(id.to_string(), p);
+                log::event(
+                    "program",
+                    Level::Info,
+                    "program.created",
+                    None,
+                    json!({ "id": id }),
                 );
-                log::event("program", Level::Info, "program.created", None, json!({ "id": id }));
             }
         }
         Vec::new()
     }
 
-    /// `destroy`: the rotation stops; what plays stays on screen.
+    /// `destroy`: the rotation stops; what plays stays on screen (an armed switch that
+    /// hasn't started is cancelled — A plays on).
     pub fn destroy(&mut self, id: &str) -> Vec<ProgramAction> {
-        if self.progs.remove(id).is_some() {
-            log::event("program", Level::Info, "program.destroyed", None, json!({ "id": id }));
+        let mut acts = Vec::new();
+        if let Some(p) = self.progs.remove(id) {
+            if let Some(c) = p.pending.and_then(|p| p.corr) {
+                acts.push(ProgramAction::Cancel { corr: c });
+            }
+            log::event(
+                "program",
+                Level::Info,
+                "program.destroyed",
+                None,
+                json!({ "id": id }),
+            );
         }
-        Vec::new()
+        acts
     }
 
-    fn get_nonempty(&self, id: &str) -> Result<&Prog, ApiError> {
-        let p = self.progs.get(id).ok_or_else(|| no_program(id))?;
+    fn get_nonempty(&mut self, id: &str) -> Result<&mut Prog, ApiError> {
+        let p = self.progs.get_mut(id).ok_or_else(|| no_program(id))?;
         if p.cfg.items.is_empty() {
             return Err(empty_program(id));
         }
         Ok(p)
     }
 
-    /// `program.play|next|prev|random` (Task 3/4 run them).
+    /// `program.play|next|prev|random {id, index?, keep_pause?}`. `play` starts at
+    /// `index` (default 0); the user switches always go `align: now` with the program's
+    /// pick (a cut with `keep_pause` while the player is paused).
     pub fn verb(
         &mut self,
         verb: &str,
         id: &str,
-        _index: Option<usize>,
-        _keep_pause: bool,
-        _g: &Graph,
+        index: Option<usize>,
+        keep_pause: bool,
+        g: &Graph,
+        now: Duration,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Result<Vec<ProgramAction>, ApiError> {
-        self.get_nonempty(id)?;
-        Err(ApiError {
-            code: "unsupported",
-            message: format!("program.{verb}: not yet"),
-            hint: "Phase 3 Task 3 runs programs".to_string(),
-        })
+        let paused = matches!(
+            g.get(&PropPath("player.paused".into())),
+            Ok(PropValue::Bool(true))
+        );
+        let cut = keep_pause && paused;
+        let p = self.get_nonempty(id)?;
+        let (step, reason) = match verb {
+            "play" => {
+                let i = index.unwrap_or(0);
+                if i >= p.cfg.items.len() {
+                    return Err(ApiError {
+                        code: "out_of_range",
+                        message: format!("index {i}: the program has {} items", p.cfg.items.len()),
+                        hint: "`liascape-player ctl get prog:<name>.items`".to_string(),
+                    });
+                }
+                // a play starts the session there (ApplyTimedPlaylist): the bar's order
+                let paths = p.cfg.paths();
+                p.order = Order::new(paths, i, p.cfg.shuffle);
+                (p.order.plan_play(i), Reason::Play)
+            }
+            "next" => (p.plan_next(id, now), Reason::Next),
+            "prev" => (p.order.plan_back(), Reason::Prev),
+            "random" => {
+                let (skips, broken) = (&p.skips, &p.broken);
+                let skip = |x: &str| skips.contains(x) || broken.contains(x);
+                (p.order.plan_random(&skip, &mut p.rng), Reason::Random)
+            }
+            other => {
+                return Err(ApiError {
+                    code: "bad_request",
+                    message: format!("program.{other}: no such verb"),
+                    hint: "program.play|next|prev|random".to_string(),
+                });
+            }
+        };
+        let Some(step) = step else {
+            return Ok(Vec::new());
+        };
+        p.started = true;
+        p.backoff_until = None;
+        // an armed switch is superseded by the new request (the recipe aborts it)
+        Ok(vec![p.start(
+            id,
+            step,
+            reason,
+            Align::Now,
+            cut,
+            defaults_of,
+        )])
     }
 
     /// A verb's reply: the switch it started (`corr`/`path` null = nothing to do).
     pub fn verb_reply(&self, id: &str, started: Option<(CorrId, String)>) -> Value {
-        let index = started.as_ref().and_then(|(_, path)| {
-            self.progs
-                .get(id)?
-                .cfg
-                .items
-                .iter()
-                .position(|i| &i.path == path)
-        });
+        let index = started
+            .as_ref()
+            .and_then(|(_, path)| Some(self.progs.get(id)?.index_of(path)))
+            .unwrap_or(-1);
         json!({
             "corr": started.as_ref().map(|(c, _)| c.0.clone()),
             "path": started.map(|(_, p)| p),
-            "index": index.map(|i| i as i64).unwrap_or(-1),
+            "index": index,
         })
     }
 
-    /// The runtime started the switch a [`ProgramAction::Start`] asked for.
+    /// The runtime started the switch a [`ProgramAction::Start`] asked for. `parked_b`: it
+    /// went to `transition_parked` (no output) and replaced the parked wallpaper at once.
     pub fn on_requested(
         &mut self,
-        _id: &str,
-        _corr: CorrId,
-        _step: Step,
-        _reason: Reason,
-        _parked: bool,
-        _now: Duration,
+        id: &str,
+        corr: CorrId,
+        step: Step,
+        reason: Reason,
+        parked_b: Option<String>,
+        g: &Graph,
+        now: Duration,
     ) {
+        self.issued.insert(corr.clone());
+        let Some(p) = self.progs.get_mut(id) else {
+            return;
+        };
+        let align = p.pending.as_ref().map(|x| x.align).unwrap_or(Align::Now);
+        p.pending = Some(Pending {
+            corr: Some(corr.clone()),
+            step,
+            reason,
+            align,
+        });
+        if let Some(b) = parked_b
+            && align == Align::Now
+        {
+            p.commit(id, Some(b), &corr, g, now);
+        }
+        log::event(
+            "program",
+            Level::Debug,
+            "program.requested",
+            Some(corr),
+            json!({ "id": id, "reason": reason.as_str(), "align": align }),
+        );
     }
 
-    /// The runtime could not start it (B's create props refused).
-    pub fn on_request_failed(
-        &mut self,
-        _id: &str,
-        _step: Step,
-        _reason: Reason,
-        _err: &ApiError,
-        _now: Duration,
-    ) {
+    /// The runtime could not start it (B's create props refused): a failure.
+    pub fn on_request_failed(&mut self, id: &str, step: Step, err: &ApiError, now: Duration) {
+        if let Some(p) = self.progs.get_mut(id) {
+            p.fail(id, &step.path, &err.to_string(), now);
+        }
     }
 
-    /// One tick (Task 3).
+    /// One tick, after `Transitions::tick` (R47): the transitions' and sources' events, the
+    /// clocks (`now` = the player clock), the rules. `parked` = no output exists;
+    /// `active` = every in-flight transition's corr.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
-        _g: &mut Graph,
-        _tr_events: &[TransitionEvent],
-        _src_events: &[(String, SourceEvent)],
-        _now: Duration,
-        _parked: bool,
-        _defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+        g: &mut Graph,
+        tr_events: &[TransitionEvent],
+        src_events: &[(String, SourceEvent)],
+        now: Duration,
+        parked: bool,
+        active: &[CorrId],
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Vec<ProgramAction> {
-        Vec::new()
+        self.issued.retain(|c| active.contains(c));
+        let foreign_busy = active.iter().any(|c| !self.issued.contains(c));
+        let mut acts = Vec::new();
+        for (id, p) in self.progs.iter_mut() {
+            acts.extend(p.tick(
+                id,
+                g,
+                tr_events,
+                src_events,
+                now,
+                parked,
+                foreign_busy,
+                defaults_of,
+            ));
+        }
+        acts
     }
 
     pub fn status(&self) -> Vec<ProgramStatus> {
-        self.progs
-            .iter()
-            .map(|(id, p)| {
-                let (history, hi) = p.order.history();
-                ProgramStatus {
-                    id: id.clone(),
-                    phase: ProgPhase::Idle,
-                    path: None,
-                    index: -1,
-                    next: None,
-                    corr: None,
-                    armed_align: None,
-                    items: p.cfg.items.len(),
-                    order: p.order.items().to_vec(),
-                    history: history.to_vec(),
-                    history_index: hi,
-                    played_ms: p.played_ms,
-                    remaining_ms: p.remaining_ms,
-                    backoff_ms: 0,
-                    failures: p.failures,
-                    last_effect: p.last_effect.clone(),
-                    broken: p.broken.iter().cloned().collect(),
-                }
-            })
-            .collect()
+        self.progs.iter().map(|(id, p)| p.status(id)).collect()
     }
 
     /// The `programs` probe: [`Programs::status`] plus each item's flags.
     pub fn probe(&self) -> Value {
         let mut out = Vec::new();
-        for (st, p) in self.status().into_iter().zip(self.progs.values()) {
-            let mut v = serde_json::to_value(&st).unwrap_or(Value::Null);
+        for (id, p) in &self.progs {
+            let mut v = serde_json::to_value(p.status(id)).unwrap_or(Value::Null);
             let items: Vec<Value> = p
                 .cfg
                 .items
                 .iter()
                 .map(|it| {
                     json!({"path": it.path, "skip": it.skip,
-                           "broken": p.broken.contains(&it.path), "failed": false})
+                           "broken": p.broken.contains(&it.path),
+                           "failed": p.failed.contains(&it.path)})
                 })
                 .collect();
             v["item_flags"] = Value::Array(items);
             out.push(v);
         }
         json!({ "programs": out })
+    }
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+
+    /// A clock whose wall time jumps 8 h while its monotonic time moves 10 ms (a suspend):
+    /// only the monotonic delta reaches the rotation.
+    struct FakeClock {
+        wall: std::time::SystemTime,
+        mono: Duration,
+    }
+
+    #[test]
+    fn countdown_uses_the_monotonic_player_clock() {
+        let mut fake = FakeClock {
+            wall: std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
+            mono: Duration::from_secs(5),
+        };
+        let mut clock = PlayClock::default();
+        assert_eq!(
+            clock.advance(fake.mono),
+            Duration::ZERO,
+            "the first call starts it"
+        );
+        let mut remaining = 3000.0_f64;
+        fake.wall += Duration::from_secs(8 * 3600);
+        fake.mono += Duration::from_millis(10);
+        remaining -= clock.advance(fake.mono).as_secs_f64() * 1000.0;
+        assert!((remaining - 2990.0).abs() < 1e-6, "{remaining}");
+        let _ = fake.wall;
+        // a clock that doesn't move (paused) adds nothing
+        assert_eq!(clock.advance(fake.mono), Duration::ZERO);
     }
 }
 
