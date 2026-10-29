@@ -74,7 +74,21 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   meanwhile …, thread-pool queue …, threads …)`) — the requests after it only say "not responding" and
   most callers swallow those. The speed storm tripped it 6× in ~25 min with the player answering < 3 ms
   per request and never > 50 ms in 6860 direct pings; cause not reproduced since the log line went in
-  (docs/TODO.md). The first request after the window tries for real. `EnsureRunning` never spawns a second
+  (docs/TODO.md). The first request after the window tries for real. **A STARTING player is not a stalled one
+  (2026-10-29 cold boot)**: the player binds its socket first and answers ~1 s later (PipeWire bus ≤ 500 ms, EGL,
+  CUDA); the restore's `monitor-daemon` (another process — its `IsPlaying`, a 300 ms `get`) connected in that window,
+  its greeting `hello` timed out, the breaker opened on the player the restore had just spawned (and the `get` was
+  still sent into it and timed out again — 2 × 300 ms). Now, until a player on that socket answered this client once
+  (`_answeredBorn` = the socket file's mtime = its bind time; a supervised restart's child binds anew), a request
+  waits for its first answer up to **`StartGraceMs` = 5 s after the bind** (`StartingMs`), and for the request
+  connection's lock as long — so a parallel caller waits behind it instead of failing "busy"; only a timeout past
+  that trips the breaker. A player that answered once gets QuickMs as before (the SIGSTOP checks unchanged). While
+  THIS process starts one (`EnsureRunning`'s spawn, `UpgradeInPlace`'s new player: `BeginStarting`/`EndStarting`), a
+  request also waits ≤ 5 s for the socket to appear instead of failing "no player". A greeting that times out ends
+  its request (`Greet`) — never sent into a player that just tripped the breaker. Guard: self-test
+  `StartupGraceAssertions` (a fake player that binds and answers 1 s later: a QuickMs `get` + a parallel `hello`
+  both answered, no breaker; then a stall still fails in ≤ 450 ms and opens it; a request during our own start waits
+  for the socket — RED before: 635 ms, two timeouts, the breaker open, "busy", "no player"). `EnsureRunning` never spawns a second
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged) — and
   **R81** catches up: the breaker closing fires `LiascapePlayerClient.Recovered` → `LiascapePlayerMedia.OnRecovered`
   → `ReapplyAll()` (below), so a dropped set isn't lost for good.
@@ -127,7 +141,8 @@ back to Legacy always stays possible).
 - `EnsureRunning()` (only a **switch** calls it — queries/sets never spawn): connect, else
   `setsid sh -c 'exec liascape-player serve …'` (no `--headless`; session env inherited — `WAYLAND_DISPLAY`
   etc.; stdio → `~/.cache/liascape/liascape-player-serve.log`, never a pipe: the player outlives the
-  backend) and wait ≤ 3 s for the socket. **Arguments:** the first start runs `serve` (`--socket` when not
+  backend) and wait ≤ 3 s for the socket (its first `hello` may wait the startup grace, ≤ 5 s after the bind —
+  § Threading "A STARTING player"). **Arguments:** the first start runs `serve` (`--socket` when not
   the default); once this client has talked to a player, it runs **that player's own arguments + `--restore`**
   (`_serveArgs`, read from its supervisor's cmdline when a new player pid answers `hello`, minus
   `--supervised/--restore/--restarted`) — a player that went away (a failed upgrade, a killed or given-up
@@ -152,8 +167,15 @@ back to Legacy always stays possible).
   running compositor isn't the build this backend starts — compared as FILES, never path strings (one
   checkout is `/home/…` and `/mnt/…/@home/…`): size + mtime through open handles, `/proc/<pid>/exe`
   opening the running binary even after a rebuild replaced it (`… (deleted)`); Nix by store root
-  (`/nix/store/<hash>-name` — every store file has mtime 1, and `LIASCAPE_PLAYER_BIN` is the `wrapProgram`
-  wrapper while the process runs `.liascape-player-wrapped`); a binary written < 2 s ago isn't started yet.
+  (`/nix/store/<hash>-name` — every store file has mtime 1). Both compare the file the binary **really runs**
+  (`RunsFile`: symlinks resolved, then a `wrapProgram` wrapper's `.<name>-wrapped` sibling): in the Nix layout
+  `LIASCAPE_PLAYER_BIN` = `liascape`'s `libexec/liascape/liascape-player`, a symlink into the **`liascape-player`
+  package** (another store path) — its wrapper, while the process runs that package's `.liascape-player-wrapped`.
+  Compared by the symlink's own store root (before 2026-10-29), the player the cold boot's restore had just started
+  read as "out of date" and was restarted at once. A different build stays stale (another wrapped binary, another
+  store root, the dev tree's plain binary vs a Nix one). Guard: self-test `StaleThroughWrapperAssertions` (pkg-a's
+  libexec symlink → pkg-b's wrapper script → `exec` its `.liascape-player-wrapped`, a real running process; plus the
+  installed `/nix/store/*-liascape-0.1.0` layouts when present); a binary written < 2 s ago isn't started yet.
   **Upgrade** = `QuitOrKill` (the player writes its final snapshot) → the supervisor's own `serve`
   arguments (from its cmdline, minus `--supervised/--restore/--restarted`) + `--restore` → the same
   wallpaper at the same place, paused stays paused, ~0.2 s; then events resubscribe and the `Restarted`

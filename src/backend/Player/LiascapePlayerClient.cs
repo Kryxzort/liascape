@@ -227,6 +227,7 @@ public sealed class LiascapePlayerClient
             _sock = s;
             _rd = new StreamReader(new NetworkStream(s, ownsSocket: false), new UTF8Encoding(false));
             _helloPending = true;
+            _connBorn = SocketBorn();
             return true;
         }
         catch { Disconnect(); return false; }
@@ -250,12 +251,54 @@ public sealed class LiascapePlayerClient
     private long _stalledUntil;
     public bool IsStalled => Environment.TickCount64 < Interlocked.Read(ref _stalledUntil);
 
+    // Startup grace (2026-10-29 cold boot): the player binds its socket FIRST, then starts — the PipeWire bus (≤ 500 ms),
+    // EGL, CUDA, the catalogue — and answers ~1 s later. A request reaching it in that window is waiting for a STARTING
+    // player, not a stalled one: the restore's monitor-daemon (another process, a 300 ms `get`) tripped the breaker on
+    // the player the restore had just spawned and failed every request for 3 s. So until a player answered this client
+    // once, a request waits for its first answer up to StartGraceMs after its socket was bound (the socket file's mtime
+    // = its bind time; a supervised restart's child binds anew), and the request connection's lock as long. Only once
+    // that runs out does a timeout trip the breaker. A player that answered once gets QuickMs as before.
+    // And while THIS process is starting one (EnsureRunning / UpgradeInPlace, `_spawningUntil`), a request waits for the
+    // socket to appear (≤ StartGraceMs) instead of failing with "no player".
+    public const int StartGraceMs = 5000;
+    private long _spawningUntil;
+    // bind times as UTC ticks (0 = none) — read without the request lock, so plain longs (atomic), not DateTime?
+    private long _connBorn;     // the socket the request connection reached
+    private long _answeredBorn; // the socket whose player last answered
+
+    private long SocketBorn()
+    {
+        try { return File.Exists(SocketPath) ? File.GetLastWriteTimeUtc(SocketPath).Ticks : 0; } catch { return 0; }
+    }
+
+    // How long a request may still wait for a player that is starting (0 = none is): its socket's grace when no
+    // player on it answered us yet, or the rest of this process's own start.
+    private int StartingMs()
+    {
+        long ms = 0;
+        long born = _sock != null ? _connBorn : SocketBorn();
+        if (born != 0 && born != _answeredBorn)
+        {
+            double age = Math.Max(0, (DateTime.UtcNow.Ticks - born) / (double)TimeSpan.TicksPerMillisecond);
+            ms = Math.Max(0, StartGraceMs - (long)age);
+        }
+        long spawning = Interlocked.Read(ref _spawningUntil) - Environment.TickCount64;
+        if (spawning > 0) ms = Math.Max(ms, Math.Min(spawning, StartGraceMs));
+        return (int)ms;
+    }
+
+    // EnsureRunning / UpgradeInPlace: this process is starting a player for up to `ms`.
+    internal void BeginStarting(int ms) => Interlocked.Exchange(ref _spawningUntil, Environment.TickCount64 + ms);
+    internal void EndStarting() => Interlocked.Exchange(ref _spawningUntil, 0);
+    private bool Spawning => Environment.TickCount64 < Interlocked.Read(ref _spawningUntil);
+
     // Any successful reply (ok or error — both are an answer) clears the breaker. R81: if it HAD been
     // open, this is the "the player answered again" moment — fire Recovered so the adapter can re-push
     // whatever a mutation dropped while the breaker was shut (the "New concern" in task-17-report.md:
     // a set made while stalled is otherwise never replayed).
     private void MarkAnswered()
     {
+        _answeredBorn = _connBorn; // this socket's player has started: no startup grace on it any more
         if (Interlocked.Exchange(ref _stalledUntil, 0) != 0)
             try { Recovered?.Invoke(); } catch (Exception ex) { Log($"recovered handler threw: {ex.Message}"); }
     }
@@ -267,9 +310,11 @@ public sealed class LiascapePlayerClient
     public JsonElement Call(string cmd, object? args, int timeoutMs = 2000)
     {
         // waiting for the connection counts against the same timeout (a query must not sit behind a
-        // switch that waits out its own 2 s on a stalled player)
-        if (!Monitor.TryEnter(_cmdLock, Math.Max(1, timeoutMs)))
-            throw new LiascapePlayerException("timeout", $"`{cmd}`: the request connection stayed busy for {timeoutMs} ms",
+        // switch that waits out its own 2 s on a stalled player) — or a starting player's grace: behind
+        // another caller's wait for its first answer (StartingMs)
+        int lockMs = Math.Max(timeoutMs, StartingMs());
+        if (!Monitor.TryEnter(_cmdLock, Math.Max(1, lockMs)))
+            throw new LiascapePlayerException("timeout", $"`{cmd}`: the request connection stayed busy for {lockMs} ms",
                 "another request is waiting on a slow player — `liascape-player ctl probe '{\"name\":\"loop\"}'`");
         try
         {
@@ -277,12 +322,20 @@ public sealed class LiascapePlayerClient
                 throw new LiascapePlayerException("timeout", $"`{cmd}`: liascape-player is not responding (a request timed out < {StallMs / 1000} s ago)",
                     "is it stopped or stalled? `liascape-player ctl probe '{\"name\":\"loop\"}'` — requests resume on their own once it answers");
             if (!EnsureConnected())
-                throw new LiascapePlayerException("io", $"no liascape-player answering on {SocketPath}",
-                    "select Player engine = liascape-player (liascape starts it) or run `liascape-player serve`");
+            {
+                // this process is starting a player: wait for its socket (≤ StartGraceMs) rather than fail
+                var sw = Stopwatch.StartNew();
+                while (Spawning && sw.ElapsedMilliseconds < StartGraceMs && !EnsureConnected()) Thread.Sleep(25);
+                if (_sock == null)
+                    throw new LiascapePlayerException("io", $"no liascape-player answering on {SocketPath}",
+                        "select Player engine = liascape-player (liascape starts it) or run `liascape-player serve`");
+            }
+            // a player that hasn't answered us yet may still be starting: wait for its first answer
+            timeoutMs = Math.Max(timeoutMs, StartingMs());
             if (_helloPending && cmd != "hello")
             {
                 _helloPending = false;
-                try { Call("hello", null, timeoutMs); } catch (LiascapePlayerException) { }
+                Greet(cmd, timeoutMs);
                 if (!EnsureConnected()) throw new LiascapePlayerException("io", "liascape-player closed the connection", "check `liascape-player ctl logs '{\"min_level\":\"warn\"}'`");
             }
             long id = Interlocked.Increment(ref _nextId);
@@ -302,7 +355,7 @@ public sealed class LiascapePlayerClient
                     Disconnect();
                     if (!EnsureConnected()) throw;
                     _helloPending = false;
-                    try { Call("hello", null, timeoutMs); } catch (LiascapePlayerException) { }
+                    Greet(cmd, timeoutMs);
                     if (!EnsureConnected()) throw;
                     _sock!.SendTimeout = Math.Max(1, timeoutMs);
                     _sock.Send(bytes);
@@ -389,6 +442,19 @@ public sealed class LiascapePlayerClient
             }
         }
         finally { Monitor.Exit(_cmdLock); }
+    }
+
+    // A new connection's `hello` (pid, capabilities) before `cmd`. Its error is swallowed — except a timeout: that
+    // opened the breaker (the player didn't answer within the grace a starting one gets), and `cmd` must not be sent
+    // into the stalled player to time out once more (the 2026-10-29 boot: a 300 ms `get` took 2 × 300 ms).
+    private void Greet(string cmd, int timeoutMs)
+    {
+        try { Call("hello", null, timeoutMs); }
+        catch (LiascapePlayerException e) when (e.Code == "timeout")
+        {
+            throw new LiascapePlayerException("timeout", $"`{cmd}`: liascape-player did not answer its greeting within {timeoutMs} ms", e.Hint);
+        }
+        catch (LiascapePlayerException) { }
     }
 
     // Call that logs the error (with its hint) instead of throwing → null.
@@ -510,20 +576,51 @@ public sealed class LiascapePlayerClient
     // build still running at 19:00). Stale = the running compositor isn't the build this backend starts:
     // a different file by size + mtime, read through open handles — `/proc/<pid>/exe` opens the running
     // binary even after a rebuild replaced it, and path strings can't tell (one checkout is reachable as
-    // /home/… and /mnt/…/@home/…). Nix: by store path — every store file has mtime 1, and LIASCAPE_PLAYER_BIN
-    // is the wrapProgram wrapper while the process runs `.liascape-player-wrapped` (two files, one build).
+    // /home/… and /mnt/…/@home/…). Nix: by store path — every store file has mtime 1 — of the file the binary
+    // really runs (RunsFile): LIASCAPE_PLAYER_BIN is `liascape`'s libexec symlink into the `liascape-player` package's
+    // wrapProgram wrapper, while the process runs that package's `.liascape-player-wrapped` (three files, one build).
     // null = current, or unknown.
     public string? StaleReason()
     {
-        if (PlayerPid is not int pid || RunningExe(pid)?.Exe is not string exe) return null;
+        if (PlayerPid is not int pid) return null;
         var bin = PlayerEngine.ResolveBinary(fresh: true);
-        if (bin == null) return null;
-        if (StoreRoot(exe) is string re && StoreRoot(bin) is string rb)
-            return re == rb ? null : $"it runs {re}, this backend starts {rb}";
-        if (BuildOf($"/proc/{pid}/exe") is not { } running || BuildOf(bin) is not { } wanted || running == wanted) return null;
+        return bin == null ? null : StaleReasonFor(pid, bin);
+    }
+
+    // Is process `pid` running another build than `bin`? (the seam the self-test drives)
+    internal static string? StaleReasonFor(int pid, string bin) =>
+        RunningExe(pid)?.Exe is string exe ? StaleReasonFor(exe, $"/proc/{pid}/exe", bin) : null;
+
+    // `exe` = the running process's exe link target, `runningPath` = a path that opens that binary
+    // (`/proc/<pid>/exe` — it opens the running file even after a rebuild replaced it).
+    internal static string? StaleReasonFor(string exe, string runningPath, string bin)
+    {
+        // what `bin` really runs (2026-10-29 cold boot: Nix's `liascape/libexec/liascape/liascape-player` is a symlink
+        // into ANOTHER store path — the `liascape-player` package's wrapProgram wrapper, whose process runs its
+        // `.liascape-player-wrapped`; compared by the symlink's own store root, the player the restore had just
+        // started read as "out of date" and was restarted at once)
+        var runs = RunsFile(bin);
+        if (StoreRoot(exe) is string re && StoreRoot(runs) is string rb)
+            return re == rb ? null : $"it runs {re}, this backend starts {rb}{(runs != bin ? $" (via {bin})" : "")}";
+        if (BuildOf(runningPath) is not { } running || BuildOf(runs) is not { } wanted || running == wanted) return null;
         // settled: a copy still being written (install.sh's `install`) is never started
         if (DateTime.UtcNow - wanted.Built < TimeSpan.FromSeconds(2)) return null;
         return $"it runs {exe} (built {running.Built.ToLocalTime():yyyy-MM-dd HH:mm:ss}), this backend starts {bin} (built {wanted.Built.ToLocalTime():yyyy-MM-dd HH:mm:ss})";
+    }
+
+    // The binary `bin` really runs: its symlinks resolved, then a wrapProgram wrapper's `.<name>-wrapped` sibling (the
+    // wrapper execs it — makeWrapper's naming; a re-wrapped one nests). A plain binary is itself.
+    internal static string RunsFile(string bin)
+    {
+        static string Real(string p) { try { return new FileInfo(p).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? p; } catch { return p; } }
+        var path = Real(bin);
+        for (int i = 0; i < 4; i++)
+        {
+            var wrapped = Path.Combine(Path.GetDirectoryName(path) ?? "/", $".{Path.GetFileName(path)}-wrapped");
+            if (!File.Exists(wrapped)) break;
+            path = Real(wrapped);
+        }
+        return path;
     }
 
     // /nix/store/<hash>-<name> of a store path, else null
@@ -595,16 +692,21 @@ public sealed class LiascapePlayerClient
             QuitOrKill(waitMs: SupervisorStopWaitMs, quitWaitMs: quitWait); // also stops the event thread
             args.Add("--restore");
             Process? p;
+            BeginStarting(StartWaitMs); // requests meanwhile wait for the new player's socket + first answer
             try { p = Spawn(bin, args); }
-            catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
+            catch (Exception e) { EndStarting(); Fail($"could not start {bin}: {e.Message}"); return false; }
             var sw = Stopwatch.StartNew();
             bool ok = false;
-            while (sw.ElapsedMilliseconds < StartWaitMs)
+            try
             {
-                if (Reachable() && PlayerPid != old) { ok = true; break; }
-                if (p is { HasExited: true }) break; // it gave up (or lost the instance lock) — no point waiting
-                Thread.Sleep(50);
+                while (sw.ElapsedMilliseconds < StartWaitMs)
+                {
+                    if (Reachable() && PlayerPid != old) { ok = true; break; }
+                    if (p is { HasExited: true }) break; // it gave up (or lost the instance lock) — no point waiting
+                    Thread.Sleep(50);
+                }
             }
+            finally { EndStarting(); }
             // resubscribe at once (the old event thread must be gone first, or StartEvents keeps it)
             evThread?.Join(1000);
             if (ok) { StartEvents(); WaitSubscribed(1000); }
@@ -719,16 +821,23 @@ public sealed class LiascapePlayerClient
             // first start: the defaults
             List<string> args = _serveArgs is { } known ? [.. known, "--restore"]
                 : SocketPath == DefaultSocketPath() ? ["serve"] : ["serve", "--socket", SocketPath];
-            try { p = Spawn(bin, args); }
-            catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 3000)
+            // requests made meanwhile (another thread: the tick, the monitor) wait for this player's socket and first
+            // answer instead of failing — or tripping the stall breaker on a player that is only starting
+            BeginStarting(3000);
+            try
             {
+                try { p = Spawn(bin, args); }
+                catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
+                var sw = Stopwatch.StartNew();
+                while (sw.ElapsedMilliseconds < 3000)
+                {
+                    if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
+                    if (p is { HasExited: true } && p.ExitCode != 1) break; // 1 = "already running" → keep connecting
+                    Thread.Sleep(50);
+                }
                 if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
-                if (p is { HasExited: true } && p.ExitCode != 1) break; // 1 = "already running" → keep connecting
-                Thread.Sleep(50);
             }
-            if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
+            finally { EndStarting(); }
             string why = p is { HasExited: true }
                 ? $"`liascape-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
                 : "`liascape-player serve` did not open its socket within 3 s";

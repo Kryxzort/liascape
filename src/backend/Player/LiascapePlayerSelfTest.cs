@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,6 +32,8 @@ public static class LiascapePlayerSelfTest
             FeatureHealthAssertions(fails);
             ScenePropertyAssertions(fails);
             PlayLimitAssertions(fails);
+            StaleThroughWrapperAssertions(fails);
+            StartupGraceAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -1008,6 +1011,205 @@ public static class LiascapePlayerSelfTest
     }
 
     [System.Runtime.InteropServices.DllImport("libc")] private static extern int kill(int pid, int sig);
+
+    // ---- in-place upgrade: the same build through a symlink + a wrapProgram wrapper (2026-10-29 cold boot) --------
+    // The Nix layout: `liascape/libexec/liascape/liascape-player` (what the launcher's LIASCAPE_PLAYER_BIN names) is a
+    // symlink into ANOTHER store path, `liascape-player/bin/liascape-player`, a wrapProgram script that execs its sibling
+    // `.liascape-player-wrapped` — the running process's exe. Compared by the symlink's own store root, the player the
+    // restore had just started read as "out of date" and was restarted at once. Built here as pkg-a/pkg-b in a temp dir
+    // (a running process whose exe is pkg-b's `.liascape-player-wrapped`, started through pkg-a's symlink), plus the
+    // owner's real store paths when they exist.
+    private static void StaleThroughWrapperAssertions(List<string> fails)
+    {
+        string? sleep = null;
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
+            if (dir.Length > 0 && File.Exists(Path.Combine(dir, "sleep"))) { sleep = Path.Combine(dir, "sleep"); break; }
+        if (sleep == null) { fails.Add("stale: no `sleep` on PATH to stand in for a player"); return; }
+        sleep = new FileInfo(sleep).ResolveLinkTarget(true)?.FullName ?? sleep; // coreutils may be a multi-call binary
+        var tmp = Path.Combine(Path.GetTempPath(), $"lsp-stale-{Environment.ProcessId}");
+        Process? p = null;
+        try
+        {
+            var old = DateTime.UtcNow.AddHours(-1); // settled builds (a copy < 2 s old is never compared)
+            string Wrapped(string pkg)
+            {
+                var bin = Path.Combine(tmp, pkg, "bin");
+                Directory.CreateDirectory(bin);
+                var wrapped = Path.Combine(bin, ".liascape-player-wrapped");
+                File.Copy(sleep, wrapped, true);
+                File.SetUnixFileMode(wrapped, (UnixFileMode)0b111_101_101); // a store copy is read-only
+                File.WriteAllText(Path.Combine(bin, "liascape-player"), $"#!/bin/sh\nexec -a sleep '{wrapped}' \"$@\"\n");
+                File.SetUnixFileMode(Path.Combine(bin, "liascape-player"), (UnixFileMode)0b111_101_101);
+                File.SetLastWriteTimeUtc(wrapped, old);
+                File.SetLastWriteTimeUtc(Path.Combine(bin, "liascape-player"), old);
+                return Path.Combine(bin, "liascape-player");
+            }
+            var wrapperB = Wrapped("pkg-b");
+            var libexec = Path.Combine(tmp, "pkg-a", "libexec", "liascape");
+            Directory.CreateDirectory(libexec);
+            var link = Path.Combine(libexec, "liascape-player");
+            File.CreateSymbolicLink(link, wrapperB);
+            // a different build: pkg-c's wrapped binary is one byte longer
+            var wrapperC = Wrapped("pkg-c");
+            var wrappedC = Path.Combine(tmp, "pkg-c", "bin", ".liascape-player-wrapped");
+            File.AppendAllText(wrappedC, "x");
+            File.SetLastWriteTimeUtc(wrappedC, old);
+            // a different build with no wrapper (the dev tree's plain binary)
+            var plainD = Path.Combine(tmp, "pkg-d", "liascape-player");
+            Directory.CreateDirectory(Path.GetDirectoryName(plainD)!);
+            File.Copy(wrappedC, plainD, true);
+            File.SetUnixFileMode(plainD, (UnixFileMode)0b111_101_101);
+            File.SetLastWriteTimeUtc(plainD, old);
+
+            var psi = new ProcessStartInfo(link) { UseShellExecute = false };
+            psi.ArgumentList.Add("30");
+            p = Process.Start(psi)!;
+            string? exe = null;
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 3000)
+            {
+                try { exe = new FileInfo($"/proc/{p.Id}/exe").LinkTarget; } catch { }
+                if (exe != null && Path.GetFileName(exe) == ".liascape-player-wrapped") break;
+                Thread.Sleep(20);
+            }
+            if (exe == null || Path.GetFileName(exe) != ".liascape-player-wrapped") { fails.Add($"stale: the wrapper never exec'ed its wrapped binary (exe {exe})"); return; }
+            foreach (var (bin, what) in new[] { (link, "the libexec symlink"), (wrapperB, "the wrapper"), (Path.Combine(tmp, "pkg-b", "bin", ".liascape-player-wrapped"), "the wrapped binary") })
+                if (LiascapePlayerClient.StaleReasonFor(p.Id, bin) is string why)
+                    fails.Add($"stale: the player started through {what} reads as out of date: {why}");
+            if (LiascapePlayerClient.StaleReasonFor(p.Id, wrapperC) == null)
+                fails.Add("stale: a different build behind another wrapper reads as current");
+            if (LiascapePlayerClient.StaleReasonFor(p.Id, plainD) == null)
+                fails.Add("stale: a different plain binary reads as current");
+
+            // the owner's real layout (2026-10-29: liascape-0.1.0's libexec symlink → liascape-player-0.1.0's wrapper,
+            // the process running its `.liascape-player-wrapped`) — only where such a store path exists
+            if (Directory.Exists("/nix/store"))
+                foreach (var pkg in Directory.EnumerateDirectories("/nix/store", "*-liascape-0.1.0").Take(8))
+                {
+                    var nixLink = Path.Combine(pkg, "libexec", "liascape", "liascape-player");
+                    var target = File.Exists(nixLink) ? new FileInfo(nixLink).ResolveLinkTarget(true)?.FullName : null;
+                    if (target == null) continue;
+                    var nixWrapped = Path.Combine(Path.GetDirectoryName(target)!, ".liascape-player-wrapped");
+                    if (!File.Exists(nixWrapped)) continue;
+                    if (LiascapePlayerClient.StaleReasonFor(nixWrapped, nixWrapped, nixLink) is string why)
+                        fails.Add($"stale: {nixLink}'s own player reads as out of date: {why}");
+                }
+        }
+        catch (Exception e) { fails.Add($"stale: {e.GetType().Name}: {e.Message}"); }
+        finally
+        {
+            try { p?.Kill(); p?.WaitForExit(2000); } catch { }
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    // ---- a player that is still starting is waited for, never "stalled" (2026-10-29 cold boot) --------------------
+    // The player binds its socket first, then starts (PipeWire bus ≤ 500 ms, EGL, CUDA…) and answers ~1 s later. The
+    // restore's monitor-daemon — another process, its `IsPlaying` a 300 ms `get` — connected in that window: its
+    // greeting `hello` timed out, the stall breaker opened (and the `get` itself was still sent and timed out again),
+    // and every request failed fast for 3 s. A fake player here binds and answers only 1 s later.
+    private sealed class SlowStartPlayer : IDisposable
+    {
+        private readonly Socket _l;
+        private readonly long _answerAt;
+        public volatile bool Stalled;
+        public string Path { get; }
+        public SlowStartPlayer(string path, int answerAfterMs)
+        {
+            Path = path;
+            _l = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            _l.Bind(new UnixDomainSocketEndPoint(path));
+            _l.Listen(16);
+            _answerAt = Environment.TickCount64 + answerAfterMs;
+            new Thread(() =>
+            {
+                while (true)
+                {
+                    Socket c;
+                    try { c = _l.Accept(); } catch { return; }
+                    new Thread(() => Serve(c)) { IsBackground = true }.Start();
+                }
+            }) { IsBackground = true }.Start();
+        }
+        private void Serve(Socket c)
+        {
+            try
+            {
+                using var ns = new NetworkStream(c, ownsSocket: true);
+                using var rd = new StreamReader(ns);
+                string? line;
+                while ((line = rd.ReadLine()) != null)
+                {
+                    var wait = _answerAt - Environment.TickCount64;
+                    if (wait > 0) Thread.Sleep((int)wait);
+                    while (Stalled) Thread.Sleep(10);
+                    using var doc = JsonDocument.Parse(line);
+                    var id = doc.RootElement.GetProperty("id").GetInt64();
+                    var cmd = doc.RootElement.GetProperty("cmd").GetString();
+                    var result = cmd == "hello" ? $"{{\"pid\":{Environment.ProcessId},\"capabilities\":[]}}" : "{\"value\":\"/x.mp4\"}";
+                    var reply = System.Text.Encoding.UTF8.GetBytes($"{{\"id\":{id},\"ok\":true,\"result\":{result}}}\n");
+                    ns.Write(reply);
+                }
+            }
+            catch { }
+        }
+        public void Dispose() { try { _l.Dispose(); } catch { } try { File.Delete(Path); } catch { } }
+    }
+
+    private static void StartupGraceAssertions(List<string> fails)
+    {
+        var tmp = Path.Combine("/tmp", $"lsp-grace-{Environment.ProcessId}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var get = new Dictionary<string, object?> { ["path"] = "cur:*.path" };
+            // 1. a quick query from a client (process) that never talked to this player, sent the moment its socket
+            //    exists, while a second thread of the same client asks too: both wait for its first answer
+            using (var fake = new SlowStartPlayer(Path.Combine(tmp, "a.sock"), 1000))
+            {
+                var client = new LiascapePlayerClient(fake.Path) { AutoSpawn = false };
+                string? err1 = null, err2 = null;
+                var sw = Stopwatch.StartNew();
+                var t2 = new Thread(() =>
+                {
+                    Thread.Sleep(50);
+                    try { client.Call("hello", null, LiascapePlayerClient.QuickMs); } catch (LiascapePlayerException e) { err2 = e.ToString(); }
+                });
+                t2.Start();
+                try { client.Call("get", get, LiascapePlayerClient.QuickMs); } catch (LiascapePlayerException e) { err1 = e.ToString(); }
+                t2.Join(10_000);
+                if (err1 != null) fails.Add($"startup: a quick `get` to a starting player failed after {sw.ElapsedMilliseconds} ms: {err1}");
+                if (err2 != null) fails.Add($"startup: a parallel quick `hello` to a starting player failed: {err2}");
+                if (client.IsStalled) fails.Add("startup: a starting player opened the stall breaker");
+                // 2. the breaker still guards a RUNNING player that stalls: one QuickMs timeout, then fail-fast
+                fake.Stalled = true;
+                sw.Restart();
+                try { client.Call("get", get, LiascapePlayerClient.QuickMs); fails.Add("startup: a stalled running player answered?"); }
+                catch (LiascapePlayerException) { }
+                if (sw.ElapsedMilliseconds > 450) fails.Add($"startup: a stalled running player took {sw.ElapsedMilliseconds} ms to fail (QuickMs = {LiascapePlayerClient.QuickMs}; the startup grace must not apply to a player that answered)");
+                if (!client.IsStalled) fails.Add("startup: a stalled running player did not open the stall breaker");
+                fake.Stalled = false;
+            }
+            // 3. a request while THIS process is starting the player (EnsureRunning's spawn, the socket not bound yet)
+            //    waits for the socket instead of failing with "no player"
+            {
+                var sock = Path.Combine(tmp, "b.sock");
+                var client = new LiascapePlayerClient(sock) { AutoSpawn = false };
+                client.BeginStarting(5000);
+                SlowStartPlayer? fake = null;
+                var binder = new Thread(() => { Thread.Sleep(300); fake = new SlowStartPlayer(sock, 700); });
+                binder.Start();
+                var sw = Stopwatch.StartNew();
+                try { client.Call("get", get, LiascapePlayerClient.QuickMs); }
+                catch (LiascapePlayerException e) { fails.Add($"startup: a quick `get` while this process starts the player failed after {sw.ElapsedMilliseconds} ms: {e}"); }
+                client.EndStarting();
+                binder.Join();
+                fake?.Dispose();
+            }
+        }
+        catch (Exception e) { fails.Add($"startup: {e.GetType().Name}: {e.Message}"); }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
+    }
 
     // Is `pid` (still) an liascape-player process? item 5: via `/proc/<pid>/exe`'s link target (the real
     // resolved binary path), never a cmdline substring — same check as LiascapePlayerClient.IsPlayerProcess,
