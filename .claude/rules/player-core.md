@@ -373,9 +373,9 @@ can't just be `node.paused` on every source, or a resume would un-pause a source
   awareness of `player.paused` at all. `update_player_paused()` (one graph read, a no-op
   if unchanged) runs at the top of `tick`/`begin_step`, *before* `now` is read for
   `run_anims` — a pause applied this tick/step freezes it too, not one tick later — and
-  again (idempotently) in `sync_sources`, which runs after *every* dispatch
-  (`after_dispatch`, not only a timer/`step`) so a plain `set player.paused` reaches the
-  sources at once, between ticks.
+  again (idempotently) in `sync_sources`, which runs after every dispatch that brought a
+  change (`after_dispatch` → `sync_due`, not only a timer/`step` — F6b) so a plain `set
+  player.paused` reaches the sources at once, between ticks.
 - **Stepped mode.** mpv itself stays paused for good regardless (§ Sources "Stepped
   mode"), so `mpv_pause` can't show the override there; instead `Runtime::begin_step`'s
   virtual-media-time advance is gated on `!player_paused` too (alongside the existing
@@ -1368,9 +1368,58 @@ recompute), so a `set` the source refuses is still mirrored back. A scene update
 nine `format!` + path-resolve + `set_observed`s per update were the largest share of the
 compositor's CPU per scene worker (perf, on-machine); measured two synthetic workers at 240 + 144
 fps, headless: process 19.2 / 19.6 % → 15.4 / 15.0 %. The mirror writes through
-`Graph::set_observed_on(id, prop, v)` (exact id: no path `format!`/split/resolve — F6b). `events()` drains `(node id, event)`; `texture(id)`
+`Graph::set_observed_on(id, prop, v)` (exact id: no path `format!`/split/resolve — F6b).
+`update_only(gfx, graph, ids)` is `update` for those ids only (F6b: a wake's update — below). `events()` drains `(node id, event)`; `texture(id)`
 is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime polls; `get`/
 `ids` for probes/tests.
+
+**Per-frame cost (F6b, 2026-10-29).** Each worker frame is a loop wake (twice when its fence
+hadn't signalled at the `Frame`), so everything a wake does is paid per worker per frame — at
+the refresh, ~200 times a second per worker. What a wake does now, and why:
+- **Only the woken source updates.** The calloop callback of a source's wake fd records its id
+  (`Runtime::woken`); `after_dispatch` runs `update_woken_sources` → `SourceHost::update_only`
+  (+ those scenes' envelopes and visualiser input); the tick (every refresh of the fastest
+  output) still updates every source (`update_sources`, which also forgets gone ids). Before,
+  every wake updated every source — a `recvmsg`, an `epoll_wait`, the mirror reads per scene:
+  work per worker that grew with the number of workers.
+- **`sync_sources` only when due** (`Runtime::sync_due`): a pending graph change, a
+  `picture_rev`/`demand_rev` move since the last sync, `SourceHost::sync_pending` (an async open
+  in flight, a low-VRAM stop/resume), a pause gate, a retire or a settling park, or the stepped
+  clock. Otherwise only `arm_gain_timer_if_needed` runs. The tick's own `sync_sources` is
+  unconditional, so anything internal still runs at the tick rate.
+- **What each output shows is cached** (`redraw::Routes`, rebuilt only when `Graph::demand_rev`
+  moves): `mark_shown_gated`, `mark_nodes`, `animating_on` and `scene_paces_output` read each
+  output's `shown`/`nodes`/`scene_fps`/`refresh_hz` from it instead of re-deriving them from the
+  graph (path `format!`s, alias resolution, cloned strings) per output per wake — Wayland's
+  `render_paced` asked on every iteration for every ready output.
+- **A scene's update reads only what is ready** — `epoll_drain` says whether the worker host's
+  epoll fd fired; `WorkerHost::poll_io(now, io)` then `epoll_wait`s its own set and reads only
+  the socket / output pipe that are readable (before: a `read` and a `recvmsg` that found
+  nothing on every poll), and `waitpid`s every poll only once the worker is ending (socket or
+  pipe EOF, killed), else at most every `REAP_CHECK` (100 ms). The GL context is made current
+  only for what needs it (events, a queued frame, the preview): on NVIDIA `eglGetCurrentContext`
+  alone is a `getpid` syscall.
+- **No `eglWaitSync` on an acquire fence that has signalled.** A `Frame` whose fence already
+  polls readable drops it at once (no epoll entry to add and remove, no poll at the latch); a
+  latched fence is only taken off the epoll set. The spike's "free safety net" cost ~10 syscalls
+  (fd dups, `getpid`) and a semaphore ioctl per frame on NVIDIA.
+- **A soundless scene's gain pushes are only folded** (`SceneSource::send_gain`: `has_audio`
+  false → `WorkerHost::fold`, no message) — its worker never opens a stream, and a fade pushed it
+  a message per millisecond; `gain_sent` stays what the worker last got, so a later `HasAudio
+  {on: true}` (or a restart's `Ready`) sends the current value.
+- **Fewer allocations per write:** `props::schema_for` reads a table built once per kind
+  (`schema_table`) instead of rebuilding the whole schema per lookup; `Graph::apply_set`
+  overwrites an existing key in place; the dropout probe's 1 kHz gain history reads
+  `Graph::source_gains_db` (no id clones).
+Measured (`scenes.sh transport`, 4 synthetic workers mid-fade at 144 + 240 Hz, headless, excess
+user + kernel instructions over the colour fade): 0.40–0.42 → 0.14–0.21 G/s; main-thread
+syscalls per worker frame ~56 → ~29 (`perf trace`). What is left per frame is the transport
+itself: the `Frame` `recvmsg`, the `Tick` and `Release` `sendmsg`s, and the release fence —
+NVIDIA's `eglCreateSync` + `eglDupNativeFenceFDANDROID` alone is ~12 syscalls (fd dups,
+`getpid`) plus a semaphore ioctl. Tried and dropped: a worker thread that waits for each
+frame's fence and sends the `Frame` after it (one compositor wake per frame instead of ~1.5) —
+no gain left in the compositor's instructions once a wake was cheap, for +2 worker context
+switches per frame.
 
 **Async opens (final review I5).** With `SourceHost::set_async_open(Some(waker))` (the
 real-clock runtime; its waker is a calloop ping) a new mpv node's core is made on an `lia-open`
@@ -3024,6 +3073,11 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
     **`STARVE_LIMIT_FACTOR` (5) × `hang_timeout`** (10 s) = hung all the same (`worker.hung
     {starved_ms}`) — slots that never come back (a fence that never signals: a dead GPU
     timeline) are recovered by a restart's fresh ring. Paused (no ticks) holds slots freely.
+  - **Reads and reaping follow readiness (F6b).** `poll` = `poll_io(now, true)`: one
+    `epoll_wait` of the host's own set, then only the readable socket / pipe is read;
+    `waitpid` on every poll once the worker is ending (EOF on either, or killed), else at most
+    every `REAP_CHECK` (100 ms). `poll_io(now, false)` (the caller's epoll just said the host's
+    fd isn't readable) skips the reads, keeping the heartbeat and the reaping.
   - **The host's own stall.** A gap between two `poll`s longer than **`host_stall_gap` =
     `hang_timeout / 2`** (1 s; production polls at the loop's tick rate, ≤ 17 ms apart) means the
     compositor itself didn't run (blocked in the driver while the whole GPU was busy): every
@@ -3183,8 +3237,11 @@ frame, never waited for (Task 8, § "GPU budget and VRAM"). Synthetic and env kn
   the **newest queued frame whose fd polls readable** (no fd = fdpoll = ready); older queued
   ones are released **without** a fence (never sampled); the previously latched slot is
   released with `release_fence()` created right then (it orders after every draw that
-  sampled it); the latched frame's (already signalled) acquire fd comes back for
-  `gpu_wait_fence` — a free safety net. Nothing ready → `stale_reuses` += 1, the previous
+  sampled it); the latched frame's (already signalled) acquire fd comes back only to leave
+  the source's epoll set — **no `gpu_wait_fence`** (F6b: the spike's "free safety net" was ~10
+  syscalls and a semaphore ioctl per frame on NVIDIA; a fence that polls readable is done), and
+  a `Frame` whose fence has already signalled is queued without it (`fence_signalled`).
+  Nothing ready → `stale_reuses` += 1, the previous
   frame stays (never black, never a wait). `forget_worker()` (a restart): queued frames
   dropped, the shown frame kept but marked never-to-be-released (the new worker never had
   that slot), `generation` + 1. Units `latch_takes_newest_signalled_and_releases_the_rest`,
@@ -3568,7 +3625,8 @@ video-only). Units: `scene_clock_excises_pauses_and_scales_by_speed`, `eff_fps_a
 `kind_has_audio_counts_scenes` (onset.rs), `outputs_of` in `srcs_alias_layers_pending_and_exclusions`.
 
 **For Tasks 6/9/11.** Task 6: `SceneSource::apply` stores `gain.*`/`no_audio` — send the
-effective dB as `Gain` from there (the 1 kHz `push_gain` path calls `apply` too) and re-send
+effective dB as `Gain` from there (the 1 kHz `push_gain` path calls `apply` too; F6b: a scene
+whose `Ready.has_audio` was false only folds it into the restart's `Start`) and re-send
 gain/`NoAudio` after a restart's `Ready` (`WorkerEvent::Restarted` → `worker_ready = false`;
 hook the next `FromWorker::Ready`); `FromWorker::AudioFlowing` → push
 `SourceEvent::AudioFlowing` when `flow_armed` (armed at open-unpaused, un-pause, path change);
@@ -4120,8 +4178,8 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   new period).
 - **Per-output present gate (`redraw.rs`, Wayland and `--redraw-policy content`).** One worker
   serves every output (D1), so a new scene frame wakes output `<c>` at most
-  `eff(out:<c>.scene_fps, refresh)` times per second: `Redraw::mark_shown_gated(graph, changed,
-  now, period)` (the runtime's `scene_gate_period`: `Some(1/eff)` for a hosted scene, `None` for
+  `eff(out:<c>.scene_fps, refresh)` times per second: `Redraw::mark_shown_gated(routes, changed,
+  now, period)` (`routes` = `redraw::Routes::of(graph)`, F6b) (the runtime's `scene_gate_period`: `Some(1/eff)` for a hosted scene, `None` for
   anything else) lets a scene frame through on a grid of that period (`GATE_SLACK` 2 ms early is
   on time; a whole period behind restarts the grid at now); an early frame is **deferred to its
   slot** (`gate_due`, promoted at the top of every `render_paced` by `promote_due`) — never
