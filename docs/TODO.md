@@ -245,6 +245,23 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           CPU is ±1 %). What's left is the per-frame transport (latch, fences, the `time_pos` mirror) and the
           transition's 1 kHz gain timer. **Owner:** re-run `scenes.sh workers` on the real outputs for the 0.6 %
           bound (it can only be judged there).
+          **Round 2 (2026-10-29, "Update Only The Source A Wake Was For", "Drop The Scene Transport's Idle
+          Syscalls", "Stop Allocating On Every Graph Write"):** each worker frame is a loop wake (~1.5 with the fence
+          wake), and every wake updated *every* source, re-synced every source, re-derived each output's routing
+          from the graph, read every worker's socket/pipe + `waitpid`ed it, `eglWaitSync`ed the already-signalled
+          acquire fence (~10 syscalls + an ioctl on NVIDIA) and pushed 1 kHz gain steps to soundless workers. Now a
+          wake updates only its source, `sync_sources` runs only when due, routing is cached per `demand_rev`, reads
+          follow epoll readiness, no wait on a signalled fence, soundless scenes only fold their gain (details
+          `phase2.md` § 10 F6b round 2). Headless A/B (3 rounds each, isolated builds): mid-fade excess user+kernel
+          instructions **0.40–0.42 → 0.14–0.21 G/s**, main-thread syscalls per worker frame ~56 → ~29. On the real
+          outputs (`f6b-20261029/om-*`, machine loaded by another agent): mid-fade compositor instructions
+          1.05 / 1.45 → 0.77 / 0.74 G/s; the CPU check **PASS 2/2** (−0.25 / −0.3 % per worker; HEAD in the same
+          session 2.25 / −0.05 %) — CPU % there is noise-dominated (baselines 23–37 %). **Open:** confirm on a quiet
+          machine. What's left per frame is the transport floor (`recvmsg` Frame, `sendmsg` Tick + Release, the release
+          fence — NVIDIA's `eglCreateSync` + dup alone is ~12 syscalls). Next lever if needed: reuse one release fence
+          for every slot not sampled since it was made (one per compose instead of one per latch, ~halves the fence
+          syscalls). Tried and dropped: a worker thread that sends each `Frame` after its fence (1 compositor wake per
+          frame) — no compositor gain once a wake was cheap, +2 worker context switches per frame.
     - [ ] **F1 follow-up — tick scenes from the frame callbacks / the exact refresh** instead of a rounded-Hz grid,
           so a scene at the refresh never beats against the vblank (F1 fixed the presents, not the content clock).
     - [ ] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet

@@ -26,7 +26,7 @@ folder `~/.local/share/Steam/steamapps/workshop/content/431960` only.
 | 2 dropout | **PASS bar one micro-gap** (38/39) | 720 switches at 60 + 240 Hz, V→S / S→V / S→S × full-live / reveal / frozen + align end, synthetic and real (Kimi) scenes: 720 done, **0 drops**, **1 micro-gap** (3 ms, 240 Hz S→S frozen — F7), onset worst +1.1 dB (bound +6); run 1 had 9 drops + 1 gap, all detector artefacts (F2) |
 | 3 crash isolation | **PASS** (56/56) | 5 SIGKILLs + 2 hangs per scene, crash loop → broken: DP-1 p95 7.87–8.35 ms vs baseline 8.10–8.17, missed ≤ 1; DP-1 tone 0 drops; DP-2 held (grim identical); recovery 0.12–0.13 s synthetic, 0.20–0.25 s real |
 | 4 GPU budget | **FAIL** (2/5) | throttles in 1.2 s at 6.2 ms/frame, `scene_throttle` off lifts it live; but DP-2's 240 Hz clip misses frames with any heavy single-draw worker (p95 6.9–9.1 ms) — finding F5 (budget part fixed, the rest open) |
-| 5 several workers | **PASS bar mid-transition CPU** (3/4) | distinct real scenes + S→S on both outputs: done 2/2, old workers reaped; compositor CPU per worker steady **0.1 %** (bound 0.6; was 2.9 % before F6), but 2.75–4.05 % per worker mid-fade with 4 workers (open, F6b) |
+| 5 several workers | **PASS bar mid-transition CPU** (3/4) | distinct real scenes + S→S on both outputs: done 2/2, old workers reaped; compositor CPU per worker steady **0.1 %** (bound 0.6; was 2.9 % before F6), but 2.75–4.05 % per worker mid-fade with 4 workers (F6b; after round 2: PASS 2/2 on-machine, −0.25 / −0.3 %, on a loaded machine — to confirm on a quiet one) |
 | 6 pause (scripted scene) | **PASS** (6/6) | held identical through 10 s; synthetic: next seq exactly +1, scene time +0.12 s; Bunk (32 scripts): first frame after the resume differs from the last before as much as one unpaused frame does |
 | 7 soak 1 h | **PASS** (5/5) | 116 switches, all `transition.done`; RSS slope **0.174 MiB/min** after 10 min (bound 0.5; plateau 323–450 MiB); ≤ 2 live workers at all 691 samples; per-worker VRAM identical across 19 plays each; no worker 2 s after `ctl stop`; 0 warn events |
 | 8 VT switch / suspend | not run (owner) | checklist § 8 |
@@ -501,6 +501,54 @@ left mid-fade is per-frame transport (`SceneSource::update`: latch + fences, ~9 
 transition's 1 kHz gain timer (~5 %; skipping it for sources with no audio was tried — no measurable change,
 reverted). The plan's bound is the on-machine step-5 number (Wayland, 0.1 % steady); not re-run here (owner's
 outputs) — § 10 "On-machine checks for the owner".
+
+**F6b round 2 (2026-10-29) — what scaled per worker per frame, fixed; the bound passes on-machine (loaded machine,
+to confirm on a quiet one).** `perf trace` of the main thread (base = `7c97559`, 4 synthetic workers mid-fade, 144 +
+240 Hz headless) put the excess at **~56 syscalls per worker frame** — and the loop wakes ~1.5 times per frame (the
+`Frame`, then its fence). Per wake, before:
+- every hosted source was updated (`SourceHost::update`): per scene an `epoll_wait`, a `read` of the output pipe and a
+  `recvmsg` that found nothing, a `waitpid`, `eglGetCurrentContext` (a `getpid` on NVIDIA), nine mirror reads — work
+  per worker that grew with the number of workers;
+- `sync_sources` walked every source (gone scan, `ids_of` clones, `wake_fds_by_id` → a `BTreeMap`, demand set);
+- the redraw decisions re-derived each output's routing from the graph (`shown_by`/`shown_nodes`: path `format!`s,
+  alias resolution) — Wayland's `render_paced` for every ready output on every iteration;
+- the latch `eglWaitSync`ed an acquire fence it had just seen signal (the spike's "free safety net": ~10 syscalls —
+  fd dups, `getpid` — plus a semaphore ioctl on NVIDIA), and every acquire fence was `epoll_ctl`-added and removed;
+- the 1 kHz gain timer sent each step to every scene — a message and a worker wake per scene per millisecond — even to
+  soundless ones; every property write rebuilt the whole schema table (`schema_for`), allocated its key, and the
+  dropout probe's 1 kHz gain history cloned every source id.
+
+Fixes ("Update Only The Source A Wake Was For", "Drop The Scene Transport's Idle Syscalls", "Stop Allocating On Every
+Graph Write"; `player-core.md` § Sources "Per-frame cost"): a wake updates only the sources whose fd fired (the tick
+still updates all), `sync_sources` runs after a dispatch only when due (`sync_due`), routing is cached per
+`Graph::demand_rev` (`redraw::Routes`), a scene reads its worker only when its epoll says so and `waitpid`s only an
+ending worker (else every 100 ms), the GL context is made current only for GL work, a signalled acquire fence is
+dropped on arrival and never waited on, a soundless scene's gain is only folded into its restart's `Start`, the
+schema is built once per kind. Measured (`scenes.sh transport`, `PERF_SUDO=1` for kernel instructions, isolated
+builds, 3 alternating rounds, `results/f6b-20261029/ab9`):
+
+| build | 2 workers steady: excess G insn/s user (kernel) | 4 workers mid-fade: excess G insn/s user (kernel) | loop wakes/s mid-fade |
+|---|---|---|---|
+| base `7c97559` | 0.06–0.08 (0.05) | **0.28–0.29 (0.12–0.13)** | 1075–1328 |
+| F6b round 2 | 0.03–0.04 (0.03) | **0.08–0.14 (0.055–0.068)** | 1184–1531 |
+
+Main-thread syscalls per worker frame ~56 → ~29 (`tr-base`, `tr-wnoout`). On the real outputs, `scenes.sh workers`
+alternating base / new twice (`om-*`; another agent was building and testing on the machine, baselines 23–37 % CPU):
+mid-fade compositor instructions (user + kernel) 1.05 / 1.45 → 0.77 / 0.74 G/s; the step's CPU check **PASS 2/2**
+(−0.25 / −0.3 % per worker) against base 2.25 % (FAIL) / −0.05 % in the same session — CPU % is noise-dominated there,
+the instruction counts are the A/B. Audio unchanged (`scenes.sh onsetrec --switches 30`): frozen 0 holes, 0 exact-silence
+runs in 61 onsets; full-live 4 and reveal 8 single 64-frame runs vs base 8 and 7 in the same session (the open F7
+residual). Tests: lib 249, api 122 (+1 ignored), scene 32, the rest — all pass in both modes; adapter 267/0.
+
+What is left per frame is the transport itself: the `Frame` `recvmsg` (+ fd), the `Tick` and `Release` `sendmsg`s and
+the release fence — NVIDIA's `eglCreateSync(NATIVE_FENCE)` + `eglDupNativeFenceFDANDROID` alone is ~12 syscalls (fd
+dups, `fcntl`, `getpid`) and a semaphore ioctl, ~40 % of what remains. At the refresh (144 / 240 frames/s per worker,
+the synthetic step's rate) that is the floor of this design; real scenes tick at 30 fps by default. Next lever if the
+quiet-machine re-run fails: hand every slot released after the same compose one release fence (a per-context epoch:
+a slot sampled before the newest fence reuses it, one never sampled since its latch needs none) — about half the fence
+syscalls. Tried and dropped: a worker thread that waits for each frame's fence and sends the `Frame` after it (one
+compositor wake per frame): no compositor gain left once a wake was cheap (0.15–0.21 vs 0.14–0.21 G/s), for +2 worker
+context switches per frame (the spike budget's 4).
 
 ### F7 — one 3 ms micro-gap at a frozen S→S handoff, 240 Hz (FIXED 2026-10-29, "Leave The Graph Before A Scene Worker Exits"; a single-cycle residual open)
 
