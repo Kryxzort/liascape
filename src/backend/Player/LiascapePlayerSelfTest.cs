@@ -32,6 +32,7 @@ public static class LiascapePlayerSelfTest
             FeatureHealthAssertions(fails);
             ScenePropertyAssertions(fails);
             PlayLimitAssertions(fails);
+            ProgramSpecAssertions(fails);
             StaleThroughWrapperAssertions(fails);
             StartupGraceAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
@@ -41,6 +42,73 @@ public static class LiascapePlayerSelfTest
         if (fails.Count == 0) { Console.WriteLine("PASS"); return 0; }
         Console.WriteLine("FAIL " + string.Join("; ", fails));
         return 1;
+    }
+
+    // ---- Phase 3 Task 7: a rotation session → the player's program spec (LiascapePlayerProgram.BuildSpec) -------------
+    private static void ProgramSpecAssertions(List<string> fails)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"lia-selftest-prog-{Environment.ProcessId}"); // never created: no file is read
+        {
+            string a = Path.Combine(dir, "a.mp4"), b = Path.Combine(dir, "b.mp4"), img = Path.Combine(dir, "c.png");
+            var g = new AppSettings
+            {
+                AllowScenes = false, Volume = 50, Speed = 1.5, NoAudio = false, Loop = true, TransitionMethod = "frozen",
+                GlobalIntervalSeconds = 30, GlobalSwitchWhenVideoEnds = true, GlobalMaxPlaySeconds = 600,
+                GlobalSeparateSceneTiming = true, GlobalSwitchScenesAfterSeconds = 90,
+                GlobalTransitionEnabled = true, GlobalTransitionEffectIds = ["fade", "wipe"], GlobalTransitionDurationMs = 400,
+                GlobalTransitionDurationMaxMs = 900, GlobalTransitionShuffle = false, GlobalPlaylistStart = "resume",
+            };
+            var own = new PlaylistSettings
+            {
+                OverrideGlobalSettings = true, IntervalSeconds = 5, SwitchWhenVideoEnds = false, MaxPlaySeconds = 7,
+                SeparateSceneTiming = false, SwitchScenesAfterSeconds = 12, TransitionEnabled = false, TransitionDurationMs = 0,
+                PlaylistStart = "start_over",
+            };
+            var follows = new PlaylistSettings { OverrideGlobalSettings = false, MaxPlaySeconds = 7, PlaylistStart = "start_over" };
+            string J(object? v) => JsonSerializer.Serialize(v);
+            void Want(string what, object? got, object? want) { if (J(got) != J(want)) fails.Add($"program spec {what} = {J(got)}, want {J(want)}"); }
+
+            // on_end (advance) vs timer: the interval → interval_ms; max / scene timing from EffectiveRotation
+            var sp = LiascapePlayerProgram.BuildSpec([a, b, img], g, follows, shuffle: true, intervalSeconds: 30, advance: true, key: "name:Mix");
+            Want("mode (advance)", sp.Mode, "on_end"); Want("interval_ms", sp.IntervalMs, 30_000L); Want("order", sp.Order, "shuffle");
+            Want("max_ms (follows)", sp.MaxMs, 600_000L); Want("separate_scenes", sp.SeparateScenes, true); Want("scenes_after_ms", sp.ScenesAfterMs, 90_000L);
+            Want("key", sp.Key, "name:Mix"); Want("start_mode (follows the global)", sp.StartMode, "resume"); Want("while_parked", sp.WhileParked, "rotate");
+            Want("transition (globals)", sp.Transition, new Dictionary<string, object?> { ["enabled"] = true, ["effects"] = new[] { "fade", "wipe" },
+                ["shuffle"] = false, ["duration_ms"] = 400.0, ["duration_max_ms"] = 900.0, ["method"] = "frozen" });
+            var so = LiascapePlayerProgram.BuildSpec([a, b], g, own, shuffle: false, intervalSeconds: 5, advance: false, key: "bar");
+            Want("mode (timer)", so.Mode, "timer"); Want("interval_ms (timer)", so.IntervalMs, 5_000L); Want("order", so.Order, "sequential");
+            Want("max_ms (override)", so.MaxMs, 7_000L); Want("separate_scenes (override)", so.SeparateScenes, false); Want("scenes_after_ms (override)", so.ScenesAfterMs, 12_000L);
+            Want("start_mode (override)", so.StartMode, "start_over");
+            Want("transition (override: off, 0 ms)", (so.Transition["enabled"], so.Transition["duration_ms"]), (false, 0.0));
+            g.TransitionMethod = "nonsense";
+            Want("method (unknown → reveal)", LiascapePlayerProgram.TransitionMap(g, null)["method"], "reveal");
+            Want("key of a saved playlist / the bar", (LiascapePlayerProgram.KeyOf("Chill"), LiascapePlayerProgram.KeyOf(null), LiascapePlayerProgram.KeyOf(" ")), ("name:Chill", "bar", "bar"));
+            Want("start mode normalized", (AppSettings.PlaylistStartMode("RESUME"), AppSettings.PlaylistStartMode("whatever"), new PlaylistSettings().PlaylistStart, new AppSettings().GlobalPlaylistStart),
+                ("resume", "start_over", "start_over", "start_over"));
+
+            // defaults = DesiredGlobal: the globals' values, kind video, Loop; no af (loudnorm is per item)
+            var d = sp.Defaults;
+            Want("defaults.gain.user", Math.Round((double)d["gain.user"]!, 2), -18.06); Want("defaults.speed", d["speed"], 1.5);
+            Want("defaults.kind/loop/af", (d["kind"], d["loop"], d["af"]), ("video", true, ""));
+            if (!d.ContainsKey("gain.mute") || !d.ContainsKey("hwdec") || !d.ContainsKey("no_audio")) fails.Add($"program defaults lack gain.mute/hwdec/no_audio: {J(d)}");
+            // a plain video (nothing of its own) carries nothing; an image its kind; nothing is skipped (no scenes)
+            Want("item a (a plain video)", sp.Items[0].Props, new Dictionary<string, object?>());
+            Want("item c (an image)", sp.Items[2].Props, new Dictionary<string, object?> { ["kind"] = "image" });
+            Want("skips (no scenes)", sp.Items.Select(i => i.Skip), new[] { false, false, false });
+            // the rule over fake items: an item's own volume → only gain.user; a scene its kind/preview/normalize/props; the skip flag
+            Dictionary<string, object?> Item(string path) => path switch
+            {
+                "v" => new(d) { ["path"] = "v", ["gain.user"] = -6.0 },
+                "s" => new(d) { ["path"] = "s", ["kind"] = "scene", ["preview"] = "/p.jpg", ["gain.normalize"] = 3.5, ["scene_props"] = new Dictionary<string, object?> { ["x"] = 1 } },
+                _ => new(d) { ["path"] = path },
+            };
+            var items = LiascapePlayerProgram.BuildItems(["v", "s", "z", "v"], d, Item, p => p == "s");
+            Want("items (deduplicated)", items.Select(i => i.Path), new[] { "v", "s", "z" });
+            Want("an item with its own volume", items[0].Props, new Dictionary<string, object?> { ["gain.user"] = -6.0 });
+            Want("a scene item", items[1].Props.Keys.Order(), new[] { "gain.normalize", "kind", "preview", "scene_props" });
+            Want("a crashed scene's skip", (items[1].Skip, items[0].Skip), (true, false));
+            Want("an item like the defaults", items[2].Props, new Dictionary<string, object?>());
+        }
     }
 
     // ---- the rotation: advance-on-end's minimum (= the interval field) / maximum (PlayerHelper § Rotation) ---------------

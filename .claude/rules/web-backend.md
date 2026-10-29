@@ -47,8 +47,9 @@ run over 500 ms.
   unsubscribe). If one was **on screen or incoming** (liascape-player: `LiascapePlayerMedia.ShownOrIncomingPaths` —
   every layer's content, an effect's `to`, every requested switch's B except an aligned one still waiting
   for A's end; `cur:*` alone missed a switch requested but not yet running; legacy: the current file), a
-  playlist session plays on from the **next surviving playlist bar item after it** (`PlayFrom`, wrapping), a
-  single one stops. The UI drops the items from its playlist bar before the request and re-reads
+  playlist session plays on from the **next surviving playlist bar item after it** (`PlayFrom`, wrapping; under
+  liascape-player the program's items lose it — the bar's survivors — then `program.next`, which goes on from its old
+  place: player-adapter.md § Rotation), a single one stops. The UI drops the items from its playlist bar before the request and re-reads
   `/playlist/state` after trash and undo (a stale playlist bar saves itself back over the backend's).
 - **`POST /playlist/state` merges too** (`JsonMerge.Over` over the saved state: a partial body keeps the rest, a
   nested `settings` merges key by key, lists replace) — a paths-only body used to reset the rotation and

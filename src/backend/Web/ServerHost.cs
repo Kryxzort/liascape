@@ -96,7 +96,10 @@ public static class ServerHost
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
         // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
         // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
-        if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
+        // liascape-player (Phase 3 Task 7): the rotation is the player's program — the mirror is seeded from it (it never
+        // stopped), and a legacy session still in timed_state.json moves into it
+        if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
+        else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
         var startup = SettingsService.Load();
         if (startup.AutoMute)
             AudioMonitor.Start(startup.AutoMuteDelayMs, startup.AutoUnmuteDelayMs, startup.AutoMuteMinLevelDb, startup.AutoMuteOnlyIfMprisActive);
@@ -112,7 +115,8 @@ public static class ServerHost
             // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
             PlayerHelper.ReleaseTimer();
             PlayerHelper.ClearGuiTimerPid();
-            if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
+            // liascape-player: the player rotates on its own with the app closed — nothing to hand over (Task 7)
+            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
         });
 
         // WE auto-import on startup, off-thread so the API is up immediately;
@@ -410,6 +414,9 @@ public static class ServerHost
             // the effective transition (the globals, when the playlist follows them) or the method changed → an
             // aligned switch already armed for A's end takes it (liascape-player requested it with the old one)
             var plS = PlaylistService.LoadCurrentState()?.Settings;
+            // "When the playlist starts again" (the global one, when the playlist follows it) → the program, for its next start
+            if (onPlayer && PlayerHelper.EffectiveStart(prev, plS) != PlayerHelper.EffectiveStart(s, plS) && Liascape.Player.LiascapePlayerProgram.IsActive)
+                Liascape.Player.LiascapePlayerProgram.SetStartMode(PlayerHelper.EffectiveStart(s, plS));
             if (prev.TransitionMethod != s.TransitionMethod
                 || !TransitionService.SameConfig(TransitionService.Effective(prev, plS), TransitionService.Effective(s, plS)))
                 PlayerHelper.RearmAlignedSwitch();
@@ -469,7 +476,12 @@ public static class ServerHost
             if (r.Paths is { Count: > 0 } && !r.Paths.Contains(PlayerHelper.QueryCurrentPath() ?? "")) return Results.Ok();
             if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
         });
-        app.MapPost("/library/whitelist", (WhitelistReq r) => { LibraryService.SetWhitelisted(r.Path, r.Value); return Results.Ok(); });
+        app.MapPost("/library/whitelist", (WhitelistReq r) =>
+        {
+            LibraryService.SetWhitelisted(r.Path, r.Value);
+            Liascape.Player.LiascapePlayerProgram.PushItem(r.Path); // a rotation's skip flag follows (Task 7)
+            return Results.Ok();
+        });
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
         // item in its index, then live on its source(s) under liascape-player), and the drag twin (live, nothing saved)
         app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));

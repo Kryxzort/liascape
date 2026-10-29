@@ -89,6 +89,14 @@ public class AppSettings
     private int _globalSwitchScenesAfterSeconds = 1800;
     public int GlobalSwitchScenesAfterSeconds { get => _globalSwitchScenesAfterSeconds; set => _globalSwitchScenesAfterSeconds = PlayLimit(value); }
     public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
+    // "When the playlist starts again" (plan 2026-10-29 § Playlist start, O4; liascape-player — the program's
+    // `start_mode`): "start_over" (default — sequential from the first wallpaper, shuffle shuffles anew) | "resume"
+    // (the exact item, time and play time). A playlist's own PlaylistSettings.PlaylistStart beats it under its
+    // override. Read at the next start only (a change never jumps the current play). Task 7 adds the key; its UI
+    // row is Task 10.
+    private string _globalPlaylistStart = "start_over";
+    public string GlobalPlaylistStart { get => _globalPlaylistStart; set => _globalPlaylistStart = PlaylistStartMode(value); }
+    public static string PlaylistStartMode(string? v) => v?.Trim().ToLowerInvariant() is "resume" ? "resume" : "start_over";
     public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields
 
     // Global transition fallbacks (used when a playlist's OverrideGlobalSettings is off). See

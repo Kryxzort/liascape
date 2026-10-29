@@ -266,6 +266,47 @@ full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still 
 unmutes when it ends.
 
 ## Rotation (advance-on-end minimum / maximum / separate scene timing; redesigned 2026-10-28)
+**Where it runs (Phase 3 Task 7, 2026-10-30): under `liascape-player` every rule below lives in the player's program**
+(`prog:main` on `out:*`, `recipes/program/` — player-core.md § Programs); the C# rotation (`Tick`, `DoVideoEndWait`,
+`HoldForMinPlay`, `AdvanceToNext`, the pending file) is legacy-only and a guard logs `legacy rotation path reached under
+liascape-player` if anything reaches it. The backend's half is `Player/LiascapePlayerProgram.cs`:
+- **Load** (`BuildSpec` + `Load`, essential on the media queue): `AppOps.PlayPlaylist` / `PlayFrom` (`from` = the
+  effective "When the playlist starts again" — `GlobalPlaylistStart` / `PlaylistSettings.PlaylistStart` under its
+  override, `PlayerHelper.EffectiveStart` — or `index` for a play-from), `ApplyTimedPlaylist` / `ApplyPlaylist` (> 1
+  item or a scene) / `Restore` (no timer-daemon: loaded directly, waited ≤ 15 s) / a legacy `timed_state.json` at
+  `serve` start or on the engine switch (`PlayerHelper.LoadFromTimedState`: the item it was on, as a play-from; the
+  file removed). The spec: items in the playlist bar's order (the player shuffles; a shuffled play-from shuffles the
+  rest of its cycle), `defaults` = `LiascapePlayerMedia.DesiredGlobal` (the resolver's values with no item + kind
+  video + Loop), each item's props = `DesiredItem` minus what equals the defaults (an override's `gain.user`, its own
+  `af`, a scene's kind/preview/normalize/props/seed, an image's kind), `skip` = `IsSkippedPath`; mode / interval /
+  max / scene timing from `EffectiveRotation`; `transition` = `TransitionService.Effective` + `TransitionMethod`;
+  `key` = `name:<the bar's saved name>` | `bar`. An existing `prog:main` is re-used: `set key` first (the player keeps
+  the old playlist's resume point), then every other prop, `player.paused false` (I1), `program.play {from}`. A single
+  `Apply` sends `destroy prog:main` before its switch; `stop` destroys it in the player.
+- **Verbs**: `/next` `/prev` `/random` (and the keybinds) with a session active → `BeforeUserSwitch` as before, then
+  `program.next|prev|random {keep_pause}` — never `pending_action.txt`.
+- **Live edits** (coalescible `QueueSet`, only while the program exists): `ApplyRotationLive`/`UpdateTimedSettings` →
+  `SetRotation` (`program:rotation` — mode + interval_ms), `ApplyPlayLimitsLive` → `SetLimits`, `RearmAlignedSwitch`
+  → `SetTransition`, the order → `SetOrder`, the start setting → `SetStartMode` (`/settings` and `/playlist/state`,
+  diffed), the playlist bar (`AppOps.SavePlaylistState` → `ApplyToProgram`: items + the bar's key, order, limits,
+  rotation, transition, start mode — diffed prev → now) → `SetItems`. R61 feeds the next B: every `ApplyEffective`
+  (and the mute) → `PushDefaults` + `PushItems`; `ApplyOverride`, a scene's props / loudness landing, a crash mark, a
+  whitelist → `PushItem(path)` (one coalesced items push; nothing sent when nothing changed; a props/skip-only change
+  never re-orders the player's rotation, and lifting a skip clears the player's own broken mark).
+- **Mirror**: `program.` events (subscribed) → `IsActive` (= `IsTimedPlaylistActive`, `/current.timed`),
+  `CurrentPath`/`CurrentIndex`; `program.current` → `PlayerHelper.OnProgramSwitched` (WS `wallpaper-changed`, the
+  speed) and `UpgradeAfterCommit` (a stale player is upgraded once that switch handed off — an armed end switch is
+  re-armed by the program's own restore; the 10 s watch still never upgrades across a pending transition). Seeded
+  by `Sync` (`state.programs`) at `serve` start (`Startup`), in a fresh process and after a player restart.
+- **R81**: `Restarted`/`Recovered` → `Reapply`: a model this backend loaded and the player lost (a restart without
+  its snapshot) is loaded again at the item it was on; else every prop that differs is set. `ReconcileShown` stands
+  down while a program owns the screen. A backend that didn't load the program (it restarted) leaves the player's
+  program as it is.
+- **Trash** of the playing / incoming item: the bar's survivors → `SetItems`, then `program.next` (web-backend.md § Trash).
+- With the app closed the player rotates on its own: under `liascape-player` the stopping backend hands nothing to a
+  `timer-daemon` (Task 8 retires the rest — `gui_timer.pid`, the restart daemon).
+
+The rules themselves (unchanged, now the player's):
 Owner-approved model (the play-time limits added the same day were folded into it; "Separate timing for scenes" + 0 =
 off everywhere added the same evening — owner: "minimum and maximum should both support '0' which then just turns them
 off … a toggle which … lets you configure differently for scenes"). Per rotation (the globals, or a playlist's own when
@@ -789,6 +830,16 @@ wireplumber / pactl / paplay / parec): the only section with real audio — a pr
 one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR`; the whole IT
 exports `PULSE_SERVER` at that socket (libpulse can't fall back to another server or autospawn one); a player WITHOUT
 `--ao null` (its bus on the private PipeWire), then back to the `--ao null` one. Checks § Auto-mute above.
+**Phase 3 Task 7 programs** (§ Rotation "Where it runs"): `/playlist/play` → `prog:main` (kind program), a 3 s timer
+rotating a → b → c → a (`program.current` reasons play/timer), every switch since the load `origin: program:prog:main`,
+`/current` = the program's path + `timed`, WS `wallpaper-changed` per switch; every live edit (interval, max / scene timing,
+transitions + method, advance-on-end, a reorder + shuffle through `/playlist/state`, Volume → `defaults.gain.user`, mute →
+`defaults.gain.mute`) on `prog:main` at once, played_ms kept; an item's own volume only in its props, live, and its next
+B created with it; normalization → its own `af` in, then out; a trash of the playing item → gone from the items, the
+program moved on (no backend switch), undo → back; § Playlist start: start over / resume × Play again, stop → Play,
+Alpha → Beta → Alpha (the bar's key `name:Alpha` / `name:Beta`), a play-from; a legacy `timed_state.json` at a backend
+start → the program at its item, the file gone. The scene / upgrade / two-backend sections check the program too
+(`srcIdForPath` reads sources only — a program node has a `path`; two backends → no `origin: api` switch).
 `LIASCAPE_IT_DLL=<liascape-backend.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test

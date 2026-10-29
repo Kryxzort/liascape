@@ -97,6 +97,14 @@ public static class PlayerHelper
     public static void AppendToActivePlaylist(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return;
+        if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
+        {
+            // the player's rotation (Task 7): its items grow
+            var items = (LiascapePlayerProgram.Paths ?? []).ToList();
+            foreach (var p in paths) if (!items.Contains(p)) items.Add(p);
+            LiascapePlayerProgram.SetItems(items);
+            return;
+        }
         lock (_lock)
         {
             if (_timedPaths != null)
@@ -120,6 +128,8 @@ public static class PlayerHelper
     // switch where mpvpaper has been killed but the next instance hasn't launched.
     public static bool IsTimedPlaylistActive()
     {
+        // liascape-player (Task 7): a rotation session is the player's program (timed_state.json is legacy's)
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerProgram.IsActive;
         try
         {
             if (!File.Exists(TimedStatePath)) return false;
@@ -791,6 +801,8 @@ public static class PlayerHelper
             }
             TeardownTimer();
             ClearTimedStateFile();
+            // a single wallpaper replaces a rotation: `destroy prog:main` queued before the switch (Task 7)
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.End();
             // I1: a new session plays — unless it's a user next/prev/random keeping the pause
             if (PlayerEngine.IsLiascapePlayer && !_keepPauseNextSwitch) LiascapePlayerMedia.QueueNewSession();
             SwitchToFile(videoPath, mpvOptions);
@@ -805,6 +817,12 @@ public static class PlayerHelper
     public static void ApplyPlaylist(IReadOnlyList<string> videoPaths, string mpvOptions, bool shuffle = false, int intervalSeconds = 0)
     {
         if (videoPaths.Count == 0) return;
+        // liascape-player (Task 7): more than one item, or any scene → the player's program (advance-on-end, as below)
+        if (PlayerEngine.IsLiascapePlayer && (videoPaths.Count > 1 || videoPaths.Any(IsScenePath)))
+        {
+            ApplyTimedPlaylist(videoPaths, mpvOptions, shuffle, intervalSeconds, switchWhenVideoEnds: true);
+            return;
+        }
         lock (_lock)
         {
             _switchWhenVideoEnds = false;
@@ -846,6 +864,14 @@ public static class PlayerHelper
     // `intervalSeconds`: advance-on-end off → the timer; on → the minimum play time (§ Rotation)
     public static void ApplyTimedPlaylist(IReadOnlyList<string> paths, string mpvOptions, bool shuffle, int intervalSeconds, bool switchWhenVideoEnds = false)
     {
+        if (PlayerEngine.IsLiascapePlayer)
+        {
+            // Task 7: the player's program — a start of the playlist (a restore, the engine switched to the player, Play
+            // All), so its "When the playlist starts again" decides where (§ Playlist start). AppOps.PlayPlaylist/PlayFrom
+            // load it themselves (the bar's order, play-from's index).
+            LoadProgram(paths, SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings, shuffle, intervalSeconds, switchWhenVideoEnds, from: null);
+            return;
+        }
         lock (_lock)
         {
             TeardownTimer();
@@ -949,6 +975,7 @@ public static class PlayerHelper
 
     public static bool RestoreTimedPlaylist()
     {
+        if (PlayerEngine.IsLiascapePlayer) return LoadFromTimedState(); // Task 7: legacy → the player's program, at its item
         bool ok;
         lock (_lock)
         {
@@ -979,6 +1006,8 @@ public static class PlayerHelper
 
     public static bool ResumeTimedTimer()
     {
+        // Task 7: the player's program never stopped (an app restart); a legacy session still in timed_state.json moves over
+        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerProgram.IsActive || LoadFromTimedState();
         bool ok;
         lock (_lock)
         {
@@ -1013,6 +1042,7 @@ public static class PlayerHelper
     // another owner (ReleaseTimer); a session (re)started here takes it back as before.
     private static void EnsureTimedTick(bool takeBack = true)
     {
+        if (LegacyRotationReached(nameof(EnsureTimedTick))) return;
         if (_playlistTimer != null || _timedTimerStopped || _timedPaths is not { Count: > 0 }) return;
         if (!takeBack && _timerReleased) return;
         StartTimedTimer();
@@ -1020,6 +1050,7 @@ public static class PlayerHelper
 
     private static void StartTimedTimer()
     {
+        if (LegacyRotationReached(nameof(StartTimedTimer))) return;
         _daemonCts?.Dispose();
         _daemonCts = new CancellationTokenSource();
         _lastTickTime = DateTime.UtcNow;
@@ -1031,6 +1062,7 @@ public static class PlayerHelper
 
     private static void Tick()
     {
+        if (LegacyRotationReached(nameof(Tick))) return;
         lock (_lock)
         {
             if (_timerReleased) return;
@@ -1207,6 +1239,10 @@ public static class PlayerHelper
             ? (p.IntervalSeconds, p.SwitchWhenVideoEnds, p.MaxPlaySeconds, p.SeparateSceneTiming, p.SwitchScenesAfterSeconds)
             : (s.GlobalIntervalSeconds, s.GlobalSwitchWhenVideoEnds, s.GlobalMaxPlaySeconds, s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds);
 
+    // A playlist's "When the playlist starts again" (§ Playlist start): its own under its override, else the global one.
+    public static string EffectiveStart(AppSettings s, PlaylistSettings? p) =>
+        p?.OverrideGlobalSettings == true ? p.PlaylistStart : s.GlobalPlaylistStart;
+
     // What a playing item plays under advance-on-end (2026-10-28, owner: "a toggle which when toggled lets you configure
     // differently for scenes … 0 … just turns them off"). (MinMs, MaxMs), wall-clock ms; 0 = off everywhere:
     // - MinMs: a VIDEO plays at least this long, then switches at its next end (0 → at its first end, however short);
@@ -1264,6 +1300,12 @@ public static class PlayerHelper
     // within a second.
     public static void ApplyPlayLimitsLive(int maxSeconds, bool separateScenes, int scenesAfterSeconds)
     {
+        if (PlayerEngine.IsLiascapePlayer)
+        {
+            // Task 7: the program's limits — the player reads them at its next tick
+            if (LiascapePlayerProgram.IsActive) LiascapePlayerProgram.SetLimits(maxSeconds, separateScenes, scenesAfterSeconds);
+            return;
+        }
         lock (_lock) { SetPlayLimits(maxSeconds, separateScenes, scenesAfterSeconds); }
     }
 
@@ -1296,6 +1338,7 @@ public static class PlayerHelper
     // loop is turned on for the hold (align:end turns it off again for its last loop).
     private static async Task<bool> HoldForMinPlay(CancellationToken ct)
     {
+        if (LegacyRotationReached(nameof(HoldForMinPlay))) return false;
         bool held = false;
         while (true)
         {
@@ -1821,6 +1864,13 @@ public static class PlayerHelper
     public static void ReorderPlaylist(IReadOnlyList<string> originalPaths, bool isTimedPlaylist, bool shuffle,
         IReadOnlyList<string>? previousPaths = null)
     {
+        if (PlayerEngine.IsLiascapePlayer)
+        {
+            // Task 7: the program's items + order (Order::reorder keeps the current item, the countdown and the play
+            // time; a removed current item finishes without a replay, the rotation goes on from its place)
+            if (originalPaths.Count > 0 && LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetItems(originalPaths); LiascapePlayerProgram.SetOrder(shuffle); }
+            return;
+        }
         lock (_lock)
         {
             if (originalPaths.Count == 0) return;
@@ -1964,6 +2014,7 @@ public static class PlayerHelper
     // queue (preserving the current playback order). Everything else does a full rebuild.
     public static void SyncAdvanceOnEndPlaylist(IReadOnlyList<string> oldPaths, IReadOnlyList<string> newPaths, bool shuffle)
     {
+        if (PlayerEngine.IsLiascapePlayer) { ReorderPlaylist(newPaths, true, shuffle, oldPaths); return; }
         lock (_lock)
         {
             if (newPaths.Count == 0) return;
@@ -2148,6 +2199,7 @@ public static class PlayerHelper
     // correctly false even when the async LWE kill hasn't completed yet.
     private static async Task DoVideoEndWait(string next, CancellationToken ct, bool prevIsVideo = false)
     {
+        if (LegacyRotationReached(nameof(DoVideoEndWait))) return;
         // For video→video: disable loop on current, append next to mpv's playlist so
         // the transition happens inside mpv (no blank gap), then restore loop after.
         // Falls back to an immediate SwitchToFile for scene transitions or when IPC is unavailable.
@@ -2528,6 +2580,8 @@ public static class PlayerHelper
     public static void RearmAlignedSwitch()
     {
         if (!PlayerEngine.IsLiascapePlayer) return;
+        // Task 7: the program's `transition` — the player re-arms an armed switch to the same B with it
+        if (LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetTransition(); return; }
         lock (_lock)
         {
             if (!_waitingForVideoEnd || _timerReleased || _waitCts == null || _history == null
@@ -2712,7 +2766,8 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            WritePendingAction("next");
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Next(keep); // Task 7: the player's program, never the pending file
+            else WritePendingAction("next");
             return;
         }
         // Single-wallpaper sessions (single, random) — step the library.
@@ -2725,7 +2780,8 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            WritePendingAction("prev");
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Prev(keep);
+            else WritePendingAction("prev");
             return;
         }
         UserSwitch(keep, () => { if (!TryStepLibrary(forward: false)) SendCommand("playlist-prev"); });
@@ -2781,6 +2837,12 @@ public static class PlayerHelper
 
     public static void UpdateTimedSettings(bool shuffle, int intervalSeconds, bool switchWhenVideoEnds = false)
     {
+        if (PlayerEngine.IsLiascapePlayer)
+        {
+            // Task 7: the program's rotation (the player retimes the countdown / re-arms to the same B)
+            if (LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetOrder(shuffle); LiascapePlayerProgram.SetRotation(intervalSeconds, switchWhenVideoEnds); }
+            return;
+        }
         lock (_lock)
         {
             if (_timedPaths == null && !LoadTimedState()) return;
@@ -2832,7 +2894,14 @@ public static class PlayerHelper
     // time. No-op when no timed session is active (UpdateTimedSettings early-returns). Wired from /settings (global
     // rotation, when the session follows globals) + /playlist/state (per-playlist rotation, when it overrides).
     public static void ApplyRotationLive(int intervalSeconds, bool switchWhenVideoEnds)
-        => UpdateTimedSettings(_timedShuffle, intervalSeconds, switchWhenVideoEnds);
+    {
+        if (PlayerEngine.IsLiascapePlayer)
+        {
+            if (LiascapePlayerProgram.IsActive) LiascapePlayerProgram.SetRotation(intervalSeconds, switchWhenVideoEnds);
+            return;
+        }
+        UpdateTimedSettings(_timedShuffle, intervalSeconds, switchWhenVideoEnds);
+    }
 
     // PlayerEngine changed (/settings), live: stop the OLD engine's media, then replay on the new one —
     // a running timed playlist resumes at the item it was on (timed_state.json), else LastSession.
@@ -2879,6 +2948,7 @@ public static class PlayerHelper
 
     public static void Stop()
     {
+        if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Forget(); // `stop` destroys the player's programs itself
         lock (_lock)
         {
             KillAll();
@@ -2902,6 +2972,18 @@ public static class PlayerHelper
         if (settings.AutoMute)
             AudioMonitor.SpawnDetachedMonitor();
 
+        if (PlayerEngine.IsLiascapePlayer && (session.IsTimedPlaylist || session.IsPlaylist) && session.Paths.Count > 0)
+        {
+            // Task 7: the player's program, loaded here (no timer-daemon: the player rotates on its own) — unless one
+            // already plays (`play` while it rotates: nothing to do). Waited for: `liascape restore` exits right after.
+            if (LiascapePlayerProgram.IsActive) return;
+            if (session.IsPlaylist && session.Paths.Count == 1 && !IsScenePath(session.Paths[0])) { Apply(session.Paths[0], settings.BuildMpvOptions()); return; }
+            var ps = PlaylistService.LoadCurrentState()?.Settings;
+            var task = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
+                session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null);
+            try { task?.Wait(15_000); } catch { }
+            return;
+        }
         if (session.IsTimedPlaylist && session.Paths.Count > 0)
             SpawnTimerDaemon();
         else if (session.IsPlaylist && session.Paths.Count > 0)
@@ -2930,7 +3012,8 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            WritePendingAction("random");
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Random(keep);
+            else WritePendingAction("random");
             return;
         }
         UserSwitch(keep, ApplyRandomNow);
@@ -3026,7 +3109,7 @@ public static class PlayerHelper
         lock (_lock)
         {
             SendCommand("cycle", "pause");
-            UpdateTimerPaused(p => !p);
+            if (!PlayerEngine.IsLiascapePlayer) UpdateTimerPaused(p => !p); // the player's clock is the rotation's (Task 7)
         }
     }
 
@@ -3168,8 +3251,11 @@ public static class PlayerHelper
     public static void SetLoop(bool loop) =>
         TrySendCommand("set", "loop-file", loop ? "inf" : "no");
 
-    public static void SetPlaylistShuffle(bool shuffle) =>
+    public static void SetPlaylistShuffle(bool shuffle)
+    {
+        if (PlayerEngine.IsLiascapePlayer) { if (LiascapePlayerProgram.IsActive) LiascapePlayerProgram.SetOrder(shuffle); return; }
         TrySendCommand(shuffle ? "playlist-shuffle" : "playlist-unshuffle");
+    }
 
     public static void SetVideoScale(string scale)
     {
@@ -3719,6 +3805,14 @@ public static class PlayerHelper
     // pause and mode rules apply); anything else (a single wallpaper, a pending B, another item) → nothing
     private static void AdvanceIfPlaying(string path, string why)
     {
+        if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
+        {
+            // Task 7: the player's program advanced by itself (a broken / VRAM-stopped current item); the item's skip
+            // flag follows the crash mark
+            TransitionService.TransLog($"{why}: {System.IO.Path.GetFileName(path)} — the player's program advances");
+            LiascapePlayerProgram.PushItem(path);
+            return;
+        }
         lock (_lock)
         {
             if (_timedPaths == null || _timedTimerStopped || _timerReleased || _history == null || _waitingForVideoEnd) return;
@@ -3732,6 +3826,74 @@ public static class PlayerHelper
             }
             else AdvanceAndLaunch(); // no countdown to expire (an advance-on-end session)
         }
+    }
+
+    // The pickers' rule for a program item's `skip` flag (LiascapePlayerProgram.BuildItems).
+    public static bool SkippedForRotation(string path, bool scenesPlayable) => IsSkippedPath(path, scenesPlayable);
+
+    // ── liascape-player Phase 3 Task 7: the rotation is the player's program (LiascapePlayerProgram) ──────────────
+    // A program switch committed (`program.current`, its effect started): what every client is told plays, the speed
+    // factor kept like PostSwitch did. The program measures nothing itself — every unmeasured video of it was kicked
+    // when its items were built (NormalizeAf), so with the app closed only an item never measured before plays raw.
+    public static void OnProgramSwitched(string path)
+    {
+        lock (_lock) _currentSpeed = IsScenePath(path) ? 1.0 : ReadSpeedOverride(path) ?? SettingsService.Load().Speed;
+        OnWallpaperChanged?.Invoke(path);
+    }
+
+    // Load `paths` (the playlist bar's order; the player shuffles) as the player's program. `from`: "start" | "resume" |
+    // "index" (+ index); null = the playlist's effective start mode (a start: Play, a restore). Returns the queued load.
+    public static Task? LoadProgram(IReadOnlyList<string> paths, AppSettings s, PlaylistSettings? ps, bool shuffle, int intervalSeconds, bool advance,
+        string? from, int index = 0, string? key = null)
+    {
+        if (paths.Count == 0) return null;
+        lock (_lock) { TeardownTimer(); ClearTimedStateFile(); }   // nothing of legacy's rotation stays behind
+        var spec = LiascapePlayerProgram.BuildSpec(paths, s, ps, shuffle, intervalSeconds, advance, key);
+        if (spec.Items.All(i => i.Skip))
+        {
+            // nothing in it can play (ApplyTimedPlaylist's legacy rule): playback stops
+            LiascapePlayerClient.Log("program: no item of the playlist can play — stopping");
+            LiascapePlayerProgram.End();
+            lock (_lock) KillCurrentProcess();
+            return null;
+        }
+        from ??= EffectiveStart(s, ps) == "resume" ? "resume" : "start";
+        return LiascapePlayerProgram.Load(spec, from, index, keepPause: false);
+    }
+
+    // A legacy rotation (timed_state.json — legacy's tick, or a backend before Task 7) → the player's program at the
+    // item it was on (designer call 10). The playlist bar's order when it holds the same items (the timed paths are the
+    // play order, maybe shuffled). The item restarts at 0 (a play-from); the file is gone afterwards.
+    public static bool LoadFromTimedState()
+    {
+        List<string> paths; bool shuffle, advance; int interval; string? current;
+        lock (_lock)
+        {
+            if (!LoadTimedState() || _timedPaths == null || _history == null) { TeardownTimer(); return false; }
+            bool stopped = _timedTimerStopped;
+            paths = [.. _timedPaths];
+            shuffle = _timedShuffle; advance = _switchWhenVideoEnds; interval = (int)_timedInterval.TotalSeconds;
+            int i = PlayingHistoryIndex;
+            current = i >= 0 && i < _history.Count ? _history[i] : null;
+            TeardownTimer();
+            if (stopped) { ClearTimedStateFile(); return false; }
+        }
+        var pl = PlaylistService.LoadCurrentState();
+        if (pl != null && pl.VideoPaths.Count == paths.Count && pl.VideoPaths.ToHashSet().SetEquals(paths)) paths = [.. pl.VideoPaths];
+        int at = current != null ? paths.IndexOf(current) : -1;
+        LiascapePlayerClient.Log($"program: the legacy timed playlist ({paths.Count} items) moves into the player"
+            + (at >= 0 ? $" at {Path.GetFileName(current)}" : ""));
+        return LoadProgram(paths, SettingsService.Load(), pl?.Settings, shuffle, interval, advance, from: at >= 0 ? "index" : null, index: Math.Max(0, at)) != null;
+    }
+
+    // Legacy's rotation machinery under liascape-player: never reached (every entry point routes to the program).
+    private static int _legacyReached;
+    private static bool LegacyRotationReached(string where)
+    {
+        if (!PlayerEngine.IsLiascapePlayer) return false;
+        if (Interlocked.Increment(ref _legacyReached) <= 5)
+            LiascapePlayerClient.Log($"legacy rotation path reached under liascape-player ({where}) — ignored");
+        return true;
     }
 
     private static bool SamePath(string a, string b)
