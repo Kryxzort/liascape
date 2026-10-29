@@ -85,7 +85,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - F6b (compositor CPU per worker mid-transition, 2.45 % vs 0.6 % on-machine) — agent running.
 - ≤ 2 big agents at once; model/effort chosen per agent.
 - **Change of plan (owner, later that evening): "defer port for later, lets focus on the bigger picture".** The LWE
-  port is PARKED: batch B1 (property scripts) was stopped just before its smoke renders; its work is uncommitted
-  in `~/.cache/liascape/src/lwe-dev` (+ any `patches/lwe/` / PIN / audit-doc edits in the repo). Resume it later
-  from there. Instead: **Phase 3 implementation started** — Tasks 1–3 (pure rotation rules, the `program` node,
+  port is PARKED after batch B1 (owner: "dont stop it, just let it complete and then leave it there"): B1
+  (property scripts) finishes; B2+ wait. Instead: **Phase 3 implementation started** — Tasks 1–3 (pure rotation rules, the `program` node,
   the rotation engine), one agent, Opus high. F6b agent still running.
