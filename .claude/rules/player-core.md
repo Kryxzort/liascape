@@ -1822,9 +1822,26 @@ source; the transition recipe stays the one place a switch happens. The contract
   - **Another client's switch:** while a non-program transition is in flight the program requests nothing by itself;
     if the outputs then show another source (`cur:<first output>`), an item's path becomes current (reason `items`),
     anything else makes the program `idle` (until a verb).
+  - **User switches** (`program.next|prev|random|play`, Task 4): always `align: now` with the program's pick (a cut
+    with `keep_pause` while `player.paused`; the rotation clock stays frozen), superseding an armed switch (the
+    recipe aborts it). `next` while armed takes the armed B (`AdvanceAndLaunch`'s pre-fetch); a verb while the
+    program's own `align: now` request has not started goes on from *that* step (`Order::plan_after`: ten `next`s
+    in a burst land ten items on, the history as if each had played); during a Running effect the recipe commits
+    B and `next` goes to the item after it. `prev` at the session's first item → `{corr: null}`, an armed switch
+    left alone.
+  - **Live edits** (`Programs::configure` diffs the old cfg against the new): `interval_ms` → `retime_remaining`
+    (timer); under `on_end` a new minimum or a new `transition` cancels an armed switch (`program.disarmed`, debug)
+    and the next tick re-arms it to the same B (`rearm`; a held one re-checks the new minimum); `on_end → timer`
+    cancels the armed switch and starts the countdown in full; `timer → on_end` arms per the rule on the next tick;
+    `max_ms` / `separate_scenes` / `scenes_after_ms` are read by the next tick; `items` / `order` →
+    `Order::reorder` (the current item kept, or finishing without a replay; history `[current]`; play time and
+    countdown kept), and an armed B that is no longer a playable item is cancelled (the abort restores A's loop)
+    and re-planned; `defaults` / item `props` reach the next B only. An edit never resets the play time.
   - Tests: `tests/program.rs` (27 stepped/real-clock API tests: timer/speed/1-item/on-end/min-hold/max/0-off/scenes
     after/separate off/images/commit at effect start/cut at A's end/effect pick/failures/all unplayable/skip/broken/
-    VRAM/pause/every switch combo) + `recipes::program` unit tests.
+    VRAM/pause/every switch combo; Task 4's 18: the history contract through the verbs, prev at the start, next while
+    armed / during an effect, the `next` storm, the keep_pause cut, 1-item next/random, every live edit, item edits)
+    + `recipes::program` unit tests.
 
 ## Runtime
 

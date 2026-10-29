@@ -1417,3 +1417,628 @@ fn vram_stopped_scene_advances_without_broken_flag() {
     assert_eq!(p["programs"][0]["item_flags"][0]["broken"], false, "{p}");
     let _ = std::fs::remove_file(&file);
 }
+
+// ---------------------------------------------------------------- Task 4: user switches, live edits
+
+/// `state.programs[0]`.
+fn prog(c: &mut Client) -> Value {
+    c.ok("state", json!({}))["programs"][0].clone()
+}
+
+/// `program.<verb>` on `prog:main` (+ `extra` args) → its reply.
+fn verb(c: &mut Client, verb: &str, extra: Value) -> Value {
+    let mut a = json!({"id": "prog:main"});
+    for (k, v) in extra.as_object().unwrap() {
+        a[k] = v.clone();
+    }
+    c.ok(&format!("program.{verb}"), a)
+}
+
+/// `n` distinct solid PNGs named `<tag><i>`.
+fn pngs(tag: &str, n: usize) -> Vec<String> {
+    (0..n)
+        .map(|i| png(&format!("{tag}{i}"), [(i * 20) as u8, 255 - (i * 20) as u8, 60]))
+        .collect()
+}
+
+/// Step until a `program.armed` count reaches `n`, return the program's state then.
+fn wait_armed(c: &mut Client, n: usize) -> Value {
+    step_until(c, 16, 4000, "armed", |evs| {
+        evs.iter().filter(|e| e["event"] == "program.armed").count() >= n
+    });
+    c.step(16);
+    let p = prog(c);
+    assert_eq!(p["phase"], "armed", "{p}");
+    p
+}
+
+#[test]
+fn next_prev_random_follow_the_history_contract() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("hc", 5);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    // the timer at 0 never switches by itself: only the verbs move it
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 0}));
+    let mut n = 0;
+    let mut go = |c: &mut Client, v: &str| -> Value {
+        let r = verb(c, v, json!({}));
+        if !r["corr"].is_null() {
+            n += 1;
+            step_until(c, 16, 2000, v, n_currents(n));
+        }
+        r
+    };
+    go(&mut c, "play");
+    go(&mut c, "next");
+    go(&mut c, "next");
+    go(&mut c, "prev");
+    go(&mut c, "prev");
+    let none = go(&mut c, "prev");
+    assert_eq!(none["corr"], Value::Null, "previous at the session's first item");
+    assert_eq!(none["path"], Value::Null);
+    go(&mut c, "next");
+    go(&mut c, "next");
+    go(&mut c, "next");
+    let cur = currents(&c);
+    let paths: Vec<&str> = cur.iter().map(|e| e["path"].as_str().unwrap()).collect();
+    let i = |k: usize| items[k];
+    assert_eq!(paths, [i(0), i(1), i(2), i(1), i(0), i(1), i(2), i(3)]);
+    let reasons: Vec<&str> = cur.iter().map(|e| e["reason"].as_str().unwrap()).collect();
+    assert_eq!(
+        reasons,
+        ["play", "next", "next", "prev", "prev", "next", "next", "next"]
+    );
+    // a, b, c, back → b; random → x ≠ b; history [a, b, x]; next follows x's order place
+    go(&mut c, "prev");
+    go(&mut c, "prev");
+    let p = prog(&mut c);
+    assert_eq!(p["path"], json!(i(1)), "{p}");
+    let r = go(&mut c, "random");
+    let x = r["path"].as_str().unwrap().to_string();
+    assert_ne!(x, i(1));
+    assert_eq!(currents(&c).last().unwrap()["reason"], "random");
+    let p = prog(&mut c);
+    assert_eq!(p["history"], json!([i(0), i(1), &x]), "{p}");
+    let at = items.iter().position(|p| *p == x).unwrap();
+    let r = go(&mut c, "next");
+    assert_eq!(r["path"], json!(items[(at + 1) % items.len()]));
+}
+
+#[test]
+fn prev_at_session_start_does_nothing() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("ps_a", 4.0), clip("ps_b", 4.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end"}));
+    verb(&mut c, "play", json!({}));
+    let before = wait_armed(&mut c, 1);
+    let r = verb(&mut c, "prev", json!({}));
+    assert_eq!(r["corr"], Value::Null, "{r}");
+    c.step(16);
+    let after = prog(&mut c);
+    assert_eq!(after["corr"], before["corr"], "the armed switch is left alone");
+    assert_eq!(after["phase"], "armed");
+    assert!(c.named("transition.cancelled").is_empty());
+}
+
+#[test]
+fn next_during_armed_wait_takes_the_armed_b() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("na_a", 6.0), clip("na_b", 6.0), clip("na_c", 6.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end", "order": "shuffle"}));
+    verb(&mut c, "play", json!({}));
+    let armed = wait_armed(&mut c, 1);
+    let r = verb(&mut c, "next", json!({}));
+    assert_eq!(r["path"], armed["next"], "{r} vs {armed}");
+    step_until(&mut c, 16, 2000, "the next", n_currents(2));
+    let cur = currents(&c);
+    assert_eq!(cur[1]["reason"], "next");
+    assert_eq!(cur[1]["path"], armed["next"]);
+    let cancelled: Vec<Value> = c
+        .named("transition.cancelled")
+        .into_iter()
+        .filter(|e| e["corr"] == armed["corr"])
+        .collect();
+    assert_eq!(cancelled.len(), 1, "{cancelled:?}");
+    assert_eq!(cancelled[0]["reason"], "superseded");
+}
+
+#[test]
+fn next_during_running_effect_goes_past_b() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("nr", 4);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 0, "transition": fade(2000)}),
+    );
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 4000, "the play's handoff", |evs| {
+        evs.iter().any(|e| e["event"] == "transition.handoff")
+    });
+    let b = verb(&mut c, "next", json!({}));
+    assert_eq!(b["path"], json!(items[1]));
+    step_until(&mut c, 16, 2000, "B started", n_currents(2));
+    step_for(&mut c, 16, 400);
+    assert!(
+        c.named("transition.handoff")
+            .iter()
+            .all(|e| e["corr"] != b["corr"]),
+        "B's effect still runs"
+    );
+    let r = verb(&mut c, "next", json!({}));
+    assert_eq!(r["path"], json!(items[2]), "the item after B: {r}");
+    step_until(&mut c, 16, 2000, "the next", n_currents(3));
+    let h: Vec<Value> = c
+        .named("transition.handoff")
+        .into_iter()
+        .filter(|e| e["corr"] == b["corr"])
+        .collect();
+    assert_eq!(h.len(), 1, "B committed early");
+    assert_eq!(h[0]["committed"], json!(true), "{}", h[0]);
+    let cur = currents(&c);
+    assert_eq!(cur[2]["from"], json!(items[1]));
+}
+
+/// Sources playing now (not paused, not ramped to silence) and how many sources exist.
+fn live_sources(c: &mut Client) -> (usize, Vec<String>) {
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let srcs = p["sources"].as_array().unwrap();
+    let live = srcs
+        .iter()
+        .filter(|s| {
+            s["effective_paused"] == json!(false)
+                && s["gains"]["anticlick"].as_f64().unwrap_or(0.0) > -90.0
+        })
+        .count();
+    let paths = srcs
+        .iter()
+        .map(|s| s["path"].as_str().unwrap_or("").to_string())
+        .collect();
+    (live, paths)
+}
+
+#[test]
+fn next_storm_lands_on_the_last() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("ns", 12);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 0, "transition": fade(300)}),
+    );
+    verb(&mut c, "play", json!({"index": 3}));
+    step_until(&mut c, 16, 2000, "the play's handoff", |evs| {
+        evs.iter().any(|e| e["event"] == "transition.handoff")
+    });
+    // 10 nexts within 3 steps (each a separate request, as from 10 CLI processes)
+    let mut last = Value::Null;
+    for burst in [4, 3, 3] {
+        for _ in 0..burst {
+            last = verb(&mut c, "next", json!({}));
+        }
+        c.step(16);
+        let (live, _) = live_sources(&mut c);
+        assert!(live <= 2, "{live} playing sources mid-storm");
+    }
+    let want = items[(3 + 10) % 12];
+    assert_eq!(last["path"], json!(want), "{last}");
+    step_until(&mut c, 16, 3000, "the last one's handoff", |evs| {
+        evs.iter()
+            .any(|e| e["event"] == "transition.handoff" && e["corr"] == last["corr"])
+    });
+    c.step(16);
+    c.step(16);
+    let (live, paths) = live_sources(&mut c);
+    assert!(live <= 1, "{live}");
+    assert!(
+        paths.iter().all(|p| p == want),
+        "every superseded B gone: {paths:?}"
+    );
+    assert_eq!(prog(&mut c)["path"], json!(want));
+}
+
+#[test]
+fn keep_pause_next_is_a_cut_paused() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("kp_a", 6.0), clip("kp_b", 6.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 5000, "transition": fade(500)}),
+    );
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 16, 600);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    c.step(16);
+    let r = verb(&mut c, "next", json!({"keep_pause": true}));
+    step_until(&mut c, 16, 3000, "the next", n_currents(2));
+    let sch = scheduled(&c);
+    let req = sch.iter().find(|e| e["corr"] == r["corr"]).unwrap();
+    assert_eq!(req["effect_id"], Value::Null, "a cut: {req}");
+    c.step(16);
+    let b = currents(&c)[1]["source"].as_str().unwrap().to_string();
+    let p = c.ok("probe", json!({"name": "sources"}));
+    let bs = p["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == b)
+        .cloned()
+        .unwrap();
+    assert_eq!(bs["effective_paused"], json!(true), "{bs}");
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    step_for(&mut c, 100, 2000);
+    close(
+        c.get("prog:main.remaining_ms").as_f64().unwrap(),
+        r0,
+        1.0,
+        "the rotation clock stays frozen",
+    );
+}
+
+#[test]
+fn one_item_next_and_random_switch_to_itself() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let a = png("oi_a", [200, 10, 10]);
+    program(
+        &mut c,
+        &[&a],
+        json!({"mode": "on_end", "transition": fade(300)}),
+    );
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 16, 500);
+    for (k, v) in ["next", "random"].iter().enumerate() {
+        let r = verb(&mut c, v, json!({}));
+        assert_eq!(r["path"], json!(a), "{v}: {r}");
+        step_until(&mut c, 16, 2000, v, n_currents(k + 2));
+        step_for(&mut c, 16, 500);
+        let cur = currents(&c);
+        assert_eq!(cur[k + 1]["reason"], *v);
+        assert_ne!(cur[k + 1]["source"], cur[k]["source"], "a new source");
+        let req = scheduled(&c)
+            .into_iter()
+            .find(|e| e["corr"] == r["corr"])
+            .unwrap();
+        assert_eq!(req["effect_id"], "fade", "with its transition: {req}");
+    }
+}
+
+#[test]
+fn live_interval_change_keeps_proportional_remaining() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("li", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 10000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 100, 6000);
+    let r = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    close(r, 4000.0, 120.0, "6 s in");
+    c.ok("set", json!({"path": "prog:main.interval_ms", "value": 20000}));
+    let r2 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    close(r2, r + 10000.0, 1.0, "elapsed < new → new − elapsed");
+    c.ok("set", json!({"path": "prog:main.interval_ms", "value": 5000}));
+    let r3 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    close(r3, 5000.0, 1.0, "elapsed ≥ new → a full new interval");
+    assert_eq!(currents(&c).len(), 1);
+}
+
+#[test]
+fn live_min_change_rearms_same_b() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("lm_a", 10.0), clip("lm_b", 10.0), clip("lm_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end", "order": "shuffle"}));
+    verb(&mut c, "play", json!({}));
+    let armed = wait_armed(&mut c, 1);
+    step_for(&mut c, 16, 500);
+    let played = c.get("prog:main.played_ms").as_f64().unwrap();
+    c.ok("set", json!({"path": "prog:main.interval_ms", "value": 3000}));
+    let re = wait_armed(&mut c, 2);
+    assert_ne!(re["corr"], armed["corr"], "a new request");
+    assert_eq!(re["next"], armed["next"], "the same B");
+    assert!(re["played_ms"].as_f64().unwrap() >= played, "{re}");
+    let cancelled = c.named("transition.cancelled");
+    assert!(
+        cancelled.iter().any(|e| e["corr"] == armed["corr"]),
+        "{cancelled:?}"
+    );
+    assert_eq!(currents(&c).len(), 1, "no switch");
+}
+
+#[test]
+fn live_max_change_applies_next_tick() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("lx_a", 10.0), clip("lx_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end"}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 5000);
+    let n = scheduled(&c).len();
+    c.ok("set", json!({"path": "prog:main.max_ms", "value": 4000}));
+    c.step(16);
+    let sch = scheduled(&c);
+    assert_eq!(sch.len(), n + 1, "{sch:?}");
+    assert_eq!(sch[n]["align"], "now");
+    step_until(&mut c, 16, 2000, "the max switch", n_currents(2));
+    assert_eq!(currents(&c)[1]["reason"], "max");
+}
+
+#[test]
+fn live_mode_toggle_keeps_played_time() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("lt_a", 10.0), clip("lt_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 60000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 100, 2000);
+    let p0 = c.get("prog:main.played_ms").as_f64().unwrap();
+    // timer → on_end: the 60 s minimum holds the 10 s clip
+    c.ok("set", json!({"path": "prog:main.mode", "value": "on_end"}));
+    step_for(&mut c, 16, 200);
+    let p = prog(&mut c);
+    assert_eq!(p["phase"], "holding", "{p}");
+    assert!(p["played_ms"].as_f64().unwrap() >= p0, "{p}");
+    // a minimum it reaches → armed
+    c.ok("set", json!({"path": "prog:main.interval_ms", "value": 3000}));
+    let armed = wait_armed(&mut c, 1);
+    // on_end → timer: the armed switch is cancelled, the countdown starts at the interval
+    c.ok("set", json!({"path": "prog:main.interval_ms", "value": 60000}));
+    let armed2 = wait_armed_or_held(&mut c);
+    let corr = armed2["corr"].clone();
+    c.ok("set", json!({"path": "prog:main.mode", "value": "timer"}));
+    c.step(16);
+    let p = prog(&mut c);
+    assert_eq!(p["phase"], "playing", "{p}");
+    assert_eq!(p["corr"], Value::Null, "{p}");
+    close(p["remaining_ms"].as_f64().unwrap(), 60000.0, 20.0, "full interval");
+    assert!(p["played_ms"].as_f64().unwrap() >= p0 + 200.0, "{p}");
+    let cancelled = c.named("transition.cancelled");
+    for k in [&armed["corr"], &corr] {
+        if !k.is_null() {
+            assert!(cancelled.iter().any(|e| e["corr"] == *k), "{k}: {cancelled:?}");
+        }
+    }
+    assert_eq!(currents(&c).len(), 1, "no switch");
+}
+
+/// The program's state once it is armed or holding (a minimum change re-plans).
+fn wait_armed_or_held(c: &mut Client) -> Value {
+    for _ in 0..50 {
+        c.step(16);
+        let p = prog(c);
+        if p["phase"] == "armed" || p["phase"] == "holding" {
+            return p;
+        }
+    }
+    panic!("never armed or held: {}", prog(c));
+}
+
+#[test]
+fn live_transition_change_rearms_armed_switch() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("lr_a", 10.0), clip("lr_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "on_end", "transition": fade(500)}),
+    );
+    verb(&mut c, "play", json!({}));
+    let armed = wait_armed(&mut c, 1);
+    let req = scheduled(&c)
+        .into_iter()
+        .find(|e| e["corr"] == armed["corr"])
+        .unwrap();
+    assert_eq!(req["effect_id"], "fade");
+    c.ok(
+        "set",
+        json!({"path": "prog:main.transition",
+               "value": {"enabled": true, "effects": ["wipeLeft"], "duration_ms": 500}}),
+    );
+    let re = wait_armed(&mut c, 2);
+    assert_ne!(re["corr"], armed["corr"]);
+    assert_eq!(re["next"], armed["next"]);
+    let req = scheduled(&c)
+        .into_iter()
+        .find(|e| e["corr"] == re["corr"])
+        .unwrap();
+    assert_eq!(req["effect_id"], "wipeLeft", "{req}");
+    assert_eq!(req["align"], "end");
+    assert!(
+        c.named("transition.cancelled")
+            .iter()
+            .any(|e| e["corr"] == armed["corr"])
+    );
+}
+
+#[test]
+fn live_order_change_plays_rest_once_first() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("lo", 5);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 0}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    c.ok("set", json!({"path": "prog:main.order", "value": "shuffle"}));
+    let p = prog(&mut c);
+    assert_eq!(p["order"][0], json!(items[0]), "{p}");
+    for k in 0..4 {
+        verb(&mut c, "next", json!({}));
+        step_until(&mut c, 16, 2000, "next", n_currents(k + 2));
+    }
+    let mut rest: Vec<String> = currents(&c)[1..]
+        .iter()
+        .map(|e| e["path"].as_str().unwrap().to_string())
+        .collect();
+    rest.sort();
+    let mut want: Vec<String> = items[1..].iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(rest, want, "the rest, once each");
+}
+
+#[test]
+fn items_edit_keeps_current_and_played_time() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("ie", 4);
+    program(
+        &mut c,
+        &[&items[0], &items[1], &items[2]],
+        json!({"mode": "timer", "interval_ms": 60000}),
+    );
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 100, 2000);
+    let p0 = c.get("prog:main.played_ms").as_f64().unwrap();
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    let new = json!([{"path": items[2]}, {"path": items[1]}, {"path": items[0]}, {"path": items[3]}]);
+    c.ok("set", json!({"path": "prog:main.items", "value": new}));
+    c.step(16);
+    let p = prog(&mut c);
+    assert_eq!(p["path"], json!(items[1]), "{p}");
+    assert!(p["played_ms"].as_f64().unwrap() >= p0, "{p}");
+    assert!(p["remaining_ms"].as_f64().unwrap() <= r0, "{p}");
+    assert_eq!(p["history"], json!([items[1]]));
+    assert_eq!(currents(&c).len(), 1, "no switch");
+}
+
+#[test]
+fn removing_current_lets_it_finish_without_replay() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("rc", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 100, 1000);
+    c.ok(
+        "set",
+        json!({"path": "prog:main.items", "value": [{"path": items[0]}, {"path": items[2]}]}),
+    );
+    c.step(16);
+    assert_eq!(currents(&c).len(), 1, "it keeps playing");
+    step_until(&mut c, 50, 20_000, "a cycle", n_currents(5));
+    let cur = currents(&c);
+    assert_eq!(cur[1]["path"], json!(items[2]), "the item after its old place");
+    assert!(
+        cur[1..].iter().all(|e| e["path"] != json!(items[1])),
+        "never replayed: {cur:?}"
+    );
+}
+
+#[test]
+fn removing_the_armed_b_rearms_to_the_new_next() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("rb_a", 10.0), clip("rb_b", 10.0), clip("rb_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({}));
+    let armed = wait_armed(&mut c, 1);
+    assert_eq!(armed["next"], json!(items[1]));
+    assert_eq!(c.get("cur:VIRTUAL-1.loop"), json!(false), "align:end ends A's loop");
+    let played = c.get("prog:main.played_ms").as_f64().unwrap();
+    c.ok(
+        "set",
+        json!({"path": "prog:main.items", "value": [{"path": items[0]}, {"path": items[2]}]}),
+    );
+    assert_eq!(
+        c.get("cur:VIRTUAL-1.loop"),
+        json!(true),
+        "the abort restored A's loop"
+    );
+    assert!(
+        c.named("transition.cancelled")
+            .iter()
+            .any(|e| e["corr"] == armed["corr"])
+            || {
+                c.step(16);
+                c.named("transition.cancelled")
+                    .iter()
+                    .any(|e| e["corr"] == armed["corr"])
+            }
+    );
+    let re = wait_armed(&mut c, 2);
+    assert_eq!(re["next"], json!(items[2]), "{re}");
+    assert!(re["played_ms"].as_f64().unwrap() >= played);
+    assert_eq!(currents(&c).len(), 1);
+}
+
+#[test]
+fn undo_regrows_a_one_item_session() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("ug_a", 10.0), clip("ug_b", 10.0), clip("ug_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items[..1], json!({"mode": "on_end"}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 16, 500);
+    assert_eq!(prog(&mut c)["phase"], "playing");
+    assert_eq!(scheduled(&c).len(), 1);
+    let all: Vec<Value> = items.iter().map(|p| json!({"path": p})).collect();
+    c.ok("set", json!({"path": "prog:main.items", "value": all}));
+    let armed = wait_armed(&mut c, 1);
+    assert_eq!(armed["next"], json!(items[1]));
+}
+
+#[test]
+fn defaults_and_item_props_reach_the_next_b() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("dp", 3);
+    c.ok(
+        "subscribe",
+        json!({"topics": ["program.", "transition.", "source."]}),
+    );
+    c.ok(
+        "create",
+        json!({"kind": "program", "id": "prog:main", "props": {
+            "items": [{"path": items[0]}, {"path": items[1], "props": {"gain.user": -3.0}},
+                      {"path": items[2]}],
+            "defaults": {"gain.user": -10.0},
+            "mode": "timer", "interval_ms": 0, "seed": 1}}),
+    );
+    let gain = |c: &mut Client, k: usize| -> f64 {
+        let src = currents(c)[k]["source"].as_str().unwrap().to_string();
+        c.get(&format!("{src}.gain.user")).as_f64().unwrap()
+    };
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    assert_eq!(gain(&mut c, 0), -10.0);
+    verb(&mut c, "next", json!({}));
+    step_until(&mut c, 16, 2000, "next", n_currents(2));
+    assert_eq!(gain(&mut c, 1), -3.0, "the item's own wins");
+    c.ok(
+        "set",
+        json!({"path": "prog:main.defaults", "value": {"gain.user": -20.0}}),
+    );
+    assert_eq!(gain(&mut c, 1), -3.0, "a live source is the resolver's job");
+    verb(&mut c, "next", json!({}));
+    step_until(&mut c, 16, 2000, "next", n_currents(3));
+    assert_eq!(gain(&mut c, 2), -20.0, "the new defaults reach the next B");
+}

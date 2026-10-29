@@ -247,6 +247,26 @@ impl Order {
         self.rev += 1;
     }
 
+    /// Plan on the order as it will be once `prev` (a step requested and not started yet)
+    /// commits — a user switch while another is still on its way goes on from *that* one
+    /// (`PlayerHelper` advanced its cursor at each request: ten `next`s land ten items on).
+    /// The step returned commits on `self` as if planned here (it carries the whole cursor
+    /// state, `prev`'s reshuffle included).
+    pub fn plan_after(
+        &self,
+        prev: &Step,
+        plan: impl FnOnce(&Order) -> Option<Step>,
+    ) -> Option<Step> {
+        let mut then = self.clone();
+        then.commit(prev.clone());
+        then.rev = self.rev;
+        let mut step = plan(&then)?;
+        if step.state.items.is_none() && then.items != self.items {
+            step.state.items = Some(then.items.clone());
+        }
+        Some(step)
+    }
+
     /// `PlayerHelper.ReorderPlaylist`, timed branch: a new item list (`new`, the bar's
     /// order) keeps the current item — it goes first, the rest follow from its place
     /// (wrapping; shuffled when `shuffle`), the cursor on it. A current item that was
@@ -336,6 +356,38 @@ mod tests {
         let p = s.path.clone();
         o.commit(s);
         p
+    }
+
+    #[test]
+    fn plan_after_chains_requests_that_never_started() {
+        let mut rng = Rng::new(3);
+        let mut o = Order::new(v(&["a", "b", "c", "d"]), 0, false);
+        let s1 = o.plan_next(&none, &mut rng).unwrap();
+        let s2 = o
+            .plan_after(&s1, |t| t.plan_next(&none, &mut rng))
+            .unwrap();
+        let s3 = o
+            .plan_after(&s2, |t| t.plan_next(&none, &mut rng))
+            .unwrap();
+        assert_eq!((s1.path.as_str(), s3.path.as_str()), ("b", "d"));
+        // only the last one starts: the cursor and the history are as if each had played
+        o.commit(s3);
+        assert_eq!(o.current(), Some("d"));
+        assert_eq!(o.history().0, v(&["a", "b", "c", "d"]).as_slice());
+        assert_eq!(next(&mut o, &mut rng), "a");
+        // back from a step on its way
+        let s = o.plan_next(&none, &mut rng).unwrap();
+        let back = o.plan_after(&s, |t| t.plan_back()).unwrap();
+        assert_eq!(back.path, "a");
+        // a reshuffle in the step on its way carries over
+        let mut sh = Order::new(v(&["a", "b", "c"]), 2, true);
+        let s1 = sh.plan_next(&none, &mut rng).unwrap();
+        let s2 = sh
+            .plan_after(&s1, |t| t.plan_next(&none, &mut rng))
+            .unwrap();
+        sh.commit(s2.clone());
+        assert_eq!(sh.current(), Some(s2.path.as_str()));
+        assert_eq!(sh.items()[sh.index()], s2.path);
     }
 
     #[test]

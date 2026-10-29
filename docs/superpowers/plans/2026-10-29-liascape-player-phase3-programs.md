@@ -406,6 +406,12 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** `--test program` + the full suite in both modes PASS.
 - [ ] **Step 5:** Commit `Add Program User Switches And Live Edits`.
 
+> **Implementer note 2026-10-30 (Task 4):**
+> - A user verb while the program's own `align: now` request has not started yet goes on from *that* step (`Order::plan_after` commits it on a clone): `next` ×10 lands ten items on and the history holds each, as `AdvanceAndLaunch` advanced its cursor per request. `prev`/`random` chain the same way. Only an armed (`align: end`) switch is "taken" by `next`.
+> - A live minimum/transition change cancels the armed switch at once (`program.disarmed`, debug) and keeps its step in `rearm`; the next tick re-arms it (or holds, if the new minimum isn't reached) to the same B. `rearm` is dropped when its item is removed or a commit/verb happens.
+> - `items` edits cancel an armed B that is gone *or now skipped*; a pending `align: now` switch is left to finish.
+> - `live_mode_toggle_keeps_played_time` also covers the `on_end → timer` cancel of an armed switch.
+
 **Size: L.**
 
 ### Task 5: Programs × pause, VRAM hold, parking, hotplug, crash and restore
