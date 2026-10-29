@@ -452,24 +452,24 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   once at its 30 min cap) and logs **`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
   played_s, complete, capped, window_s, cap_s, state}`** (subscribed, `Topics`; each report cumulative over every
   play) → `LiascapePlayerMedia.OnSceneLoudness` off the event thread → `LibraryService.StoreSceneLoudness` →
-  `MergeSceneLoudness` (pure): the index's `loudnessState` (the player's `state`: its block-loudness histogram +
-  peak, opaque here), `loudnessSeconds`, `loudnessPartial` and the APPLIED `loudnessI` (LUFS) / `loudnessTP` (the
+  `MergeSceneLoudness` (pure): the report's configuration's live measurement — `sceneLoudness[<key>].live {state
+  (the player's block-loudness histogram + peak, opaque here), seconds, lufs, peakDbfs, partial}` (per audio
+  configuration since 2026-10-29: the next bullet) — and the APPLIED `loudnessI` (LUFS) / `loudnessTP` (the
   SAMPLE peak, dBFS) (library.md). **The measurement** is replaced by any report covering MORE audible seconds (a
   lost report is made up by the next; two sources of one scene at once — the longer stays; a duplicate is ignored);
   **the applied value moves only by ≥ `ApplyHysteresisLu` (0.5 LU / dB)** — `loudnessI`/`loudnessTP` stay put
   through a refinement smaller than that, so `gain.normalize` never twitches by tenths (drift accumulates: it's
   compared with the APPLIED value). A scene outside the library or trashed meanwhile stores nothing. **Each new
-  source continues it:** `SourceProps` (create only) carries `loudness_seed` = the stored `loudnessState`
-  (`SceneLoudnessSeed`) — never a resolver value (a live source already holds that measurement plus its own play
+  source continues it:** `SourceProps` (create only) carries `loudness_seed` = the current configuration's live
+  state, else its estimate's seed (`SceneLoudnessSeed`) — never a resolver value (a live source already holds that measurement plus its own play
   since; re-seeding it would drop the latter). **The seed is a floor, not the truth** (2026-10-29): the index can
   lag the player — `stop_now` → `/apply` of the same scene creates the new source before this side has stored the
   stopped one's end-of-play report (`OnSceneLoudness` runs off the event thread) — so the player continues its OWN
   measurement of the path whenever it holds more than the seed (player-core.md § "Scene loudness" → "One
   measurement per path": a reopen or a transition A → A' of one scene continues it; nothing waits, never counted
   twice). Nothing here waits for a report; after a player restart the seed is all there is (as before).
-  **Entries learned before 2026-10-28** (no `loudnessState`, decided —
-  no migration): applied as they are and never a seed; the next play measures from nothing and its first COMPLETE
-  report re-learns the entry (a partial doesn't replace it; the 0.5 LU rule applies against the old value).
+  (Entries learned before 2026-10-28 without a state are gone: the one-off script of 2026-10-29 moved every flat
+  measurement under its configuration — library.md § Loudness.)
   Applied changed → `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver
   pass); stored but not applied → nothing sent (adapter log `stored (< 0.5 LU: not applied)`). **Applied as
   the scene source's `gain.normalize`** (`LiascapePlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
@@ -483,10 +483,35 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   `gain.mute` like the video `af` + `volume-gain`. A silent scene (no sound, or digital silence) never reports
   → never stored, never normalized. **Legacy engine:** unchanged — LWE scenes aren't normalized (the stored value
   is unused there; `OnLoudnessMeasured` returns for a scene path), and nothing learns under legacy.
+- **Per audio configuration + the offline estimate (2026-10-29; docs/TODO.md "Offline scene loudness → integration").**
+  Each scene's loudness is kept per configuration of its sound (library.md § Loudness: `sceneLoudness[<fingerprint>]
+  = {estimate, live}`, `sceneLoudnessFp` the current one); the fingerprint is `liascape-player scene-loudness`'s
+  (web-backend.md § Scene loudness — `SceneLoudnessPlanner`, the queue `SceneLoudnessOps`). **What the player gets:**
+  a scene source's **`loudness_key`** = the current fingerprint ("" = never estimated) — a resolver value ordered
+  after `scene_props` (`Desired`), sent only to a player whose `hello.capabilities` has `scene_loudness_key` (an older
+  one rejects the prop) — and at create `loudness_seed` = that configuration's live state, else its estimate's seed
+  (10 s of play: the first live report outweighs it 6:1, the cap 180:1); `gain.normalize` from the applied value
+  (live, else the estimate) — so a never-played scene is normalized from its first frame. When a pass SENDS a changed
+  `loudness_key`, it sends the new configuration's `loudness_seed` right after it on the same source (`{}` = none —
+  the player's book may hold more of it). **Reports:** `scene.loudness` carries `key`; `OnSceneLoudness` stores it
+  under that configuration (`StoreSceneLoudness(path, key, …)`), applies only if it is the current one, and
+  broadcasts `library-item-changed {path, loudness…}`. **A property commit** (`/library/scene-props` →
+  `ApplySceneProps`): off the request thread, `Replan` (serialized; the CLI at normal priority, a re-mix from the
+  per-file cache: the adapter logs `re-planned in N ms`) → `SceneLoudnessPlanner.Store` (the estimate of the new
+  configuration; it becomes current only if the props it was planned for are still the item's) → ONE resolver pass
+  `sceneprops:<path>` with `scene_props`, `loudness_key` (+ its seed) and `gain.normalize` (`animate` 500 ms) on the
+  item's sources — same source, same worker; `scene_props` is left out of it when a drag preview (or another commit)
+  of the item was queued while it re-planned (a per-item sequence): that pass already carried every saved property,
+  and sent after it this one reverted the preview's live values (IT "preview color blue → live", red on the first
+  build). A failed re-plan keeps the configuration (the pass still sends
+  `scene_props`). Under legacy the commit re-plans only (`ReplanInBackground`). The drag twin (`/preview`) changes
+  nothing here. **An estimate landing** for a playing item (the queue) → `ApplySceneLoudness(path)`
+  (`sceneloudness:<path>`: `loudness_key` + `gain.normalize`). IT § "Scene loudness estimated offline, per audio
+  configuration" (below).
 - **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
   Volume —, gain.normalize 0 unlearned / absent on a video, `SceneLoudnessAssertions`: the `MergeSceneLoudness`
-  rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates, a state-less (pre-2026-10-28) entry is applied, never a seed, re-learned by a complete report — and the `SceneNormalizeDb` table — peak cap, clamps, off,
+  rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates; per configuration (`MergeSceneEstimate`): the first estimate adopts the un-keyed measurement, a new configuration jumps to its estimate and seeds from it, an old key's late report is stored under it and applies nothing, its first live report takes over by the 0.5 rule, a re-estimate never displaces live data, toggled back the first configuration's measurement applies, a silent configuration applies nothing, a low estimate's first note is the card's — and the `SceneNormalizeDb` table — peak cap, clamps, off,
   unlearned, NoAudio —, the ownership filter on a `liascape-player-scene.src4` block, the `GpuProps` table) + the round trip (its
   private player runs `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
@@ -526,7 +551,8 @@ computed for the playing item at request time landed on whatever played when it 
   | `/library/volume\|speed`, volume key on an item → `ApplyOverride(path)` | `override:<path>` | that item's | gain.user, speed | — | cached |
   | `/preview {paths}` → `Preview` | `preview:<prop>:<paths>` | those items' (none → the playing item's) | the dragged one | the value, for those items | cached |
   | `/preview {global}` → `PreviewGlobal` | `preview-global:<prop>` | all | the dragged one | the value, as the global | cached |
-  | `/library/scene-props` → `ApplySceneProps(path)` | `sceneprops:<path>` | that item's | scene_props | — | cached |
+  | `/library/scene-props` → `ApplySceneProps(path)` (after the re-plan) | `sceneprops:<path>` | that item's | scene_props, loudness_key (+ its seed), gain.normalize | — | cached |
+  | a scene's estimate landing (the queue) → `ApplySceneLoudness(path)` | `sceneloudness:<path>` | that item's | loudness_key (+ its seed), gain.normalize | — | cached |
   | `/library/scene-props/preview` → `PreviewSceneProps` | `preview:scene_props:<path>:<names>` | that item's | scene_props | the dragged values | cached |
   | an mpv volume/speed literal (`/volume {value}`) → `Mpv` | `set:<prop>` | all | that one | the value, for the playing item | cached |
   | a mute change (SetMute / SetUserMute → mpv `mute`) → `Mpv` | `set:gain.mute` | all | gain.mute | — | Force |
@@ -729,7 +755,15 @@ without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play t
 reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
 on it; reopened → +6 from the first frame, it continues the whole first play (the `workers` probe's `seed_s` ≥ play 1's last report and ≈ play 1's play time — its end report + a rest < window/12, or, when the `/apply` lands during the stop's fade-out, play 1's live measurement handed over; `measuring` — the player's own measurement, never the index's lagging copy: TODO "A reopen right after a stop…") and the index then holds play 1's last report, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); a third play of the folder at −10 dBFS moves `loudnessI` ≥ 0.5 LU → `gain.normalize` ramps (≥ 300 ms) to its new value on the same source and worker; the
 soundless scene → no event, nothing stored, 0; switched away after ~1.2 s → a partial (`loudnessPartial`) stored,
-the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
+the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); **scene loudness
+estimated offline** (S8: a synthetic scene that also carries WE sound objects — sound 1 always, sound 2 bound to the
+bool `extra`): `POST /library/scene-loudness/estimate {paths}` → `{queued: 1}`, the index's `sceneLoudnessFp` + its
+estimate, `/library` `loudnessEstimated`; Estimate again → `queued 0`; force → re-estimated, same fingerprint; an idle
+cancel → `cancelled: false`; `/apply` → `loudness_key` = the fingerprint, `gain.normalize` from the estimate at once,
+`seed_s` 10; `extra=true` committed → a new fingerprint in the index and on the same source/worker, the applied value
+up by > 0.5 LU, `gain.normalize` ramped (≥ 300 ms), the new configuration at its estimate's 10 s (nothing of the old
+play), segments `dropped`, the old key's rest reported with its key and stored under it; reset → back on the first
+key, continuing its own measurement; the adapter log's `re-planned in N ms`; `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
 S→V in a playlist — each `fade full-live` handed off — and an aligned V→S at a 2 s clip's end; a scene crashing
 every 400 ms in a timed playlist → one `source.broken`, WS `scene-crashed`, index `crashed: true`, the rotation
 advanced ≤ 2 s after the break (event clocks), `/next` ×3 skips it, whitelisted → `/next` plays it again; a

@@ -144,6 +144,20 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `previewSceneProp` (~90 ms) + debounced persist (250 ms, per property); toggle/combo/reset persist at once; text
   persists debounced; the POST's answer (overridden flags, condition visibility) replaces the list; unmount flushes
   pending persists. Under legacy the backend's `note` shows ("applied when the scene starts").
+- **Scene loudness (2026-10-29; web-backend.md § Scene loudness).** The card settings modal's meta row (a scene under
+  liascape-player, `data-scene-loudness-line`): "≈ −14.6 LUFS (estimated)" — the offline estimate of its current
+  properties' sound — or "−15.2 LUFS (measured, 30 min)" (`sceneLoudnessText`: `loudnessLufs/Estimated/Seconds` of the
+  `/library` item); a `low`-confidence estimate adds "Estimate may be off: <its first note>" (`data-scene-loudness-note`).
+  It follows a property toggle live: `library-item-changed` carries only the fields that changed (`{path, …}` spread
+  into `itemChangedByBackend` — the grid's copy and an open modal's; it used to pass `volumeOverride` always, which a
+  loudness-only payload would have cleared). **Settings → Playback → "Scene loudness"** (under "Normalize audio" /
+  "Target loudness", liascape-player only — `SceneLoudnessRow`, `wk="normalizeAudio"` so the ffmpeg warning shows):
+  **Estimate** (scenes without an estimate for their current properties; "every scene is already estimated" when
+  none), **Recalculate all** (force), **Cancel** while running; the hint carries `done / total (current id)…` or the
+  last run's failure count (`GET /library/scene-loudness/status` when idle; a run already going on is picked up).
+  **Topbar status** (App.tsx `s.status`): WS `scene-loudness-progress` → "Estimating scene loudness 12 / 96…"
+  (untimed) while it runs, then "Scene loudness: estimated N scenes" / "…: cancelled" (timed, 5 s) at `finished`;
+  the store's `sceneLoudness` holds the progress (null = idle).
 - **Global Volume/Speed sliders (Settings page) drag-preview live too** (`useGlobalPreview` in
   `views/Settings.tsx`): each `onChange` → `setSetting` (the store's debounced 250 ms `/settings` save
   persists) + a throttled (~90 ms, trailing) `api.preview({volume|speed, global: true})` — the backend

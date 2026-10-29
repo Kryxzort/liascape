@@ -35,7 +35,7 @@ One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local,
 
 ```
 SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, LoudnessI/TP/LRA/Thresh?, LoudnessSkip?,
-LoudnessSeconds?, LoudnessPartial?, LoudnessState?, Crashed, Whitelist, SceneProps?,
+SceneLoudness? {<fingerprint>: {estimate?, live?}}, SceneLoudnessFp?, Crashed, Whitelist, SceneProps?,
 Resolution, AgeRating, YoutubeUrl, PageUrl, AuthorName, Description,
 FileSizeBytes?, Subscriptions?, Favorites?, Views?, Tags[]
 ```
@@ -60,15 +60,24 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 - **Videos:** `ffmpeg loudnorm` pass 1, once per item in the background (`LibraryService.EnsureLoudnessAsync` /
   `BackfillLoudnessAsync`) → all four `loudnessI/TP/LRA/Thresh` (`ReadLoudness` requires all four) or
   `loudnessSkip` (no audio track / silent); applied as mpv's `af` loudnorm (`LoudnormAf`).
-- **Scenes (liascape-player only):** learned by the player over the first ~60 s of audible play and refined on every
-  later play up to 30 min of audible play in all (`scene.loudness`, player-adapter.md § Scenes → "Loudness") →
-  `loudnessState` (the player's measurement: a BS.1770 block-loudness histogram + peak, opaque — the next play's
-  source continues it as its `loudness_seed`) + `loudnessSeconds` (audible seconds it covers, every play) +
-  `loudnessPartial` (true = less than the window: switched away early) + the APPLIED `loudnessI` (LUFS) /
-  `loudnessTP` (SAMPLE peak, dBFS) — moved only by ≥ 0.5 LU/dB. No LRA/Thresh, so the video path never reads it.
-  `MergeSceneLoudness`: the report covering more seconds replaces the measurement. An entry without
-  `loudnessState` (learned before 2026-10-28) is applied as is, never a seed, and re-learned by the next complete
-  report (no migration). Applied as the scene source's `gain.normalize`. Legacy LWE scenes: not normalized.
+- **Scenes (liascape-player only), per audio configuration** (2026-10-29, docs/TODO.md "Offline scene loudness →
+  integration"): `sceneLoudness` = `{<fingerprint>: {estimate, live}}` + `sceneLoudnessFp` (the CURRENT configuration).
+  The fingerprint is the offline estimator's (`liascape-player scene-loudness`) of the scene's sound under its user
+  properties — a property that changes no sound keeps it; toggling a sound off and back on returns to that
+  configuration's own data. **`estimate`** `{lufs (null = no sound), peakDbfs, seed (the estimated histogram scaled to
+  10 s of play), confidence high|medium|low, notes, lufsIfCoherent, model, v, at}` — computed on import, at startup
+  for what has none, by Settings → "Scene loudness", and on every property commit (`SceneLoudnessPlanner`,
+  web-backend.md § Scene loudness). **`live`** `{state (the player's BS.1770 block-loudness histogram + peak, opaque —
+  the next source's `loudness_seed`), seconds (audible, every play of this configuration), lufs, peakDbfs, partial}`
+  — the player's `scene.loudness` reports (player-adapter.md § Scenes → "Loudness"), stored under the report's `key`
+  (else the current configuration, else `""`); `MergeSceneLoudness`: the report covering more seconds replaces it.
+  The APPLIED `loudnessI` (LUFS) / `loudnessTP` (SAMPLE peak, dBFS) = the current configuration's live value once it
+  has one, else its estimate — moved by ≥ 0.5 LU/dB within one configuration, set exactly on a configuration change
+  (`MergeSceneEstimate`); no LRA/Thresh, so the video path never reads it. The seed a new source continues = the
+  current configuration's live state, else its estimate's seed — an estimate never displaces live data (the
+  player's `Book` adopts a seed only when it covers more). Applied as the scene source's `gain.normalize`. No
+  estimate (not estimable / failed) = learn on first play as before. The flat `loudnessState/Seconds/Partial` of
+  before were moved by a one-off script (no migration code). Legacy LWE scenes: not normalized.
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
 

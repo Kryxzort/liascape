@@ -4056,9 +4056,25 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   learner stays for a reopen — up to `BOOK_IDLE_KEEP` (64) paths without a live source, the least
   recently left dropped beyond (that one falls back to the backend's seed). In memory only: a
   compositor crash/restart behaves as before (below).
+- **Per audio configuration (`loudness_key`, 2026-10-29; docs/TODO.md "Offline scene loudness → integration").**
+  Source prop **`loudness_key`** (Str, `""` = unknown) = the backend's fingerprint of the scene's sound under its
+  `scene_props` (the offline estimator's, below). The book's entry is **(canonical path, key)**
+  (`sources::scene::book_key`: the path alone for `""`, else `path\u{1f}key`), so two configurations of one scene
+  never share a histogram. Read at open; a **live change** (`change_loudness_key`): `leave` the old key (its rest
+  reported WITH the old key — `finish`, the usual thresholds), `join` the new one WITHOUT `forget_idle` (a
+  configuration played earlier — toggled back — continues its own measurement), the seed cleared (it was the old
+  configuration's; the backend sends the new one's right after: `reseed`, adopted only if it covers more), the meter
+  re-checked, and **the worker's segments of the next `KEY_CHANGE_SETTLE` (500 ms, wall clock from the `set`) dropped**
+  (the worker applies the new `scene_props` within a frame, but the stream's buffers still carry the old mix). The
+  same key again changes nothing. A `path` change clears it (the old folder's). `hello.capabilities` carries
+  **`scene_loudness_key`** (the backend sends the prop only to a player that has it). `scene.loudness` carries `key`;
+  the `workers` probe's `loudness` carries `key` + `dropped` (segments dropped while settling). Api
+  `scene_loudness_key_change_never_shares_a_histogram` (k1 → k2: k1's end report with key k1, k2 from 0 s, 3 segments
+  dropped in the first 350 ms, k2's window report = its own play minus the settle; k2 → k1 continues k1's 3.0 s; the
+  same key again: no report) — RED before (no `key`, one measurement per path).
 - **The window = audible play.** `LIASCAPE_PLAYER_LOUDNESS_WINDOW_S` (default 60; tests 1–6) seconds of
   blocks **above the absolute gate** — a silent stretch doesn't count, a paused or muted one isn't
-  even measured. **Reports** (`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
+  even measured. **Reports** (`scene.loudness {id, path, key, lufs, peak_dbfs, seconds, session_s, seed_s,
   played_s, complete, capped, window_s, cap_s, state}`, info, comp `scene` — each one cumulative over
   every play): when the audible seconds over every play (seed included) reach the window; then after
   **each further window** of audible play (60 s); **at the end** (`finish` — destroyed, switched away,
@@ -4098,7 +4114,7 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, measuring
   (this source is its path's measuring one — the `Book`; the other values are the path's), received
   (segments the worker sent, measured or not — stands still once the meter is off), meter (the worker
-  meters)}`.
+  meters), key (its `loudness_key`), dropped (segments dropped settling after a key change)}`.
 - **Tests.** Units `audio::loudness` (`stereo_1khz_sine_reads_its_level_in_lufs`,
   `k_weighting_shapes_the_spectrum`, `gating_excludes_silence_and_quiet_passages`,
   `silence_learns_nothing_and_the_window_is_audible_play`,
@@ -4142,7 +4158,9 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
 
 **Offline estimate (2026-10-29; `scene/loudness_estimate.rs`, `scene/pkg.rs`, `liascape-player scene-loudness`).**
 What the learner above would measure, computed from the scene's files before it plays — so a scene can be
-normalized from its first second. Not wired into the backend yet (docs/TODO.md → "Offline scene loudness").
+normalized from its first second. Wired into the backend 2026-10-29 (player-adapter.md § Scenes → "Loudness" → "Per
+audio configuration"; web-backend.md § Scene loudness): run on import / at startup / from Settings, and on every
+property commit (its fingerprint = the source's `loudness_key`).
 - **`scene.pkg`** (`scene::pkg::Pkg`, read-only; LWE's `PackageParser`): little-endian `u32 n + n bytes` header
   `PKGV00xx`, `u32 count`, `count × {u32 n + name, u32 offset, u32 length}`, then the data — an entry is
   `[end of the table + offset, + length)`. Every `scene.pkg` of the owner's library (96, headers `PKGV0001`…`0024`)
@@ -4175,9 +4193,8 @@ normalized from its first second. Not wired into the backend yet (docs/TODO.md �
   never change it, one that changes a sound's level or which sounds play always does. **`SOUND_SEMANTICS`** = how
   the player plays sound objects: 1 = LWE before 0018, **2** = 0018 (2026-10-29) — every fingerprint changed
   with it, so nothing keyed by a fingerprint continues a measurement of the old sound. Bump it whenever the
-  player's sound semantics change. (Today nothing stores by fingerprint yet — docs/TODO.md "Offline scene
-  loudness → integration"; the index's flat `loudnessState` isn't keyed by it: see TODO "LWE ignores a sound
-  object's `volume`" for the entries 0018 made stale.)
+  player's sound semantics change. The backend stores every scene's loudness by it (`sceneLoudness[<fingerprint>]`,
+  library.md § Loudness) and keys the player's measurement with it (`loudness_key`, above).
 - **CLI** `liascape-player scene-loudness <scene dir> [--assets <dir>] [--props '<scene_props json>'] [--model
   lwe|we] [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache]` → one JSON line `{path, estimated: true,
   model, fingerprint, lufs, peak_dbfs, audible_s, horizon_s, state, seed {weight_s, state}, confidence {level
