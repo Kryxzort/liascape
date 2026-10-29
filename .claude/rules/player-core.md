@@ -4137,6 +4137,19 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   resuming (count), scene_limit_mib, scenes [{id, pid, used_mib, over_ms, stopped}]}`. **`workers`**
   adds `fps_demand`, `gpu_ms_p50`, `gpu_ms_p95`, `throttle {cap, demand, since_ms}` (null =
   unthrottled), `vram_stopped {used_mib, limit_mib}`; `fps_target` is the effective rate.
+  **`cpu {total_ms, threads {name: ms}}`** (F4, `sources::scene::proc_cpu`: the worker process's
+  `utime + stime` from `/proc/<pid>/task/*/stat`, threads summed by name — cumulative, so two
+  probes give a rate; `null` without a live worker). Measured (release, headless 1920×1080@144,
+  `scene_fps` 30, private PipeWire at a 64-frame quantum): Kimi 2371103399 (sound) 6.0 % of a core —
+  renderer `liascape-scene-` 3.5, PipeWire `data-loop.0` 2.2 (no_audio: 4.3 / 2.8 / 1.2 — the
+  stream keeps its callbacks, gated); Bunk 2134765860 2.6 %; Emilia 1726902114 1.2 %. `perf` of
+  Kimi (samples): the render thread 66 % (by library over the whole worker: NVIDIA's GL driver
+  54 %, LWE 25 %, EGL 6 %), PipeWire's data loop 17 %, `lia-scene-audio` 5 %, the protocol thread
+  4 %; LWE's mp3 decode (`mp_decode_layer3` …) ~5 %, PipeWire's plumbing ~3 %, ours
+  (`Dsp::process`, `SegmentMeter::feed` — until the loudness cap —, `BlockMeter`, `fill`) ~3.5 %
+  of the worker ≈ 0.2 % of a core. So a scene's worker CPU is
+  LWE's per frame (≈ legacy LWE's, § phase2 report 1.3), linear in `scene_fps`: the plan's 5 %
+  holds for light scenes at 30 fps, not for heavy ones at 144–240 (TODO F4: bound per class).
 - **Tests.** `tests/scene.rs::scene_budget_throttles_live_and_recovers` (harness: the
   `report_gpu_ms` knob at 20 ms, 10 % misses fed through `observe_budget` with a virtual clock →
   cap ≈ 15, latched 15 ± 2/s, a calm 5 s step × 1.25, `auto` off back to 30 ± 2/s, same pid; a

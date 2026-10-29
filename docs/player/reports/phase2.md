@@ -411,12 +411,32 @@ meter's capture; the `bus` probe reports `meter.callback_thread` / `callback_pol
 the bus/meter/scene-audio/dropout api tests 14/14. On-machine: the crash step's DP-1 meter max step 1.00 ms through
 15 worker kills/hangs; the final step-2 run: 508 `unmeasured` stretches (571 before) — **F3 removed one cause, not the main one**: the rest is the capture missing cycles when another stream leaves the graph, proven measurement-only (§ 2, the `pw-record` phase check).
 
-### F4 — real scenes' worker CPU over the 5 % bound (OPEN)
+### F4 — real scenes' worker CPU over the 5 % bound (2026-10-29: a hard limit — LWE's per-frame cost; bound restated per class)
 
 § 1.3: per frame the worker costs what LWE costs (Kimi/Bunk ≈ 1.07 ms of CPU per frame at 240 fps, legacy LWE 1.04
 at 144); at the default 30 fps Kimi 10.2 % (with its sound: decode + our stream), Bunk 6.6 % (the visualiser), Emilia
 2.2 %. The plan's bound came from the transport spike's trivial frame. TODO: profile the scene-audio path at 1×, add
 the worker's own CPU to the `workers` probe, re-state the bound per scene class.
+
+**2026-10-29.** The `workers` probe now reports each worker's `cpu {total_ms, threads}` ("Report A Scene Worker's
+Own CPU"). Per thread (release, headless 1920×1080@144, `scene_fps` 30, private PipeWire at a 64-frame quantum,
+10 s each):
+
+| scene | worker total | renderer (`liascape-scene-`) | PipeWire `data-loop.0` | with `no_audio` |
+|---|---|---|---|---|
+| Kimi 2371103399 (sound) | 6.0 % | 3.5 | 2.2 | 4.3 % (data loop 1.2: the gated stream keeps its callbacks) |
+| Bunk 2134765860 (scripts; no input here) | 2.6 % | 2.3 | — | 3.4 % |
+| Emilia 1726902114 | 1.2 % | 1.1 | — | 1.5 % |
+
+`perf` of Kimi's worker (5 s, DWARF): render thread 66 % of samples (over the whole worker by library: NVIDIA's GL
+driver 54 %, LWE 25 %, EGL 6 %), data loop 17 %, `lia-scene-audio` 5 %, protocol 4 %. The audio path at 1×:
+LWE's mp3 decode ~5 % of the worker, PipeWire's plumbing ~3 %, **ours** (`Dsp::process`, the loudness
+`SegmentMeter` — only until its cap —, the envelope `BlockMeter`, `fill`) **~3.5 % of the worker ≈ 0.2 % of a
+core**. Nothing in our code is worth cutting; the worker's CPU is LWE's render + the driver, per frame, as § 1.3's
+per-frame comparison with legacy LWE already showed. **Bound per class:** synthetic and light scenes stay under 5 %
+at 30 fps (PASS); heavy scenes cost ≈ 0.8–1.1 ms of CPU per frame, so 5 % holds only to ~30–45 fps — the plan's 5 %
+was the transport spike's trivial frame. (A gated `no_audio` stream still wakes per cycle — 1.2 % at a 64-frame
+quantum; deactivating it is tied to the F7 residual.)
 
 ### F5 — the GPU budget was blind to other outputs (FIXED in part, `9550127` "Count Every Output's Missed Frames In The Scene GPU Budget"; rest OPEN)
 
@@ -523,6 +543,22 @@ worker's deactivation (with the disconnect delayed to 150 ms the residual stayed
 without the deactivation 18 of 60 moved to the disconnect) — a PipeWire graph change seen through the in-process
 loopback. Also seen once in ~300 frozen switches, not reproduced: A audible again ~90 ms after its anti-click for
 the rest of the effect (no event log then; `onsetrec` now dumps it).
+
+### On-machine checks for the owner (2026-10-29)
+
+Not run by the agent — they need the real outputs (DP-1 144 Hz, DP-2 240 Hz) or a quiet machine. Stop the dev
+backend first (`systemctl --user stop liascape-watch`); each draws on the session through its own private
+`liascape-player serve` and private PipeWire (no sound reaches the speakers).
+
+- **F6b** — compositor CPU per worker, steady and mid-transition, on Wayland (the plan's 0.6 % bound):
+  `bash src/player/tests/onmachine/scenes.sh workers` (release build first:
+  `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo build --release`). The headless A/B (no session
+  needed): `bash src/player/tests/onmachine/scenes.sh transport` (`TRANSPORT_ROUNDS=3`).
+- **F5b** — the GPU budget vs DP-2's 240 Hz clip, on a quiet machine with the GPU clocks up (no other player
+  or game on the GPU): `bash src/player/tests/onmachine/scenes.sh budget`. Then the policy question in TODO F5b.
+- **F7** — already hermetic (headless 240 Hz, no session): `bash src/player/tests/onmachine/scenes.sh onsetrec
+  --switches 30`, `ONSET_METHOD=full-live …` and `ONSET_METHOD=reveal …` (the recorded sink: no hole, ≤ the
+  residual single cycles); the full § 2 matrix: `bash src/player/tests/onmachine/scenes.sh dropout`.
 
 ## 11. Battery-script bugs (fixed while running; no product verdict depended on them)
 

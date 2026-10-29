@@ -74,6 +74,30 @@ const BUDGET_WINDOW: Duration = Duration::from_secs(2);
 /// A scene latching under this fraction of its tick rate is missing its own frames (Task 8).
 const DEFICIT_RATIO: f64 = 0.9;
 
+/// F4: a process's CPU time from `/proc/<pid>/task/*/stat` (`utime + stime`): `{total_ms,
+/// threads: {name: ms}}` (threads summed by name), `None` if it is gone.
+pub fn proc_cpu(pid: u32) -> Option<Value> {
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
+    let mut threads = Map::new();
+    let mut total = 0.0;
+    for t in std::fs::read_dir(format!("/proc/{pid}/task")).ok()?.flatten() {
+        let Ok(st) = std::fs::read_to_string(t.path().join("stat")) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (st.find('('), st.rfind(')')) else {
+            continue;
+        };
+        let name = &st[a + 1..b];
+        let f: Vec<&str> = st[b + 2..].split_whitespace().collect();
+        let ticks = |i: usize| f.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+        let ms = (ticks(11) + ticks(12)) / hz * 1e3;
+        total += ms;
+        let e = threads.entry(name.to_string()).or_insert(json!(0.0));
+        *e = json!(e.as_f64().unwrap_or(0.0) + ms);
+    }
+    Some(json!({"total_ms": total, "threads": threads}))
+}
+
 /// One output showing a scene ([`SceneSource::set_demand`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputDemand {
@@ -2059,6 +2083,9 @@ impl SceneSource {
             // Task 6
             "audio": audio,
         });
+        // F4 (Phase 2 battery): the worker process's own CPU, cumulative (two probes give a
+        // rate) — whole and per thread name (`lia-scene-audio`, PipeWire's `data-loop.0`, LWE's).
+        v["cpu"] = json!(self.pid().and_then(proc_cpu));
         // Task 8: the GPU budget and the VRAM guard.
         v["fps_demand"] = json!(self.demand_hz);
         v["gpu_ms_p50"] = json!(gpu_p50);
@@ -2391,6 +2418,43 @@ pub fn kind_change_unsupported(v: &PropValue) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F4: the `workers` probe's `cpu` — a live process's CPU, whole and per thread name, and
+    /// growing with the work it does; a pid that's gone is `None`.
+    #[test]
+    fn proc_cpu_reads_a_process_and_its_threads() {
+        // Other tests' threads come and go in this process: judge one thread of our own.
+        let me = std::process::id();
+        let (busy_tx, busy_rx) = std::sync::mpsc::channel();
+        let (end_tx, end_rx) = std::sync::mpsc::channel::<()>();
+        let h = std::thread::Builder::new()
+            .name("f4-cpu-probe".into())
+            .spawn(move || {
+                let t = Instant::now();
+                let mut x = 0u64;
+                while t.elapsed() < Duration::from_millis(80) {
+                    x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
+                }
+                std::hint::black_box(x);
+                busy_tx.send(()).unwrap();
+                let _ = end_rx.recv();
+            })
+            .unwrap();
+        busy_rx.recv().unwrap();
+        let v = proc_cpu(me).expect("this process");
+        end_tx.send(()).unwrap();
+        h.join().unwrap();
+        let ms = v["threads"]["f4-cpu-probe"].as_f64().expect("the thread by name");
+        assert!(ms >= 40.0, "80 ms busy read as {ms} ms: {v}");
+        let sum: f64 = v["threads"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|t| t.as_f64().unwrap())
+            .sum();
+        assert!((sum - v["total_ms"].as_f64().unwrap()).abs() < 1e-6, "{v}");
+        assert!(proc_cpu(u32::MAX - 1).is_none());
+    }
 
     #[test]
     fn scene_clock_excises_pauses_and_scales_by_speed() {
