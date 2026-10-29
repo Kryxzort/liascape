@@ -262,7 +262,7 @@ An earlier soak on `5139419` (before F6) is kept as `soak*.run1.*`: same workers
 peak fell from 447 to 377 MiB over the hour); its two "FAIL"s were the battery's own (an absolute-value slope bound;
 switch outcomes read from `.event` instead of `.kind`), fixed before this run.
 
-## 8. Owner-run checklist (not run — needs a VT switch / suspend)
+## 8. Owner-run checklist (VT switch / suspend — run 2026-10-29, see the results at the end)
 
 The battery never suspends, switches VTs or logs out. These are what the robust worker context
 (`gfx.context_robust`, `EGL_GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV`) and the crash policy are
@@ -286,6 +286,25 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
 5. If anything breaks: `ctl probe '{"name":"workers","args":{"log_tail":true}}'` (the worker's
    `gfx: robust context granted|not available` line and its last stderr) and
    `~/.local/state/liascape/liascape-player/crashes/*.json` — file it in `docs/TODO.md` → liascape-player.
+
+**Results (2026-10-29, run by an agent with `sudo -n`; one scene, 2371103399, on both outputs).**
+- **Suspend** (`rtcwake -m mem -s 20`, 05:55 IST): survived. The robust context did **not** report a reset
+  (no `scene.context_lost`); after the wake the worker never answered its tick — most likely stuck inside a GL
+  call after NVIDIA's VRAM purge, before it polls `glGetGraphicsResetStatus` — so the heartbeat took it:
+  `worker.hung {waited_ms: 2003}` → SIGKILL → `worker.restart {attempt: 1}` → `worker.ready` 216 ms →
+  `scene.resumed` at the held frame's `t` (74.944, exact), 0.9 s after the kill. The held frame stayed on screen
+  through it; no `source.broken`. Cost vs. the designed path: ~2 s more frozen frame (the hang timeout) than a
+  `context_lost` would have taken. Open: make the worker notice a purge before it blocks (TODO).
+- **VT switch** (`chvt` away and back, 05:57): **Hyprland 0.56.2 aborted** on the way back — not the player.
+  aquamarine's restore of both CRTCs failed (`atomic drm request: failed to commit: Invalid argument` → `drm: crtc
+  64/83 failed restore`; the kernel logged `nvidia-drm … Flip event timeout on head 0`), then an app window (an
+  `xdg_surface` destroy — the player only has layer surfaces) was unmapped, its close-animation snapshot
+  (`makeSnapshotFB` → `beginSimple`) hit an assert with no usable render target → SIGABRT
+  (`~/.cache/hyprland/hyprlandCrashReport1745.txt`; two plugins loaded). The player did what it should: its
+  Wayland connection broke → `loop.failed` → exit 3 → the supervisor waited for the compositor → reconnected to
+  the restarted Hyprland in 1.3 s and restored its snapshot. Workaround: avoid VT switches on this
+  NVIDIA + Hyprland setup; a suspend is fine. Not re-run (it takes the session down).
+- (3) suspend twice and (4) video alongside: not run.
 
 ## 9. Scene corpus — fresh run + A/B against the legacy engine
 
