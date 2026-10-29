@@ -334,12 +334,15 @@ step_dropout() {
 # an independent `pw-record` of the private sink's monitor for the whole run. Per recorded onset
 # (a tone after ≥ 200 ms of silence): the 1 ms RMS envelope of its first 40 ms against the ideal
 # 30 ms linear-amplitude ramp — a "hole" is ≥ 1 ms more than 20 dB under the ramp after the first
-# 2 ms. A detector micro-gap with no recorded hole is the meter's; a recorded hole is real.
+# 2 ms — and every run of ≥ 16 samples of EXACT silence inside sound anywhere in the recording
+# (a skipped graph cycle: whole 64-frame quanta of zeros at the sink). A detector micro-gap with
+# no recorded hole is the meter's; a recorded hole is real. ONSET_METHOD (default frozen) also
+# runs full-live/reveal (the zero-run count is then the measure: their onsets overlap).
 step_onsetrec() {
     step_begin onsetrec
     DROP_RECS=$RESULTS/onsetrec-switches.jsonl
     : >"$DROP_RECS"
-    local hz=${ONSET_HZ:-240} n=${SWITCHES:-20} s1 s2 i wav=$RESULTS/onsetrec.wav
+    local hz=${ONSET_HZ:-240} n=${SWITCHES:-20} m=${ONSET_METHOD:-frozen} s1 s2 i wav=$RESULTS/onsetrec.wav
     s1=$(mk_scene tone660 '{"pattern":"solid","rgb":[200,40,40],"native":[1920,1080],"has_audio":true,"tone_hz":660,"tone_dbfs":-20}')
     s2=$(mk_scene tone550 '{"pattern":"solid","rgb":[40,40,200],"native":[1920,1080],"has_audio":true,"tone_hz":550,"tone_dbfs":-20}')
     s1=$(jq -nc --arg p "$s1" '{kind:"scene", path:$p}')
@@ -351,11 +354,12 @@ step_onsetrec() {
     ctl transition "$(jq -nc --argjson to "$s1" '{outputs:"out:*", to:$to}')" >/dev/null
     sleep 2.5
     for ((i = 0; i < n; i++)); do
-        drop_switch "$s2" frozen now SS "$hz" "S→S"
-        drop_switch "$s1" frozen now SS "$hz" "S→S"
+        drop_switch "$s2" "$m" now SS "$hz" "S→S"
+        drop_switch "$s1" "$m" now SS "$hz" "S→S"
     done
     sleep 1
     kill -INT "$TONE_PID" 2>/dev/null; wait "$TONE_PID" 2>/dev/null; TONE_PID=
+    ctl logs '{"limit":100000,"min_level":"debug"}' >"$RESULTS/onsetrec-events.json" 2>/dev/null
     serve_down
     local res
     res=$(python3 - "$wav" "$DROP_RECS" "$RESULTS/onsetrec-onsets.jsonl" <<'PYA'
@@ -396,17 +400,30 @@ while i < len(db):
 with open(out, "w") as f:
     for o in onsets:
         f.write(json.dumps(o) + "\n")
+zero_runs = []
+z = 0
+while z < len(L):
+    if L[z] == 0.0:
+        e = z
+        while e < len(L) and L[e] == 0.0:
+            e += 1
+        if 16 <= e - z < 4800 and z > 200 and e < len(L) - 200 \
+                and any(L[x] != 0.0 for x in range(z - 200, z)) and any(L[x] != 0.0 for x in range(e, e + 200)):
+            zero_runs.append([round(z / 48000, 4), e - z])
+        z = e
+    else:
+        z += 1
 gaps = [json.loads(l) for l in open(recs)]
 det = [(j, r["gap_list"]) for j, r in enumerate(gaps) if r.get("micro_gaps")]
 print(json.dumps({"onsets": len(onsets), "with_holes": [(j, o["t_s"], o["holes_ms"]) for j, o in enumerate(onsets) if o["holes_ms"]],
-                  "switches": len(gaps), "detector_gaps": det, "full_db": round(full, 2)}))
+                  "zero_runs": zero_runs, "switches": len(gaps), "detector_gaps": det, "full_db": round(full, 2)}))
 PYA
     ) || die "onset analysis failed"
     say "onsetrec: $res"
-    check "frozen S→S onsets recorded without a hole ($hz Hz)" "$(jq -c '{onsets, with_holes}' <<<"$res")" "no recorded onset with a hole" \
-        "$(jq -r 'if (.with_holes | length) == 0 and .onsets > 0 then 1 else 0 end' <<<"$res")" "$res"
-    check "detector micro-gaps on those switches ($hz Hz)" "$(jq -c '.detector_gaps' <<<"$res")" "none (a gap with no recorded hole = the detector's)" \
-        "$(jq -r 'if (.detector_gaps | length) == 0 then 1 else 0 end' <<<"$res")" "$res"
+    check "$m S→S at $hz Hz: the recorded sink has no hole" "$(jq -c '{onsets, with_holes, zero_runs}' <<<"$res")" \
+        "no onset > 20 dB under its ramp, no run of exact silence inside sound" \
+        "$(jq -r 'if (.with_holes | length) == 0 and (.zero_runs | length) == 0 and .switches > 0 then 1 else 0 end' <<<"$res")" "$res"
+    note "detector micro-gaps on those switches (with no recorded hole: the meter's own capture): $(jq -c '.detector_gaps' <<<"$res")"
     step_end
 }
 

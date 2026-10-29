@@ -34,9 +34,11 @@ folder `~/.local/share/Steam/steamapps/workshop/content/431960` only.
 
 **Product findings: 7** (§ 10) — F1 scene pacing at the refresh (fixed), F2 the dropout detector's ramp-edge
 bins and the meter's missed cycles (fixed), F3 the bus meter not real-time (fixed — its remaining gaps proven
-measurement-only), F5 the GPU budget blind to other outputs (fixed in part), F6 compositor CPU per worker (fixed for
-the steady state, 2.9 → 0.1 %; mid-transition open), F4 real scenes' worker CPU (open), F7 one frozen-handoff
-micro-gap (open) — plus a corpus-runner bug that hid every scene failing under legacy (§ 9, fixed). Battery-script bugs found and fixed while running it are
+measurement-only — **corrected 2026-10-29: they were real, F7**), F5 the GPU budget blind to other outputs (fixed in
+part; the rest a hardware limit at this policy, owner's call), F6 compositor CPU per worker (fixed for the steady
+state, 2.9 → 0.1 %; mid-transition root cause fixed 2026-10-29, to re-check on-machine), F4 real scenes' worker CPU
+(open), F7 one frozen-handoff micro-gap (**fixed 2026-10-29: a real lost graph cycle in every S→S switch**, a rare
+single-cycle residual open) — plus a corpus-runner bug that hid every scene failing under legacy (§ 9, fixed). Battery-script bugs found and fixed while running it are
 listed in § 11 (none of them changed a product verdict).
 
 ## 1. Outputs (step 1)
@@ -161,7 +163,8 @@ switches).
 
 **`unmeasured` (the meter's own missed cycles) — measurement, not audio:** 571 → 508 stretches in 720 switches (491
 switches), one per switch that tears a scene's stream down (S→V, S→S: 20/20), at 24–27 ms after that worker stopped
-— its stream leaving the graph. Proof that the audio is continuous there (`e9`, a private RT PipeWire, 3 rounds of a
+— its stream leaving the graph. **Corrected 2026-10-29 (§ 10 F7): these were real lost graph cycles at the sink, not
+measurement — fixed in the worker.** The original argument, kept for the record: proof that the audio is continuous there (`e9`, a private RT PipeWire, 3 rounds of a
 full-live S→S): an independent `pw-record` of the sink shows B's steady 550 Hz tone across the instant the meter's
 timestamps jump (2.3–5 ms) with no phase step above 0.02 rad over ~2.5 s — one skipped 64-frame graph cycle would step
 it by 1.68 rad. So the graph never skipped; the meter's capture did. F3 (the meter on the RT data thread) removed the
@@ -427,6 +430,20 @@ loop (tick max 4–6 ms); (b) the plan's "3.7 ms at 144 fps, no throttle" isn't 
 (1140 of 2100 MHz) with another process on it — re-measure on a quiet machine. Real scenes' `gpu_ms_p50` is 0.95 ms
 median (corpus), so this bites only very heavy scenes.
 
+**F5b (2026-10-29 re-analysis) — a hardware/driver limit at this policy, not fixed in code; the policy is the
+owner's call.** Root cause from the step-4 numbers: NVIDIA doesn't preempt a graphics context mid-draw (the
+worker's `EGL_IMG_context_priority` low only orders work *between* submissions). A worker draw of length d holds
+the GPU; a 240 Hz composition submitted during it waits up to d, and with d ≈ 3.7–4.1 ms of a 4.17 ms period
+any collision misses the vblank (with explicit sync off the swap also blocks the loop — the 4–6 ms tick maxima).
+The collision model fits the measurement: the worker at 58–63 fps × ~4 ms ≈ 23–26 % of the GPU, DP-2 missed
+33–38 / 480 frames per 2 s = 7–8 % ≈ one miss per 3–4 worker frames. So the miss rate ∝ (heavy frames per
+second) × (draw length): the only levers are fewer heavy frames (the throttle), shorter draws (LWE's frame
+isn't ours to split) or GPU preemption (the driver). Lowering the 400 ms/s guard (e.g. "a frame longer than
+half the fastest output's period counts as heavy") would push such a scene to the 10 fps floor and still
+leave ~4 % misses at 240 Hz, and would also throttle a scene for misses something else (a game) caused —
+a product decision, left to the owner (TODO F5b). Real scenes' `gpu_ms_p50` median is 0.95 ms; the re-measure
+on a quiet machine with the GPU clocks up is in "On-machine checks for the owner".
+
 ### F6 — compositor CPU per worker 2.9–3.45 % vs 0.6 % (FIXED for the steady state, `d7d412b` "Mirror Only Changed Source Values Into The Graph"; mid-transition root cause fixed 2026-10-29, bound to re-check on-machine)
 
 § 5. `perf` of the compositor with two synthetic workers (headless, 240 + 144 fps): the cost is not the dmabuf
@@ -465,14 +482,47 @@ transition's 1 kHz gain timer (~5 %; skipping it for sources with no audio was t
 reverted). The plan's bound is the on-machine step-5 number (Wayland, 0.1 % steady); not re-run here (owner's
 outputs) — § 10 "On-machine checks for the owner".
 
-### F7 — one 3 ms micro-gap at a frozen S→S handoff, 240 Hz (OPEN)
+### F7 — one 3 ms micro-gap at a frozen S→S handoff, 240 Hz (FIXED 2026-10-29, "Leave The Graph Before A Scene Worker Exits"; a single-cycle residual open)
 
 1 of 20 switches in the final run (2 of 20 in run 2, 0 in run 1): `at_ms` 1512–1515, 3 ms, ~60 dB under, right where
 B's anti-click ramp-in starts after the handoff and ~10 ms before the meter's timestamp jump of A's stream leaving
-(`unmeasured` at 1519–1525). Not resolved: it may be the scene worker's gate opening a few ms after its
-`AudioFlowing` (a real 3 ms hole at B's onset — the onset check, which looks at levels, passes) or the same capture
-disturbance starting a cycle before its timestamp jump. Next step: § 2's `pw-record` phase check on a frozen S→S at
-240 Hz (B's tone onset instead of a steady tone) — TODO F7.
+(`unmeasured` at 1519–1525).
+
+**Root cause (a real hole, not the meter's).** New: `scenes.sh onsetrec` — frozen S→S between two synthetic tone
+scenes on a headless 240 Hz output, every switch through the dropout detector **and** an independent `pw-record`
+of the private sink for the whole run, analysed for onsets that dip > 20 dB under their ramp and for runs of
+*exact* silence (≥ 16 samples) inside sound. Base build (`c5dfcdb`), 60 switches: **60 runs of exact silence, all
+whole 64-frame graph cycles (64–384 samples), one per switch, 10–37 ms into B's ramp-in** — the detector flagged 5
+of them (micro-gaps at 1511–1515, the F7 signature) and called the rest `unmeasured`, because the meter's capture
+lost the same cycles. Full-live S→S: **30 of 30 switches, B at full level** (1.3–8 ms of silence — clicks). Mapped
+onto the event log they sit at A's teardown. The worker exited (`exit` after its fade) with its PipeWire stream
+still active in the graph; the server only dropped the node when it noticed the dead socket, and the bus — the
+in-process loopback — lost cycles meanwhile. (A `pw-play` killed into the bus loses one 1 in 10; straight into the
+sink, 0 in 10.)
+
+**Fix.** `audio::Control::quit` now takes the stream out of the graph before the exit: `set_active(false)` + a
+core roundtrip, 20 ms inactive, `disconnect` + a roundtrip (≤ 200 ms, under the host's 500 ms `STOP_GRACE`).
+Test `tests/api.rs::scene_worker_exit_never_skips_bus_cycles` (private PipeWire, 6 frozen S→S, the sink recorded;
+RED with the old worker: 6 of 6 switches, 64–192 samples).
+
+| release build, 240 Hz headless | frozen: runs of exact silence / switches | full-live | reveal |
+|---|---|---|---|
+| base | 60 / 60 (+ 31 / 30 in a 2nd run) | 30 / 30 | — |
+| disconnect only | 0 / 60 | 12 / 30 | — |
+| deactivate, roundtrip, disconnect | — | 3 / 30 | — |
+| **+ 20 ms inactive (shipped)** | **0 / 60, 0 / 61** | **1 / 30, 4 / 60, 2 / 60** | 8 / 60 |
+| same + `target.delay.sec` 4 ms on the loopback | — | 5 / 60 | 4 / 60 (not kept) |
+
+Detector side: switches with an `unmeasured` stretch 60/60 → 5/60 (frozen), 30/30 → 2/60 (full-live); detector
+micro-gaps 5/60 → 0–1/60, the remaining one with no hole in the recording (the meter's own capture). **§ 2's
+"`unmeasured` is measurement-only" was wrong:** its `pw-record` check looked for a phase step, and a cycle of
+zeros in place makes none.
+
+**Residual (open, TODO "F7 residual"):** a single 64-frame cycle in ~1 of 15 full-live/reveal switches, at the
+worker's deactivation (with the disconnect delayed to 150 ms the residual stayed at the teardown instant, while
+without the deactivation 18 of 60 moved to the disconnect) — a PipeWire graph change seen through the in-process
+loopback. Also seen once in ~300 frozen switches, not reproduced: A audible again ~90 ms after its anti-click for
+the rest of the effect (no event log then; `onsetrec` now dumps it).
 
 ## 11. Battery-script bugs (fixed while running; no product verdict depended on them)
 

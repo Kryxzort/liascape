@@ -215,6 +215,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           waits for the GPU on the loop. Options: a lower guard when another output misses, splitting LWE's frame
           (not ours to split), or explicit sync back once egl-wayland2 ships 6235dd8. Re-measure on a quiet machine
           with the GPU clocks up (the run's card sat in P3, 1140/2100 MHz, with another process on it).
+          **Re-analysed 2026-10-29 (`phase2.md` § 10 F5b): a hardware/driver limit at this policy** — no mid-draw
+          preemption, so misses ∝ heavy frames/s × draw length (measured ≈ one miss per 3–4 worker frames at
+          ~4 ms/frame). A lower guard would floor such a scene at 10 fps and still leave ~4 % misses at 240 Hz, and
+          throttle scenes for misses a game caused. **Waiting on owner:** keep the 400 ms/s guard, or trade a
+          very heavy scene's fps for the 240 Hz output? Re-measure: `systemctl --user stop liascape-watch; bash
+          src/player/tests/onmachine/scenes.sh budget` on a quiet machine.
     - [ ] **F6b — compositor CPU per scene worker mid-transition 2.75–4.05 %** (steady state 0.1 % after F6a):
           during an S→S fade the runtime recomputes `srcs:` / the scene demand on every sync (`Graph::get`,
           `srcs_for_connector`, `format!` of paths at the top of the profile). Cache per `picture_rev` / transition
@@ -232,14 +238,24 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           machine) — the LWE load + build on the worker's main thread competes for CPU. Consider the worker's nice /
           `SCHED_IDLE` for the build and a Ready budget that scales with load (`ready_ms` in the corpus is an upper
           bound already).
-    - [ ] **F7 — one 3 ms micro-gap at a frozen S→S handoff at 240 Hz** (1/20 in the final run, 2/20 in run 2),
-          ~10 ms before the meter's capture gap of A's stream leaving: a real 3 ms hole at B's onset (the worker's
-          gate vs its `AudioFlowing`) or the capture disturbance starting early. Check with the report's `pw-record`
-          phase method on B's onset (§ 2 of `docs/player/reports/phase2.md`).
-    - [ ] **The bus meter's capture misses 1–5 ms when another stream leaves the graph** (every scene teardown;
-          proven measurement-only — the sink's recorded output stays phase-continuous). The detector calls it
-          `unmeasured`; a meter that never misses (e.g. capturing the loopback's output port, or deriving block times
-          from a frame counter instead of `pw_buffer.time`) would close that blind spot.
+    - [x] **F7 — one 3 ms micro-gap at a frozen S→S handoff at 240 Hz** (1/20 in the final run, 2/20 in run 2).
+          **Fixed 2026-10-29 ("Leave The Graph Before A Scene Worker Exits"):** a REAL hole — the new
+          `scenes.sh onsetrec` records the sink independently: a worker exited with its stream active in the graph
+          and the bus lost whole graph cycles (exact silence, 64–384 samples) in *every* S→S switch, in B's sound
+          (frozen 60/61, full-live 30/30 at full level). The detector saw ~1 in 20 because the meter's capture lost
+          the same cycles (`unmeasured`). The worker now deactivates, settles 20 ms and disconnects (roundtrips)
+          before exiting: frozen 0/121, full-live 2–5/60, reveal 4–8/60 — single 64-frame cycles, see below.
+    - [ ] **F7 residual — a single graph cycle lost at a stream's deactivation** in ~1 of 15 full-live/reveal
+          switches (0 frozen): at the worker's `set_active(false)` (moved with it when the disconnect was delayed
+          150 ms), through the in-process bus loopback (a `pw-play` killed into the bus: 1/10, straight into the
+          sink: 0/10). `target.delay.sec` on the loopback didn't help (5/60). Next: a loopback whose capture side
+          isn't rescheduled (an out-of-process loopback or a filter-chain), or hand B's stream the bus before A
+          leaves. Also seen once in 300+ frozen switches (not reproduced, no logs then): A audible again 90 ms after
+          its anti-click for the whole effect — `scenes.sh onsetrec` now dumps the event log to catch it.
+    - [x] ~~**The bus meter's capture misses 1–5 ms when another stream leaves the graph** (proven
+          measurement-only)~~ — **wrong (2026-10-29):** those were the real lost cycles of F7 (the earlier
+          `pw-record` check looked for a phase step, which a cycle of zeros in place doesn't make); with F7 fixed,
+          switches with an `unmeasured` stretch fell 60/60 → 5/60 (frozen) and 30/30 → 2/60 (full-live).
   - [x] **A suspend no longer kills the scene worker as "hung"** (2026-10-29; `phase2.md` § 8, player-core.md §
         Scene worker → WorkerHost → Heartbeat). Both on-machine suspends SIGKILLed a live worker: after the resume
         the compositor held every slot of its ring (fences not signalled yet) and the idle worker waited for a
