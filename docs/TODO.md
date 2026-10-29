@@ -378,8 +378,40 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         `~/.local/share/liascape/library/local/index.json` (or the whole loudness block of every scene: the 2
         unaffected relearn too), then they relearn on their next play (and the player restarted, so its `Book`
         holds no old measurement).
-  - [ ] **Offline scene loudness → integration** (design 2026-10-29, not wired — waits on the loudness race fix;
-        owner decisions folded in: estimate on import + a "recalculate all" button; property-aware loudness):
+  - [x] **Offline scene loudness → integration** (design 2026-10-29; **built 2026-10-29** — player-core.md § "Scene
+        loudness" → "Per audio configuration", player-adapter.md § Scenes → "Loudness", web-backend.md § Scene loudness,
+        library.md § Loudness, web-ui.md; owner decisions folded in: estimate on import + a "recalculate all" button;
+        property-aware loudness). **As built:** backend `Helpers/SceneLoudnessPlanner.cs` (the CLI run + store) +
+        `Web/SceneLoudnessOps.cs` (the queue, endpoints, WS); `LibMeta.SceneLoudness` / `SceneLoudnessFp` replaced the
+        flat `loudnessState/Seconds/Partial`; the player's `loudness_key` prop + `Book` per (path, key) + 0.5 s settle;
+        Settings → Playback → "Scene loudness" (under "Normalize audio", liascape-player only); the card modal's
+        loudness line. The owner's library: 96 scenes estimated at the first start in 9.8 s (warm per-file cache;
+        55 with sound, 1 `low`), 0 failed. **Choices where the design was open:** (a) the estimate stores the CLI's
+        `seed.state` (the 10 s seed) as `estimate.seed`, not the full-weight `state` — nothing reads the full one;
+        (b) a report without a key (a source created before the item had a fingerprint, or by a player without the
+        prop) goes to the item's CURRENT configuration, else `""`; an item's first estimate adopts a `""` live
+        measurement (it was measured with the props it has now); (c) on a property commit the re-plan runs FIRST
+        and `scene_props` goes in the same pass as the key (a few ms later than before) — so the new mix never
+        lands in the old key; the drag twin (`/preview`) still applies at once and its segments count for the
+        configuration the source is keyed to (no settle on a preview), and a preview queued while a commit re-plans
+        makes that commit's pass leave `scene_props` alone (it would revert the preview — the preview's pass carries
+        every saved property anyway); (d) the backend sends `loudness_key` only to
+        a player whose `hello.capabilities` has `scene_loudness_key` (an older player rejects the prop at create);
+        (e) the settle is wall-clock 500 ms from the `set`, not a segment count; (f) the startup pass and every sync
+        queue every library scene WITHOUT an estimate for its stored configuration (a folder that's not a scene
+        fails again in ms each time — not remembered); (g) a property commit under the legacy engine re-plans too
+        (nothing live), so the stored configuration follows the props whichever engine plays; (h) the Settings row
+        shows whenever liascape-player is the engine (not only with normalization on). **One-off (no migration
+        code):** the 13 flat measurements (all post-0018; the 8 stale ones were already gone) were moved to
+        `sceneLoudness[<fingerprint of their current props>].live` by a script with the backend stopped
+        (`migrate_scene_loudness.py` in the session scratch dir: flock + atomic write, live `lufs` re-integrated
+        from the histogram, applied `loudnessI/TP` untouched). An installed (older) backend writing the index drops
+        the new fields — reinstall. **Open:** a committed property's pass waits for the re-plan + its index write: measured 0.3–1.0 s on the
+        owner's machine under load (the CLI 40–60 ms; the rest `SetMeta`'s write — ~290 ms for ANY index size here, the
+        143 KB one before this change too), so a committed toggle shows that much later than before (a drag preview is
+        still immediate) — if it's noticeable, send `scene_props` at once and accept the gap's segments in the old key.
+        A configuration's live measurement is never pruned (a slider dragged
+        through many values leaves an estimate entry per committed value — ~1 KB each).
     - **When the backend runs it.** (1) **On import**: every scene that enters the library (WE local import,
           Workshop download, the auto-add sync) is queued once its folder is complete (`project.json` + `scene.pkg`/
           `scene.json` present — a half-downloaded item fails `SceneDir::open` and is retried by the next sync).

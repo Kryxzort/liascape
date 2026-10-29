@@ -65,9 +65,9 @@ run over 500 ms.
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
 `GET /health /health/features /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
-/playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path=`,
+/playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path= /library/scene-loudness/status`,
 `POST /browse /detail /settings /apply /stop /action /next /prev /random /pause /volume /mute /download /open
-/preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview} /playlist/{state,save,load,play,play-from}
+/preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview,scene-loudness/estimate,scene-loudness/cancel} /playlist/{state,save,load,play,play-from}
 /steam/{qr/start,qr/cancel,signout} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
@@ -96,6 +96,30 @@ condition, visible, editable, unsupported, default, value, overridden, min, max,
 — then live on the item's source(s) (`PlayerHelper.ApplyScenePropsLive`) — and answers the new list; a bad value / an
 unknown name / a non-editable type / not a scene folder → **400 `{error}`**, nothing saved. `POST
 /library/scene-props/preview {path, name, value}` = the drag twin (live, nothing saved).
+
+**Scene loudness** (`Web/SceneLoudnessOps.cs` — the queue — + `Helpers/SceneLoudnessPlanner.cs` — the CLI run and the
+store; library.md § Loudness, player-adapter.md § Scenes → "Loudness"; docs/TODO.md "Offline scene loudness →
+integration"): a scene's loudness ESTIMATED from its files by `liascape-player scene-loudness <dir> --props '<its
+scene_props>'` (the player's own estimator; per-file decode cached in `~/.cache/liascape/scene-loudness`, so a repeat is
+a re-mix, ~1–4 ms + the spawn). **One background child at a time** under `nice -n 19 ionice -c3` (each when on PATH),
+`LD_LIBRARY_PATH` dropped, 600 s bound, never on a request thread, never touching playback (read-only on the scene).
+**Cancel-safe:** a scene's result is written to its index entry atomically (`SetMeta`) only when its child succeeded;
+cancel kills the running child and drops the queue (what's stored stays); a run cut short by a restart is picked up by
+the next startup pass. **Fed by:** an import (`/download` — a Workshop download, a WE local add — and `/library/import`:
+`Imported`, the item if it's a scene), `/library/sync` and the `serve` startup after its WE sync (`AfterImport`: every
+library scene WITHOUT an estimate for its stored configuration — a new one, one whose folder was incomplete last time:
+`SceneDir::open` fails on a half-downloaded item, so the next sync retries it), and the endpoints — all no-ops without
+a `liascape-player` binary. `POST /library/scene-loudness/estimate {paths?: [...], force?: bool}` → `{queued}` (no paths
+= every library scene; without `force` a scene already estimated for its current configuration is skipped — Settings'
+**Estimate**; `force` = **Recalculate all**; a path already queued counts once); `POST /library/scene-loudness/cancel`
+→ `{cancelled}` (false = nothing ran); `GET /library/scene-loudness/status` → `{running, done, total, current, failed:
+[{path, error}]}` (the last run's). WS **`scene-loudness-progress {done, total, currentId, finished?, cancelled?}`**
+(shaped like `unsub-progress`; `finished` once per run) + **`library-item-changed {path, loudnessLufs,
+loudnessEstimated, loudnessSeconds, loudnessConfidence, loudnessNote}`** per stored scene (and per stored live report).
+Adapter log: `scene loudness: queued N scene(s) (why)`, `… not estimated — <error>`, `… finished — D done, S stored, F
+failed in T s`. A property commit re-plans at normal priority (`LiascapePlayerMedia.Replan`, not this queue).
+`/library` items carry `loudnessLufs / loudnessEstimated / loudnessSeconds / loudnessConfidence / loudnessNote` for a
+scene (`LibraryService.SceneLoudnessInfoOf`). Measured: the owner's 96 scenes in 9.8 s (warm cache), 0 failed.
 
 **`GET /health/features`** (`Helpers/FeatureHealth.cs`, owner 2026-10-28 "make missing libraries fail loudly") →
 `{features: [{id, label, ok (true | false | null = unknown), reason, affects (AppSettings keys, camelCase — the Settings
@@ -126,7 +150,7 @@ the base UI), the adapter IT's `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` section 
 {…changed fields}` (the backend changed settings itself — a keybind volume-up/down; the UI merges it:
 every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume) `· scene-crashed {path}` (legacy: an LWE process died; liascape-player: the scene's `source.broken` — the item is then marked crashed in its index; the UI marks its card at once) `· scene-vram-stopped {path, usedMib, limitMib, message}` (liascape-player: the VRAM guard stopped a scene — not a crash; the UI's status bar shows the message) `· timed-stopped · download-progress {id,value,done?,status?}
 · unsub-progress {done,total,currentId,finished?} · library-synced {count} (the startup one fires before any open page has
-reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, volumeOverride} (a volume keybind moved an item's own volume) · steam-qr {png}
+reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, …only the changed fields} (a volume keybind moved an item's own volume → `volumeOverride`; a scene's loudness estimate / report → `loudness*`) · scene-loudness-progress {done,total,currentId,finished?,cancelled?} · steam-qr {png}
 · steam-signed-in {…status} · steam-qr-error {message}`.
 
 ## Rules
