@@ -482,9 +482,15 @@ fn status_code(st: ExitStatus) -> u8 {
 }
 
 /// Run the supervisor (module doc) until supervision ends; returns the process exit code.
-/// `user_args`: the `serve` options without `--restore`; `restore`: pass `--restore` to the
-/// first child too.
-pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode {
+/// `user_args`: the `serve` options without `--restore`/`--session-start`; `restore`: pass
+/// `--restore` to the first child too; `session_start`: pass `--session-start` to the first
+/// child only (a restart is a recovery, never a playlist start — § Programs).
+pub fn run(
+    user_args: Vec<String>,
+    restore: bool,
+    session_start: bool,
+    state_dir: &Path,
+) -> ExitCode {
     let set = block_signals();
     let sup = Sup {
         started: Instant::now(),
@@ -500,7 +506,10 @@ pub fn run(user_args: Vec<String>, restore: bool, state_dir: &Path) -> ExitCode 
     let mut compositor_waited = Duration::ZERO;
     let mut compositor_delay = COMPOSITOR_WAIT_INITIAL_DELAY;
     loop {
-        let args = child_args(&user_args, restore, restart.as_ref());
+        let mut args = child_args(&user_args, restore, restart.as_ref());
+        if session_start && restart.is_none() {
+            args.push("--session-start".into());
+        }
         let started = Instant::now();
         let mut child = match sup.spawn(&args) {
             Ok(c) => c,

@@ -1418,3 +1418,44 @@ fn fourth_restart_in_a_minute_starts_without_program() {
         }
     }
 }
+
+/// Phase 3 Task 5b: a crash restart is a recovery, never a start — a `start_over` program
+/// comes back on its item at its position, and the supervisor never forwards
+/// `--session-start` to a restarted child.
+#[test]
+fn crash_restore_ignores_start_mode() {
+    let Some(mut sup) = Sup::start(&["--session-start"]) else {
+        return;
+    };
+    let items = [prog_clip("cs_a", 10.0), prog_clip("cs_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let mut c = sup.client();
+    create_program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 60_000, "key": "name:A",
+               "start_mode": "start_over"}),
+    );
+    c.ok("program.play", json!({"id": "prog:main", "index": 1}));
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, items[1], 2000.0));
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["phase"] == "playing"
+            && sources(st)
+                .iter()
+                .any(|(_, n)| n["path"] == items[1] && n["ready"] == json!(true))
+    });
+    assert_eq!(st["programs"][0]["path"], json!(items[1]), "the same item");
+    assert!(st["programs"][0]["played_ms"].as_f64().unwrap() >= 1500.0);
+    let (_, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == items[1])
+        .unwrap();
+    assert!(node["time_pos"].as_f64().unwrap() >= 1.5, "its position: {node}");
+    assert!(
+        sources(&st).iter().all(|(_, n)| n["path"] != items[0]),
+        "item 1 never started"
+    );
+}

@@ -263,6 +263,13 @@ impl Order {
         Some(self.step(path, StepWhy::Play, st))
     }
 
+    /// A step to what the cursor already names (a start planned elsewhere — `resume::plan_start`
+    /// — and installed as the order): committing it changes nothing but marks the switch.
+    pub fn plan_stay(&self) -> Option<Step> {
+        let path = self.current()?.to_string();
+        Some(self.step(path, StepWhy::Play, self.state()))
+    }
+
     /// The step's B started: it is what plays now. A step planned before a reorder
     /// (stale) re-seats the cursor at its path and appends it to the history instead.
     pub fn commit(&mut self, step: Step) {

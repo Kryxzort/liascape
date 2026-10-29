@@ -128,6 +128,10 @@ pub struct ServeOpts {
     pub wayland: bool,
     /// `--restore`: recreate what `<state>/snapshot.json` saved (`crate::snapshot`).
     pub restore: bool,
+    /// `--session-start` (with `--restore`; a boot / `liascape restore`, never a crash
+    /// restart — the supervisor gives it to its first child only): each restored program
+    /// starts per its `start_mode` (§ Playlist start) instead of where it was.
+    pub session_start: bool,
     /// Run by the supervisor (`--supervised`, `crate::supervise`): its pid, and why this is
     /// a restart (`--restarted`).
     pub supervised: Option<Supervised>,
@@ -3108,7 +3112,7 @@ impl Runtime {
         let now = self.now();
         // Phase 3: the session ends — every program goes (its pending switches with the
         // transitions below).
-        for id in self.programs.destroy_all() {
+        for id in self.programs.destroy_all(&self.graph) {
             let _ = self.graph.destroy(&id);
         }
         for st in self.tr.status() {
@@ -3328,8 +3332,8 @@ impl Runtime {
         if self.snap.frozen {
             return;
         }
-        if self.programs.def_dirty() {
-            self.snapshot_dirty(); // program.json goes with the next (debounced) write
+        if self.programs.def_dirty() || self.programs.resume_dirty() {
+            self.snapshot_dirty(); // program.json / resume.json go with the next write
         }
         let now = Instant::now();
         let due = match self.snap.due {
@@ -3385,6 +3389,12 @@ impl Runtime {
                 .writer
                 .send_file(crate::recipes::program::store::FILE, f.to_bytes());
         }
+        if self.programs.resume_dirty() {
+            let b = self.programs.resume_bytes();
+            self.snap
+                .writer
+                .send_file(crate::recipes::program::resume::FILE, b);
+        }
         let bytes = self.capture_snapshot().to_bytes();
         self.snap.writer.send(bytes);
         self.snap.last_write = Some(Instant::now());
@@ -3401,6 +3411,7 @@ impl Runtime {
             return;
         }
         self.programs.mark_def_dirty();
+        self.programs.put_all_points(&self.graph); // quit: each playlist's resume point
         self.write_snapshot();
         self.snap.frozen = true;
     }
@@ -3408,9 +3419,9 @@ impl Runtime {
     /// `--restore`: load `<state>/snapshot.json` and recreate it; a corrupt or
     /// unknown-version file is moved aside (`snapshot.invalid.json`) and the player starts
     /// empty — never a crash loop over a bad file.
-    fn restore_from_disk(&mut self, dir: &std::path::Path) {
+    fn restore_from_disk(&mut self, dir: &std::path::Path, session_start: bool) {
         match snapshot::load(dir) {
-            Ok(Some(s)) => self.restore_snapshot(s),
+            Ok(Some(s)) => self.restore_snapshot(s, session_start),
             Ok(None) => log::event(
                 "snapshot",
                 Level::Info,
@@ -3441,7 +3452,14 @@ impl Runtime {
     /// outputs that show nothing, else parked again; a present connector the snapshot
     /// didn't know shows the current wallpaper (as hotplug would). Audible sources start
     /// silent and ramp in over 30 ms once ready.
-    fn restore_snapshot(&mut self, snap: Snapshot) {
+    fn restore_snapshot(&mut self, mut snap: Snapshot, session_start: bool) {
+        // § Playlist start: a session start of a `start_over` program never shows the item
+        // it was on — that item isn't restored at all (the program starts afresh below).
+        let starting_over = if session_start {
+            self.starting_over(&mut snap)
+        } else {
+            BTreeMap::new()
+        };
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
@@ -3549,14 +3567,58 @@ impl Runtime {
             json!({ "sources": made.len(), "outputs": outputs, "age_ms": age_ms,
                     "parked": self.parked.as_ref().map(|pk| pk.id.clone()), "ids": made }),
         );
-        self.restore_programs(&snap);
+        self.restore_programs(&snap, &starting_over, session_start);
+    }
+
+    /// `--session-start`: every `program.json` program whose `start_mode` is `start_over`
+    /// → the item it was on (id → path), and that item taken off the snapshot's outputs and
+    /// parked slot so it is never created.
+    fn starting_over(&self, snap: &mut Snapshot) -> BTreeMap<String, Option<String>> {
+        use crate::recipes::program::store;
+        let mut out = BTreeMap::new();
+        let Ok(Some(file)) = store::load(&self.snap.writer.dir) else {
+            return out;
+        };
+        for def in &file.programs {
+            if def.props.get("start_mode").and_then(Value::as_str) == Some("resume") {
+                continue;
+            }
+            let last = snap
+                .programs
+                .iter()
+                .find(|x| x.id == def.id)
+                .and_then(|x| x.current_path.clone());
+            if let Some(path) = &last {
+                let ids: BTreeSet<String> = snap
+                    .sources
+                    .iter()
+                    .filter(|(_, s)| &s.path == path)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for o in snap.outputs.values_mut() {
+                    if o.content.as_ref().is_some_and(|c| ids.contains(c)) {
+                        o.content = None;
+                    }
+                }
+                if snap.parked.as_ref().is_some_and(|pk| ids.contains(&pk.id)) {
+                    snap.parked = None;
+                }
+            }
+            out.insert(def.id.clone(), last);
+        }
+        out
     }
 
     /// Phase 3 (`recipes::program::store`): after the snapshot's sources, every program of
     /// `<state>/program.json` is created again and given its saved state
     /// (`Programs::restore`): current = what its first output shows (or the parked
     /// wallpaper) when that is its saved item.
-    fn restore_programs(&mut self, snap: &Snapshot) {
+    fn restore_programs(
+        &mut self,
+        snap: &Snapshot,
+        starting_over: &BTreeMap<String, Option<String>>,
+        session_start: bool,
+    ) {
         use crate::recipes::program::store;
         let file = match store::load(&self.snap.writer.dir) {
             Ok(Some(f)) => f,
@@ -3602,8 +3664,30 @@ impl Runtime {
                 })
                 .or_else(|| self.parked.as_ref().map(|pk| pk.id.clone()));
             let saved = snap.programs.iter().find(|x| x.id == def.id);
+            let now = self.now();
+            if let Some(last) = starting_over.get(&def.id) {
+                // a session start, start over: its order only, then a fresh start (a cut)
+                self.programs
+                    .restore(&def.id, def, None, file.rev, None, &mut self.graph);
+                let cat = &self.cat;
+                let acts = self.programs.session_start(
+                    &def.id,
+                    last.as_deref(),
+                    now,
+                    &|e| cat.defaults(e),
+                );
+                self.run_program_actions(acts);
+                continue;
+            }
             self.programs
                 .restore(&def.id, def, saved, file.rev, shown, &mut self.graph);
+            if session_start {
+                let cat = &self.cat;
+                let acts =
+                    self.programs
+                        .session_start(&def.id, None, now, &|e| cat.defaults(e));
+                self.run_program_actions(acts);
+            }
         }
     }
 
@@ -4515,8 +4599,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
     }
     rt.apply_output_changes();
+    // Phase 3 (§ Playlist start): the per-playlist resume points, restore or not
+    rt.programs.load_resume(&opts.state_dir);
     if opts.restore {
-        rt.restore_from_disk(&opts.state_dir);
+        rt.restore_from_disk(&opts.state_dir, opts.session_start);
     }
     // Always save the starting state soon: a crash right after a fresh (non-restore) start
     // must not bring back an older session's snapshot.

@@ -3,7 +3,7 @@
 //! ```text
 //! liascape-player --version
 //! liascape-player serve [--clock real|stepped] [--ao <mpv ao>] [--socket <path>]
-//!                 [--log-level error|warn|info|debug|trace] [--restore] [--debug]
+//!                 [--log-level error|warn|info|debug|trace] [--restore [--session-start]] [--debug]
 //!                 [--no-supervise] [--render-worker on|off]          (Wayland outputs)
 //! liascape-player serve --headless [--outputs 1920x1080@60[,…]] [--redraw-policy content|every_tick]
 //!                 [same options]
@@ -18,7 +18,10 @@
 //! process stays a small supervisor and runs the compositor as a child
 //! (`serve --supervised …`), restarting it with `--restore` after a crash. `--no-supervise`
 //! runs the compositor in this process (tests that don't test supervision). `--restore`
-//! restores `<state>/snapshot.json` (§ Snapshot). Exit codes: 0 clean, 1 refused at
+//! restores `<state>/snapshot.json` (§ Snapshot); `--session-start` with it marks a session
+//! start (boot / `liascape restore`): each restored program starts per its `start_mode`
+//! (§ Programs "Playlist start") — the supervisor gives it to its first child only, never
+//! to a restart. Exit codes: 0 clean, 1 refused at
 //! startup (never retried — e.g. already running), 2 usage, 3 compositor connection lost
 //! mid-run (restarted when supervised), 4 the supervisor gave up (5 real crashes in 60 s,
 //! or the compositor/EGL never became available), 5 compositor/EGL not available *yet*
@@ -34,7 +37,7 @@ use liascape_player::supervise::{self, RestartInfo};
 const SERVE_USAGE: &str = "usage: liascape-player serve [--headless [--outputs WxH@HZ[,…]] \
                            [--redraw-policy content|every_tick]] [--clock real|stepped] \
                            [--ao <mpv ao>] [--socket <path>] \
-                           [--log-level error|warn|info|debug|trace] [--restore] \
+                           [--log-level error|warn|info|debug|trace] [--restore [--session-start]] \
                            [--no-supervise] [--debug] [--render-worker on|off]";
 
 fn serve_main(args: &[String]) -> ExitCode {
@@ -46,6 +49,7 @@ fn serve_main(args: &[String]) -> ExitCode {
     let mut socket = None;
     let mut level = Level::Info;
     let mut restore = false;
+    let mut session_start = false;
     let mut no_supervise = false;
     let mut supervised = false;
     let mut restarted = None;
@@ -75,6 +79,7 @@ fn serve_main(args: &[String]) -> ExitCode {
                 }
                 "--ao" => ao = Some(val("--ao")?),
                 "--restore" => restore = true,
+                "--session-start" => session_start = true,
                 "--no-supervise" => no_supervise = true,
                 "--supervised" => supervised = true,
                 "--restarted" => restarted = Some(RestartInfo::parse(&val("--restarted")?)?),
@@ -143,8 +148,17 @@ fn serve_main(args: &[String]) -> ExitCode {
     if !no_supervise && !supervised {
         // The supervisor: nothing but fork + exec + wait from here on (no thread, no EGL,
         // no PipeWire, no socket — R72).
-        let child: Vec<String> = args.iter().filter(|a| *a != "--restore").cloned().collect();
-        return supervise::run(child, restore, &liascape_player::paths::state_dir());
+        let child: Vec<String> = args
+            .iter()
+            .filter(|a| *a != "--restore" && *a != "--session-start")
+            .cloned()
+            .collect();
+        return supervise::run(
+            child,
+            restore,
+            session_start,
+            &liascape_player::paths::state_dir(),
+        );
     }
     if supervised {
         // Exec'd as /proc/self/exe: comm would be "exe".
@@ -160,6 +174,7 @@ fn serve_main(args: &[String]) -> ExitCode {
         log_level: level,
         wayland: !headless,
         restore,
+        session_start,
         supervised: supervised.then(|| Supervised {
             pid: unsafe { libc::getppid() } as u32,
             restart: restarted,
