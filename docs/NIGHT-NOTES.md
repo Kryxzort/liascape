@@ -100,3 +100,9 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Phase 3 Tasks 1–3 done** (`7dfda3f`, `3f57ca9`, `52caea7`): rotation rules, the `program` node, the rotation
   engine inside the player (timer, end-of-video with min/max, scene timing, failure ladder). 28 program tests.
   Not wired to the backend yet (Task 7). Next: Tasks 4, 5, 5b (agent running).
+- **F6b fixed** (`b8be9bf`, `3c37047`, `5bf3c82`, `871f4bd`, `de263c7`): a wake updates only its own source,
+  worker reads follow epoll, no wait on a signalled fence, no idle gain messages, schema built once. Syscalls per
+  worker frame ~56 → ~29; headless excess instructions mid-fade 0.28 → 0.08–0.14 G/s. On your monitors: 2/2 under
+  the 0.6 % bound (machine was busy — worth a quiet re-run: `scenes.sh workers`). Audio unchanged (onset harness).
+- **Started:** the loudness estimator wiring (import + Settings → Audio "Scene loudness" Estimate / Recalculate
+  all / Cancel, per-property-combination loudness, live re-seed on a property change).
