@@ -21,6 +21,14 @@ public class LibraryItem
     public int? VolumeOverride { get; init; }
     public double? SpeedOverride { get; init; }
     public DateTime AddedAt { get; init; }
+    // A scene's loudness under liascape-player (its CURRENT audio configuration — library.md § Loudness): the applied
+    // LUFS, whether it is the offline estimate (no live measurement of this configuration yet), the audible seconds
+    // measured, the estimate's confidence and — when low — its first note. All null for a video / nothing known.
+    public double? LoudnessLufs { get; init; }
+    public bool? LoudnessEstimated { get; init; }
+    public double? LoudnessSeconds { get; init; }
+    public string? LoudnessConfidence { get; init; }
+    public string? LoudnessNote { get; init; }
 
     // Rich metadata captured at download time (persisted in the source index.json). All optional.
     public string? Resolution { get; init; }

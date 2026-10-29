@@ -1106,7 +1106,10 @@ S5=$LIB/workshop/900000005; S6=$LIB/workshop/900000006; S7=$LIB/workshop/9000000
 mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-20}'
 mk_scene "$S6" '{"pattern":"solid","rgb":[0,255,255],"native":[640,360]}'
 mk_scene "$S7" '{"pattern":"solid","rgb":[255,0,255],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-26}'
-idx_loud() { jq -c --arg k "$1" '.[$k] | {i: .loudnessI, tp: .loudnessTP, s: .loudnessSeconds, partial: .loudnessPartial}' "$IDX" 2>/dev/null; }
+# a scene's live measurement is kept per audio configuration (sceneLoudness[<fingerprint>].live; these synthetic
+# scenes have no estimable sound objects, so no fingerprint: the configuration "")
+LIVE='(.sceneLoudness[.sceneLoudnessFp // ""].live // {})'
+idx_loud() { jq -c --arg k "$1" ".[\$k] | {i: .loudnessI, tp: .loudnessTP, s: $LIVE.seconds, partial: $LIVE.partial}" "$IDX" 2>/dev/null; }
 loud_i() { jq -r --arg k "$1" '.[$k].loudnessI // empty' "$IDX" 2>/dev/null; }
 wloud() { ctl probe '{"name":"workers"}' | jq -r --arg id "$1" ".workers[] | select(.id==\$id) | .loudness.$2"; }
 setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14 | .Volume = 100 | .NoAudio = false'
@@ -1117,7 +1120,7 @@ SID5=$(srcIdForPath "$S5"); WP5=$(wpid "$SID5")
 near "$(cur gain.normalize)" 0 0.001 && ok "an unlearned scene plays at gain.normalize 0" || bad "unlearned scene: gain.normalize $(cur gain.normalize)"
 t_l=$(ms_now)
 waitfor 15000 eval '[ -n "$(loud_i 900000005)" ]' && ok "learned after $(( $(ms_now) - t_l )) ms of play: index $(idx_loud 900000005)" || bad "no loudness in the index: $(idx_loud 900000005)"
-near "$(loud_i 900000005)" -20 1 && jq -e '."900000005" | .loudnessSeconds >= 3 and (.loudnessPartial // false | not)' "$IDX" >/dev/null \
+near "$(loud_i 900000005)" -20 1 && jq -e "(.\"900000005\" | $LIVE) | .seconds >= 3 and (.partial // false | not)" "$IDX" >/dev/null \
   && ok "…−20 LUFS ± 1 over ≥ 3 audible s, complete" || bad "stored $(idx_loud 900000005), want ≈ −20 LUFS, complete"
 waitfor $WAIT cur_near gain.normalize 6 0.1 && [ "$(wpid "$SID5")" = "$WP5" ] && [ "$(srcIdForPath "$S5")" = "$SID5" ] \
   && ok "gain.normalize moved live to $(cur gain.normalize) dB (−14 − (−20)) — same source $SID5, same worker $WP5" || bad "normalize live: $(cur gain.normalize), src $SID5 → $(srcIdForPath "$S5"), worker $WP5 → $(wpid "$SID5")"
@@ -1153,7 +1156,7 @@ ns_l() { ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq --arg id
 # OWN measurement of the path (audio::loudness::Book): the backend's `loudness_seed`, read from the index at create,
 # can lag the end-of-play report the stop just made (stored off its event thread — TODO "A reopen right after a stop
 # can seed with the previous report": this check read the window's 3.0 s for the end's 5.8 s in 2 of 3 runs).
-idx_s() { jq -r --arg k "$1" '.[$k].loudnessSeconds // 0' "$IDX" 2>/dev/null; }
+idx_s() { jq -r --arg k "$1" ".[\$k] | $LIVE.seconds // 0" "$IDX" 2>/dev/null; }
 E5s=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -r --arg id "$SID5" '[.events[] | select(.id==$id)][-1].seconds')
 P5=$(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID5b" '.workers[] | select(.id==$id) | .loudness | {seconds, seed_s, session_s, measuring}')
 # its seed = everything play 1 measured: never less than play 1's last report (its end's, + a rest too short to
@@ -1203,17 +1206,82 @@ SID7=$(srcIdForPath "$S7")
 audible_ge() { local v; v=$(wloud "$1" seconds); python3 -c "import sys; sys.exit(0 if float('${v:-0}') >= $2 else 1)" 2>/dev/null; }
 waitfor 10000 audible_ge "$SID7" 1.2 || bad "s7 never reached 1.2 s audible: $(wloud "$SID7" seconds)"
 post /apply "{\"path\":\"$S6\"}" >/dev/null
-waitfor $WAIT eval '[ -n "$(loud_i 900000007)" ]' && jq -e '."900000007".loudnessPartial == true' "$IDX" >/dev/null && near "$(loud_i 900000007)" -26 1 \
+waitfor $WAIT eval '[ -n "$(loud_i 900000007)" ]' && jq -e "(.\"900000007\" | $LIVE).partial == true" "$IDX" >/dev/null && near "$(loud_i 900000007)" -26 1 \
   && ok "switched away after ~1.2 s: a partial stored $(idx_loud 900000007)" || bad "partial: $(idx_loud 900000007)"
 post /apply "{\"path\":\"$S7\"}" >/dev/null
 waitfor 5000 scene_ready "$S7" || bad "re-apply s7 → $(basename "$(cur path)")"
 SID7b=$(srcIdForPath "$S7")
 waitfor $WAIT cur_near gain.normalize 12 0.2 && ok "reopened with a partial: gain.normalize $(cur gain.normalize) (−14 − (−26)) from it" || bad "s7 with a partial: gain.normalize $(cur gain.normalize), want 12 (applied from the partial)"
-waitfor 15000 eval 'jq -e ".\"900000007\" | (.loudnessPartial // false | not) and .loudnessSeconds >= 3" "$IDX" >/dev/null' && [ "$(wpid "$SID7b")" != "" ] \
+waitfor 15000 eval 'jq -e "(.\"900000007\" | $LIVE) | (.partial // false | not) and .seconds >= 3" "$IDX" >/dev/null' && [ "$(wpid "$SID7b")" != "" ] \
   && ok "the next play completed it: $(idx_loud 900000007), gain.normalize $(cur gain.normalize)" || bad "s7 never completed: $(idx_loud 900000007)"
 stop_now
+
+echo "== Scene loudness estimated offline, per audio configuration (estimate endpoints, a property toggle re-keys live)"
+# S8: a synthetic scene (it plays the tone of liascape-synthetic.json) that ALSO carries real WE sound objects for the
+# estimator (`liascape-player scene-loudness`): sound 1 always, sound 2 bound to the bool property "extra" (off).
+S8=$LIB/workshop/900000008
+mkdir -p "$S8/sounds"
+printf '{"type":"scene","title":"900000008","file":"scene.json","preview":"preview.png","general":{"properties":{"extra":{"type":"bool","value":false,"text":"Extra"}}}}' > "$S8/project.json"
+printf '{"objects":[{"id":1,"name":"a","sound":["sounds/a.wav"],"playbackmode":"loop","volume":1.0},{"id":2,"name":"b","sound":["sounds/b.wav"],"playbackmode":"loop","volume":{"user":"extra","value":0.0}}]}' > "$S8/scene.json"
+ffmpeg -v error -y -f lavfi -i "sine=frequency=1000:duration=6" -af volume=0.8 -ac 2 "$S8/sounds/a.wav"
+ffmpeg -v error -y -f lavfi -i "sine=frequency=330:duration=4" -ac 2 "$S8/sounds/b.wav"
+printf '%s' '{"pattern":"solid","rgb":[0,128,255],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-20}' > "$S8/liascape-synthetic.json"
+echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC | base64 -d > "$S8/preview.png"
+sl_status() { curl -sf -m 5 "$U/library/scene-loudness/status"; }
+sl_idle() { sl_status | jq -e '.running == false' >/dev/null; }
+fp8() { jq -r '."900000008".sceneLoudnessFp // empty' "$IDX"; }
+est8() { jq -c '."900000008" | .sceneLoudness[.sceneLoudnessFp].estimate | {lufs, peakDbfs, confidence, seed: (.seed != null)}' "$IDX"; }
+waitfor $WAIT sl_idle || bad "the startup estimate queue never went idle: $(sl_status)"
+Q=$(post /library/scene-loudness/estimate "{\"paths\":[\"$S8\"]}" | jq -r .queued)
+waitfor 30000 eval '[ -n "$(fp8)" ] && sl_idle' && [ "$Q" = 1 ] && est8 | jq -e '.lufs < -10 and .lufs > -40 and .seed' >/dev/null \
+  && ok "estimate {paths}: queued $Q, stored under $(fp8): $(est8); status $(sl_status | jq -c '{running, done, total, failed: (.failed | length)}')" \
+  || bad "estimate: queued $Q, fp $(fp8), $(est8), status $(sl_status)"
+FP1=$(fp8); EST1=$(jq -r '."900000008".loudnessI' "$IDX")
+curl -sf "$U/library" | jq -e --arg p "$S8" '.[] | select(.videoPath==$p) | .loudnessEstimated == true and (.loudnessLufs != null)' >/dev/null \
+  && ok "/library: the item's loudness is the estimate (loudnessEstimated, $EST1 LUFS)" || bad "/library item: $(curl -sf "$U/library" | jq -c --arg p "$S8" '.[] | select(.videoPath==$p) | {loudnessLufs, loudnessEstimated}')"
+[ "$(post /library/scene-loudness/estimate "{\"paths\":[\"$S8\"]}" | jq -r .queued)" = 0 ] && ok "Estimate skips a scene already estimated for its configuration" || bad "a second Estimate re-queued S8"
+[ "$(post /library/scene-loudness/estimate "{\"paths\":[\"$S8\"],\"force\":true}" | jq -r .queued)" = 1 ] && waitfor 30000 sl_idle && [ "$(fp8)" = "$FP1" ] \
+  && ok "Recalculate (force) re-estimates it: same fingerprint" || bad "force: fp $(fp8) (was $FP1)"
+post /library/scene-loudness/cancel '{}' | jq -e '.cancelled == false' >/dev/null && ok "cancel with nothing running: {cancelled: false}" || bad "idle cancel"
+setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14'
+post /apply "{\"path\":\"$S8\"}" >/dev/null
+waitfor 5000 scene_ready "$S8" || bad "/apply s8 → $(basename "$(cur path)")"
+SID8=$(srcIdForPath "$S8"); WP8=$(wpid "$SID8")
+W8=$(python3 -c "print(round(min(-14 - float('$EST1'), -1.5 - float('$(jq -r '."900000008".loudnessTP' "$IDX")')), 3))")
+K8=$(wloud "$SID8" key); SEED8=$(wloud "$SID8" seed_s)
+[ "$K8" = "$FP1" ] && near "$(cur gain.normalize)" "$W8" 0.01 && near "$SEED8" 10 0.2 \
+  && ok "never played: opens on loudness_key $K8, gain.normalize $(cur gain.normalize) from the estimate at once, seeded with 10 s of it" \
+  || bad "s8 open: key $K8 (want $FP1), gain.normalize $(cur gain.normalize) (want $W8), seed_s $SEED8"
+waitfor 10000 eval 'python3 -c "import sys; sys.exit(0 if float(\"$(wloud "$SID8" session_s)\") >= 1.5 else 1)"' || bad "s8 never played 1.5 s: $(wloud "$SID8" session_s)"
+S8a=$(wloud "$SID8" seconds)
+# the property that turns sound 2 on: re-planned → a new configuration → ONE pass: scene_props, loudness_key + its
+# seed (its estimate), gain.normalize ramped — same source, same worker
+t8=$(ms_now)
+post /library/scene-props "{\"path\":\"$S8\",\"name\":\"extra\",\"value\":true}" >/dev/null || bad "scene-props extra=true refused"
+waitfor 5000 eval '[ "$(wloud "$SID8" key)" != "$FP1" ] && [ -n "$(wloud "$SID8" key)" ]' || bad "the source never re-keyed: $(wloud "$SID8" key)"
+FP2=$(fp8); K8b=$(wloud "$SID8" key)
+[ "$FP2" != "$FP1" ] && [ "$K8b" = "$FP2" ] && [ "$(srcIdForPath "$S8")" = "$SID8" ] && [ "$(wpid "$SID8")" = "$WP8" ] \
+  && ok "extra=true → configuration $FP2 in $(( $(ms_now) - t8 )) ms, live on the same source $SID8 / worker $WP8" || bad "re-key: index $FP2, source $K8b, src $(srcIdForPath "$S8"), worker $(wpid "$SID8")"
+EST2=$(jq -r '."900000008".loudnessI' "$IDX")
+python3 -c "import sys; sys.exit(0 if float('$EST2') > float('$EST1') + 0.5 else 1)" && ok "…its estimate applies: $EST1 → $EST2 LUFS (sound 2 adds to it)" || bad "applied $EST1 → $EST2"
+W8b=$(python3 -c "print(round(min(-14 - float('$EST2'), -1.5 - float('$(jq -r '."900000008".loudnessTP' "$IDX")')), 3))")
+waitfor $WAIT cur_near gain.normalize "$W8b" 0.05 && ramp8=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID8.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}') \
+  && echo "$ramp8" | jq -e '.duration_ms >= 300' >/dev/null && ok "…gain.normalize ramped to $(cur gain.normalize) ($ramp8)" || bad "normalize after the toggle: $(cur gain.normalize) (want $W8b), ramp $ramp8"
+P8=$(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID8" '.workers[] | select(.id==$id) | .loudness | {key, seconds, seed_s, dropped}')
+echo "$P8" | jq -e '.seed_s > 9.8 and .seed_s < 10.2 and .seconds < 13' >/dev/null && ok "…the new configuration starts from its own estimate's 10 s, nothing of the old one's play: $P8" || bad "new configuration's measurement: $P8 (old one had $S8a s)"
+waitfor 3000 eval '[ "$(wloud "$SID8" dropped)" -ge 1 ]' && ok "…segments dropped right after the key change ($(wloud "$SID8" dropped))" || bad "nothing dropped after the key change: $(wloud "$SID8" dropped)"
+OLD8=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -c --arg id "$SID8" --arg k "$FP1" '[.events[] | select(.id==$id and .key==$k)][-1] | {key, seconds}')
+echo "$OLD8" | jq -e '.seconds >= 1' >/dev/null && waitfor $WAIT eval "jq -e '.\"900000008\".sceneLoudness[\"$FP1\"].live.seconds >= 1' \"\$IDX\" >/dev/null" \
+  && ok "…the old configuration's rest reported with its key and stored under it: $OLD8" || bad "old key's end report: $OLD8, index $(jq -c --arg k "$FP1" '."900000008".sceneLoudness[$k]' "$IDX")"
+# toggled back: the first configuration again — its own measurement (the player's book) and its applied value
+post /library/scene-props "{\"path\":\"$S8\",\"reset\":true}" >/dev/null
+waitfor 5000 eval '[ "$(wloud "$SID8" key)" = "$FP1" ]' && [ "$(fp8)" = "$FP1" ] \
+  && python3 -c "import sys; sys.exit(0 if float('$(wloud "$SID8" seconds)') >= float('$S8a') - 0.001 else 1)" \
+  && ok "reset → back on $FP1, continuing its own measurement ($(wloud "$SID8" seconds) s ≥ the $S8a s it had)" || bad "back: key $(wloud "$SID8" key), index $(fp8), seconds $(wloud "$SID8" seconds) (had $S8a)"
+grep -q "re-planned in .* ms" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" && ok "adapter log: $(grep -o 're-planned in [0-9]* ms' "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)" || bad "no re-plan line in the adapter log"
+stop_now
 setting '.NormalizeAudio = false'
-mv "$S5" "$S6" "$S7" "$T/"   # out of the library: the sections below step through it
+mv "$S5" "$S6" "$S7" "$S8" "$T/"   # out of the library: the sections below step through it
 
 restart_player 9 LIASCAPE_SCENE_WORKER_BIN=/nonexistent
 ctl hello | jq -e '.capabilities | index("scene") == null' >/dev/null && ok "a player whose liascape-scene-worker doesn't resolve has no scene capability" || bad "capabilities: $(ctl hello | jq -c .capabilities)"

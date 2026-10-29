@@ -324,26 +324,28 @@ public static class LiascapePlayerSelfTest
     // the gain the resolver gives a scene.
     private static void SceneLoudnessAssertions(List<string> fails)
     {
-        // MergeSceneLoudness (refined across plays, 2026-10-28): the report covering MORE audible seconds replaces the
-        // measurement (its state, seconds, partial flag); the applied I/TP move only by ≥ 0.5 LU/dB
+        // MergeSceneLoudness (refined across plays, 2026-10-28; per audio configuration, 2026-10-29): the report covering
+        // MORE audible seconds replaces its configuration's live measurement (state, seconds, partial); the applied I/TP
+        // move only by ≥ 0.5 LU/dB
         var m = new LibMeta();
         JsonElement St(int n) => JsonSerializer.SerializeToElement(new { v = 1, first = 500, counts = new[] { n } });
-        void Merge(double lufs, double? peak, double secs, bool complete, (bool, bool) want, string what, JsonElement? state = null)
+        SceneLoudnessLive? Live(string fp = "") => LibraryService.SceneLoudnessEntryOf(m, fp)?.Live;
+        void Merge(double lufs, double? peak, double secs, bool complete, (bool, bool) want, string what, JsonElement? state = null, string? key = null)
         {
-            var got = LibraryService.MergeSceneLoudness(m, lufs, peak, secs, complete, state ?? St((int)(secs * 10)));
-            if (got != want) fails.Add($"MergeSceneLoudness({what}) = {got}, want {want} (now I={m.LoudnessI}, TP={m.LoudnessTP}, s={m.LoudnessSeconds}, partial={m.LoudnessPartial})");
+            var got = LibraryService.MergeSceneLoudness(m, key, lufs, peak, secs, complete, state ?? St((int)(secs * 10)));
+            if (got != want) fails.Add($"MergeSceneLoudness({what}) = {got}, want {want} (now I={m.LoudnessI}, TP={m.LoudnessTP}, live={JsonSerializer.Serialize(Live(key ?? m.SceneLoudnessFp ?? ""))})");
         }
         Merge(-30, -12, 25, false, (true, true), "first partial on an empty entry");
-        if (m.LoudnessI != -30 || m.LoudnessTP != -12 || m.LoudnessPartial != true || m.LoudnessSeconds != 25 || m.LoudnessLRA != null
-            || m.LoudnessState?.GetProperty("counts")[0].GetInt32() != 250)
-            fails.Add($"a partial stored as I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} partial={m.LoudnessPartial} LRA={m.LoudnessLRA} state={m.LoudnessState}");
+        if (m.LoudnessI != -30 || m.LoudnessTP != -12 || Live() is not { Partial: true, Seconds: 25 } l0 || m.LoudnessLRA != null
+            || l0.State?.GetProperty("counts")[0].GetInt32() != 250)
+            fails.Add($"a partial stored as I={m.LoudnessI} TP={m.LoudnessTP} live={JsonSerializer.Serialize(Live())} LRA={m.LoudnessLRA}");
         Merge(-31, -12, 22, false, (false, false), "a shorter report (two sources at once: the longer stays)");
         Merge(-28, -11, 40, false, (true, true), "a longer partial");
         Merge(-27, -10, 60, true, (true, true), "a complete one over a partial");
-        if (m.LoudnessI != -27 || m.LoudnessPartial != null || m.LoudnessSeconds != 60) fails.Add($"complete stored as I={m.LoudnessI} partial={m.LoudnessPartial} s={m.LoudnessSeconds}");
+        if (m.LoudnessI != -27 || Live() is not { Partial: null, Seconds: 60 }) fails.Add($"complete stored as I={m.LoudnessI} live={JsonSerializer.Serialize(Live())}");
         Merge(-27.3, -9.8, 120, true, (true, false), "refined by 0.3 LU: stored, not applied");
-        if (m.LoudnessI != -27 || m.LoudnessTP != -10 || m.LoudnessSeconds != 120 || m.LoudnessState?.GetProperty("counts")[0].GetInt32() != 1200)
-            fails.Add($"a sub-0.5 refinement: I={m.LoudnessI} TP={m.LoudnessTP} s={m.LoudnessSeconds} (want I −27 TP −10 kept, s 120 + its state)");
+        if (m.LoudnessI != -27 || m.LoudnessTP != -10 || Live() is not { Seconds: 120 } l1 || l1.State?.GetProperty("counts")[0].GetInt32() != 1200)
+            fails.Add($"a sub-0.5 refinement: I={m.LoudnessI} TP={m.LoudnessTP} live={JsonSerializer.Serialize(Live())} (want I −27 TP −10 kept, s 120 + its state)");
         Merge(-27.6, -9.8, 180, true, (true, true), "refined to 0.6 LU from the applied value (drift accumulates)");
         if (m.LoudnessI != -27.6 || m.LoudnessTP != -10) fails.Add($"applied I={m.LoudnessI} TP={m.LoudnessTP}, want −27.6 / −10");
         Merge(-27.6, -9.0, 240, true, (true, true), "the peak rose ≥ 0.5 dB");
@@ -351,19 +353,55 @@ public static class LiascapePlayerSelfTest
         Merge(-20, -5, 240, true, (false, false), "the same seconds again (a duplicate report)");
         Merge(-20, -5, 200, false, (false, false), "a shorter partial after a complete one");
         Merge(double.NegativeInfinity, null, 60, true, (false, false), "-inf (silence)");
-        if (LibraryService.MergeSceneLoudness(new LibMeta(), double.NaN, null, 60, true) != (false, false)) fails.Add("MergeSceneLoudness(NaN) stored");
-        if (LibraryService.MergeSceneLoudness(new LibMeta(), -20, null, 0, true) != (false, false)) fails.Add("MergeSceneLoudness(0 s) stored");
-        // an entry learned before the state was kept (no LoudnessState): applied as it is until a complete report
-        // re-learns it — never a seed; a partial doesn't replace it
-        m = new LibMeta { LoudnessI = -22, LoudnessTP = -8, LoudnessSeconds = 60 };
-        if (LibraryService.SceneLoudnessSeedOf(m) != null) fails.Add("a state-less entry must not seed");
-        Merge(-30, -8, 25, false, (false, false), "a partial over a state-less entry");
-        Merge(-22.2, -8, 60, true, (true, false), "a complete report re-learns a state-less entry (0.2 LU: not applied)");
-        if (m.LoudnessState == null || m.LoudnessI != -22 || LibraryService.SceneLoudnessSeedOf(m) == null)
-            fails.Add($"re-learned: state={m.LoudnessState} I={m.LoudnessI}");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), null, double.NaN, null, 60, true) != (false, false)) fails.Add("MergeSceneLoudness(NaN) stored");
+        if (LibraryService.MergeSceneLoudness(new LibMeta(), null, -20, null, 0, true) != (false, false)) fails.Add("MergeSceneLoudness(0 s) stored");
+        if (LibraryService.SceneLoudnessSeedOf(m)?.GetProperty("counts")[0].GetInt32() != 2400) fails.Add("the seed = the current configuration's live state");
         // a video's ffmpeg measurement (all four fields) is never read as a scene's — and vice versa
-        var sceneOnly = new LibMeta { LoudnessI = -20, LoudnessTP = -10, LoudnessSeconds = 60 };
+        var sceneOnly = new LibMeta { LoudnessI = -20, LoudnessTP = -10 };
         if (sceneOnly.LoudnessLRA != null) fails.Add("a scene measurement must not look like a video's (LRA set)");
+
+        // Per audio configuration (MergeSceneEstimate; docs/TODO.md "Offline scene loudness → integration"): the first
+        // estimate hands an un-keyed measurement to its fingerprint; a new configuration jumps to its own value (its
+        // estimate, never-played) and seeds from the estimate; its first live report takes over (0.5 LU rule vs the
+        // estimate); toggled back, the first configuration's measurement applies again; an estimate never displaces a
+        // live measurement; a report of a configuration that isn't current is stored and applies nothing.
+        JsonElement Seed(int n) => JsonSerializer.SerializeToElement(new { v = 1, first = 600, counts = new[] { n } });
+        SceneLoudnessEstimate Est(double? lufs, double? peak = null, int seed = 100) => new() { Lufs = lufs, PeakDbfs = peak, Seed = Seed(seed), Confidence = "high", Model = "lwe" };
+        void MergeEst(string fp, SceneLoudnessEstimate e, (bool, bool) want, string what)
+        {
+            var got = LibraryService.MergeSceneEstimate(m, fp, e);
+            if (got != want) fails.Add($"MergeSceneEstimate({what}) = {got}, want {want} (now fp={m.SceneLoudnessFp} I={m.LoudnessI} TP={m.LoudnessTP})");
+        }
+        MergeEst("A", Est(-25, -8), (true, false), "the first estimate of a measured scene: the un-keyed measurement is A's, it stays applied");
+        if (m.SceneLoudnessFp != "A" || Live("A") is not { Seconds: 240 } || m.SceneLoudness!.ContainsKey("") || m.LoudnessI != -27.6)
+            fails.Add($"un-keyed → A: fp={m.SceneLoudnessFp} A.live={JsonSerializer.Serialize(Live("A"))} keys={string.Join(",", m.SceneLoudness!.Keys)} I={m.LoudnessI}");
+        if (LibraryService.SceneLoudnessInfoOf(m) is not { Estimated: false, Seconds: 240 }) fails.Add($"A's info: {LibraryService.SceneLoudnessInfoOf(m)}");
+        MergeEst("B", Est(-18, -4), (true, true), "props changed → B (never played): jumps to B's estimate");
+        if (m.LoudnessI != -18 || m.LoudnessTP != -4 || LibraryService.SceneLoudnessSeedOf(m)?.GetProperty("counts")[0].GetInt32() != 100
+            || LibraryService.SceneLoudnessInfoOf(m) is not { Estimated: true, Seconds: null })
+            fails.Add($"on B: I={m.LoudnessI} TP={m.LoudnessTP} seed={LibraryService.SceneLoudnessSeedOf(m)} info={LibraryService.SceneLoudnessInfoOf(m)}");
+        Merge(-27.4, -9, 260, true, (true, false), "A's end report after the switch to B: stored under A, nothing applied", key: "A");
+        if (Live("A")?.Seconds != 260 || m.LoudnessI != -18) fails.Add($"A's late report: A.live={JsonSerializer.Serialize(Live("A"))} I={m.LoudnessI}");
+        Merge(-18.3, -4.2, 20, true, (true, false), "B's first live report, 0.3 LU from its estimate: live now, not applied", key: "B");
+        if (LibraryService.SceneLoudnessInfoOf(m).Estimated != false || m.LoudnessI != -18) fails.Add($"B live: {LibraryService.SceneLoudnessInfoOf(m)} I={m.LoudnessI}");
+        MergeEst("B", Est(-12, -1), (true, false), "a re-estimate of B never displaces B's live measurement");
+        if (m.LoudnessI != -18 || LibraryService.SceneLoudnessSeedOf(m)?.GetProperty("counts")[0].GetInt32() != 200) fails.Add($"B re-estimated: I={m.LoudnessI} seed={LibraryService.SceneLoudnessSeedOf(m)}");
+        MergeEst("A", Est(-25, -8), (true, true), "toggled back → A: its own measurement again");
+        if (m.LoudnessI != -27.4 || m.LoudnessTP != -9 || LibraryService.SceneLoudnessSeedOf(m)?.GetProperty("counts")[0].GetInt32() != 2600)
+            fails.Add($"back on A: I={m.LoudnessI} TP={m.LoudnessTP} seed={LibraryService.SceneLoudnessSeedOf(m)}");
+        MergeEst("S", Est(null), (true, true), "a configuration with no sound: nothing applied");
+        if (m.LoudnessI != null || m.LoudnessTP != null || LiascapePlayerMedia.SceneNormalizeDb(m, new AppSettings { NormalizeAudio = true }) != 0)
+            fails.Add($"silent configuration: I={m.LoudnessI} TP={m.LoudnessTP}");
+        m = new LibMeta();
+        MergeEst("C", Est(-20, -6), (true, true), "a fresh scene's estimate is applied at once");
+        if (m.LoudnessI != -20 || LibraryService.SceneLoudnessInfoOf(m) is not { Estimated: true, Lufs: -20 }) fails.Add($"fresh estimate: I={m.LoudnessI}");
+        Merge(-23, -6, 60, true, (true, true), "its first live report (key-less: the current configuration's) moves ≥ 0.5 LU");
+        if (Live("C")?.Seconds != 60 || m.LoudnessI != -23) fails.Add($"C live: {JsonSerializer.Serialize(Live("C"))} I={m.LoudnessI}");
+        if (LibraryService.MergeSceneEstimate(m, "", Est(-1)) != (false, false)) fails.Add("an empty fingerprint stored");
+        m = new LibMeta { SceneLoudness = new() { ["L"] = new SceneLoudnessEntry { Estimate = Est(-15, -3), } }, SceneLoudnessFp = "L" };
+        m.SceneLoudness["L"].Estimate!.Confidence = "low";
+        m.SceneLoudness["L"].Estimate!.Notes = ["two versions of one song play at once"];
+        if (LibraryService.SceneLoudnessInfoOf(m).Note != "two versions of one song play at once") fails.Add("a low estimate's first note is the card's note");
 
         // SceneNormalizeDb: target − I, never boosting the sample peak past −1.5 dBFS, clamped −60…+24; 0 when off / unlearned
         var on = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };

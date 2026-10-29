@@ -285,7 +285,8 @@ public static class LiascapePlayerMedia
                 bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
                 var peak = Num("peak_dbfs");
                 JsonElement? state = e.TryGetProperty("state", out var sv) && sv.ValueKind == JsonValueKind.Object ? sv.Clone() : null;
-                _ = Task.Run(() => { try { OnSceneLoudness(lp, lufs, peak, secs, complete, state); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
+                var key = Str(e, "key"); // the source's `loudness_key` (its audio configuration; "" = none)
+                _ = Task.Run(() => { try { OnSceneLoudness(lp, key, lufs, peak, secs, complete, state); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
             }
             return;
         }
@@ -325,15 +326,17 @@ public static class LiascapePlayerMedia
             _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
     }
 
-    // `scene.loudness`: store it (the measurement covering the most audible play wins — MergeSceneLoudness) and,
-    // when the applied value moved (≥ 0.5 LU) with normalization on, ramp every live source of that scene to its new
-    // `gain.normalize` — the same worker keeps playing.
-    private static void OnSceneLoudness(string path, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
+    // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —
+    // MergeSceneLoudness) and, when the applied value moved (≥ 0.5 LU) with normalization on, ramp every live source of
+    // that scene to its new `gain.normalize` — the same worker keeps playing.
+    private static void OnSceneLoudness(string path, string key, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
     {
-        var (stored, applied) = LibraryService.StoreSceneLoudness(path, lufs, peak, seconds, complete, state);
+        var (stored, applied) = LibraryService.StoreSceneLoudness(path, key, lufs, peak, seconds, complete, state);
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
+            + (key.Length > 0 ? $" [{key}]" : "")
             + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
+        if (stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
         if (applied) PlayerHelper.OnLoudnessMeasured(path);
     }
 
@@ -573,8 +576,10 @@ public static class LiascapePlayerMedia
         // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,
         // a broken scene — player-core.md § Scene worker); the video-only props are stored, no effect
         if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
-        // the scene's loudness measured over its earlier plays: this source continues it (create only — never a
-        // resolver value: a live source already holds that measurement plus its own play since)
+        // the scene's loudness measured over its earlier plays of its current audio configuration (`loudness_key`, a
+        // resolver value), else that configuration's estimate (10 s of play): this source continues it (create only —
+        // never a resolver value: a live source already holds that measurement plus its own play since; a key change
+        // sends the new configuration's with it — ResolveNow)
         if (scene && LibraryService.SceneLoudnessSeed(path) is JsonElement seed) props["loudness_seed"] = seed;
         foreach (var (k, v) in Desired(path, () => s, PlayerHelper.IsMuted, null, item: false)) props[k] = v;
         return props;
@@ -932,20 +937,75 @@ public static class LiascapePlayerMedia
     private static readonly IReadOnlySet<string> PerItem = new HashSet<string> { "gain.user", "speed" };
     private static readonly IReadOnlySet<string> MuteOnly = new HashSet<string> { "gain.mute" };
     private static readonly IReadOnlySet<string> ScenePropsOnly = new HashSet<string> { "scene_props" };
+    private static readonly IReadOnlySet<string> SceneConfig = new HashSet<string> { "scene_props", "loudness_key", "gain.normalize" };
+    private static readonly IReadOnlySet<string> SceneLoudnessProps = new HashSet<string> { "loudness_key", "gain.normalize" };
 
     // A scene item's user properties (its index overrides, `SceneProperties.PlayerMap`) onto its source(s) —
-    // on screen, either side of an effect, a pending B. `/library/scene-props` after the save. Coalescible per
-    // item: it re-reads the index when it runs. A property whose override went (a reset) gets its default sent
-    // (LWE has no reset; `WithResets`).
-    public static void ApplySceneProps(string path) =>
-        QueueSet("sceneprops:" + FullPath(path), () =>
-            ResolveNow(new Req { Items = [path], OnlyItems = true, Props = ScenePropsOnly }));
+    // on screen, either side of an effect, a pending B. `/library/scene-props` after the save. A property whose
+    // override went (a reset) gets its default sent (LWE has no reset; `WithResets`). Property-aware loudness: the
+    // scene's sound is re-planned first (`liascape-player scene-loudness --props`, a re-mix from the per-file cache:
+    // ~1 ms + the spawn; off the request thread) → its configuration's fingerprint → the index (its estimate; the
+    // current configuration) → ONE pass on the item's sources: `scene_props`, `loudness_key` + that configuration's
+    // `loudness_seed` (its live measurement, else its estimate), `gain.normalize` ramped over 500 ms (its live value,
+    // else its estimate). Coalescible per item: the pass re-reads the index when it runs; re-plans are serialized.
+    // A drag preview (or another commit) of the item queued while this one re-planned already carried every saved
+    // property (its pass reads the index too): this pass then leaves `scene_props` alone — sent after it, it would
+    // revert the preview's live values (IT "preview color blue → live").
+    private static readonly ConcurrentDictionary<string, long> _scenePropsSeq = new();
+    private static long NextScenePropsSeq(string path) => _scenePropsSeq.AddOrUpdate(FullPath(path), 1, (_, n) => n + 1);
+    public static void ApplySceneProps(string path)
+    {
+        long seq = NextScenePropsSeq(path);
+        _ = Task.Run(() =>
+        {
+            try { Replan(path); }
+            catch (Exception e) { LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-plan failed: {e.Message}"); }
+            bool latest = _scenePropsSeq.TryGetValue(FullPath(path), out var now) && now == seq;
+            QueueSet("sceneprops:" + FullPath(path), () =>
+                ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps }));
+        });
+    }
+
+    // The re-plan alone (the legacy engine: nothing live, the stored configuration still follows the props).
+    public static void ReplanInBackground(string path)
+    {
+        if (PlayerEngine.ResolveBinary() == null || !PlayerHelper.IsScenePath(path)) return;
+        _ = Task.Run(() => { try { Replan(path); } catch (Exception e) { LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-plan failed: {e.Message}"); } });
+    }
+
+    private static readonly object _replanLock = new();
+    private static void Replan(string path)
+    {
+        lock (_replanLock)
+        {
+            var sw = Stopwatch.StartNew();
+            if (SceneLoudnessPlanner.Estimate(path, background: false, CancellationToken.None, out var err) is not { } plan)
+            {
+                LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} not re-planned ({err}) — its loudness configuration stays");
+                return;
+            }
+            long planMs = sw.ElapsedMilliseconds;
+            var (stored, applied, fpChanged) = SceneLoudnessPlanner.Store(path, plan);
+            LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-planned in {sw.ElapsedMilliseconds} ms (estimate {planMs} ms): {plan.Fingerprint}"
+                + (fpChanged ? " (new configuration)" : "") + (applied ? ", applied changed" : ""));
+            if (stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
+        }
+    }
+
+    // A scene's estimate landed (the background queue — Web/SceneLoudnessOps): its live source(s) take its current
+    // configuration's `loudness_key` (+ seed) and `gain.normalize` (ramped). Coalescible per item.
+    public static void ApplySceneLoudness(string path) =>
+        QueueSet("sceneloudness:" + FullPath(path), () =>
+            ResolveNow(new Req { Items = [path], OnlyItems = true, Props = SceneLoudnessProps }));
 
     // `/library/scene-props/preview` (the modal's drag twin, nothing persisted): `values` over the saved overrides,
     // on that item's source(s) only. Coalescible per item + property set.
-    public static void PreviewSceneProps(string path, IReadOnlyDictionary<string, JsonElement> values) =>
+    public static void PreviewSceneProps(string path, IReadOnlyDictionary<string, JsonElement> values)
+    {
+        NextScenePropsSeq(path);
         QueueSet("preview:scene_props:" + FullPath(path) + ":" + string.Join(",", values.Keys.Order(StringComparer.Ordinal)), () =>
             ResolveNow(new Req { Items = [path], OnlyItems = true, Props = ScenePropsOnly, ItemSceneProps = values }));
+    }
 
     // Every setting the resolver owns, live, from the settings as they are now — /settings, the volume key
     // on the global, normalization, a loudness measurement landing.
@@ -1019,8 +1079,6 @@ public static class LiascapePlayerMedia
         if (Want("speed"))
             d["speed"] = Math.Clamp((item ? r!.ItemSpeed : null) ?? Meta()?.Speed ?? r?.GlobalSpeed ?? settings().Speed, 0.1, 4.0);
         if (Want("af")) d["af"] = NormalizeAf(path, settings()) ?? "";
-        // a scene's loudness normalization: its learned loudness → a plain gain (0 until learned / when off)
-        if (Want("gain.normalize") && PlayerHelper.IsScenePath(path)) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
         if (Want("no_audio")) d["no_audio"] = settings().NoAudio;
         if (Want("hwdec")) d["hwdec"] = HwDec(settings());
         if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFpsCap);
@@ -1033,6 +1091,14 @@ public static class LiascapePlayerMedia
         if (Want("scene_props") && PlayerHelper.IsScenePath(path))
             d["scene_props"] = JsonSerializer.SerializeToElement(
                 SceneProperties.PlayerMap(path, Meta()?.SceneProps, item ? r!.ItemSceneProps : null));
+        // ordered after scene_props: the scene's audio configuration (the estimator's fingerprint of its props; "" =
+        // never estimated) — the player keeps one measurement per (path, key); a change sends the new configuration's
+        // seed right after it (ResolveNow)
+        if (Want("loudness_key") && PlayerHelper.IsScenePath(path) && C.Capabilities.Contains("scene_loudness_key"))
+            d["loudness_key"] = Meta()?.SceneLoudnessFp ?? "";
+        // a scene's loudness normalization: its current configuration's loudness (live, else estimated) → a plain
+        // gain (0 until known / when off)
+        if (Want("gain.normalize") && PlayerHelper.IsScenePath(path)) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
         return d;
     }
 
@@ -1086,6 +1152,13 @@ public static class LiascapePlayerMedia
                         if (!r.Force && have.TryGetValue(prop, out var h) && Same(h, v)) continue;
                         var sent = Send(client, id, prop, v);
                         if (sent == Sent.Ok) have[prop] = v;
+                        // a new audio configuration: the source continues THAT configuration's measurement — its live
+                        // state, else its estimate's 10 s seed ({} = nothing: the player's book may still hold some)
+                        if (sent == Sent.Ok && prop == "loudness_key")
+                        {
+                            object seed = LibraryService.SceneLoudnessSeed(path) is JsonElement sd ? sd : new Dictionary<string, object>();
+                            if (Send(client, id, "loudness_seed", seed) == Sent.Ok) have["loudness_seed"] = seed;
+                        }
                         else if (sent == Sent.Stalled) return covered; // the rest would fail fast too; R81 catches up
                         else if (sent == Sent.Gone) { stale = true; break; } // retired meanwhile: its other props too
                     }
