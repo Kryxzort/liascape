@@ -298,6 +298,9 @@ struct Prog {
     /// The committed switch while its effect runs (until its handoff).
     running: Option<CorrId>,
     pending: Option<Pending>,
+    /// An armed switch cancelled by a live edit (a new minimum or transition): the next
+    /// arm goes to this same B.
+    rearm: Option<Step>,
     /// A video held below its minimum (`program.held` logged).
     held: bool,
     clock: PlayClock,
@@ -390,6 +393,7 @@ impl Prog {
             cur_src: None,
             running: None,
             pending: None,
+            rearm: None,
             held: false,
             clock: PlayClock::default(),
             played_ms: 0.0,
@@ -447,9 +451,25 @@ impl Prog {
     /// stretch where every playable item failed logs `empty` and starts the ladder over them
     /// again (the backoff keeps it from spinning).
     fn plan_next(&mut self, id: &str, now: Duration) -> Option<Step> {
+        self.plan_next_from(id, now, None)
+    }
+
+    /// Whether `path` is passed over (`skip`, broken, failed).
+    fn skipped(&self, path: &str) -> bool {
+        self.skips.contains(path) || self.broken.contains(path) || self.failed.contains(path)
+    }
+
+    /// [`Prog::plan_next`], from the order as it will be once `after` commits (a switch
+    /// still on its way: [`Order::plan_after`]).
+    fn plan_next_from(&mut self, id: &str, now: Duration, after: Option<&Step>) -> Option<Step> {
         let (skips, broken, failed) = (&self.skips, &self.broken, &self.failed);
         let skip = |p: &str| skips.contains(p) || broken.contains(p) || failed.contains(p);
-        if let Some(s) = self.order.plan_next(&skip, &mut self.rng) {
+        let rng = &mut self.rng;
+        let planned = match after {
+            Some(prev) => self.order.plan_after(prev, |o| o.plan_next(&skip, rng)),
+            None => self.order.plan_next(&skip, rng),
+        };
+        if let Some(s) = planned {
             return Some(s);
         }
         if !self.empty_logged {
@@ -470,6 +490,39 @@ impl Prog {
             }
         }
         None
+    }
+
+    /// The rotation's next switch: the B of an armed switch a live edit cancelled (it is
+    /// re-armed to the same B while it is still a playable item), else [`Prog::plan_next`].
+    fn take_next(&mut self, id: &str, now: Duration) -> Option<Step> {
+        if let Some(s) = self.rearm.take()
+            && self.index_of(&s.path) >= 0
+            && !self.skipped(&s.path)
+        {
+            return Some(s);
+        }
+        self.plan_next(id, now)
+    }
+
+    /// Cancel an armed (`align: end`, not started) switch; its step is returned so a
+    /// live edit can re-arm it to the same B.
+    fn cancel_armed(&mut self, id: &str, why: &str, acts: &mut Vec<ProgramAction>) -> Option<Step> {
+        if !self.pending.as_ref().is_some_and(|p| p.align == Align::End) {
+            return None;
+        }
+        let p = self.pending.take()?;
+        log::event(
+            "program",
+            Level::Debug,
+            "program.disarmed",
+            p.corr.clone(),
+            json!({ "id": id, "next": p.step.path, "why": why }),
+        );
+        if let Some(c) = p.corr {
+            acts.push(ProgramAction::Cancel { corr: c });
+        }
+        self.held = false;
+        Some(p.step)
     }
 
     /// B's create props (`defaults` ∪ the item's props, item wins; its path; `loop` while an
@@ -550,6 +603,7 @@ impl Prog {
         let from = self.order.current().map(str::to_string);
         let path = p.step.path.clone();
         self.order.commit(p.step);
+        self.rearm = None;
         self.cur_src = b;
         self.played_ms = 0.0;
         self.remaining_ms = self.cfg.interval_ms as f64;
@@ -857,7 +911,7 @@ impl Prog {
                     if !can_rotate {
                         self.remaining_ms = self.cfg.interval_ms as f64;
                     } else if self.pending.is_none()
-                        && let Some(step) = self.plan_next(id, now)
+                        && let Some(step) = self.take_next(id, now)
                     {
                         acts.push(self.start(
                             id,
@@ -884,7 +938,7 @@ impl Prog {
                     let armed = self.pending.take();
                     let step = match armed {
                         Some(p) => Some(p.step),
-                        None => self.plan_next(id, now),
+                        None => self.take_next(id, now),
                     };
                     if let Some(step) = step {
                         acts.push(self.start(
@@ -899,7 +953,7 @@ impl Prog {
                 } else if kind != PlayKind::Video {
                     if self.pending.is_none()
                         && rule::still_min_reached(true, can_rotate, kind, played, rule.min_ms)
-                        && let Some(step) = self.plan_next(id, now)
+                        && let Some(step) = self.take_next(id, now)
                     {
                         let reason = if self.cfg.separate_scenes {
                             Reason::ScenesAfter
@@ -912,7 +966,7 @@ impl Prog {
                 {
                     // a video: its end, once this loop reaches the minimum
                     if rule::min_reached(played, loop_remaining_ms(g, &cur), rule.min_ms) {
-                        if let Some(step) = self.plan_next(id, now) {
+                        if let Some(step) = self.take_next(id, now) {
                             let path = step.path.clone();
                             acts.push(self.start(
                                 id,
@@ -989,6 +1043,7 @@ impl Programs {
         let Some(cfg) = ProgCfg::read(g, id) else {
             return Vec::new();
         };
+        let mut acts = Vec::new();
         match self.progs.get_mut(id) {
             Some(p) => {
                 let old = std::mem::replace(&mut p.cfg, cfg);
@@ -1000,7 +1055,23 @@ impl Programs {
                     ) as f64;
                 }
                 if old.on_end && !p.cfg.on_end {
+                    // on_end → timer: no end to wait for; the countdown starts in full
+                    p.cancel_armed(id, "mode", &mut acts);
+                    p.rearm = None;
+                    p.held = false;
                     p.remaining_ms = p.cfg.interval_ms as f64;
+                } else if old.on_end && p.cfg.on_end {
+                    // a new minimum or transition re-arms an armed switch to the same B (a
+                    // held one re-checks the new minimum on the next tick)
+                    let min = old.interval_ms != p.cfg.interval_ms;
+                    if (min || old.transition != p.cfg.transition)
+                        && let Some(step) = p.cancel_armed(id, "rearm", &mut acts)
+                    {
+                        p.rearm = Some(step);
+                    }
+                    if min {
+                        p.held = false;
+                    }
                 }
                 if old.items != p.cfg.items || old.shuffle != p.cfg.shuffle {
                     p.skips = p
@@ -1020,6 +1091,17 @@ impl Programs {
                     } else {
                         p.order = Order::new(paths, 0, p.cfg.shuffle);
                     }
+                    // an armed B that is no longer a playable item: cancelled, re-planned
+                    // by the next tick (A's loop comes back with the abort)
+                    let gone = |p: &Prog, path: &str| p.index_of(path) < 0 || p.skipped(path);
+                    if let Some(armed) = p.pending.as_ref().filter(|x| x.align == Align::End)
+                        && gone(p, &armed.step.path.clone())
+                    {
+                        p.cancel_armed(id, "items", &mut acts);
+                    }
+                    if p.rearm.as_ref().is_some_and(|s| gone(p, &s.path)) {
+                        p.rearm = None;
+                    }
                 }
                 p.set_observed(id, g);
             }
@@ -1036,7 +1118,7 @@ impl Programs {
                 );
             }
         }
-        Vec::new()
+        acts
     }
 
     /// `destroy`: the rotation stops; what plays stays on screen (an armed switch that
@@ -1085,6 +1167,19 @@ impl Programs {
         );
         let cut = keep_pause && paused;
         let p = self.get_nonempty(id)?;
+        // A switch requested and not started: an armed one (`align: end`) is what `next`
+        // takes (`AdvanceAndLaunch`'s pre-fetch); one on its way (`align: now`, e.g. the
+        // previous `next` of a key-repeat burst) is where the user switch goes on from.
+        let armed = p
+            .pending
+            .as_ref()
+            .filter(|x| x.align == Align::End)
+            .map(|x| x.step.clone());
+        let on_way = p
+            .pending
+            .as_ref()
+            .filter(|x| x.align == Align::Now)
+            .map(|x| x.step.clone());
         let (step, reason) = match verb {
             "play" => {
                 let i = index.unwrap_or(0);
@@ -1100,12 +1195,30 @@ impl Programs {
                 p.order = Order::new(paths, i, p.cfg.shuffle);
                 (p.order.plan_play(i), Reason::Play)
             }
-            "next" => (p.plan_next(id, now), Reason::Next),
-            "prev" => (p.order.plan_back(), Reason::Prev),
+            "next" => {
+                let step = match (armed, &on_way) {
+                    (Some(s), _) => Some(s),
+                    (None, Some(prev)) => p.plan_next_from(id, now, Some(prev)),
+                    (None, None) => p.take_next(id, now),
+                };
+                (step, Reason::Next)
+            }
+            "prev" => {
+                let step = match &on_way {
+                    Some(prev) => p.order.plan_after(prev, |o| o.plan_back()),
+                    None => p.order.plan_back(),
+                };
+                (step, Reason::Prev)
+            }
             "random" => {
                 let (skips, broken) = (&p.skips, &p.broken);
                 let skip = |x: &str| skips.contains(x) || broken.contains(x);
-                (p.order.plan_random(&skip, &mut p.rng), Reason::Random)
+                let rng = &mut p.rng;
+                let step = match &on_way {
+                    Some(prev) => p.order.plan_after(prev, |o| o.plan_random(&skip, rng)),
+                    None => p.order.plan_random(&skip, rng),
+                };
+                (step, Reason::Random)
             }
             other => {
                 return Err(ApiError {
@@ -1120,6 +1233,7 @@ impl Programs {
         };
         p.started = true;
         p.backoff_until = None;
+        p.rearm = None;
         // an armed switch is superseded by the new request (the recipe aborts it)
         Ok(vec![p.start(
             id,
