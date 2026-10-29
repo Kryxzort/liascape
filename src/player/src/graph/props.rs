@@ -374,6 +374,16 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "loudness_seed",
                 def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
             ),
+            // The scene's audio configuration (the offline estimate's `fingerprint` of its
+            // `scene_props`; "" = unknown): the loudness measurement is kept per (path, key),
+            // so two configurations never share a histogram. A live change leaves the old
+            // key's measurement (its rest reported with that key), joins the new one and drops
+            // 0.5 s of segments (the stream still carries the old mix). `scene.loudness`
+            // carries it. Stored on every kind, used by scenes only.
+            (
+                "loudness_key",
+                def(PropType::Str, false, PropValue::Str(String::new())),
+            ),
         ],
         // Phase 3: a rotation (`recipes::program`). Settable props are the program's live
         // configuration; the observed ones are what it does now (read-only).

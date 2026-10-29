@@ -9083,6 +9083,97 @@ fn scene_path_changes_and_folder_spellings_share_one_measurement() {
     let _ = std::fs::remove_file(&link);
 }
 
+/// A live `loudness_key` change (the backend re-planned the scene's sound for new `scene_props`
+/// — integration design, docs/TODO.md "Offline scene loudness → integration"): the source
+/// leaves the old configuration's measurement (its rest reported with the OLD key), joins the
+/// new one's and drops the segments of the next 0.5 s (the stream still carries the old mix) —
+/// two configurations never share a histogram; toggled back, the old key continues its own
+/// measurement; every report carries its key. RED before: one measurement per path (the new
+/// key continued the old one's seconds, no `key` in the report, nothing dropped).
+#[test]
+fn scene_loudness_key_change_never_shares_a_histogram() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    // The backend sends the prop only to a player that says it has it.
+    let caps = c.ok("hello", json!({}))["capabilities"].clone();
+    assert!(caps.as_array().unwrap().contains(&json!("scene_loudness_key")), "{caps}");
+    let tone = tone_scene(1000.0);
+    let secs = |v: &Value, k: &str| v[k].as_f64().unwrap_or(-1.0);
+    let a = create_scene(&mut c, "api-loud-key", &tone, json!({"loudness_key": "k1"}));
+    show_all(&mut c, &a);
+    let p = loudness_progress(&mut c, &a);
+    assert_eq!(p["key"], json!("k1"), "{p}");
+    let w1 = wait_for(Duration::from_secs(15), "k1's window report", || {
+        loudness_events(&mut c, Some(&a)).into_iter().next()
+    });
+    assert_eq!(w1["key"], json!("k1"), "{w1}");
+    wait_for(Duration::from_secs(10), "k1: 1 s more", || {
+        (audible_s(&mut c, &a) >= secs(&w1, "seconds") + 1.0).then_some(())
+    });
+    let n_before = loudness_events(&mut c, Some(&a)).len();
+    // k1 → k2: k1's rest is reported with k1; k2 starts from nothing.
+    let t_change = Instant::now();
+    c.ok("set", json!({"path": format!("{a}.loudness_key"), "value": "k2"}));
+    let ev = loudness_events(&mut c, Some(&a));
+    assert_eq!(ev.len(), n_before + 1, "the old key's end report: {ev:?}");
+    let k1_end = ev.last().unwrap().clone();
+    assert_eq!(k1_end["key"], json!("k1"), "{k1_end}");
+    let s_k1 = secs(&k1_end, "seconds");
+    assert!(s_k1 >= secs(&w1, "seconds") + 1.0, "{k1_end}");
+    let p = loudness_progress(&mut c, &a);
+    println!("right after k1 → k2: {p}");
+    assert_eq!(p["key"], json!("k2"), "{p}");
+    assert!(secs(&p, "seconds") < 1e-6, "k2 shares nothing with k1: {p}");
+    assert_eq!(p["measuring"], json!(true), "{p}");
+    // The first 0.5 s after the change: segments arrive and are dropped, nothing measured.
+    std::thread::sleep(Duration::from_millis(350));
+    let p = loudness_progress(&mut c, &a);
+    let dropped = p["dropped"].as_u64().unwrap_or(0);
+    println!("350 ms after the change: {p}");
+    assert!(dropped >= 1, "segments dropped while settling: {p}");
+    assert!(secs(&p, "seconds") < 1e-6, "nothing measured while settling: {p}");
+    // Then k2 measures — never more than the play since the change minus the 0.5 s.
+    let w2 = wait_for(Duration::from_secs(15), "k2's window report", || {
+        loudness_events(&mut c, Some(&a))
+            .into_iter()
+            .find(|e| e["key"] == json!("k2"))
+    });
+    let since = t_change.elapsed().as_secs_f64();
+    println!("k2's window report {:.1} s after the change: {w2}", since);
+    assert!(
+        secs(&w2, "seconds") <= since - 0.4 && secs(&w2, "seed_s") < 1e-6,
+        "k2's own play only, the settle dropped: {w2}"
+    );
+    let dropped = loudness_progress(&mut c, &a)["dropped"].as_u64().unwrap_or(0);
+    assert!(
+        (2..=10).contains(&dropped),
+        "about 0.5 s of 100 ms segments dropped, then no more: {dropped}"
+    );
+    // k2 → k1: k1 continues its own measurement (the book kept it), k2's rest goes with k2.
+    c.ok("set", json!({"path": format!("{a}.loudness_key"), "value": "k1"}));
+    let last = loudness_events(&mut c, Some(&a)).last().cloned().unwrap();
+    assert_eq!(last["key"], json!("k2"), "the k2 rest: {last}");
+    let p = loudness_progress(&mut c, &a);
+    println!("back on k1: {p}");
+    assert_eq!(p["key"], json!("k1"), "{p}");
+    assert!(
+        (secs(&p, "seconds") - s_k1).abs() < 1e-6,
+        "k1 continues its own {s_k1} s, nothing of k2: {p}"
+    );
+    // The same key again changes nothing (no report, no settle).
+    let n = loudness_events(&mut c, Some(&a)).len();
+    let d = loudness_progress(&mut c, &a)["dropped"].as_u64().unwrap_or(0);
+    c.ok("set", json!({"path": format!("{a}.loudness_key"), "value": "k1"}));
+    assert_eq!(loudness_events(&mut c, Some(&a)).len(), n);
+    std::thread::sleep(Duration::from_millis(1200));
+    let p = loudness_progress(&mut c, &a);
+    assert!(p["dropped"].as_u64().unwrap_or(0) <= d + 8, "{p}");
+    assert!(secs(&p, "seconds") > s_k1, "k1 measures on: {p}");
+    c.ok("destroy", json!({"id": a}));
+}
+
 /// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once
 /// the audible play over every session reaches it (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
 /// last report (`capped`) and the worker stops metering — no segment arrives any more, nothing

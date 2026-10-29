@@ -255,6 +255,9 @@ pub struct SceneOpts {
     /// The book of scene measurements this source shares with every other source of the
     /// compositor (`SourceHost`'s); `None` = a private one (tests driving `open_opts`).
     pub loudness_book: Option<SharedBook>,
+    /// The scene's audio configuration (`loudness_key`: the offline estimate's fingerprint of
+    /// its `scene_props`; "" = unknown) — the measurement is kept per (path, key).
+    pub loudness_key: String,
 }
 
 impl SceneOpts {
@@ -286,6 +289,7 @@ impl SceneOpts {
             loudness_cap_s: loudness::DEFAULT_CAP_S,
             loudness_seed: None,
             loudness_book: None,
+            loudness_key: String::new(),
         }
     }
 
@@ -442,8 +446,13 @@ pub struct SceneSource {
     /// restarts and across sources of the same path — a reopen or a transition A → A'
     /// continues it).
     loudness: SharedBook,
-    /// The path this source joined in `loudness` (`None` once it left: ended).
-    loudness_key: Option<String>,
+    /// The (path, key) entry this source joined in `loudness` (`None` once it left: ended).
+    book_key: Option<String>,
+    /// When `loudness_key` last changed live: segments for [`KEY_CHANGE_SETTLE`] after it are
+    /// dropped (the stream's buffers still carry the old mix).
+    key_changed_at: Option<Instant>,
+    /// Segments dropped after a key change (the `workers` probe `loudness.dropped`).
+    loudness_dropped: u64,
     /// The worker meters (its last `Start.loudness` / `LoudnessMeter`).
     meter_on: bool,
     /// When `update` last asked the book whether a meter that is off should be on again.
@@ -468,12 +477,24 @@ pub fn hang_timeout(v: Option<&str>) -> Duration {
 /// How often a source whose meter is off asks the book whether it should meter again.
 const METER_RECHECK: Duration = Duration::from_millis(250);
 
-/// A scene folder's key in the loudness [`Book`]: canonical where it resolves, else as given.
-pub fn loudness_key(path: &std::path::Path) -> String {
-    std::fs::canonicalize(path)
+/// How long after a live `loudness_key` change the worker's segments are dropped: the worker
+/// applies the new `scene_props` within a frame, but the stream's buffers still carry the old
+/// mix — so two configurations never share a histogram.
+pub const KEY_CHANGE_SETTLE: Duration = Duration::from_millis(500);
+
+/// A scene's entry in the loudness [`Book`]: its folder — canonical where it resolves, else as
+/// given — and its audio configuration `key` (the `loudness_key` prop; "" = unknown: the folder
+/// alone), so two configurations of one scene never share a measurement.
+pub fn book_key(path: &std::path::Path, key: &str) -> String {
+    let p = std::fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
-        .into_owned()
+        .into_owned();
+    if key.is_empty() {
+        p
+    } else {
+        format!("{p}\u{1f}{key}")
+    }
 }
 
 /// The shared loudness book (a panic elsewhere never poisons it for good: its state is plain
@@ -603,6 +624,7 @@ impl SceneSource {
             o.loudness_seed = Some(Value::Object(m.clone()));
         }
         o.loudness_book = Some(book.clone());
+        o.loudness_key = s("loudness_key");
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
         // Task 10: a scene the snapshot saved broken (past its restart budget before the
@@ -730,7 +752,9 @@ impl SceneSource {
             restored_broken: false,
             context_losses: 0,
             loudness: opts.loudness_book.clone().unwrap_or_else(Book::shared),
-            loudness_key: None,
+            book_key: None,
+            key_changed_at: None,
+            loudness_dropped: 0,
             meter_on: true,
             meter_checked: Instant::now(),
             loudness_received: 0,
@@ -1375,18 +1399,27 @@ impl SceneSource {
             FromWorker::Envelope { t0_ms, dbfs_1ms } => self.on_envelope(t0_ms, &dbfs_1ms),
             FromWorker::Loudness { segments } => {
                 self.loudness_received += segments.len() as u64;
-                let reports: Vec<Learned> = match self.loudness_key.as_deref() {
-                    Some(key) => {
+                // Right after a live key change the segments still carry the old mix: dropped.
+                let settling = self
+                    .key_changed_at
+                    .is_some_and(|t| now.saturating_duration_since(t) < KEY_CHANGE_SETTLE);
+                if settling {
+                    self.loudness_dropped += segments.len() as u64;
+                } else {
+                    self.key_changed_at = None;
+                }
+                let reports: Vec<Learned> = match self.book_key.as_deref() {
+                    Some(key) if !settling => {
                         let mut b = lock_book(&self.loudness);
                         segments
                             .into_iter()
                             .filter_map(|seg| b.push(key, &self.opts.id, seg))
                             .collect()
                     }
-                    None => Vec::new(),
+                    _ => Vec::new(),
                 };
                 for l in reports {
-                    self.report_loudness(l);
+                    self.report_loudness(l, &self.opts.loudness_key);
                 }
                 // The cap reached (by this source or another of the path): the worker stops
                 // metering (folded into a restart's Start).
@@ -1593,9 +1626,12 @@ impl SceneSource {
         }
         self.latch.forget_worker();
         self.end_loudness();
-        // The seed was the old folder's measurement: the new one continues what the book has
-        // of the new folder, else starts from nothing (the next worker's `Start` meters again).
+        // The seed (and the audio configuration's key) were the old folder's: the new one
+        // continues what the book has of the new folder, else starts from nothing (the next
+        // worker's `Start` meters again).
         self.opts.loudness_seed = None;
+        self.opts.loudness_key.clear();
+        self.key_changed_at = None;
         self.opts.path = PathBuf::from(&path);
         self.join_loudness();
         self.opts.synthetic = self
@@ -1762,17 +1798,18 @@ impl SceneSource {
         }
     }
 
-    /// `scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s, played_s,
-    /// complete, capped, window_s, cap_s, state}` — the integration over every play so far
-    /// (`seconds` audible, `session_s` of them this source's); the backend stores it in the
-    /// item's index (`state` seeds the next play) and normalizes the scene by it.
-    fn report_loudness(&self, l: Learned) {
+    /// `scene.loudness {id, path, key, lufs, peak_dbfs, seconds, session_s, seed_s, played_s,
+    /// complete, capped, window_s, cap_s, state}` — the integration over every play so far of
+    /// the configuration `key` (`seconds` audible, `session_s` of them this source's); the
+    /// backend stores it in the item's index under `key` (`state` seeds the next play) and
+    /// normalizes the scene by it.
+    fn report_loudness(&self, l: Learned, key: &str) {
         log::event(
             "scene",
             Level::Info,
             "scene.loudness",
             None,
-            json!({"id": self.opts.id, "path": self.opts.path, "lufs": l.lufs,
+            json!({"id": self.opts.id, "path": self.opts.path, "key": key, "lufs": l.lufs,
                    "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
                    "seconds": l.seconds, "session_s": l.session_s,
                    "seed_s": l.seed_s, "played_s": l.played_s,
@@ -1784,24 +1821,30 @@ impl SceneSource {
 
     /// Join the current path's measurement in the book: continue it (a reopen, a second source
     /// of a playing scene) unless the backend's seed covers more (`Book::join`).
-    /// The key is the canonical path (`/home` vs its physical path, a trailing slash, a
-    /// `local/<id>` symlink: one entry), else the path as given. Without a seed (the backend has
-    /// nothing for the item) an idle entry of the path is dropped first (`Book::forget_idle`).
+    /// The entry is the canonical path (`/home` vs its physical path, a trailing slash, a
+    /// `local/<id>` symlink: one entry), else the path as given, + the `loudness_key` (one
+    /// measurement per audio configuration — [`book_key`]). Without a seed (the backend has
+    /// nothing for the item) an idle entry is dropped first (`Book::forget_idle`) — except on a
+    /// live key change (`forget` false): a configuration played earlier continues its own.
     fn join_loudness(&mut self) {
-        let key = loudness_key(&self.opts.path);
+        self.join_loudness_with(true);
+    }
+
+    fn join_loudness_with(&mut self, forget: bool) {
+        let key = book_key(&self.opts.path, &self.opts.loudness_key);
         let mut b = lock_book(&self.loudness);
-        if self.opts.loudness_seed.is_none() {
+        if forget && self.opts.loudness_seed.is_none() {
             b.forget_idle(&key);
         }
         b.join(&key, &self.opts.id, self.opts.learner());
         drop(b);
-        self.loudness_key = Some(key);
+        self.book_key = Some(key);
     }
 
     /// `f` of this path's measurement (a fresh one once the source left its path).
     fn with_learner<R>(&self, f: impl FnOnce(&Learner) -> R) -> R {
         let b = lock_book(&self.loudness);
-        match self.loudness_key.as_deref().and_then(|k| b.learner(k)) {
+        match self.book_key.as_deref().and_then(|k| b.learner(k)) {
             Some(l) => f(l),
             None => f(&self.opts.learner()),
         }
@@ -1824,13 +1867,28 @@ impl SceneSource {
     /// path's measurement — what's left unreported, if enough and if it was the measuring one
     /// (`Book::leave`). Idempotent.
     fn end_loudness(&mut self) {
-        let Some(key) = self.loudness_key.take() else {
+        let Some(key) = self.book_key.take() else {
             return;
         };
         let end = lock_book(&self.loudness).leave(&key, &self.opts.id);
         if let Some(l) = end {
-            self.report_loudness(l);
+            self.report_loudness(l, &self.opts.loudness_key);
         }
+    }
+
+    /// A live `loudness_key` change (the backend re-planned the scene's sound for new
+    /// `scene_props`): leave the old configuration's measurement (its rest reported with the
+    /// old key), join the new one's — continuing what the book holds of it (a configuration
+    /// toggled back) — and drop the segments of the next [`KEY_CHANGE_SETTLE`]. The old seed
+    /// was the old configuration's: the backend sends the new one's after this
+    /// (`loudness_seed`, adopted only if it covers more).
+    fn change_loudness_key(&mut self, key: String, now: Instant) {
+        self.end_loudness();
+        self.opts.loudness_key = key;
+        self.opts.loudness_seed = None;
+        self.join_loudness_with(false);
+        self.key_changed_at = Some(now);
+        self.send_loudness_meter();
     }
 
     /// Envelope entries since the last call (`(t on the log clock, dBFS)`, oldest first):
@@ -2136,7 +2194,7 @@ impl SceneSource {
         v["restored_broken"] = json!(self.restored_broken);
         v["resuming"] = json!(self.resuming.is_some());
         v["context_losses"] = json!(self.context_losses);
-        let measuring = self.loudness_key.as_deref().is_some_and(|k| {
+        let measuring = self.book_key.as_deref().is_some_and(|k| {
             lock_book(&self.loudness).measuring(k, &self.opts.id)
         });
         let mut lv = self.with_learner(|l| {
@@ -2153,6 +2211,8 @@ impl SceneSource {
             })
         });
         lv["measuring"] = json!(measuring);
+        lv["key"] = json!(self.opts.loudness_key);
+        lv["dropped"] = json!(self.loudness_dropped);
         lv["received"] = json!(self.loudness_received);
         lv["meter"] = json!(self.meter_on);
         v["loudness"] = lv;
@@ -2213,7 +2273,7 @@ impl Source for SceneSource {
         // more room, or this one now measures a path whose learner was replaced. Asked at most
         // every `METER_RECHECK` (a capped scene would otherwise lock the book every frame).
         if !self.meter_on
-            && self.loudness_key.is_some()
+            && self.book_key.is_some()
             && now.duration_since(self.meter_checked) >= METER_RECHECK
         {
             self.meter_checked = now;
@@ -2366,6 +2426,15 @@ impl Source for SceneSource {
                     self.set_properties(m);
                 }
             }
+            // The audio configuration (the backend's fingerprint of `scene_props`): one
+            // measurement per (path, key).
+            "loudness_key" => {
+                if let PropValue::Str(k) = v
+                    && *k != self.opts.loudness_key
+                {
+                    self.change_loudness_key(k.clone(), Instant::now());
+                }
+            }
             // A new seed (the backend sets it at create; a live one is rare): the measurement
             // restarts from it — what this source measured since its last report is dropped
             // (it may be in the seed already: never counted twice).
@@ -2374,7 +2443,7 @@ impl Source for SceneSource {
                     let seed = (!m.is_empty()).then(|| Value::Object(m.clone()));
                     if seed != self.opts.loudness_seed {
                         self.opts.loudness_seed = seed;
-                        if let Some(key) = self.loudness_key.as_deref() {
+                        if let Some(key) = self.book_key.as_deref() {
                             lock_book(&self.loudness).reseed(key, &self.opts.id, self.opts.learner());
                         }
                         self.send_loudness_meter();
