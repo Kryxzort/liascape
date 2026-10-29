@@ -1110,6 +1110,7 @@ idx_loud() { jq -c --arg k "$1" '.[$k] | {i: .loudnessI, tp: .loudnessTP, s: .lo
 loud_i() { jq -r --arg k "$1" '.[$k].loudnessI // empty' "$IDX" 2>/dev/null; }
 wloud() { ctl probe '{"name":"workers"}' | jq -r --arg id "$1" ".workers[] | select(.id==\$id) | .loudness.$2"; }
 setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14 | .Volume = 100 | .NoAudio = false'
+t5_0=$(ms_now)   # play 1 starts (its audible seconds can't exceed the time since)
 post /apply "{\"path\":\"$S5\"}" >/dev/null
 waitfor 5000 scene_ready "$S5" || bad "/apply s5 → $(basename "$(cur path)") ready $(cur ready)"
 SID5=$(srcIdForPath "$S5"); WP5=$(wpid "$SID5")
@@ -1135,8 +1136,10 @@ post /library/volume "{\"path\":\"$S5\",\"intValue\":100}" >/dev/null
 [ "$(wpid "$SID5")" = "$WP5" ] || bad "the worker changed while normalizing: $WP5 → $(wpid "$SID5")"
 # reopened: the new source opens at its normalization (create props), and a later play's measurement never replaces it
 I5=$(loud_i 900000005)
+t5_stop=$(ms_now)
 stop_now
 post /apply "{\"path\":\"$S5\"}" >/dev/null
+t5_re=$(ms_now)
 waitfor 5000 scene_ready "$S5" || bad "re-apply s5 → $(basename "$(cur path)")"
 SID5b=$(srcIdForPath "$S5")
 W5=$(python3 -c "print(round(-14 - float('$I5'), 3))")
@@ -1145,16 +1148,28 @@ A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b
 [ "$SID5b" != "$SID5" ] && near "$G5b" "$W5" 0.01 && [ "$A5b" = 0 ] \
   && ok "reopened ($SID5b): gain.normalize $G5b from its first frame (its create props — no ramp)" || bad "reopened $SID5b: gain.normalize $G5b (want $W5), ramps $A5b"
 ns_l() { ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq --arg id "$1" '[.events[] | select(.id==$id)] | length'; }
-# refined across plays (2026-10-28): the reopened source continues the stored measurement (its `loudness_seed`), each
-# report covers both plays, the index keeps the longer one — and the applied value only moves by ≥ 0.5 LU
+# refined across plays (2026-10-28): the reopened source continues the first play's measurement, each report covers
+# both plays, the index keeps the longer one — and the applied value only moves by ≥ 0.5 LU. The player continues its
+# OWN measurement of the path (audio::loudness::Book): the backend's `loudness_seed`, read from the index at create,
+# can lag the end-of-play report the stop just made (stored off its event thread — TODO "A reopen right after a stop
+# can seed with the previous report": this check read the window's 3.0 s for the end's 5.8 s in 2 of 3 runs).
 idx_s() { jq -r --arg k "$1" '.[$k].loudnessSeconds // 0' "$IDX" 2>/dev/null; }
-S5s=$(idx_s 900000005)
-seed5=$(ctl get "{\"path\":\"$SID5b.loudness_seed\"}" | jq -c '.value | {v, n: ([.counts[]] | add)}')
-echo "$seed5" | jq -e --argjson s "$S5s" '.v == 1 and (.n / 10 - $s | fabs) < 0.05' >/dev/null \
-  && ok "reopened: seeded with the stored measurement ($seed5 = ${S5s} s)" || bad "reopened source's loudness_seed: $seed5 (index ${S5s} s)"
+E5s=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -r --arg id "$SID5" '[.events[] | select(.id==$id)][-1].seconds')
+P5=$(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID5b" '.workers[] | select(.id==$id) | .loudness | {seconds, seed_s, session_s, measuring}')
+# its seed = everything play 1 measured: never less than play 1's last report (its end's, + a rest too short to
+# report — or, when the reopen came during the stop's fade-out, play 1's live measurement handed over: no end
+# report then), about play 1's play time (a stale seed is ≥ 0.25 s short — up to a window; a double count ~2×)
+echo "$P5" | jq -e --argjson e "${E5s:-0}" --argjson lo "$(( t5_stop - t5_0 ))" --argjson hi "$(( t5_re - t5_0 ))" \
+  '.measuring and .seed_s >= $e - 0.001 and .seed_s >= $lo / 1000 - 2.5 and .seed_s <= $hi / 1000 + 0.2' >/dev/null \
+  && ok "reopened: continues the whole first play ($P5; play 1's last report ${E5s} s, played $(( t5_stop - t5_0 ))–$(( t5_re - t5_0 )) ms)" \
+  || bad "reopened source's loudness: $P5 (play 1's last report ${E5s} s, played $(( t5_stop - t5_0 ))–$(( t5_re - t5_0 )) ms)"
+S5s=$(echo "$P5" | jq -r .seed_s)
+waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000005)\") >= ${E5s:-0} - 0.001 else 1)"' \
+  && ok "…the index holds play 1's last report ($(idx_s 900000005) s)" || bad "the index never stored play 1's last report: $(idx_s 900000005) s (want ≥ ${E5s} s)"
 waitfor 15000 eval '[ "$(ns_l "$SID5b")" -ge 1 ]'
 ev5b=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -c --arg id "$SID5b" '[.events[] | select(.id==$id)][0] | {seconds, seed_s, session_s, lufs}')
-echo "$ev5b" | jq -e --argjson s "$S5s" '(.seed_s - $s | fabs) < 0.05 and (.seconds - .seed_s - .session_s | fabs) < 0.05 and .session_s >= 3' >/dev/null \
+# (due a window after play 1's last report: its unreported rest, if any, counts toward it)
+echo "$ev5b" | jq -e --argjson s "$S5s" --argjson e "${E5s:-0}" '(.seed_s - $s | fabs) < 0.05 and (.seconds - .seed_s - .session_s | fabs) < 0.05 and .seconds >= $e + 3 - 0.001' >/dev/null \
   && ok "the second play's report covers both plays: $ev5b" || bad "second play's report: $ev5b (stored before: ${S5s} s)"
 waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000005)\") > $S5s + 2.5 else 1)"' && [ "$(loud_i 900000005)" = "$I5" ] \
   && ok "the index refined: $(idx_loud 900000005) — loudnessI kept at $I5 (moved < 0.5 LU)" || bad "second play: index $(idx_loud 900000005) (was $I5 over ${S5s} s)"

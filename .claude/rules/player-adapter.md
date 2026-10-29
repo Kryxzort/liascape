@@ -461,7 +461,13 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   compared with the APPLIED value). A scene outside the library or trashed meanwhile stores nothing. **Each new
   source continues it:** `SourceProps` (create only) carries `loudness_seed` = the stored `loudnessState`
   (`SceneLoudnessSeed`) — never a resolver value (a live source already holds that measurement plus its own play
-  since; re-seeding it would drop the latter). **Entries learned before 2026-10-28** (no `loudnessState`, decided —
+  since; re-seeding it would drop the latter). **The seed is a floor, not the truth** (2026-10-29): the index can
+  lag the player — `stop_now` → `/apply` of the same scene creates the new source before this side has stored the
+  stopped one's end-of-play report (`OnSceneLoudness` runs off the event thread) — so the player continues its OWN
+  measurement of the path whenever it holds more than the seed (player-core.md § "Scene loudness" → "One
+  measurement per path": a reopen or a transition A → A' of one scene continues it; nothing waits, never counted
+  twice). Nothing here waits for a report; after a player restart the seed is all there is (as before).
+  **Entries learned before 2026-10-28** (no `loudnessState`, decided —
   no migration): applied as they are and never a seed; the next play measures from nothing and its first COMPLETE
   report re-learns the entry (a partial doesn't replace it; the 0.5 LU rule applies against the old value).
   Applied changed → `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver
@@ -721,7 +727,7 @@ during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a 
 without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play the index gains `loudnessI` −20 ± 1
 (complete, ≥ 3 s) and `gain.normalize` ramps (`anim.start` ≥ 300 ms) to +6 live — same source, same worker — and
 reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
-on it; reopened → +6 from the first frame, its `loudness_seed` = the stored measurement, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); a third play of the folder at −10 dBFS moves `loudnessI` ≥ 0.5 LU → `gain.normalize` ramps (≥ 300 ms) to its new value on the same source and worker; the
+on it; reopened → +6 from the first frame, it continues the whole first play (the `workers` probe's `seed_s` ≥ play 1's last report and ≈ play 1's play time — its end report + a rest < window/12, or, when the `/apply` lands during the stop's fade-out, play 1's live measurement handed over; `measuring` — the player's own measurement, never the index's lagging copy: TODO "A reopen right after a stop…") and the index then holds play 1's last report, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); a third play of the folder at −10 dBFS moves `loudnessI` ≥ 0.5 LU → `gain.normalize` ramps (≥ 300 ms) to its new value on the same source and worker; the
 soundless scene → no event, nothing stored, 0; switched away after ~1.2 s → a partial (`loudnessPartial`) stored,
 the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); `/stop` → the worker gone ≤ 1 s; `/next` V→S, S→S,
 S→V in a playlist — each `fade full-live` handed off — and an aligned V→S at a 2 s clip's end; a scene crashing

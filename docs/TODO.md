@@ -266,17 +266,26 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         `loudnessI`/`loudnessTP` → `gain.normalize` (500 ms ramp) only by ≥ 0.5 LU. Entries learned before: applied
         as is, re-learned by the next complete report (no migration). Open: a compositor crash loses what the live
         source measured since its last report (≤ 60 s; the snapshot restores it with its create-time seed); two
-        sources of one scene at once keep only the longer one's contribution; a `path` change on a live scene source
+        sources of one scene at once keep only the longer one's contribution (since 2026-10-29: the newer continues the
+        older's live measurement — the entry below); a `path` change on a live scene source
         drops the seed but the graph/snapshot still carry the old one (the backend never path-changes a scene).
-  - [ ] **A reopen right after a stop can seed with the previous report, not the end-of-play one** (found 2026-10-28
+  - [x] **A reopen right after a stop can seed with the previous report, not the end-of-play one** (found 2026-10-28
         by the fps-cap fix's adapter-IT runs, 2 of 3 runs, on both the fixed and the pre-fix player — unrelated to
         that fix): IT § scene loudness "reopened: seeded with the stored measurement" read `loudness_seed` 3.0 / 6.0 s
         while the index already held 5.8 / 6.3 s. `stop_now` → `/apply` the same scene: the stopped source's
         end-of-play `scene.loudness` (`finish`, ≥ 5 s new) is stored off the event thread AFTER the new source's
-        `SourceProps` read the index. Harmless for the measurement (the backend keeps the longer report; the new
-        source continues an older seed, so its play is counted once, the stretch between the two reports is lost), but
-        the IT check races. Fix candidates: the IT waits for the index to stop growing before the reopen, or the
-        backend waits briefly for a just-retired source's final report before seeding.
+        `SourceProps` read the index — the new source continued the older seed, the stretch between the two reports
+        lost (and a rest < 5 s at the end never reached the index at all). **Fixed 2026-10-29 in the player**
+        (player-core.md § "Scene loudness" → "One measurement per path", player-adapter.md § Scenes → "Loudness"):
+        the compositor keeps one measurement per scene path (`audio::loudness::Book`, owned by `SourceHost`); a new
+        source continues it — the last one left (a reopen) or the live one (a transition A → A' of one scene: only
+        the newest source of a path measures from then on) — unless its `loudness_seed` covers more (adopted then:
+        one of the two kept, never added — no double count). No wait anywhere: 0 ms added to a switch; the
+        backend's seed stays the fallback after a compositor restart (behaviour there unchanged). Tests: units
+        `book_*` (3), api `scene_reopen_continues_the_end_of_play_measurement` (RED before: the reopen continued
+        the window's 2.0 s for the end's 3.0 s); the IT check now reads what the player continues (`workers` probe
+        `seed_s` ≥ play 1's last report and ≈ its play time: the end report + a rest < window/12, or — a reopen during
+        the stop's fade-out, seen in 1 of 4 runs — play 1's live measurement handed over), then the index catching up.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on

@@ -28,7 +28,8 @@
 //! and once at the cap ([`CAP_ENV`], 30 min of audible play over every session) — after which
 //! nothing more is measured (the worker stops metering).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 
 /// The worker's stream rate (the K-weighting coefficients below are for it).
 pub const RATE: u32 = 48_000;
@@ -165,7 +166,7 @@ impl SegmentMeter {
 
 /// What a source reports (`scene.loudness`): the integration over every session measured so
 /// far (its seed + this source's own play).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Learned {
     /// Integrated loudness (gated), LUFS.
     pub lufs: f64,
@@ -181,6 +182,14 @@ pub struct Learned {
     pub session_s: f64,
     /// The cap was reached: measuring stopped for good.
     pub capped: bool,
+    /// Audible seconds this source continued (its seed, or what the source of the same scene
+    /// before it measured — [`Book`]).
+    pub seed_s: f64,
+    pub window_s: f64,
+    pub cap_s: f64,
+    /// [`Learner::state_json`] at the report: what the backend stores and seeds the next play
+    /// with.
+    pub state: serde_json::Value,
 }
 
 /// The histogram's bins: [`HIST_STEP`] LU wide from [`ABS_GATE_LUFS`] up to +5 LUFS (a block
@@ -397,7 +406,23 @@ impl Learner {
             complete: self.audible_s() + 1e-9 >= self.window_s,
             session_s: self.session_s(),
             capped: self.capped,
+            seed_s: self.seed_s(),
+            window_s: self.window_s,
+            cap_s: self.cap_s,
+            state: self.state_json(),
         })
+    }
+
+    /// Another source of the same scene continues this measurement ([`Book::join`], or the
+    /// measuring one left while another still plays): what's measured so far becomes its seed
+    /// (`seed_s`), its block forming and played time start over (blocks never span two
+    /// sources), and it measures again unless capped. What's still unreported stays so — the
+    /// next report includes it, once.
+    pub fn begin_session(&mut self) {
+        self.seed_blocks = self.blocks;
+        self.segments = 0;
+        self.recent.clear();
+        self.done = self.capped;
     }
 
     /// The audible seconds at which the next report is due: the window, then each further
@@ -454,6 +479,142 @@ impl Learner {
             return None;
         }
         self.learned()
+    }
+}
+
+/// Idle paths (no live source) whose measurement the [`Book`] keeps for a reopen — the least
+/// recently left beyond this go (a rotation through more scenes than this falls back to the
+/// backend's seed for the oldest: what it lost is at most a report's unreported rest).
+pub const BOOK_IDLE_KEEP: usize = 64;
+
+/// Every scene path's measurement in this player, shared by the sources playing it (TODO "A
+/// reopen right after a stop can seed with the previous report"). The backend seeds a new
+/// source from its index (`loudness_seed`), which can lag the player: the end-of-play report of
+/// a source retired just before (stored off the backend's event thread) — or a rest too short
+/// to report at all — isn't in it yet. The player holds the measurement itself, so:
+///
+/// - **one measurement per path, continued by every source of it** ([`join`](Self::join)): a
+///   new source continues the path's live (or last left) learner — unless its seed covers MORE
+///   audible play (another lineage — e.g. after a player restart, or the index edited — is then
+///   adopted). Never both added: a seed is never merged into a learner, so no block is counted
+///   twice (every report the backend stored came from this lineage, or is the one adopted);
+/// - **only the newest live source of a path measures** ([`push`](Self::push)): a transition
+///   A → A' of one scene hands A's live measurement to A' at A''s open (A's segments are
+///   dropped from then on — the same sound, never counted twice); when the measuring source
+///   leaves while another of the path still plays, that one takes over;
+/// - **the end of a play** ([`leave`](Self::leave)) reports what's left (`Learner::finish`) and
+///   keeps the learner for the next source of the path (no wait, no index round trip).
+///
+/// In memory only: a player crash/restart starts from the backend's seeds again (the
+/// documented bounded loss — player-core.md § "Scene loudness").
+#[derive(Debug, Default)]
+pub struct Book {
+    paths: HashMap<String, Measure>,
+    /// Paths without a live source, least recently left first (≤ [`BOOK_IDLE_KEEP`]).
+    idle: VecDeque<String>,
+}
+
+#[derive(Debug)]
+struct Measure {
+    learner: Learner,
+    /// Live sources of the path in the order they joined: the last one measures.
+    members: Vec<String>,
+}
+
+/// The book the compositor's scene sources share (`SourceHost` owns one).
+pub type SharedBook = Arc<Mutex<Book>>;
+
+impl Book {
+    pub fn shared() -> SharedBook {
+        Arc::new(Mutex::new(Book::default()))
+    }
+
+    /// Source `id` opens on `path`; `seeded` = the learner its `loudness_seed` (the backend's
+    /// index) makes. It continues the path's measurement — or adopts `seeded` when that covers
+    /// more audible play — and measures from now (the newest source of the path).
+    pub fn join(&mut self, path: &str, id: &str, seeded: Learner) {
+        self.idle.retain(|p| p != path);
+        match self.paths.get_mut(path) {
+            None => {
+                self.paths.insert(
+                    path.to_string(),
+                    Measure {
+                        learner: seeded,
+                        members: vec![id.to_string()],
+                    },
+                );
+            }
+            Some(m) => {
+                m.members.retain(|x| x != id);
+                m.members.push(id.to_string());
+                if seeded.blocks > m.learner.blocks {
+                    m.learner = seeded;
+                } else {
+                    m.learner.begin_session();
+                }
+            }
+        }
+    }
+
+    /// Source `id` stops playing `path` (destroyed, its path changed): if it was the measuring
+    /// one, the end's report of what's left (`Learner::finish`) — and the next newest source
+    /// still playing the path, if any, measures on. The learner stays for a reopen. Idempotent.
+    pub fn leave(&mut self, path: &str, id: &str) -> Option<Learned> {
+        let m = self.paths.get_mut(path)?;
+        let head = m.members.last().is_some_and(|x| x == id);
+        let n = m.members.len();
+        m.members.retain(|x| x != id);
+        if m.members.len() == n {
+            return None;
+        }
+        let r = if head { m.learner.finish() } else { None };
+        if m.members.is_empty() {
+            self.idle.push_back(path.to_string());
+            while self.idle.len() > BOOK_IDLE_KEEP {
+                if let Some(p) = self.idle.pop_front() {
+                    self.paths.remove(&p);
+                }
+            }
+        } else if head {
+            m.learner.begin_session();
+        }
+        r
+    }
+
+    /// A segment `id` played of `path`: measured if `id` is the path's measuring source
+    /// (`Learner::push` — `Some` when a report is due), else dropped.
+    pub fn push(&mut self, path: &str, id: &str, seg: Segment) -> Option<Learned> {
+        let m = self.paths.get_mut(path)?;
+        if m.members.last().is_some_and(|x| x == id) {
+            m.learner.push(seg)
+        } else {
+            None
+        }
+    }
+
+    /// A live `loudness_seed` on source `id`: the path's measurement restarts from `seeded`
+    /// (what was measured since its last report is dropped — it may be in the seed already:
+    /// never counted twice), `id` measuring.
+    pub fn reseed(&mut self, path: &str, id: &str, seeded: Learner) {
+        if let Some(m) = self.paths.get_mut(path) {
+            m.members.retain(|x| x != id);
+            m.members.push(id.to_string());
+            m.learner = seeded;
+        } else {
+            self.join(path, id, seeded);
+        }
+    }
+
+    /// `path`'s measurement, if the book holds one.
+    pub fn learner(&self, path: &str) -> Option<&Learner> {
+        self.paths.get(path).map(|m| &m.learner)
+    }
+
+    /// `id` is the source measuring `path` (the newest of its live sources).
+    pub fn measuring(&self, path: &str, id: &str) -> bool {
+        self.paths
+            .get(path)
+            .is_some_and(|m| m.members.last().is_some_and(|x| x == id))
     }
 }
 
@@ -561,7 +722,7 @@ mod tests {
             }
         }
         assert_eq!(hits.len(), 1, "once: {hits:?}");
-        let (i, x) = hits[0];
+        let (i, x) = hits[0].clone();
         // 3 s audible: the first block needs 4 segments, then one per segment.
         assert_eq!(i, 32, "at segment {i}");
         assert!(x.complete && (x.lufs + 20.0).abs() < 0.1 && (x.seconds - 3.0).abs() < 1e-6);
@@ -770,6 +931,117 @@ mod tests {
         assert_eq!(cap_s(None), 1800.0);
         assert_eq!(cap_s(Some("12")), 12.0);
         assert_eq!(cap_s(Some("0")), 1800.0);
+    }
+
+    /// The book (TODO "A reopen right after a stop can seed with the previous report"): a
+    /// reopen continues what the path's last source measured — its end report, and a rest too
+    /// short to report — whatever older seed the backend's index still has; the up-to-date seed
+    /// is the same measurement, never added again; a longer seed (another lineage) is adopted.
+    #[test]
+    fn book_reopen_continues_the_last_source_never_twice() {
+        let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
+        let seeded = |st: Option<&serde_json::Value>| Learner::new(2.0).with_cap(1e9).with_seed(st);
+        let mut b = Book::default();
+        b.join("p", "a", seeded(None));
+        let r: Vec<Learned> = tone(3.5).into_iter().filter_map(|s| b.push("p", "a", s)).collect();
+        assert_eq!(r.len(), 1, "the window's report: {r:?}");
+        let window = r[0].clone();
+        let end = b.leave("p", "a").expect("the end's report (1.2 s left ≥ 0.17 s)");
+        assert!(end.seconds > window.seconds + 1.0, "{end:?}");
+        assert!(b.leave("p", "a").is_none(), "idempotent");
+        // The race: the reopen is seeded with the window's report → continues the end.
+        b.join("p", "b", seeded(Some(&window.state)));
+        let l = b.learner("p").unwrap();
+        assert_eq!((l.audible_s(), l.seed_s(), l.session_s()), (end.seconds, end.seconds, 0.0));
+        assert!(b.leave("p", "b").is_none(), "nothing new: no report");
+        // Up to date: the same, not twice.
+        b.join("p", "c", seeded(Some(&end.state)));
+        assert_eq!(b.learner("p").unwrap().audible_s(), end.seconds);
+        // A rest too short to report at the end is continued too.
+        let short: Vec<_> = tone(0.4).into_iter().filter_map(|s| b.push("p", "c", s)).collect();
+        assert!(short.is_empty());
+        let after_c = b.learner("p").unwrap().audible_s();
+        assert!(after_c > end.seconds, "c measured");
+        assert!(b.leave("p", "c").is_none(), "0.1 s < a twelfth of the window");
+        b.join("p", "d", seeded(Some(&end.state)));
+        assert_eq!(b.learner("p").unwrap().audible_s(), after_c, "the unreported rest kept");
+        // …and reported by the next report, once: seconds = seed + its own.
+        let r: Vec<Learned> = tone(2.5).into_iter().filter_map(|s| b.push("p", "d", s)).collect();
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert!((r[0].seconds - r[0].seed_s - r[0].session_s).abs() < 1e-9, "{r:?}");
+        assert_eq!(r[0].seed_s, after_c);
+        // A seed covering more (another lineage) is adopted, never added.
+        let long = {
+            let mut l = seeded(None);
+            feed(&mut l, &tone(20.0));
+            l.state_json()
+        };
+        b.leave("p", "d");
+        b.join("p", "e", seeded(Some(&long)));
+        let l = b.learner("p").unwrap();
+        assert!((l.audible_s() - 19.7).abs() < 0.05 && l.seed_s() == l.audible_s(), "{}", l.audible_s());
+        // Paths are separate.
+        b.join("q", "f", seeded(None));
+        assert_eq!(b.learner("q").unwrap().audible_s(), 0.0);
+    }
+
+    /// Two live sources of one path (a transition A → A'): A' continues A's live measurement
+    /// and only A' measures (A's segments — the same sound — are dropped); A leaving reports
+    /// nothing; A' leaving first hands the measurement back to A.
+    #[test]
+    fn book_hands_a_live_measurement_to_the_newest_source() {
+        let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
+        let fresh = || Learner::new(2.0).with_cap(1e9);
+        let mut b = Book::default();
+        b.join("p", "a", fresh());
+        for s in tone(1.5) {
+            assert!(b.push("p", "a", s).is_none());
+        }
+        let at_join = b.learner("p").unwrap().audible_s();
+        b.join("p", "a2", fresh());
+        assert!(b.measuring("p", "a2") && !b.measuring("p", "a"));
+        let l = b.learner("p").unwrap();
+        assert_eq!((l.seed_s(), l.session_s()), (at_join, 0.0));
+        // Both play the same sound: only a2's counts.
+        let mut r = Vec::new();
+        for s in tone(2.0) {
+            assert!(b.push("p", "a", s).is_none(), "a no longer measures");
+            r.extend(b.push("p", "a2", s));
+        }
+        let l = b.learner("p").unwrap();
+        assert!((l.session_s() - 1.7).abs() < 0.05, "a2's own play only: {}", l.session_s());
+        assert_eq!(r.len(), 1, "the window (2 s) reached once: {r:?}");
+        assert!(b.leave("p", "a").is_none(), "a handed its measurement over: no report");
+        assert!(b.measuring("p", "a2"));
+        let before = b.learner("p").unwrap().audible_s();
+        // The other way round: the newest leaves first → the older one measures on.
+        b.join("p", "a3", fresh());
+        // a3 measured nothing itself, but it was the measuring one: the rest a2 left
+        // unreported is reported once now (and not again later).
+        let end = b.leave("p", "a3").expect("the unreported rest");
+        assert_eq!((end.seconds, end.session_s), (before, 0.0), "{end:?}");
+        assert!(b.measuring("p", "a2"));
+        for s in tone(1.0) {
+            b.push("p", "a2", s);
+        }
+        assert!(b.learner("p").unwrap().audible_s() > before + 0.5, "a2 measures again");
+    }
+
+    /// The book keeps at most [`BOOK_IDLE_KEEP`] idle paths (the least recently left go); a
+    /// path with a live source is never dropped.
+    #[test]
+    fn book_keeps_a_bounded_number_of_idle_paths() {
+        let mut b = Book::default();
+        b.join("live", "x", Learner::new(2.0));
+        for i in 0..BOOK_IDLE_KEEP + 5 {
+            let p = format!("p{i}");
+            b.join(&p, "s", Learner::new(2.0));
+            b.leave(&p, "s");
+        }
+        assert!(b.learner("p0").is_none() && b.learner("p4").is_none());
+        assert!(b.learner("p5").is_some() && b.learner(&format!("p{}", BOOK_IDLE_KEEP + 4)).is_some());
+        assert!(b.learner("live").is_some());
+        assert_eq!(b.paths.len(), BOOK_IDLE_KEEP + 1);
     }
 
     #[test]

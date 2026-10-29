@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value, json};
 
 use super::{MpvSource, Source, SourceEvent, StepStatus, unsupported};
-use crate::audio::loudness::{self, Learned, Learner};
+use crate::audio::loudness::{self, Book, Learned, Learner, SharedBook};
 use crate::gfx::dmabuf::DmabufDesc;
 use crate::gfx::{Gfx, GlKeepAlive, Tex};
 use crate::graph::props::{self, PropValue};
@@ -225,8 +225,12 @@ pub struct SceneOpts {
     /// (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`; 1800 by default).
     pub loudness_cap_s: f64,
     /// The measurement of earlier plays to continue (`loudness_seed`: the state the backend
-    /// stored from the last `scene.loudness`), if any.
+    /// stored from the last `scene.loudness`), if any — unless the player's own [`Book`] holds
+    /// more of this path.
     pub loudness_seed: Option<Value>,
+    /// The book of scene measurements this source shares with every other source of the
+    /// compositor (`SourceHost`'s); `None` = a private one (tests driving `open_opts`).
+    pub loudness_book: Option<SharedBook>,
 }
 
 impl SceneOpts {
@@ -257,6 +261,7 @@ impl SceneOpts {
             loudness_window_s: loudness::DEFAULT_WINDOW_S,
             loudness_cap_s: loudness::DEFAULT_CAP_S,
             loudness_seed: None,
+            loudness_book: None,
         }
     }
 
@@ -407,8 +412,14 @@ pub struct SceneSource {
     /// `ContextLost` reports (the worker's GL context was lost → a crash restart).
     context_losses: u32,
     /// Scene loudness learned on first play (`audio::loudness`): the worker's segments of the
-    /// current path — kept across worker restarts, started over by a `path` change.
-    loudness: Learner,
+    /// current path go into that path's measurement in the shared [`Book`] (kept across worker
+    /// restarts and across sources of the same path — a reopen or a transition A → A'
+    /// continues it).
+    loudness: SharedBook,
+    /// The path this source joined in `loudness` (`None` once it left: ended).
+    loudness_key: Option<String>,
+    /// The worker meters (its last `Start.loudness` / `LoudnessMeter`).
+    meter_on: bool,
     /// Loudness segments the worker sent (every one, measured or not): the cap's meter-off shows
     /// as this standing still (the `workers` probe `loudness.received`).
     loudness_received: u64,
@@ -424,6 +435,20 @@ pub fn hang_timeout(v: Option<&str>) -> Duration {
     v.and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|ms| *ms > 0)
         .map_or(HANG_TIMEOUT, Duration::from_millis)
+}
+
+/// The shared loudness book (a panic elsewhere never poisons it for good: its state is plain
+/// counts).
+fn lock_book(b: &SharedBook) -> std::sync::MutexGuard<'_, Book> {
+    b.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A source dropped without its teardown (tests) still leaves its path's measurement — else it
+/// would stay the measuring one and the next source of the path would never measure.
+impl Drop for SceneSource {
+    fn drop(&mut self) {
+        self.end_loudness();
+    }
 }
 
 fn epoll_new() -> Result<OwnedFd, String> {
@@ -466,6 +491,7 @@ impl SceneSource {
         id: &str,
         node: &[(String, PropValue)],
         base: &Map<String, Value>,
+        book: &SharedBook,
     ) -> Result<SceneSource, ApiError> {
         let get = |k: &str| node.iter().find(|(n, _)| n == k).map(|(_, v)| v);
         let s = |k: &str| match get(k) {
@@ -531,6 +557,7 @@ impl SceneSource {
         {
             o.loudness_seed = Some(Value::Object(m.clone()));
         }
+        o.loudness_book = Some(book.clone());
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
         // Task 10: a scene the snapshot saved broken (past its restart budget before the
@@ -656,10 +683,13 @@ impl SceneSource {
             preview_error: None,
             restored_broken: false,
             context_losses: 0,
-            loudness: opts.learner(),
+            loudness: opts.loudness_book.clone().unwrap_or_else(Book::shared),
+            loudness_key: None,
+            meter_on: true,
             loudness_received: 0,
             opts,
         };
+        src.join_loudness();
         if !src.opts.defer_spawn {
             src.spawn()?;
         }
@@ -687,8 +717,9 @@ impl SceneSource {
                 self.clock.speed()
             },
             // A measurement already at its cap: nothing to meter.
-            loudness: !self.loudness.capped(),
+            loudness: !self.loudness_capped(),
         };
+        self.meter_on = !self.loudness_capped();
         self.gain_sent = Some(self.gains.effective_db());
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
         spec.env = self.opts.env.clone();
@@ -1284,15 +1315,23 @@ impl SceneSource {
             }
             FromWorker::Envelope { t0_ms, dbfs_1ms } => self.on_envelope(t0_ms, &dbfs_1ms),
             FromWorker::Loudness { segments } => {
-                let capped = self.loudness.capped();
                 self.loudness_received += segments.len() as u64;
-                for seg in segments {
-                    if let Some(l) = self.loudness.push(seg) {
-                        self.report_loudness(l);
+                let reports: Vec<Learned> = match self.loudness_key.as_deref() {
+                    Some(key) => {
+                        let mut b = lock_book(&self.loudness);
+                        segments
+                            .into_iter()
+                            .filter_map(|seg| b.push(key, &self.opts.id, seg))
+                            .collect()
                     }
+                    None => Vec::new(),
+                };
+                for l in reports {
+                    self.report_loudness(l);
                 }
-                // The cap reached: the worker stops metering (folded into a restart's Start).
-                if self.loudness.capped() && !capped {
+                // The cap reached (by this source or another of the path): the worker stops
+                // metering (folded into a restart's Start).
+                if self.meter_on && self.loudness_capped() {
                     self.send_loudness_meter();
                 }
             }
@@ -1495,11 +1534,11 @@ impl SceneSource {
         }
         self.latch.forget_worker();
         self.end_loudness();
-        // The seed was the old folder's measurement: the new one starts from nothing (the
-        // next worker's `Start` meters again).
+        // The seed was the old folder's measurement: the new one continues what the book has
+        // of the new folder, else starts from nothing (the next worker's `Start` meters again).
         self.opts.loudness_seed = None;
-        self.loudness = self.opts.learner();
         self.opts.path = PathBuf::from(&path);
+        self.join_loudness();
         self.opts.synthetic = self
             .opts
             .env
@@ -1668,25 +1707,52 @@ impl SceneSource {
             json!({"id": self.opts.id, "path": self.opts.path, "lufs": l.lufs,
                    "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
                    "seconds": l.seconds, "session_s": l.session_s,
-                   "seed_s": self.loudness.seed_s(), "played_s": l.played_s,
+                   "seed_s": l.seed_s, "played_s": l.played_s,
                    "complete": l.complete, "capped": l.capped,
-                   "window_s": self.loudness.window_s(), "cap_s": self.loudness.cap_s(),
-                   "state": self.loudness.state_json()}),
+                   "window_s": l.window_s, "cap_s": l.cap_s,
+                   "state": l.state}),
         );
+    }
+
+    /// Join the current path's measurement in the book: continue it (a reopen, a second source
+    /// of a playing scene) unless the backend's seed covers more (`Book::join`).
+    fn join_loudness(&mut self) {
+        let key = self.opts.path.to_string_lossy().into_owned();
+        lock_book(&self.loudness).join(&key, &self.opts.id, self.opts.learner());
+        self.loudness_key = Some(key);
+    }
+
+    /// `f` of this path's measurement (a fresh one once the source left its path).
+    fn with_learner<R>(&self, f: impl FnOnce(&Learner) -> R) -> R {
+        let b = lock_book(&self.loudness);
+        match self.loudness_key.as_deref().and_then(|k| b.learner(k)) {
+            Some(l) => f(l),
+            None => f(&self.opts.learner()),
+        }
+    }
+
+    fn loudness_capped(&self) -> bool {
+        self.with_learner(Learner::capped)
     }
 
     /// Tell the worker whether to meter (off once the measurement is capped).
     fn send_loudness_meter(&mut self) {
-        let on = !self.loudness.capped();
+        let on = !self.loudness_capped();
+        self.meter_on = on;
         if let Some(h) = self.host.as_mut() {
             let _ = h.send(&ToWorker::LoudnessMeter { on }, &[]);
         }
     }
 
-    /// The source stops playing its current path (destroyed, or `path` changed): what's left
-    /// unreported, if enough (`Learner::finish`).
+    /// The source stops playing its current path (destroyed, or `path` changed): leaves the
+    /// path's measurement — what's left unreported, if enough and if it was the measuring one
+    /// (`Book::leave`). Idempotent.
     fn end_loudness(&mut self) {
-        if let Some(l) = self.loudness.finish() {
+        let Some(key) = self.loudness_key.take() else {
+            return;
+        };
+        let end = lock_book(&self.loudness).leave(&key, &self.opts.id);
+        if let Some(l) = end {
             self.report_loudness(l);
         }
     }
@@ -1991,18 +2057,25 @@ impl SceneSource {
         v["restored_broken"] = json!(self.restored_broken);
         v["resuming"] = json!(self.resuming.is_some());
         v["context_losses"] = json!(self.context_losses);
-        v["loudness"] = json!({
-            "seconds": self.loudness.audible_s(),
-            "session_s": self.loudness.session_s(),
-            "seed_s": self.loudness.seed_s(),
-            "played_s": self.loudness.played_s(),
-            "lufs": self.loudness.integrated(),
-            "done": self.loudness.done(),
-            "capped": self.loudness.capped(),
-            "window_s": self.loudness.window_s(),
-            "cap_s": self.loudness.cap_s(),
-            "received": self.loudness_received,
+        let measuring = self.loudness_key.as_deref().is_some_and(|k| {
+            lock_book(&self.loudness).measuring(k, &self.opts.id)
         });
+        let mut lv = self.with_learner(|l| {
+            json!({
+                "seconds": l.audible_s(),
+                "session_s": l.session_s(),
+                "seed_s": l.seed_s(),
+                "played_s": l.played_s(),
+                "lufs": l.integrated(),
+                "done": l.done(),
+                "capped": l.capped(),
+                "window_s": l.window_s(),
+                "cap_s": l.cap_s(),
+            })
+        });
+        lv["measuring"] = json!(measuring);
+        lv["received"] = json!(self.loudness_received);
+        v["loudness"] = lv;
         v["preview"] = json!({
             "path": self.opts.preview,
             "open": self.preview.is_some(),
@@ -2191,7 +2264,9 @@ impl Source for SceneSource {
                     let seed = (!m.is_empty()).then(|| Value::Object(m.clone()));
                     if seed != self.opts.loudness_seed {
                         self.opts.loudness_seed = seed;
-                        self.loudness = self.opts.learner();
+                        if let Some(key) = self.loudness_key.as_deref() {
+                            lock_book(&self.loudness).reseed(key, &self.opts.id, self.opts.learner());
+                        }
                         self.send_loudness_meter();
                     }
                 }
