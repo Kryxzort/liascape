@@ -1837,6 +1837,28 @@ source; the transition recipe stays the one place a switch happens. The contract
     `Order::reorder` (the current item kept, or finishing without a replay; history `[current]`; play time and
     countdown kept), and an armed B that is no longer a playable item is cancelled (the abort restores A's loop)
     and re-planned; `defaults` / item `props` reach the next B only. An edit never resets the play time.
+  - **Pause, holds, parking** (Task 5): the clock is `Runtime::now`, so a user pause and the low-VRAM hold stop
+    play time and the countdown. Parked (no output, R60) the program's phase is `parked` and it follows
+    `while_parked` (O2, a Program prop, live): `rotate` (default — today's backend) keeps both clocks counting,
+    timer/max/scenes-after switches go through `transition_parked` (each replaces the parked wallpaper and commits at
+    once; no sooner than `PARKED_MIN_PLAY_MS` = 1 s after the last commit, so an image at minimum 0 can't switch
+    every tick), an end-of-video switch waits for an output (a parked A never ends); `hold` stops both clocks and
+    the rules until an output returns. An output added mid-switch is adopted by the recipe as usual.
+  - **Persistence** (`recipes/program/store.rs`, designer call 4): `<state>/program.json` = `{version: 1, rev,
+    programs: [{id, props (settable, as `get` returns them), order: {items, idx, shuffle}}]}`, written on
+    `lia-snapshot` (`Writer::send_file`, before the snapshot queued with it) only when a definition changed
+    (create/set/destroy, a play, a cycle's reshuffle — `Programs::def_dirty`; at startup too, and always on a clean
+    exit) — never by the 2 s refresh. The snapshot's `programs: [ProgramSnap {id, rev, index, history,
+    history_index, current_path, played_ms, remaining_ms, last_effect, failures, broken}]` (additive, `VERSION` 1)
+    carries the dynamic half; while a program plays (player not paused) the snapshot refreshes every 2 s like a
+    video. `--restore`: after the snapshot's sources, each `program.json` program is created again and
+    `Programs::restore` gives it its order and — when its first output (or the parked slot) shows its saved
+    `current_path` — its cursor, history and clocks (`program.restored {reanchored}`); a `rev` that differs from
+    `program.json`'s (a crash between the two writes) re-anchors the cursor on `current_path` (history `[current]`);
+    anything else leaves it `idle` (`program.restore_mismatch`). Its first tick arms per the rule (an `on_end`
+    video re-arms `align: end` — the snapshot saved an armed switch as A where it plays). The supervisor's 4th
+    restart in a minute (no `--restore`) comes back without programs. `stop` (and `quit`, after its final
+    write) destroys every program (`stop_all`).
   - Tests: `tests/program.rs` (27 stepped/real-clock API tests: timer/speed/1-item/on-end/min-hold/max/0-off/scenes
     after/separate off/images/commit at effect start/cut at A's end/effect pick/failures/all unplayable/skip/broken/
     VRAM/pause/every switch combo; Task 4's 18: the history contract through the verbs, prev at the start, next while
@@ -2901,7 +2923,8 @@ same place.
   demuxer_*, af, no_audio, audio_delay), playing, transition_target, broken (Phase 2 Task
   10: a scene past its restart budget — only when true; restored as its preview, no worker)}`;
   `parked` — `{id,
-  resume_paused, connector}`. Source keys are references inside the file only: a restore
+  resume_paused, connector}`; `programs` (Phase 3, only when there is one) — each program's dynamic state
+  (§ Programs "Persistence"; its configuration is `program.json`, written by the same thread). Source keys are references inside the file only: a restore
   mints fresh ids (`snapshot.restored.ids` maps old → new).
 - **Excluded:** effects, `snapshot`-kind sources, sources no output shows (graves, held A's,
   anything created but not shown), every in-flight transition's scaffolding. **A transition

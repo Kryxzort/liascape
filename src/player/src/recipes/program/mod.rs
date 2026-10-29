@@ -7,10 +7,12 @@
 //!   countdown's retime (pure).
 //! - [`order`] — the play order: cycles, shuffle, history, random, reorder (pure, seeded).
 //! - [`pick`] — the effect / duration / method of one switch (pure, seeded).
+//! - [`store`] — `program.json` (configuration + order) and the snapshot's dynamic half.
 
 pub mod order;
 pub mod pick;
 pub mod rule;
+pub mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -75,6 +77,12 @@ impl Rng {
 /// The failure ladder (designer call 8): the backoff after the n-th switch failure in a row,
 /// then 30 s for as long as failures continue. A handoff resets it.
 pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];
+
+/// While parked under `while_parked: rotate`, a program switches no sooner than this after
+/// its last commit: a parked switch commits at once (nothing to wait for), so a rule that
+/// is reached at once (an image with minimum 0) would otherwise switch every tick. The
+/// backend's tick polled ≤ 1 s apart.
+pub const PARKED_MIN_PLAY_MS: f64 = 1000.0;
 
 /// What a program is doing (`prog:<id>.phase`, `state.programs[].phase`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -158,6 +166,8 @@ pub struct ProgCfg {
     pub scenes_after_ms: u64,
     pub transition: TransitionCfg,
     pub seed: u64,
+    /// `while_parked: hold` — both clocks stop while no output shows the item (O2).
+    pub hold_parked: bool,
 }
 
 impl ProgCfg {
@@ -195,6 +205,7 @@ impl ProgCfg {
                 Some(PropValue::I64(i)) => *i as u64,
                 _ => 0,
             },
+            hold_parked: s("while_parked") == "hold",
         })
     }
 
@@ -317,6 +328,8 @@ struct Prog {
     broken: BTreeSet<String>,
     empty_logged: bool,
     parked: bool,
+    /// The play order changed by itself (a cycle's reshuffle): `program.json` is due.
+    def_changed: bool,
 }
 
 fn no_program(id: &str) -> ApiError {
@@ -406,6 +419,7 @@ impl Prog {
             broken: BTreeSet::new(),
             empty_logged: false,
             parked: false,
+            def_changed: false,
         }
     }
 
@@ -602,6 +616,7 @@ impl Prog {
         let Some(p) = self.pending.take() else { return };
         let from = self.order.current().map(str::to_string);
         let path = p.step.path.clone();
+        self.def_changed |= p.step.reshuffles();
         self.order.commit(p.step);
         self.rearm = None;
         self.cur_src = b;
@@ -732,6 +747,11 @@ impl Prog {
         let mut acts = Vec::new();
         let mut dt = self.clock.advance(now).as_secs_f64() * 1000.0;
         self.parked = parked;
+        // `while_parked: hold` (O2): both clocks and the rules stop until an output returns
+        let frozen = parked && self.cfg.hold_parked;
+        if frozen {
+            dt = 0.0;
+        }
         let cur_before = self.cur_src.clone();
 
         // 1. the transitions' outcomes
@@ -900,9 +920,11 @@ impl Prog {
             return acts;
         }
 
-        // 7. the rotation rules (player-adapter.md § Rotation)
+        // 7. the rotation rules (player-adapter.md § Rotation); while parked they go on
+        // under `rotate` (no sooner than PARKED_MIN_PLAY_MS apart) and stop under `hold`
         let in_flight_now = self.pending.as_ref().is_some_and(|p| p.align == Align::Now);
-        if !in_flight_now && !foreign_busy && self.cur_src.is_some() {
+        let parked_wait = parked && (frozen || self.played_ms < PARKED_MIN_PLAY_MS);
+        if !in_flight_now && !foreign_busy && !parked_wait && self.cur_src.is_some() {
             let can_rotate = self.can_rotate();
             let played = self.played_ms.max(0.0) as u64;
             if !self.cfg.on_end {
@@ -1016,11 +1038,178 @@ pub struct Programs {
     /// Every switch a program requested that may still be in flight (to tell another
     /// client's transitions from the programs' own; pruned to the live ones each tick).
     issued: std::collections::HashSet<CorrId>,
+    /// A definition (config or play order) changed since `program.json` was last written.
+    def_dirty: bool,
+    /// `program.json`'s revision (bumped per write; the snapshot's state carries it).
+    def_rev: u64,
 }
 
 impl Programs {
+    /// No program yet — and `program.json` due, so a fresh start never leaves an older
+    /// session's file behind for a later `--restore`.
     pub fn new() -> Programs {
-        Programs::default()
+        Programs {
+            def_dirty: true,
+            ..Programs::default()
+        }
+    }
+
+    /// `program.json` is due (a definition changed since the last write).
+    pub fn def_dirty(&self) -> bool {
+        self.def_dirty
+    }
+
+    /// Write `program.json` with the next snapshot whatever changed (a clean exit).
+    pub fn mark_def_dirty(&mut self) {
+        self.def_dirty = true;
+    }
+
+    /// Some program follows what it plays (its play time moves: the snapshot refreshes).
+    pub fn any_started(&self) -> bool {
+        self.progs.values().any(|p| p.started)
+    }
+
+    /// `program.json` now (a new revision; the dirty mark cleared).
+    pub fn program_file(&mut self, g: &Graph) -> store::ProgramFile {
+        self.def_rev += 1;
+        self.def_dirty = false;
+        let programs = self
+            .progs
+            .iter()
+            .map(|(id, p)| {
+                let props = store::SETTABLE
+                    .iter()
+                    .filter_map(|k| {
+                        let v = g.get(&PropPath(format!("{id}.{k}"))).ok()?;
+                        Some((k.to_string(), v.to_json()))
+                    })
+                    .collect();
+                store::ProgramDef {
+                    id: id.clone(),
+                    props,
+                    order: store::OrderSnap {
+                        items: p.order.items().to_vec(),
+                        idx: p.order.index(),
+                        shuffle: p.order.shuffle(),
+                    },
+                }
+            })
+            .collect();
+        store::ProgramFile {
+            version: store::VERSION,
+            rev: self.def_rev,
+            programs,
+        }
+    }
+
+    /// Each program's dynamic state for `snapshot.json`.
+    pub fn snaps(&self) -> Vec<store::ProgramSnap> {
+        self.progs
+            .iter()
+            .map(|(id, p)| {
+                let (history, hi) = p.order.history();
+                store::ProgramSnap {
+                    id: id.clone(),
+                    rev: self.def_rev,
+                    index: p.order.index(),
+                    history: history.to_vec(),
+                    history_index: hi,
+                    current_path: p.order.current().filter(|_| p.started).map(str::to_string),
+                    played_ms: p.played_ms.round(),
+                    remaining_ms: p.remaining_ms.round(),
+                    last_effect: p.last_effect.clone(),
+                    failures: p.failures,
+                    broken: p.broken.iter().cloned().collect(),
+                }
+            })
+            .collect()
+    }
+
+    /// `--restore`: a program [`configure`](Self::configure)d from `program.json` gets its
+    /// saved order back and — when the outputs show its saved current item (`shown`, the
+    /// restored source; the parked one with no output) — its cursor, history, play time
+    /// and countdown; its first tick then arms per the rule (an end-of-video switch re-arms
+    /// `align: end`). A snapshot of another revision re-anchors the cursor on the current
+    /// item (history `[current]`). Anything else: `idle` (`program.restore_mismatch`).
+    pub fn restore(
+        &mut self,
+        id: &str,
+        def: &store::ProgramDef,
+        snap: Option<&store::ProgramSnap>,
+        file_rev: u64,
+        shown: Option<String>,
+        g: &mut Graph,
+    ) {
+        self.def_rev = self.def_rev.max(file_rev);
+        let Some(p) = self.progs.get_mut(id) else {
+            return;
+        };
+        let paths = p.cfg.paths();
+        let saved_ok = store::same_items(&def.order.items, &paths);
+        let items = if saved_ok {
+            def.order.items.clone()
+        } else {
+            paths.clone()
+        };
+        let shuffle = p.cfg.shuffle;
+        p.order = Order::from_parts(items.clone(), def.order.idx, shuffle, paths.clone(), Vec::new(), usize::MAX);
+        let Some(sn) = snap else {
+            p.set_observed(id, g);
+            return;
+        };
+        let shown_path = shown.as_deref().map(|s| src_str(g, s, "path"));
+        let cur = match &sn.current_path {
+            Some(c) if shown_path.as_deref() == Some(c.as_str()) && items.contains(c) => c.clone(),
+            other => {
+                if other.is_some() {
+                    log::event(
+                        "program",
+                        Level::Warn,
+                        "program.restore_mismatch",
+                        None,
+                        json!({ "id": id, "saved": other, "shown": shown_path }),
+                    );
+                }
+                p.set_observed(id, g);
+                return;
+            }
+        };
+        let exact = saved_ok && sn.rev == file_rev;
+        let at = items.iter().position(|x| *x == cur).unwrap_or(0);
+        p.order = if exact {
+            Order::from_parts(items.clone(), sn.index, shuffle, paths.clone(), sn.history.clone(), sn.history_index)
+        } else {
+            Order::from_parts(items.clone(), at, shuffle, paths.clone(), vec![cur.clone()], 0)
+        };
+        if p.order.current() != Some(cur.as_str()) {
+            p.order = Order::from_parts(items, at, shuffle, paths, vec![cur.clone()], 0);
+        }
+        p.started = true;
+        p.cur_src = shown;
+        p.played_ms = sn.played_ms.max(0.0);
+        p.remaining_ms = sn.remaining_ms;
+        p.last_effect = sn.last_effect.clone();
+        p.failures = sn.failures;
+        p.broken = sn.broken.iter().cloned().collect();
+        log::event(
+            "program",
+            Level::Info,
+            "program.restored",
+            None,
+            json!({ "id": id, "path": cur, "played_ms": p.played_ms,
+                    "remaining_ms": p.remaining_ms, "reanchored": !exact }),
+        );
+        p.set_observed(id, g);
+    }
+
+    /// `stop` / `quit`: every program goes (what plays is the caller's to tear down).
+    /// Returns their ids (graph nodes the caller destroys).
+    pub fn destroy_all(&mut self) -> Vec<String> {
+        let ids = self.ids();
+        for id in &ids {
+            let _ = self.destroy(id);
+        }
+        ids
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1044,6 +1233,7 @@ impl Programs {
             return Vec::new();
         };
         let mut acts = Vec::new();
+        self.def_dirty = true;
         match self.progs.get_mut(id) {
             Some(p) => {
                 let old = std::mem::replace(&mut p.cfg, cfg);
@@ -1126,6 +1316,7 @@ impl Programs {
     pub fn destroy(&mut self, id: &str) -> Vec<ProgramAction> {
         let mut acts = Vec::new();
         if let Some(p) = self.progs.remove(id) {
+            self.def_dirty = true;
             if let Some(c) = p.pending.and_then(|p| p.corr) {
                 acts.push(ProgramAction::Cancel { corr: c });
             }
@@ -1193,6 +1384,7 @@ impl Programs {
                 // a play starts the session there (ApplyTimedPlaylist): the bar's order
                 let paths = p.cfg.paths();
                 p.order = Order::new(paths, i, p.cfg.shuffle);
+                p.def_changed = true;
                 (p.order.plan_play(i), Reason::Play)
             }
             "next" => {
@@ -1331,7 +1523,17 @@ impl Programs {
                 defaults_of,
             ));
         }
+        self.collect_def_changes();
         acts
+    }
+
+    /// A program's order changed by itself (a reshuffle, a play): `program.json` is due.
+    pub fn collect_def_changes(&mut self) {
+        for p in self.progs.values_mut() {
+            if std::mem::take(&mut p.def_changed) {
+                self.def_dirty = true;
+            }
+        }
     }
 
     pub fn status(&self) -> Vec<ProgramStatus> {
@@ -1391,6 +1593,96 @@ mod engine_tests {
         let _ = fake.wall;
         // a clock that doesn't move (paused) adds nothing
         assert_eq!(clock.advance(fake.mono), Duration::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+    use crate::graph::NodeKind;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A graph with `prog:main` over `a, b, c, d` and a source showing `b`.
+    fn setup() -> (Graph, Programs, String) {
+        let mut g = Graph::new();
+        let items: Vec<Value> = ["a", "b", "c", "d"].iter().map(|p| json!({"path": p})).collect();
+        let props = json!({"items": items, "seed": 1, "mode": "timer", "interval_ms": 9000});
+        g.create(
+            NodeKind::Program,
+            Some("prog:main".into()),
+            props.as_object().unwrap().clone(),
+        )
+        .unwrap();
+        let src = g
+            .create(NodeKind::Source, None, json!({"path": "b"}).as_object().unwrap().clone())
+            .unwrap();
+        let mut ps = Programs::new();
+        ps.configure("prog:main", &mut g);
+        (g, ps, src)
+    }
+
+    fn def(order: &[&str], idx: usize) -> store::ProgramDef {
+        store::ProgramDef {
+            id: "prog:main".into(),
+            props: Map::new(),
+            order: store::OrderSnap { items: v(order), idx, shuffle: false },
+        }
+    }
+
+    fn snap(rev: u64) -> store::ProgramSnap {
+        store::ProgramSnap {
+            id: "prog:main".into(),
+            rev,
+            index: 3,
+            history: v(&["c", "d", "a", "b"]),
+            history_index: 3,
+            current_path: Some("b".into()),
+            played_ms: 1200.0,
+            remaining_ms: 7800.0,
+            ..store::ProgramSnap::default()
+        }
+    }
+
+    #[test]
+    fn program_json_restores_exactly_at_the_same_rev() {
+        let (mut g, mut ps, src) = setup();
+        ps.restore("prog:main", &def(&["c", "d", "a", "b"], 3), Some(&snap(5)), 5, Some(src), &mut g);
+        let st = &ps.status()[0];
+        assert_eq!(st.phase, ProgPhase::Playing);
+        assert_eq!(st.order, v(&["c", "d", "a", "b"]));
+        assert_eq!(st.history, v(&["c", "d", "a", "b"]));
+        assert_eq!((st.history_index, st.played_ms, st.remaining_ms), (3, 1200.0, 7800.0));
+    }
+
+    #[test]
+    fn program_json_rev_mismatch_reanchors() {
+        let (mut g, mut ps, src) = setup();
+        // program.json one write ahead of the snapshot: its order, the cursor on `b`
+        ps.restore("prog:main", &def(&["d", "b", "a", "c"], 0), Some(&snap(4)), 5, Some(src), &mut g);
+        let st = &ps.status()[0];
+        assert_eq!(st.order, v(&["d", "b", "a", "c"]));
+        assert_eq!(st.path.as_deref(), Some("b"));
+        assert_eq!((st.history.clone(), st.history_index), (v(&["b"]), 0));
+        assert_eq!(st.played_ms, 1200.0, "the clocks are kept");
+    }
+
+    #[test]
+    fn restore_mismatch_leaves_the_program_idle() {
+        let (mut g, mut ps, _) = setup();
+        let other = g
+            .create(NodeKind::Source, None, json!({"path": "zzz"}).as_object().unwrap().clone())
+            .unwrap();
+        ps.restore("prog:main", &def(&["a", "b", "c", "d"], 1), Some(&snap(5)), 5, Some(other), &mut g);
+        assert_eq!(ps.status()[0].phase, ProgPhase::Idle);
+        // an order that no longer fits the items falls back to the bar order
+        let (mut g, mut ps, src) = setup();
+        ps.restore("prog:main", &def(&["x", "y"], 1), Some(&snap(5)), 5, Some(src), &mut g);
+        let st = &ps.status()[0];
+        assert_eq!(st.order, v(&["a", "b", "c", "d"]));
+        assert_eq!(st.history, v(&["b"]), "re-anchored");
     }
 }
 

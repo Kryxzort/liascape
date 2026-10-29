@@ -2042,3 +2042,352 @@ fn defaults_and_item_props_reach_the_next_b() {
     step_until(&mut c, 16, 2000, "next", n_currents(3));
     assert_eq!(gain(&mut c, 2), -20.0, "the new defaults reach the next B");
 }
+
+// ---------------------------------------------------------------- Task 5: pause, VRAM, parking, persistence
+
+fn remove_outputs(c: &mut Client) {
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        c.ok("headless.remove_output", json!({"name": o}));
+    }
+}
+
+fn add_output(c: &mut Client, name: &str) {
+    c.ok(
+        "headless.add_output",
+        json!({"name": name, "width": 320, "height": 180, "hz": 60}),
+    );
+}
+
+/// The program's `transition.scheduled` with `parked: true`.
+fn scheduled_parked(c: &Client) -> Vec<Value> {
+    scheduled(c)
+        .into_iter()
+        .filter(|e| e["parked"] == json!(true))
+        .collect()
+}
+
+#[test]
+fn pause_freezes_the_rotation() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("pf", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    let mut t = 0;
+    while t < 1000 {
+        c.step(20);
+        t += 20;
+    }
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    c.step(20);
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    let p0 = c.get("prog:main.played_ms").as_f64().unwrap();
+    for _ in 0..250 {
+        c.step(20);
+    }
+    t += 20 + 5000;
+    close(c.get("prog:main.remaining_ms").as_f64().unwrap(), r0, 1.0, "remaining");
+    close(c.get("prog:main.played_ms").as_f64().unwrap(), p0, 1.0, "played");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    while currents(&c).len() < 2 {
+        assert!(t < 12_000, "never switched");
+        c.step(20);
+        t += 20;
+    }
+    close(t as f64, 8000.0, 60.0, "the switch at 1000 + 5000 paused + 2000");
+}
+
+#[test]
+fn vram_hold_freezes_the_rotation() {
+    let file = std::env::temp_dir().join(format!(
+        "liascape-program-vramhold-{}.json",
+        std::process::id()
+    ));
+    write_vram(&file, 6000.0, &[]);
+    let probe = format!("fake:{}", file.display());
+    let Some(srv) = Serve::start_clock(
+        &[
+            ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
+            ("LIASCAPE_PLAYER_VRAM_TIMING", "50,300,600,200,1000"),
+        ],
+        "real",
+    ) else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.vram_low_mode", "value": "pause"}));
+    let items = pngs("vh", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 2500}));
+    verb(&mut c, "play", json!({}));
+    wait_real(&mut c, Duration::from_secs(5), "the play", |c| {
+        !c.named("program.current").is_empty()
+    });
+    write_vram(&file, 300.0, &[]);
+    wait_real(&mut c, Duration::from_secs(5), "the hold", |c| {
+        c.ok("state", json!({}))["graph"]["player"]["vram_low_active"] == json!(true)
+    });
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    c.ok("state", json!({}));
+    assert_eq!(c.named("program.current").len(), 1, "no switch while held");
+    close(
+        c.get("prog:main.remaining_ms").as_f64().unwrap(),
+        r0,
+        20.0,
+        "the countdown stops",
+    );
+    write_vram(&file, 6000.0, &[]);
+    wait_real(&mut c, Duration::from_secs(10), "the switch after the release", |c| {
+        c.named("program.current").len() >= 2
+    });
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn parked_keeps_rotating_invisibly_by_default() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("pk", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 20, 500);
+    remove_outputs(&mut c);
+    c.step(20);
+    assert_eq!(prog(&mut c)["phase"], "parked");
+    // 10 s parked: a switch every 3000 of play time, one each, each replacing the parked one
+    let mut t = 20;
+    while t < 10_000 {
+        c.step(20);
+        t += 20;
+    }
+    let sp = scheduled_parked(&c);
+    assert_eq!(sp.len(), 3, "one per interval: {sp:?}");
+    for w in sp.windows(2) {
+        close(ms_of(&w[1]) - ms_of(&w[0]), 3000.0, 21.0, "the interval");
+    }
+    let last = currents(&c).last().unwrap()["path"].clone();
+    add_output(&mut c, "VIRTUAL-1");
+    c.step(20);
+    let src = c.ok("state", json!({}))["graph"]["lay:VIRTUAL-1:main"]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(c.get(&format!("{src}.path")), last, "the LAST target shown");
+    let n = currents(&c).len();
+    step_until(&mut c, 20, 4000, "the rotation goes on", n_currents(n + 1));
+}
+
+#[test]
+fn parked_on_end_video_waits_for_an_output() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("pe_a", 2.0), clip("pe_b", 2.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end", "interval_ms": 0}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    // the end switch armed before the outputs go is handed off by the runtime's removal (its
+    // B becomes the parked wallpaper — R60/I4) and the program commits it
+    remove_outputs(&mut c);
+    c.step(16);
+    c.step(16);
+    let (n, k) = (scheduled(&c).len(), currents(&c).len());
+    assert_eq!(prog(&mut c)["phase"], "parked");
+    step_for(&mut c, 50, 8000);
+    assert_eq!(scheduled(&c).len(), n, "a parked A never ends: nothing requested");
+    assert_eq!(currents(&c).len(), k);
+    add_output(&mut c, "VIRTUAL-1");
+    step_until(&mut c, 16, 6000, "the end switch once shown", n_currents(k + 1));
+    assert_eq!(currents(&c)[k]["reason"], "end");
+    assert_eq!(scheduled(&c)[n]["align"], "end");
+}
+
+#[test]
+fn parked_hold_mode_holds_and_resumes() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("ph", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 3000, "while_parked": "hold"}),
+    );
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 20, 1000);
+    remove_outputs(&mut c);
+    c.step(20);
+    let p0 = prog(&mut c);
+    assert_eq!(p0["phase"], "parked");
+    step_for(&mut c, 50, 10_000);
+    let p1 = prog(&mut c);
+    assert_eq!(scheduled(&c).len(), 1, "nothing while held parked");
+    assert_eq!(p1["played_ms"], p0["played_ms"]);
+    assert_eq!(p1["remaining_ms"], p0["remaining_ms"]);
+    add_output(&mut c, "VIRTUAL-1");
+    c.step(20);
+    let p2 = prog(&mut c);
+    assert_eq!(p2["path"], json!(items[0]), "the same item");
+    let mut t = 20u64;
+    while currents(&c).len() < 2 {
+        assert!(t < 4000, "never switched");
+        c.step(20);
+        t += 20;
+    }
+    let rem = p0["remaining_ms"].as_f64().unwrap();
+    close(t as f64, rem, 45.0, "the switch at the remaining time");
+}
+
+#[test]
+fn parked_mode_is_live() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("pl", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 30_000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    remove_outputs(&mut c);
+    c.step(20);
+    let r = |c: &mut Client| c.get("prog:main.remaining_ms").as_f64().unwrap();
+    let r0 = r(&mut c);
+    step_for(&mut c, 20, 1000);
+    let r1 = r(&mut c);
+    assert!(r1 < r0 - 900.0, "rotate counts while parked: {r0} → {r1}");
+    c.ok("set", json!({"path": "prog:main.while_parked", "value": "hold"}));
+    step_for(&mut c, 20, 1000);
+    let r2 = r(&mut c);
+    assert!((r2 - r1).abs() <= 21.0, "hold stops it at once: {r1} → {r2}");
+    c.ok("set", json!({"path": "prog:main.while_parked", "value": "rotate"}));
+    step_for(&mut c, 20, 1000);
+    assert!(r(&mut c) < r2 - 900.0, "rotate again");
+}
+
+#[test]
+fn hotplug_mid_program_switch_adopts() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("hp", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(
+        &mut c,
+        &items,
+        json!({"mode": "timer", "interval_ms": 2000, "transition": fade(1000)}),
+    );
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 6000, "the timer switch", n_currents(2));
+    c.step(100);
+    add_output(&mut c, "VIRTUAL-3");
+    step_until(&mut c, 16, 3000, "the handoff", |evs| {
+        evs.iter().filter(|e| e["event"] == "transition.handoff").count() >= 2
+    });
+    assert!(
+        !c.named("transition.output_adopted").is_empty(),
+        "the new output adopted"
+    );
+    step_until(&mut c, 16, 4000, "the rotation goes on", n_currents(3));
+    assert_eq!(currents(&c)[2]["path"], json!(items[2]));
+    assert!(c.named("transition.failed").is_empty());
+}
+
+/// `<state>` of a `Serve`.
+fn state_of(srv: &Serve) -> PathBuf {
+    srv.path("state/liascape/liascape-player")
+}
+
+fn read_json(p: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+}
+
+/// Poll `file` (real time) until `pred` holds over it.
+fn wait_file(file: &Path, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
+    let t = Instant::now();
+    loop {
+        if let Some(v) = read_json(file)
+            && pred(&v)
+        {
+            return v;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "{what}: {:?}",
+            read_json(file)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn stop_destroys_the_program() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("sd", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    let st = state_of(&srv);
+    wait_file(&st.join("program.json"), "program.json has it", |v| {
+        v["programs"].as_array().is_some_and(|p| p.len() == 1)
+    });
+    wait_file(&st.join("snapshot.json"), "the snapshot has it", |v| {
+        v["programs"].as_array().is_some_and(|p| p.len() == 1)
+    });
+    c.ok("stop", json!({}));
+    assert_eq!(c.ok("state", json!({}))["programs"], json!([]));
+    assert!(c.ok("state", json!({}))["graph"].get("prog:main").is_none());
+    c.step(16);
+    wait_file(&st.join("program.json"), "program.json empty", |v| {
+        v["programs"] == json!([])
+    });
+    wait_file(&st.join("snapshot.json"), "no program in the snapshot", |v| {
+        v.get("programs").is_none_or(|p| p == &json!([]))
+    });
+    step_for(&mut c, 50, 5000);
+    assert!(scheduled(&c).len() == 1, "no rotation after stop");
+}
+
+#[test]
+fn program_json_written_only_on_config_change() {
+    let Some(srv) = Serve::start_clock(&[], "real") else {
+        return;
+    };
+    let mut c = srv.client();
+    let items = [clip("pj_a", 10.0), clip("pj_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 0}));
+    verb(&mut c, "play", json!({}));
+    let file = state_of(&srv).join("program.json");
+    wait_file(&file, "program.json", |v| {
+        v["programs"].as_array().is_some_and(|p| p.len() == 1)
+    });
+    std::thread::sleep(Duration::from_millis(600));
+    let m0 = std::fs::metadata(&file).unwrap().modified().unwrap();
+    let w0 = c.ok("probe", json!({"name": "snapshot"}))["writes"]
+        .as_u64()
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(10));
+    let w1 = c.ok("probe", json!({"name": "snapshot"}))["writes"]
+        .as_u64()
+        .unwrap();
+    assert!(w1 >= w0 + 4, "the snapshot refreshes while a video plays: {w0} → {w1}");
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().modified().unwrap(),
+        m0,
+        "program.json untouched by playback"
+    );
+    c.ok("set", json!({"path": "prog:main.order", "value": "shuffle"}));
+    let v = wait_file(&file, "the new order", |v| {
+        v["programs"][0]["props"]["order"] == "shuffle"
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    let m1 = std::fs::metadata(&file).unwrap().modified().unwrap();
+    assert_ne!(m1, m0);
+    assert_eq!(read_json(&file).unwrap()["rev"], v["rev"], "written once");
+}

@@ -3106,6 +3106,11 @@ impl Runtime {
     /// on by itself.
     pub(crate) fn stop_all(&mut self, instant: bool) -> Vec<String> {
         let now = self.now();
+        // Phase 3: the session ends — every program goes (its pending switches with the
+        // transitions below).
+        for id in self.programs.destroy_all() {
+            let _ = self.graph.destroy(&id);
+        }
         for st in self.tr.status() {
             log::event(
                 "transition",
@@ -3323,6 +3328,9 @@ impl Runtime {
         if self.snap.frozen {
             return;
         }
+        if self.programs.def_dirty() {
+            self.snapshot_dirty(); // program.json goes with the next (debounced) write
+        }
         let now = Instant::now();
         let due = match self.snap.due {
             Some(d) => now >= d,
@@ -3339,9 +3347,10 @@ impl Runtime {
     }
 
     /// A video or scene is playing: its position moves without graph changes, so the
-    /// snapshot refreshes every `snapshot::REFRESH`.
+    /// snapshot refreshes every `snapshot::REFRESH` — so does a program's play time.
     fn media_playing(&self) -> bool {
-        self.graph.ids_of(NodeKind::Source).iter().any(|id| {
+        (self.programs.any_started() && !self.player_paused)
+            || self.graph.ids_of(NodeKind::Source).iter().any(|id| {
             onset::kind_has_audio(&self.str_prop(id, "kind"))
                 && self.bool_prop(id, "ready")
                 && !self.bool_prop(id, "paused")
@@ -3351,7 +3360,7 @@ impl Runtime {
     /// What `snapshot.json` would hold now (`crate::snapshot::capture`).
     pub(crate) fn capture_snapshot(&self) -> Snapshot {
         let status = self.tr.status();
-        snapshot::capture(&snapshot::Capture {
+        let mut snap = snapshot::capture(&snapshot::Capture {
             graph: &self.graph,
             anim: &self.anim,
             setting_anim: &self.setting_anim,
@@ -3362,10 +3371,20 @@ impl Runtime {
                 connector: pk.connector.clone(),
             }),
             remembered: &self.out_props,
-        })
+        });
+        snap.programs = self.programs.snaps();
+        snap
     }
 
     fn write_snapshot(&mut self) {
+        // Phase 3: `program.json` first (a definition changed), then the snapshot whose
+        // program state names that revision.
+        if self.programs.def_dirty() {
+            let f = self.programs.program_file(&self.graph);
+            self.snap
+                .writer
+                .send_file(crate::recipes::program::store::FILE, f.to_bytes());
+        }
         let bytes = self.capture_snapshot().to_bytes();
         self.snap.writer.send(bytes);
         self.snap.last_write = Some(Instant::now());
@@ -3381,6 +3400,7 @@ impl Runtime {
         if self.snap.frozen {
             return;
         }
+        self.programs.mark_def_dirty();
         self.write_snapshot();
         self.snap.frozen = true;
     }
@@ -3529,6 +3549,62 @@ impl Runtime {
             json!({ "sources": made.len(), "outputs": outputs, "age_ms": age_ms,
                     "parked": self.parked.as_ref().map(|pk| pk.id.clone()), "ids": made }),
         );
+        self.restore_programs(&snap);
+    }
+
+    /// Phase 3 (`recipes::program::store`): after the snapshot's sources, every program of
+    /// `<state>/program.json` is created again and given its saved state
+    /// (`Programs::restore`): current = what its first output shows (or the parked
+    /// wallpaper) when that is its saved item.
+    fn restore_programs(&mut self, snap: &Snapshot) {
+        use crate::recipes::program::store;
+        let file = match store::load(&self.snap.writer.dir) {
+            Ok(Some(f)) => f,
+            Ok(None) => return,
+            Err(reason) => {
+                log::event(
+                    "program",
+                    Level::Warn,
+                    "program.restore_failed",
+                    None,
+                    json!({ "reason": reason, "hint": "starting without programs" }),
+                );
+                return;
+            }
+        };
+        for def in &file.programs {
+            if let Err(e) = self
+                .graph
+                .create(NodeKind::Program, Some(def.id.clone()), def.props.clone())
+            {
+                log::event(
+                    "program",
+                    Level::Warn,
+                    "program.restore_failed",
+                    None,
+                    json!({ "id": def.id, "reason": e.to_string() }),
+                );
+                continue;
+            }
+            let _ = self.programs.configure(&def.id, &mut self.graph);
+            let outputs = match self.graph.get(&p(&format!("{}.outputs", def.id))) {
+                Ok(PropValue::Str(s)) => s,
+                _ => "out:*".to_string(),
+            };
+            let shown = self
+                .graph
+                .resolve(&outputs)
+                .into_iter()
+                .next()
+                .and_then(|o| {
+                    let c = o.strip_prefix("out:")?.to_string();
+                    self.graph.resolve(&format!("cur:{c}")).into_iter().next()
+                })
+                .or_else(|| self.parked.as_ref().map(|pk| pk.id.clone()));
+            let saved = snap.programs.iter().find(|x| x.id == def.id);
+            self.programs
+                .restore(&def.id, def, saved, file.rev, shown, &mut self.graph);
+        }
     }
 
     /// Whether `id`'s `gain.anticlick` animation is still the restore fade-in (not

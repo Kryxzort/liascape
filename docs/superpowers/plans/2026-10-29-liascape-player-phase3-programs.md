@@ -443,6 +443,13 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** `--test program --test supervise` + the full suite in both modes PASS.
 - [ ] **Step 5:** Commit `Persist Programs Across Player Restarts`.
 
+> **Implementer note 2026-10-30 (Task 5):**
+> - `ProgramSnap` gains `index` (the order's cursor: after a `prev` it is not the current item's place); `rev` names the `program.json` revision. `program.json` is written whenever a definition changes — create/set/destroy, a play (a new order) and a cycle's reshuffle — at startup (a fresh start must not leave an older session's file for a later `--restore`) and always on a clean exit; never by the 2 s refresh. The snapshot refreshes every 2 s while a program plays (not paused), images included, so `played_ms` is ≤ 2 s stale after a crash.
+> - Parked under `rotate`, a program switches no sooner than `PARKED_MIN_PLAY_MS` = 1 s after its last commit: a parked switch commits at once, so an image at minimum 0 (reached at once) would otherwise switch every tick. The backend's tick polled ≤ 1 s apart; a timer interval < 1 s is the only other thing it slows.
+> - `program.json` programs are created on `--restore` even without a snapshot part (then `idle`); a saved current item that no output shows → `idle` + `program.restore_mismatch` (warn). A current item removed by an edit (finishing without a replay) can't be restored as current (it is no longer an item) → `idle` too.
+> - RED against the Task 4 commit: 8 of 13 new tests fail (`while_parked`, persistence, stop); `pause_freezes_the_rotation`, `vram_hold_freezes_the_rotation`, `parked_keeps_rotating_invisibly_by_default`, `parked_on_end_video_waits_for_an_output` and `hotplug_mid_program_switch_adopts` already passed — Task 3's player clock and the runtime's R60/I4 parking gave them; they stay as regression tests.
+> - An end switch armed when the last output goes is handed off by the runtime's removal (its B becomes the parked wallpaper, R60/I4) and the program commits it; after that nothing is requested until an output returns. The parked on-end case has its own test, `parked_on_end_video_waits_for_an_output`. `fourth_restart_in_a_minute_starts_without_program` crashes 4 children with SIGSEGV (no test knob needed).
+
 **Size: M–L.**
 
 ### Task 5b: Playlist start — resume points and start modes (player side)

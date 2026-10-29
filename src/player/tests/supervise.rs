@@ -1202,3 +1202,219 @@ fn broken_scene_restores_as_preview() {
         .collect();
     assert!(spawned.is_empty(), "spawned {spawned:?}");
 }
+
+// ---------------------------------------------------------------- Phase 3 Task 5: programs
+
+fn prog_clip(name: &str, secs: f64) -> String {
+    let frames = (secs * 30.0).round() as u32;
+    s(&ensure_clip(
+        &format!("sup_prog_{name}_{frames}f"),
+        ClipSpec::FrameIndex { frames },
+    ))
+    .to_string()
+}
+
+fn create_program(c: &mut Client, items: &[&str], props: Value) {
+    let mut p = json!({
+        "items": items.iter().map(|i| json!({"path": i})).collect::<Vec<_>>(),
+        "seed": 1,
+    });
+    for (k, v) in props.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    c.ok(
+        "create",
+        json!({"kind": "program", "id": "prog:main", "props": p}),
+    );
+}
+
+fn program0(c: &mut Client) -> Value {
+    c.state()["programs"][0].clone()
+}
+
+/// The snapshot's program part has played `ms` or more of the item at `path`.
+fn snap_program(snap: &Value, path: &str, ms: f64) -> bool {
+    snap["programs"][0]["current_path"] == path
+        && snap["programs"][0]["played_ms"].as_f64().unwrap_or(0.0) >= ms
+}
+
+#[test]
+fn program_survives_a_crash() {
+    let Some(mut sup) = Sup::start(&[]) else {
+        return;
+    };
+    let items = [prog_clip("cr_a", 10.0), prog_clip("cr_b", 10.0), prog_clip("cr_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let mut c = sup.client();
+    create_program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    c.ok("program.play", json!({"id": "prog:main"}));
+    // 2 switches, then 1.5 s into the third item
+    let p = wait_state(&mut c, Duration::from_secs(15), |st| {
+        st["programs"][0]["path"] == items[2]
+    });
+    assert_eq!(p["programs"][0]["history"], json!(items[..3]));
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, items[2], 1500.0));
+    let before = program0(&mut c);
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+    let mut c = sup.client();
+    let after = wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["phase"] == "playing"
+    })["programs"][0]
+        .clone();
+    assert_eq!(after["order"], before["order"], "{after}");
+    assert_eq!(after["history"], before["history"]);
+    assert_eq!(after["path"], json!(items[2]));
+    let (a, b) = (
+        after["played_ms"].as_f64().unwrap(),
+        before["played_ms"].as_f64().unwrap(),
+    );
+    assert!((a - b).abs() <= 2500.0, "played {b} → {a}");
+    // the rotation goes on: the next switch to the next item, from the program
+    let st = wait_state(&mut c, Duration::from_secs(6), |st| {
+        st["programs"][0]["path"] == items[0]
+    });
+    assert_eq!(st["programs"][0]["history"][3], json!(items[0]));
+    let sch = c.logs("transition.scheduled");
+    assert!(
+        sch.iter()
+            .any(|e| e["origin"] == "program:prog:main" && e["path"] == items[0]),
+        "{sch:?}"
+    );
+}
+
+#[test]
+fn restored_armed_program_rearms_at_a_end() {
+    let Some(mut sup) = Sup::start(&[]) else {
+        return;
+    };
+    let items = [prog_clip("ra_a", 6.0), prog_clip("ra_b", 6.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let mut c = sup.client();
+    create_program(&mut c, &items, json!({"mode": "on_end"}));
+    c.ok("program.play", json!({"id": "prog:main"}));
+    wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["phase"] == "armed"
+    });
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        snap_program(sn, items[0], 2000.0) && snap_has_path(sn, items[0])
+    });
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["phase"] == "armed"
+    });
+    assert_eq!(st["programs"][0]["path"], json!(items[0]), "A restored");
+    assert_eq!(st["programs"][0]["next"], json!(items[1]));
+    let (nid, _) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == items[0])
+        .expect("A");
+    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["graph"][&nid]["ready"] == json!(true)
+    });
+    let node = st["graph"][&nid].clone();
+    let sch = c.logs("transition.scheduled");
+    assert!(!sch.is_empty());
+    assert!(sch.iter().all(|e| e["align"] == "end"), "no align:now: {sch:?}");
+    assert_eq!(content(&st, "VIRTUAL-1"), nid, "B is not shown early");
+    let tp = node["time_pos"].as_f64().unwrap_or(0.0);
+    assert!(tp >= 1.5, "A where it played: {tp}");
+    // the handoff at A's end
+    let t = Instant::now();
+    wait_state(&mut c, Duration::from_secs(8), |st| {
+        st["programs"][0]["path"] == items[1]
+    });
+    let left = 6.0 - tp;
+    println!("handoff {:?} after the restore (A had {left:.2} s left)", t.elapsed());
+    let h = c.logs("transition.handoff");
+    assert!(!h.is_empty());
+    assert!(
+        c.logs("program.current")
+            .iter()
+            .any(|e| e["reason"] == "end" && e["path"] == items[1])
+    );
+}
+
+#[test]
+fn quit_then_restore_resumes_the_program() {
+    let Some(mut sup) = Sup::start(&[]) else {
+        return;
+    };
+    let items = [prog_clip("qr_a", 10.0), prog_clip("qr_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let mut c = sup.client();
+    create_program(&mut c, &items, json!({"mode": "timer", "interval_ms": 30_000}));
+    c.ok("program.play", json!({"id": "prog:main", "index": 1}));
+    wait_state(&mut c, Duration::from_secs(5), |st| {
+        sources(st)
+            .iter()
+            .any(|(_, n)| n["path"] == items[1] && n["time_pos"].as_f64().unwrap_or(0.0) >= 3.0)
+    });
+    let before = program0(&mut c);
+    c.ok("quit", json!({}));
+    drop(c);
+    let st = sup.wait_exit(Duration::from_secs(30)).expect("quit");
+    assert_eq!(st.code(), Some(0));
+    let root = std::mem::take(&mut sup.root);
+    let serial = sup._serial.take();
+    sup.pid = 0;
+    let sup2 = Sup::spawn_in(root, &["--restore"], &[], serial, true);
+    let mut c = sup2.client();
+    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["phase"] == "playing"
+            && sources(st)
+                .iter()
+                .any(|(_, n)| n["path"] == items[1] && n["ready"] == json!(true))
+    });
+    let p = &st["programs"][0];
+    assert_eq!(p["path"], json!(items[1]), "{p}");
+    let (a, b) = (
+        p["played_ms"].as_f64().unwrap(),
+        before["played_ms"].as_f64().unwrap(),
+    );
+    assert!((a - b).abs() <= 2000.0, "played {b} → {a}");
+    let (_, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == items[1])
+        .unwrap();
+    assert!(node["time_pos"].as_f64().unwrap() >= 2.0, "{node}");
+    // the rotation continues
+    c.ok("program.next", json!({"id": "prog:main"}));
+    wait_state(&mut c, Duration::from_secs(5), |st| {
+        st["programs"][0]["path"] == items[0]
+    });
+}
+
+/// The supervisor's 4th restart within a minute starts without `--restore` (a snapshot that
+/// crashes the player at startup can't loop): no program comes back — documented; the
+/// backend re-sends it (Task 7 reconciliation).
+#[test]
+fn fourth_restart_in_a_minute_starts_without_program() {
+    let Some(mut sup) = Sup::start(&[]) else {
+        return;
+    };
+    let items = [prog_clip("fr_a", 10.0), prog_clip("fr_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let mut c = sup.client();
+    create_program(&mut c, &items, json!({"mode": "timer", "interval_ms": 30_000}));
+    c.ok("program.play", json!({"id": "prog:main"}));
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, items[0], 0.0));
+    drop(c);
+    for k in 1..=4 {
+        sup.crash(libc::SIGSEGV);
+        let mut c = sup.client();
+        if k <= 3 {
+            let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+                st["programs"].as_array().is_some_and(|p| p.len() == 1)
+            });
+            assert_eq!(st["programs"][0]["path"], json!(items[0]), "restart {k}");
+            sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, items[0], 0.0));
+        } else {
+            std::thread::sleep(Duration::from_millis(500));
+            let st = c.state();
+            assert_eq!(st["programs"], json!([]), "restart {k}: {st}");
+        }
+    }
+}

@@ -50,6 +50,7 @@ use crate::anim::{Animator, PropPath};
 use crate::graph::props::schema_for_kind;
 use crate::graph::{Graph, NodeKind, PropType, PropValue};
 use crate::log::{self, Level};
+use crate::recipes::program::store::ProgramSnap;
 use crate::recipes::{Align, TransitionStatus};
 
 /// The snapshot format this player writes and reads; any other `version` is invalid.
@@ -90,6 +91,11 @@ pub struct Snapshot {
     pub sources: BTreeMap<String, SourceSnap>,
     #[serde(default)]
     pub parked: Option<ParkedSnap>,
+    /// Phase 3: each program's dynamic state (cursor, history, play time, countdown —
+    /// `recipes::program::store`; its configuration and order are `program.json`).
+    /// Additive: a file without it parses ([`VERSION`] stays 1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub programs: Vec<ProgramSnap>,
 }
 
 /// One present output.
@@ -342,6 +348,7 @@ pub fn capture(c: &Capture) -> Snapshot {
         output_props: c.remembered.clone(),
         sources: BTreeMap::new(),
         parked: None,
+        programs: Vec::new(),
     };
     // id → saved as a transition target
     let mut wanted: BTreeMap<String, bool> = BTreeMap::new();
@@ -451,14 +458,23 @@ pub fn set_aside(dir: &Path) -> Option<PathBuf> {
 
 /// Atomic write: tmp file + `fsync`, rename over [`FILE`], `fsync` the directory.
 pub fn write_atomic(dir: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_named(dir, FILE, bytes)
+}
+
+/// [`write_atomic`] for another file of the state dir (`program.json`, `resume.json`).
+pub fn write_atomic_named(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     fs::create_dir_all(dir)?;
-    let tmp = dir.join(TMP_FILE);
+    let tmp = if name == FILE {
+        dir.join(TMP_FILE)
+    } else {
+        dir.join(format!("{name}.tmp"))
+    };
     {
         let mut f = File::create(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
     }
-    fs::rename(&tmp, dir.join(FILE))?;
+    fs::rename(&tmp, dir.join(name))?;
     if let Ok(d) = File::open(dir) {
         let _ = d.sync_all();
     }
@@ -480,10 +496,15 @@ pub struct WriterStats {
 /// Never set it outside tests.
 pub const TEST_WRITE_DELAY_ENV: &str = "LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS";
 
+/// One queued write: `None` = `snapshot.json`, else another state file by name.
+type Job = (Option<&'static str>, Vec<u8>);
+
 /// The snapshot writer thread: the latest snapshot sent wins (older pending ones are
-/// skipped), each written atomically.
+/// skipped), each written atomically. Other state files (`program.json`, `resume.json`)
+/// go through the same thread — the latest of each wins too — and are written before the
+/// snapshot queued with them.
 pub struct Writer {
-    tx: Option<mpsc::Sender<Vec<u8>>>,
+    tx: Option<mpsc::Sender<Job>>,
     thread: Option<std::thread::JoinHandle<()>>,
     pub dir: PathBuf,
     pub stats: Arc<WriterStats>,
@@ -491,7 +512,7 @@ pub struct Writer {
 
 impl Writer {
     pub fn start(dir: &Path) -> Writer {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<Job>();
         let stats = Arc::new(WriterStats::default());
         let (d, st) = (dir.to_path_buf(), stats.clone());
         let thread = std::thread::Builder::new()
@@ -518,7 +539,14 @@ impl Writer {
     /// Queue `bytes` for writing (replacing anything not written yet).
     pub fn send(&self, bytes: Vec<u8>) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(bytes);
+            let _ = tx.send((None, bytes));
+        }
+    }
+
+    /// Queue another state file (`name` in the state dir), written before the next snapshot.
+    pub fn send_file(&self, name: &'static str, bytes: Vec<u8>) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send((Some(name), bytes));
         }
     }
 
@@ -537,16 +565,43 @@ impl Drop for Writer {
     }
 }
 
-fn writer_loop(rx: mpsc::Receiver<Vec<u8>>, dir: &Path, st: &WriterStats) {
+fn writer_loop(rx: mpsc::Receiver<Job>, dir: &Path, st: &WriterStats) {
     let mut failing = false;
     let delay = std::env::var(TEST_WRITE_DELAY_ENV)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_millis);
-    while let Ok(mut bytes) = rx.recv() {
-        while let Ok(newer) = rx.try_recv() {
-            bytes = newer;
+    while let Ok(first) = rx.recv() {
+        let mut snap: Option<Vec<u8>> = None;
+        let mut files: BTreeMap<&'static str, Vec<u8>> = BTreeMap::new();
+        for (name, b) in std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok())) {
+            match name {
+                None => snap = Some(b),
+                Some(n) => {
+                    files.insert(n, b);
+                }
+            }
         }
+        for (name, b) in files {
+            match write_atomic_named(dir, name, &b) {
+                Ok(()) => log::event(
+                    "snapshot",
+                    Level::Debug,
+                    "snapshot.file_saved",
+                    None,
+                    json!({ "file": name, "bytes": b.len() }),
+                ),
+                Err(e) => log::event(
+                    "snapshot",
+                    Level::Warn,
+                    "snapshot.write_failed",
+                    None,
+                    json!({ "dir": dir.display().to_string(), "file": name,
+                            "error": e.to_string() }),
+                ),
+            }
+        }
+        let Some(bytes) = snap else { continue };
         let t = Instant::now();
         if let Some(d) = delay {
             std::thread::sleep(d); // counted in write_ms: it stands for a slow fsync
@@ -879,6 +934,40 @@ mod tests {
         assert_eq!(pk.connector.as_deref(), Some("DP-1"));
         assert!(!s.sources["pk"].paused, "saved with its resume state");
         assert_eq!(Snapshot::parse(&s.to_bytes()).unwrap(), s);
+    }
+
+    #[test]
+    fn snapshot_without_programs_still_parses() {
+        // a Phase 2 file: no `programs` key
+        let old = br#"{"version": 1, "saved_unix_ms": 5, "outputs": {}, "sources": {}}"#;
+        let s = Snapshot::parse(old).unwrap();
+        assert!(s.programs.is_empty());
+        // none → not written; some → written and read back
+        assert!(!String::from_utf8(s.to_bytes()).unwrap().contains("programs"));
+        let mut s2 = s.clone();
+        s2.programs.push(ProgramSnap {
+            id: "prog:main".into(),
+            rev: 2,
+            current_path: Some("/a.mkv".into()),
+            played_ms: 1500.0,
+            ..ProgramSnap::default()
+        });
+        assert_eq!(Snapshot::parse(&s2.to_bytes()).unwrap(), s2);
+    }
+
+    #[test]
+    fn named_state_files_are_written_with_the_snapshot() {
+        let dir = std::env::temp_dir().join(format!("lia-snap-named-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut w = Writer::start(&dir);
+        w.send_file("program.json", b"{\"a\": 1}".to_vec());
+        w.send_file("program.json", b"{\"a\": 2}".to_vec());
+        w.send(b"{}".to_vec());
+        w.finish();
+        assert_eq!(fs::read(dir.join("program.json")).unwrap(), b"{\"a\": 2}");
+        assert_eq!(fs::read(dir.join(FILE)).unwrap(), b"{}");
+        assert!(!dir.join("program.json.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
