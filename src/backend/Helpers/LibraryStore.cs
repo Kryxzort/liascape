@@ -25,19 +25,18 @@ public sealed class LibMeta
     public double? LoudnessLRA { get; set; }    // loudness range (LU)
     public double? LoudnessThresh { get; set; } // measurement threshold
     public bool? LoudnessSkip { get; set; }     // true = no audio track → nothing to normalize, don't retry
-    // A WE scene's loudness is learned by liascape-player on first play (`scene.loudness`, BS.1770 over its first ~60 s
-    // of audible play): LoudnessI = integrated LUFS, LoudnessTP = its SAMPLE peak (dBFS, ≤ the true peak), no
-    // LRA/Thresh (so ReadLoudness — the video loudnorm path — never takes it). LoudnessSeconds = the audible
-    // seconds it covers; LoudnessPartial = measured over less than the window (the scene was switched away
-    // early) — replaced by a longer or complete measurement on a later play.
-    public double? LoudnessSeconds { get; set; }
-    public bool? LoudnessPartial { get; set; }
-    // The measurement itself (2026-10-28, refined across plays): the player's `scene.loudness` `state` — a
-    // histogram of BS.1770 block loudness (0.1 LU bins) + the sample peak — opaque here; sent back as the next
-    // source's `loudness_seed`, so every play continues the same integration until the player's cap (30 min of
-    // audible play). LoudnessSeconds = the audible seconds it covers (every play). LoudnessI moves only when the
-    // measurement moved ≥ 0.5 LU (MergeSceneLoudness), so `gain.normalize` never twitches.
-    public JsonElement? LoudnessState { get; set; }
+    // A WE scene's loudness (liascape-player only — library.md § Loudness): kept PER AUDIO CONFIGURATION, keyed by
+    // the offline estimator's `fingerprint` of the scene's sound under its user properties (`liascape-player
+    // scene-loudness`; a property that changes no sound keeps it). Each entry holds the estimate (computed from the
+    // scene's files on import / Settings → "Scene loudness") and the live measurement (the player's `scene.loudness`
+    // reports, refined on every play up to its cap). SceneLoudnessFp = the CURRENT configuration's fingerprint (null =
+    // never estimated: reports go under "" until it is). LoudnessI / LoudnessTP above are the APPLIED value of the
+    // current configuration — its live measurement once it has a report, else its estimate (0.5 LU hysteresis
+    // within one configuration; a configuration change jumps to the new one's value) — LoudnessI = LUFS,
+    // LoudnessTP = the SAMPLE peak (dBFS, ≤ the true peak); no LRA/Thresh, so ReadLoudness (the video loudnorm path)
+    // never takes a scene's.
+    public Dictionary<string, SceneLoudnessEntry>? SceneLoudness { get; set; }
+    public string? SceneLoudnessFp { get; set; }
     public bool Crashed { get; set; }
     public bool Whitelist { get; set; }
     // A scene's user-property overrides (project.json general.properties → name → value in WE's encoding:
@@ -55,6 +54,41 @@ public sealed class LibMeta
     public long? Favorites { get; set; }
     public long? Views { get; set; }
     public string[]? Tags { get; set; }
+}
+
+// One audio configuration's loudness (LibMeta.SceneLoudness[fingerprint]).
+public sealed class SceneLoudnessEntry
+{
+    public SceneLoudnessEstimate? Estimate { get; set; }
+    public SceneLoudnessLive? Live { get; set; }
+}
+
+// The offline estimate (`liascape-player scene-loudness`): Lufs null = the configuration plays no sound.
+public sealed class SceneLoudnessEstimate
+{
+    public double? Lufs { get; set; }
+    public double? PeakDbfs { get; set; }
+    // the estimated histogram scaled to 10 s of audible play (the CLI's `seed.state`): a new source's
+    // `loudness_seed` while the configuration has no live measurement — the first live report outweighs it 6:1
+    public JsonElement? Seed { get; set; }
+    public string? Confidence { get; set; }     // high | medium | low
+    public string[]? Notes { get; set; }        // the confidence notes (the UI shows the first when low)
+    public double? LufsIfCoherent { get; set; } // the upper bound when equal-length tracks may be one recording
+    public string? Model { get; set; }
+    public int V { get; set; } = 1;             // this record's format
+    public DateTime? At { get; set; }
+}
+
+// The live measurement (the player's `scene.loudness`, cumulative over every play of this configuration): `State` =
+// its BS.1770 block-loudness histogram + peak (opaque here — the next source's `loudness_seed`), `Seconds` = the
+// audible seconds it covers, `Partial` = less than the window (switched away early on a first play).
+public sealed class SceneLoudnessLive
+{
+    public JsonElement? State { get; set; }
+    public double Seconds { get; set; }
+    public double Lufs { get; set; }
+    public double? PeakDbfs { get; set; }
+    public bool? Partial { get; set; }
 }
 
 public static class LibraryStore

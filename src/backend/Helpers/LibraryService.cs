@@ -118,59 +118,143 @@ public static class LibraryService
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
     }
 
-    // ---- a WE scene's loudness, learned by liascape-player and refined on every play (`scene.loudness`) ----
-    // The player measures (BS.1770, pre-gain, AUDIBLE play — player-core.md § Scene worker → "Scene loudness"):
-    // the first report after ~60 s, then one per further 60 s and at the end of each play, each covering EVERY
-    // play so far (the source was seeded with the stored `state` — LiascapePlayerMedia.SourceProps), until its cap
-    // (30 min). This stores it like a video's loudness*, and the resolver turns it into the scene source's
+    // ---- a WE scene's loudness, per audio configuration: estimated offline, learned live (liascape-player) ----
+    // LibMeta.SceneLoudness[fingerprint] = {estimate, live} (library.md § Loudness). The fingerprint is the offline
+    // estimator's (`liascape-player scene-loudness`, SceneLoudnessPlanner) of the scene's sound under its user
+    // properties: toggling a sound off and back on returns to the measurement that configuration already had, a
+    // never-played combination starts from its estimate. The player measures (BS.1770, pre-gain, AUDIBLE play —
+    // player-core.md § Scene worker → "Scene loudness"; one measurement per (path, `loudness_key`)): the first report
+    // after ~60 s, then one per further 60 s and at the end of each play, each covering EVERY play of that
+    // configuration so far, until its cap (30 min). The resolver turns the applied value into the scene source's
     // `gain.normalize` (LiascapePlayerMedia.SceneNormalizeDb).
-    // - The measurement (`state`, LoudnessSeconds, LoudnessPartial) is replaced by any report covering MORE audible
-    //   seconds (reports are cumulative: a lost one is made up by the next; two sources of one scene at once keep
-    //   the longer), or by a complete report over an entry without a state (one learned before 2026-10-28 — kept
-    //   and applied until then, never a seed: it can't be continued).
-    // - The APPLIED value (LoudnessI, LoudnessTP) moves only when it changed ≥ ApplyHysteresisLu (0.5 LU / dB):
-    //   `gain.normalize` follows a refinement smoothly (the 500 ms ramp) and never twitches by a tenth.
+    // - A report's configuration = its `key` (the source's `loudness_key`), else (a source that had none — never
+    //   estimated) the item's current one, else "".
+    // - The live measurement (state, seconds, partial) is replaced by any report covering MORE audible seconds
+    //   (reports are cumulative: a lost one is made up by the next; two sources of one scene at once keep the longer).
+    // - The APPLIED value (LoudnessI, LoudnessTP) = the CURRENT configuration's live measurement once it has one,
+    //   else its estimate; within one configuration it moves only when it changed ≥ ApplyHysteresisLu (0.5 LU / dB)
+    //   — `gain.normalize` follows a refinement smoothly (the 500 ms ramp) and never twitches by a tenth; a change of
+    //   configuration jumps to the new one's value (another sound). A report of another configuration (an old key's
+    //   end report after a property change) is stored under it and applies nothing.
     // Returns (stored: `m` changed, applied: LoudnessI/TP changed → normalization should follow it live). Pure (the
     // self-test drives it on a bare LibMeta).
     public const double ApplyHysteresisLu = 0.5;
-    public static (bool Stored, bool Applied) MergeSceneLoudness(LibMeta m, double lufs, double? peakDbfs, double seconds,
-        bool complete, JsonElement? state = null)
+    public static (bool Stored, bool Applied) MergeSceneLoudness(LibMeta m, string? key, double lufs, double? peakDbfs,
+        double seconds, bool complete, JsonElement? state = null)
     {
         if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return (false, false);
-        bool longer = m.LoudnessI == null || seconds > (m.LoudnessSeconds ?? 0) + 1e-9;
-        bool relearn = m.LoudnessI != null && m.LoudnessState == null && complete && state != null;
-        if (!longer && !relearn) return (false, false);
-        m.LoudnessState = state is { ValueKind: JsonValueKind.Object } s ? s.Clone() : null;
-        m.LoudnessSeconds = seconds;
-        m.LoudnessPartial = complete ? null : true;
-        m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
+        string fp = !string.IsNullOrEmpty(key) ? key : m.SceneLoudnessFp ?? "";
+        var e = SceneLoudnessEntryOf(m, fp, create: true)!;
+        if (e.Live is { } old && seconds <= old.Seconds + 1e-9) return (false, false);
         double? peak = peakDbfs is double p && double.IsFinite(p) ? p : null;
+        e.Live = new SceneLoudnessLive
+        {
+            State = state is { ValueKind: JsonValueKind.Object } s ? s.Clone() : null,
+            Seconds = seconds, Lufs = lufs, PeakDbfs = peak, Partial = complete ? null : true,
+        };
+        m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
+        bool applied = fp == (m.SceneLoudnessFp ?? "") && ApplySceneLoudness(m, jump: false);
+        return (true, applied);
+    }
+
+    // The offline estimate of configuration `fp` (the item's current props): stored in its entry, and `fp` becomes the
+    // item's current configuration. The applied value follows: a new configuration jumps to its value (its live
+    // measurement if it was played before, else this estimate); the same one moves by the 0.5 LU rule, and only when it
+    // has no live measurement (an estimate never displaces live data). An item measured before it had any fingerprint
+    // (reports under "") hands that measurement to `fp` the first time it gets one. Pure.
+    public static (bool Stored, bool Applied) MergeSceneEstimate(LibMeta m, string fp, SceneLoudnessEstimate est)
+    {
+        if (string.IsNullOrEmpty(fp)) return (false, false);
+        var e = SceneLoudnessEntryOf(m, fp, create: true)!;
+        if (m.SceneLoudnessFp == null && e.Live == null && m.SceneLoudness!.TryGetValue("", out var unkeyed) && unkeyed.Live != null)
+        {
+            e.Live = unkeyed.Live;
+            m.SceneLoudness.Remove("");
+        }
+        bool jump = m.SceneLoudnessFp != fp;
+        e.Estimate = est;
+        m.SceneLoudnessFp = fp;
+        return (true, ApplySceneLoudness(m, jump));
+    }
+
+    // The current configuration's entry (`create` adds an empty one).
+    public static SceneLoudnessEntry? SceneLoudnessEntryOf(LibMeta m, string? fp, bool create = false)
+    {
+        fp ??= "";
+        if (m.SceneLoudness?.TryGetValue(fp, out var e) == true) return e;
+        if (!create) return null;
+        m.SceneLoudness ??= new();
+        return m.SceneLoudness[fp] = new SceneLoudnessEntry();
+    }
+
+    // (lufs, peak, estimated) of the current configuration: its live measurement, else its estimate; null = nothing.
+    public static (double? Lufs, double? Peak, bool Estimated)? SceneLoudnessTarget(LibMeta? m)
+    {
+        if (m == null || SceneLoudnessEntryOf(m, m.SceneLoudnessFp) is not { } e) return null;
+        if (e.Live is { } l) return (l.Lufs, l.PeakDbfs, false);
+        if (e.Estimate is { } est) return (est.Lufs, est.Lufs == null ? null : est.PeakDbfs, true);
+        return null;
+    }
+
+    // LoudnessI/TP ← the current configuration's target: `jump` = exactly (a configuration change), else by the 0.5 LU
+    // rule. A configuration with nothing (no estimate, never measured) leaves them as they are unless it's a jump
+    // (another sound: nothing known = not normalized). Returns whether they changed.
+    private static bool ApplySceneLoudness(LibMeta m, bool jump)
+    {
+        var t = SceneLoudnessTarget(m);
+        double? lufs = t?.Lufs, peak = t?.Peak;
+        if (t == null && !jump) return false;
         bool applied = false;
-        if (m.LoudnessI is not double i || Math.Abs(lufs - i) >= ApplyHysteresisLu) { m.LoudnessI = lufs; applied = true; }
+        if (jump)
+        {
+            applied = m.LoudnessI != lufs || m.LoudnessTP != peak;
+            m.LoudnessI = lufs; m.LoudnessTP = peak;
+            return applied;
+        }
+        if (lufs is not double nl) { applied = m.LoudnessI != null; m.LoudnessI = null; m.LoudnessTP = null; return applied; }
+        if (m.LoudnessI is not double i || Math.Abs(nl - i) >= ApplyHysteresisLu) { m.LoudnessI = nl; applied = true; }
         if (m.LoudnessTP is not double tp ? peak != null : peak is not double np || Math.Abs(np - tp) >= ApplyHysteresisLu)
         {
             m.LoudnessTP = peak; applied = true;
         }
-        return (true, applied);
+        return applied;
     }
 
     // Store a scene's loudness report in its index entry (a scene folder in the library only). Applied = the value
     // normalization uses moved (it should follow live — PlayerHelper.OnLoudnessMeasured).
-    public static (bool Stored, bool Applied) StoreSceneLoudness(string scenePath, double lufs, double? peakDbfs,
+    public static (bool Stored, bool Applied) StoreSceneLoudness(string scenePath, string? key, double lufs, double? peakDbfs,
         double seconds, bool complete, JsonElement? state = null)
     {
         // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `r` stays (false, false)
         if (!PlayerHelper.IsScenePath(scenePath)) return (false, false);
         (bool, bool) r = (false, false);
-        LibraryStore.SetMeta(scenePath, m => r = MergeSceneLoudness(m, lufs, peakDbfs, seconds, complete, state));
+        LibraryStore.SetMeta(scenePath, m => r = MergeSceneLoudness(m, key, lufs, peakDbfs, seconds, complete, state));
         return r;
     }
 
-    // The stored measurement to continue (a source's `loudness_seed`), or null (none, or one learned before it was
-    // kept — re-learned from scratch).
+    // The card's loudness line (LibraryItem.Loudness*, WS `library-item-changed`): the applied LUFS of the current
+    // configuration, whether it's the estimate, the measured seconds, the estimate's confidence + its first note when low.
+    public readonly record struct SceneLoudnessInfo(double? Lufs, bool? Estimated, double? Seconds, string? Confidence, string? Note);
+    public static SceneLoudnessInfo SceneLoudnessInfoOf(LibMeta? m)
+    {
+        if (m == null) return default;
+        var e = SceneLoudnessEntryOf(m, m.SceneLoudnessFp);
+        var est = e?.Estimate;
+        bool? estimated = e?.Live != null ? false : est?.Lufs != null ? true : m.LoudnessI != null ? false : null;
+        string? note = est?.Confidence == "low" && est.Notes is { Length: > 0 } n ? n[0] : null;
+        return new SceneLoudnessInfo(m.LoudnessI, estimated, e?.Live?.Seconds, est?.Confidence, note);
+    }
+
+    // What a source of the scene continues (`loudness_seed`), with the configuration it belongs to (`loudness_key`):
+    // the current configuration's live measurement, else its estimate's seed (10 s of audible play); null = nothing.
     public static JsonElement? SceneLoudnessSeed(string scenePath) => SceneLoudnessSeedOf(LibraryStore.GetMeta(scenePath));
-    public static JsonElement? SceneLoudnessSeedOf(LibMeta? m) =>
-        m?.LoudnessState is { ValueKind: JsonValueKind.Object } s ? s : null;
+    public static JsonElement? SceneLoudnessSeedOf(LibMeta? m)
+    {
+        if (m == null || SceneLoudnessEntryOf(m, m.SceneLoudnessFp) is not { } e) return null;
+        if (e.Live?.State is { ValueKind: JsonValueKind.Object } s) return s;
+        if (e.Estimate?.Seed is { ValueKind: JsonValueKind.Object } seed) return seed;
+        return null;
+    }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _measuring = new();
 
@@ -395,6 +479,7 @@ public static class LibraryService
         m ??= new LibMeta();
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
         DateTime added; try { var fi = new FileInfo(media); added = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime; } catch { added = DateTime.Now; }
+        var loud = isScene || m.IsScene ? SceneLoudnessInfoOf(m) : default;
         return new LibraryItem
         {
             Title = m.Title ?? key,
@@ -410,6 +495,8 @@ public static class LibraryService
             VolumeOverride = m.Volume,
             SpeedOverride = m.Speed,
             AddedAt = added,
+            LoudnessLufs = loud.Lufs, LoudnessEstimated = loud.Estimated, LoudnessSeconds = loud.Seconds,
+            LoudnessConfidence = loud.Confidence, LoudnessNote = loud.Note,
             Resolution = m.Resolution, AgeRating = m.AgeRating, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
             Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = m.Tags,

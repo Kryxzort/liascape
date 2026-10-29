@@ -121,6 +121,9 @@ public static class ServerHost
         {
             try { Program.RunHeadlessAutoSync(); EventBus.Broadcast("library-synced", new { count = 0 }); }
             catch { }
+            // every scene without an offline loudness estimate for its current configuration (new since the last run,
+            // incomplete then, or a run cancelled / cut short by a restart) — one nice'd child at a time
+            SceneLoudnessOps.AfterImport("startup");
         });
 
         // While the app is open, measure any un-measured library audio in the background so loudness
@@ -440,6 +443,7 @@ public static class ServerHost
         app.MapPost("/library/import", async (ImportReq r) =>
         {
             var item = await ImportService.ImportAsync(r.Path, r.Title);
+            SceneLoudnessOps.Imported(item, "import");
             return item == null ? Results.BadRequest("import failed") : Results.Json(item);
         });
 
@@ -478,8 +482,15 @@ public static class ServerHost
             var s = SettingsService.Load();
             var added = LibraryService.SyncWallpaperEngine(s.WorkshopFolder, s.AllowScenes, s.CopyFilesInsteadOfSymlinking);
             EventBus.Broadcast("library-synced", new { count = added.Count });
+            SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
             return Results.Json(new { added });
         });
+        // a scene's offline loudness estimate (Settings → Audio → "Scene loudness"; web-backend.md § Scene loudness):
+        // queue {paths?: [...] (none = every scene), force?: recalculate what's already estimated} → {queued}
+        app.MapPost("/library/scene-loudness/estimate", (SceneLoudnessReq? r) =>
+            Results.Json(new { queued = SceneLoudnessOps.Enqueue(r?.Paths is { Count: > 0 } p ? p : null, r?.Force == true, "request") }));
+        app.MapPost("/library/scene-loudness/cancel", () => Results.Json(new { cancelled = SceneLoudnessOps.Cancel() }));
+        app.MapGet("/library/scene-loudness/status", () => Results.Json(SceneLoudnessOps.Status()));
 
         // ---- trash / undo (soft delete) ---------------------------------------------------
         app.MapPost("/library/trash", (TrashReq r) => Results.Json(new { batch = AppOps.Trash(r.Items) }));
@@ -813,5 +824,6 @@ public static class ServerHost
     public record PlayReq(List<string> Paths, PlaylistSettings? Settings);
     public record PlayFromReq(List<string> Paths, int StartIndex, PlaylistSettings? Settings);
     public record ImportReq(string Path, string Title);
+    public record SceneLoudnessReq(List<string>? Paths = null, bool? Force = null);
     public record OpenReq(string? Path, string? Url, bool Reveal, bool IsScene = false, string? WorkshopId = null, string? CopiedSceneDir = null);
 }

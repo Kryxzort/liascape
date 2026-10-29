@@ -165,7 +165,13 @@ public static class AppOps
         else if (r.Reset) err = LibraryService.SaveSceneProp(r.Path, r.Name, null);
         else if (r.Value is not { } v || v.ValueKind == System.Text.Json.JsonValueKind.Undefined) err = "value required (or reset: true)";
         else err = LibraryService.SaveSceneProp(r.Path, r.Name, v);
-        if (err == null) PlayerHelper.ApplyScenePropsLive(r.Path);
+        if (err == null)
+        {
+            // liascape-player: re-planned (its loudness configuration) then live; legacy: re-planned only, so the
+            // stored configuration follows the props whichever engine plays (no-op without the binary)
+            if (Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.ApplyScenePropsLive(r.Path);
+            else Liascape.Player.LiascapePlayerMedia.ReplanInBackground(r.Path);
+        }
         return err;
     }
 
@@ -228,6 +234,7 @@ public static class AppOps
 
         var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
         if (item.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
+        SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
         EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
         return item;
     }
