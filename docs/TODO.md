@@ -205,10 +205,19 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
     the refresh paced by frame callbacks, F2 the dropout detector's ramp-edge bins + meter gaps (`unmeasured`), F3
     the bus meter on the RT data thread, F5a the GPU budget reads every output, F6a the source mirror writes only
     changed values. Open:
-    - [ ] **F4 — real scenes' worker CPU over the plan's 5 %**: per frame the worker costs what LWE costs (Kimi/Bunk
+    - [x] **F4 — real scenes' worker CPU over the plan's 5 %**: per frame the worker costs what LWE costs (Kimi/Bunk
           ≈ 1.07 ms CPU per frame at 240 fps; legacy LWE 1.04 at 144); at the default 30 fps Kimi 10.2 % (its sound),
           Bunk 6.6 % (visualiser), Emilia 2.2 %. Profile the scene-audio path at 1× (LWE decode + resample + our
           stream), add the worker's own CPU to the `workers` probe, re-state the bound per scene class.
+          **Done 2026-10-29 — a hard limit (LWE's own per-frame cost), restated per class ("Report A Scene
+          Worker's Own CPU"):** the `workers` probe now has `cpu {total_ms, threads}`. Release, headless @144,
+          `scene_fps` 30: Kimi (sound) 6.0 % (renderer 3.5, PipeWire data loop 2.2), Bunk 2.6 %, Emilia 1.2 %.
+          `perf` of Kimi: the render thread 66 % of samples (NVIDIA GL driver + LWE), the audio path ~1/5 —
+          LWE's mp3 decode ~5 % of the worker, PipeWire's plumbing ~3 %, ours (Dsp, loudness meter, envelope)
+          ~3.5 % ≈ 0.2 % of a core. **Bound per class:** synthetic / light scenes < 5 % at 30 fps (PASS); heavy
+          scenes cost ≈ 0.8–1.1 ms CPU per frame (= legacy LWE), so < 5 % only up to ~30–45 fps — not a
+          compositor bug. Open idea: a `no_audio` / paused stream still runs its callbacks (1.2 %); deactivating
+          it costs a bus cycle sometimes (F7 residual) — only once that's solved.
     - [ ] **F5b — a heavy single-draw worker still costs a 240 Hz output frames**: at 220–260 ms/s of worker GPU,
           DP-2's 240 Hz clip missed 33–38 frames / 2 s (p95 6.9–9.1 ms); the throttle stops at its GPU-load guard
           (400 ms/s). NVIDIA doesn't preempt the low-priority context mid-draw and with explicit sync off each swap
