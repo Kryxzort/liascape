@@ -187,6 +187,7 @@ fn main() -> ExitCode {
         Some("serve") => serve_main(&args[1..]),
         Some("ctl") => liascape_player::ctl::main(&args[1..]),
         Some("scene-check") => scene_check(&args[1..]),
+        Some("scene-loudness") => scene_loudness(&args[1..]),
         Some("health") => {
             // `hello.health` for when no player runs (no render worker here: no hwdec interop);
             // the backend's capability report (/health/features) reads it, exit 0
@@ -200,9 +201,89 @@ fn main() -> ExitCode {
         _ => {
             eprintln!(
                 "usage: liascape-player --version | liascape-player serve [--headless …] | liascape-player ctl \
-                 <verb> ['<json args>'] | liascape-player scene-check [--assets <dir>] | liascape-player health"
+                 <verb> ['<json args>'] | liascape-player scene-check [--assets <dir>] | liascape-player \
+                 scene-loudness <scene dir> [--assets <dir>] [--props '<json>'] [--model lwe|we] \
+                 [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache] | liascape-player health"
             );
             ExitCode::from(2)
+        }
+    }
+}
+
+/// `liascape-player scene-loudness <scene dir> [--assets <dir>] [--props '<json>'] [--model lwe|we]
+/// [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache]` — the OFFLINE loudness estimate of
+/// a WE scene (`scene::loudness_estimate`; player-core.md § Scene worker → "Scene loudness" →
+/// "Offline estimate"): one JSON object `{path, estimated: true, model, fingerprint, lufs,
+/// lufs_if_coherent, peak_dbfs, audible_s, horizon_s, state, seed {weight_s, state}, confidence
+/// {level, notes}, sounds, files, cache, ms}` — `state`/`seed.state` are the live learner's
+/// `state_json` shape (a `loudness_seed`).
+/// `--props` = the item's `scene_props` (name → value) over project.json's defaults; `--model`
+/// `lwe` (default: what liascape-player plays — LWE ignores `volume`) or `we`. `--assets` = WE's
+/// assets dir for sounds the scene takes from it (else resolved like `scene-check`). Per-file
+/// stats are cached (`$XDG_CACHE_HOME/liascape/scene-loudness`), so a re-estimate is a re-mix.
+/// `--horizon S` simulates exactly the first S s of play (validation against a recording).
+/// Exit 0, 1 = not a scene / unreadable (the error as `{path, error}`), 2 = usage.
+fn scene_loudness(args: &[String]) -> ExitCode {
+    use liascape_player::scene::loudness_estimate as le;
+    let usage = || {
+        eprintln!(
+            "usage: liascape-player scene-loudness <scene dir> [--assets <dir>] [--props '<json>'] \
+             [--model lwe|we] [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache]"
+        );
+        ExitCode::from(2)
+    };
+    let (mut dir, mut assets, mut opts) = (None, None, le::Opts::default());
+    let mut cache_dir = le::Cache::default_dir();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--assets" => assets = it.next().map(std::path::PathBuf::from),
+            "--props" => match it
+                .next()
+                .map(|v| serde_json::from_str::<serde_json::Value>(v))
+            {
+                Some(Ok(serde_json::Value::Object(m))) => opts.props = Some(m),
+                _ => {
+                    eprintln!("liascape-player scene-loudness: --props needs a JSON object");
+                    return ExitCode::from(2);
+                }
+            },
+            "--model" => match it.next().and_then(|m| le::Model::parse(m)) {
+                Some(m) => opts.model = m,
+                None => return usage(),
+            },
+            "--seed-seconds" => match it.next().and_then(|v| v.parse::<f64>().ok()) {
+                Some(s) if s > 0.0 => opts.seed_s = s,
+                _ => return usage(),
+            },
+            "--horizon" => match it.next().and_then(|v| v.parse::<f64>().ok()) {
+                Some(s) if s > 0.0 => opts.horizon_s = Some(s),
+                _ => return usage(),
+            },
+            "--cache" => cache_dir = it.next().map(std::path::PathBuf::from),
+            "--no-cache" => cache_dir = None,
+            other if !other.starts_with("--") && dir.is_none() => {
+                dir = Some(std::path::PathBuf::from(other))
+            }
+            _ => return usage(),
+        }
+    }
+    let Some(dir) = dir else { return usage() };
+    let assets = assets.or_else(|| {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        liascape_player::scene::assets::resolve(None, &home).ok()
+    });
+    match le::SceneDir::open(&dir, assets.as_deref()) {
+        Ok(scene) => {
+            let mut cache = le::Cache::new(cache_dir);
+            println!("{}", le::estimate_scene(&scene, &opts, &mut cache));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            println!("{}", serde_json::json!({"path": dir, "error": e}));
+            ExitCode::from(1)
         }
     }
 }
