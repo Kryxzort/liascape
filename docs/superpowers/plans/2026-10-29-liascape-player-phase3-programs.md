@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rotation runs inside `liascape-player`, with the same rules users see today: timed playlists, "Switch when video ends" with a minimum and maximum play time, "Separate timing for scenes", shuffle, history (next/previous), random and restore. A new Signal pauses the wallpaper when a window covers it. The backend no longer needs its timer daemon, restart daemon, `pending_action.txt` or the `timer.pid`/`gui_timer.pid` ownership: under `PlayerEngine=liascape-player` it starts none of them. Rotation keeps going with the app closed, survives a player crash, and stays the same for the UI.
+**Goal:** Rotation runs inside `liascape-player`, with the same rules users see today: timed playlists, "Switch when video ends" with a minimum and maximum play time, "Separate timing for scenes", shuffle, history (next/previous), random and restore. When a playlist starts again it either resumes where it left off or starts over (a new per-playlist setting). A new Signal pauses the wallpaper when a fullscreen or maximized window covers it (on by default). The backend no longer needs its timer daemon, restart daemon, `pending_action.txt` or the `timer.pid`/`gui_timer.pid` ownership: under `PlayerEngine=liascape-player` it starts none of them. Rotation keeps going with the app closed, survives a player crash, and stays the same for the UI.
 
 **Architecture:** A rotation is a graph node, `prog:<name>` (kind `program`). Its settings are ordinary live properties, so a `set` reaches the running rotation the same way every other setting does. Its items carry their source create props. A recipe next to the transition recipe, `recipes/program/`, reads the node and the events. On the player clock it decides when to request a `transition` on the program's outputs, and with which item and effect. It never renders and never touches a source. The backend keeps the library, the settings and the R61 resolver. It turns a playlist into a program spec, sends user switches as four thin verbs, and mirrors what plays from the program's events. Pause-when-covered is a Signal: `out:<c>.covered` is observed from wlr-foreign-toplevel. A rule turns it into a player-level hold, composed the same way as the Phase 2 low-VRAM hold, so invariant #7's pause machinery covers it unchanged.
 
@@ -15,37 +15,68 @@
 ## Decisions
 
 **Owner decisions this plan rests on** (stated before 2026-10-29):
-- Phase 3 scope is spec §12 item 3. **The in-player auto-mute Signal is PARKED** (2026-10-28): `AudioMonitor` stays as it is, for both engines.
+- Phase 3 scope is spec §12 item 3. The in-player auto-mute Signal was PARKED (2026-10-28); on 2026-10-29 the owner allowed it back **as an optional last task, only if it is a strict upgrade** (O5, Task 14). Until it passes, `AudioMonitor` stays as it is, for both engines.
 - The owner uses the `liascape-player` engine only. The legacy engine may break, and no work goes into it. Phase 5 deletes it, this phase does not.
 - The rotation model (2026-10-28, `player-adapter.md` § Rotation) is the contract, kept exactly. It is listed verbatim under Global Constraints.
 - `StayPausedWhenSwitching` (2026-10-25). Off: a user switch while paused resumes and then switches. On: the pause stays and the switch is a cut to B's first frame, paused.
 - A broken scene playing in a rotation advances to the next item at once (Phase 2, round 2). A crashed scene is skipped unless whitelisted (D6).
 - No migration code (the owner is the only user). Settings apply live. Features must compose.
 
+**Owner decisions, 2026-10-29** (answers to this plan's open questions):
+- **O1 — Pause when covered: on by default**, mode "a fullscreen or maximized window". The wallpaper pauses only when every monitor showing it is covered. Off and fullscreen-only stay selectable (designer call 9, Task 6, Task 10).
+- **O2 — Rotation while no monitor shows the wallpaper: keep rotating invisibly by default** (today's behaviour). A setting holds it until a monitor returns instead. That setting lives in a **new "Expert" settings group**, hidden unless a new **"Show expert options"** toggle is on; future expert-only settings use the same mechanism (designer calls 3 and 12, Tasks 3, 5, 10).
+- **O3 — Keep `monitor-daemon`** until Task 14 passes its parity bar (designer call 5).
+- **O4 — Where a playlist resumes is a playlist setting.** Owner: "checkbox in playlist setting, 'always start with the first wallpaper': sequential = always first to last, shuffle = play first and then shuffle as normal; another toggle for toggling between exact spot and normal shuffle/sequential … probably make changing this setting smarter". Revised by the owner the same day: **one choice only**, "When the playlist starts again" = **Start over** (default; sequential from the first wallpaper, shuffle reshuffles) | **Resume where it left off** (exact item, time and play time). The "always start with the first wallpaper" checkbox is **dropped** (no real use-case). It has a global default and a per-playlist override like the other rotation settings (§ Playlist start, designer call 11, Task 5b).
+- **O5 — Auto-mute:** the current one works fine. The in-player rework may be done **if it is a strict upgrade**: an optional last task (Task 14) with explicit parity criteria against today's `AudioMonitor`. Only when it meets every one does it replace `AudioMonitor` and retire `monitor-daemon`; otherwise the current one stays.
+
 **Designer calls (my call; the owner can override any of them):**
 1. **One node, one recipe.** `prog:<name>` holds every setting as a live property. `create`/`set`/`get`/`destroy` are the generic verbs. `program.play|next|prev|random` are thin recipes over `transition` (spec §4.2). The backend uses one program, `prog:main` on `out:*`, for every rotation session: timed, advance-on-end, and Play All with more than one item. **A single applied wallpaper stays a plain `transition`.** Next/previous/random on a single wallpaper stay the backend's library step (`TryStepLibrary`, `ApplyRandomNow`), because they need the library order.
 2. **Settings stay the backend's.** The program holds `defaults` (the globals' desired source props) and per-item `props` (only where an item differs: overrides, `af`, `gain.normalize`, `scene_props`, `kind`, `preview`, `loudness_seed`). B's create props = `defaults` with the item's `props` merged over them, shallowly. That merge *is* "override ?? global", and the player does not know it: R61 (`LiascapePlayerMedia.Desired`) stays the one authority, and it now also writes `defaults` and the item props.
-3. **The rotation's clock is the player clock** (`Runtime::now`, pause-excised). Play time and the countdown stop when the picture stops: during a user pause, the low-VRAM hold, the cover hold, and while no output shows the program's item (parked). The last one changes today's behaviour: the backend's tick kept rotating invisibly while every output was gone. See Q2.
-4. **The program persists across player restarts.** Its configuration and order go in `<state>/program.json`, written only when they change. Its dynamic state (cursor, history, play time, countdown) goes in `snapshot.json`. A restarted player resumes the program and re-arms an end-of-video switch by itself. `liascape restore` with `ResumeFromLast` on starts `serve --restore`: the same item, at the saved position and play time (see Q4). With it off, or with no saved state, it replays `LastSession` from the top, as today.
-5. **The daemons, under `liascape-player`:** `timer-daemon`, `restart-daemon`, `pending_action.txt`, `timer.pid`, `gui_timer.pid` and `timed_state.json` are never started, written or read. Their code stays for legacy until Phase 5 deletes it. Every `PlayerHelper` entry point that reaches them gets an `IsLiascapePlayer` dispatch at the top, the existing pattern. **`monitor-daemon` stays**: it *is* the parked auto-mute (`AudioMonitor` running with the app closed). See Q3.
+3. **The rotation's clock is the player clock** (`Runtime::now`, pause-excised). Play time and the countdown stop when the picture stops: during a user pause, the low-VRAM hold and the cover hold. **While no output shows the program's item (parked)**, the program follows `while_parked` (O2):
+   - `rotate` (default) is today's behaviour exactly. Play time and the countdown keep counting. Timer, maximum and "Switch scenes after" switches go through `transition_parked` (each replaces the parked wallpaper, invisibly). An end-of-video switch waits, because the parked A is paused and never ends — as the backend's `AlignedWaitCheck` waits today.
+   - `hold` stops both clocks until an output shows the item again.
+4. **The program persists across player restarts.** Its configuration and order go in `<state>/program.json`, written only when they change. Its dynamic state (cursor, history, play time, countdown) goes in `snapshot.json`. A crash restart or an in-place upgrade always resumes the program exactly and re-arms an end-of-video switch by itself. What a *start* does — boot, Play, coming back to a playlist — is § Playlist start.
+5. **The daemons, under `liascape-player`:** `timer-daemon`, `restart-daemon`, `pending_action.txt`, `timer.pid`, `gui_timer.pid` and `timed_state.json` are never started, written or read. Their code stays for legacy until Phase 5 deletes it. Every `PlayerHelper` entry point that reaches them gets an `IsLiascapePlayer` dispatch at the top, the existing pattern. **`monitor-daemon` stays** (O3): it *is* `AudioMonitor` running with the app closed, until Task 14 passes its parity bar.
 6. **What the backend must persist while it is away goes into a player outbox.** These are facts that the timer daemon stored as a backend process: `source.broken` (→ `MarkCrashed`), `scene.loudness` (→ the index), `scene.vram_exceeded` (UI text only). `<state>/outbox.jsonl` is append-only, bounded and acked. The backend drains it on every (re)subscription.
 7. **The effect pick moves into the player** (`recipes/program/pick.rs`) with today's rules. Sequential cycles through the enabled set; shuffle never repeats the last effect. The duration is uniform in `[duration_ms, duration_max_ms]`, and 0 ms is a cut. The method comes from the program's `transition.method`, and the params are the catalogue's uniform defaults (as `TransitionService.Pick` sends them).
 8. **Failures never spin.** A switch that fails (B errors, or is not ready in 10 s) backs off 1 s, 2 s, 4 s … up to 30 s while failures continue in a row; a handoff resets the backoff. After the backoff the program switches, `align: now`, to the next playable item after the failed one. When nothing is playable it logs `program.empty` once and holds what is shown.
-9. **Pause-when-covered:** a toplevel that is activated, not minimized, and in the fullscreen state (or maximized, depending on the mode) on an output covers that output. The hold engages when *every* output showing the program's content (or, with no program, any content) is covered for `COVER_ENGAGE_MS` = 300 ms, and releases at once. With the same wallpaper on every output, a game fullscreen on one monitor leaves the wallpaper playing on the other (it is still visible, and audio follows the picture). New setting `PauseWhenCovered` = `off` | `fullscreen` | `maximized`, default `off` (Q1).
+9. **Pause-when-covered:** a toplevel that is activated, not minimized, and fullscreen (or maximized, depending on the mode) on an output covers that output. The hold engages when *every* output showing content is covered for `COVER_ENGAGE_MS` = 300 ms, and releases at once. With the same wallpaper on every output, a game fullscreen on one monitor leaves the wallpaper playing on the other (it is still visible, and audio follows the picture). New setting `PauseWhenCovered` = `off` | `fullscreen` | `maximized` ("fullscreen or maximized"), **default `maximized`** (O1). The player prop's own default stays `off`, so a raw `ctl`/test player never pauses by itself; the backend asserts the setting on every player process, as it does the GPU settings, and a crash restart keeps it through the snapshot's player props.
 10. **Engine switch away from `liascape-player`** replays `LastSession` from the top on legacy. Nothing more is spent there. Legacy → `liascape-player` loads the program from `timed_state.json` at the item it was on (a cheap read of a file legacy already writes).
+11. **Playlist start is decided in the player** (O4, § Playlist start). Each program carries its playlist's identity (`key`) and `start_mode`. The player keeps a resume point per key in `<state>/resume.json`: it is written whenever a keyed program is stopped, replaced or destroyed, and kept whatever the setting, so switching from Start over to Resume later still finds a point. `program.play {from: "start" | "resume" | "index"}` applies the rules. Boot passes `--session-start` so the snapshot's program starts per its mode with no flash of the old item; a crash restart or upgrade never passes it.
+12. **Expert options** (O2) are a UI tier, not a backend concept.
+    - `AppSettings.ShowExpertOptions` (default false, in settings.json — per user, like `AdvancedSettings`) is a checkbox row "Show expert options" in Settings → Advanced, directly under "Advanced settings", always visible.
+    - `Row` gains an `expert` prop: an expert row renders nothing unless the toggle is on. An `<ExpertSection>` (Settings → "Expert", last on the page) renders only while the toggle is on.
+    - Each expert row carries a small "Expert" tag, so a screenshot shows where a setting lives.
+    - Expert settings are ordinary settings: saved and applied live whether or not the group is shown. Hiding a row never resets its value, and a non-default expert value shows the existing "deviated" marker on the "Show expert options" row while the group is hidden, so a setting changed and then hidden is never forgotten.
+    - The first expert setting is `RotateWhileParked` ("When no monitor shows the wallpaper": Keep rotating — default | Hold until a monitor returns), global only.
+13. **`ResumeFromLast` ("Resume from last on launch") is folded into the playlist start setting.** Its row goes. A single wallpaper always comes back at its position on boot (the snapshot), and a playlist follows its "When the playlist starts again". No migration and no script: an old file's `ResumeFromLast` loads as an unknown key, and the new default (Start over) applies; the owner picks Resume in Settings if they want it.
 
 ---
 
-## Open questions for the owner
+## Playlist start — start over or resume (O4)
 
-Each has a recommendation. The tasks implement the recommendation, and changing an answer changes only the task named.
+**The setting:** "When the playlist starts again" = `GlobalPlaylistStart` / `PlaylistSettings.PlaylistStart`, `start_over` (**default**) | `resume`. It has a global default and a per-playlist override under the existing "Override global rotation", like every other rotation setting; `EffectiveRotation` gains it. Nothing else — the owner dropped the "always start with the first wallpaper" checkbox (no real use).
+- **Start over:** sequential → the playlist bar's first playable wallpaper; shuffle → a new shuffle (its first ≠ the last one played, so a restart never repeats what was just on).
+- **Resume where it left off:** the exact item, its time and its play time (and the timer's remaining). A shuffle continues its own order.
 
-- **Q1 — Pause when covered: default and scope.** *Recommend:* default **Off**. Today the app never pauses for a window: it launches LWE with `--no-fullscreen-pause` and mpvpaper without `-p`. Options: Off / "a fullscreen window" / "a fullscreen or maximized window". The wallpaper pauses only when every monitor showing it is covered. *Alternative:* pause when any monitor is covered. That would stop a wallpaper you can still see on the other screen; it changes Task 6's rule to "any" (one line).
-- **Q2 — Rotation while no monitor shows the wallpaper** (every output unplugged or KVM-switched away). *Recommend:* **hold**. The item and its remaining time wait until a monitor comes back, and nothing is decoded for nobody. *Alternative:* keep rotating invisibly (today). Task 5 then counts play time while parked and keeps `transition_parked`'s replace-the-parked-wallpaper path.
-- **Q3 — Auto-mute with the app closed.** The spec lists the monitor daemon for retirement, but it is the parked auto-mute's only way to run without the app. *Recommend:* **keep `monitor-daemon`** in Phase 3 and retire it with the Signal when that is un-parked. *Alternative:* retire it now; auto-mute then works only while the app is open. Task 8 deletes `SpawnDetachedMonitor`'s callers under `liascape-player`.
-- **Q4 — "Resume from last on launch": where to resume.** *Recommend:* **the exact position** (the item, its time, its play time — the snapshot). Today a timed restore restarts the item from 0, and a single wallpaper restarts from 0. *Alternative:* the item's start. Task 8 then sends `program.play {index}` instead of `serve --restore`.
+**What counts as "starts again", and what the setting does** (Task 5b tests the player rows; Tasks 7–8 the backend rows through the IT):
 
----
+| event | Start over (default), sequential | Start over, shuffle | Resume | test |
+|---|---|---|---|---|
+| boot / `liascape restore` (player not running; `serve --restore --session-start`) | item 1 at 0 | a fresh shuffle | exact item, time, play time | T5b `session_start_*`; T8 IT `restore × mode`; T12 step 6 |
+| app restart (Electron/backend), player still running | untouched: it never stopped | untouched | untouched | T8 IT "app closed" (no `transition.scheduled` origin `api`, `played_ms` monotone) |
+| player crash / supervised restart / in-place upgrade | exact, always (recovery, not a start) | exact | exact | T5 `program_survives_a_crash`; T5b `crash_restore_ignores_start_mode` |
+| Play on the playlist that is playing now | restarts at item 1 | a fresh shuffle | keeps playing where it is (a pause is lifted, I1) | T5b `play_same_key_*`; T7 IT |
+| Play after `stop`, the `play` keybind, `toggle-play` | item 1 | a fresh shuffle | its resume point | T5b `play_after_stop_*`; T8 IT |
+| another playlist (or a single wallpaper) played, then this one again | item 1 | a fresh shuffle | its own resume point, kept per playlist | T5b `switching_playlists_and_back_*`; T7 IT |
+| Resume, but the resume item was removed / the list edited meanwhile | — | — | the item after its old place, at 0 (the reorder rule); order re-anchored | T5b `resume_after_edit_reanchors` |
+| Resume, nothing to resume (first play, point aged out) | — | — | as Start over | T5b `resume_without_point_starts_over` |
+| play-from (a specific card or playlist-bar item clicked) | that item at 0 — every column: an explicit choice beats the setting | | | T5b `play_index_beats_start_mode`; matrix `seq:*` |
+
+- **The playlist's identity (`key`)** = `name:<saved name>` for a loaded/saved playlist, else `bar` (the unsaved playlist bar). "Save as" makes a new key; the old point ages out.
+- **Resume points** are kept in `<state>/resume.json` whatever the setting, so switching to Resume later still finds one. At most 50 keys, least recently used dropped. Each entry: `{order, idx, history, hist_idx, path, time_pos, played_ms, remaining_ms, last_effect, saved_unix_ms}`.
+- **Live** (settings apply live): a change while a playlist plays is a `set prog:main.start_mode`. It takes effect at the **next start** and never jumps the current play (T5b `start_setting_change_never_jumps_the_current_play`). The row's hint says so while a playlist plays: "Takes effect the next time this playlist starts — what's playing now carries on".
+- **Single wallpaper:** on boot it comes back at its position (the snapshot). There is nothing to start over.
 
 ## Global Constraints
 
@@ -70,6 +101,9 @@ Each has a recommendation. The tasks implement the recommendation, and changing 
   - Random picks uniformly from the playable items except the current one, re-seats the cursor at the pick, and drops the forward history.
   - An item list edit keeps the current item (or, if it was removed, lets it finish without replaying it, and plays the item after its old place next). It resets the history to `[current]` and never resets the countdown or the play time (`ReorderPlaylist`).
   - Skipped items (`skip` true, broken, or unplayable) are passed over by next/random/rotation.
+- **Playlist start contract:** § Playlist start's table, verbatim. A crash restart, an upgrade and an app restart never count as a start. An explicit play-from beats the setting. A setting change applies at the next start only.
+- **Parked:** `while_parked` = `rotate` (default) reproduces today's backend exactly: play time and the countdown count; timer/max/scenes-after switches replace the parked wallpaper (`transition_parked`); an end-of-video switch waits. `hold` stops both clocks.
+- **Cover:** `PauseWhenCovered` defaults to `maximized` (fullscreen or maximized) in AppSettings; it engages only when every output showing content is covered.
 - **Never block the loop:** a program's per-tick work is O(1); O(items) only on an edit, a cycle reshuffle or a random pick. `program.json` is written on the snapshot thread (`lia-snapshot`), atomically (temp + fsync + rename).
 - **Settings apply live** for every program property (`set prog:main.<prop>`). Nothing needs a replay. A per-item override reaches a pending B through the resolver as today.
 - Global settings still go to `srcs:*` for live sources. `defaults` covers the B's not created yet.
@@ -108,8 +142,10 @@ src/player/src/recipes/program/rule.rs    ItemRule table + min/max/scene predica
 src/player/src/recipes/program/order.rs   Order: play order, shuffle cycles, history, random, reorder (pure, seeded)
 src/player/src/recipes/program/pick.rs    TransitionCfg + effect/duration/method pick (pure, seeded)
 src/player/src/recipes/program/store.rs   program.json (config + order) read/write; snapshot half (cursor/history/clock)
+src/player/src/recipes/program/resume.rs  resume.json (per-playlist resume points, LRU 50) + the start rules (§ Playlist start)
 src/player/src/signal/{mod,covered}.rs    the covered Signal: Toplevels tracker, CoverState, the cover rule
 src/player/src/outbox.rs                  <state>/outbox.jsonl: append, read, ack, bound
+src/player/src/signal/automute.rs, audio/foreign.rs   optional Task 14: the in-player auto-mute Signal
 src/player/src/graph/{mod,props}.rs       NodeKind::Program, PropValue::Items, schema; out:<c>.covered; player.pause_when_covered
 src/player/src/runtime.rs                 Programs + cover hold in the tick (R47 order), update_player_paused, park/unpark hooks
 src/player/src/snapshot.rs                `programs` (dynamic state), restore order
@@ -119,13 +155,14 @@ src/player/src/wl.rs                      zwlr_foreign_toplevel_manager_v1 bindi
 src/player/tests/program.rs               new test target (stepped headless, clips + synthetic scenes)
 src/backend/Player/LiascapePlayerProgram.cs  the adapter's program half (spec builder, verbs, mirror, R81, outbox)
 src/backend/Helpers/PlayerHelper.cs, Web/{ServerHost,AppOps}.cs, Program.cs   dispatches + lifecycle
-src/backend/Models/AppSettings.cs, app/ui/src/views/Settings.tsx   PauseWhenCovered
+src/backend/Models/{AppSettings,CustomPlaylist}.cs   PauseWhenCovered, RotateWhileParked, ShowExpertOptions, (Global)PlaylistStart
+app/ui/src/views/Settings.tsx, app/ui/src/components/PlaylistSettingsModal.tsx   the rows, the Expert group + `Row expert`
 scripts/test-liascape-player-adapter.sh, scripts/test-settings-merge.sh, scripts/test-ui-matrix.sh, app/shell/probe-matrix.js
 ```
 
-**Order:** 1 → 2 → 3 → 4 → 5 → 7 → 8 → 11 → 12 → 13. Task 6 (cover) and Task 9 (outbox) need only Task 2 and can run beside 3–5, but no more than 2 agents at once (memory "Subagent cap"). Task 10 follows 6.
+**Order:** 1 → 2 → 3 → 4 → 5 → 5b → 7 → 8 → 10 → 11 → 12 → 13 → (optional) 14. Task 6 (cover) and Task 9 (outbox) need only Task 2 and can run beside 3–5, but no more than 2 agents at once (memory "Subagent cap"). Task 10 follows 6, 5b and 7.
 
-**Sizes:** S ≤ ½ day, M ½–1½ days, L 1½–3 days of focused agent work. Total ≈ 16–22 days, plus whatever Task 12 finds.
+**Sizes:** S ≤ ½ day, M ½–1½ days, L 1½–3 days of focused agent work. Total ≈ 19–25 days for Tasks 1–13 (the owner's answers added ≈ 3: Task 5b, the parked mode, the Expert tier, the start-mode rows), plus whatever Task 12 finds; optional Task 14 ≈ 2½–3½ more.
 
 ---
 
@@ -261,17 +298,18 @@ impl Programs {
   pub fn play(&mut self, id: &str, index: usize, keep_pause: bool, g: &Graph) -> Result<Vec<ProgramAction>, ApiError>;
   pub fn on_requested(&mut self, id: &str, corr: CorrId, step: Step, reason: Reason);
   pub fn tick(&mut self, g: &mut Graph, tr_events: &[TransitionEvent], src_events: &[(String, SourceEvent)],
-              player_now: Duration, parked: bool) -> Vec<ProgramAction>;            // after Transitions::tick, before refresh_srcs (R47)
+              player_now: Duration, parked: bool) -> Vec<ProgramAction>;  // parked → per `while_parked`            // after Transitions::tick, before refresh_srcs (R47)
   pub fn status(&self) -> Vec<ProgramStatus>;
 }
 pub enum Reason { Play, Timer, End, Max, ScenesAfter, Next, Prev, Random, Broken, Vram, FailedSkip, Items } // = program.current.reason (snake_case)
-pub struct PlayClock { /* accumulates player-clock deltas while the item is shown (not parked) */ }
+pub struct PlayClock { /* accumulates player-clock deltas; while parked only under while_parked = rotate */ }
 pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // then 30000 for as long as failures continue
 ```
 - **B's create props:** `defaults` ∪ `item.props` (item wins), plus `path`, plus `loop: true` while a min-hold needs A to loop. `kind` comes from the item props, else from the extension the backend sends; the player's own image flag corrects it as today.
 - **Commit:** at `transition.started` for the program's corr (B becomes current: `Order::commit(step)`, play time → 0, emit `program.current`, then arm the next per the rule). `handoff {committed: true}` also commits a step not yet committed (a missed `started`). A `cancelled {superseded}` caused by the program's own next request is ignored. A `cancelled` by another client (`origin: api`) drops the pending step, and the program follows what `cur:` now shows (its path, if it is an item, becomes current with reason `items`; else the program goes `idle` until the next verb).
 - **On end:** with a video current and `CanRotate`, `plan_next` happens right after commit. If `min_reached` (with A's loop remaining = (duration − time_pos)/speed) → `Start align:end` now. Else `held`, with A's `loop` set true, and the request goes in during the loop that reaches the minimum. The maximum runs on the tick. A still (image/scene) uses `still_min_reached` on the tick (`align:now`).
-- **Timer:** `remaining_ms -= Δplayer × speed(cur source)` while not parked; at ≤ 0 with `interval_ms > 0` → `Start align:now`. A 1-item program resets to the interval.
+- **Timer:** `remaining_ms -= Δplayer × speed(cur source)` (while parked only under `rotate`); at ≤ 0 with `interval_ms > 0` → `Start align:now`. A 1-item program resets to the interval.
+- **Parked** (`while_parked`, Program prop `rotate|hold`, default `rotate`): under `rotate` a timer/max/scenes-after `Start` while no output exists goes through the runtime's `transition_parked` (it replaces the parked wallpaper; `transition.scheduled {parked: true}`), and an armed end-of-video switch waits (`parked_req`) as today; under `hold` the PlayClock and the countdown stop.
 - **Failure ladder** (designer call 8) and **broken/vram:** `source.broken` / `scene.vram_exceeded` for the current item's source → an immediate `Start align:now` to the next playable item (`broken` marks the path; `vram` does not).
 
 - [ ] **Step 1: Write failing tests** (`tests/program.rs`, stepped clock, `seed` pinned, clips from `ensure_clip` — 2 s / 4 s / 10 s FrameIndex clips; `solid_png`; `synthetic_scene`):
@@ -348,7 +386,7 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 
 **Files:**
 - Create: `src/player/src/recipes/program/store.rs`
-- Modify: `src/player/src/snapshot.rs` (`#[serde(default)] programs: Vec<ProgramSnap>`; `VERSION` stays 1 — additive), `src/player/src/runtime.rs` (park/unpark → `parked` flag; the restore order: outputs → sources → programs), `src/player/tests/{program.rs, supervise.rs}`
+- Modify: `src/player/src/graph/props.rs` (Program `while_parked` `rotate|hold`, default `rotate`), `src/player/src/snapshot.rs` (`#[serde(default)] programs: Vec<ProgramSnap>`; `VERSION` stays 1 — additive), `src/player/src/runtime.rs` (park/unpark → `parked` flag; the restore order: outputs → sources → programs), `src/player/tests/{program.rs, supervise.rs}`
 
 **Interfaces:**
 - `<state>/program.json` = `{version: 1, rev, programs: [{id, props (settable), order: {items, idx, shuffle}}]}`. It is written on `lia-snapshot` after a config/order change (debounced 250 ms like the snapshot), and never by the 2 s position refresh.
@@ -359,7 +397,9 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 - [ ] **Step 1: Write failing tests:**
   - `pause_freezes_the_rotation` (`program.rs`): timer 3000, `player.paused` for 5000 at played 1000 → the switch at t ≈ 8000; `remaining_ms` constant while paused.
   - `vram_hold_freezes_the_rotation`: the fake VRAM probe low → hold → no switch while held; resumes after the release.
-  - `no_output_holds_the_rotation_and_resumes_on_replug` (Q2, recommended): `headless.remove_output` ×2 → `phase: "parked"`, no `transition.scheduled` for 10 s; re-add → the same item shown, and the switch comes at the remaining time.
+  - `parked_keeps_rotating_invisibly_by_default` (O2): timer 3000, `headless.remove_output` ×2 → `phase: "parked"`; `transition.scheduled {parked: true}` every 3000 (± 1 step), exactly one per interval (no storm); an on_end video A parked → no request until an output returns; re-add → the LAST target shown, the rotation continuing.
+  - `parked_hold_mode_holds_and_resumes` (`while_parked: hold`): no `transition.scheduled` for 10 s parked, `played_ms`/`remaining_ms` constant; re-add → the same item, the switch at the remaining time.
+  - `parked_mode_is_live`: `rotate` → `hold` while parked stops the clocks at once; back to `rotate` resumes them.
   - `hotplug_mid_program_switch_adopts`: an output added during a program effect is adopted (`transition.output_adopted`) and the program commits normally.
   - `program_survives_a_crash` (`supervise.rs`, supervised headless, real clock): a timer rotation of 3 clips; `kill -SEGV` the compositor after 2 switches → the new pid's `state.programs[0]` has the same order and history, `played_ms` within 2.5 s of before, and the rotation goes on (the next switch to the next item, origin program).
   - `restored_armed_program_rearms_at_a_end` (Review Focus 2): on_end with a 6 s clip, crashed 2 s in while armed → A restored at ≈ 2 s, a new `transition.scheduled {align: "end"}`, no `align: "now"`, handoff at A's end.
@@ -372,6 +412,46 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 - [ ] **Step 5:** Commit `Persist Programs Across Player Restarts`.
 
 **Size: M–L.**
+
+### Task 5b: Playlist start — resume points and start modes (player side)
+
+**Files:**
+- Create: `src/player/src/recipes/program/resume.rs`
+- Modify: `src/player/src/graph/props.rs` (Program `key` Str default `""`, `start_mode` `start_over|resume` default `start_over`), `src/player/src/recipes/program/{mod.rs, order.rs}` (`Order::new_start(paths, shuffle, avoid_first: Option<&str>, rng)` — a fresh shuffle whose first ≠ the last played), `src/player/src/api/handlers.rs` (`program.play {from}`), `src/player/src/main.rs` + `snapshot.rs` (`serve --session-start`: only meaningful with `--restore`; the supervisor never forwards it to a restarted child), `src/player/tests/program.rs`
+
+**Interfaces:**
+```rust
+// resume.rs
+pub struct ResumePoint { pub order: Vec<String>, pub idx: usize, pub history: Vec<String>, pub hist_idx: usize, pub path: String,
+                         pub time_pos: f64, pub played_ms: u64, pub remaining_ms: u64, pub last_effect: Option<String>, pub saved_unix_ms: u64 }
+pub struct ResumeStore { /* <state>/resume.json, ≤ RESUME_MAX_KEYS = 50, LRU; written on lia-snapshot */ }
+impl ResumeStore { pub fn get(&self, key: &str) -> Option<&ResumePoint>; pub fn put(&mut self, key: &str, p: ResumePoint); }
+pub enum StartFrom { Start, Resume, Index(usize) }
+pub fn plan_start(items: &[String], skip: &dyn Fn(&str) -> bool, shuffle: bool, from: StartFrom,
+                  point: Option<&ResumePoint>, rng: &mut impl Rng) -> StartPlan;   // the whole § Playlist start table, pure
+pub struct StartPlan { pub order: Order, pub position: f64, pub played_ms: u64, pub remaining_ms: Option<u64>, pub resumed: bool }
+```
+- `program.play {id, from: "start" | "resume" | "index", index?, keep_pause?}`. A missing `from` = `index` with an index, else `start`. `from: "resume"` while the same key's program already plays → `{corr: null, resumed: true}`, nothing switched.
+- A keyed program `put`s its point on destroy, `stop`, replacement and `quit`. `program.current` gains `resumed: bool`.
+- `--session-start --restore`: each restored program with `start_mode: start_over` starts per `plan_start(Start)` instead of its saved item. The restore creates that item directly, so the old one is never shown.
+
+- [ ] **Step 1: Write failing tests** (unit `resume::plan_start_*` for the pure table, plus `tests/program.rs` through the verbs, one per table row):
+  - unit `plan_start_sequential_is_item_one`, `plan_start_shuffle_is_a_new_permutation` (seeded, ≠ the stored order, its first ≠ the point's last played), `plan_start_skips_a_skipped_first`.
+  - `session_start_resume_is_exact`: `serve --restore --session-start` after `quit` → the same item, `time_pos` ± 2 s, `played_ms` kept, `program.current {resumed: true}`.
+  - `session_start_start_over_never_shows_the_old_item` (the default): `start_mode: start_over` sequential → `cur:*` = item 1 at 0 from the first `state` that shows anything; no source of the saved item is ever created (`source.open` log).
+  - `crash_restore_ignores_start_mode`: `start_over`, `kill -SEGV` → the same item and position (supervise.rs).
+  - `play_same_key_resume_keeps_playing` / `play_same_key_start_over_restarts`: `program.play {from}` on the playing key → `{corr: null}` for resume (a paused player stays paused here: the backend lifts it, I1), a switch to item 1 for start_over.
+  - `play_after_stop_resumes_its_point`: `stop`, then `create` + `program.play {from: "resume"}` with the same key → the saved item at its time.
+  - `switching_playlists_and_back_resumes_each`: key A to its 3rd item, key B played, A again (resume) → A's 3rd item at its time; B again → B's point.
+  - `resume_after_edit_reanchors`: A's point on item c, A's items now without c → the item after c's old place, at 0.
+  - `resume_without_point_starts_over`.
+  - `play_index_beats_start_mode`: `from: "index", index: 4` under either mode → item 4 at 0.
+  - `start_setting_change_never_jumps_the_current_play`: `set start_mode resume` (and back) mid-play → no `transition.scheduled` within 5 s, `played_ms` monotone; the next `play {from:"start"}` follows it.
+  - `resume_store_is_bounded`: 60 keys → 50, the least recently used gone.
+- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** `--test program --test supervise` + the full suite in both modes PASS.
+- [ ] **Step 5:** Commit `Resume Or Start Over When A Playlist Starts Again`.
+
+**Size: M.**
 
 ### Task 6: The covered Signal — pause when a window covers the wallpaper
 
@@ -426,11 +506,13 @@ public static class LiascapePlayerProgram {
   public sealed record Item(string Path, Dictionary<string, object?> Props, bool Skip);
   public sealed record Spec(List<Item> Items, Dictionary<string, object?> Defaults, string Order /*sequential|shuffle*/,
       string Mode /*timer|on_end*/, long IntervalMs, long MaxMs, bool SeparateScenes, long ScenesAfterMs,
-      Dictionary<string, object?> Transition /*enabled, effects, shuffle, duration_ms, duration_max_ms, method*/);
+      Dictionary<string, object?> Transition /*enabled, effects, shuffle, duration_ms, duration_max_ms, method*/,
+      string Key /*name:<saved> | bar*/, string StartMode /*start_over|resume*/, string WhileParked /*rotate|hold*/);
   public static Spec BuildSpec(IReadOnlyList<string> paths, AppSettings s, PlaylistSettings? p, bool shuffle, int intervalSeconds, bool advance);
       // EffectiveRotation for max / scene timing; TransitionService.Effective + s.TransitionMethod; Defaults = DesiredGlobal();
       // Item.Props = SourceProps(path) minus the entries equal to Defaults; Skip = IsSkippedPath(path)
-  public static void Load(Spec spec, int startIndex, bool keepPause);   // essential: destroy prog:main if present, create, program.play
+  public static void Load(Spec spec, string from /*start|resume|index*/, int index, bool keepPause);   // essential: destroy prog:main if present
+      // (the player stores its resume point), create, program.play {from}; the same key already playing + resume → only the I1 unpause
   public static void Next(bool keepPause); public static void Prev(bool keepPause); public static void Random(bool keepPause);
   public static void SetRotation(int intervalSeconds, bool advance);                // coalescible "program:rotation"
   public static void SetLimits(int maxSeconds, bool separate, int scenesAfterSeconds); // "program:limits"
@@ -447,7 +529,7 @@ public static class LiascapePlayerProgram {
 
 | PlayerHelper / AppOps | under liascape-player |
 |---|---|
-| `ApplyTimedPlaylist`, `ApplyPlaylist` (> 1 item or any scene), `AppOps.PlayPlaylist/PlayFrom` | `Load(BuildSpec(…), first playable or startIndex, keep)`; `_history`/`_timedPaths` not kept; `QueueNewSession` (I1) as today |
+| `ApplyTimedPlaylist`, `ApplyPlaylist` (> 1 item or any scene), `AppOps.PlayPlaylist/PlayFrom` | `Load(BuildSpec(…), from, index, keep)` — Play → `from` = the effective start mode (§ Playlist start), play-from → `index`; `_history`/`_timedPaths` not kept; `QueueNewSession` (I1) as today |
 | `NextWallpaper` / `PreviousWallpaper` / `ApplyRandom` (session active) | `BeforeUserSwitch` as today, then `Next/Prev/Random(keep)` — never `WritePendingAction` |
 | `UpdateTimedSettings`, `ApplyRotationLive`, `ApplyPlayLimitsLive`, `RearmAlignedSwitch`, `SetPlaylistShuffle` | `SetRotation` / `SetLimits` / `SetTransition` / `SetOrder` |
 | `ReorderPlaylist`, `SyncAdvanceOnEndPlaylist`, `AppendToActivePlaylist`, trash/undo of a listed item | `SetItems(paths)`; a trashed shown/incoming item then `Next(false)` (web-backend.md § Trash) |
@@ -471,6 +553,7 @@ public static class LiascapePlayerProgram {
     - The volume/override/normalization passes reach `prog:main.defaults` / the item props and the next B's create props.
     - A crashing synthetic scene → index `crashed: true`, the rotation advanced by the player (no backend request).
     - The engine switch: liascape-player → legacy replays `LastSession`; legacy → liascape-player loads from `timed_state.json` at its item.
+    - Playlist start through the HTTP routes: Play on the playing playlist, stop → Play, and A → B → A (saved playlists through `/playlist/load`), each under Start over (default) and Resume, per the § Playlist start table; `prog:main.key` = `name:<A>` / `bar`.
 - [ ] **Step 2:** `bash scripts/test-liascape-player-adapter.sh` → the new checks FAIL (and with `LIASCAPE_IT_DLL=<base>` too).
 - [ ] **Step 3: Implement.** Port nothing: the C# rotation stays for legacy; this task routes around it.
 - [ ] **Step 4:** IT `RESULT pass=N fail=0`; `player-selftest` PASS; `test-settings-merge.sh` all pass; `cd app/ui && npm run build` ok.
@@ -485,8 +568,8 @@ public static class LiascapePlayerProgram {
 
 **Behaviour under liascape-player:**
 - **serve startup:** kill a leftover `timer-daemon` / `restart-daemon` (from a legacy session or an older build: `KillTimerDaemon`, `KillRestartDaemon`). Do not write `gui_timer.pid`, do not call `ResumeTimedTimer`; `LiascapePlayerProgram.Sync()` reads `state.programs` to seed the mirror.
-- **serve shutdown:** no `ReleaseTimer` / `SpawnTimerDaemon`. The `AudioMonitor` hand-off to `monitor-daemon` is unchanged (Q3).
-- **`liascape restore`:** with `ResumeFromLast` on → `EnsureRunning(restore: true)`; once `hello` answers, `state` shows a wallpaper or a program → done. Otherwise, or with it off → replay `LastSession` (`Load` for timed/playlist sessions, `Apply` for a single one, shuffled anew when `Shuffle`). `AudioMonitor.SpawnDetachedMonitor` when AutoMute (unchanged); never `SpawnTimerDaemon` / `SpawnRestartDaemon`.
+- **serve shutdown:** no `ReleaseTimer` / `SpawnTimerDaemon`. The `AudioMonitor` hand-off to `monitor-daemon` is unchanged (O3).
+- **`liascape restore`:** `EnsureRunning(restore: true, sessionStart: true)` (`serve --restore --session-start`); the player applies each program's start mode itself (§ Playlist start). Once `hello` answers, if `state` shows a wallpaper or a program → done. With no snapshot content (first boot, after `stop`) → replay `LastSession`: `Load` with `from` = its effective start mode (a Resume finds its point in `resume.json`), `Apply` for a single one. `AudioMonitor.SpawnDetachedMonitor` when AutoMute (unchanged); never `SpawnTimerDaemon` / `SpawnRestartDaemon`.
 - **`play` / `toggle-play`:** a program already active → nothing (as today's resume). Else `Restore`.
 - **CLI keybinds with no app:** `ActionForward` fails → `AppOps.RunAction` → the program verbs straight to the player (`DrainLiascapePlayerBeforeExit` as today).
 - **Files never touched:** `pending_action.txt`, `timer.pid`, `gui_timer.pid`, `restart.pid`, `timed_state.json`, `playlist_observer_paths.json` are never written. A stale one from a legacy run is ignored.
@@ -496,7 +579,7 @@ public static class LiascapePlayerProgram {
   - **Files:** across the whole IT, under liascape-player, none of `pending_action.txt` / `timer.pid` / `gui_timer.pid` / `restart.pid` / `timed_state.json` exists.
   - **CLI storm, no backend** (Review Focus 1): 10 × `liascape next` in parallel → the program lands ten items on, ≤ 2 unpaused sources per output sampled every 100 ms.
   - **CLI with the app closed:** `liascape previous` / `random` / `toggle-pause` / `volume up` (the global and an overridden item) / `stop` / `play` → each reaches the player (`ctl` checks); `volume up` changes `prog:main.defaults.gain.user`.
-  - **Restore:** `restore` with `ResumeFromLast` on after `ctl quit` → the same item at the saved position (± 2 s), still a program. With it off → `LastSession`'s first item at 0. With no snapshot (`trash` it first) → `LastSession`. `stop`, then `play` → `LastSession`.
+  - **Restore** (one check per table row): after `ctl quit`, `restore` under Start over (default) → item 1 at 0 (sequential) / a new order (shuffle), the old item never shown; under Resume → the same item at its position (± 2 s), still a program. With no snapshot (`trash` it first) → `LastSession` per its mode. `stop`, then `play` → the same per its mode. Play on the playing playlist, and A → B → A, per the table.
   - **Two backends:** a second `serve` started while one runs → still one switch per interval (origin program), no supersedes.
   - The upgrade watch: a stale player with an armed program → upgraded at the next commit only (the existing "no upgrade while armed" rule now reads `state.programs[*].phase == "armed"`).
 - [ ] **Step 2:** IT → the new checks FAIL. **Step 3:** implement. **Step 4:** IT `fail=0`; `player-selftest` PASS.
@@ -523,18 +606,48 @@ public static class LiascapePlayerProgram {
 
 **Size: M.**
 
-### Task 10: The Pause-when-covered setting
+### Task 10: Settings and UI — pause when covered, playlist start, the Expert tier
 
-**Files:** `src/backend/Models/AppSettings.cs` (`PauseWhenCovered` = `"off"`, normalized to off|fullscreen|maximized), `src/backend/Web/ServerHost.cs` (`/settings` diff → `LiascapePlayerMedia.ApplyCoverSetting` — coalescible `player:pause_when_covered`, re-asserted per player process with the GPU settings), `src/backend/Helpers/FeatureHealth.cs` (`cover` row from `hello.health`), `app/ui/src/views/Settings.tsx` (Playback, liascape-player only: "Pause when covered" — Off / A fullscreen window / A fullscreen or maximized window; hint "Pauses picture and sound while every monitor showing the wallpaper is covered"; the health icon when `cover` is unavailable), `scripts/test-settings-merge.sh`, `.claude/rules/{session.md, web-ui.md}`
+**Files:**
+- `src/backend/Models/AppSettings.cs`:
+  - `PauseWhenCovered` = `"maximized"` (O1), normalized to off|fullscreen|maximized.
+  - `GlobalPlaylistStart` = `"start_over"`, normalized to start_over|resume.
+  - `RotateWhileParked` = true.
+  - `ShowExpertOptions` = false.
+  - `ResumeFromLast` removed (designer call 13).
+- `src/backend/Models/CustomPlaylist.cs` (`PlaylistSettings.PlaylistStart`, used with `OverrideGlobalSettings`).
+- `src/backend/Helpers/PlayerHelper.cs` (`EffectiveRotation` gains `Start`).
+- `src/backend/Web/{ServerHost.cs, AppOps.cs}` — every value goes out coalescible and re-asserted per player process, like the GPU settings:
+  - `/settings` diffs → `LiascapePlayerMedia.ApplyCoverSetting` (`player:pause_when_covered`), `LiascapePlayerProgram.SetStartMode` / `SetWhileParked` (`program:start` / `program:parked`).
+  - `/playlist/state` → `SetStartMode` for a playlist that overrides.
+- `src/backend/Helpers/FeatureHealth.cs` (`cover` row from `hello.health`).
+- `app/ui/src/views/Settings.tsx`:
+  - Playback, liascape-player only: "Pause when covered" — Off / A fullscreen window / A fullscreen or maximized window (default); hint "Pauses picture and sound while every monitor showing the wallpaper is covered"; the health icon when `cover` is unavailable.
+  - Rotation: "When the playlist starts again" — Start over / Resume where it left off; hint per value ("Sequential starts from the first wallpaper, shuffle shuffles anew" / "The same wallpaper, at the same moment"), plus "Takes effect the next time the playlist starts — what's playing now carries on" while a playlist plays.
+  - The "Resume from last on launch" row removed.
+  - Advanced: "Show expert options" under "Advanced settings".
+  - Expert section (last): "When no monitor shows the wallpaper" — Keep rotating / Hold until a monitor returns.
+- `app/ui/src/components/PlaylistSettingsModal.tsx` ("When the playlist starts again" under its override, showing the global value it overrides).
+- `app/ui/src/components/` (the `Row` `expert` prop + `ExpertSection`, its deviated marker — designer call 12).
+- `app/ui/src/{store/index.ts, api/client.ts}` (the new keys).
+- `scripts/test-settings-merge.sh`, `.claude/rules/{session.md, web-ui.md}` (§ "Expert options": how to mark a row expert, for future settings).
 
 - [ ] **Step 1: Write failing checks:**
-  - `test-settings-merge.sh`: the default `off` on a file without the key; a partial body keeps it; a bad value → `off`; a live change → `ctl get player.pause_when_covered`.
-  - IT: a set → live on the player; a fresh player (not restored) → re-applied.
-  - Matrix cell `cover:fullscreen` (Task 11).
+  - `test-settings-merge.sh`:
+    - the defaults (`maximized`, `start_over`, `RotateWhileParked` true, `ShowExpertOptions` false) on a file without the keys; partial bodies keep them; bad values normalized;
+    - an old file's `ResumeFromLast` loads and is gone from GET and the next save;
+    - live: `ctl get player.pause_when_covered`, `prog:main.start_mode`, `prog:main.while_parked`;
+    - a playlist's own `PlaylistStart` beats the global one only with its override on.
+  - IT: each set → live on the player, the current play untouched (`played_ms` monotone, no `transition.scheduled`); a fresh player (not restored) → re-applied.
+  - UI probe (`--probe` or matrix cells, Task 11):
+    - the Expert section and every `expert` row absent with the toggle off; present with it on; the toggle persists across a reload;
+    - a non-default expert value with the toggle off → the deviated marker on the Advanced "Show expert options" row;
+    - hiding never changes the value;
+    - the start choice and its hint in Settings and in the playlist modal.
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** merge + IT PASS; `npm run build` ok.
-- [ ] **Step 5:** Commit `Add The Pause When Covered Setting`.
+- [ ] **Step 5:** Commit `Add Cover, Playlist Start And Expert Settings`.
 
-**Size: S.**
+**Size: M.**
 
 ### Task 11: UI × player-state matrix — programs at the seams
 
@@ -546,8 +659,11 @@ public static class LiascapePlayerProgram {
   - `coverHeld × pause|next|volume|mute` (user pause and mute through the cover hold)
   - `restart:backend × programArmed` (no switch by the new backend; UI resyncs to `prog:main.path`)
   - `cli:next` with the backend down × playlist (via `liascape next` in the stack's env)
-  - `cover:fullscreen` × playing/playlist/effect/pending
-- [ ] **Step 2:** `bash scripts/test-ui-matrix.sh --only 'program|cover|restart:backend|cli:' --jobs 2` → the new cells fail on the base, pass on the branch.
+  - `cover:fullscreen` × playing/playlist/effect/pending (+ `cover:default` — a fresh settings file pauses on a maximized cover)
+  - `plStart:startOver|resume` × playlist/pending (Play again, stop → play, A → B → A through the Load/Save modals, per § Playlist start; the current play never jumps when the choice changes)
+  - `parked:rotate|hold` × playlist (outputs removed: rotating invisibly by default, held in the expert mode)
+  - `expert:toggle` (the Expert section hidden by default, shown when on, the value kept while hidden, the deviated marker)
+- [ ] **Step 2:** `bash scripts/test-ui-matrix.sh --only 'program|cover|plStart|parked|expert|restart:backend|cli:' --jobs 2` → the new cells fail on the base, pass on the branch.
 - [ ] **Step 3:** The full run: `bash scripts/test-ui-matrix.sh --jobs 2` → `fail=0 error=0`. A cell failing under load reruns 2×; it is recorded as load only if it passes alone both times.
 - [ ] **Step 4:** Commit `Cover Programs In The UI Matrix`.
 
@@ -559,8 +675,9 @@ public static class LiascapePlayerProgram {
 
 - [ ] **Step 1 — dropout across program switches:** for each method (full-live, reveal, frozen) × {timer 6 s, on_end 4 s clips, on_end + max 3 s on 10 s clips, separate timing with SFW 431960 scenes}, 50 consecutive switches each, on DP-1 (144 Hz) and DP-2 (240 Hz). Expected: the detector `drops 0`, `micro_gaps 0`, handoff vs A's end ≤ 1 frame for full-live align:end.
 - [ ] **Step 2 — app closed:** `liascape kill`, start the program through the app, close the app (Electron; the backend exits). Run a 1 h rotation: no `liascape-backend` process, every expected switch present (`ctl logs '{"kind_prefix":"program."}'`), CLI keybinds work (next/prev/random/toggle-pause/volume).
-- [ ] **Step 3 — crash and restore:** 5 × `kill -SEGV` of the compositor mid-rotation (2 while armed) → each comes back at its item, armed ones re-armed, 0 `align:now` origins after a restart. Then `ctl quit` + `liascape restore` → resumed (Q4).
-- [ ] **Step 4 — cover:** a fullscreen game-like window (kitty fullscreen, then a real fullscreen app if one is installed) over both outputs → paused ≤ 350 ms, `probe sources` all paused, CPU/GPU of the compositor drop; a rotation does not advance meanwhile; uncover → resumes. One output covered → keeps playing.
+- [ ] **Step 3 — crash and restore:** 5 × `kill -SEGV` of the compositor mid-rotation (2 while armed) → each comes back at its item, armed ones re-armed, 0 `align:now` origins after a restart. Then, for each start mode (Start over sequential / Start over shuffle / Resume), `ctl quit` + `liascape restore` → the § Playlist start row "boot".
+- [ ] **Step 4 — cover:** a fullscreen game-like window (kitty fullscreen, then a real fullscreen app if one is installed) over both outputs → paused ≤ 350 ms, `probe sources` all paused, CPU/GPU of the compositor drop; a rotation does not advance meanwhile; uncover → resumes. One output covered → keeps playing. Default settings (no `PauseWhenCovered` key) pause on a maximized window too (O1).
+- [ ] **Step 4b — no monitor:** both outputs disabled (`hyprctl keyword monitor DP-1,disable`, then DP-2; re-enabled after) during a timer rotation → it keeps rotating invisibly (one `transition.scheduled {parked: true}` per interval) and the last target shows on re-enable; with the Expert "Hold until a monitor returns" → nothing switches, and the same item resumes.
 - [ ] **Step 5 — soak:** 2 h of a mixed program (videos, images, SFW scenes; timer 30 s; methods rotating) with the app closed. Expected: compositor RSS slope ≤ 0.5 MiB/min, worker count ≤ 2 + dying, VRAM flat ± 10 %, `programs` probe bounded (history ≤ 100). (The §11 8 h soak stays the switch-over bar's.)
 - [ ] **Step 6 — owner-run checklist** (documented, not automated): a cold boot via `claude-reboot` (tell the owner first) with a timer program → restored at its item and rotating, before and without opening the app; a suspend/resume during a timer rotation → no catch-up switch (Review Focus 5); a VT switch.
 - [ ] **Step 7:** Write `docs/player/reports/phase3.md` (every number, RED→GREEN for anything fixed). File each product finding as a follow-up in `docs/TODO.md`. Commit `Report Phase 3 On-Machine Battery`.
@@ -570,9 +687,9 @@ public static class LiascapePlayerProgram {
 ### Task 13: Docs sweep
 
 **Files:**
-- `docs/player/architecture.md`: §2 block model, with Program and Signal implemented; §3 a rotation switch end to end; §6 roadmap (Phase 3 done, the auto-mute Signal still PARKED).
+- `docs/player/architecture.md`: §2 block model, with Program and Signal implemented; §3 a rotation switch end to end; §6 roadmap (Phase 3 done; the auto-mute Signal per Task 14's outcome).
 - `docs/player/invariants.md`:
-  - **#12** "A rotation's clock is the player's: it never advances while the picture is paused, held or parked" — enforced by `pause_freezes_the_rotation`, `cover_hold_freezes_a_program`, `no_output_holds_the_rotation…`.
+  - **#12** "A rotation's clock is the player's: it never advances while the picture is paused or held; while no output shows it, it does exactly what `while_parked` says" — enforced by `pause_freezes_the_rotation`, `cover_hold_freezes_a_program`, `parked_keeps_rotating_invisibly_by_default`, `parked_hold_mode_holds_and_resumes`.
   - **#13** "One owner of a session's schedule — the player; the backend only requests" — enforced by the IT's origin check and the `legacy rotation path reached` guard.
 - `docs/player/debugging.md`: rows for "didn't switch" → `probe programs` phase/played/remaining; "switched early" → `program.current.reason`; "stuck after failures" → `backoff_ms`; "paused by itself" → `cover.engaged` / `player.cover_hold_active`.
 - `.claude/rules/player-core.md`: § Program, § Signals, § Outbox, the Snapshot/Command API rows.
@@ -585,6 +702,49 @@ public static class LiascapePlayerProgram {
 
 **Size: S.**
 
+### Task 14 (optional, last): The in-player auto-mute Signal — replaces AudioMonitor only if it is a strict upgrade
+
+Owner (2026-10-29): the current auto-mute works fine; the rework may be done **if it is a strict upgrade**. This task runs after Tasks 1–13 are green. It lands **switched off** unless every parity criterion below passes on the owner's machine. Only then does the adapter stop starting `AudioMonitor` and spawning `monitor-daemon` under `liascape-player`. If any criterion fails, the code stays behind `LIASCAPE_PLAYER_AUTOMUTE=1`, `AudioMonitor` + `monitor-daemon` stay as they are, and `docs/TODO.md` records which criterion failed and by how much.
+
+**Design (spec §4.4):**
+- In-process, on the player's persistent PipeWire connection (`audio/`, pipewire-rs — the bus already holds one). No process per stream.
+- A peak meter with 10 ms fragments is attached the instant a stream node appears. Every foreign stream is metered individually, never the mix.
+- Own streams are excluded **by ownership**: nodes the player created, nodes of its scene workers' pids, and anything targeting `liascape-player-bus`. Never by name.
+- A Signal `audio.foreign_level` feeds a rule that moves `gain.automute` on every source. A new source gets the current value at create, so a B comes up muted.
+- MPRIS-only: a `lia-mpris` thread reads `org.mpris.MediaPlayer2.*` `PlaybackStatus` over the session bus (zbus, blocking, off the loop). With no session bus it reports `unavailable` instead of passing.
+
+**Files:**
+- Create: `src/player/src/signal/automute.rs`, `src/player/src/audio/foreign.rs`
+- Modify: `src/player/src/graph/props.rs`:
+  - Player `automute` Bool (false), `automute_delay_ms` F64 (200), `autounmute_delay_ms` F64 (2000), `automute_min_level_db` F64 (−70), `automute_only_if_mpris` Bool (false).
+  - Observed `automute_active` Bool.
+- Modify: `hello.capabilities` + `automute` (bus up). Probe `automute`: the streams it meters with their verdicts and levels, the MPRIS state, decisions with timestamps.
+- Modify: `src/backend/Player/LiascapePlayerMedia.cs` (`ApplyAutoMuteSettings`, coalescible, re-asserted per process), `src/backend/Helpers/{AudioMonitor.cs, PlayerHelper.cs}` (the engine gate `AutoMuteInPlayer` = liascape-player && capability && the parity flag `AutoMuteParityPassed`, a constant flipped in this task's last commit only if step 4 passes; the user-mute vs auto-mute logic reads `player.automute_active`), `src/backend/Web/ServerHost.cs` (no `AudioMonitor.Start` / `SpawnDetachedMonitor` while the gate is on), `scripts/measure-automute-latency.py` (both engines, same harness), `scripts/test-liascape-player-adapter.sh` § auto-mute (run once per engine).
+
+**Parity criteria** — each measured side by side against today's `AudioMonitor` in the same private PipeWire + pipewire-pulse harness, then on the owner's machine:
+1. **Every setting behaves the same**, live: AutoMute on/off, mute delay, unmute delay, the minimum level (threshold), "Only if MPRIS player active". Today's IT § "auto-mute" checks and the matrix `autoMute*` cells pass unchanged with the Signal as the engine.
+2. **The exclusions:** there is no user-editable ignore list today; the built-in exclusions are its own streams and LWE's.
+   - It never hears the player's own audio: V→V/V→S/S→V/S→S × full-live/reveal/frozen → 0 mutes (today's "auto-mute never hears our own switches" section).
+   - An `mpv` the user runs **is** heard (today's `application.name = "mpv"` filter ignores it — the spec calls that a bug). This is the one intended difference; the report names it, and the owner can veto it before the flag flips.
+3. **Mute latency at least as good:** first audible foreign sample → every source at −96 dB, with delay 0. p50 and p95 over 30 trials ≤ today's (65–76 ms measured), target ≤ 100 ms.
+4. **Unmute timing at least as accurate:** silence → unmute at the configured delay ± 20 ms (± today's measured error, whichever is larger).
+5. **Works with the app closed** (no backend process) and across a player crash restart (the settings are in the snapshot's player props).
+6. **User mute vs auto-mute semantics unchanged:** `toggle-mute` while auto-muted unmutes; a user mute survives an auto-unmute; the CLI keybind with the app closed.
+7. **A B created while auto-muted comes up muted** (every program switch; matrix `autoMute × pending`).
+8. **No per-stream processes:** with 20 foreign streams, 0 child processes spawned.
+9. **CPU:** the player's added CPU ≤ today's `parec` total with 5 foreign streams.
+10. **No silent degrade:** with the bus down, `automute` capability absent → the backend keeps `AudioMonitor`.
+
+- [ ] **Step 1: Write failing tests:**
+  - unit `foreign_streams_are_classified_by_ownership` (synthetic node props: own pid, a worker pid, the bus target → own; a `paplay`, an `mpv` → foreign).
+  - api (private PipeWire, `tests/common/pw.rs`): `automute_mutes_on_a_foreign_stream`, `automute_ignores_own_switches_every_combo`, `automute_delays_and_threshold`, `automute_new_source_comes_up_muted`, `automute_survives_a_crash_restart`, `automute_spawns_no_processes`.
+- [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** The crate suite in both modes PASS; the adapter IT § auto-mute PASS on both engines; `measure-automute-latency.py --engine both` → criterion 3/4 numbers.
+- [ ] **Step 5 (on-machine):** criteria 1–10 on the owner's session (a real browser video, a real `mpv`, Spotify via MPRIS if installed). Write them as a section of `docs/player/reports/phase3.md`.
+- [ ] **Step 6:** All ten pass → flip `AutoMuteParityPassed`, retire `monitor-daemon` under liascape-player (not spawned; a leftover one killed at serve start), update `player.md` § Auto-Mute + `player-adapter.md`. Any fails → leave the flag off and file the TODO.
+- [ ] **Step 7:** Commit `Add The In-Player Auto-Mute Signal` (+ `Replace AudioMonitor Under liascape-player` only when step 6 flips it).
+
+**Size: L** (2½–3½ days; optional — Phase 3 is complete without it).
+
 ---
 
 ## Composition coverage ("Features must compose")
@@ -595,7 +755,8 @@ public static class LiascapePlayerProgram {
 | advance-on-end, min / max / 0 = off | T3 `on_end_*`, `min_hold_*`, `max_*`, `zero_means_off_for_both`; T7 IT (today's § play-time limits); matrix `playlist:minPlay\|maxPlay` |
 | separate scene timing (+ images) | T3 `scene_switches_after_*`, `separate_off_*`, `image_*`; T7 IT; matrix `playlist\|global:sceneTiming` |
 | manual next / prev / random (+ mid-wait, mid-effect, storm, 1-item, at start) | T4; T7 IT; T8 CLI storm; matrix `seq:*`, `programHeld\|Armed × next…` |
-| restore (ResumeFromLast on/off, no snapshot, stop→play) | T5 `quit_then_restore_*`; T8 IT; T12 step 3/6 |
+| playlist start: boot, app restart, crash, Play again, stop→play, A→B→A, edited resume item, play-from × Start over / Resume | § Playlist start table (one test per row: T5b, T7/T8 IT); matrix `plStart:*`; T12 step 3/6 |
+| single-wallpaper restore, no snapshot | T5 `quit_then_restore_*`; T8 IT |
 | V→V / V→S / S→V / S→S × methods | T3 `every_switch_combo`; T12 step 1 |
 | pause (user, keep_pause cut, StayPausedWhenSwitching) | T4 `keep_pause_*`; T5 `pause_freezes_the_rotation`; matrix `paused × *` |
 | low-VRAM hold, VRAM-stopped scene, broken scene | T3 `vram_stopped_*`, `broken_scene_*`; T5 `vram_hold_*`; T9 IT |
@@ -606,7 +767,11 @@ public static class LiascapePlayerProgram {
 | keybind actions from the CLI (app open / closed) | T8 IT; matrix `cli:*`; T12 step 2 |
 | settings live (interval, min, max, scene timing, transitions, method, order, items, volume/speed/override/normalization/NoAudio/mute) | T4 `live_*`; T7 IT; `test-settings-merge.sh`; matrix `set:*`, `pl*`, `g*` |
 | list edits (reorder, add, trash shown / armed, undo) | T4 `items_*`, `removing_*`, `undo_*`; matrix `trash*`, `playlistBar*` |
-| auto-mute (parked, backend) × program B's | T7 IT: a B created while auto-muted comes up muted (`defaults.gain.mute`); matrix `autoMute*` unchanged |
+| auto-mute (backend `AudioMonitor`) × program B's | T7 IT: a B created while auto-muted comes up muted (`defaults.gain.mute`); matrix `autoMute*` unchanged |
+| in-player auto-mute (optional) vs `AudioMonitor` | T14 parity criteria 1–10, both engines in one harness + on-machine |
+| parked: rotate (default) / hold | T5 `parked_*`; matrix `parked:*` |
+| cover default on (maximized) | T10 merge defaults; matrix `cover:default` |
+| Expert tier (hidden by default, values kept, deviated marker) | T10 UI probe; matrix `expert:toggle` |
 | failures (garbage file, all unplayable) | T3 `failed_item_*`, `all_items_unplayable_*` |
 | pause-when-covered × pause / mute / next / rotation / one of two outputs | T6; T11 `coverHeld × …` |
 
@@ -615,12 +780,14 @@ public static class LiascapePlayerProgram {
 ## Risks and fallbacks
 
 1. **Porting the rotation loses an edge case.** The C# encodes ~20 matrix-found fixes (commit at effect start, re-arm on a minimum change, the pre-fetch taken by max/next, history after random, 1-item ticks). *Fallback:* the adapter IT and the UI matrix check HTTP/UI-level behaviour regardless of engine, and they are the oracle. Each RED → GREEN run uses the base backend (`LIASCAPE_IT_DLL` / `LIASCAPE_MATRIX_DLL`). Each Rust function names the C# function it ports.
-2. **Hyprland's foreign-toplevel reports a fullscreen window on a hidden workspace as activated** (or misses states). *Fallback:* Task 6's spike decides before any rule ships. Use Hyprland socket2 (`activewindowv2`, `fullscreen`, `workspace`) behind an instance check, or ship fullscreen-only. The setting stays Off by default either way (Q1).
+2. **Hyprland's foreign-toplevel reports a fullscreen window on a hidden workspace as activated** (or misses states). *Fallback:* Task 6's spike decides before any rule ships. Use Hyprland socket2 (`activewindowv2`, `fullscreen`, `workspace`) behind an instance check, or ship fullscreen-only. If no reliable maximized/fullscreen signal exists, the setting ships fullscreen-only and the default becomes `fullscreen` (a deviation from O1, reported to the owner).
 3. **Snapshot I/O grows with the program** (300 items × props, fsync'ed). *Fallback (built in):* `program.json` is written only on a config change; the snapshot carries only the cursor, history and clocks (history ≤ 100 paths).
 4. **A legacy rotation path still runs under liascape-player** (a missed dispatch → two schedulers, the old "two timer owners" storm). *Fallback:* the guard log line + the IT's "no origin `api` switch during a rotation" check + the files-never-written check.
 5. **Unmeasured videos play un-normalized while the app is closed** (the loudness measure is a backend job). *Mitigation:* `Load`/`SetItems` kick `EnsureLoudnessAsync` for every unmeasured item, so only an item never measured before the app closed is affected. Measuring in the player is a later option, not Phase 3.
 6. **The CLI keybind latency stays .NET's startup** (~150–300 ms) with the app closed. Not a regression; noted. A `liascape` launcher fast path (`ctl` straight to `program.next`) is possible later.
+7. **Start over is now the default, and `ResumeFromLast` is gone** (O4 + designer call 13): the owner's next boot starts their playlist over unless they pick Resume. That is the owner's choice, called out in the report so it isn't a surprise.
+8. **The in-player auto-mute misses a parity criterion** (Task 14). *Fallback (built in):* it stays behind `LIASCAPE_PLAYER_AUTOMUTE=1`; `AudioMonitor` + `monitor-daemon` keep working unchanged.
 
 ## Deferred (not Phase 3)
 
-The in-player auto-mute Signal and `monitor-daemon`'s retirement (PARKED, Q3). Per-monitor programs (the node supports one per output alias; the user-facing feature is its own follow-up project). Deleting the legacy rotation and daemon code (Phase 5). Renaming `IntervalSeconds` to the UI labels (docs/TODO.md). Mute/stop variants of the cover action (WE's "Mute"/"Stop"). Loudness measurement of videos in the player.
+The in-player auto-mute Signal if Task 14 doesn't pass its parity bar (then `AudioMonitor` + `monitor-daemon` stay, O3). Per-monitor programs (the node supports one per output alias; the user-facing feature is its own follow-up project). Deleting the legacy rotation and daemon code (Phase 5). Renaming `IntervalSeconds` to the UI labels (docs/TODO.md). Mute/stop variants of the cover action (WE's "Mute"/"Stop"). Loudness measurement of videos in the player.
