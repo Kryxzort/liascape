@@ -4,7 +4,7 @@
 //! (`audio`), clocks (`clock`), the Animator (`anim`), the node graph (`graph`), the GPU core
 //! (`gfx`), the libmpv wrapper (`mpv`), the frame sources (`sources`), the recipes built from
 //! them (`recipes`), the running player (`runtime`) with its outputs (`headless`, `wl`) and
-//! their redraw policy (`redraw`), command API (`api`), probes (`probe`), socket/state paths
+//! their redraw policy (`redraw`), command API (`api`), probes (`probe`), Signals (`signal`, Phase 3), socket/state paths
 //! (`paths`), shell client (`ctl`), the supervisor (`supervise`), the state snapshot
 //! (`snapshot`) and the scene worker's compositor side (`worker`, Phase 2). Later tasks
 //! append modules here — see
@@ -29,6 +29,7 @@ pub mod recipes;
 pub mod redraw;
 pub mod runtime;
 pub mod scene;
+pub mod signal;
 pub mod snapshot;
 pub mod sources;
 pub mod supervise;

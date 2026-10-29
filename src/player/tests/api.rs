@@ -9472,3 +9472,453 @@ fn fps_cap_never_stalls_a_still_any_kind() {
         serial = srv._serial.take();
     }
 }
+
+// ---------------------------------------------------------------- Phase 3 Task 6: the covered Signal
+
+/// Cover outputs through the headless fake source (`headless.cover`): `"*"` = every output.
+fn cover(c: &mut Client, output: &str, state: &str) {
+    c.ok("headless.cover", json!({"output": output, "state": state}));
+}
+
+fn time_pos(c: &mut Client, id: &str) -> f64 {
+    get(c, &format!("{id}.time_pos"))["result"]["value"]
+        .as_f64()
+        .unwrap_or(0.0)
+}
+
+fn bool_of(c: &mut Client, path: &str) -> bool {
+    get(c, path)["result"]["value"] == json!(true)
+}
+
+/// A looping red clip on every output, playing, `cover.` events subscribed; `mode` set.
+fn cover_setup(c: &mut Client, mode: &str) -> String {
+    c.ok("subscribe", json!({"topics": ["cover."]}));
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": mode}));
+    let id = create_src(
+        c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(c, &id);
+    for _ in 0..10 {
+        c.step(20);
+    }
+    id
+}
+
+/// Step 20 ms at a time (≤ `max_ms`) until `name` arrives; → the stepped ms it took.
+fn step_to_event(c: &mut Client, name: &str, max_ms: u64) -> Option<u64> {
+    let mut t = 0;
+    while t < max_ms {
+        c.step(20);
+        t += 20;
+        if c.drain_events().iter().any(|e| e["event"] == name) {
+            return Some(t);
+        }
+    }
+    None
+}
+
+/// The plan's first cover test: both outputs fullscreen-covered → the hold engages ≥ 300 ms
+/// later (`COVER_ENGAGE_MS`, base clock), every source is held paused (picture frozen), the
+/// user's `player.paused` untouched; uncovering releases it at the next step.
+#[test]
+fn cover_hold_pauses_when_every_output_is_covered() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let id = cover_setup(&mut c, "fullscreen");
+    assert!(time_pos(&mut c, &id) > 0.0, "playing before the cover");
+    cover(&mut c, "*", "fullscreen");
+    let t = step_to_event(&mut c, "cover.engaged", 1000).expect("cover.engaged");
+    assert!((300..=340).contains(&t), "engaged {t} ms after the cover");
+    assert!(bool_of(&mut c, "player.cover_hold_active"));
+    assert!(!bool_of(&mut c, "player.paused"), "the user's pause is never written");
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(probe_source(&probe, &id)["effective_paused"], json!(true), "{probe}");
+    c.step(20);
+    let held = time_pos(&mut c, &id);
+    for _ in 0..25 {
+        c.step(20);
+    }
+    assert_eq!(time_pos(&mut c, &id), held, "the picture moved while covered");
+    cover(&mut c, "*", "none");
+    let t = step_to_event(&mut c, "cover.released", 200).expect("cover.released");
+    assert_eq!(t, 20, "released at the next step");
+    assert!(!bool_of(&mut c, "player.cover_hold_active"));
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(probe_source(&probe, &id)["effective_paused"], json!(false));
+    for _ in 0..10 {
+        c.step(20);
+    }
+    assert!(time_pos(&mut c, &id) > held, "plays again after the release");
+}
+
+/// The hold is a pause like the user's (R88 gates): `gain.pause` ramps out before mpv pauses
+/// and back in after the release. Real clock (the gates are wall-clock, as in
+/// `player_pause_ramps_a_plain_source`).
+#[test]
+fn cover_hold_ramps_like_a_pause() {
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let srv = Serve::spawn_in(new_root(), &["--clock", "real"], serial);
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "maximized"}));
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    let t = Instant::now();
+    while time_pos(&mut c, &id) < 0.3 {
+        assert!(t.elapsed() < Duration::from_secs(5), "never started playing");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mpv_paused = |c: &mut Client| {
+        let p = c.ok("probe", json!({"name": "sources"}));
+        probe_source(&p, &id)["mpv_pause"].as_str() == Some("yes")
+    };
+    cover(&mut c, "*", "maximized");
+    let t = Instant::now();
+    while !mpv_paused(&mut c) {
+        assert!(t.elapsed() < Duration::from_secs(2), "never paused");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let engaged_after = t.elapsed();
+    assert!(
+        engaged_after >= Duration::from_millis(300),
+        "paused {engaged_after:?} after the cover (< COVER_ENGAGE_MS)"
+    );
+    let g = get(&mut c, &format!("{id}.gain.pause"))["result"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(g <= -95.9, "paused before the ramp reached silence: {g} dB");
+    cover(&mut c, "*", "none");
+    let t = Instant::now();
+    while mpv_paused(&mut c) {
+        assert!(t.elapsed() < Duration::from_millis(500), "never un-paused");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let t = Instant::now();
+    loop {
+        let g = get(&mut c, &format!("{id}.gain.pause"))["result"]["value"]
+            .as_f64()
+            .unwrap_or(0.0);
+        if g >= -0.01 {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(3), "never ramped back in: {g} dB");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// One of two outputs covered: the wallpaper is still seen on the other — it keeps playing.
+/// An output showing nothing doesn't count: with VIRTUAL-2 empty, VIRTUAL-1's cover alone
+/// engages.
+#[test]
+fn cover_on_one_output_of_two_keeps_playing() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let id = cover_setup(&mut c, "maximized");
+    cover(&mut c, "VIRTUAL-1", "fullscreen");
+    let before = time_pos(&mut c, &id);
+    assert_eq!(step_to_event(&mut c, "cover.engaged", 1000), None);
+    assert!(!bool_of(&mut c, "player.cover_hold_active"));
+    assert!(time_pos(&mut c, &id) > before + 0.5, "kept playing");
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": ""}));
+    assert!(step_to_event(&mut c, "cover.engaged", 1000).is_some());
+    let probe = c.ok("probe", json!({"name": "cover"}));
+    let outs = probe["outputs"].as_array().unwrap();
+    let v2 = outs.iter().find(|o| o["name"] == "VIRTUAL-2").unwrap();
+    assert_eq!(v2["showing"], json!(false), "{probe}");
+    // Something shown there again → uncovered output → released.
+    show_all(&mut c, &id);
+    assert!(step_to_event(&mut c, "cover.released", 200).is_some());
+}
+
+/// `fullscreen` mode ignores a maximized window; `maximized` (the backend's default) counts
+/// both. A live mode change applies at the next step.
+#[test]
+fn cover_maximized_mode_counts_maximized() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    cover_setup(&mut c, "fullscreen");
+    cover(&mut c, "VIRTUAL-1", "maximized");
+    cover(&mut c, "VIRTUAL-2", "fullscreen");
+    assert_eq!(step_to_event(&mut c, "cover.engaged", 800), None);
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "maximized"}));
+    let t = step_to_event(&mut c, "cover.engaged", 1000).expect("engaged in maximized mode");
+    assert!(t >= 300, "{t}");
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "off"}));
+    let evs = {
+        c.step(20);
+        c.drain_events()
+    };
+    let rel = events_named(&evs, "cover.released");
+    assert_eq!(rel.len(), 1, "{evs:?}");
+    assert_eq!(rel[0]["reason"], json!("mode_off"));
+}
+
+/// A transition caught by the hold freezes exactly and resumes where it stopped (the
+/// player clock is pause-excised: the hold is a pause).
+#[test]
+fn cover_hold_mid_transition_freezes_and_resumes_exactly() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition.", "cover."]}));
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "fullscreen"}));
+    let a = color(&mut c, [255, 0, 0]);
+    show_all(&mut c, &a);
+    c.step(16);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "color", "color": [0, 0, 255]},
+               "effect_id": "fade", "duration_ms": 3000}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    c.step_until_event(16, 60, "transition.started", &corr);
+    let fx = content(&mut c, "VIRTUAL-1");
+    let progress = |c: &mut Client| {
+        get(c, &format!("{fx}.progress"))["result"]["value"]
+            .as_f64()
+            .unwrap()
+    };
+    cover(&mut c, "*", "fullscreen");
+    assert!(step_to_event(&mut c, "cover.engaged", 1000).is_some());
+    let p0 = progress(&mut c);
+    assert!(p0 > 0.0 && p0 < 0.5, "{p0}");
+    for _ in 0..100 {
+        c.step(20);
+    }
+    assert_eq!(progress(&mut c), p0, "the effect moved during a 2 s hold");
+    cover(&mut c, "*", "none");
+    // The release lands at the end of the next step (that step is still held), then the
+    // effect runs on from exactly where it stopped.
+    c.step(20);
+    assert_eq!(progress(&mut c), p0);
+    c.step(20);
+    let p1 = progress(&mut c);
+    assert!(p1 > p0 && p1 - p0 < 0.01, "resumed from {p0}: {p1}");
+    let evs = c.step_until_event(20, 200, "transition.done", &corr);
+    assert!(names(&evs, &corr).contains(&"transition.done".to_string()));
+}
+
+/// A user pause during the hold survives the release; the user's resume plays.
+#[test]
+fn cover_hold_composes_with_user_pause() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let id = cover_setup(&mut c, "maximized");
+    cover(&mut c, "*", "maximized");
+    assert!(step_to_event(&mut c, "cover.engaged", 1000).is_some());
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    c.step(20);
+    cover(&mut c, "*", "none");
+    assert!(step_to_event(&mut c, "cover.released", 200).is_some());
+    let held = time_pos(&mut c, &id);
+    for _ in 0..20 {
+        c.step(20);
+    }
+    let probe = c.ok("probe", json!({"name": "sources"}));
+    assert_eq!(probe_source(&probe, &id)["effective_paused"], json!(true));
+    assert_eq!(time_pos(&mut c, &id), held, "the user's pause outlived the hold");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    for _ in 0..20 {
+        c.step(20);
+    }
+    assert!(time_pos(&mut c, &id) > held, "plays after the user's resume");
+}
+
+/// `off` (the prop's default: a raw player never pauses by itself) ignores the Signal — which
+/// is still observed.
+#[test]
+fn cover_off_mode_ignores_signal() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    assert_eq!(
+        get(&mut c, "player.pause_when_covered")["result"]["value"],
+        json!("off")
+    );
+    c.ok("subscribe", json!({"topics": ["cover."]}));
+    let a = color(&mut c, [255, 0, 0]);
+    show_all(&mut c, &a);
+    cover(&mut c, "*", "fullscreen");
+    assert_eq!(step_to_event(&mut c, "cover.engaged", 1000), None);
+    assert_eq!(
+        get(&mut c, "out:VIRTUAL-1.covered")["result"]["value"],
+        json!("fullscreen")
+    );
+    assert!(!bool_of(&mut c, "player.cover_hold_active"));
+}
+
+/// A cover flapping faster than `COVER_ENGAGE_MS` never engages.
+#[test]
+fn cover_flap_is_debounced() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    cover_setup(&mut c, "fullscreen");
+    let mut evs = Vec::new();
+    for _ in 0..5 {
+        cover(&mut c, "*", "fullscreen");
+        for _ in 0..5 {
+            c.step(20);
+        }
+        cover(&mut c, "*", "none");
+        for _ in 0..5 {
+            c.step(20);
+        }
+        evs.extend(c.drain_events());
+    }
+    assert!(events_named(&evs, "cover.engaged").is_empty(), "{evs:?}");
+    assert_eq!(events_named(&evs, "cover.changed").len(), 20, "2 outputs × 10 changes");
+}
+
+/// The Signal for rules: `out:<c>.covered` / `covered_by`, `cover.changed`, the `cover` probe
+/// (source, per output, the decisions with timestamps), `state.cover`, `hello.health.cover`.
+#[test]
+fn cover_signal_is_observable() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let h = c.ok("hello", json!({}));
+    assert!(h["capabilities"].as_array().unwrap().contains(&json!("cover")), "{h}");
+    assert_eq!(h["health"]["cover"]["ok"], json!(true), "{h}");
+    assert_eq!(h["health"]["cover"]["source"], json!("headless"));
+    assert_eq!(get(&mut c, "out:VIRTUAL-1.covered")["result"]["value"], json!("none"));
+    c.ok("subscribe", json!({"topics": ["cover."]}));
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "maximized"}));
+    let a = color(&mut c, [255, 0, 0]);
+    show_all(&mut c, &a);
+    c.ok(
+        "headless.cover",
+        json!({"output": "VIRTUAL-1", "state": "maximized", "app_id": "kitty", "pid": 1234}),
+    );
+    c.step(20);
+    assert_eq!(get(&mut c, "out:VIRTUAL-1.covered")["result"]["value"], json!("maximized"));
+    assert_eq!(
+        get(&mut c, "out:VIRTUAL-1.covered_by")["result"]["value"],
+        json!({"app_id": "kitty", "pid": 1234})
+    );
+    assert_eq!(get(&mut c, "out:VIRTUAL-2.covered_by")["result"]["value"], json!({}));
+    let evs = c.drain_events();
+    let ch = events_named(&evs, "cover.changed");
+    assert_eq!(ch.len(), 1, "{evs:?}");
+    assert_eq!(ch[0]["output"], json!("VIRTUAL-1"));
+    assert_eq!(ch[0]["app_id"], json!("kitty"));
+    assert_eq!(ch[0]["source"], json!("headless"));
+    c.ok(
+        "headless.cover",
+        json!({"output": "VIRTUAL-2", "state": "fullscreen", "app_id": "mpv"}),
+    );
+    assert!(step_to_event(&mut c, "cover.engaged", 1000).is_some());
+    let p = c.ok("probe", json!({"name": "cover"}));
+    assert_eq!(p["source"], json!("headless"), "{p}");
+    assert_eq!(p["mode"], json!("maximized"));
+    assert_eq!(p["rule"], json!(true));
+    assert_eq!(p["hold"]["active"], json!(true));
+    let v1 = p["outputs"].as_array().unwrap().iter().find(|o| o["name"] == "VIRTUAL-1").unwrap();
+    assert_eq!(v1["covered"], json!("maximized"));
+    assert_eq!(v1["pid"], json!(1234));
+    assert!(v1["since_ms"].as_f64().is_some());
+    let d = &p["decisions"][0];
+    assert_eq!(d["decision"], json!("engaged"), "{p}");
+    assert!(d["t_ms"].as_f64().is_some() && d["unix_ms"].as_u64().is_some(), "{d}");
+    assert_eq!(d["outputs"], json!(["VIRTUAL-1", "VIRTUAL-2"]));
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["cover"]["source"], json!("headless"), "{st}");
+    assert_eq!(st["cover"]["hold_active"], json!(true));
+    assert_eq!(st["cover"]["outputs"]["VIRTUAL-2"], json!("fullscreen"));
+    // A bad state / unknown output is refused.
+    c.err("headless.cover", json!({"output": "VIRTUAL-1", "state": "half"}));
+    c.err("headless.cover", json!({"output": "VIRTUAL-9", "state": "none"}));
+}
+
+/// The Hyprland source end to end against a fake instance (`$XDG_RUNTIME_DIR/hypr/<sig>/`):
+/// a socket2 event → one batched `j/monitors;j/clients` → `out:<c>.covered`. Only read-only
+/// requests are ever sent.
+#[test]
+fn cover_from_a_fake_hyprland() {
+    use std::os::unix::net::UnixListener;
+    use std::sync::Arc;
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let root = new_root();
+    let dir = root.join("run/hypr/fake");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mons = r#"[{"name":"VIRTUAL-1","activeWorkspace":{"id":1},"specialWorkspace":{"id":0}},
+                   {"name":"VIRTUAL-2","activeWorkspace":{"id":2},"specialWorkspace":{"id":0}}]"#;
+    let reply = Arc::new(Mutex::new(format!("{mons}\n\n\n[]")));
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let l1 = UnixListener::bind(dir.join(".socket.sock")).unwrap();
+    let (r, q) = (reply.clone(), requests.clone());
+    std::thread::spawn(move || {
+        for s in l1.incoming() {
+            let Ok(mut s) = s else { return };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            q.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).into());
+            let _ = s.write_all(r.lock().unwrap().as_bytes());
+        }
+    });
+    let l2 = UnixListener::bind(dir.join(".socket2.sock")).unwrap();
+    let subs = Arc::new(Mutex::new(Vec::<UnixStream>::new()));
+    let sb = subs.clone();
+    std::thread::spawn(move || {
+        for s in l2.incoming() {
+            let Ok(s) = s else { return };
+            sb.lock().unwrap().push(s);
+        }
+    });
+    let srv = Serve::spawn_env(
+        root,
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_COVER_SOURCE", Path::new("hyprland")),
+            ("HYPRLAND_INSTANCE_SIGNATURE", Path::new("fake")),
+        ],
+        serial,
+    );
+    let mut c = srv.client();
+    let covered = |c: &mut Client| get(c, "out:VIRTUAL-1.covered")["result"]["value"].clone();
+    let t = Instant::now();
+    while covered(&mut c) != json!("none") || subs.lock().unwrap().is_empty() {
+        assert!(t.elapsed() < Duration::from_secs(5), "never read the fake Hyprland");
+        c.step(20);
+    }
+    *reply.lock().unwrap() = format!(
+        "{mons}\n\n\n{}",
+        r#"[{"class":"steam_app_1","pid":4242,"workspace":{"id":1},"fullscreen":2,"mapped":true,"hidden":false},
+            {"class":"mpv","pid":7,"workspace":{"id":5},"fullscreen":2,"mapped":true,"hidden":false}]"#
+    );
+    for s in subs.lock().unwrap().iter_mut() {
+        s.write_all(b"fullscreen>>1\n").unwrap();
+    }
+    let t = Instant::now();
+    while covered(&mut c) != json!("fullscreen") {
+        assert!(t.elapsed() < Duration::from_secs(5), "the cover never arrived");
+        c.step(20);
+    }
+    assert_eq!(
+        get(&mut c, "out:VIRTUAL-1.covered_by")["result"]["value"],
+        json!({"app_id": "steam_app_1", "pid": 4242})
+    );
+    assert_eq!(
+        get(&mut c, "out:VIRTUAL-2.covered")["result"]["value"],
+        json!("none"),
+        "a fullscreen window on a hidden workspace never covers"
+    );
+    let p = c.ok("probe", json!({"name": "cover"}));
+    assert_eq!(p["source"], json!("hyprland"), "{p}");
+    assert_eq!(p["ok"], json!(true));
+    assert!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r == "[[BATCH]]j/monitors;j/clients"),
+        "read-only requests only"
+    );
+}

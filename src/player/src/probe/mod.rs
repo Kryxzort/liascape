@@ -21,6 +21,9 @@
 //!   hold, each scene worker's VRAM against `player.scene_vram_limit_mib`.
 //! - `memory` (`memory.rs`, Task 20b) — RSS + glibc malloc in-use vs retained, arena
 //!   count; `args: {"trim": true}` runs `malloc_trim(0)` and reports the RSS it gave back.
+//! - `cover` (Phase 3 Task 6, `crate::signal`) — the covered Signal: its source (`hyprland` |
+//!   `sway` | `wlr-foreign-toplevel` | `headless` | `unavailable`) and status, per output
+//!   `covered`/`app_id`/`pid`/`showing`/`since_ms`, the rule, the hold, its last decisions.
 //! - `programs` (`programs.rs`, Phase 3) — every program: `state.programs` plus each item's
 //!   `skip`/`broken`/`failed` flags.
 
@@ -89,6 +92,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
          malloc_trim(0) and reports what it gave back",
     ),
     (
+        "cover",
+        cover,
+        "the covered Signal (Phase 3): source + status, per output covered/app_id/pid/showing, \
+         the rule, the hold and its recent decisions with timestamps",
+    ),
+    (
         "vram",
         vram::vram,
         "VRAM (Task 8): the sampler, the newest sample, the low-VRAM rule and its hold, each \
@@ -118,6 +127,10 @@ pub fn run(rt: &mut Runtime, name: &str, args: &Value) -> Result<Value, ApiError
             hint: "`liascape-player ctl probe '{\"name\":\"list\"}'` lists the probes".into(),
         }),
     }
+}
+
+fn cover(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
+    Ok(rt.cover_probe())
 }
 
 fn list(_: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
@@ -155,10 +168,11 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         // cached runtime field) — a pipelined `set player.paused` + `probe sources` in the
         // same batch saw the *stale* cached value (it's only refreshed at the top of the
         // next tick/step), even though `get`/`state` already read it live.
+        // A rule's hold (low VRAM, Phase 3 Task 6's cover) pauses every source too.
         let player_paused_live = matches!(
             rt.graph.get(&crate::anim::PropPath("player.paused".into())),
             Ok(PropValue::Bool(true))
-        );
+        ) || rt.held();
         o.insert(
             "effective_paused".into(),
             json!(g("paused") == json!(true) || player_paused_live),

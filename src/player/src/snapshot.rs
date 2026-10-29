@@ -707,9 +707,17 @@ mod tests {
         g.set(&p("lay:DP-1:main.fit"), PropValue::Str("crop".into()))
             .unwrap();
         g.set(&p("player.debug"), PropValue::Bool(true)).unwrap();
+        // Phase 3 Task 6: the backend's cover setting survives a crash restart; the observed
+        // Signal (`out:<c>.covered`, `player.cover_hold_active`) is never saved.
+        g.set(&p("player.pause_when_covered"), PropValue::Str("maximized".into()))
+            .unwrap();
+        g.set_observed(&p("out:DP-1.covered"), PropValue::Str("fullscreen".into()))
+            .unwrap();
         let s = cap(&g, &Animator::new(), &[]);
         assert_eq!(s.version, VERSION);
         assert_eq!(s.player["debug"], json!(true));
+        assert_eq!(s.player["pause_when_covered"], json!("maximized"));
+        assert!(s.player.get("cover_hold_active").is_none());
         assert_eq!(s.outputs["DP-1"].content.as_deref(), Some("a"));
         assert_eq!(s.outputs["DP-2"].content.as_deref(), Some("b"));
         assert_eq!(s.outputs["DP-2"].props["layer"], json!("overlay"));

@@ -213,6 +213,24 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "vram_low_active",
                 def(PropType::Bool, true, PropValue::Bool(false)),
             ),
+            // Phase 3 Task 6, pause when covered (`crate::signal`): `fullscreen` = hold the player
+            // while every output showing content has a fullscreen window on screen, `maximized` =
+            // a fullscreen or maximized one, `off` = never. The prop's default stays `off` (a raw
+            // player never pauses by itself); the backend asserts the user's setting (default
+            // `maximized`, O1). Live; kept across a crash restart by the snapshot.
+            (
+                "pause_when_covered",
+                def(
+                    PropType::Enum(&["off", "fullscreen", "maximized"]),
+                    false,
+                    PropValue::Str("off".to_string()),
+                ),
+            ),
+            // Observed: the cover hold is holding the player (paused; never `player.paused`).
+            (
+                "cover_hold_active",
+                def(PropType::Bool, true, PropValue::Bool(false)),
+            ),
         ],
         NodeKind::Output => vec![
             (
@@ -244,6 +262,22 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             (
                 "scene_fps",
                 ranged(PropType::F64, (0.0, 480.0), "0–480", PropValue::F64(30.0)),
+            ),
+            // Phase 3 Task 6, the covered Signal (observed, `crate::signal`): how a window that is
+            // on screen here covers this output — `unavailable` when this session has no
+            // window-state source (GNOME, KDE) — and the covering window, `{app_id, pid}` where
+            // the source names them (`{}` when uncovered).
+            (
+                "covered",
+                def(
+                    PropType::Enum(&["none", "maximized", "fullscreen", "unavailable"]),
+                    true,
+                    PropValue::Str("none".to_string()),
+                ),
+            ),
+            (
+                "covered_by",
+                def(PropType::Map, true, PropValue::Map(Default::default())),
             ),
         ],
         NodeKind::Layer => vec![

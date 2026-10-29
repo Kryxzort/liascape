@@ -13,6 +13,7 @@ use glow::HasContext;
 
 use crate::gfx::{Fbo, Gfx, Tex};
 use crate::graph::ApiError;
+use crate::signal::covered::{Cover, CoverMap, CoverState};
 
 /// One output as the backend sees it.
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +108,15 @@ pub trait OutputBackend {
     fn take_pointer(&mut self) -> Vec<PointerSample> {
         Vec::new()
     }
+    /// Phase 3 Task 6: the backend's own cover source (`crate::signal`) — wlr-foreign-toplevel
+    /// on Wayland, `headless.cover` headless: its name, or why there is none.
+    fn cover_source(&self) -> Result<&'static str, String> {
+        Err("this output backend has no window-state source".into())
+    }
+    /// The backend's cover map, when it changed since the last call (`None` = no change).
+    fn take_cover(&mut self) -> Option<CoverMap> {
+        None
+    }
     /// The headless backend, for the `headless.*` verbs.
     fn as_headless_mut(&mut self) -> Option<&mut Headless> {
         None
@@ -133,6 +143,9 @@ pub struct Headless {
     content_paced: bool,
     /// `headless.pointer` samples not taken yet (Task 7: a virtual pointer for scenes).
     pointer: Vec<PointerSample>,
+    /// Phase 3 Task 6: the fake cover source (`headless.cover`), and whether it changed.
+    cover: CoverMap,
+    cover_dirty: bool,
 }
 
 fn bad(msg: String) -> ApiError {
@@ -181,6 +194,8 @@ impl Headless {
             changes: Vec::new(),
             content_paced: false,
             pointer: Vec::new(),
+            cover: CoverMap::new(),
+            cover_dirty: false,
         };
         for (i, &(w, ht, hz)) in specs.iter().enumerate() {
             let info = OutputInfo {
@@ -248,6 +263,42 @@ impl Headless {
         Ok(())
     }
 
+    /// Cover output `name` (`"*"` = every output) — `headless.cover`, the tests' fake cover
+    /// source: `state` `none|maximized|fullscreen`, the covering window's `app_id`/`pid`.
+    pub fn set_cover(
+        &mut self,
+        name: &str,
+        state: &str,
+        app_id: Option<String>,
+        pid: Option<u32>,
+    ) -> Result<(), ApiError> {
+        let state = CoverState::parse(state).ok_or_else(|| ApiError {
+            code: "bad_request",
+            message: format!("cover state {state:?} is not none|maximized|fullscreen"),
+            hint: "`liascape-player ctl headless.cover '{\"output\":\"*\",\"state\":\"fullscreen\"}'`".into(),
+        })?;
+        let names: Vec<String> = if name == "*" {
+            self.outs.iter().map(|o| o.info.name.clone()).collect()
+        } else if self.outs.iter().any(|o| o.info.name == name) {
+            vec![name.to_string()]
+        } else {
+            return Err(ApiError {
+                code: "no_such_node",
+                message: format!("no headless output {name:?}"),
+                hint: "`liascape-player ctl state` lists the outputs (`out:<name>`)".into(),
+            });
+        };
+        let cover = match state {
+            CoverState::None => Cover::default(),
+            s => Cover::by(s, app_id, pid),
+        };
+        for n in names {
+            self.cover.insert(n, cover.clone());
+        }
+        self.cover_dirty = true;
+        Ok(())
+    }
+
     /// Unplug a virtual output (`headless.remove_output`).
     pub fn remove(&mut self, gfx: &Gfx, name: &str) -> Result<(), ApiError> {
         let Some(i) = self.outs.iter().position(|o| o.info.name == name) else {
@@ -263,6 +314,9 @@ impl Headless {
             gfx.gl.delete_texture(o.tex.id);
         }
         self.changes.push(OutputChange::Removed(name.to_string()));
+        if self.cover.remove(name).is_some() {
+            self.cover_dirty = true;
+        }
         Ok(())
     }
 }
@@ -316,6 +370,14 @@ impl OutputBackend for Headless {
 
     fn take_pointer(&mut self) -> Vec<PointerSample> {
         std::mem::take(&mut self.pointer)
+    }
+
+    fn cover_source(&self) -> Result<&'static str, String> {
+        Ok("headless")
+    }
+
+    fn take_cover(&mut self) -> Option<CoverMap> {
+        std::mem::take(&mut self.cover_dirty).then(|| self.cover.clone())
     }
 
     fn as_headless_mut(&mut self) -> Option<&mut Headless> {

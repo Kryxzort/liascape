@@ -566,6 +566,8 @@ pub struct Runtime {
     next_budget: Instant,
     /// Task 8: VRAM measurement, the per-scene limit and the low-VRAM rule.
     pub(crate) vram: VramState,
+    /// Phase 3 Task 6: the covered Signal and the cover hold (`crate::signal`).
+    pub(crate) cover: crate::signal::CoverRt,
 }
 
 /// Phase 2 Task 8: the runtime's side of `crate::vram` (`Runtime::vram_tick`).
@@ -783,12 +785,13 @@ impl Runtime {
     /// happens in [`Runtime::sync_sources`], which reads the now-current
     /// `self.player_paused` this set). Cheap when nothing changed (one graph read).
     fn update_player_paused(&mut self) {
-        // Task 8: the low-VRAM rule holds the player paused too (composed, never written to
-        // `player.paused` — the user's own pause is untouched and survives it).
+        // Task 8: the low-VRAM rule holds the player paused too, and Phase 3 Task 6's cover hold
+        // (composed, never written to `player.paused` — the user's own pause is untouched and
+        // survives both).
         let now_paused = matches!(
             self.graph.get(&p("player.paused")),
             Ok(PropValue::Bool(true))
-        ) || self.vram.hold.is_some();
+        ) || self.held();
         if now_paused != self.player_paused {
             let base = self.clock.now();
             if now_paused {
@@ -802,9 +805,16 @@ impl Runtime {
                 Level::Info,
                 "player.paused",
                 None,
-                json!({ "paused": now_paused, "vram_hold": self.vram.hold.is_some() }),
+                json!({ "paused": now_paused, "vram_hold": self.vram.hold.is_some(),
+                        "cover_hold": self.cover_held() }),
             );
         }
+    }
+
+    /// A rule holds the player paused (the low-VRAM hold, the cover hold) — what
+    /// `effective_paused` adds to `player.paused`.
+    pub(crate) fn held(&self) -> bool {
+        self.vram.hold.is_some() || self.cover_held()
     }
 
     /// `player.debug` (Task 15: gates the dropout probe's auto-trigger after
@@ -821,6 +831,7 @@ impl Runtime {
     /// One full iteration (real clock: the timer; stepped: the end of a `step`).
     pub(crate) fn tick(&mut self) {
         let t = Instant::now();
+        self.cover_tick();
         self.update_player_paused();
         self.track_bus_route();
         let now = self.now();
@@ -2528,6 +2539,7 @@ impl Runtime {
         } else {
             None
         };
+        self.cover_mirror();
         log::event(
             "output",
             Level::Info,
@@ -3805,6 +3817,7 @@ impl Runtime {
         if let ClockKind::Stepped(c) = &self.clock {
             c.step(dt);
         }
+        self.cover_tick();
         self.update_player_paused();
         let now = self.now();
         self.run_anims(now);
@@ -4593,8 +4606,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             last: None,
             pids: Vec::new(),
         },
+        cover: crate::signal::CoverRt::idle(),
     };
     rt.update_scene_assets();
+    rt.start_cover();
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
     }
