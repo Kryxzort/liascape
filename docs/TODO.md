@@ -93,6 +93,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       server). `player-core.md` § Audio bus → Fallback. Guards `tests/api.rs::bus_comes_up_when_pipewire_starts_after_the_player`,
       `serve_answers_at_once_while_wireplumber_isnt_up_yet`, `scene_moves_onto_a_bus_that_comes_up_late`,
       `quit_while_the_bus_waits_for_wireplumber_is_prompt`.
+- [x] **Cold boot (2026-10-29 08:34): a starting player tripped the stall breaker, and the restore "upgraded" the player
+      it had just started.** (1) The player binds its socket first and answers ~0.9 s later; the restore's
+      `monitor-daemon` (its `IsPlaying`, a 300 ms `get`) connected in between → its greeting `hello` timed out, the
+      breaker opened for 3 s and the `get` was still sent and timed out again. Now a player that hasn't answered this
+      client yet gets a 5 s startup grace from its socket's bind (requests and the lock wait for its first answer; a
+      timeout past it still trips the breaker; one that answered once keeps QuickMs), requests during our own spawn
+      wait for the socket, and a timed-out greeting ends its request. (2) `StaleReason` compared the store root of
+      `liascape`'s libexec SYMLINK with the running `liascape-player` package's `.liascape-player-wrapped` → "out of
+      date" → restarted onto the same build. Now it compares the file the binary really runs (symlinks + the
+      wrapProgram wrapper's `.<name>-wrapped`); a different build (another wrapped binary, the dev tree) stays stale.
+      `player-adapter.md` § Threading "A STARTING player" + § Lifecycle "In-place upgrade". Guards: self-test
+      `StartupGraceAssertions`, `StaleThroughWrapperAssertions` (incl. the installed `/nix/store/*-liascape-0.1.0`).
 - [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),
@@ -220,6 +232,14 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           proven measurement-only — the sink's recorded output stays phase-continuous). The detector calls it
           `unmeasured`; a meter that never misses (e.g. capturing the loopback's output port, or deriving block times
           from a frame counter instead of `pw_buffer.time`) would close that blind spot.
+  - [x] **A suspend no longer kills the scene worker as "hung"** (2026-10-29; `phase2.md` § 8, player-core.md §
+        Scene worker → WorkerHost → Heartbeat). Both on-machine suspends SIGKILLed a live worker: after the resume
+        the compositor held every slot of its ring (fences not signalled yet) and the idle worker waited for a
+        `Release` (08:16, `waited_ms 2001`), and the VRAM save blocked the compositor's own loop ~6.4 s (08:35,
+        `waited_ms 6438`). The heartbeat now skips a starved worker's tick age (pinged instead; bounded at 5 × the
+        timeout) and the time of a host stall (a poll gap > half the timeout); a real hang keeps its bound.
+        Tests `tests/worker.rs::starved_*`, `host_stall_is_not_a_hang`, `worker_freeze_while_the_host_polls_is_hung`,
+        `tests/scene.rs::gpu_stall_that_starves_the_worker_is_not_a_hang`.
   - [x] **Phase 2 Task 15 — docs sweep** (2026-10-28): `docs/player/architecture.md` (process model with
         `liascape-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
         never blocks the compositor) + #11 (a worker's audio is a gain on a stream that keeps running),
