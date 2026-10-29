@@ -328,6 +328,88 @@ step_dropout() {
     step_end
 }
 
+# ------------------------------------------------------------------ onsetrec (F7: frozen S→S onsets, recorded)
+# F7's check: frozen S→S switches between two synthetic tone scenes on a headless output at
+# ONSET_HZ (default 240), each analysed by the player's own dropout detector (`drop_switch`) AND
+# an independent `pw-record` of the private sink's monitor for the whole run. Per recorded onset
+# (a tone after ≥ 200 ms of silence): the 1 ms RMS envelope of its first 40 ms against the ideal
+# 30 ms linear-amplitude ramp — a "hole" is ≥ 1 ms more than 20 dB under the ramp after the first
+# 2 ms. A detector micro-gap with no recorded hole is the meter's; a recorded hole is real.
+step_onsetrec() {
+    step_begin onsetrec
+    DROP_RECS=$RESULTS/onsetrec-switches.jsonl
+    : >"$DROP_RECS"
+    local hz=${ONSET_HZ:-240} n=${SWITCHES:-20} s1 s2 i wav=$RESULTS/onsetrec.wav
+    s1=$(mk_scene tone660 '{"pattern":"solid","rgb":[200,40,40],"native":[1920,1080],"has_audio":true,"tone_hz":660,"tone_dbfs":-20}')
+    s2=$(mk_scene tone550 '{"pattern":"solid","rgb":[40,40,200],"native":[1920,1080],"has_audio":true,"tone_hz":550,"tone_dbfs":-20}')
+    s1=$(jq -nc --arg p "$s1" '{kind:"scene", path:$p}')
+    s2=$(jq -nc --arg p "$s2" '{kind:"scene", path:$p}')
+    serve_up "headless:640x360@$hz"
+    env "${PW_ENV[@]}" pw-record --target hermetic-sink -P '{ stream.capture.sink = true }' --rate 48000 --channels 2 --format f32 "$wav" &
+    TONE_PID=$!
+    sleep 1
+    ctl transition "$(jq -nc --argjson to "$s1" '{outputs:"out:*", to:$to}')" >/dev/null
+    sleep 2.5
+    for ((i = 0; i < n; i++)); do
+        drop_switch "$s2" frozen now SS "$hz" "S→S"
+        drop_switch "$s1" frozen now SS "$hz" "S→S"
+    done
+    sleep 1
+    kill -INT "$TONE_PID" 2>/dev/null; wait "$TONE_PID" 2>/dev/null; TONE_PID=
+    serve_down
+    local res
+    res=$(python3 - "$wav" "$DROP_RECS" "$RESULTS/onsetrec-onsets.jsonl" <<'PYA'
+import sys, json, math, array
+wav, recs, out = sys.argv[1:4]
+# pw-record writes a WAV with an f32 data chunk: find "data" and read floats.
+raw = open(wav, "rb").read()
+k = raw.find(b"data")
+data = array.array("f"); data.frombytes(raw[k + 8: k + 8 + ((len(raw) - k - 8) // 8) * 8])
+L = data[0::2]
+B = 48  # 1 ms
+blocks = [math.sqrt(sum(x * x for x in L[i:i + B]) / B) for i in range(0, len(L) - B, B)]
+db = [20 * math.log10(b) if b > 1e-9 else -180.0 for b in blocks]
+full = sorted(v for v in db if v > -40)[len([v for v in db if v > -40]) // 2] if any(v > -40 for v in db) else -23.0
+onsets = []
+quiet = 0
+i = 0
+while i < len(db):
+    if db[i] < -90:
+        quiet += 1
+        i += 1
+        continue
+    if quiet >= 200:
+        # sample-accurate start
+        s0 = i * B
+        while s0 > 0 and abs(L[s0 - 1]) > 1e-6:
+            s0 -= 1
+        env = []
+        for m in range(40):
+            seg = L[s0 + m * B: s0 + (m + 1) * B]
+            r = math.sqrt(sum(x * x for x in seg) / len(seg)) if seg else 0
+            env.append(20 * math.log10(r) if r > 1e-9 else -180.0)
+        ideal = [full + 20 * math.log10(min(1.0, (m + 0.5) / 30.0)) for m in range(40)]
+        holes = [m for m in range(2, 40) if env[m] < ideal[m] - 20]
+        onsets.append({"t_s": round(s0 / 48000, 4), "holes_ms": holes, "env": [round(v, 1) for v in env], "ideal": [round(v, 1) for v in ideal]})
+    quiet = 0
+    i += 1
+with open(out, "w") as f:
+    for o in onsets:
+        f.write(json.dumps(o) + "\n")
+gaps = [json.loads(l) for l in open(recs)]
+det = [(j, r["gap_list"]) for j, r in enumerate(gaps) if r.get("micro_gaps")]
+print(json.dumps({"onsets": len(onsets), "with_holes": [(j, o["t_s"], o["holes_ms"]) for j, o in enumerate(onsets) if o["holes_ms"]],
+                  "switches": len(gaps), "detector_gaps": det, "full_db": round(full, 2)}))
+PYA
+    ) || die "onset analysis failed"
+    say "onsetrec: $res"
+    check "frozen S→S onsets recorded without a hole ($hz Hz)" "$(jq -c '{onsets, with_holes}' <<<"$res")" "no recorded onset with a hole" \
+        "$(jq -r 'if (.with_holes | length) == 0 and .onsets > 0 then 1 else 0 end' <<<"$res")" "$res"
+    check "detector micro-gaps on those switches ($hz Hz)" "$(jq -c '.detector_gaps' <<<"$res")" "none (a gap with no recorded hole = the detector's)" \
+        "$(jq -r 'if (.detector_gaps | length) == 0 then 1 else 0 end' <<<"$res")" "$res"
+    step_end
+}
+
 # ------------------------------------------------------------------ step 3 — crash isolation
 # DP-1 a playing 240 fps video with a steady tone, DP-2 a scene. Per scene (synthetic, and the
 # real 1726902114): 5 SIGKILLs and 2 hangs (SIGSTOP — the host's heartbeat kills it), ≥ 21 s
@@ -639,6 +721,85 @@ step_workers() {
     say "transport, $n workers mid-fade: compositor $cpu4 % vs $basef % (colour → colour fade) → $per4 % per worker"
     check "transport per worker ($n workers, S→S full-live on both outputs)" "$per4 % ($cpu4 − $basef baseline, / 4)" "≤ 0.6 % of a core" "$([[ $n == 4 ]] && le "$per4" 0.6 || echo 0)"
     sleep 3
+    serve_down
+    step_end
+}
+
+# ------------------------------------------------------------------ transport (step 5's CPU part, headless)
+# Step 5's two transport measurements on headless outputs (VIRTUAL-1 @144, VIRTUAL-2 @240 — the
+# real outputs' rates), so they need no session and can be A/B'd between builds: compositor CPU
+# per synthetic worker steady (2 workers) and mid-fade (4 workers, an S→S full-live fade on both
+# outputs), each against a decode-free baseline with the same presents. TRANSPORT_ROUNDS
+# (default 3) alternating rounds; PERF_S > 0 also records `perf` of the compositor mid-fade.
+# CPU % of the compositor over $2 s plus its user-space instructions retired in that window
+# (`perf stat`, in G/s, summed over the hybrid CPU's core + atom PMUs — far steadier than CPU
+# time on a shared, frequency-scaling machine).
+cpu_insns() {
+    local f=$SCRATCH/insns.$$ c
+    nix shell nixpkgs#perf -c perf stat -x, -e instructions:u -o "$f" -p "$1" -- sleep "$2" >/dev/null 2>&1 &
+    local pp=$!
+    c=$(cpu_pct "$1" "$2")
+    wait "$pp"
+    printf '%s %s\n' "$c" "$(awk -F, -v s="$2" '$3 ~ /instructions/ {n += $1} END {printf "%.3f", n / s / 1e9}' "$f")"
+}
+step_transport() {
+    step_begin transport
+    local OUT_A=VIRTUAL-1 OUT_B=VIRTUAL-2 r rounds=${TRANSPORT_ROUNDS:-3}
+    serve_up "headless:1920x1080@144,1920x1080@240"
+    local col s1 s2 s3 s4 i1 i2 base2 cpu2 basef cpu4 per2 per4 n perf_pid= all2=() all4=()
+    col=$(create_color '[40,40,40]')
+    ctl set '{"path":"out:*.scene_fps","value":0}' >/dev/null
+    s1=$(mk_scene t1 "$SYN_FI"); s2=$(mk_scene t2 "$SYN_FI"); s3=$(mk_scene t3 "$SYN_FI"); s4=$(mk_scene t4 "$SYN_FI")
+    for ((r = 1; r <= rounds; r++)); do
+        show $OUT_A "$col"; show $OUT_B "$col"
+        ctl animate '{"path":"lay:*:main.opacity","from":1,"to":0.97,"duration_ms":9000}' >/dev/null
+        sleep 1.5
+        read -r base2 ib2 < <(cpu_insns "$PLAYER_PID" 5)
+        sleep 2.6
+        ctl set '{"path":"lay:*:main.opacity","value":1}' >/dev/null
+        i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
+        show $OUT_A "$i1"; show $OUT_B "$i2"
+        wait_ready "$i1" 20 && wait_ready "$i2" 20 || die "synthetic scenes never ready"
+        sleep 2
+        read -r cpu2 ic2 < <(cpu_insns "$PLAYER_PID" 5)
+        per2=$(python3 -c "print(round(($cpu2 - $base2) / 2, 2))")
+        show $OUT_A "$col"; show $OUT_B "$col"
+        destroy "$i1"; destroy "$i2"; sleep 2
+        ctl transition '{"outputs":"out:*","to":{"kind":"color","color":[60,60,60]},"effect_id":"fade","duration_ms":8000}' >/dev/null
+        sleep 1.5
+        read -r basef ibf < <(cpu_insns "$PLAYER_PID" 5)
+        sleep 2.5
+        i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
+        show $OUT_A "$i1"; show $OUT_B "$i2"
+        wait_ready "$i1" 20 && wait_ready "$i2" 20 || die "synthetic scenes never ready"
+        sleep 1
+        ctl transition "$(jq -nc --arg o "out:$OUT_A" --arg p "$s3" '{outputs:$o, to:{kind:"scene", path:$p}, effect_id:"fade", duration_ms:8000}')" >/dev/null
+        ctl transition "$(jq -nc --arg o "out:$OUT_B" --arg p "$s4" '{outputs:$o, to:{kind:"scene", path:$p}, effect_id:"fade", duration_ms:8000}')" >/dev/null
+        sleep 1.5
+        n=$(workers_json | jq '[.workers[] | select(.pid != null)] | length')
+        if ((${PERF_S:-0} > 0 && r == 1)); then
+            nix shell nixpkgs#perf -c perf record -q -g -o "$RESULTS/transport-midfade.perf" -p "$PLAYER_PID" -- sleep "$PERF_S" >/dev/null 2>&1 &
+            perf_pid=$!
+        fi
+        read -r cpu4 ic4 < <(cpu_insns "$PLAYER_PID" 5)
+        [[ -n $perf_pid ]] && wait "$perf_pid"
+        perf_pid=
+        per4=$(python3 -c "print(round(($cpu4 - $basef) / 4, 2))")
+        say "round $r: 2 workers $cpu2 vs $base2 % → $per2 % per worker; $n workers mid-fade $cpu4 vs $basef % → $per4 % per worker; Ginsn/s: 2 workers $ic2 vs $ib2, mid-fade $ic4 vs $ibf"
+        jq -nc --argjson r "$r" --argjson c2 "$cpu2" --argjson b2 "$base2" --argjson c4 "$cpu4" --argjson bf "$basef" \
+            --argjson i2 "${ic2:-null}" --argjson ib2 "${ib2:-null}" --argjson i4 "${ic4:-null}" --argjson ibf "${ibf:-null}" \
+            '{round:$r, cpu2:$c2, base2:$b2, cpu4:$c4, basef:$bf, insn2:$i2, insn_base2:$ib2, insn4:$i4, insn_basef:$ibf}' >>"$RESULTS/transport-rounds.jsonl"
+        all2+=("$per2"); all4+=("$per4")
+        sleep 7
+        show $OUT_A "$col"; show $OUT_B "$col"
+        for i in $(workers_json | jq -r '.workers[].id'); do destroy "$i"; done
+        sleep 2
+    done
+    local m2 m4
+    m2=$(python3 -c "import statistics,sys; print(round(statistics.median(map(float, sys.argv[1:])), 2))" "${all2[@]}")
+    m4=$(python3 -c "import statistics,sys; print(round(statistics.median(map(float, sys.argv[1:])), 2))" "${all4[@]}")
+    check "transport per worker steady (2 workers, 144/240 Hz headless), median of $rounds" "$m2 % (rounds: ${all2[*]})" "≤ 0.6 % of a core" "$(le "$m2" 0.6)"
+    check "transport per worker mid-fade (4 workers), median of $rounds" "$m4 % (rounds: ${all4[*]})" "≤ 0.6 % of a core" "$(le "$m4" 0.6)"
     serve_down
     step_end
 }

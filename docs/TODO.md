@@ -219,6 +219,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           during an S→S fade the runtime recomputes `srcs:` / the scene demand on every sync (`Graph::get`,
           `srcs_for_connector`, `format!` of paths at the top of the profile). Cache per `picture_rev` / transition
           change. `perf`: `nix shell nixpkgs#perf -c perf record -g -p <compositor>`.
+          **Root cause fixed (2026-10-29, "Cache Each Scene's Demand Per Routing Change"):** `SourceHost::sync`
+          (once per worker frame) recomputed every scene's `outputs_of` — 17.7 % of the main thread mid-fade; now
+          cached per `Graph::demand_rev` (2.4 %). Headless A/B (`scenes.sh transport`, 144 + 240 Hz, 4 synthetic
+          workers mid-fade): excess user instructions 0.85 → 0.33 G/s, CPU 2.6 → 1.2–1.6 % per worker (headless
+          CPU is ±1 %). What's left is the per-frame transport (latch, fences, the `time_pos` mirror) and the
+          transition's 1 kHz gain timer. **Owner:** re-run `scenes.sh workers` on the real outputs for the 0.6 %
+          bound (it can only be judged there).
     - [ ] **F1 follow-up — tick scenes from the frame callbacks / the exact refresh** instead of a rounded-Hz grid,
           so a scene at the refresh never beats against the vblank (F1 fixed the presents, not the content clock).
     - [ ] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet

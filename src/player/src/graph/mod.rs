@@ -187,6 +187,18 @@ impl Node {
     }
 }
 
+/// Whether `prop` on a node of `kind` feeds [`Graph::outputs_of`] or a scene's demand
+/// ([`Graph::demand_rev`]).
+fn moves_demand(kind: NodeKind, prop: &str) -> bool {
+    match kind {
+        NodeKind::Layer => matches!(prop, "output" | "content"),
+        NodeKind::Effect => matches!(prop, "from" | "to"),
+        NodeKind::Source => prop == "kind",
+        NodeKind::Output => matches!(prop, "width" | "height" | "refresh_hz" | "scene_fps"),
+        NodeKind::Player => false,
+    }
+}
+
 /// The player's single source of truth: every output, layer, source and effect, as a flat
 /// map of id -> [`Node`]. Single-threaded (spec §4.1 — driven from the render loop / command
 /// handler), so this carries no interior mutability or locking of its own.
@@ -205,6 +217,11 @@ pub struct Graph {
     parked: Option<String>,
     /// Picture-affecting mutations so far (see the module doc).
     picture_rev: u64,
+    /// Mutations that can change [`Graph::outputs_of`] or what those outputs ask of a source
+    /// (see [`Graph::demand_rev`]).
+    demand_rev: u64,
+    /// Unique per graph (a cache keyed on `demand_rev` can't mistake another graph's).
+    uid: u64,
 }
 
 impl Default for Graph {
@@ -239,6 +256,11 @@ impl Graph {
             tr_graves: BTreeSet::new(),
             parked: None,
             picture_rev: 0,
+            demand_rev: 0,
+            uid: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         }
     }
 
@@ -246,6 +268,18 @@ impl Graph {
     /// except `gain.<slot>`; never by `set_observed` (the redraw policy, `crate::redraw`).
     pub fn picture_rev(&self) -> u64 {
         self.picture_rev
+    }
+
+    /// F6b: bumped by every mutation that can change [`Graph::outputs_of`] (which outputs
+    /// show a source, the `srcs:` alias) or what those outputs ask of it — `create`,
+    /// `destroy`, a layer's `output`/`content`, an effect's `from`/`to`, a source's `kind`,
+    /// an output's `width`/`height`/`refresh_hz`/`scene_fps` (set or observed), and a
+    /// changed [`Graph::set_transition_sources`]. Nothing an animation moves every frame
+    /// (`fx.progress`, `opacity`, `gain.*`) and nothing a source observes about itself
+    /// touches it, so the scene demand (`sources::host::demand_for`) is recomputed only
+    /// when it can differ, not on every sync.
+    pub fn demand_rev(&self) -> (u64, u64) {
+        (self.uid, self.demand_rev)
     }
 
     /// Creates a node of `kind`. `id` is required (and used verbatim) for `Output`;
@@ -290,6 +324,7 @@ impl Graph {
         }
         self.nodes.insert(new_id.clone(), node);
         self.picture_rev += 1;
+        self.demand_rev += 1;
 
         if kind == NodeKind::Output {
             let connector = new_id.strip_prefix("out:").unwrap_or(&new_id);
@@ -361,6 +396,7 @@ impl Graph {
         }
         let node = self.nodes.remove(id).ok_or_else(|| no_such_node(id))?;
         self.picture_rev += 1;
+        self.demand_rev += 1;
         if node.kind == NodeKind::Output {
             let connector = id.strip_prefix("out:").unwrap_or(id);
             self.nodes.remove(&format!("lay:{connector}:main"));
@@ -464,6 +500,9 @@ impl Graph {
         by_output: BTreeMap<String, BTreeSet<String>>,
         graves: BTreeSet<String>,
     ) {
+        if self.tr_sources != by_output || self.tr_graves != graves {
+            self.demand_rev += 1;
+        }
         self.tr_sources = by_output;
         self.tr_graves = graves;
     }
@@ -471,6 +510,9 @@ impl Graph {
     /// The wallpaper the runtime parked because no output is left (R60) — silent and
     /// paused, but still a target of `srcs:*` so global settings keep reaching it.
     pub fn set_parked(&mut self, id: Option<String>) {
+        if self.parked != id {
+            self.demand_rev += 1;
+        }
         self.parked = id;
     }
 
@@ -493,6 +535,20 @@ impl Graph {
         for id in &targets {
             self.apply_set(id, prop, value.clone(), false, false);
         }
+        Ok(())
+    }
+
+    /// [`Graph::set_observed`] on one exact node id (no path to format, split or resolve —
+    /// F6b: `SourceHost::update` mirrors a scene's `time_pos` on every frame of every worker).
+    pub fn set_observed_on(
+        &mut self,
+        id: &str,
+        prop: &str,
+        value: PropValue,
+    ) -> Result<(), ApiError> {
+        let kind = self.nodes.get(id).ok_or_else(|| no_such_node(id))?.kind;
+        props::validate_value(kind, prop, &value, false)?;
+        self.apply_set(id, prop, value, false, false);
         Ok(())
     }
 
@@ -554,6 +610,9 @@ impl Graph {
                 node.gain_slots.insert(slot, *db);
             }
         } else if let Some(node) = self.nodes.get_mut(id) {
+            if moves_demand(node.kind, prop) && node.props.get(prop) != Some(&value) {
+                self.demand_rev += 1;
+            }
             node.props.insert(prop.to_string(), value.clone());
         }
         if record {
@@ -1287,6 +1346,69 @@ mod tests {
             assert_eq!(f.to_string(), s);
         }
         assert!("zoom".parse::<Fit>().is_err());
+    }
+
+    /// F6b: `demand_rev` moves on every routing change `outputs_of` / a scene's demand reads,
+    /// and never on what animates or is observed every frame — so a cached demand is
+    /// recomputed exactly when it can differ.
+    #[test]
+    fn demand_rev_moves_on_routing_changes_only() {
+        let mut g = Graph::new();
+        out(&mut g, "out:A");
+        let a = src(&mut g, "a");
+        let b = src(&mut g, "b");
+        let moved = |g: &Graph, r: &mut (u64, u64)| {
+            let now = g.demand_rev();
+            let m = now != *r;
+            *r = now;
+            m
+        };
+        let mut r = g.demand_rev();
+        g.set(&p("lay:A:main.content"), PropValue::Str(a.clone()))
+            .unwrap();
+        assert!(moved(&g, &mut r), "layer content");
+        g.set(&p("lay:A:main.content"), PropValue::Str(a.clone()))
+            .unwrap();
+        assert!(!moved(&g, &mut r), "the same content again");
+        let fx = g
+            .create(
+                NodeKind::Effect,
+                Some("fx".into()),
+                json!({"from": a, "to": b, "effect_id": "fade"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+        assert!(moved(&g, &mut r), "create");
+        g.set(&p("lay:A:main.content"), PropValue::Str(fx.clone()))
+            .unwrap();
+        assert!(moved(&g, &mut r), "an effect shown");
+        for _ in 0..3 {
+            g.set_animated(&p("fx.progress"), PropValue::F64(0.5)).unwrap();
+            g.set_animated(&p("lay:A:main.opacity"), PropValue::F64(0.5))
+                .unwrap();
+            g.set_animated(&p("a.gain.xfade"), PropValue::F64(-6.0)).unwrap();
+            g.set_observed(&p("a.time_pos"), PropValue::F64(1.0)).unwrap();
+            g.set_transition_sources(BTreeMap::new(), BTreeSet::new());
+        }
+        assert!(!moved(&g, &mut r), "per-frame animation / observation");
+        g.set(&p("fx.to"), PropValue::Str(a.clone())).unwrap();
+        assert!(moved(&g, &mut r), "effect side");
+        g.set(&p("out:A.scene_fps"), PropValue::F64(60.0)).unwrap();
+        assert!(moved(&g, &mut r), "scene_fps");
+        g.set_observed(&p("out:A.refresh_hz"), PropValue::I64(240))
+            .unwrap();
+        assert!(moved(&g, &mut r), "observed refresh");
+        let mut held = BTreeMap::new();
+        held.insert("out:A".to_string(), [b.clone()].into_iter().collect());
+        g.set_transition_sources(held.clone(), BTreeSet::new());
+        assert!(moved(&g, &mut r), "transition-held sources");
+        g.set_transition_sources(held, BTreeSet::new());
+        assert!(!moved(&g, &mut r), "the same held sources again");
+        g.destroy(&b).unwrap();
+        assert!(moved(&g, &mut r), "destroy");
+        assert_ne!(Graph::new().demand_rev(), Graph::new().demand_rev(), "unique per graph");
     }
 
     #[test]
