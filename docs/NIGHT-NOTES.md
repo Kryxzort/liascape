@@ -88,3 +88,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   port is PARKED after batch B1 (owner: "dont stop it, just let it complete and then leave it there"): B1
   (property scripts) finishes; B2+ wait. Instead: **Phase 3 implementation started** — Tasks 1–3 (pure rotation rules, the `program` node,
   the rotation engine), one agent, Opus high. F6b agent still running.
+- **Owner, before sleeping:** max 2 agents at once tonight (the 3 running — F6b, Phase 3 T1–3, LWE B1 — finish
+  naturally first); then run through the plans by priority. Order: Phase 3 T4 → T5 → T5b → T6 (revise the cover
+  rule per the recon first) → T7 → … ; second slot: the offline loudness estimator's backend wiring (TODO design).
+  Auto-mute (T14): latency must be ≤ today's p50/p95 (no 100 ms slack), and NO default exclusions (rules feature
+  may default-exclude notifications only).
