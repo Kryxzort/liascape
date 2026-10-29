@@ -1,7 +1,7 @@
 From 4bccb0c9becd94e5e217d1f6db9de7574e235ba0 Mon Sep 17 00:00:00 2001
 From: Greg Gage <webmaster@zedle.com>
 Date: Tue, 27 Oct 2026 22:57:11 -0400
-Subject: [PATCH 14/17] fix: don't treat "particle": "None" on text objects as
+Subject: [PATCH 14/18] fix: don't treat "particle": "None" on text objects as
  a particle system (#692)
 
 Some scenes' text objects carry "particle": "None" (Workshop 1315534440,

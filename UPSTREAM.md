@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`40eacc9`** (fork) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`45ed25c`** (fork) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after
@@ -95,6 +95,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0015 data: optional JSON fails soft | `JsonExtensions::optional` is `noexcept`; a value of the wrong type threw inside it → `terminate` (SIGABRT past the C API's `catch`). Now absent/default + a log line | candidate-for-upstream |
 | 0016 filesystem: case-insensitive fallback | a path no mountpoint has exactly is matched ignoring ASCII case (pkg file list, directory walked per component inside its base) — WE runs on a case-insensitive FS (corpus 3354740764) | candidate-for-upstream |
 | 0017 render: leave out a broken effect | an image effect whose pass can't be built (a packaged shader that doesn't compile) is left out, the image renders — it used to drop the object (corpus 2189783622: black). A passthrough/fullscreen layer still goes whole (part of a post-process chain blacked out 3432999904 in a trial run) | candidate-for-upstream |
+| 0018 audio: WE's sound-object semantics | `CSound` plays a sound object as Wallpaper Engine 2.8.485 does (decompiled: `docs/player/spikes/we-sound-semantics.md` § 4) — `sound` a string or a list; ONE random file per start; each stream at `volume²` (a `DynamicValue`: user properties incl. `{name, condition}` bindings, live, unclamped), mixed by `HostAudioDriver::pull`; `loop` back to back (one file loops natively), `random` + a uniform `mintime`..`maxtime` gap, `single` once; the schedule on the host's clock (`renderTime`); a volume rise from 0 restarts a stopped non-`single` object; `startsilent` never starts (no SceneScript sound API); `WPENGINE_SOUND_SEED` seeds the picks. One driver slot per object for life (`replaceStream`), so `wp_context_audio_stream_count` counts objects that can play. Also a per-stream `decodeFrame` packet counter (was a shared static). Spatialization not done | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and

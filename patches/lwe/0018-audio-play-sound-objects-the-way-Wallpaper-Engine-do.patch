@@ -1,0 +1,945 @@
+From 45ed25ceb4850fa16050f17d1c89ea39f06bab60 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Thu, 29 Oct 2026 18:29:05 +0530
+Subject: [PATCH 18/18] audio: play sound objects the way Wallpaper Engine does
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CSound started every file of a sound object at once, at unity gain, and
+ignored the object's volume, startsilent, mintime and maxtime: a scene
+with a vocal and an instrumental mix of one song played both together, a
+track behind a user property at 0 played at full level, and a "random"
+object played all its files at once, once. Wallpaper Engine (2.8.485,
+decompiled) does this instead, and so does CSound now:
+
+- "sound" is a string (one file) or a list of files. Every start picks ONE
+  of them uniformly at random (repeats allowed) and plays it alone.
+- Each stream plays at volume² (WE squares the field; no clamp, so a
+  value above 1 boosts). "volume" is a user setting like any other: a
+  literal, a {user, value} binding or a {name, condition} one, so a
+  property change reaches it live. The host driver multiplies each
+  stream by its gain (AudioStream::setGain); the SDL driver folds it into
+  its 0..128 volume.
+- playbackmode "loop" (also when absent or unknown): one file loops
+  natively; several play back to back, a new random pick as each ends.
+  "random": a file, then a uniform [mintime, maxtime] s of silence
+  (defaults 1 / 5 s) on the host's clock, then a new pick. "single":
+  one random file, once.
+- The schedule runs on the context's renderTime (CScene::renderFrame
+  ticks the sound objects), so it follows the host's clock: a paused
+  or slowed host pauses or slows it. A file's end is when the driver has
+  mixed its last sample, not a duration read off the container (an mp3
+  without a header estimates that wrong by seconds).
+- A volume change applies at the next pull, without a ramp. A volume
+  rising from 0 starts an object that isn't playing (never a "single"
+  one); a playing object at volume 0 keeps running silently and its
+  schedule freezes.
+- startsilent: not started at load. Only a script's play() starts it,
+  and LWE's SceneScript has no sound methods yet: CSound::play() is the
+  entry point for when it does.
+- WPENGINE_SOUND_SEED (an integer) seeds the picks and gaps: the same
+  ones on every run.
+
+A sound object keeps one stream slot in the driver for its whole life
+(AudioDriver::replaceStream swaps the file playing in it; a null stream
+plays nothing), so wp_context_audio_stream_count counts the sound objects
+that can play, also one held at volume 0 at load: a host that opens its
+output only for a scene with sound still hears that object when a
+property raises it. A startsilent object has no slot until it is played.
+
+Also: decodeFrame's leftover-packet counter was a function-level static
+shared by every stream (one stream's count drove another's decoder,
+which could send it an empty packet = drain, silencing it); it is per
+stream now. The SDL callback no longer blocks in decodeFrame on an ended
+stream's empty queue, and its removeStream takes the stream-list lock.
+
+Not done: spatialization (WE pans a 2D scene's sound by the object's
+position when "spatialization" is set; attenuation / mindistance only
+matter then) — parsed by WE, ignored here. muteineditor, visible and
+queuemode don't apply to sound objects in WE either.
+
+Origin: ours
+Why: liascape-player played scenes' sound objects all at once and ignored their volume and user properties (docs/player/spikes/we-sound-semantics.md § 4: 3289734539, 2951169110, 3276522107)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/context.h       |   8 +-
+ .../WallpaperEngine/Audio/AudioContext.cpp    |   3 +
+ src/core/WallpaperEngine/Audio/AudioContext.h |   6 +
+ .../WallpaperEngine/Audio/AudioStream.cpp     |  19 +-
+ src/core/WallpaperEngine/Audio/AudioStream.h  |  35 +++
+ .../Audio/Drivers/AudioDriver.h               |  11 +-
+ .../Audio/Drivers/HostAudioDriver.cpp         |  25 +-
+ .../Audio/Drivers/HostAudioDriver.h           |   8 +-
+ .../Audio/Drivers/SDLAudioDriver.cpp          |  49 +++-
+ .../Audio/Drivers/SDLAudioDriver.h            |   2 +
+ src/core/WallpaperEngine/Data/Model/Object.h  |  10 +-
+ .../Data/Parsers/ObjectParser.cpp             |  21 +-
+ .../Data/Parsers/ObjectParser.h               |   2 +-
+ .../WallpaperEngine/Render/Objects/CSound.cpp | 213 ++++++++++++++++--
+ .../WallpaperEngine/Render/Objects/CSound.h   |  68 +++++-
+ .../Render/Wallpapers/CScene.cpp              |  14 ++
+ .../Render/Wallpapers/CScene.h                |   6 +
+ 17 files changed, 462 insertions(+), 38 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 5adf65f..c2f56ec 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -120,7 +120,8 @@ WPENGINE_API void wp_context_set_time_counter (wp_context* context, wp_time_coun
+ WPENGINE_API void wp_context_set_audio_input_mix (wp_context* context, wp_audio_input_mix* mix);
+ 
+ /**
+- * Pulls the next frames of the context's audio: the unity-gain mix of every playing stream, as F32
++ * Pulls the next frames of the context's audio: the sum of every playing stream, each at its sound
++ * object's level (volume², Wallpaper Engine's mapping; the wallpaper's own volume is the host's), as F32
+  * interleaved samples in the format given to wp_config_set_audio_output. Never waits for decoding:
+  * whatever is not decoded yet is silence. Call it from the host's audio output (any one thread), and
+  * stop pulling before wp_context_destroy.
+@@ -140,8 +141,9 @@ WPENGINE_API size_t wp_context_audio_pull (wp_context* context, float* interleav
+ /**
+  * @param context
+  *
+- * @return The number of audio streams the context's backgrounds currently play (0 until a scene's
+- * renderer is built by its first wp_render_frame)
++ * @return The number of sound objects the context's backgrounds can play (one stream slot each, also
++ * while one is held at volume 0 or between two files; a `startsilent` object waits for a script and
++ * isn't counted), 0 until a scene's renderer is built by its first wp_render_frame
+  */
+ WPENGINE_API int wp_context_audio_stream_count (wp_context* context);
+ 
+diff --git a/src/core/WallpaperEngine/Audio/AudioContext.cpp b/src/core/WallpaperEngine/Audio/AudioContext.cpp
+index 8d41c82..aa24f72 100644
+--- a/src/core/WallpaperEngine/Audio/AudioContext.cpp
++++ b/src/core/WallpaperEngine/Audio/AudioContext.cpp
+@@ -11,6 +11,9 @@ AudioContext::AudioContext (
+ 
+ int AudioContext::addStream (AudioStream* stream) const { return this->m_driver->addStream (stream); }
+ void AudioContext::removeStream (int streamId) const { this->m_driver->removeStream (streamId); }
++void AudioContext::replaceStream (int streamId, AudioStream* stream) const {
++    this->m_driver->replaceStream (streamId, stream);
++}
+ 
+ AVSampleFormat AudioContext::getFormat () const { return this->m_driver->getFormat (); }
+ 
+diff --git a/src/core/WallpaperEngine/Audio/AudioContext.h b/src/core/WallpaperEngine/Audio/AudioContext.h
+index a5a71e9..3734303 100644
+--- a/src/core/WallpaperEngine/Audio/AudioContext.h
++++ b/src/core/WallpaperEngine/Audio/AudioContext.h
+@@ -34,6 +34,12 @@ public:
+      */
+     void removeStream (int streamId) const;
+ 
++    /**
++     * @param streamId The slot to play another stream in
++     * @param stream The new stream, or nullptr to play nothing
++     */
++    void replaceStream (int streamId, AudioStream* stream) const;
++
+     /**
+      * TODO: MAYBE THIS SHOULD BE OUR OWN DEFINITIONS INSTEAD OF LIBRARY SPECIFIC ONES?
+      *
+diff --git a/src/core/WallpaperEngine/Audio/AudioStream.cpp b/src/core/WallpaperEngine/Audio/AudioStream.cpp
+index 27ea6da..7fac767 100644
+--- a/src/core/WallpaperEngine/Audio/AudioStream.cpp
++++ b/src/core/WallpaperEngine/Audio/AudioStream.cpp
+@@ -54,6 +54,9 @@ int audio_read_thread (void* arg) {
+ 	}
+     }
+ 
++    // nothing more will be queued: once the queue drains, the stream has played out
++    stream->markReadEnded ();
++
+     // stop the audio too just in case
+     SDL_DestroyMutex (waitMutex);
+ 
+@@ -582,7 +585,7 @@ int AudioStream::resampleAudio (uint8_t* out_buf, const int out_size) {
+ }
+ 
+ int AudioStream::decodeFrame (uint8_t* audioBuffer, const int bufferSize) {
+-    static int audio_pkt_size = 0;
++    int& audio_pkt_size = this->m_audioPacketSize;
+ 
+     // block until there's any data in the buffers
+     while (this->m_audioContext.getDriver ().getContext ().isRunning) {
+@@ -636,4 +639,16 @@ int AudioStream::decodeFrame (uint8_t* audioBuffer, const int bufferSize) {
+     return 0;
+ }
+ 
+-AudioContext& AudioStream::getAudioContext () const { return this->m_audioContext; }
+\ No newline at end of file
++AudioContext& AudioStream::getAudioContext () const { return this->m_audioContext; }
++
++void AudioStream::setGain (const float gain) { this->m_gain.store (gain, std::memory_order_relaxed); }
++
++float AudioStream::getGain () const { return this->m_gain.load (std::memory_order_relaxed); }
++
++bool AudioStream::isReadEnded () const { return this->m_readEnded.load (); }
++
++void AudioStream::markReadEnded () { this->m_readEnded.store (true); }
++
++void AudioStream::markPlayedOut () { this->m_playedOut.store (true); }
++
++bool AudioStream::isPlayedOut () const { return this->m_playedOut.load (); }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Audio/AudioStream.h b/src/core/WallpaperEngine/Audio/AudioStream.h
+index 1b3e538..f29d610 100644
+--- a/src/core/WallpaperEngine/Audio/AudioStream.h
++++ b/src/core/WallpaperEngine/Audio/AudioStream.h
+@@ -2,6 +2,7 @@
+ 
+ #include "WallpaperEngine/Data/Utils/BinaryReader.h"
+ 
++#include <atomic>
+ #include <string>
+ 
+ extern "C" {
+@@ -130,6 +131,31 @@ public:
+      */
+     int decodeFrame (uint8_t* audioBuffer, int bufferSize);
+ 
++    /**
++     * @param gain The linear amplitude the driver mixes this stream at (1 = unity, no clamp; any thread)
++     */
++    void setGain (float gain);
++    /**
++     * @return The linear amplitude the driver mixes this stream at
++     */
++    [[nodiscard]] float getGain () const;
++    /**
++     * @return If the read thread is done: the file ended without repeat (or failed), nothing more will be queued
++     */
++    [[nodiscard]] bool isReadEnded () const;
++    /**
++     * Marks the read thread as done (called by the read thread itself)
++     */
++    void markReadEnded ();
++    /**
++     * Called by a driver once it mixed the last decoded sample of an ended stream
++     */
++    void markPlayedOut ();
++    /**
++     * @return If a driver played every sample of this stream: the file ended (never true for a repeating stream)
++     */
++    [[nodiscard]] bool isPlayedOut () const;
++
+ private:
+     /**
+      * Initializes ffmpeg to read the given file
+@@ -202,5 +228,14 @@ private:
+     }* m_queue {};
+ 
+     SDL_Thread* m_audioThread = nullptr;
++
++    /** Bytes of the current packet not decoded yet (one per stream: a shared counter mixed up streams) */
++    int m_audioPacketSize = 0;
++    /** The amplitude the driver mixes this stream at */
++    std::atomic<float> m_gain { 1.0f };
++    /** The read thread finished (EOF without repeat, or an error) */
++    std::atomic<bool> m_readEnded { false };
++    /** A driver mixed the last sample */
++    std::atomic<bool> m_playedOut { false };
+ };
+ } // namespace WallpaperEngine::Audio
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/AudioDriver.h b/src/core/WallpaperEngine/Audio/Drivers/AudioDriver.h
+index e116bbe..5171492 100644
+--- a/src/core/WallpaperEngine/Audio/Drivers/AudioDriver.h
++++ b/src/core/WallpaperEngine/Audio/Drivers/AudioDriver.h
+@@ -21,7 +21,7 @@ namespace Drivers {
+ 	/**
+ 	 * Registers the given stream in the driver for playing
+ 	 *
+-	 * @param stream
++	 * @param stream The stream, or nullptr for a slot that plays nothing until replaceStream fills it
+ 	 */
+ 	virtual int addStream (AudioStream* stream) = 0;
+ 
+@@ -31,6 +31,15 @@ namespace Drivers {
+ 	 */
+ 	virtual void removeStream (int streamId) = 0;
+ 
++	/**
++	 * Swaps the stream a slot plays (a sound object's next file); the previous one is no longer
++	 * touched by the driver once this returns, so the caller can delete it
++	 *
++	 * @param streamId The slot from addStream
++	 * @param stream The new stream, or nullptr to play nothing
++	 */
++	virtual void replaceStream (int streamId, AudioStream* stream) = 0;
++
+ 	/**
+ 	 * Updates status of the different audio settings
+ 	 */
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+index fd35a05..57cf244 100644
+--- a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
++++ b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.cpp
+@@ -46,6 +46,20 @@ void HostAudioDriver::removeStream (const int streamId) {
+     this->m_streams.erase (it);
+ }
+ 
++void HostAudioDriver::replaceStream (const int streamId, AudioStream* stream) {
++    std::lock_guard lock (this->m_streamsMutex);
++    const auto it = this->m_streams.find (streamId);
++
++    if (it == this->m_streams.end ()) {
++	return;
++    }
++
++    // the previous stream's decoded rest is dropped with it
++    it->second->stream = stream;
++    it->second->size = 0;
++    it->second->index = 0;
++}
++
+ int HostAudioDriver::streamCount () {
+     std::lock_guard lock (this->m_streamsMutex);
+ 
+@@ -69,10 +83,12 @@ size_t HostAudioDriver::pull (float* out, const size_t frames) {
+     std::lock_guard lock (this->m_streamsMutex);
+ 
+     for (auto* buffer : this->m_streams | std::views::values) {
+-	if (!buffer->stream->isInitialized ()) {
++	if (buffer->stream == nullptr || !buffer->stream->isInitialized () || buffer->stream->isPlayedOut ()) {
+ 	    continue;
+ 	}
+ 
++	// the stream's own level (a sound object's volume²; not clamped, > 1 boosts)
++	const float gain = buffer->stream->getGain ();
+ 	size_t written = 0;
+ 
+ 	while (written < samples && this->getContext ().isRunning) {
+@@ -80,6 +96,11 @@ size_t HostAudioDriver::pull (float* out, const size_t frames) {
+ 		// decodeFrame blocks on an empty packet queue; a pull must never wait for decoding, so an
+ 		// empty queue is silence for the rest of this pull (and wakes the read thread)
+ 		if (buffer->stream->isQueueEmpty ()) {
++		    // the read thread is done and everything it queued is mixed: the file has played out
++		    if (buffer->stream->isReadEnded () && buffer->stream->isQueueEmpty ()) {
++			buffer->stream->markPlayedOut ();
++		    }
++
+ 		    SDL_CondSignal (buffer->stream->getWaitCondition ());
+ 		    break;
+ 		}
+@@ -105,7 +126,7 @@ size_t HostAudioDriver::pull (float* out, const size_t frames) {
+ 	    const size_t count = std::min (samples - written, buffer->size - buffer->index);
+ 
+ 	    for (size_t i = 0; i < count; i++) {
+-		out[written + i] += source[i];
++		out[written + i] += source[i] * gain;
+ 	    }
+ 
+ 	    written += count;
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
+index 8458157..73ef062 100644
+--- a/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
++++ b/src/core/WallpaperEngine/Audio/Drivers/HostAudioDriver.h
+@@ -27,7 +27,8 @@ struct HostAudioBuffer {
+  * Opens no device: the host pulls F32 interleaved PCM at the configured rate and channel count with
+  * wp_context_audio_pull, from whatever thread drives its own output (a real-time callback included:
+  * a pull never waits for decoding — what is not decoded yet is silence). Every stream is mixed at
+- * unity gain; volume, ramps, mute and pause are the host's (not pulling = paused: the decode queues
++ * its own gain (AudioStream::setGain: a sound object's volume², unity by default) and summed; the
++ * wallpaper's volume, ramps, mute and pause are the host's (not pulling = paused: the decode queues
+  * fill and the read threads wait). Because the host decides how many frames it pulls per second it
+  * can also play a scene's sound faster or slower, e.g. through a time-stretch stage of its own.
+  */
+@@ -40,6 +41,8 @@ public:
+     int addStream (AudioStream* stream) override;
+     /** @inheritdoc */
+     void removeStream (int streamId) override;
++    /** @inheritdoc */
++    void replaceStream (int streamId, AudioStream* stream) override;
+ 
+     /** @inheritdoc */
+     [[nodiscard]] AVSampleFormat getFormat () const override;
+@@ -57,7 +60,8 @@ public:
+     size_t pull (float* out, size_t frames);
+ 
+     /**
+-     * @return The number of streams currently registered
++     * @return The number of streams currently registered (a sound object's slot counts while it is
++     *         between files or held silent)
+      */
+     [[nodiscard]] int streamCount ();
+ 
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.cpp b/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.cpp
+index c780b53..aaef5c8 100644
+--- a/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.cpp
++++ b/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.cpp
+@@ -1,3 +1,5 @@
++#include <algorithm>
++#include <cmath>
+ #include <ranges>
+ 
+ #include "SDLAudioDriver.h"
+@@ -30,18 +32,34 @@ void audio_callback (void* userdata, uint8_t* streamData, int length) {
+ 
+ 	// sound is not initialized or stopped and is not in loop mode
+ 	// ignore mixing it in
+-	if (!buffer->stream->isInitialized ()) {
++	if (buffer->stream == nullptr || !buffer->stream->isInitialized () || buffer->stream->isPlayedOut ()) {
+ 	    continue;
+ 	}
+ 
+ 	// check if queue is empty and signal the read thread
+ 	if (buffer->stream->isQueueEmpty ()) {
++	    if (buffer->stream->isReadEnded () && buffer->audio_buf_index >= buffer->audio_buf_size) {
++		buffer->stream->markPlayedOut ();
++	    }
++
+ 	    SDL_CondSignal (buffer->stream->getWaitCondition ());
+ 	    continue;
+ 	}
+ 
++	// the stream's own level on top of the configured volume (SDL mixes 0..128: a boost above the
++	// configured volume is capped there)
++	const int volume = std::clamp (
++	    static_cast<int> (std::lround (driver->getContext ().config.volume * buffer->stream->getGain ())), 0,
++	    SDL_MIX_MAXVOLUME
++	);
++
+ 	while (streamLength > 0 && driver->getContext ().isRunning) {
+ 	    if (buffer->audio_buf_index >= buffer->audio_buf_size) {
++		// decodeFrame blocks on an empty packet queue (a file that ended): silence for the rest
++		if (buffer->stream->isQueueEmpty ()) {
++		    break;
++		}
++
+ 		// get more data to fill the buffer
+ 		int audio_size = buffer->stream->decodeFrame (buffer->audio_buf, sizeof (buffer->audio_buf));
+ 
+@@ -65,7 +83,7 @@ void audio_callback (void* userdata, uint8_t* streamData, int length) {
+ 	    // mix the audio
+ 	    SDL_MixAudioFormat (
+ 		streamDataPointer, &buffer->audio_buf[buffer->audio_buf_index], driver->getSpec ().format, len1,
+-		driver->getContext ().config.volume
++		volume
+ 	    );
+ 
+ 	    streamLength -= len1;
+@@ -137,7 +155,32 @@ int SDLAudioDriver::addStream (AudioStream* stream) {
+ 
+     return newStreamId;
+ }
+-void SDLAudioDriver::removeStream (int streamId) { this->m_streams.erase (streamId); }
++void SDLAudioDriver::removeStream (int streamId) {
++    SDL_LockMutex (this->m_streamListMutex);
++
++    const auto it = this->m_streams.find (streamId);
++
++    if (it != this->m_streams.end ()) {
++	delete it->second;
++	this->m_streams.erase (it);
++    }
++
++    SDL_UnlockMutex (this->m_streamListMutex);
++}
++
++void SDLAudioDriver::replaceStream (int streamId, AudioStream* stream) {
++    SDL_LockMutex (this->m_streamListMutex);
++
++    const auto it = this->m_streams.find (streamId);
++
++    if (it != this->m_streams.end ()) {
++	it->second->stream = stream;
++	it->second->audio_buf_size = 0;
++	it->second->audio_buf_index = 0;
++    }
++
++    SDL_UnlockMutex (this->m_streamListMutex);
++}
+ 
+ const std::map<int, SDLAudioBuffer*>& SDLAudioDriver::getStreams () { return this->m_streams; }
+ 
+diff --git a/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.h b/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.h
+index 9b76e53..65390b0 100644
+--- a/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.h
++++ b/src/core/WallpaperEngine/Audio/Drivers/SDLAudioDriver.h
+@@ -33,6 +33,8 @@ public:
+     int addStream (AudioStream* stream) override;
+     /** @inheritdoc */
+     void removeStream (int streamId) override;
++    /** @inheritdoc */
++    void replaceStream (int streamId, AudioStream* stream) override;
+     /**
+      * @return All the registered audio streams
+      */
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 3dfa6e9..694964d 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -133,10 +133,18 @@ public:
+ };
+ 
+ struct SoundData {
+-    /** Playback mode, loop, */
++    /** Playback mode as written: `loop` (also when absent or unknown), `random` or `single` */
+     // TODO: WRITE AN ENUM FOR THIS
+     std::optional<std::string> playbackmode;
++    /** The files; one of them is picked at random each time the object starts */
+     std::vector<std::string> sounds;
++    /** Level: each stream plays at volume² (Wallpaper Engine's mapping; not clamped). Bindable to a user property */
++    UserSettingUniquePtr volume;
++    /** `random` mode: silence between two files, uniform in [mintime, maxtime] seconds */
++    float mintime;
++    float maxtime;
++    /** Not started at load: only a script's play() starts it */
++    bool startsilent;
+ };
+ 
+ class Sound : public Object, public SoundData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 47c2158..f7d57e9 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -73,8 +73,8 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 
+     if (imageIt != it.end () && imageIt->is_string ()) {
+ 	return parseImage (it, project, std::move (basedata), *imageIt);
+-    } else if (soundIt != it.end () && soundIt->is_array ()) {
+-	return parseSound (it, std::move (basedata));
++    } else if (soundIt != it.end () && (soundIt->is_array () || soundIt->is_string ())) {
++	return parseSound (it, project, std::move (basedata));
+     } else if (hasParticle) {
+ 	return parseParticle (it, project, std::move (basedata));
+     } else if (textIt != it.end ()) {
+@@ -111,12 +111,19 @@ std::vector<int> ObjectParser::parseDependencies (const JSON& it) {
+     return result;
+ }
+ 
+-SoundUniquePtr ObjectParser::parseSound (const JSON& it, ObjectData base) {
++SoundUniquePtr ObjectParser::parseSound (const JSON& it, const Project& project, ObjectData base) {
+     const auto soundIt = it.require ("sound", "Object must have a sound");
+     std::vector<std::string> sounds = {};
+ 
+-    for (const auto& cur : soundIt) {
+-	sounds.push_back (cur);
++    // one file as a string, or a list to pick from (Wallpaper Engine accepts both)
++    if (soundIt.is_string ()) {
++	sounds.push_back (soundIt);
++    } else {
++	for (const auto& cur : soundIt) {
++	    if (cur.is_string ()) {
++		sounds.push_back (cur);
++	    }
++	}
+     }
+ 
+     return std::make_unique<Sound> (
+@@ -124,6 +131,10 @@ SoundUniquePtr ObjectParser::parseSound (const JSON& it, ObjectData base) {
+ 	SoundData {
+ 	    .playbackmode = it.optional<std::string> ("playbackmode"),
+ 	    .sounds = sounds,
++	    .volume = it.user ("volume", project.properties, 1.0f),
++	    .mintime = it.optional ("mintime", 1.0f),
++	    .maxtime = it.optional ("maxtime", 5.0f),
++	    .startsilent = it.optional ("startsilent", false),
+ 	}
+     );
+ }
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+index 3146fde..525b955 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+@@ -19,7 +19,7 @@ public:
+ 
+ private:
+     static std::vector<int> parseDependencies (const JSON& it);
+-    static SoundUniquePtr parseSound (const JSON& it, ObjectData base);
++    static SoundUniquePtr parseSound (const JSON& it, const Project& project, ObjectData base);
+     static ImageUniquePtr
+     parseImage (const JSON& it, const Project& project, ObjectData base, const std::string& image);
+     static ParticleUniquePtr parseParticle (const JSON& it, const Project& project, ObjectData base);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CSound.cpp b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+index 94dd807..f69146a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CSound.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+@@ -1,37 +1,220 @@
+ #include <SDL.h>
+ 
++#include <algorithm>
++#include <cstdlib>
++
+ #include "CSound.h"
+ 
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/FileSystem/Container.h"
++#include "WallpaperEngine/Logging/Log.h"
+ 
+ using namespace WallpaperEngine::Render::Objects;
+ 
+-CSound::CSound (Wallpapers::CScene& scene, const Sound& sound) : CObject (scene, sound), m_sound (sound) {
+-    if (this->getContext ().getContext ().config.enableAudio) {
+-	this->load ();
++namespace {
++uint64_t soundSeed (const int objectId) {
++    // WPENGINE_SOUND_SEED: the same picks and gaps on every run (tests); per object, so the order objects
++    // are built in doesn't matter
++    if (const char* env = std::getenv ("WPENGINE_SOUND_SEED"); env != nullptr && *env != '\0') {
++	return std::strtoull (env, nullptr, 0) * 0x9E3779B97F4A7C15ull + static_cast<uint64_t> (objectId);
++    }
++
++    std::random_device device;
++    return (static_cast<uint64_t> (device ()) << 32) ^ device ();
++}
++} // namespace
++
++CSound::CSound (Wallpapers::CScene& scene, const Sound& sound) :
++    CObject (scene, sound), m_sound (sound), m_random (soundSeed (sound.id)) {
++    const auto& mode = sound.playbackmode;
++
++    // absent = loop (WE's constructor default); an unknown name falls back to it too
++    if (mode.has_value () && *mode == "random") {
++	this->m_mode = Mode::Random;
++    } else if (mode.has_value () && *mode == "single") {
++	this->m_mode = Mode::Single;
++    } else {
++	this->m_mode = Mode::Loop;
++    }
++
++    this->m_audio = this->getContext ().getContext ().config.enableAudio && !sound.sounds.empty ();
++
++    if (!this->m_audio) {
++	return;
++    }
++
++    // one slot for the object's life, so the host sees a scene with sound even while this object is
++    // held at volume 0 or between files. A startsilent object waits for a script: no slot until then
++    if (!sound.startsilent) {
++	this->m_slot = this->getScene ().getAudioContext ().addStream (nullptr);
++    }
++
++    if (sound.volume != nullptr && sound.volume->value != nullptr) {
++	this->m_volumeListener = sound.volume->value->listen ([this] (const DynamicValue&, DynamicValue::UpdateSource) {
++	    this->onVolumeChanged ();
++	});
++    }
++
++    if (!sound.startsilent) {
++	this->start ();
+     }
+ }
+ 
+ CSound::~CSound () {
+-    // free all the sound buffers and streams
+-    for (const auto& stream : this->m_audioStreams) {
+-	this->getScene ().getAudioContext ().removeStream (stream.first);
+-	delete stream.second;
++    if (this->m_volumeListener) {
++	this->m_volumeListener ();
++    }
++
++    if (this->m_slot >= 0) {
++	this->getScene ().getAudioContext ().removeStream (this->m_slot);
+     }
+ 
+-    this->m_audioStreams.clear ();
++    delete this->m_stream;
++    this->m_stream = nullptr;
+ }
+ 
+-void CSound::load () {
+-    for (const auto& cur : this->m_sound.sounds) {
+-	auto stream
+-	    = new Audio::AudioStream (this->getScene ().getAudioContext (), this->getAssetLocator ().read (cur));
++CSound::Mode CSound::getMode () const { return this->m_mode; }
++
++float CSound::getGain () const {
++    if (this->m_sound.volume == nullptr || this->m_sound.volume->value == nullptr) {
++	return 1.0f;
++    }
++
++    // Wallpaper Engine hands the stream volume² (× the wallpaper's own level, the host's here); no clamp
++    const float v = this->m_sound.volume->value->getFloat ();
++
++    return v * v;
++}
++
++bool CSound::isPlaying () const { return this->m_stream != nullptr && !this->m_stream->isPlayedOut (); }
++
++void CSound::swapStream (Audio::AudioStream* stream) {
++    Audio::AudioStream* previous = this->m_stream;
++
++    this->m_stream = stream;
++    this->getScene ().getAudioContext ().replaceStream (this->m_slot, stream);
++    // the driver no longer touches it
++    delete previous;
++}
++
++void CSound::start () {
++    if (!this->m_audio || this->m_slot < 0) {
++	return;
++    }
++
++    this->m_neverStarted = false;
++
++    const float gain = this->getGain ();
++
++    // volume 0 (or the wallpaper muted): WE starts nothing; a later rise does (onVolumeChanged)
++    if (!(gain > 0.0f)) {
++	return;
++    }
++
++    // `random` starts only once its silence is over (a file that just played out starts its silence)
++    if (this->m_mode == Mode::Random) {
++	if (this->m_gap < 0.0 && this->m_stream != nullptr && this->m_stream->isPlayedOut ()) {
++	    this->m_gap = this->m_nextGap;
++	}
++
++	if (this->m_gap > 0.0) {
++	    return;
++	}
++    }
++
++    const auto& files = this->m_sound.sounds;
++    std::uniform_int_distribution<size_t> pick (0, files.size () - 1);
++    const auto& file = files[pick (this->m_random)];
++    Audio::AudioStream* stream = nullptr;
++
++    try {
++	stream = new Audio::AudioStream (this->getScene ().getAudioContext (), this->getAssetLocator ().read (file));
++    } catch (const std::exception& e) {
++	sLog.error ("Cannot play sound ", file, " of object ", this->getId (), ": ", e.what ());
++	this->swapStream (nullptr);
++	this->m_gap = -1.0;
++	return;
++    }
++
++    // one file of a `loop` object loops natively; everything else plays once and is followed by the next start
++    stream->setRepeat (this->m_mode == Mode::Loop && files.size () == 1);
++    stream->setGain (gain);
++    this->swapStream (stream);
++    this->m_gap = -1.0;
++
++    if (this->m_mode == Mode::Random) {
++	const double lo = this->m_sound.mintime, hi = this->m_sound.maxtime;
++	std::uniform_real_distribution<double> u (0.0, 1.0);
++
++	// WE: U·(maxtime − mintime) + mintime, U in [0, 1)
++	this->m_nextGap = u (this->m_random) * (hi - lo) + lo;
++    }
++}
++
++void CSound::play () {
++    if (!this->m_audio) {
++	return;
++    }
++
++    if (this->m_slot < 0) {
++	this->m_slot = this->getScene ().getAudioContext ().addStream (nullptr);
++    }
++
++    // a script's play() restarts a waiting `random` object at once
++    this->m_gap = -1.0;
++    this->start ();
++}
++
++void CSound::onVolumeChanged () {
++    if (!this->m_audio || this->m_slot < 0) {
++	return;
++    }
++
++    const float gain = this->getGain ();
++
++    // instant, like WE (no ramp): the next pull mixes at the new level
++    if (this->m_stream != nullptr) {
++	this->m_stream->setGain (gain);
++    }
++
++    // a rise from 0 starts an object that isn't playing — never a `single` one, never one that hasn't
++    // had its first start (startsilent)
++    if (gain > 0.0f && !this->isPlaying () && this->m_mode != Mode::Single && !this->m_neverStarted) {
++	this->start ();
++    }
++}
++
++void CSound::tick (const double dt) {
++    if (!this->m_audio || this->m_slot < 0 || this->m_neverStarted || this->m_mode == Mode::Single) {
++	return;
++    }
++
++    // a muted object's schedule is frozen (it keeps playing silently)
++    if (!(this->getGain () > 0.0f)) {
++	return;
++    }
++
++    // a looping single file never ends
++    if (this->m_stream == nullptr || !this->m_stream->isPlayedOut ()) {
++	return;
++    }
++
++    if (this->m_mode == Mode::Loop) {
++	// back to back: the next random pick as soon as the file played out
++	this->start ();
++	return;
++    }
++
++    // random: the silence is counted from the end of the file
++    if (this->m_gap < 0.0) {
++	this->m_gap = this->m_nextGap;
++    }
+ 
+-	stream->setRepeat (this->m_sound.playbackmode.has_value () && this->m_sound.playbackmode == "loop");
++    this->m_gap -= std::max (0.0, dt);
+ 
+-	// add the stream to the context so it can be played
+-	this->m_audioStreams.insert_or_assign (this->getScene ().getAudioContext ().addStream (stream), stream);
++    if (this->m_gap <= 0.0) {
++	this->m_gap = 0.0;
++	this->start ();
+     }
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CSound.h b/src/core/WallpaperEngine/Render/Objects/CSound.h
+index b056412..691fcc1 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CSound.h
++++ b/src/core/WallpaperEngine/Render/Objects/CSound.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <functional>
++#include <random>
++
+ #include "WallpaperEngine/Audio/AudioStream.h"
+ #include "WallpaperEngine/Render/CObject.h"
+ 
+@@ -12,19 +15,78 @@ class CScene;
+ namespace WallpaperEngine::Render::Objects {
+ using namespace WallpaperEngine::Data::Model;
+ 
++/**
++ * A sound object, played the way Wallpaper Engine plays it (WE 2.8.485, decompiled):
++ *
++ * - every start picks ONE of the object's files uniformly at random (repeats allowed) and plays it at
++ *   volume² (the object's `volume`, bound to a user property or not, never clamped: > 1 boosts);
++ * - `loop` (also an absent or unknown playbackmode): one file loops natively; several play back to
++ *   back, each start a new random pick;
++ * - `random`: a file, then a uniform [mintime, maxtime] s of silence (on the host's clock), then a new pick;
++ * - `single`: one random file, once;
++ * - `startsilent`: not started at load, only by a script's play();
++ * - a volume change applies at once (no ramp); a volume rising from 0 starts a not-playing, not-`single`
++ *   object; a playing object at volume 0 keeps running silently and its schedule freezes.
++ *
++ * The object keeps one slot in the audio driver for its whole life; each start swaps a fresh stream of
++ * the picked file into it. Picks come from a per-object RNG, seeded from WPENGINE_SOUND_SEED when set
++ * (deterministic tests), else from std::random_device.
++ */
+ class CSound final : public CObject {
+ public:
++    enum class Mode { Loop, Random, Single };
++
+     CSound (Wallpapers::CScene& scene, const Sound& sound);
+     ~CSound () override;
+ 
+     void render () override;
+ 
+-protected:
+-    void load ();
++    /**
++     * Advances the object's schedule (the next file, the silence of `random`) by dt seconds of the
++     * host's clock; called once per rendered frame
++     *
++     * @param dt Seconds since the previous frame (< 0, a clock that went back, counts as 0)
++     */
++    void tick (double dt);
++
++    /**
++     * A script's play(): starts the object even if `startsilent` (SceneScript has no sound methods
++     * yet; the entry point exists for when it does)
++     */
++    void play ();
++
++    /** @return The playback mode in use */
++    [[nodiscard]] Mode getMode () const;
++    /** @return volume², the amplitude the streams play at */
++    [[nodiscard]] float getGain () const;
++    /** @return If a file of this object is playing (audible or not) */
++    [[nodiscard]] bool isPlaying () const;
+ 
+ private:
+-    std::map<int, Audio::AudioStream*> m_audioStreams = {};
++    /** WE's start/advance routine: stop, pick, play, schedule (nothing at volume 0) */
++    void start ();
++    /** the volume's listener: the gain now, and a rise from 0 restarts a stopped non-`single` object */
++    void onVolumeChanged ();
++    /** swaps `stream` into the driver slot and deletes the previous one */
++    void swapStream (Audio::AudioStream* stream);
+ 
+     const Sound& m_sound;
++    Mode m_mode = Mode::Loop;
++    bool m_audio = false;
++
++    /** the driver slot (-1: no audio) */
++    int m_slot = -1;
++    /** the stream in the slot (nullptr between files / before the first start) */
++    Audio::AudioStream* m_stream = nullptr;
++
++    /** a start was never attempted (WE's "stopped" bit): volume changes don't start the object */
++    bool m_neverStarted = true;
++    /** `random`: seconds of silence still to wait once the current file played out (< 0: none pending) */
++    double m_gap = -1.0;
++    /** `random`: the gap drawn for the file playing now */
++    double m_nextGap = 0.0;
++
++    std::mt19937_64 m_random;
++    std::function<void ()> m_volumeListener;
+ };
+ } // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index efe45c4..8202d44 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -258,6 +258,10 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	renderObject = nullptr;
+     }
+ 
++    if (renderObject != nullptr && renderObject->is<Objects::CSound> ()) {
++	this->m_sounds.push_back (renderObject->as<Objects::CSound> ());
++    }
++
+     return renderObject;
+ }
+ 
+@@ -319,6 +323,16 @@ void CScene::renderFrame () {
+     // run a tick in the javascript logic
+     this->getScriptEngine ().tick ();
+ 
++    // advance the sound objects' playlists (next file, `random`'s silence) on the host's clock
++    const double soundDt = std::max (
++	0.0,
++	static_cast<double> (this->getContext ().getContext ().renderTime - this->getContext ().getContext ().renderTimeLast)
++    );
++
++    for (auto* sound : this->m_sounds) {
++	sound->tick (soundDt);
++    }
++
+     // update main textures for images
+     for (const auto& cur : this->m_objectsByRenderOrder) {
+ 	if (!cur->is<Objects::CImage> ()) {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 2e353ae..fdc0b3b 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -13,6 +13,10 @@ class Camera;
+ class CObject;
+ }
+ 
++namespace WallpaperEngine::Render::Objects {
++class CSound;
++}
++
+ namespace WallpaperEngine::Render::Wallpapers {
+ using namespace WallpaperEngine::Data::Model;
+ 
+@@ -62,6 +66,8 @@ private:
+     CObject* m_bloomObject = nullptr;
+     std::map<int, CObject*> m_objects = {};
+     std::vector<CObject*> m_objectsByRenderOrder = {};
++    /** the sound objects, ticked on the host's clock every frame (they don't render) */
++    std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};

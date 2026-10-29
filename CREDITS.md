@@ -49,3 +49,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0015-data-an-optional-JSON-value-that-doesn-t-convert-is-.patch` | data: an optional JSON value that doesn't convert is absent, not a terminate | ours | Kryxzort <virajslko@gmail.com> |
 | lwe | `0016-filesystem-find-an-asset-whose-name-differs-only-in-.patch` | filesystem: find an asset whose name differs only in case | ours | Kryxzort <virajslko@gmail.com> |
 | lwe | `0017-render-leave-out-an-image-effect-that-can-t-be-built.patch` | render: leave out an image effect that can't be built, not the image | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0018-audio-play-sound-objects-the-way-Wallpaper-Engine-do.patch` | audio: play sound objects the way Wallpaper Engine does | ours | Kryxzort <virajslko@gmail.com> |

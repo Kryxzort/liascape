@@ -1,7 +1,7 @@
 From 7c0a3eb9d73c5a131428de362a16b88fd6d68ab2 Mon Sep 17 00:00:00 2001
 From: Kryxzort <virajslko@gmail.com>
 Date: Wed, 28 Oct 2026 22:13:43 +0530
-Subject: [PATCH 16/17] filesystem: find an asset whose name differs only in
+Subject: [PATCH 16/18] filesystem: find an asset whose name differs only in
  case
 
 Wallpaper Engine runs on Windows, whose filesystem ignores case, so

@@ -3230,11 +3230,19 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
 - **Patch work.** `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build test` builds a working
   tree in place (`build/lwe-build-dev`, incremental; `REV` = `dev:<dir>`, which
   `core_is_the_pinned_one` skips), then `LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core cargo …`.
-  `bash scripts/lwe.sh --nix …` runs any command inside the devShell.
+  `bash scripts/lwe.sh --nix …` runs any command inside the devShell. **Gotcha:** the devShell sets
+  `LIASCAPE_LWE_CORE_DIR` to the pinned store path, so `lwe.sh --nix build` installs into `/nix/store` and fails
+  (`Read-only file system`) — run `nix develop -c bash -c 'LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core-dev
+  LWE_DEV_SRC=… bash scripts/lwe.sh build test'` instead. **A fork commit not pushed yet** (0018, 2026-10-29):
+  `LWE_REPO=<local fork clone> bash scripts/lwe.sh fetch patches verify` regenerates the series from it, and
+  the flake's `lwe-src` (a fixed-output fetch) is satisfied without GitHub by adding the exact tree to the store:
+  the previous rev's `-source` store path copied, the new patch `git apply`d, `nix hash path` = the PIN's
+  `nix_hash`, `nix-store --add-fixed --recursive sha256 <dir named source>`. Only this machine builds until
+  the branch is pushed.
 - **The patched API** (`patches/lwe/0003`): `wp_config_set_audio_output(cfg, {sample_rate,
   channels})` before `wp_context_create` → the context uses `HostAudioDriver`: no SDL audio
-  subsystem, no device. `wp_context_audio_pull(ctx, float*, frames)` = the unity-gain mix of every
-  stream, F32 interleaved, always `frames` (silence where nothing is decoded; 0 on an SDL context
+  subsystem, no device. `wp_context_audio_pull(ctx, float*, frames)` = the sum of every stream, each
+  at its sound object's `volume²` (0018; unity before), F32 interleaved, always `frames` (silence where nothing is decoded; 0 on an SDL context
   / null buffer); it **never waits for decoding** (an empty packet queue = silence for that pull),
   so the worker may call it from its PipeWire process callback. Not pulling = paused (the read
   threads wait on full queues); the frames pulled per second of the host's clock = the speed, so
@@ -3243,7 +3251,9 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   but the worker never sets them (dB gains are ours). A mono source reaches each stereo channel at
   −3 dB (FFmpeg's default mono→stereo rematrix — measured 0.354 for a 0.5 sine).
   `wp_context_audio_stream_count` (0 until the first `wp_render_frame` builds the scene's sound
-  objects), `wp_context_audio_driver_name` (`"host"|"sdl"`). Stop pulling before
+  objects; since 0018 = the sound objects that can play — one slot each for life, also one held at volume 0
+  — so the worker's `has_audio` still opens the stream for a scene whose only sound waits on a property),
+  `wp_context_audio_driver_name` (`"host"|"sdl"`). Stop pulling before
   `wp_context_destroy`. **0004:** a project whose renderer build threw renders nothing ever again
   (no SIGSEGV on the 2nd call), size stays 1×1. **0005:** `engine.setTimeout/setInterval` run on
   the context's `renderTime` (the host clock), a clock going back reschedules them. **0006:** a mono
@@ -3256,6 +3266,22 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `terminate` (the C API's `try`/`catch` never saw it). **0016:** a path no mountpoint has exactly is matched
   ignoring ASCII case (`Found X as Y (case differs)`; exact matches everywhere first). **0017:** an image
   effect whose pass can't be built is left out (`Leaving out effect …`) — the object used to be dropped.
+  **0018 (2026-10-29): sound objects play by Wallpaper Engine's rules** (the decompiled spec,
+  `docs/player/spikes/we-sound-semantics.md` § 4; until then LWE started every file of an object at once at
+  unity gain and ignored `volume`, `startsilent`, `mintime`/`maxtime`): `sound` = a string or a list; every
+  start plays ONE file picked uniformly at random (repeats allowed; `WPENGINE_SOUND_SEED` = deterministic
+  picks); each stream at `volume²` — a `DynamicValue` (literal, `{user, value}`, `{name, condition}`),
+  unclamped (2 = ×4), applied per stream in `HostAudioDriver::pull`; `loop` (also absent/unknown) = one file
+  loops natively, several back to back (the next pick when the driver mixed the last sample — not a container
+  duration, which an mp3 without a header gets wrong by seconds); `random` = + a uniform `mintime`..`maxtime`
+  silence (defaults 1 / 5 s) counted from the file's end; `single` = one file once; the schedule ticks in
+  `CScene::renderFrame` on `renderTime` (follows the worker's clock, speed and pause; a muted object's
+  schedule freezes); a property change sets the gain at the next pull (no ramp, like WE), a rise from 0
+  starts a stopped non-`single` object, a fall to 0 keeps it running silently; `startsilent` never starts
+  (LWE's SceneScript has no sound methods — `CSound::play()` is the hook for when it does); spatialization
+  (WE pans by the object's x when set) not done. Each start opens the picked file on the render thread:
+  measured 22 ms for 3289734539's 40 MB WAV from its `scene.pkg` (once per file, every ~4 min), 1–2 ms
+  for an mp3. Also fixed: `decodeFrame`'s leftover-packet counter was a static shared by all streams.
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").
@@ -3266,7 +3292,10 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   clock, `wp_project_load_folder`; NULL → `Err("load failed")`), `first_render(scratch_fbo)` →
   native size or `Err` when ≤ 1, `render(t, fbo)` (native-sized FBO; no flip, alpha 0 — the caller
   forces 1), `pull_audio`, `audio_streams`, `audio_driver`. Task 7's `render.rs` builds on it.
-  **`liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S]`** renders a
+  **`liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S] [--audio-dump S]
+  [--prop name=value]… [--prop-at T name=value]…`** (`--prop`: a user property before the build, like
+  `scene_props`; `--prop-at`: set T s into the dump, live; the dump renders at 30 fps of scene time meanwhile,
+  so 0018's playlists advance) renders a
   real scene offscreen (frames at 30 fps of scene time), writes `lwe-smoke-1s.png`/`-3s.png`
   (upright, opaque) and prints one JSON line (`native`, `load_ms`, `build_ms`, `frame_ms_*` with a
   `glFinish` per frame, `lit_pixels`, `changed_pixels_1s_to_end`, `gl_error`, `audio_driver`,
@@ -3283,7 +3312,13 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `host_output_replaces_sdl`, `pull_without_streams_is_silence`,
   `render_after_failed_build_returns` (RED unpatched: SIGSEGV), `min_scene_renders_without_assets`,
   `host_pull_mixes_scene_sound_at_unity_gain` (a generated looping mono WAV: peak 0.354 on both
-  channels, 5 blocks without a gap; RED before 0006: `double free or corruption`),
+  channels, 5 blocks without a gap; RED before 0006: `double free or corruption`); 0018 (generated
+  stereo tones, a render + a pull per 20 ms of the fake clock; all RED on the 0017 core):
+  `loop_plays_one_file_at_a_time` (two files: never both, both picked, back to back with 0 quiet blocks;
+  the string `sound` form loops), `random_waits_mintime_to_maxtime` (gaps 0.44–0.78 s for 0.4..0.8),
+  `volume_is_squared_and_live` (0.5 on a 0.8 tone → 0.200; a slider 0 → 2 starts its object at ×4; 2 → 1
+  steps at the very next pull), `startsilent_and_volume_rise` (no slot, silent; a bool raising a `single`
+  never starts it, a `loop` starts at once; back to 0 = silent),
   `sdl_stays_default_without_host_output`, `pull_on_sdl_context_returns_zero`.
   `tests/lwe_build.rs` (core tests SKIP without `LIASCAPE_LWE_CORE_DIR`, FAIL then under
   `LIASCAPE_REQUIRE_SCENES=1`; repo tests SKIP in the flake's sandbox): `core_exports_only_wp_symbols`
