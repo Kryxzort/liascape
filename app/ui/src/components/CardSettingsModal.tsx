@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield } from "lucide-react";
+import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield, AudioLines } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
@@ -18,6 +18,17 @@ function fmtDur(s: number): string {
   if (m) parts.push(`${m} ${m === 1 ? "minute" : "minutes"}`);
   if (sec || !parts.length) parts.push(`${sec} ${sec === 1 ? "second" : "seconds"}`);
   return parts.length === 1 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+}
+
+// A scene's loudness line (liascape-player; library.md § Loudness): "≈ −14.6 LUFS (estimated)" — the offline estimate
+// of its current properties' sound, not played that way yet — or "−15.2 LUFS (measured, 30 min)" (its own measurement
+// over that much audible play). null = nothing known (a silent scene, never estimated).
+export function sceneLoudnessText(i: LibraryItem): string | null {
+  if (i.loudnessLufs == null) return null;
+  const v = (i.loudnessLufs < 0 ? "−" : "") + Math.abs(i.loudnessLufs).toFixed(1) + " LUFS";
+  if (i.loudnessEstimated) return `≈ ${v} (estimated)`;
+  const s = i.loudnessSeconds ?? 0;
+  return s > 0 ? `${v} (measured, ${s < 60 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`})` : `${v} (measured)`;
 }
 
 // library card "Settings" — per-wallpaper volume/speed overrides (+ ↺ Global),
@@ -166,7 +177,14 @@ export function CardSettingsModal({
             {!item.isScene && <span className="mrow" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={14} /> {dur || "0 seconds"}</span>}
             {item.resolution && <span className="mrow"><Monitor size={14} /> {item.resolution}</span>}
             {item.ageRating && <span className="mrow"><Shield size={14} /> {item.ageRating}</span>}
+            {item.isScene && sceneSpeed && sceneLoudnessText(item) && (
+              <span className="mrow" data-scene-loudness-line title="the scene's loudness under its current properties — normalization matches it to the target">
+                <AudioLines size={14} /> {sceneLoudnessText(item)}</span>
+            )}
           </div>
+          {item.isScene && sceneSpeed && item.loudnessEstimated && item.loudnessNote && (
+            <div className="meta"><span className="shint" data-scene-loudness-note>Estimate may be off: {item.loudnessNote}</span></div>
+          )}
           {item.tags && item.tags.length > 0 && (
             <div className="tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
           )}

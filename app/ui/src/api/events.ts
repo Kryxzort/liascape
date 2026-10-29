@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { API } from "./client";
+import { API, type LibraryItem } from "./client";
 
 export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
@@ -10,7 +10,11 @@ export type LiascapeEvent =
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }
   | { type: "library-synced"; payload: { count: number } }
-  | { type: "library-item-changed"; payload: { path: string; volumeOverride: number | null } }
+  // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
+  // loudness estimate / measurement → the loudness* fields)
+  | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote">> }
+  // the background scene-loudness queue (Settings → Audio → "Scene loudness", imports): shaped like unsub-progress
+  | { type: "scene-loudness-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; cancelled?: boolean } }
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }

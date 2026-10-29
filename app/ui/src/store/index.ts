@@ -44,6 +44,8 @@ interface State {
   steam: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } | null;
   qrOpen: boolean; qrPng: string | null;
   unsub: { done: number; total: number; currentId: string; active: boolean } | null;
+  // the background scene-loudness queue's progress (WS scene-loudness-progress; null = idle)
+  sceneLoudness: { done: number; total: number; currentId: string } | null;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
   status: string; error: string | null;
@@ -88,6 +90,7 @@ interface State {
   deleteFromSource(items: LibraryItem[]): Promise<void>; drain(): Promise<void>;
   setQrPng(png: string): void; onSignedIn(s: State["steam"]): void;
   setUnsub(u: State["unsub"]): void;
+  setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
   openCardSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeCardSettings(): void;
   // shared
@@ -132,7 +135,7 @@ export const useStore = create<State>((set, get) => ({
   browseFilter: { ...DEFAULT_FILTER, ...LS.get<Partial<WorkshopFilter>>("browseFilter", {}) }, browseSort: LS.get("browseSort", 0),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
-  steam: null, qrOpen: false, qrPng: null, unsub: null,
+  steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
   themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
   cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null, appActive: true,
 
@@ -350,6 +353,7 @@ export const useStore = create<State>((set, get) => ({
   setQrPng(png) { set({ qrPng: png }); },
   onSignedIn(s) { set({ steam: s, qrOpen: false, qrPng: null }); get().setStatus("Signed in to Steam"); },
   setUnsub(u) { set({ unsub: u }); },
+  setSceneLoudness(p) { set({ sceneLoudness: p }); },
 
   openExternal(body) { api.open(body).catch(() => {}); },
 
