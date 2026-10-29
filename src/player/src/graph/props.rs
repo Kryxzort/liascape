@@ -482,10 +482,28 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
 /// `kind` at all (callers turn that into `no_such_prop`) — this never resolves `gain.<slot>`
 /// paths, which aren't static schema entries (see [`validate_value`]).
 pub fn schema_for(kind: NodeKind, name: &str) -> Option<PropDef> {
-    schema_for_kind(kind)
-        .into_iter()
+    schema_table(kind)
+        .iter()
         .find(|(n, _)| *n == name)
-        .map(|(_, d)| d)
+        .map(|(_, d)| d.clone())
+}
+
+/// [`schema_for_kind`], built once per kind (F6b: every property write is validated through
+/// [`schema_for`] — a scene's mirror and each gain push included, several per worker frame —
+/// and rebuilding the whole table, defaults and all, for each lookup was a measurable share
+/// of the loop mid-transition).
+fn schema_table(kind: NodeKind) -> &'static [(&'static str, PropDef)] {
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<(&'static str, PropDef)>>; 6] = [const { OnceLock::new() }; 6];
+    let i = match kind {
+        NodeKind::Player => 0,
+        NodeKind::Output => 1,
+        NodeKind::Layer => 2,
+        NodeKind::Source => 3,
+        NodeKind::Effect => 4,
+        NodeKind::Program => 5,
+    };
+    TABLES[i].get_or_init(|| schema_for_kind(kind))
 }
 
 /// The single gate both `Graph::set` (value already typed) and `Graph::create` (value typed

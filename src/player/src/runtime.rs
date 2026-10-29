@@ -1212,16 +1212,7 @@ impl Runtime {
     /// clock and would disagree with the bus meter's real-time samples.
     fn record_gain_history(&mut self) {
         let t = log::mono_now().unwrap_or_default();
-        let readings: Vec<(String, f64)> = self
-            .graph
-            .ids_of(NodeKind::Source)
-            .into_iter()
-            .filter_map(|id| {
-                let db = self.graph.effective_gain_db(&id)?;
-                Some((id, db))
-            })
-            .collect();
-        self.gain_history.record(t, readings.into_iter());
+        self.gain_history.record(t, self.graph.source_gains_db());
     }
 
     /// The second half of a tick: update sources, run the recipes on every source event
