@@ -297,6 +297,13 @@ pub struct SourceHost {
     resuming: BTreeMap<String, Resuming>,
     /// Where each reopened source starts (its `position` for the open only).
     resume_at: BTreeMap<String, f64>,
+    /// F6b: each scene's last [`demand_for`], valid while the graph's
+    /// [`Graph::demand_rev`] is the key — `sync` runs after every dispatch (each worker
+    /// frame is one), and recomputing `outputs_of` there for every scene cost the
+    /// compositor ~1 % of a core per worker mid-transition.
+    demand_cache: ((u64, u64), BTreeMap<String, Vec<OutputDemand>>),
+    /// How many times `sync` recomputed a scene's demand (the `sources` probe; tests).
+    pub(crate) demand_computes: u64,
 }
 
 impl SourceHost {
@@ -320,6 +327,8 @@ impl SourceHost {
             suspend_new: false,
             resuming: BTreeMap::new(),
             resume_at: BTreeMap::new(),
+            demand_cache: ((0, 0), BTreeMap::new()),
+            demand_computes: 0,
         }
     }
 
@@ -845,9 +854,22 @@ impl SourceHost {
         // refresh, `scene_fps`). The first one naming an output spawns its worker (here, on
         // the loop thread: the worker's PDEATHSIG follows the spawning thread); a change of
         // the largest output re-exports its ring; no output (parked) changes nothing.
+        // F6b: the demand is recomputed only when the graph's routing moved
+        // (`Graph::demand_rev`); `set_demand` itself still runs every sync (it also applies
+        // a budget rate change and spawns a worker a path change or a restart left without).
+        let rev = graph.demand_rev();
+        if self.demand_cache.0 != rev {
+            self.demand_cache = (rev, BTreeMap::new());
+        }
+        let cache = &mut self.demand_cache.1;
+        cache.retain(|id, _| self.sources.contains_key(id));
         for (id, h) in &mut self.sources {
             if let Some(s) = h.src.as_scene_mut() {
-                s.set_demand(&demand_for(graph, id));
+                let d = cache.entry(id.clone()).or_insert_with(|| {
+                    self.demand_computes += 1;
+                    demand_for(graph, id)
+                });
+                s.set_demand(d);
             }
         }
     }
@@ -1112,7 +1134,7 @@ impl SourceHost {
                     if h.mirrored[i].as_ref() == Some(&v) {
                         continue;
                     }
-                    let _ = graph.set_observed(&PropPath(format!("{id}.{prop}")), v.clone());
+                    let _ = graph.set_observed_on(id, prop, v.clone());
                     h.mirrored[i] = Some(v);
                 }
             }

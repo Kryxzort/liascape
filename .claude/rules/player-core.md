@@ -1367,7 +1367,8 @@ cleared whenever a change is forwarded to that source (`sync`'s applies, `force_
 recompute), so a `set` the source refuses is still mirrored back. A scene updates every frame, and
 nine `format!` + path-resolve + `set_observed`s per update were the largest share of the
 compositor's CPU per scene worker (perf, on-machine); measured two synthetic workers at 240 + 144
-fps, headless: process 19.2 / 19.6 % → 15.4 / 15.0 %. `events()` drains `(node id, event)`; `texture(id)`
+fps, headless: process 19.2 / 19.6 % → 15.4 / 15.0 %. The mirror writes through
+`Graph::set_observed_on(id, prop, v)` (exact id: no path `format!`/split/resolve — F6b). `events()` drains `(node id, event)`; `texture(id)`
 is the compositor's closure; `wake_fds()` (mpv sources) is what the runtime polls; `get`/
 `ids` for probes/tests.
 
@@ -3315,7 +3316,18 @@ hard-coded `kind == "video"` learned about `scene`.
   `scene_*`/`allow_synthetic` keys — the base opts reach every mpv source too; without that
   every video failed `no_such_prop`). **Every `sync` ends with each scene's
   demand** (`host::demand_for(graph, id)` → `[OutputDemand {name, width, height, refresh_hz,
-  scene_fps}]` from `outputs_of`): **the worker is spawned at the first demand that names an
+  scene_fps}]` from `outputs_of`) — **cached per `Graph::demand_rev`** (F6b, Phase 2 battery):
+  `sync` runs after every dispatch, i.e. once per worker frame, and recomputing `outputs_of`
+  (every output × every layer, `format!`s, `BTreeSet`s) for every scene there was the top of the
+  compositor's profile mid-transition (main thread: `SourceHost::sync` 17.7 % of samples, 4
+  synthetic workers mid-fade, headless 144 + 240 Hz). `demand_rev` (with a per-graph uid) moves on
+  `create`/`destroy`, a layer's `output`/`content`, an effect's `from`/`to`, a source's `kind`, an
+  output's `width`/`height`/`refresh_hz`/`scene_fps` (set or observed, only when the value
+  differs), and a *changed* `set_transition_sources`/`set_parked` — never on what animates
+  (`fx.progress`, `opacity`, `gain.*`) or a source observes; unit
+  `demand_rev_moves_on_routing_changes_only`. `set_demand` itself still runs every sync with the
+  cached value (it also applies a budget rate change and spawns a worker a restart / path change
+  left without). `SourceHost::demand_computes` counts recomputes. **The worker is spawned at the first demand that names an
   output** (so the ring is exported at the right size from the start; a node created but not
   shown has no worker); `max_size` = the largest width and height over the outputs (the cover
   size covers each), tick rate = max `eff_fps(scene_fps, refresh)` (`scene_fps` capped at the

@@ -427,7 +427,7 @@ loop (tick max 4–6 ms); (b) the plan's "3.7 ms at 144 fps, no throttle" isn't 
 (1140 of 2100 MHz) with another process on it — re-measure on a quiet machine. Real scenes' `gpu_ms_p50` is 0.95 ms
 median (corpus), so this bites only very heavy scenes.
 
-### F6 — compositor CPU per worker 2.9–3.45 % vs 0.6 % (FIXED for the steady state, `d7d412b` "Mirror Only Changed Source Values Into The Graph"; mid-transition OPEN)
+### F6 — compositor CPU per worker 2.9–3.45 % vs 0.6 % (FIXED for the steady state, `d7d412b` "Mirror Only Changed Source Values Into The Graph"; mid-transition root cause fixed 2026-10-29, bound to re-check on-machine)
 
 § 5. `perf` of the compositor with two synthetic workers (headless, 240 + 144 fps): the cost is not the dmabuf
 transport but **graph bookkeeping** — `SourceHost::update` mirrored all nine observed props of every source into the
@@ -441,6 +441,29 @@ graph after every update (a scene updates every frame), each a `format!` + path 
 profile): open, TODO F6b. Regression suites: lib 223, `sources` 32, `transition` 31, `scene` 29 (`four_workers_…`
 failed once at load 12 — its documented load sensitivity — and passed alone), api subset (pause / scene / broken /
 restore / snapshot / stepped) 48 — all pass.
+
+**F6b (mid-transition) — root cause FIXED 2026-10-29 ("Cache Each Scene's Demand Per Routing Change"), the 0.6 % bound
+to be re-judged on the real outputs.** DWARF `perf` of the compositor's main thread (headless 144 + 240 Hz, 4 synthetic
+workers mid-fade, 4 s): `SourceHost::sync` **17.7 %** of samples, nearly all `demand_for` → `Graph::outputs_of`
+(every output × every layer, `srcs_for_connector`'s `format!`s and `BTreeSet`s) — `sync` runs after every dispatch,
+i.e. once per worker frame, and recomputed every scene's demand each time: per-worker cost grew with the number of
+workers, which is why mid-fade (4) cost more per worker than steady (2). Fix: the demand is cached per
+`Graph::demand_rev` (moves only on routing changes — unit `demand_rev_moves_on_routing_changes_only`); plus the
+source mirror writes through `set_observed_on` (exact id). After: `SourceHost::sync` 2.4 %, main-thread samples per
+4 s 1663 → 863. `scenes.sh transport` (new: step 5's two transport measurements on headless outputs, with
+`perf stat` user instructions — far steadier than CPU time here), excess over the decode-free baseline:
+
+| build | 2 workers steady: Ginsn/s / CPU % | 4 workers mid-fade: Ginsn/s / CPU % (per worker) |
+|---|---|---|
+| before (`c5dfcdb`), 4 rounds | 0.17–0.21 / 3.4–22.6 (noise) | **0.75–1.03** / 7.4–13.6 (**1.9–3.4 %**) |
+| demand cache, 6 rounds | 0.06–0.11 / −1.6–8 | **0.29–0.41** / 4.4–11.2 (1.1–2.8 %) |
+| + `set_observed_on`, 2 rounds | 0.06–0.11 / 2.0–2.2 | 0.29–0.35 / 3.6–6.0 (**0.9–1.5 %**) |
+
+Headless CPU per worker is ±1 % between rounds on this shared machine; the instruction counts are the A/B. What is
+left mid-fade is per-frame transport (`SceneSource::update`: latch + fences, ~9 % of the main thread) and the
+transition's 1 kHz gain timer (~5 %; skipping it for sources with no audio was tried — no measurable change,
+reverted). The plan's bound is the on-machine step-5 number (Wayland, 0.1 % steady); not re-run here (owner's
+outputs) — § 10 "On-machine checks for the owner".
 
 ### F7 — one 3 ms micro-gap at a frozen S→S handoff, 240 Hz (OPEN)
 

@@ -5,9 +5,11 @@
 #
 #   bash src/player/tests/onmachine/scenes.sh outputs        # step 1: pixels, pacing, CPU, pointer, visualiser
 #   bash src/player/tests/onmachine/scenes.sh dropout        # step 2: V/S switch matrix, dropout detector (headless)
+#   bash src/player/tests/onmachine/scenes.sh onsetrec       # F7: frozen S→S onsets, detector vs an independent pw-record
 #   bash src/player/tests/onmachine/scenes.sh crash          # step 3: crash isolation (DP-1 video, DP-2 scene)
 #   bash src/player/tests/onmachine/scenes.sh budget         # step 4: GPU budget under a heavy worker
 #   bash src/player/tests/onmachine/scenes.sh workers        # step 5: several workers, S→S on both outputs
+#   bash src/player/tests/onmachine/scenes.sh transport      # step 5's CPU part on headless 144/240 Hz outputs (A/B builds)
 #   bash src/player/tests/onmachine/scenes.sh pause          # step 6: pause on a scripted scene
 #   bash src/player/tests/onmachine/scenes.sh soak [--minutes N]   # step 7: mixed-playlist soak
 #   bash src/player/tests/onmachine/scenes.sh all            # 1–7 in order
@@ -57,7 +59,7 @@ SWITCHES=20
 SOAK_MIN=60
 while (($#)); do
     case $1 in
-        outputs|dropout|crash|budget|workers|pause|soak|explore) STEPS+=("$1") ;;
+        outputs|dropout|onsetrec|crash|budget|workers|transport|pause|soak|explore) STEPS+=("$1") ;;
         all) STEPS+=(outputs dropout crash budget workers pause soak) ;;
         --results) RESULTS=$2; shift ;;
         --bin) BINDIR=$2; shift ;;
@@ -378,5 +380,5 @@ events_since() { # <t_mono_ms> <kind prefix> → JSON array of events
 for s in "${STEPS[@]}"; do
     "step_$s"
 done
-jq -s '{steps: ., pass: ([.[].pass] | all)}' "$RESULTS"/{outputs,dropout,crash,budget,workers,pause,soak}.json 2>/dev/null >"$RESULTS/summary.json"
+jq -s '{steps: ., pass: ([.[].pass] | all)}' "$RESULTS"/{outputs,dropout,crash,budget,workers,transport,pause,soak}.json 2>/dev/null >"$RESULTS/summary.json"
 say "summary: $(jq -c '[.steps[] | {step, pass}]' "$RESULTS/summary.json")"
