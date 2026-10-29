@@ -712,6 +712,13 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 - Own streams are excluded **by ownership**: nodes the player created, nodes of its scene workers' pids, and anything targeting `liascape-player-bus`. Never by name.
 - A Signal `audio.foreign_level` feeds a rule that moves `gain.automute` on every source. A new source gets the current value at create, so a B comes up muted.
 - MPRIS-only: a `lia-mpris` thread reads `org.mpris.MediaPlayer2.*` `PlaybackStatus` over the session bus (zbus, blocking, off the loop). With no session bus it reports `unavailable` instead of passing.
+- **MPRIS-only hears only the MPRIS player's own audio** (owner, 2026-10-29: today it mutes on *any* sound while some player reports Playing — a muted song + a notification still mutes). `lia-mpris` resolves each Playing player's bus name → pid (`org.freedesktop.DBus.GetConnectionUnixProcessID`) and keeps its `DesktopEntry` / `Identity`; a foreign stream counts only when it **belongs** to a Playing player:
+  - its `application.process.id` is that pid or a descendant of it (`/proc/<pid>/stat` ppid walk — a browser's audio comes from a child process of the one that owns the MPRIS name);
+  - else its `pipewire.access.portal.app_id` / Flatpak app id matches the player's `DesktopEntry` (sandboxed pids don't match the host's);
+  - else `application.process.binary` / `application.name` matches `DesktopEntry` / `Identity` (case-insensitive) — the fallback for pids that don't line up (pipewire-pulse clients through a wrapper).
+  - A muted stream or one at volume 0 (its node `Props` `mute` / `channelVolumes`) is silent; the meter reads post-volume, so a song turned down below the threshold doesn't mute either.
+  - Several streams of one browser: any of them audible while its player is Playing counts (a tab's stream can't be told from another tab's reliably; `media.name` ≈ the MPRIS `xesam:title` is used only to rank the probe's report, never to drop a stream).
+  - A Playing player with no stream matched → it doesn't mute, and the probe says `mpris.unmatched:<identity>` so a mismatch is visible, not a silent no-op.
 
 **Files:**
 - Create: `src/player/src/signal/automute.rs`, `src/player/src/audio/foreign.rs`
@@ -723,6 +730,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 
 **Parity criteria** — each measured side by side against today's `AudioMonitor` in the same private PipeWire + pipewire-pulse harness, then on the owner's machine:
 1. **Every setting behaves the same**, live: AutoMute on/off, mute delay, unmute delay, the minimum level (threshold), "Only if MPRIS player active". Today's IT § "auto-mute" checks and the matrix `autoMute*` cells pass unchanged with the Signal as the engine.
+   - Intended difference #2 (owner, 2026-10-29): with "Only if MPRIS player active", only the Playing player's own streams count — a muted song + another app's sound → no mute; the song audible → mute. Measured with a browser tab (child-process audio), `mpv --input-ipc…` with `mpv-mpris`, and a Flatpak player if installed.
 2. **The exclusions:** there is no user-editable ignore list today; the built-in exclusions are its own streams and LWE's.
    - It never hears the player's own audio: V→V/V→S/S→V/S→S × full-live/reveal/frozen → 0 mutes (today's "auto-mute never hears our own switches" section).
    - An `mpv` the user runs **is** heard (today's `application.name = "mpv"` filter ignores it — the spec calls that a bug). This is the one intended difference — **confirmed by the owner 2026-10-29** ("new behaviour ofc, current is just a flaw").
@@ -737,6 +745,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 
 - [ ] **Step 1: Write failing tests:**
   - unit `foreign_streams_are_classified_by_ownership` (synthetic node props: own pid, a worker pid, the bus target → own; a `paplay`, an `mpv` → foreign).
+  - unit `mpris_streams_match_by_pid_tree_then_app_id_then_name` (child pid of the player → match; Flatpak app id = `DesktopEntry` → match; unrelated `paplay` → no match; a matched stream muted / volume 0 → silent).
   - api (private PipeWire, `tests/common/pw.rs`): `automute_mutes_on_a_foreign_stream`, `automute_ignores_own_switches_every_combo`, `automute_delays_and_threshold`, `automute_new_source_comes_up_muted`, `automute_survives_a_crash_restart`, `automute_spawns_no_processes`.
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** The crate suite in both modes PASS; the adapter IT § auto-mute PASS on both engines; `measure-automute-latency.py --engine both` → criterion 3/4 numbers.
 - [ ] **Step 5 (on-machine):** criteria 1–10 on the owner's session (a real browser video, a real `mpv`, Spotify via MPRIS if installed). Write them as a section of `docs/player/reports/phase3.md`.
