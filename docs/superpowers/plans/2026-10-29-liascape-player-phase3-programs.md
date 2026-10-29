@@ -725,7 +725,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 1. **Every setting behaves the same**, live: AutoMute on/off, mute delay, unmute delay, the minimum level (threshold), "Only if MPRIS player active". Today's IT § "auto-mute" checks and the matrix `autoMute*` cells pass unchanged with the Signal as the engine.
 2. **The exclusions:** there is no user-editable ignore list today; the built-in exclusions are its own streams and LWE's.
    - It never hears the player's own audio: V→V/V→S/S→V/S→S × full-live/reveal/frozen → 0 mutes (today's "auto-mute never hears our own switches" section).
-   - An `mpv` the user runs **is** heard (today's `application.name = "mpv"` filter ignores it — the spec calls that a bug). This is the one intended difference; the report names it, and the owner can veto it before the flag flips.
+   - An `mpv` the user runs **is** heard (today's `application.name = "mpv"` filter ignores it — the spec calls that a bug). This is the one intended difference — **confirmed by the owner 2026-10-29** ("new behaviour ofc, current is just a flaw").
 3. **Mute latency at least as good:** first audible foreign sample → every source at −96 dB, with delay 0. p50 and p95 over 30 trials ≤ today's (65–76 ms measured), target ≤ 100 ms.
 4. **Unmute timing at least as accurate:** silence → unmute at the configured delay ± 20 ms (± today's measured error, whichever is larger).
 5. **Works with the app closed** (no backend process) and across a player crash restart (the settings are in the snapshot's player props).
