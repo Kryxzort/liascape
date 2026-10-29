@@ -861,7 +861,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world (both still build the
       pre-rewrite Avalonia app).
-- [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625, #631, #694 …;
+- [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
       `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 92 ok, 1 static
@@ -869,6 +869,44 @@ Two bug classes kept recurring; fix the class, not the instance:
       `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
+  - [ ] **WE ↔ LWE gap audit → porting batches** (2026-10-29,
+        `docs/player/spikes/we-lwe-gap-audit.md`). It has 185 rows: what WE 2.8.485 scenes do (decompiled, or from
+        assets/docs) that the fork doesn't, each with the number of the owner's 96 scenes that use it. Port it in
+        the batches below, highest usage × impact first. After each batch, rerun the corpus and the batch's own
+        smoke/capture check. The WE captures the owner can take on Windows are listed in the doc's "Needs the
+        owner".
+    - [ ] **B1 Property scripts run.** quickjs-ng module namespace, not the Promise. Skip undefined returns,
+          `init`, `thisLayer` per call. Load WE's `baseclasses.js` + jsmodules (S1–S7, S9, S33–S35, S38). 40 scenes,
+          25 visibly broken today. M.
+    - [ ] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
+          `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M.
+    - [ ] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
+          meaning, HSV `colorn`, sprite-sheet blend, live overrides (P1–P8, P13, P14, P18, P19, P38). 61 scenes. M.
+    - [ ] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
+          NixOS today), drawn as an image so effects/parent/rotation/parallax apply (T1–T8, E34, G13, G30). 45
+          scenes. L.
+    - [ ] **B5 Parallax + camera.** Delay smoothing (read as a bool today → 14 of 25 frozen), a centred target,
+          `g_ParallaxPosition`, the effect projection matrix, `general.zoom`/fov, camera objects, then shake (G10–G19,
+          E1, E6). 25 + 8 scenes. M.
+    - [ ] **B6 Hierarchy.** A hidden parent hides its children; particle/text parent transforms (G03, G04, P36,
+          G31). 12 + 19 scenes. S.
+    - [ ] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
+          loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
+    - [ ] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
+          `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
+    - [ ] **B9 Small uniform/property/shader fixes.** `g_Frametime`, `g_PointerState`, `g_Daytime` (0 scenes read it),
+          time wrap, annotation defaults, the foliagesway varying, live bloom, textinput quotes, usertextures (E4,
+          E5, E9, E11, E17–E20, E36–E41, C1, C3, U1, U2, S18). ≤ 10 scenes each. S.
+    - [ ] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
+          ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
+          (S8, S10–S37). 1–28 scenes each. M–L; needs B1.
+    - [ ] **B11 Particles, extended.** Child systems, the missing initializers/operators, control points, rope/trail
+          combos (P2, P10, P15, P22–P35). 29 scenes. L; first read the operator interpreter from asm.
+    - [ ] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
+          unmerged). 14 scenes. L.
+    - [ ] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M.
+    - [ ] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
+          E14, E43). The 3 load_failed scenes below. L.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
@@ -886,6 +924,7 @@ Two bug classes kept recurring; fix the class, not the instance:
   - [ ] **LWE: 3D / perspective scenes** — `Projection must have a width. Contents: null`: `general.
         orthogonalprojection` null + a perspective `camera {eye, center, up}`; next-v2 parses only 2D scenes.
         Corpus: 3276522107, 3477054430, 3509243656. Likely the biggest item (upstream may have work in flight).
+        Gap audit B14 / G24 gives what each one needs (3276522107 has no meshes, so it is the cheapest).
   - [x] **LWE: case-insensitive asset lookup** (2026-10-28, fork patch 0016) — no exact match on any mountpoint →
         a case-insensitive one (pkg entries, a directory walked per component), logged `Found X as Y (case
         differs)`. Corpus: 3354740764 (load_failed → ok). Still open: log *which* file wasn't found on a real miss.
@@ -893,10 +932,11 @@ Two bug classes kept recurring; fix the class, not the instance:
         left out (`Leaving out effect …`), the image renders. Corpus: 2189783622 (blank → ok); the same drops
         happened (unnoticed — other layers drew) in 3233141951, 3326873240, 3354740764. A passthrough/fullscreen
         layer (pure post-processing) still goes whole: rendering part of its chain blacked out 3432999904.
-  - [ ] **LWE: the packaged godrays shader itself** — 2189783622 now renders without its godrays effect: the old
-        `godrays` fragment shipped in its scene.pkg uses `v_Bounds`, which its vertex stage never declares
-        (`'v_Bounds' : undeclared identifier`, `missing #endif`) — needs a look at how WE resolves that shader
-        (probably a newer stock godrays from `assets/` that LWE should prefer, or a compat rewrite).
+  - [ ] **LWE: the packaged shader that drops an effect in 2189783622** — it is **foliagesway**, not godrays
+        (gap audit E19): its fragment reads `v_Bounds`, which only the vertex unit declares (under `MODE == 0`)
+        (`'v_Bounds' : undeclared identifier`, `missing #endif`). WE compiles it, so it probably builds the
+        fragment's inputs from the vertex unit's varyings. Fix: add the missing varying declarations to the fragment.
+        This is batch B9 of the gap audit above.
   - [x] **`ctl capture` still encodes on the loop** (2026-10-28, player-core.md § GFX / EGL "`capture` never
         stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lia-capture` maps → encodes → writes, the
         reply is deferred until written (like `step`'s). Loop max busy around a 3840×1080 capture 810 ms (debug)
