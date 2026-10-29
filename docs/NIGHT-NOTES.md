@@ -84,3 +84,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - LWE scene port, one batch at a time (they all patch the same fork branch): B1 property scripts (running), then B2 alpha/colour + keyframes, B3 particle core, B4 text, … per `docs/player/spikes/we-lwe-gap-audit.md`.
 - F6b (compositor CPU per worker mid-transition, 2.45 % vs 0.6 % on-machine) — agent running.
 - ≤ 2 big agents at once; model/effort chosen per agent.
+- **Change of plan (owner, later that evening): "defer port for later, lets focus on the bigger picture".** The LWE
+  port is PARKED: batch B1 (property scripts) was stopped just before its smoke renders; its work is uncommitted
+  in `~/.cache/liascape/src/lwe-dev` (+ any `patches/lwe/` / PIN / audit-doc edits in the repo). Resume it later
+  from there. Instead: **Phase 3 implementation started** — Tasks 1–3 (pure rotation rules, the `program` node,
+  the rotation engine), one agent, Opus high. F6b agent still running.
