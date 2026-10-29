@@ -50,6 +50,7 @@ use crate::log::{self, CorrId, Level};
 use crate::onset::{self, ONSET_TIMEOUT, Onsets, PendingOnset};
 use crate::probe::dropout::{self, GainHistory, PendingWindows};
 use crate::probe::frames::FrameStats;
+use crate::recipes::program::{ProgramAction, Programs};
 use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL};
 use crate::recipes::{TransitionEventKind, Transitions};
 use crate::redraw::{self, Redraw};
@@ -421,6 +422,11 @@ pub struct Runtime {
     clock: ClockKind,
     pub(crate) host: SourceHost,
     pub(crate) tr: Transitions,
+    /// Phase 3: the rotations (`recipes::program`), ticked after `Transitions::tick`.
+    pub(crate) programs: Programs,
+    /// Transition events drained outside the tick (the `transition`/`cancel` verbs, an
+    /// output removed): the programs see them with the next tick's.
+    tr_backlog: Vec<crate::recipes::TransitionEvent>,
     pub(crate) backend: Box<dyn OutputBackend>,
     pub(crate) server: Server,
     pub(crate) tap: Arc<EventTap>,
@@ -1230,8 +1236,10 @@ impl Runtime {
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
         // Already in the event log → subscribers via the tap; the dropout probe (Task 15,
         // R71) also watches for Started/Done here to track each transition's audio window.
-        let tr_events = self.tr.drain_events();
+        let mut tr_events = std::mem::take(&mut self.tr_backlog);
+        tr_events.extend(self.tr.drain_events());
         self.record_dropout_windows(&tr_events);
+        self.tick_programs(&tr_events, &evs, now);
         self.refresh_srcs();
         // R88 (Task 16c): resolve any `AwaitingFlow` gate against this tick's events —
         // the other half runs earlier, from `sync_sources` (see its doc).
@@ -1304,6 +1312,83 @@ impl Runtime {
                 log::event("runtime", Level::Info, "anim.done", Some(c), json!({}));
             }
         }
+    }
+
+    /// Drain the transition outbox outside the tick (already logged → subscribers via the
+    /// tap); the programs get these events with the next tick's.
+    pub(crate) fn stash_tr_events(&mut self) {
+        let evs = self.tr.drain_events();
+        self.tr_backlog.extend(evs);
+    }
+
+    /// Phase 3: the programs' tick (R47 order: after `Transitions::tick`, before
+    /// `refresh_srcs`) and the switches it asks for.
+    fn tick_programs(
+        &mut self,
+        tr_events: &[crate::recipes::TransitionEvent],
+        src_events: &[(String, SourceEvent)],
+        now: Duration,
+    ) {
+        if self.programs.is_empty() {
+            return;
+        }
+        let parked = self.graph.ids_of(NodeKind::Output).is_empty();
+        let cat = &self.cat;
+        let acts = self.programs.tick(
+            &mut self.graph,
+            tr_events,
+            src_events,
+            now,
+            parked,
+            &|id| cat.defaults(id),
+        );
+        self.run_program_actions(acts);
+    }
+
+    /// Run what a program asks for — through the same `Transitions::start` the `transition`
+    /// verb uses (or `transition_parked` with no output). The last switch started: its corr
+    /// and B's path (a verb's reply).
+    pub(crate) fn run_program_actions(
+        &mut self,
+        acts: Vec<ProgramAction>,
+    ) -> Option<(CorrId, String)> {
+        if acts.is_empty() {
+            return None;
+        }
+        let mut last = None;
+        for a in acts {
+            match a {
+                ProgramAction::Start { id, req, step, reason } => {
+                    let path = step.path.clone();
+                    let parked = req.outputs.starts_with("out:")
+                        && self.graph.ids_of(NodeKind::Output).is_empty();
+                    let res = if parked {
+                        self.transition_parked(req).map(|(c, _)| c)
+                    } else {
+                        let now = self.now();
+                        self.tr.start(req, &mut self.graph, &mut self.anim, now)
+                    };
+                    match res {
+                        Ok(corr) => {
+                            let now = self.now();
+                            self.programs.on_requested(&id, corr.clone(), step, reason, parked, now);
+                            last = Some((corr, path));
+                        }
+                        Err(e) => {
+                            let now = self.now();
+                            self.programs.on_request_failed(&id, step, reason, &e, now);
+                        }
+                    }
+                }
+                ProgramAction::Cancel { corr } => {
+                    let now = self.now();
+                    let _ = self.tr.cancel(&corr, &mut self.graph, &mut self.anim, now);
+                }
+            }
+        }
+        self.stash_tr_events();
+        self.refresh_srcs();
+        last
     }
 
     /// Task 15 (R70/R71): track each transition's audio window from its own
@@ -2484,7 +2569,7 @@ impl Runtime {
         let committed = self
             .tr
             .drop_output(&id, &mut self.graph, &mut self.anim, now);
-        self.tr.drain_events();
+        self.stash_tr_events();
         self.refresh_srcs();
         log::event(
             "output",
@@ -2898,7 +2983,7 @@ impl Runtime {
             Some(corr.clone()),
             json!({ "at_ms": at_ms, "outputs": [], "to": b, "path": path, "method": req.method,
                     "align": req.align, "effect_id": req.effect_id,
-                    "duration_ms": req.duration_ms, "parked": true }),
+                    "duration_ms": req.duration_ms, "parked": true, "origin": req.origin }),
         );
         let old = self.parked.take().map(|pk| pk.id);
         // Phase 2 Task 9: a parked A that never ends (a scene, a still) has no end to wait
@@ -4209,6 +4294,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         clock,
         host: SourceHost::new(base),
         tr: Transitions::new(),
+        programs: Programs::new(),
+        tr_backlog: Vec::new(),
         backend,
         server: Server::default(),
         tap,

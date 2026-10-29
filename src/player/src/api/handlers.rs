@@ -1,5 +1,5 @@
 //! The verbs (spec §4.2 "Command API"): generic graph verbs (`create`/`destroy`/`set`/
-//! `get`/`animate`), thin recipe verbs (`transition`/`cancel`), queries (`state`/`logs`/
+//! `get`/`animate`), thin recipe verbs (`transition`/`cancel`, `program.*`), queries (`state`/`logs`/
 //! `probe`/`effects`/`hello`), `capture`, lifecycle (`stop`/`quit`), and the headless-only
 //! `step` + `headless.*`. Each verb is documented, with a `ctl` example, in
 //! `.claude/rules/player-core.md` § Command API — keep [`VERBS`] and that table in step.
@@ -45,6 +45,26 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
         "A→B transition recipe {…TransitionReq} → {corr, to}",
     ),
     ("cancel", cancel, "cancel an in-flight transition {corr}"),
+    (
+        "program.play",
+        program_play,
+        "a program plays item {id, index?: 0, keep_pause?} → {corr, path, index}",
+    ),
+    (
+        "program.next",
+        program_next,
+        "a program's next item {id, keep_pause?} → {corr, path} (null = nothing to do)",
+    ),
+    (
+        "program.prev",
+        program_prev,
+        "a program's previous item (its history) {id, keep_pause?} → {corr, path}",
+    ),
+    (
+        "program.random",
+        program_random,
+        "a program's random item {id, keep_pause?} → {corr, path}",
+    ),
     (
         "state",
         state,
@@ -133,7 +153,7 @@ fn hint(s: &str) -> String {
 // ---------------------------------------------------------------- queries
 
 fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
-    let mut caps = vec!["video", "image", "color", "transition"];
+    let mut caps = vec!["video", "image", "color", "transition", "program"];
     // Phase 2: scenes play when the worker binary resolves (Task 5) and WE's assets dir does
     // (Task 7 — `player.scene_assets_resolved`), unless synthetic scenes are allowed.
     if rt.scenes_available().is_ok() {
@@ -183,6 +203,8 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     Ok(json!({
         "graph": rt.graph.snapshot(),
         "transitions": rt.tr.status(),
+        // Phase 3: every program (`recipes::program`)
+        "programs": rt.programs.status(),
         "clock": {"mode": rt.clock_name(), "now_ms": rt.now().as_secs_f64() * 1000.0},
         "outputs": outputs,
         "backend": rt.backend.kind(),
@@ -256,6 +278,7 @@ fn parse_kind(k: &str) -> Result<NodeKind, ApiError> {
         "source" => Ok(NodeKind::Source),
         "layer" => Ok(NodeKind::Layer),
         "effect" => Ok(NodeKind::Effect),
+        "program" => Ok(NodeKind::Program),
         "output" => Err(proto::unsupported(
             "outputs come from the compositor (Wayland) or headless.add_output".into(),
             "headless: `liascape-player ctl headless.add_output '{\"name\":\"VIRTUAL-3\",\"width\":\
@@ -266,7 +289,7 @@ fn parse_kind(k: &str) -> Result<NodeKind, ApiError> {
             "set its properties instead (`player.debug`)",
         )),
         other => Err(bad_request(format!(
-            "kind {other:?}: expected source|layer|effect"
+            "kind {other:?}: expected source|layer|effect|program"
         ))),
     }
 }
@@ -274,7 +297,7 @@ fn parse_kind(k: &str) -> Result<NodeKind, ApiError> {
 fn create(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let kind = parse_kind(arg_str(args, "kind")?)?;
     let id = opt_str(args, "id")?.map(str::to_string);
-    let props = match args.get("props") {
+    let mut props = match args.get("props") {
         None | Some(Value::Null) => Map::new(),
         Some(Value::Object(m)) => m.clone(),
         Some(other) => {
@@ -295,7 +318,19 @@ fn create(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     {
         check_effect(rt, eid)?;
     }
+    if kind == NodeKind::Program && !props.contains_key("seed") {
+        // a program's default seed: the wall clock at create (tests pin it)
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as i64)
+            .unwrap_or(1);
+        props.insert("seed".into(), json!(nanos));
+    }
     let id = rt.graph.create(kind, id, props)?;
+    if kind == NodeKind::Program {
+        let acts = rt.programs.configure(&id, &mut rt.graph);
+        rt.run_program_actions(acts);
+    }
     Ok(json!({ "id": id }))
 }
 
@@ -331,6 +366,11 @@ fn destroy(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     }
     if rt.graph.kind_of(id).is_none() {
         rt.graph.destroy(id)?; // the graph's own no_such_node
+    }
+    if rt.graph.kind_of(id) == Some(NodeKind::Program) {
+        // the rotation stops; what plays stays on screen
+        let acts = rt.programs.destroy(id);
+        rt.run_program_actions(acts);
     }
     // A source is ramped out first if it can be heard (core invariant); `ramp_ms` says
     // how long until it's gone (0 = gone now).
@@ -378,6 +418,13 @@ fn set(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         return Ok(json!({ "targets": [] }));
     }
     let targets = rt.graph.set_json(&PropPath(path.to_string()), value)?;
+    // Phase 3: a program's settings are live — the program re-reads its node
+    for t in &targets {
+        if rt.graph.kind_of(t) == Some(NodeKind::Program) {
+            let acts = rt.programs.configure(t, &mut rt.graph);
+            rt.run_program_actions(acts);
+        }
+    }
     Ok(json!({ "targets": targets }))
 }
 
@@ -535,7 +582,7 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
 // ---------------------------------------------------------------- recipes
 
 fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
-    let req: TransitionReq = serde_json::from_value(args.clone()).map_err(|e| {
+    let mut req: TransitionReq = serde_json::from_value(args.clone()).map_err(|e| {
         bad_request(format!(
             "transition args: {e} (fields: outputs, to, effect_id?, params?, duration_ms?, \
              method? full-live|reveal|frozen, align? now|end)"
@@ -544,6 +591,7 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
     if let Some(eid) = &req.effect_id {
         check_effect(rt, &json!(eid))?;
     }
+    req.origin = crate::recipes::transition::ORIGIN_API.to_string();
     // I4 (final review): no output at all (R60 parked) — accepted, B replaces the parked
     // wallpaper (`Runtime::transition_parked`); never refused, so a rotation can't spin.
     if req.outputs.starts_with("out:") && rt.graph.ids_of(NodeKind::Output).is_empty() {
@@ -552,7 +600,7 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
     }
     let now = rt.now();
     let corr = rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)?;
-    rt.tr.drain_events(); // logged → subscribers via the tap
+    rt.stash_tr_events(); // logged → subscribers via the tap; programs see them next tick
     rt.refresh_srcs();
     let to = rt
         .tr
@@ -567,9 +615,52 @@ fn cancel(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let corr = log::CorrId(arg_str(args, "corr")?.to_string());
     let now = rt.now();
     rt.tr.cancel(&corr, &mut rt.graph, &mut rt.anim, now)?;
-    rt.tr.drain_events();
+    rt.stash_tr_events();
     rt.refresh_srcs();
     Ok(json!({}))
+}
+
+// ---------------------------------------------------------------- programs (Phase 3)
+
+fn opt_bool(args: &Value, key: &str) -> Result<bool, ApiError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(other) => Err(bad_request(format!("args.{key} must be a bool, got {other}"))),
+    }
+}
+
+/// `program.<verb> {id, index?, keep_pause?}` — a thin recipe over `transition`: the
+/// program picks the item and the effect, the transition recipe switches.
+fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, ApiError> {
+    let id = arg_str(args, "id")?.to_string();
+    let keep_pause = opt_bool(args, "keep_pause")?;
+    let index = match opt_f64(args, "index")? {
+        Some(i) if i < 0.0 || i.fract() != 0.0 => {
+            return Err(bad_request(format!("args.index {i}: a non-negative integer")));
+        }
+        Some(i) => Some(i as usize),
+        None => None,
+    };
+    let acts = rt.programs.verb(verb, &id, index, keep_pause, &rt.graph)?;
+    let out = rt.run_program_actions(acts);
+    Ok(rt.programs.verb_reply(&id, out))
+}
+
+fn program_play(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    program_verb(rt, "play", args)
+}
+
+fn program_next(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    program_verb(rt, "next", args)
+}
+
+fn program_prev(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    program_verb(rt, "prev", args)
+}
+
+fn program_random(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    program_verb(rt, "random", args)
 }
 
 // ---------------------------------------------------------------- capture

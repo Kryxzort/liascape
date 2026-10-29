@@ -21,11 +21,14 @@
 //!   hold, each scene worker's VRAM against `player.scene_vram_limit_mib`.
 //! - `memory` (`memory.rs`, Task 20b) — RSS + glibc malloc in-use vs retained, arena
 //!   count; `args: {"trim": true}` runs `malloc_trim(0)` and reports the RSS it gave back.
+//! - `programs` (`programs.rs`, Phase 3) — every program: `state.programs` plus each item's
+//!   `skip`/`broken`/`failed` flags.
 
 mod audio;
 pub mod dropout;
 pub mod frames;
 mod memory;
+mod programs;
 mod snapshot;
 mod vram;
 mod workers;
@@ -42,6 +45,12 @@ pub type ProbeFn = fn(&mut Runtime, &Value) -> Result<Value, ApiError>;
 /// Every probe: name, function, one-line description.
 pub const PROBES: &[(&str, ProbeFn, &str)] = &[
     ("list", list, "every probe with a one-line description"),
+    (
+        "programs",
+        programs::programs,
+        "per program (Phase 3): phase, item, next, order, history, clocks, backoff + each \
+         item's skip/broken/failed flags",
+    ),
     (
         "sources",
         sources,

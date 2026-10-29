@@ -246,6 +246,19 @@ impl Catalogue {
         (!self.dir.as_os_str().is_empty()).then_some(self.dir.as_path())
     }
 
+    /// `id`'s uniform defaults as a transition's `params` (`name → [values]`, the manifest's
+    /// `default` arrays — what `TransitionService.Pick` sent); `None` = not in the catalogue.
+    pub fn defaults(&self, id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+        let e = self.effects.iter().find(|e| e.id == id)?;
+        Some(
+            e.uniforms
+                .iter()
+                .filter(|u| !u.default.is_empty())
+                .map(|u| (u.name.clone(), serde_json::json!(u.default)))
+                .collect(),
+        )
+    }
+
     /// Every effect id from `manifest.json`, in manifest order.
     pub fn ids(&self) -> Vec<String> {
         self.effects.iter().map(|e| e.id.clone()).collect()
