@@ -163,7 +163,18 @@ pub fn plan_start(
     match from {
         StartFrom::Index(i) => {
             let i = i.min(items.len().checked_sub(1)?);
-            Some(fresh(Order::new(items.to_vec(), i, shuffle)))
+            if !shuffle {
+                return Some(fresh(Order::new(items.to_vec(), i, false)));
+            }
+            // shuffle (`AppOps.PlayFrom`): the clicked item first, the rest of its cycle shuffled
+            let mut play: Vec<String> = Vec::with_capacity(items.len());
+            play.push(items[i].clone());
+            let mut rest: Vec<String> =
+                items.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, p)| p.clone()).collect();
+            rng.shuffle(&mut rest);
+            play.extend(rest);
+            let first = play[0].clone();
+            Some(fresh(Order::from_parts(play, 0, true, items.to_vec(), vec![first], 0)))
         }
         StartFrom::Start => {
             let avoid = point.map(|p| p.path.as_str());
@@ -279,6 +290,26 @@ mod tests {
         let p = plan_start(&items, &none, true, StartFrom::Start, Some(&pt), &mut Rng::new(3))
             .unwrap();
         assert_ne!(p.order.items(), stored.as_slice(), "a new shuffle");
+    }
+
+    #[test]
+    fn plan_start_index_shuffles_the_rest_of_its_cycle() {
+        let items = v(&["a", "b", "c", "d", "e", "f"]);
+        let p = plan_start(&items, &none, false, StartFrom::Index(2), None, &mut Rng::new(1)).unwrap();
+        assert_eq!(p.order.items(), items.as_slice(), "sequential: the bar order from the item");
+        assert_eq!(p.order.current(), Some("c"));
+        let mut rng = Rng::new(7);
+        let mut moved = false;
+        for _ in 0..50 {
+            let p = plan_start(&items, &none, true, StartFrom::Index(2), None, &mut rng).unwrap();
+            assert_eq!(p.order.current(), Some("c"));
+            assert_eq!(p.order.items()[0], "c");
+            let mut sorted = p.order.items().to_vec();
+            sorted.sort();
+            assert_eq!(sorted, items, "a permutation");
+            moved |= p.order.items()[1..] != ["d", "e", "f", "a", "b"];
+        }
+        assert!(moved, "the rest is shuffled");
     }
 
     #[test]

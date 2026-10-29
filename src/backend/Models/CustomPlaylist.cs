@@ -20,6 +20,9 @@ public class PlaylistSettings
     public bool SeparateSceneTiming { get; set; } = true;
     private int _switchScenesAfterSeconds = 1800;
     public int SwitchScenesAfterSeconds { get => _switchScenesAfterSeconds; set => _switchScenesAfterSeconds = AppSettings.PlayLimit(value); }
+    // "When the playlist starts again" (gated by OverrideGlobalSettings like the rotation): start_over | resume
+    private string _playlistStart = "start_over";
+    public string PlaylistStart { get => _playlistStart; set => _playlistStart = AppSettings.PlaylistStartMode(value); }
 
     // Transitions (gated by OverrideGlobalSettings, like the rotation fields above; else the
     // AppSettings.GlobalTransition* fallbacks apply). TransitionEffectIds = manifest ids the user

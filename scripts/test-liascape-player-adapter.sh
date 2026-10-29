@@ -165,7 +165,7 @@ cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
 # recipe left it; see player-core.md § Graph & properties "Player node paused").
 playerPaused() { ctl get '{"path":"player.paused"}' | jq -r .value; }
 srcPaused() { ctl probe '{"name":"sources"}' | jq -r --arg id "$1" '.sources[] | select(.id==$id) | .effective_paused'; }
-srcIdForPath() { ctl state | jq -r --arg p "$1" '.graph | to_entries[] | select(.value.path==$p) | .key' | head -1; }
+srcIdForPath() { ctl state | jq -r --arg p "$1" '.graph | to_entries[] | select((.key | startswith("src")) and .value.path==$p) | .key' | head -1; }   # a source: a program node has a `path` too
 setting() { curl -sf -m 5 "$U/settings" | jq "$1" > "$T/s.json" && post /settings "$(cat "$T/s.json")" >/dev/null; }
 post_ms() { curl -s -m 10 -o /dev/null -w '%{time_total}' -X POST -H 'Content-Type: application/json' -d "$2" "$U$1" | python3 -c "import sys; print(int(float(sys.stdin.read())*1000))"; }
 
@@ -1298,6 +1298,145 @@ restart_player 10
 setting '.AllowScenes = false'
 mv "$T/removed-ss1" "$LIB/imported/ss1"; mv "$T/removed-ss2" "$LIB/imported/ss2"
 
+echo "== Phase 3 Task 7: a rotation session is the player's program (prog:main) — the backend loads it, edits it live, mirrors it"
+# The rotation runs inside the player (recipes/program/): every switch of a session is `origin: program:prog:main`,
+# the backend sends only the load, the live edits (`set prog:main.<prop>`) and the verbs, and follows `program.current`.
+prog() { ctl get "{\"path\":\"prog:main.$1\"}" 2>/dev/null | jq -c '.value'; }
+prog_is() { [ "$(prog "$1")" = "$2" ]; }
+prog_num() { near "$(prog "$1")" "$2" 0.5; }
+pst() { ctl state | jq -c '.programs[]? | select(.id=="prog:main")'; }
+pplayed() { pst | jq -r '.played_ms // 0'; }
+ncur() { ctl logs '{"kind_prefix":"program.current","limit":10000}' | jq '.events|length'; }
+curs_after() { ctl logs '{"kind_prefix":"program.current","limit":10000}' | jq -c --argjson n "$1" '[.events[$n:][] | {p: (.path | split("/") | .[-1]), r: .reason, resumed}]'; }
+last_cur() { ctl logs '{"kind_prefix":"program.current","limit":10000}' | jq -c '.events[-1] | {p: (.path | split("/") | .[-1]), r: .reason, resumed}'; }
+api_after() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq --argjson n "$1" '[.events[$n:][] | select(.origin != "program:prog:main")] | length'; }
+ge() { python3 -c "import sys; sys.exit(0 if float('$1') >= float('$2') - 1 else 1)" 2>/dev/null; }
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = false | .GlobalTransitionDurationMs = 300 | .GlobalPlaylistStart = "start_over" | .Volume = 100 | .NormalizeAudio = false'
+post /playlist/state '{"videoPaths":[],"settings":{"order":0,"overrideGlobalSettings":false},"name":null}' >/dev/null
+ws_listen "$T/ws-prog.log"
+waitfor $WAIT eval 'grep -q " 101 " "$T/ws-prog.log"' || bad "WebSocket: $(head -c 300 "$T/ws-prog.log")"
+m0=$(nsched_all); c0=$(ncur)
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\",\"$C\"],\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT eval 'ctl state | jq -e ".graph[\"prog:main\"].kind == \"program\"" >/dev/null' && ok "/playlist/play → ctl state has prog:main (kind program)" || bad "no prog:main: $(ctl state | jq -c '.programs')"
+waitfor 16000 eval '[ $(( $(ncur) - c0 )) -ge 4 ]'
+[ "$(curs_after "$c0" | jq -c '.[0:4] | map(.p)')" = '["a.mp4","b.mp4","c.mp4","a.mp4"]' ] && [ "$(curs_after "$c0" | jq -c '.[0:4] | map(.r)')" = '["play","timer","timer","timer"]' ] \
+  && ok "timer 3 s: program.current a (play) → b → c → a (timer)" || bad "program.current: $(curs_after "$c0")"
+[ "$(api_after "$m0")" = 0 ] && ok "every switch since the load is origin program:prog:main ($(( $(nsched_all) - m0 )) scheduled, none api)" || bad "$(api_after "$m0") switches not from the program"
+prog_is mode '"timer"' && prog_num interval_ms 3000 && ok "prog:main mode timer, interval_ms 3000" || bad "prog:main mode $(prog mode), interval $(prog interval_ms)"
+cur_matches() { [ "$(curl -sf -m 5 "$U/current" | jq -r .path)" = "$(ctl logs '{"kind_prefix":"program.current","limit":10000}' | jq -r '.events[-1].path')" ]; }
+waitfor $WAIT cur_matches && curl -sf -m 5 "$U/current" | jq -e '.timed == true' >/dev/null && ok "/current = the program's path, timed true" || bad "/current $(curl -sf -m 5 "$U/current" | jq -c '{path, timed}')"
+nwc=$(grep -c '"wallpaper-changed"' "$T/ws-prog.log")
+[ "$nwc" -ge 4 ] && grep '"wallpaper-changed"' "$T/ws-prog.log" | grep -qF "c.mp4" && ok "WS wallpaper-changed per program switch ($nwc)" || bad "WS wallpaper-changed: $nwc ($(tail -c 300 "$T/ws-prog.log"))"
+
+# live edits: each reaches prog:main at once; an edit never resets the play time
+setting '.GlobalIntervalSeconds = 30'; waitfor $WAIT prog_num interval_ms 30000; sleep 1   # no timer switch during the edits below
+cl0=$(ncur); p0=$(pplayed); setting '.GlobalIntervalSeconds = 40'
+waitfor $WAIT prog_num interval_ms 40000 && ge "$(pplayed)" "$p0" && [ "$(ncur)" = "$cl0" ] && ok "/settings interval 40 s → interval_ms 40000 live, no switch, played_ms kept ($p0 → $(pplayed))" || bad "interval live: $(prog interval_ms), played $p0 → $(pplayed), switches $(( $(ncur) - cl0 ))"
+setting '.GlobalMaxPlaySeconds = 9 | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 7'
+waitfor $WAIT eval 'prog_num max_ms 9000 && prog_is separate_scenes true && prog_num scenes_after_ms 7000' && ok "max / separate timing / scenes after → prog:main live" || bad "limits: max $(prog max_ms), separate $(prog separate_scenes), after $(prog scenes_after_ms)"
+setting '.GlobalTransitionEffectIds = ["fade","wipeLeft"] | .GlobalTransitionShuffle = false | .TransitionMethod = "reveal"'
+waitfor $WAIT eval '[ "$(prog transition | jq -c "{effects, shuffle, method}")" = "{\"effects\":[\"fade\",\"wipeLeft\"],\"shuffle\":false,\"method\":\"reveal\"}" ]' && ok "transitions + method → prog:main.transition live" || bad "transition: $(prog transition)"
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
+waitfor $WAIT eval 'prog_is mode "\"on_end\"" && prog_num interval_ms 0' && ok "advance-on-end on → mode on_end, minimum 0, live" || bad "mode $(prog mode), interval $(prog interval_ms)"
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = false | .GlobalTransitionEffectIds = ["fade"] | .TransitionMethod = "full-live"'
+post /playlist/state "{\"videoPaths\":[\"$A\",\"$Bc\",\"$C\"],\"settings\":{\"order\":0},\"name\":null}" >/dev/null
+c1=$(ncur); pp=$(prog path)
+post /playlist/state "{\"videoPaths\":[\"$C\",\"$A\",\"$Bc\"],\"settings\":{\"order\":1},\"name\":null}" >/dev/null
+waitfor $WAIT eval '[ "$(prog items | jq -c "map(.path | split(\"/\") | .[-1])")" = "[\"c.mp4\",\"a.mp4\",\"b.mp4\"]" ] && prog_is order "\"shuffle\""' \
+  && ok "/playlist/state reorder + shuffle → prog:main.items / order live" || bad "items $(prog items | jq -c 'map(.path)'), order $(prog order)"
+setting '.Volume = 40'
+waitfor $WAIT eval 'near "$(prog defaults | jq -r ".\"gain.user\"")" "$(dB 40)" 0.01' && ok "Volume 40 → prog:main.defaults gain.user $(prog defaults | jq -r '."gain.user"')" || bad "defaults after Volume 40: $(prog defaults)"
+post /mute '{"value":true,"user":true}' >/dev/null
+waitfor $WAIT eval 'near "$(prog defaults | jq -r ".\"gain.mute\"")" -96 0.01' && ok "user mute → prog:main.defaults gain.mute -96 (a new B starts muted)" || bad "defaults after mute: $(prog defaults | jq -c '{"gain.mute"}')"
+post /mute '{"value":false,"user":true}' >/dev/null
+waitfor $WAIT eval 'near "$(prog defaults | jq -r ".\"gain.mute\"")" 0 0.01' || bad "unmute → defaults $(prog defaults | jq -c '{"gain.mute"}')"
+stop_now
+waitfor $WAIT eval '[ -z "$(pst)" ]' && curl -sf -m 5 "$U/current" | jq -e '.timed == false' >/dev/null && ok "/stop → no program, /current timed false" || bad "after /stop: $(pst), $(curl -sf -m 5 "$U/current" | jq -c .timed)"
+
+# per-item values (R61) → the item props; a library item's own volume, its loudness (normalization)
+setting '.Volume = 100'
+QA=$(lib_import "$A" qa); QB=$(lib_import "$Bc" qb)
+post /library/volume "{\"path\":\"$QB\",\"intValue\":30}" >/dev/null
+post /playlist/play "{\"paths\":[\"$QA\",\"$QB\",\"$C\"],\"settings\":{\"order\":0}}" >/dev/null
+item_props() { prog items | jq -c --arg p "$1" '.[] | select(.path==$p) | .props'; }
+waitfor $WAIT eval 'near "$(item_props "$QB" | jq -r ".\"gain.user\" // 99")" "$(dB 30)" 0.01 && [ "$(item_props "$QA")" = "{}" ]' \
+  && ok "an item's own volume → only its props (gain.user $(item_props "$QB" | jq -r '."gain.user"')), a plain one carries none" || bad "item props: qa $(item_props "$QA"), qb $(item_props "$QB")"
+post /library/volume "{\"path\":\"$QA\",\"intValue\":60}" >/dev/null
+waitfor $WAIT eval 'near "$(item_props "$QA" | jq -r ".\"gain.user\" // 99")" "$(dB 60)" 0.01' && ok "/library/volume on an item mid-rotation → its props live" || bad "qa props after /library/volume: $(item_props "$QA")"
+nb0=$(nsched_all)
+waitfor 12000 eval '[ -n "$(ctl logs "{\"kind_prefix\":\"transition.scheduled\",\"limit\":10000}" | jq -r --argjson n "$nb0" --arg p "$QA" "[.events[\$n:][] | select(.path==\$p)][0].to // empty")" ]'
+qa_src=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --argjson n "$nb0" --arg p "$QA" '[.events[$n:][] | select(.path==$p)][0].to // empty')
+waitfor $WAIT eval 'near "$(ctl get "{\"path\":\"$qa_src.gain.user\"}" | jq -r .value)" "$(dB 60)" 0.01' && ok "…and its next B is created with it ($qa_src gain.user $(ctl get "{\"path\":\"$qa_src.gain.user\"}" | jq -r .value))" || bad "next B of qa ($qa_src): gain.user $(ctl get "{\"path\":\"$qa_src.gain.user\"}" 2>&1 | head -c 200)"
+setting '.NormalizeAudio = true'
+waitfor 30000 eval 'item_props "$QA" | jq -e "(.af // \"\") | test(\"loudnorm\")" >/dev/null' && ok "normalization on → a measured item's own af (loudnorm) in its props" || bad "no loudnorm af in qa's props: $(item_props "$QA")"
+setting '.NormalizeAudio = false'
+waitfor $WAIT eval '[ "$(item_props "$QA" | jq -r ".af // \"none\"")" = none ]' && ok "normalization off → its af gone (= the defaults')" || bad "qa af after off: $(item_props "$QA" | jq -c .af)"
+post /library/volume "{\"path\":\"$QA\",\"intValue\":null}" >/dev/null; post /library/volume "{\"path\":\"$QB\",\"intValue\":null}" >/dev/null
+
+# trash of the playing item: the items lose it, the rotation goes on to the next survivor (the player's verb)
+setting '.GlobalIntervalSeconds = 30'
+post /playlist/state "{\"videoPaths\":[\"$QA\",\"$QB\",\"$C\"],\"settings\":{\"order\":0},\"name\":null}" >/dev/null
+post /playlist/play-from "{\"paths\":[\"$QA\",\"$QB\",\"$C\"],\"startIndex\":0,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT shows "$QA"
+playing=$(cur path); item=$(curl -sf -m 5 "$U/library" | jq -c --arg p "$playing" '[.[] | select(.videoPath==$p)][0]')
+m1=$(nsched_all); c2=$(ncur)
+post /library/trash "{\"items\":[$item]}" >/dev/null
+waitfor $WAIT eval '[ "$(prog items | jq -r --arg p "$playing" "[.[] | select(.path==\$p)] | length")" = 0 ] && [ "$(ncur)" -gt "$c2" ] && ! cur_is path "$playing"' \
+  && ok "trash of the playing $(basename "$playing") → gone from the items, the program moved on ($(last_cur))" || bad "trash: items $(prog items | jq -c 'map(.path | split("/") | .[-1])'), cur $(basename "$(cur path)")"
+[ "$(api_after "$m1")" = 0 ] && ok "…by the program (no backend switch)" || bad "trash: $(api_after "$m1") switches not from the program"
+post /library/undo '{}' >/dev/null
+waitfor $WAIT eval '[ "$(prog items | jq -r --arg p "$playing" "[.[] | select(.path==\$p)] | length")" = 1 ]' && ok "undo → back in the items" || bad "undo: items $(prog items | jq -c 'map(.path | split("/") | .[-1])')"
+stop_now
+
+# § Playlist start through the HTTP routes (start over / resume; play again, stop → play, A → B → A)
+setting '.GlobalIntervalSeconds = 3 | .GlobalPlaylistStart = "start_over"'
+pl() { post /playlist/state "{\"videoPaths\":$2,\"settings\":{\"order\":0},\"name\":$1}" >/dev/null; post /playlist/play "{\"paths\":$2,\"settings\":{\"order\":0}}" >/dev/null; }
+PA="[\"$A\",\"$Bc\",\"$C\"]"; PB="[\"$P1\",\"$P2\"]"
+at_item() { waitfor 10000 eval "[ \"\$(last_cur | jq -r .p)\" = \"$1\" ]"; }
+pl '"Alpha"' "$PA"; at_item b.mp4 || bad "precondition: Alpha never reached b ($(last_cur))"
+prog_is key '"name:Alpha"' && ok "a saved playlist's key: name:Alpha" || bad "key $(prog key)"
+c3=$(ncur); pl '"Alpha"' "$PA"
+waitfor $WAIT eval '[ "$(curs_after "$c3" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c3" | jq -c 'map(select(.r == "play"))[0]')" = '{"p":"a.mp4","r":"play","resumed":false}' ] && ok "start over: Play on the playing playlist → item 1 (a.mp4)" || bad "start over × play again: $(curs_after "$c3")"
+setting '.GlobalPlaylistStart = "resume"'
+waitfor $WAIT prog_is start_mode '"resume"' && ok "the start setting → prog:main.start_mode live" || bad "start_mode $(prog start_mode)"
+at_item b.mp4; c4=$(ncur); m4=$(nsched_all); pb=$(pplayed); pl '"Alpha"' "$PA"; sleep 1
+[ "$(curs_after "$c4" | jq -c 'map(select(.r == "play"))')" = "[]" ] && ge "$(pplayed)" "$pb" && [ "$(last_cur | jq -r .p)" = b.mp4 ] \
+  && ok "resume: Play on the playing playlist keeps playing where it is (b.mp4, played_ms $pb → $(pplayed))" || bad "resume × play again: $(curs_after "$c4"), played $pb → $(pplayed)"
+at_item c.mp4; stop_now; c5=$(ncur); pl '"Alpha"' "$PA"
+waitfor $WAIT eval '[ "$(curs_after "$c5" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c5" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = '{"p":"c.mp4","resumed":true}' ] && ok "resume: stop → Play → its resume point (c.mp4, resumed)" || bad "resume × stop → play: $(curs_after "$c5")"
+at_item a.mp4; c6=$(ncur)
+post /playlist/state "{\"videoPaths\":$PB,\"settings\":{\"order\":0},\"name\":\"Beta\"}" >/dev/null   # Beta loaded into the bar
+waitfor $WAIT prog_is key '"name:Beta"' && ok "another playlist loaded into the bar → key name:Beta (Alpha's point kept)" || bad "key after loading Beta: $(prog key)"
+pl '"Beta"' "$PB"; waitfor $WAIT eval '[ "$(last_cur | jq -r .p)" = p1.mp4 ]' && ok "resume × Beta never played → its item 1 (p1.mp4)" || bad "Beta: $(last_cur)"
+c7=$(ncur); pl '"Alpha"' "$PA"
+waitfor $WAIT eval '[ "$(curs_after "$c7" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c7" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = '{"p":"a.mp4","resumed":true}' ] && ok "resume: Alpha → Beta → Alpha → Alpha's own point (a.mp4, resumed)" || bad "A → B → A × resume: $(curs_after "$c7") (Alpha was at a.mp4)"
+setting '.GlobalPlaylistStart = "start_over"'
+pl '"Beta"' "$PB"; at_item p1.mp4; c8=$(ncur); pl '"Alpha"' "$PA"
+waitfor $WAIT eval '[ "$(curs_after "$c8" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c8" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = '{"p":"a.mp4","resumed":false}' ] && ok "start over: Alpha → Beta → Alpha → item 1" || bad "A → B → A × start over: $(curs_after "$c8")"
+c9=$(ncur); post /playlist/play-from "{\"paths\":$PA,\"startIndex\":2,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT eval '[ "$(curs_after "$c9" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c9" | jq -c 'map(select(.r == "play"))[0] | {p, r}')" = '{"p":"c.mp4","r":"play"}' ] && ok "play-from c (index 2) → c.mp4, whatever the start setting" || bad "play-from: $(curs_after "$c9")"
+stop_now
+post /playlist/state '{"videoPaths":[],"settings":{"order":0},"name":null}' >/dev/null
+
+# a backend restart under a legacy rotation (timed_state.json — a backend before Task 7): the player's program takes over at its item
+printf '{"Paths":["%s","%s","%s"],"Index":1,"Options":"","Shuffle":false,"IntervalSeconds":3,"History":["%s","%s"],"HistoryIndex":1,"TimerPaused":false,"TimerStopped":false,"RemainingMs":2000,"SwitchWhenVideoEnds":false,"WaitingForVideoEnd":false,"ItemPlayedMs":0,"PlayedSavedAtMs":0}' \
+  "$A" "$Bc" "$C" "$A" "$Bc" > "$XDG_CONFIG_HOME/liascape/timed_state.json"
+port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP; c10=$(ncur)
+kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+"$DOTNET" "$DLL" serve > "$T/backend-legacy-state.log" 2>&1 & BP=$!
+waitfor 60000 eval '[ "$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)" != "$port0" ]'; U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); waitfor 30000 eval 'curl -sf -m 2 "$U/health" >/dev/null'
+waitfor 15000 eval '[ "$(curs_after "$c10" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
+[ "$(curs_after "$c10" | jq -c 'map(select(.r == "play"))[0] | {p, r}')" = '{"p":"b.mp4","r":"play"}' ] && prog_is mode '"timer"' && [ ! -e "$XDG_CONFIG_HOME/liascape/timed_state.json" ] \
+  && ok "a legacy timed_state.json at serve start → the player's program at its item (b.mp4), the file gone" || bad "legacy takeover: $(curs_after "$c10"), mode $(prog mode), file $(ls "$XDG_CONFIG_HOME/liascape/timed_state.json" 2>&1)"
+stop_now
+kill "$WSP" 2>/dev/null; WSP=""
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .GlobalPlaylistStart = "start_over" | .Volume = 100'
+
 echo "== play-from keeps the playlist's transition settings (it used to rebuild them from rotation fields only)"
 pf=$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$b], startIndex:1, settings:{order:1, overrideGlobalSettings:true,
   intervalSeconds:20, switchWhenVideoEnds:true, transitionEnabled:true,
@@ -1536,16 +1675,19 @@ between "$(sw_field 1)" 5300 7300 && [ "$(sw_field 3)" = now ] && ok "scenes aft
   || bad "scene timing × backend restart: $swr (want align now at +5.3…7.3 s)"
 setting '.GlobalSeparateSceneTiming = false | .GlobalSwitchScenesAfterSeconds = 0 | .AllowScenes = false'; stop_now
 
-echo "== a second backend started while the first runs takes the playlist over (the first stops ticking)"
+echo "== a second backend started while the first runs: the player's program keeps the playlist (no backend timer)"
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 armed_only
+apis0=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.origin=="api")] | length')
 st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); first=$BP; pe=$(tpos 0); te=$(ms_now)
 "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1 & BP=$!; BP_OLD="$BP_OLD $first"
 new_backend_up "$port0"
 e1_window "$te" "$pe"
 [ "$(storms)" = "$st0" ] && [ "$(nows)" = "$nw0" ] && ok "two live backends: no storm, no immediate switch" || bad "two live backends: $(( $(storms) - st0 )) failed aligned switches, $(( $(nows) - nw0 )) align:now"
 one_advance && ok "one advance at E1's end" || bad "$dh handoffs, the last to $(basename "$dto")"
-grep -q "stops ticking" "${BLOG:-$T/backend2.log}" && ok "the first backend yielded: $(grep -m1 "stops ticking" "${BLOG:-$T/backend2.log}")" || bad "the first backend never yielded the timer"
+# Phase 3 Task 7: no backend ticks a rotation under liascape-player — neither one requested a switch (the program did)
+apis1=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.origin=="api")] | length')
+[ "$apis1" = "$apis0" ] && ok "neither backend requested a switch (every one origin program)" || bad "$(( apis1 - apis0 )) backend (origin api) switches with two backends"
 kill "$first" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$first" 2>/dev/null || break; sleep 0.1; done
 stop_now
 

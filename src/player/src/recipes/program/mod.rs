@@ -1518,6 +1518,7 @@ impl Programs {
                     }
                 }
                 if old.items != p.cfg.items || old.shuffle != p.cfg.shuffle {
+                    let was_skipped = std::mem::take(&mut p.skips);
                     p.skips = p
                         .cfg
                         .items
@@ -1525,15 +1526,27 @@ impl Programs {
                         .filter(|i| i.skip)
                         .map(|i| i.path.clone())
                         .collect();
-                    if old.paths() != p.cfg.paths() {
+                    // an item the backend skipped and now lets play again (a crashed scene whitelisted):
+                    // its own broken / failed mark goes too — the backend is the authority on that
+                    for path in was_skipped.difference(&p.skips) {
+                        p.broken.remove(path);
+                        p.failed.remove(path);
+                    }
+                    let list_changed = old.paths() != p.cfg.paths();
+                    if list_changed {
                         p.failed.clear();
                         p.empty_logged = false;
                     }
-                    let paths = p.cfg.paths();
-                    if p.started {
-                        p.order.reorder(&paths, p.cfg.shuffle, &mut p.rng);
-                    } else {
-                        p.order = Order::new(paths, 0, p.cfg.shuffle);
+                    // only a new list or order re-orders: an item's props or skip flag alone (the
+                    // backend's PushItem — a loudness measured, an override, a crash mark) reach
+                    // the next B and the passing-over, never the order or the history
+                    if list_changed || old.shuffle != p.cfg.shuffle {
+                        let paths = p.cfg.paths();
+                        if p.started {
+                            p.order.reorder(&paths, p.cfg.shuffle, &mut p.rng);
+                        } else {
+                            p.order = Order::new(paths, 0, p.cfg.shuffle);
+                        }
                     }
                     // an armed B that is no longer a playable item: cancelled, re-planned
                     // by the next tick (A's loop comes back with the abort)
@@ -1915,6 +1928,50 @@ mod store_tests {
         assert_eq!(st.path.as_deref(), Some("b"));
         assert_eq!((st.history.clone(), st.history_index), (v(&["b"]), 0));
         assert_eq!(st.played_ms, 1200.0, "the clocks are kept");
+    }
+
+    #[test]
+    fn item_props_edit_keeps_the_order_and_history() {
+        let (mut g, mut ps, src) = setup();
+        ps.restore("prog:main", &def(&["c", "d", "a", "b"], 3), Some(&snap(5)), 5, Some(src), &mut g);
+        let before = ps.status()[0].clone();
+        // the same list, one item's props and another's skip flag changed (PushItem)
+        let items: Vec<Value> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|p| match *p {
+                "a" => json!({"path": p, "props": {"gain.user": -6.0}}),
+                "c" => json!({"path": p, "skip": true}),
+                _ => json!({"path": p}),
+            })
+            .collect();
+        let v = crate::graph::PropValue::Items(serde_json::from_value(Value::Array(items)).unwrap());
+        g.set(&PropPath("prog:main.items".into()), v).unwrap();
+        ps.configure("prog:main", &mut g);
+        let st = &ps.status()[0];
+        assert_eq!(st.order, before.order, "no re-order");
+        assert_eq!((st.history.clone(), st.history_index), (before.history, before.history_index));
+        assert_eq!(st.path, before.path);
+    }
+
+    #[test]
+    fn lifting_an_items_skip_clears_its_broken_mark() {
+        let (mut g, mut ps, src) = setup();
+        ps.restore("prog:main", &def(&["a", "b", "c", "d"], 1), Some(&snap(5)), 5, Some(src), &mut g);
+        let set = |g: &mut Graph, skip_c: bool| {
+            let items: Vec<Value> = ["a", "b", "c", "d"]
+                .iter()
+                .map(|p| json!({"path": p, "skip": *p == "c" && skip_c}))
+                .collect();
+            let v = crate::graph::PropValue::Items(serde_json::from_value(Value::Array(items)).unwrap());
+            g.set(&PropPath("prog:main.items".into()), v).unwrap();
+        };
+        ps.progs.get_mut("prog:main").unwrap().broken.insert("c".into()); // its scene broke
+        set(&mut g, true); // the backend marks it crashed
+        ps.configure("prog:main", &mut g);
+        assert!(ps.status()[0].broken.contains(&"c".to_string()));
+        set(&mut g, false); // whitelisted
+        ps.configure("prog:main", &mut g);
+        assert!(ps.status()[0].broken.is_empty(), "plays again");
     }
 
     #[test]

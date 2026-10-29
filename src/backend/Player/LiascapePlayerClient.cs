@@ -873,7 +873,8 @@ public sealed class LiascapePlayerClient
     // `scene.vram_exceeded` — the VRAM guard stopped a scene (→ PlayerHelper.OnSceneVramStopped);
     // `scene.loudness` — a scene's loudness learned on first play (→ LiascapePlayerMedia.OnSceneLoudness: stored in
     // the index, normalization applied live). Once per scene play at most.
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness"];
+    // Phase 3 Task 7: `program.` — the player's rotation (LiascapePlayerProgram's mirror; `program.current` → the UI)
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "program."];
     public event Action<string, JsonElement>? Event;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;

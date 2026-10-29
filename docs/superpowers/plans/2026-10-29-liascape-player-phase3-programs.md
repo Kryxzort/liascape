@@ -625,6 +625,16 @@ public static class LiascapePlayerProgram {
 - [ ] **Step 4:** IT `RESULT pass=N fail=0`; `player-selftest` PASS; `test-settings-merge.sh` all pass; `cd app/ui && npm run build` ok.
 - [ ] **Step 5:** Commit `Drive Rotation Through The Player Program`.
 
+> **Implementer note 2026-10-30 (Task 7):**
+> - `GlobalPlaylistStart` / `PlaylistSettings.PlaylistStart` (normalized start_over|resume) and `PlayerHelper.EffectiveStart` landed here (the IT drives them through `/settings`); their rows, `ResumeFromLast`'s removal and the merge checks stay Task 10. `SetStartMode` is wired live from `/settings` and `/playlist/state` already. `while_parked` is sent as `rotate` (no setting yet).
+> - Play-from = `program.play {from: "index"}` on the bar's order. Sequential now continues down the bar from the clicked item (c → d → a → b; C# went c → a → b → d); a shuffled play-from shuffles the rest of its cycle (player change in `resume::plan_start`, unit `plan_start_index_shuffles_the_rest_of_its_cycle`) — before it played the first cycle in bar order.
+> - Two small player fixes the adapter needed: an `items` edit that changes only props/skip flags (every `PushItem`: an override, a loudness landing, a crash mark) no longer re-orders the rotation or resets its history; an item whose `skip` goes true → false (a crashed scene whitelisted) loses the player's own broken/failed mark (units `item_props_edit_keeps_the_order_and_history`, `lifting_an_items_skip_clears_its_broken_mark`).
+> - The upgrade watch never finds a quiet moment under an advance-on-end program (its next end switch is armed right after each handoff), so a stale player is upgraded at each program commit once the effect handed off (`LiascapePlayerMedia.UpgradeAfterCommit`; the program's snapshot re-arms the armed switch). This is the Task 8 upgrade row, done here because the IT's "upgrades at its next switch" check needed it.
+> - `Restore()` (`liascape restore`, `play`, `toggle-play`) loads the program directly (waits ≤ 15 s for the queued load) instead of spawning `timer-daemon`; a stopping `serve` no longer hands a rotation to `timer-daemon` under liascape-player. `gui_timer.pid`, `--restore --session-start` and the rest of the daemon retirement stay Task 8.
+> - A legacy `timed_state.json` found at `serve` start (or on legacy → liascape-player) becomes the program at its item as a play-from (that item restarts at 0 once), and the file is removed.
+> - `ReconcileShown is a no-op while IsActive` is not a self-test assertion (it needs a player); it's `LiascapePlayerProgram.Owns` and the IT's crash sections run with a program. The IT's `srcIdForPath` reads sources only (a program node has an observed `path`), and the two-backend check asserts no `origin: api` switch instead of a backend "stops ticking".
+> - The adapter IT went 273 → 314 checks, `fail=0`; the RED run on the base backend was not run (every new check reads `prog:main`, which the base backend never creates).
+
 **Size: L** (≈ 2½ days incl. the IT).
 
 ### Task 8: Retire the timer and restart daemons, the pending file and pid ownership

@@ -274,6 +274,12 @@ public static class LiascapePlayerMedia
 
     private static void OnEvent(string kind, JsonElement e)
     {
+        if (kind.StartsWith("program.", StringComparison.Ordinal))
+        {
+            // the player's rotation (Task 7): the mirror + what the UI is told — no source changed
+            LiascapePlayerProgram.OnEvent(kind, e);
+            return;
+        }
         if (kind == "scene.loudness")
         {
             // a scene's loudness report (the first after ~60 s of audible play, then refined) — no source changed;
@@ -337,6 +343,7 @@ public static class LiascapePlayerMedia
             + (key.Length > 0 ? $" [{key}]" : "")
             + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
         if (stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
+        if (stored) LiascapePlayerProgram.PushItem(path); // its next source continues this measurement (`loudness_seed`)
         if (applied) PlayerHelper.OnLoudnessMeasured(path);
     }
 
@@ -368,6 +375,7 @@ public static class LiascapePlayerMedia
         QueueEssential(ReconcileShown);
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
         ReapplyAll();
+        LiascapePlayerProgram.OnRestarted();
     }
 
     // ---- what the screen should show: the backend's model of it (R81 for the wallpaper) ----------
@@ -417,6 +425,9 @@ public static class LiascapePlayerMedia
         var intent = _intent;
         var client = C;
         if (intent == null || !client.SocketExists) return;
+        // a rotation: the player owns what shows (its program restored with the snapshot, R81 re-loads one it lost —
+        // LiascapePlayerProgram.Reapply); a backend switch from before the program must not be put back
+        if (LiascapePlayerProgram.Owns) return;
         var shown = ShownOrIncoming(client, parked: true);
         if (shown == null) return; // no answer: R81's reapply logs it; the next switch catches up anyway
         if (intent.Path == null)
@@ -445,6 +456,7 @@ public static class LiascapePlayerMedia
     {
         LiascapePlayerClient.Log("liascape-player answered again after a stall — re-applying settings (R81)");
         ReapplyAll();
+        LiascapePlayerProgram.Reapply();
     }
 
     private static int _reapplyCount;
@@ -585,6 +597,24 @@ public static class LiascapePlayerMedia
         return props;
     }
 
+    // A program's `defaults` (plan 2026-10-29 Task 7, designer call 2): what every new B of a rotation runs unless its
+    // item says otherwise — the resolver's values with no item (the globals: volume, speed, decode/buffer settings, the
+    // mute; no `af` — loudnorm is per item) + kind `video` and the Loop setting. `DesiredItem(path)` = what a new source
+    // of `path` gets (SourceProps minus `path`); the program carries only the entries that differ from these.
+    public static Dictionary<string, object?> DesiredGlobal(AppSettings s)
+    {
+        var d = new Dictionary<string, object?> { ["kind"] = "video", ["loop"] = s.Loop };
+        foreach (var (k, v) in Desired(null, () => s, PlayerHelper.IsMuted, null, item: false)) d[k] = v;
+        return d;
+    }
+
+    public static Dictionary<string, object?> DesiredItem(string path, AppSettings s)
+    {
+        var d = SourceProps(path, s);
+        d.Remove("path");
+        return d;
+    }
+
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
 
     // A scene's `gain.normalize` (dB) under `s`: its learned loudness (LibMeta.LoudnessI, the player's
@@ -637,6 +667,44 @@ public static class LiascapePlayerMedia
         });
     }
 
+    // Phase 3 Task 7: a rotation program switches inside the player, and under advance-on-end its next end-of-video
+    // switch is armed right after each handoff — the 10 s check never finds a quiet moment. So at each program commit
+    // (`program.current`): once its effect handed off — only an ARMED switch left, which the program's snapshot re-arms
+    // for A's end after the restart (player-core.md § Programs, Persistence) — a stale player is upgraded.
+    private static int _upgradeAtCommit;
+    public static void UpgradeAfterCommit()
+    {
+        if (!PlayerEngine.IsLiascapePlayer) return;
+        var client = C;
+        if (client.StaleReason() == null || Interlocked.Exchange(ref _upgradeAtCommit, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                for (int i = 0; i < 150 && Running(client); i++) await Task.Delay(100).ConfigureAwait(false);
+                await QueueEssential(() =>
+                {
+                    if (client.StaleReason() is not string why || Running(client)) return;
+                    client.UpgradeInPlace(why + " — at a rotation's switch");
+                    InvalidateSources();
+                }).ConfigureAwait(false);
+            }
+            finally { Interlocked.Exchange(ref _upgradeAtCommit, 0); }
+        });
+    }
+
+    // a transition past its arming and not done (scheduled / waiting_ready / running / handoff); unknown → yes
+    private static bool Running(LiascapePlayerClient client)
+    {
+        try
+        {
+            var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
+            return st.TryGetProperty("transitions", out var t) && t.ValueKind == JsonValueKind.Array
+                && t.EnumerateArray().Any(x => Str(x, "phase") is not ("waiting_start" or "done"));
+        }
+        catch (LiascapePlayerException) { return true; }
+    }
+
     // any transition not yet done (armed, waiting, running, handing off); unknown → treated as yes
     private static bool Switching(LiascapePlayerClient client)
     {
@@ -657,7 +725,10 @@ public static class LiascapePlayerMedia
         finally { InvalidateSources(); } // a new B (and maybe an upgraded player): re-read the map next time
     }
 
-    private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
+    // Before anything that puts a wallpaper on screen (our switch, a program load — on the queue's worker): a running,
+    // current player (an older build is upgraded in place first: A comes back as it was), its events subscribed, the
+    // layer fit and the per-monitor scene fps asserted. null = no player could be started.
+    internal static LiascapePlayerClient? Ready(AppSettings s)
     {
         var client = C;
         if (!client.EnsureRunning()) return null;
@@ -667,6 +738,19 @@ public static class LiascapePlayerMedia
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
         client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LiascapePlayerClient.QuickMs);
         if (_sceneFpsGen != client.Generation) AssertSceneFps(client, s); // once per player process
+        return client;
+    }
+
+    // A program (LiascapePlayerProgram) owns what shows from here: no backend switch to put back after a restart.
+    internal static void ForgetIntent()
+    {
+        _intent = null;
+        _alignedCorrs.Clear();
+    }
+
+    private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
+    {
+        if (Ready(s) is not { } client) return null;
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
@@ -963,6 +1047,7 @@ public static class LiascapePlayerMedia
             bool latest = _scenePropsSeq.TryGetValue(FullPath(path), out var now) && now == seq;
             QueueSet("sceneprops:" + FullPath(path), () =>
                 ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps }));
+            LiascapePlayerProgram.PushItem(path);
         });
     }
 
@@ -994,9 +1079,12 @@ public static class LiascapePlayerMedia
 
     // A scene's estimate landed (the background queue — Web/SceneLoudnessOps): its live source(s) take its current
     // configuration's `loudness_key` (+ seed) and `gain.normalize` (ramped). Coalescible per item.
-    public static void ApplySceneLoudness(string path) =>
+    public static void ApplySceneLoudness(string path)
+    {
         QueueSet("sceneloudness:" + FullPath(path), () =>
             ResolveNow(new Req { Items = [path], OnlyItems = true, Props = SceneLoudnessProps }));
+        LiascapePlayerProgram.PushItem(path);
+    }
 
     // `/library/scene-props/preview` (the modal's drag twin, nothing persisted): `values` over the saved overrides,
     // on that item's source(s) only. Coalescible per item + property set.
@@ -1009,18 +1097,27 @@ public static class LiascapePlayerMedia
 
     // Every setting the resolver owns, live, from the settings as they are now — /settings, the volume key
     // on the global, normalization, a loudness measurement landing.
-    public static void ApplyEffective() => QueueSet("resolve", () => ResolveNow(new Req { Fresh = true }));
+    // A rotation's next B gets the same values: the program's `defaults` (and every item's own, e.g. a loudness landed).
+    public static void ApplyEffective()
+    {
+        QueueSet("resolve", () => ResolveNow(new Req { Fresh = true }));
+        LiascapePlayerProgram.PushDefaults();
+        LiascapePlayerProgram.PushItems();
+    }
 
     // `path`'s own volume/speed (its override ?? the global) onto its source(s) — wherever they are (on
     // screen, either side of an effect, a pending B). `onPlayingSpeed` gets its effective speed when it is
     // what `cur:*` shows (the timed tick's speed factor). Coalescible per item: it re-reads the override.
-    public static void ApplyOverride(string path, Action<double>? onPlayingSpeed = null) =>
+    public static void ApplyOverride(string path, Action<double>? onPlayingSpeed = null)
+    {
         QueueSet("override:" + FullPath(path), () =>
         {
             if (ResolveNow(new Req { Items = [path], OnlyItems = true, Props = PerItem }) == 0 || onPlayingSpeed == null) return;
             if (SamePath(CurrentPath(), path))
                 onPlayingSpeed(Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? SettingsService.Load().Speed, 0.1, 4.0));
         });
+        LiascapePlayerProgram.PushItem(path); // a rotation's next B of it
+    }
 
     // /preview (drag twin, no persist), literal values → the source(s) of `paths` — the item(s) the modal
     // edits, wherever they are: on screen, the outgoing A or incoming B of an effect, a pending B. No
@@ -1065,12 +1162,14 @@ public static class LiascapePlayerMedia
     // belongs to one of the request's items, so their transient values apply). Only the request's props,
     // and only what they need (`settings` is loaded once, on first use): a drag preview reads neither the
     // settings nor the index, nor kicks a loudness measure.
-    private static Dictionary<string, object> Desired(string path, Func<AppSettings> settings, bool muted, Req? r, bool item)
+    // `path` null = no item: the globals' values (a program's `defaults` — DesiredGlobal), never an item's own.
+    private static Dictionary<string, object> Desired(string? path, Func<AppSettings> settings, bool muted, Req? r, bool item)
     {
         var props = r?.Props;
         bool Want(string p) => props == null || props.Contains(p);
-        LibMeta? meta = null; bool metaRead = false;
-        LibMeta? Meta() { if (!metaRead) { meta = LibraryStore.GetMeta(path); metaRead = true; } return meta; }
+        bool scene = path != null && PlayerHelper.IsScenePath(path);
+        LibMeta? meta = null; bool metaRead = path == null;
+        LibMeta? Meta() { if (!metaRead) { meta = LibraryStore.GetMeta(path!); metaRead = true; } return meta; }
         var d = new Dictionary<string, object>();
         if (Want("gain.user"))
             d["gain.user"] = (item ? r!.ItemGainDb : null)
@@ -1078,7 +1177,7 @@ public static class LiascapePlayerMedia
                 ?? r?.GlobalGainDb ?? MpvPropertyMap.VolumeDb(settings().Volume);
         if (Want("speed"))
             d["speed"] = Math.Clamp((item ? r!.ItemSpeed : null) ?? Meta()?.Speed ?? r?.GlobalSpeed ?? settings().Speed, 0.1, 4.0);
-        if (Want("af")) d["af"] = NormalizeAf(path, settings()) ?? "";
+        if (Want("af")) d["af"] = (path != null ? NormalizeAf(path, settings()) : null) ?? "";
         if (Want("no_audio")) d["no_audio"] = settings().NoAudio;
         if (Want("hwdec")) d["hwdec"] = HwDec(settings());
         if (Want("fps_cap")) d["fps_cap"] = (double)Math.Max(0, settings().VideoFpsCap);
@@ -1088,17 +1187,17 @@ public static class LiascapePlayerMedia
         if (Want("gain.mute")) d["gain.mute"] = muted ? MpvPropertyMap.SilentDb : 0.0;
         // a scene's user properties: its overrides (+ a drag's transient values) — defaults aren't sent, LWE
         // loads them itself; `WithResets` adds the default of one the source still runs from an earlier override
-        if (Want("scene_props") && PlayerHelper.IsScenePath(path))
+        if (Want("scene_props") && scene)
             d["scene_props"] = JsonSerializer.SerializeToElement(
-                SceneProperties.PlayerMap(path, Meta()?.SceneProps, item ? r!.ItemSceneProps : null));
+                SceneProperties.PlayerMap(path!, Meta()?.SceneProps, item ? r!.ItemSceneProps : null));
         // ordered after scene_props: the scene's audio configuration (the estimator's fingerprint of its props; "" =
         // never estimated) — the player keeps one measurement per (path, key); a change sends the new configuration's
         // seed right after it (ResolveNow)
-        if (Want("loudness_key") && PlayerHelper.IsScenePath(path) && C.Capabilities.Contains("scene_loudness_key"))
+        if (Want("loudness_key") && scene && C.Capabilities.Contains("scene_loudness_key"))
             d["loudness_key"] = Meta()?.SceneLoudnessFp ?? "";
         // a scene's loudness normalization: its current configuration's loudness (live, else estimated) → a plain
         // gain (0 until known / when off)
-        if (Want("gain.normalize") && PlayerHelper.IsScenePath(path)) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
+        if (Want("gain.normalize") && scene) d["gain.normalize"] = SceneNormalizeDb(Meta(), settings());
         return d;
     }
 
@@ -1270,6 +1369,7 @@ public static class LiascapePlayerMedia
             _ => () => Set(t.prop, t.value),
         };
         QueueSet("set:" + t.prop, run);
+        if (t.prop == "gain.mute") LiascapePlayerProgram.PushDefaults(); // a rotation's next B starts muted / unmuted too
         return true;
     }
 
