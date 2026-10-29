@@ -334,20 +334,29 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         start than the first 60 s report. **Found:** LWE plays every file of a sound object at once at unity gain and
         ignores `volume` — 57 of the library's 79 sound objects carry a volume it drops (32 bound to a user property,
         25 a literal ≠ 1), so no property changes a scene's sound under liascape-player today (next entry).
-  - [ ] **LWE ignores a sound object's `volume` (and its user property), `startsilent` and the playlist modes**
-        (found 2026-10-29 with the estimate; LWE `next-v2` `CSound::load`/`ObjectParser::parseSound` keep only
-        `sound` + `playbackmode`): e.g. 2951169110 plays its "believe in you" AND its "orchestral version"
-        (`volume` bound to a slider at 0) together; 3276522107's train music (slider default 0) plays at full;
-        3289734539 its vocal and instrumental mixes at once; `random` objects play all their files at once, once.
-        Fix = a fork patch: parse `volume` with `it.user(...)` (a `DynamicValue` → its listener sets the stream's
-        gain live, so `scene_props` reach it like any property), apply it in `HostAudioDriver::pull`, honour
-        `startsilent`, play a multi-file `loop`/`random` object as WE does (one file at a time). **WE's rules are now
-        decompiled (WE 2.8.485, 2026-10-29) — the patch spec is `docs/player/spikes/we-sound-semantics.md` § 4**:
-        stream gain = `volume²` (no clamp, no ramp on a property change), every start plays ONE random file
-        (`loop` = back-to-back shuffle, a single file loops natively; `random` = + a uniform `mintime`..`maxtime`
-        gap, defaults 1 / 5 s; `single` = one random file once), absent `playbackmode` = `loop`, `startsilent` =
-        only a script starts it; `muteineditor`/`visible`/`queuemode` don't apply. The `we` model already follows
-        it. Then flip `scene-loudness`'s default model to `we`.
+  - [x] **LWE ignores a sound object's `volume` (and its user property), `startsilent` and the playlist modes**
+        (found 2026-10-29 with the estimate). **Fixed 2026-10-29 by fork patch 0018** (player-core.md § "LWE core";
+        spec `docs/player/spikes/we-sound-semantics.md` § 4): `sound` string or list, ONE random file per start,
+        `volume²` per stream as a live `DynamicValue` (unclamped), `loop` back to back / `random` + a
+        `mintime`..`maxtime` gap / `single` once, on the host clock; a rise from 0 restarts a stopped non-`single`
+        object. Checked on real scenes: 3289734539 plays one version (0.49 × the instrumental), 2951169110's
+        orchestral silent until its slider moves (then live), 3276522107's train music 0 at its default (its sound
+        objects in a bare scene: LWE can't load the scene itself — corpus `load_failed`), 2375914945
+        `musicvolume` 0.8 → 2 = +15.92 dB, 2886313155 `random` gaps 1.98 / 4.85 s. The estimator's `lwe` model now
+        equals `we` (kept the default; 20 scenes re-validated: ±0.10 LU in 17, the 2 off ones are random picks).
+        `SOUND_SEMANTICS` 2 is hashed into every fingerprint. **Open:** spatialization (WE pans a 2D scene's sound
+        by the object's x when `spatialization` is set) not done; `startsilent` sounds never play (LWE's SceneScript
+        has no sound methods — `CSound::play()` is the hook); a start opens the picked file on the render thread
+        (22 ms for a 40 MB WAV in a `scene.pkg`, every few minutes). The fork commit `45ed25c` is local only until
+        the owner pushes `livepaper/next-v2` (this machine's store holds its source, so the flake builds here).
+        **One-off (owner, no migration code):** the index's flat `loudnessState` isn't keyed by the fingerprint, so
+        a stored measurement of the OLD sound is continued by the next play: stale for 8 of the 10 measured items
+        (3289734539, 3023509773, 3013489778, 2511663284, 2371103399, 2375914945, 2288455459, 3219908811 — volume ≠
+        1 or several files; 3363252053 and 3422085307 play as before). With the backend stopped, drop their
+        `loudnessI`/`loudnessTP`/`loudnessSeconds`/`loudnessPartial`/`loudnessState` in
+        `~/.local/share/liascape/library/local/index.json` (or the whole loudness block of every scene: the 2
+        unaffected relearn too), then they relearn on their next play (and the player restarted, so its `Book`
+        holds no old measurement).
   - [ ] **Offline scene loudness → integration** (design 2026-10-29, not wired — waits on the loudness race fix;
         owner decisions folded in: estimate on import + a "recalculate all" button; property-aware loudness):
     - **When the backend runs it.** (1) **On import**: every scene that enters the library (WE local import,
@@ -390,8 +399,9 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           (path, key); a key change on a live source = `leave` the old key (its rest reported with that key) +
           `join` the new one (seeded), segments for 0.5 s after the change dropped (the worker applies the property
           within a frame; the stream's buffers still carry the old mix) — so two configurations never share a
-          histogram; `scene.loudness` carries `key`, and the backend stores each report under it. Under today's LWE
-          no property changes the fingerprint (the entry above), so this flow is inert until LWE honours `volume`.
+          histogram; `scene.loudness` carries `key`, and the backend stores each report under it. Since fork patch
+          0018 a property that changes a sound changes the fingerprint (the entry above), so this flow is live as
+          soon as it's built.
     - **UI.** The card settings modal's loudness line / tooltip: "≈ −14.6 LUFS (estimated)" vs "−15.2 LUFS
           (measured, 30 min)"; a `low` confidence adds its first note ("two versions of one song play at once — may be
           up to +4.7 LU louder"); `/library` items gain `loudnessEstimated`.
