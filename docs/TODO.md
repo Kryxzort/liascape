@@ -316,9 +316,13 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         3289734539 its vocal and instrumental mixes at once; `random` objects play all their files at once, once.
         Fix = a fork patch: parse `volume` with `it.user(...)` (a `DynamicValue` → its listener sets the stream's
         gain live, so `scene_props` reach it like any property), apply it in `HostAudioDriver::pull`, honour
-        `startsilent`, play a multi-file `loop`/`random` object as WE does (one file at a time; WE's exact rules —
-        volume law, `random` gaps from `mintime`/`maxtime` — are inferred, not confirmed: WE's binary wasn't
-        decompiled, no Ghidra here). Then flip `scene-loudness`'s default model to the patched rules (`we` today).
+        `startsilent`, play a multi-file `loop`/`random` object as WE does (one file at a time). **WE's rules are now
+        decompiled (WE 2.8.485, 2026-10-29) — the patch spec is `docs/player/spikes/we-sound-semantics.md` § 4**:
+        stream gain = `volume²` (no clamp, no ramp on a property change), every start plays ONE random file
+        (`loop` = back-to-back shuffle, a single file loops natively; `random` = + a uniform `mintime`..`maxtime`
+        gap, defaults 1 / 5 s; `single` = one random file once), absent `playbackmode` = `loop`, `startsilent` =
+        only a script starts it; `muteineditor`/`visible`/`queuemode` don't apply. The `we` model already follows
+        it. Then flip `scene-loudness`'s default model to `we`.
   - [ ] **Offline scene loudness → integration** (design 2026-10-29, not wired — waits on the loudness race fix;
         owner decisions folded in: estimate on import + a "recalculate all" button; property-aware loudness):
     - **When the backend runs it.** (1) **On import**: every scene that enters the library (WE local import,

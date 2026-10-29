@@ -3901,11 +3901,12 @@ normalized from its first second. Not wired into the backend yet (docs/TODO.md �
   stream per file of a sound object (`objects[]` with a `sound` array), ALL at once from the start, each looping iff
   `playbackmode == "loop"` (else once), unity-gain sum (`HostAudioDriver::pull`); it **ignores `volume`** (and every
   user property bound to it), `visible`, `startsilent`, `mintime`/`maxtime`. So under the player a scene's user
-  properties never change its sound (a fidelity gap — docs/TODO.md). `we`: Wallpaper Engine's rules as far as
-  established — `volume` a linear amplitude (inferred), a bound property's value (slider = its value, bool = 1/0,
-  `{name, condition}` = 1 iff equal: LWE's `DynamicValue` rule), `loop` = a repeating playlist, `random` = one file
-  at a time + the mean of `mintime`/`maxtime` of silence (time-weighted), `single` = the first file once,
-  `startsilent` = silent.
+  properties never change its sound (a fidelity gap — docs/TODO.md). `we`: Wallpaper Engine 2.8.485's decompiled
+  rules (`docs/player/spikes/we-sound-semantics.md`) — stream amplitude = `volume²` (unclamped), a bound property's
+  value (slider = its value, bool = 1/0, `{name, condition}` = 1 iff equal: LWE's `DynamicValue` rule — WE's own
+  conversion not decompiled), absent `playbackmode` = `loop`, `loop` = one random file at a time back-to-back
+  (time-weighted like a playlist), `random` = one random file at a time + the mean of `mintime`/`maxtime` (defaults
+  1 / 5 s) of silence, `single` = one random file once (the first stands in), `startsilent` = silent.
 - **Per-file stats, cached** (`FileStats`, `Cache`): each file decoded ONCE by ffmpeg (`PATH`; a package entry
   piped through stdin; `-ac 2 -ar 48000 f32le`, so a mono file is at −3 dB per channel like LWE's resampler;
   ≤ 1800 s; 120 s timeout, PDEATHSIG) and reduced through the live `SegmentMeter` to per-100 ms K-weighted powers +
