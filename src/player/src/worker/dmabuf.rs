@@ -88,8 +88,8 @@ impl ImportedRing {
     }
 }
 
-/// A frame the [`Latch`] picked. `acquire` = its (already signalled) fence, for the caller's
-/// `gpu_wait_fence` safety net.
+/// A frame the [`Latch`] picked. `acquire` = its (already signalled) fence — the caller only
+/// drops its epoll entry and closes it (F6b: no `gpu_wait_fence` on a signalled fence).
 #[derive(Debug)]
 pub struct Latched {
     pub slot: u8,
@@ -139,6 +139,12 @@ pub struct Latch {
 }
 
 /// A `sync_file` polls readable once it has signalled.
+/// Whether a `sync_file` (or a test's pipe standing in for one) has signalled — `poll`
+/// readable, or in error (never waited on forever).
+pub fn fence_signalled(fd: &OwnedFd) -> bool {
+    signalled(fd)
+}
+
 fn signalled(fd: &OwnedFd) -> bool {
     let mut p = libc::pollfd {
         fd: fd.as_raw_fd(),

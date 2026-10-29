@@ -67,6 +67,11 @@ const EOF_KILL_AFTER: Duration = Duration::from_secs(1);
 const MAX_LINE: usize = 4096;
 /// Most worker output read per `poll` (the rest next time).
 const MAX_READ_PER_POLL: usize = 256 * 1024;
+/// How often [`WorkerHost::poll`] `waitpid`s a worker whose socket and output are still open
+/// (an ending one — EOF, or killed — is reaped on every poll). F6b: `poll` runs on every
+/// frame; a process that exits closes both, so this only bounds an odd case (a descendant
+/// still holding the socket).
+const REAP_CHECK: Duration = Duration::from_millis(100);
 
 /// Restart policy: at most `max` restarts within a sliding `window` (spec §6.3: 3 per 60 s).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,6 +215,8 @@ pub struct WorkerHost {
     sync: Option<String>,
     /// The previous `poll` (the host-stall grace).
     last_poll: Option<Instant>,
+    /// The last `waitpid` of a worker that showed no sign of ending ([`REAP_CHECK`]).
+    reap_checked: Option<Instant>,
 }
 
 impl WorkerHost {
@@ -232,6 +239,7 @@ impl WorkerHost {
             corr: log::new_corr("wk"),
             sync: None,
             last_poll: None,
+            reap_checked: None,
         };
         host.proc_ = Some(host.spawn_proc(0)?);
         Ok(host)
@@ -242,6 +250,14 @@ impl WorkerHost {
     /// owned by the host (register a `dup`, like the mpv wake fds).
     pub fn wake_fd(&self) -> RawFd {
         self.epoll.as_raw_fd()
+    }
+
+    /// Record `m` for the next `Start` only (what [`send`](Self::send) folds), never sent
+    /// to the running worker — `false` = not a message that folds. F6b: a gain push to a
+    /// scene without sound (no stream to apply it to) — a fade pushes one per source per
+    /// millisecond.
+    pub fn fold(&mut self, m: &ToWorker) -> bool {
+        self.fold_into_start(m)
     }
 
     /// Send `m` (+ fds). While no worker is connected (`Starting` before `Hello`,
@@ -287,16 +303,71 @@ impl WorkerHost {
     /// Never blocks: drains messages and output, reaps, runs the heartbeat and the restart
     /// policy. Call on every wake and regularly (the hang check needs time to pass).
     pub fn poll(&mut self, now: Instant) -> Vec<WorkerEvent> {
+        self.poll_io(now, true)
+    }
+
+    /// [`poll`](Self::poll), told whether [`wake_fd`](Self::wake_fd) was readable — `false`
+    /// (the caller's own epoll just said it isn't) skips the reads, leaving the heartbeat,
+    /// the hang check and the reaping. F6b: a scene source polls on every frame and every
+    /// tick.
+    pub fn poll_io(&mut self, now: Instant, io: bool) -> Vec<WorkerEvent> {
         let mut out = Vec::new();
         if self.proc_.is_none() {
             return out;
         }
         self.host_stall_grace(now);
-        self.drain_output(false);
-        self.drain_socket(now, &mut out);
+        // F6b: read only what is ready (one `epoll_wait` instead of a `read` and a `recvmsg`
+        // that mostly find nothing — this runs on every frame).
+        let (sock_ready, out_ready) = if io { self.ready() } else { (false, false) };
+        if out_ready {
+            self.drain_output(false);
+        }
+        if sock_ready {
+            self.drain_socket(now, &mut out);
+        }
         self.heartbeat(now, &mut out);
-        self.reap(now, &mut out);
+        let ending = self
+            .proc_
+            .as_ref()
+            .is_some_and(|p| p.killed || p.sock.is_none() || p.out.is_none());
+        if ending
+            || self
+                .reap_checked
+                .is_none_or(|t| now.saturating_duration_since(t) >= REAP_CHECK)
+        {
+            self.reap_checked = Some(now);
+            self.reap(now, &mut out);
+        }
         out
+    }
+
+    /// `(socket, output)` readable (or hung up) now, from the host's own epoll set; both
+    /// when it can't tell.
+    fn ready(&self) -> (bool, bool) {
+        let Some(p) = self.proc_.as_ref() else {
+            return (false, false);
+        };
+        let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 4];
+        let n = unsafe {
+            libc::epoll_wait(
+                self.epoll.as_raw_fd(),
+                evs.as_mut_ptr(),
+                evs.len() as i32,
+                0,
+            )
+        };
+        if n < 0 {
+            return (true, true);
+        }
+        let sock = p.sock.as_ref().map(|f| f.as_raw_fd() as u64);
+        let out = p.out.as_ref().map(|f| f.as_raw_fd() as u64);
+        let mut r = (false, false);
+        for ev in &evs[..n as usize] {
+            let fd = ev.u64;
+            r.0 |= sock == Some(fd);
+            r.1 |= out == Some(fd);
+        }
+        r
     }
 
     /// The scene time a restart's `Start` carries.
@@ -1284,6 +1355,7 @@ mod tests {
             corr: log::new_corr("wk"),
             sync: None,
             last_poll: None,
+            reap_checked: None,
         };
         host.send(&ToWorker::Paused { paused: true }, &[]).unwrap();
         host.send(
