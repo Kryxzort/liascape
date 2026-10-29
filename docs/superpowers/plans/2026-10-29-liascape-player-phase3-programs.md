@@ -490,6 +490,14 @@ pub struct StartPlan { pub order: Order, pub position: f64, pub played_ms: u64, 
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** `--test program --test supervise` + the full suite in both modes PASS.
 - [ ] **Step 5:** Commit `Resume Or Start Over When A Playlist Starts Again`.
 
+> **Implementer note 2026-10-30 (Task 5b):**
+> - `plan_start` takes `rng: &mut Rng` (the in-crate SplitMix64) and returns `Option<StartPlan>` (`None` = nothing playable). `Order::new_start` lives in `resume.rs` as `resume::new_start` (it needs `Order::from_parts`); `Order::plan_stay` is the step that commits a start installed as the order.
+> - `program.play` is `Programs::play` (the `play` arm left `Programs::verb`). A `start` while the same key plays avoids the item playing now as a fresh shuffle's first; one after a stop avoids the stored point's item. The reply always carries `resumed`.
+> - "Replacement" = the program's `key` changes (`set prog:main.key`): the old key's point is put then, before any `items` edit — the adapter (Task 7) must set `key` first, then `items`, then `program.play {from}`.
+> - `--session-start` with `start_over`: the snapshot's sources whose path is the program's saved item are taken off its outputs/parked slot before the restore (never created); the program then gets its order only and starts with a cut (`Programs::session_start`). With `resume` the restore is the crash restore plus a `program.current {reason: "play", resumed: true}` log. The supervisor appends `--session-start` to its first child only (also its no-compositor retries, which never started).
+> - `resume.json` is loaded at every start (not only `--restore`) and written on `lia-snapshot` with the next snapshot when a point was put (`quit` puts every keyed program's point before its final write).
+> - RED was run against the Task 4 commit's player (the props and the flag don't exist there): 11 of 11 integration tests fail.
+
 **Size: M.**
 
 ### Task 6: The covered Signal — pause when a window covers the wallpaper

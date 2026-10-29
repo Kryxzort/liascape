@@ -8,9 +8,11 @@
 //! - [`order`] — the play order: cycles, shuffle, history, random, reorder (pure, seeded).
 //! - [`pick`] — the effect / duration / method of one switch (pure, seeded).
 //! - [`store`] — `program.json` (configuration + order) and the snapshot's dynamic half.
+//! - [`resume`] — per-playlist resume points and the playlist start rules (O4).
 
 pub mod order;
 pub mod pick;
+pub mod resume;
 pub mod rule;
 pub mod store;
 
@@ -168,6 +170,10 @@ pub struct ProgCfg {
     pub seed: u64,
     /// `while_parked: hold` — both clocks stop while no output shows the item (O2).
     pub hold_parked: bool,
+    /// The playlist's identity (its resume point's key; "" = none).
+    pub key: String,
+    /// `start_mode: resume` ("When the playlist starts again": resume where it left off).
+    pub start_resume: bool,
 }
 
 impl ProgCfg {
@@ -206,6 +212,8 @@ impl ProgCfg {
                 _ => 0,
             },
             hold_parked: s("while_parked") == "hold",
+            key: s("key"),
+            start_resume: s("start_mode") == "resume",
         })
     }
 
@@ -292,6 +300,9 @@ struct Pending {
     step: Step,
     reason: Reason,
     align: Align,
+    /// A resumed start: the play time and countdown B starts with (`None` = 0 and a full
+    /// interval).
+    resume: Option<(f64, Option<f64>)>,
 }
 
 /// One program's live state.
@@ -330,6 +341,11 @@ struct Prog {
     parked: bool,
     /// The play order changed by itself (a cycle's reshuffle): `program.json` is due.
     def_changed: bool,
+    /// The key whose playlist plays now (set by a play; its resume point is put when the
+    /// key changes).
+    playing_key: Option<String>,
+    /// Where the next requested B starts (a resumed start), seconds.
+    start_position: Option<f64>,
 }
 
 fn no_program(id: &str) -> ApiError {
@@ -420,6 +436,8 @@ impl Prog {
             empty_logged: false,
             parked: false,
             def_changed: false,
+            playing_key: None,
+            start_position: None,
         }
     }
 
@@ -556,6 +574,9 @@ impl Prog {
             }
         }
         to.insert("path".into(), Value::String(step.path.clone()));
+        if let Some(pos) = self.start_position.take().filter(|p| *p > 0.0) {
+            to.insert("position".into(), json!(pos));
+        }
         if self.cfg.on_end && self.cfg.interval_ms > 0 && self.can_rotate() {
             // a clip shorter than the minimum loops on until the loop that reaches it
             to.insert("loop".into(), Value::Bool(true));
@@ -601,6 +622,7 @@ impl Prog {
             step: step.clone(),
             reason,
             align,
+            resume: None,
         });
         self.held = false;
         ProgramAction::Start {
@@ -620,8 +642,9 @@ impl Prog {
         self.order.commit(p.step);
         self.rearm = None;
         self.cur_src = b;
-        self.played_ms = 0.0;
-        self.remaining_ms = self.cfg.interval_ms as f64;
+        let (played, remaining) = p.resume.unwrap_or((0.0, None));
+        self.played_ms = played;
+        self.remaining_ms = remaining.unwrap_or(self.cfg.interval_ms as f64);
         self.held = false;
         self.empty_logged = false;
         self.started = true;
@@ -631,10 +654,38 @@ impl Prog {
             "program.current",
             Some(corr.clone()),
             json!({ "id": id, "index": self.index_of(&path), "path": path, "from": from,
-                    "reason": p.reason.as_str(), "corr": corr.0,
+                    "reason": p.reason.as_str(), "corr": corr.0, "resumed": p.resume.is_some(),
                     "at_ms": now.as_secs_f64() * 1000.0,
                     "source": self.cur_src, "source_kind": self.cur_src.as_deref().map(|s| src_str(g, s, "kind")) }),
         );
+    }
+
+    /// Where its playlist is now ([`resume::ResumePoint`]): `None` unless it plays an item.
+    fn resume_point(&self, g: &Graph) -> Option<resume::ResumePoint> {
+        if !self.started {
+            return None;
+        }
+        let path = self.order.current()?.to_string();
+        let (history, hist_idx) = self.order.history();
+        let time_pos = self
+            .cur_src
+            .as_deref()
+            .and_then(|s| src_f64(g, s, "time_pos"))
+            .unwrap_or(0.0);
+        Some(resume::ResumePoint {
+            order: self.order.items().to_vec(),
+            idx: self.order.index(),
+            history: history.to_vec(),
+            hist_idx,
+            path,
+            time_pos,
+            played_ms: self.played_ms.max(0.0) as u64,
+            remaining_ms: self.remaining_ms.max(0.0) as u64,
+            last_effect: self.last_effect.clone(),
+            saved_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64),
+        })
     }
 
     fn fail(&mut self, id: &str, path: &str, reason: &str, now: Duration) {
@@ -853,6 +904,7 @@ impl Prog {
                         step,
                         reason: Reason::Items,
                         align: Align::Now,
+                        resume: None,
                     });
                     let corr = CorrId(String::new());
                     self.commit(id, Some(shown), &corr, g, now);
@@ -1042,6 +1094,9 @@ pub struct Programs {
     def_dirty: bool,
     /// `program.json`'s revision (bumped per write; the snapshot's state carries it).
     def_rev: u64,
+    /// Per-playlist resume points (`resume.json`) and whether they changed since written.
+    resume: resume::ResumeStore,
+    resume_dirty: bool,
 }
 
 impl Programs {
@@ -1204,12 +1259,204 @@ impl Programs {
 
     /// `stop` / `quit`: every program goes (what plays is the caller's to tear down).
     /// Returns their ids (graph nodes the caller destroys).
-    pub fn destroy_all(&mut self) -> Vec<String> {
+    pub fn destroy_all(&mut self, g: &Graph) -> Vec<String> {
         let ids = self.ids();
         for id in &ids {
-            let _ = self.destroy(id);
+            let _ = self.destroy(id, g);
         }
         ids
+    }
+
+    // ------------------------------------------------------------ playlist start (O4)
+
+    /// `<state>/resume.json` (at startup, whatever `--restore`: a later Play resumes).
+    pub fn load_resume(&mut self, dir: &std::path::Path) {
+        self.resume = resume::ResumeStore::load(dir);
+    }
+
+    /// `resume.json` is due.
+    pub fn resume_dirty(&self) -> bool {
+        self.resume_dirty
+    }
+
+    /// `resume.json` now (the dirty mark cleared).
+    pub fn resume_bytes(&mut self) -> Vec<u8> {
+        self.resume_dirty = false;
+        self.resume.to_bytes()
+    }
+
+    /// Keep where `id`'s playlist is (its key's resume point) — on stop, destroy, a key
+    /// change (another playlist replaces it) and quit, whatever its `start_mode`.
+    pub fn put_point(&mut self, id: &str, g: &Graph) {
+        let Some(p) = self.progs.get(id) else { return };
+        let key = p.playing_key.clone().unwrap_or_else(|| p.cfg.key.clone());
+        if key.is_empty() {
+            return;
+        }
+        let Some(pt) = p.resume_point(g) else { return };
+        log::event(
+            "program",
+            Level::Debug,
+            "program.resume_saved",
+            None,
+            json!({ "id": id, "key": key, "path": pt.path, "time_pos": pt.time_pos,
+                    "played_ms": pt.played_ms }),
+        );
+        self.resume.put(&key, pt);
+        self.resume_dirty = true;
+    }
+
+    /// `quit`: every keyed program's point (before the final write).
+    pub fn put_all_points(&mut self, g: &Graph) {
+        for id in self.ids() {
+            self.put_point(&id, g);
+        }
+    }
+
+    /// `program.play {id, from: "start" | "resume" | "index", index?, keep_pause?}` — the
+    /// § Playlist start table (`resume::plan_start`). A missing `from` = `index` with an
+    /// index, else `start`. `resume` while the same key's playlist plays → nothing switched
+    /// (`Some(reply)` = the verb's reply as is). `cut`: no effect (`keep_pause` while
+    /// paused; a session start).
+    #[allow(clippy::too_many_arguments)]
+    pub fn play(
+        &mut self,
+        id: &str,
+        from: Option<&str>,
+        index: Option<usize>,
+        cut: bool,
+        g: &Graph,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+    ) -> Result<(Vec<ProgramAction>, Option<Value>), ApiError> {
+        let from = match (from, index) {
+            (Some("start"), _) | (None, None) => resume::StartFrom::Start,
+            (Some("resume"), _) => resume::StartFrom::Resume,
+            (Some("index"), i) | (None, i @ Some(_)) => resume::StartFrom::Index(i.unwrap_or(0)),
+            (Some(other), _) => {
+                return Err(ApiError {
+                    code: "bad_request",
+                    message: format!("from {other:?}: expected start|resume|index"),
+                    hint: "`program.play {\"id\": \"prog:main\", \"from\": \"resume\"}`".to_string(),
+                });
+            }
+        };
+        let stored = {
+            let p = self.get_nonempty(id)?;
+            if let resume::StartFrom::Index(i) = from
+                && i >= p.cfg.items.len()
+            {
+                return Err(ApiError {
+                    code: "out_of_range",
+                    message: format!("index {i}: the program has {} items", p.cfg.items.len()),
+                    hint: "`liascape-player ctl get prog:<name>.items`".to_string(),
+                });
+            }
+            let key = p.cfg.key.clone();
+            let same_playing = p.started
+                && !key.is_empty()
+                && p.playing_key.as_deref() == Some(key.as_str());
+            if same_playing && from == resume::StartFrom::Resume {
+                // it never stopped: keep playing where it is (a pause is the backend's, I1)
+                let path = p.order.current().map(str::to_string);
+                let index = path.as_deref().map(|x| p.index_of(x)).unwrap_or(-1);
+                return Ok((
+                    Vec::new(),
+                    Some(json!({ "corr": null, "path": path, "index": index, "resumed": true })),
+                ));
+            }
+            if same_playing {
+                p.resume_point(g) // what plays now: a fresh shuffle won't start there
+            } else if key.is_empty() {
+                None
+            } else {
+                self.resume.get(&key).cloned()
+            }
+        };
+        let p = self.progs.get_mut(id).ok_or_else(|| no_program(id))?;
+        let paths = p.cfg.paths();
+        let (skips, broken) = (&p.skips, &p.broken);
+        let skip = |x: &str| skips.contains(x) || broken.contains(x);
+        let Some(plan) =
+            resume::plan_start(&paths, &skip, p.cfg.shuffle, from, stored.as_ref(), &mut p.rng)
+        else {
+            return Ok((Vec::new(), None));
+        };
+        p.order = plan.order;
+        let Some(step) = p.order.plan_stay() else {
+            return Ok((Vec::new(), None));
+        };
+        p.def_changed = true;
+        p.started = true;
+        p.backoff_until = None;
+        p.rearm = None;
+        p.failed.clear();
+        p.playing_key = Some(p.cfg.key.clone());
+        p.start_position = Some(plan.position);
+        let act = p.start(id, step, Reason::Play, Align::Now, cut, defaults_of);
+        if plan.resumed
+            && let Some(pd) = p.pending.as_mut()
+        {
+            pd.resume = Some((plan.played_ms as f64, plan.remaining_ms.map(|r| r as f64)));
+        }
+        Ok((vec![act], None))
+    }
+
+    /// `serve --restore --session-start` (a boot / `liascape restore`, never a crash
+    /// restart): a `start_over` program starts per `plan_start(Start)` — a cut to its first
+    /// item (sequential) or a fresh shuffle whose first ≠ `last` (the item it was on); the
+    /// runtime left that item uncreated. A `resume` one was restored exactly
+    /// ([`Programs::restore`]) and says so (`program.current {resumed: true}`).
+    pub fn session_start(
+        &mut self,
+        id: &str,
+        last: Option<&str>,
+        now: Duration,
+        defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
+    ) -> Vec<ProgramAction> {
+        let Some(p) = self.progs.get_mut(id) else {
+            return Vec::new();
+        };
+        if p.cfg.start_resume {
+            if p.started {
+                p.playing_key = Some(p.cfg.key.clone());
+                let path = p.order.current().unwrap_or("").to_string();
+                log::event(
+                    "program",
+                    Level::Info,
+                    "program.current",
+                    None,
+                    json!({ "id": id, "index": p.index_of(&path), "path": path, "from": null,
+                            "reason": "play", "corr": null, "resumed": true,
+                            "at_ms": now.as_secs_f64() * 1000.0, "source": p.cur_src }),
+                );
+            }
+            return Vec::new();
+        }
+        let avoid = last.map(|l| resume::ResumePoint {
+            path: l.to_string(),
+            ..resume::ResumePoint::default()
+        });
+        let paths = p.cfg.paths();
+        let (skips, broken) = (&p.skips, &p.broken);
+        let skip = |x: &str| skips.contains(x) || broken.contains(x);
+        let Some(plan) = resume::plan_start(
+            &paths,
+            &skip,
+            p.cfg.shuffle,
+            resume::StartFrom::Start,
+            avoid.as_ref(),
+            &mut p.rng,
+        ) else {
+            return Vec::new();
+        };
+        p.order = plan.order;
+        let Some(step) = p.order.plan_stay() else {
+            return Vec::new();
+        };
+        p.def_changed = true;
+        p.started = true;
+        p.playing_key = Some(p.cfg.key.clone());
+        vec![p.start(id, step, Reason::Play, Align::Now, true, defaults_of)]
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1234,6 +1481,13 @@ impl Programs {
         };
         let mut acts = Vec::new();
         self.def_dirty = true;
+        // another playlist replaces this one (its key changes): keep where the old one was
+        if let Some(p) = self.progs.get(id)
+            && p.cfg.key != cfg.key
+            && p.playing_key.as_deref() == Some(p.cfg.key.as_str())
+        {
+            self.put_point(id, g);
+        }
         match self.progs.get_mut(id) {
             Some(p) => {
                 let old = std::mem::replace(&mut p.cfg, cfg);
@@ -1313,8 +1567,9 @@ impl Programs {
 
     /// `destroy`: the rotation stops; what plays stays on screen (an armed switch that
     /// hasn't started is cancelled — A plays on).
-    pub fn destroy(&mut self, id: &str) -> Vec<ProgramAction> {
+    pub fn destroy(&mut self, id: &str, g: &Graph) -> Vec<ProgramAction> {
         let mut acts = Vec::new();
+        self.put_point(id, g);
         if let Some(p) = self.progs.remove(id) {
             self.def_dirty = true;
             if let Some(c) = p.pending.and_then(|p| p.corr) {
@@ -1346,7 +1601,6 @@ impl Programs {
         &mut self,
         verb: &str,
         id: &str,
-        index: Option<usize>,
         keep_pause: bool,
         g: &Graph,
         now: Duration,
@@ -1372,21 +1626,6 @@ impl Programs {
             .filter(|x| x.align == Align::Now)
             .map(|x| x.step.clone());
         let (step, reason) = match verb {
-            "play" => {
-                let i = index.unwrap_or(0);
-                if i >= p.cfg.items.len() {
-                    return Err(ApiError {
-                        code: "out_of_range",
-                        message: format!("index {i}: the program has {} items", p.cfg.items.len()),
-                        hint: "`liascape-player ctl get prog:<name>.items`".to_string(),
-                    });
-                }
-                // a play starts the session there (ApplyTimedPlaylist): the bar's order
-                let paths = p.cfg.paths();
-                p.order = Order::new(paths, i, p.cfg.shuffle);
-                p.def_changed = true;
-                (p.order.plan_play(i), Reason::Play)
-            }
             "next" => {
                 let step = match (armed, &on_way) {
                     (Some(s), _) => Some(s),
@@ -1443,10 +1682,17 @@ impl Programs {
             .as_ref()
             .and_then(|(_, path)| Some(self.progs.get(id)?.index_of(path)))
             .unwrap_or(-1);
+        let resumed = started.is_some()
+            && self
+                .progs
+                .get(id)
+                .and_then(|p| p.pending.as_ref())
+                .is_some_and(|x| x.resume.is_some());
         json!({
             "corr": started.as_ref().map(|(c, _)| c.0.clone()),
             "path": started.map(|(_, p)| p),
             "index": index,
+            "resumed": resumed,
         })
     }
 
@@ -1467,11 +1713,13 @@ impl Programs {
             return;
         };
         let align = p.pending.as_ref().map(|x| x.align).unwrap_or(Align::Now);
+        let resume = p.pending.as_ref().and_then(|x| x.resume);
         p.pending = Some(Pending {
             corr: Some(corr.clone()),
             step,
             reason,
             align,
+            resume,
         });
         if let Some(b) = parked_b
             && align == Align::Now

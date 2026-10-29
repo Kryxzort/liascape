@@ -452,6 +452,21 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                         PropValue::Str("rotate".to_string()),
                     ),
                 ),
+                // the playlist's identity (`name:<saved name>` | `bar`; "" = none): its resume
+                // point is kept per key (§ Playlist start)
+                (
+                    "key",
+                    def(PropType::Str, false, PropValue::Str(String::new())),
+                ),
+                // "When the playlist starts again" (O4): start over (default) | resume
+                (
+                    "start_mode",
+                    def(
+                        PropType::Enum(&["start_over", "resume"]),
+                        false,
+                        PropValue::Str("start_over".to_string()),
+                    ),
+                ),
                 // observed
                 (
                     "phase",

@@ -48,7 +48,7 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
     (
         "program.play",
         program_play,
-        "a program plays item {id, index?: 0, keep_pause?} → {corr, path, index}",
+        "a program (re)starts {id, from?: start|resume|index, index?, keep_pause?} → {corr, path, index, resumed}",
     ),
     (
         "program.next",
@@ -372,7 +372,7 @@ fn destroy(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     }
     if rt.graph.kind_of(id) == Some(NodeKind::Program) {
         // the rotation stops; what plays stays on screen
-        let acts = rt.programs.destroy(id);
+        let acts = rt.programs.destroy(id, &rt.graph);
         rt.run_program_actions(acts);
     }
     // A source is ramped out first if it can be heard (core invariant); `ramp_ms` says
@@ -651,11 +651,37 @@ fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, Api
     };
     let now = rt.now();
     let cat = &rt.cat;
-    let acts = rt
-        .programs
-        .verb(verb, &id, index, keep_pause, &rt.graph, now, &|e| {
-            cat.defaults(e)
-        })?;
+    let acts = if verb == "play" {
+        // § Playlist start: `from` start | resume | index
+        let from = match args.get("from") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(f)) => Some(f.as_str()),
+            Some(other) => {
+                return Err(bad_request(format!(
+                    "args.from must be \"start\", \"resume\" or \"index\", got {other}"
+                )));
+            }
+        };
+        let paused = matches!(
+            rt.graph.get(&PropPath("player.paused".into())),
+            Ok(crate::graph::PropValue::Bool(true))
+        );
+        let (acts, early) = rt.programs.play(
+            &id,
+            from,
+            index,
+            keep_pause && paused,
+            &rt.graph,
+            &|e| cat.defaults(e),
+        )?;
+        if let Some(reply) = early {
+            return Ok(reply);
+        }
+        acts
+    } else {
+        rt.programs
+            .verb(verb, &id, keep_pause, &rt.graph, now, &|e| cat.defaults(e))?
+    };
     let out = rt.run_program_actions(acts);
     Ok(rt.programs.verb_reply(&id, out))
 }

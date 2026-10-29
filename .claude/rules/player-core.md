@@ -1859,6 +1859,23 @@ source; the transition recipe stays the one place a switch happens. The contract
     video re-arms `align: end` — the snapshot saved an armed switch as A where it plays). The supervisor's 4th
     restart in a minute (no `--restore`) comes back without programs. `stop` (and `quit`, after its final
     write) destroys every program (`stop_all`).
+  - **Playlist start** (Task 5b, O4, plan § Playlist start; `recipes/program/resume.rs`): Program props `key`
+    (Str, `name:<saved name>` | `bar`, "" = none) and `start_mode` (`start_over` default | `resume`, live — read at
+    the next start only, never jumps the current play). `program.play {id, from?: start|resume|index, index?,
+    keep_pause?}` (no `from` = `index` with an index, else `start`) applies `resume::plan_start`: `start` →
+    sequential: the first playable item; shuffle: a fresh permutation whose first ≠ the last item played; `index` →
+    that item at 0 (an explicit play-from beats the setting); `resume` → the key's resume point exactly (order,
+    cursor, history, `position` = its `time_pos`, play time, countdown — `program.current {resumed: true}`), a point
+    whose items changed re-anchored by the reorder rule (its item at its time if still there, else the item after
+    its old place at 0), none → as `start`; `resume` while the same key's playlist plays → `{corr: null, resumed:
+    true}`, nothing switched (a pause stays — the backend lifts it, I1). Resume points: `<state>/resume.json`
+    (≤ 50 keys, least recently put dropped; written on `lia-snapshot` when changed), put whatever the mode when a
+    keyed program is destroyed, `stop`ped, replaced (its `key` changes — the adapter sets `key` before `items`) and
+    on `quit`; loaded at every start. **`serve --restore --session-start`** (boot / `liascape restore`; the
+    supervisor gives it to its first child only, never to a restart): a `start_over` program's saved item is taken
+    off the snapshot before the restore (never created) and the program starts per `plan_start(start)` with a cut;
+    a `resume` one restores exactly and logs `program.current {resumed: true}`. A crash restart or upgrade restores
+    exactly whatever the mode.
   - Tests: `tests/program.rs` (27 stepped/real-clock API tests: timer/speed/1-item/on-end/min-hold/max/0-off/scenes
     after/separate off/images/commit at effect start/cut at A's end/effect pick/failures/all unplayable/skip/broken/
     VRAM/pause/every switch combo; Task 4's 18: the history contract through the verbs, prev at the start, next while
@@ -1869,11 +1886,12 @@ source; the transition recipe stays the one place a switch happens. The contract
 
 `src/runtime.rs` + `src/headless.rs` (spec §4.1/§4.2, §9 "headless deterministic mode";
 Task 12). `liascape-player serve --headless [--outputs 1920x1080@60[,…]] [--clock real|stepped]
-[--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace] [--restore]
+[--ao <mpv ao>] [--socket <path>] [--log-level error|warn|info|debug|trace] [--restore [--session-start]]
 [--no-supervise] [--redraw-policy content|every_tick]` — defaults `1920x1080@60`, `real`,
 mpv's liascape-player default ao (`pipewire`), `info`. `serve` is **supervised** unless
 `--no-supervise` (§ Supervisor: the process you start is the supervisor, the compositor is
-its child); `--restore` recreates `<state>/snapshot.json` (§ Snapshot);
+its child); `--restore` recreates `<state>/snapshot.json` (§ Snapshot) — with `--session-start` (a session
+start, § Programs "Playlist start") each program starts per its `start_mode`;
 `--redraw-policy content` (headless only) presents like Wayland — only when the picture
 changed (§ Wayland → Frame pacing) — instead of composing every tick. **Exit codes:** 0
 clean (quit / SIGTERM / SIGINT), 1 refused at startup, never retried (lock held, an
@@ -2217,7 +2235,7 @@ note on stderr and exits 0 (or stdout closes).
 | `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}` (a broadcast alias matching nothing: `targets: []`, like `set` — M13); `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
 | `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` (`parked: true` when no output exists — § Runtime, I4) | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
-| `program.play` | `{id, index?: 0, keep_pause?: false}` (§ Programs) | `{corr, path, index}` | `no_such_node` (no such program), `unsupported` (empty program — hint: the `programs` probe), `out_of_range` (index) | `ctl program.play '{"id":"prog:main","index":2}'` |
+| `program.play` | `{id, from?: "start"\|"resume"\|"index", index?, keep_pause?: false}` (§ Programs "Playlist start"; no `from` = `index` with an index, else `start`) | `{corr, path, index, resumed}` — `corr` null + `resumed: true` = the same key's playlist already plays (nothing switched) | `no_such_node` (no such program), `unsupported` (empty program — hint: the `programs` probe), `out_of_range` (index), `bad_request` (`from`) | `ctl program.play '{"id":"prog:main","from":"resume"}'` |
 | `program.next` / `program.prev` / `program.random` | `{id, keep_pause?: false}` | `{corr, path, index}` — `corr`/`path` null = nothing to do (previous at the session's first item, nothing playable) | `no_such_node`, `unsupported` (empty) | `ctl program.next '{"id":"prog:main"}'` |
 | `state` | — | `{graph (Graph::snapshot), transitions (status), programs (§ Programs, `ProgramStatus`), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
@@ -2808,7 +2826,8 @@ default change (no fight), `audio.bus.up {requested}` ≤ 1 s, meter gap ≤ 50 
 `src/supervise.rs` + `main.rs` (spec §4.1 "Supervision"; Task 16, R72/R73). `liascape-player
 serve …` **is the supervisor** unless `--no-supervise`: before any thread, GL context or
 PipeWire connection exists it fork+execs `/proc/self/exe serve --supervised [--restore]
-[--restarted <spec>] <the user's options>` (argv[0] kept; the child sets its comm back to
+[--restarted <spec>] <the user's options>` (`--session-start` only on the first child — a restart is a recovery,
+never a playlist start) (argv[0] kept; the child sets its comm back to
 `liascape-player` — exec of `/proc/self/exe` would make it `exe`), then only waits and forwards
 signals. It never binds the socket or takes the instance lock (the child does, as before),
 never touches EGL/PipeWire, has no socket. `/proc/self/exe` means a restart runs the same

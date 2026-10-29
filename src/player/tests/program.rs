@@ -30,6 +30,8 @@ struct Serve {
     child: Option<Child>,
     root: PathBuf,
     sock: PathBuf,
+    env: Vec<(String, String)>,
+    clock: String,
     _serial: MutexGuard<'static, ()>,
 }
 
@@ -56,6 +58,24 @@ impl Serve {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("run")).unwrap();
         std::fs::create_dir_all(root.join("state")).unwrap();
+        let sock = root.join("run/liascape/liascape-player.sock");
+        let mut s = Serve {
+            child: None,
+            root,
+            sock,
+            env: env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            clock: clock.to_string(),
+            _serial: serial,
+        };
+        s.spawn(&[]);
+        Some(s)
+    }
+
+    /// Start the player in this root (`extra` serve args), wait for its socket.
+    fn spawn(&mut self, extra: &[&str]) {
         let mut c = Command::new(BIN);
         {
             use std::os::unix::process::CommandExt;
@@ -73,40 +93,52 @@ impl Serve {
             "--outputs",
             "640x360@60,320x180@60",
             "--clock",
-            clock,
+            &self.clock,
             "--ao",
             "null",
         ])
+        .args(extra)
         .env("LIASCAPE_PLAYER_VRAM_PROBE", "none")
-        .env("XDG_RUNTIME_DIR", root.join("run"))
-        .env("XDG_STATE_HOME", root.join("state"))
+        .env("XDG_RUNTIME_DIR", self.root.join("run"))
+        .env("XDG_STATE_HOME", self.root.join("state"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(
-            std::fs::File::create(root.join("stderr.log")).unwrap(),
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.root.join("stderr.log"))
+                .unwrap(),
         ));
-        for (k, v) in env {
+        for (k, v) in &self.env {
             c.env(k, v);
         }
-        let child = c.spawn().expect("spawn liascape-player serve");
-        let sock = root.join("run/liascape/liascape-player.sock");
-        let mut s = Serve {
-            child: Some(child),
-            root,
-            sock,
-            _serial: serial,
-        };
+        self.child = Some(c.spawn().expect("spawn liascape-player serve"));
         let t = Instant::now();
         while t.elapsed() < Duration::from_secs(15) {
-            if UnixStream::connect(&s.sock).is_ok() {
-                return Some(s);
+            if UnixStream::connect(&self.sock).is_ok() {
+                return;
             }
-            if let Some(st) = s.child.as_mut().unwrap().try_wait().unwrap() {
-                panic!("serve exited early ({st}): {}", s.stderr());
+            if let Some(st) = self.child.as_mut().unwrap().try_wait().unwrap() {
+                panic!("serve exited early ({st}): {}", self.stderr());
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        panic!("serve socket never came up: {}", s.stderr());
+        panic!("serve socket never came up: {}", self.stderr());
+    }
+
+    /// After a `quit`: wait for the player to exit, then start it again in the same root.
+    fn respawn(&mut self, extra: &[&str]) {
+        let mut child = self.child.take().expect("a player");
+        let t = Instant::now();
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(t.elapsed() < Duration::from_secs(20), "the player never exited");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        self.spawn(extra);
     }
 
     fn stderr(&self) -> String {
@@ -2390,4 +2422,272 @@ fn program_json_written_only_on_config_change() {
     let m1 = std::fs::metadata(&file).unwrap().modified().unwrap();
     assert_ne!(m1, m0);
     assert_eq!(read_json(&file).unwrap()["rev"], v["rev"], "written once");
+}
+
+// ---------------------------------------------------------------- Task 5b: playlist start
+
+/// `prog:main` with `key` and `start_mode`, items as given (no play yet).
+fn keyed(c: &mut Client, key: &str, mode: &str, items: &[&str], props: Value) {
+    let mut p = json!({"key": key, "start_mode": mode});
+    for (k, v) in props.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    program(c, items, p);
+}
+
+/// Set the program's key + items (the backend switching to another playlist).
+fn switch_to(c: &mut Client, key: &str, items: &[&str]) {
+    let it: Vec<Value> = items.iter().map(|p| json!({"path": p})).collect();
+    c.ok("set", json!({"path": "prog:main.key", "value": key}));
+    c.ok("set", json!({"path": "prog:main.items", "value": it}));
+}
+
+/// The shown source's `time_pos` on VIRTUAL-1.
+fn shown_time(c: &mut Client) -> f64 {
+    c.get("cur:VIRTUAL-1.time_pos").as_f64().unwrap_or(0.0)
+}
+
+#[test]
+fn session_start_resume_is_exact() {
+    let Some(mut srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("ssr_a", 10.0), clip("ssr_b", 10.0), clip("ssr_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 3000);
+    let played = c.get("prog:main.played_ms").as_f64().unwrap();
+    let tp = shown_time(&mut c);
+    c.ok("quit", json!({}));
+    drop(c);
+    srv.respawn(&["--restore", "--session-start"]);
+    let mut c = srv.client();
+    c.step(16);
+    let p = prog(&mut c);
+    assert_eq!(p["path"], json!(items[1]), "{p}");
+    assert!((p["played_ms"].as_f64().unwrap() - played).abs() <= 100.0, "{p}");
+    let t2 = shown_time(&mut c);
+    assert!((t2 - tp).abs() <= 2.0, "time_pos {tp} → {t2}");
+    let cur = c.ok("logs", json!({"kind_prefix": "program.current"}))["events"].clone();
+    assert!(
+        cur.as_array().unwrap().iter().any(|e| e["resumed"] == json!(true)),
+        "{cur}"
+    );
+}
+
+#[test]
+fn session_start_start_over_never_shows_the_old_item() {
+    let Some(mut srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("sso_a", 10.0), clip("sso_b", 10.0), clip("sso_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "start_over", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 2}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 2000);
+    c.ok("quit", json!({}));
+    drop(c);
+    srv.respawn(&["--restore", "--session-start"]);
+    let mut c = srv.client();
+    let mut shown = false;
+    for _ in 0..200 {
+        let st = c.ok("state", json!({}));
+        let content = st["graph"]["lay:VIRTUAL-1:main"]["content"].as_str().unwrap_or("");
+        if !content.is_empty() {
+            assert_eq!(st["graph"][content]["path"], json!(items[0]), "{st}");
+            shown = true;
+            break;
+        }
+        c.step(16);
+    }
+    assert!(shown, "item 1 shown");
+    let opened = c.ok("logs", json!({"kind_prefix": "source."}))["events"].clone();
+    assert!(
+        opened
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["path"] != json!(items[2])),
+        "the saved item is never created: {opened}"
+    );
+    let p = prog(&mut c);
+    assert_eq!(p["path"], json!(items[0]));
+    assert!(p["played_ms"].as_f64().unwrap() < 500.0, "{p}");
+}
+
+#[test]
+fn play_same_key_resume_keeps_playing() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("sk", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 1000);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let n = scheduled(&c).len();
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["corr"], Value::Null, "{r}");
+    assert_eq!(r["resumed"], json!(true), "{r}");
+    step_for(&mut c, 50, 500);
+    assert_eq!(scheduled(&c).len(), n, "nothing switched");
+    assert_eq!(c.get("player.paused"), json!(true), "the backend lifts a pause (I1)");
+    assert_eq!(prog(&mut c)["path"], json!(items[1]));
+}
+
+#[test]
+fn play_same_key_start_over_restarts() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("so", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "start_over", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 1000);
+    let r = verb(&mut c, "play", json!({"from": "start"}));
+    assert_eq!(r["path"], json!(items[0]), "{r}");
+    step_until(&mut c, 16, 2000, "the restart", n_currents(2));
+    assert_eq!(currents(&c)[1]["resumed"], json!(false));
+}
+
+#[test]
+fn play_after_stop_resumes_its_point() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("as_a", 10.0), clip("as_b", 10.0), clip("as_c", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 2}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 3000);
+    let tp = shown_time(&mut c);
+    let played = c.get("prog:main.played_ms").as_f64().unwrap();
+    c.ok("stop", json!({}));
+    c.step(16);
+    c.events.clear();
+    keyed(&mut c, "name:A", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["path"], json!(items[2]), "{r}");
+    step_until(&mut c, 16, 3000, "the resume", n_currents(1));
+    let cur = &currents(&c)[0];
+    assert_eq!(cur["resumed"], json!(true), "{cur}");
+    step_for(&mut c, 16, 300);
+    let t2 = shown_time(&mut c);
+    assert!((t2 - tp).abs() <= 1.0, "at its time: {tp} → {t2}");
+    assert!(c.get("prog:main.played_ms").as_f64().unwrap() >= played);
+}
+
+#[test]
+fn switching_playlists_and_back_resumes_each() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let a = [clip("sw_a1", 10.0), clip("sw_a2", 10.0), clip("sw_a3", 10.0)];
+    let a: Vec<&str> = a.iter().map(String::as_str).collect();
+    let b = [clip("sw_b1", 10.0), clip("sw_b2", 10.0)];
+    let b: Vec<&str> = b.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "resume", &a, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 2}));
+    step_until(&mut c, 16, 2000, "A's 3rd", n_currents(1));
+    step_for(&mut c, 50, 2000);
+    let ta = shown_time(&mut c);
+    switch_to(&mut c, "name:B", &b);
+    verb(&mut c, "play", json!({"from": "index", "index": 1}));
+    step_until(&mut c, 16, 2000, "B", n_currents(2));
+    step_for(&mut c, 50, 1500);
+    let tb = shown_time(&mut c);
+    switch_to(&mut c, "name:A", &a);
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["path"], json!(a[2]), "A's point: {r}");
+    step_until(&mut c, 16, 2000, "A again", n_currents(3));
+    step_for(&mut c, 16, 200);
+    assert!((shown_time(&mut c) - ta).abs() <= 1.0, "A at its time");
+    switch_to(&mut c, "name:B", &b);
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["path"], json!(b[1]), "B's point: {r}");
+    step_until(&mut c, 16, 2000, "B again", n_currents(4));
+    step_for(&mut c, 16, 200);
+    assert!((shown_time(&mut c) - tb).abs() <= 1.0, "B at its time");
+}
+
+#[test]
+fn resume_after_edit_reanchors() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("re", 4);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 2}));
+    step_until(&mut c, 16, 2000, "c", n_currents(1));
+    switch_to(&mut c, "name:B", &items[..1]);
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "B", n_currents(2));
+    // A's items now without c
+    switch_to(&mut c, "name:A", &[items[0], items[1], items[3]]);
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["path"], json!(items[3]), "the item after c's old place: {r}");
+    step_until(&mut c, 16, 2000, "A", n_currents(3));
+    assert_eq!(currents(&c)[2]["resumed"], json!(false));
+    assert!(c.get("prog:main.played_ms").as_f64().unwrap() < 100.0);
+}
+
+#[test]
+fn resume_without_point_starts_over() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("wp", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:new", "resume", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    let r = verb(&mut c, "play", json!({"from": "resume"}));
+    assert_eq!(r["path"], json!(items[0]), "{r}");
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    assert_eq!(currents(&c)[0]["resumed"], json!(false));
+}
+
+#[test]
+fn play_index_beats_start_mode() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("pi", 5);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    for (k, mode) in ["start_over", "resume"].iter().enumerate() {
+        if k > 0 {
+            c.ok("destroy", json!({"id": "prog:main"}));
+        }
+        keyed(&mut c, "name:A", mode, &items, json!({"mode": "timer", "interval_ms": 60_000}));
+        verb(&mut c, "play", json!({"index": 1}));
+        step_until(&mut c, 16, 2000, "the play", n_currents(2 * k + 1));
+        let r = verb(&mut c, "play", json!({"from": "index", "index": 4}));
+        assert_eq!(r["path"], json!(items[4]), "{mode}: {r}");
+        step_until(&mut c, 16, 2000, "item 4", n_currents(2 * k + 2));
+        assert!(c.get("prog:main.played_ms").as_f64().unwrap() < 100.0);
+    }
+}
+
+#[test]
+fn start_setting_change_never_jumps_the_current_play() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("sc", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "start_over", &items, json!({"mode": "timer", "interval_ms": 60_000}));
+    verb(&mut c, "play", json!({"index": 1}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    let n = scheduled(&c).len();
+    let mut last = 0.0;
+    for mode in ["resume", "start_over", "resume"] {
+        c.ok("set", json!({"path": "prog:main.start_mode", "value": mode}));
+        for _ in 0..30 {
+            c.step(55);
+            let p = c.get("prog:main.played_ms").as_f64().unwrap();
+            assert!(p >= last, "monotone: {last} → {p}");
+            last = p;
+        }
+    }
+    assert_eq!(scheduled(&c).len(), n, "no switch");
+    // the next start follows it: resume on the playing key keeps playing
+    let r = verb(&mut c, "play", json!({"from": "start"}));
+    assert_eq!(r["path"], json!(items[0]), "an explicit start still starts over: {r}");
 }
