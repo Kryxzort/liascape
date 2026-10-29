@@ -3764,9 +3764,9 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
 - **Seeded plays.** Source prop **`loudness_seed`** (Map; `{}` = none) = a stored state: a `Learner`
   starts from it (`with_seed`: its counts, peak, audible seconds) and continues the SAME integration.
   Read at open — and used only when the player holds less of that path itself (next bullet); a live
-  set restarts the path's measurement from the new seed (what was measured since its last report is
-  dropped — it may already be in that seed: never counted twice; the backend only sets it at create);
-  a `path` change drops it (the old folder's). A malformed seed is ignored (measured from nothing).
+  set follows the same rule (`Book::reseed`: adopted only if it covers more audible play, who measures
+  unchanged — never counted twice, never shrunk; the backend only sets it at create); a `path` change
+  drops it (the old folder's). A malformed seed is ignored (measured from nothing).
   Each session forms its own first block (its first 3 segments start none: 0.3 s less than one long
   run).
 - **One measurement per path (`audio::loudness::Book`, 2026-10-29).** The backend reads the seed from
@@ -3776,16 +3776,30 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   runs); a rest too short to report at the end (< a twelfth of the window) never reached the index at
   all. So the compositor keeps its own: `SourceHost` owns one `Book` (path → `Learner` + the live
   sources of the path, in open order), every `SceneSource` joins its path at open / `path` change and
-  leaves it at teardown / `path` change / drop. **A source continues the path's measurement** — live
+  leaves it at teardown / `path` change / drop. **The key is the canonical folder**
+  (`sources::scene::loudness_key`: `fs::canonicalize`, else the path as given — computed at the join, never
+  per segment), so `/home/…` vs its physical path, a trailing slash and a `local/<id>` symlink are one entry.
+  **A source opening with no seed** (`loudness_seed` absent — and every `path` change) **on a folder no
+  source plays drops that folder's idle entry first** (`Book::forget_idle`): the backend has nothing for the
+  item — deleted and re-added, a Workshop update —, so a stale measurement isn't continued; a stale-but-present
+  seed keeps the reopen-continues rule. Trade-off (decided by the review): a first play shorter than its first
+  report (no index state yet) reopened right away starts over instead of continuing — nothing double-counted,
+  at most that rest lost. **A source continues the path's measurement** — live
   (a transition A → A' of one scene: A''s open takes A's live state; also a reopen during a real-clock `stop`'s
   fade-out, when the stopped source is still a node — then it makes no end report) or last left (a reopen: no wait,
   no index round trip — the bound on a switch is 0 ms) — **unless its seed covers more audible play**
   (another lineage: after a compositor restart, the index edited) — then the seed is adopted. A seed is
   never merged into a learner, only one of the two kept, and every report the backend stored came from
-  the book's lineage (or the one adopted): **no block is ever counted twice**. **Only the newest live
-  source of a path measures** (`Book::push`): A's segments are dropped from A''s open on (the same
-  sound twice — A's leave then reports nothing); if the newest leaves first, the next newest measures
-  on. Joining starts a session (`Learner::begin_session`: `seed_s` = what's measured so far, the block
+  the book's lineage (or the one adopted): **no block is ever counted twice**. **One live source of a path
+  measures — the head** (`Book::push`): a source joining a path that plays is **pending until its first
+  segment** — A measures on while A' loads its worker, is paused or waiting, is restored broken or past its
+  restart budget (no worker: it never sounds) — and only then takes over (A's segments are dropped from
+  A''s first one on: the same sound twice — A's leave then reports nothing). A member that joined *before*
+  the head never takes over by sounding. When the head leaves, the newest member that joined before it
+  measures on (it was playing), else the newest pending one; a pending member leaving reports nothing and
+  starts no session; a source alone on its path measures at once. A meter switched off at the cap comes
+  back on if the path's measurement stops being capped (`update` re-checks every 250 ms while it's off).
+  Taking over starts a session (`Learner::begin_session`: `seed_s` = what's measured so far, the block
   forming and `played_s` start over, the unreported rest stays unreported — the next report includes
   it, once). The measuring source's leave reports what's left (`finish`, the thresholds below); the
   learner stays for a reopen — up to `BOOK_IDLE_KEEP` (64) paths without a live source, the least
@@ -3823,8 +3837,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   that seed; the backend keeps whichever report covers more seconds, so until the restored one passes
   the stored one its reports are ignored, then it replaces it: bounded loss, never a double count).
   Two sources of one scene at once (a transition to the same item): the newer continues the older's
-  live measurement and only it measures (the `Book` — the older one's part after the hand-over isn't
-  measured: the same sound; nothing is lost or added twice). Paused/`no_audio`: not
+  live measurement from its first segment and only it measures from then (the `Book` — the older one's
+  part after the hand-over isn't measured: the same sound; nothing is lost or added twice). Paused/`no_audio`: not
   measured (above); `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
 - **Applying it** is the backend's: the scene source's **`gain.normalize`** slot (the summed `Gains`
   → the worker's stream; § Units) — set at create from the stored value, live through `animate` (a
@@ -3832,7 +3846,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
 - **Probe `workers` → `loudness`**: `{seconds (audible, every play), session_s, seed_s, played_s,
   lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, measuring
   (this source is its path's measuring one — the `Book`; the other values are the path's), received
-  (segments the worker sent, measured or not — stands still once the meter is off)}`.
+  (segments the worker sent, measured or not — stands still once the meter is off), meter (the worker
+  meters)}`.
 - **Tests.** Units `audio::loudness` (`stereo_1khz_sine_reads_its_level_in_lufs`,
   `k_weighting_shapes_the_spectrum`, `gating_excludes_silence_and_quiet_passages`,
   `silence_learns_nothing_and_the_window_is_audible_play`,
@@ -3863,7 +3878,16 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   (destroy → a create seeded with the window's report continues the end's 3.0 s, not 2.0; the up-to-date
   seed doesn't double it; a second source beside a playing one continues its live 4.0 s, `measuring`
   moves to it, its report = `seed_s` + `session_s`, the first reports nothing at its end) — RED before:
-  the reopen read 2.0 s.
+  the reopen read 2.0 s. **Review fixes (2026-10-29):** units `book_hands_a_live_measurement_over_at_the_newest_sources_first_segment`,
+  `book_head_leaving_passes_to_an_older_member_first_then_a_pending_one`, `book_reseed_adopts_only_more_and_keeps_the_head`,
+  `book_forgets_an_idle_path_only_without_live_sources`, `book_idle_eviction_is_least_recently_left`; api
+  `scene_silent_second_source_leaves_the_playing_one_measuring` (A' paused on VIRTUAL-2: A measures on, A' takes over
+  at its first sound with everything so far as its seed, A measures again after A' goes),
+  `scene_live_seed_on_a_two_source_path_never_shrinks_it`, `scene_path_changes_and_folder_spellings_share_one_measurement`
+  (a symlink + trailing slash = X's measurement; `path` onto X pending then measuring, back onto Y afresh, X back to A),
+  `scene_reopen_continues_the_end_of_play_measurement` (C pending until shown); harness `tests/scene.rs`
+  `dropped_scene_source_hands_its_loudness_over` (`Drop`), `scene_meter_comes_back_on_when_the_path_is_no_longer_capped`
+  (per-source caps — only `SceneOpts` can make a path uncap).
 
 **Offline estimate (2026-10-29; `scene/loudness_estimate.rs`, `scene/pkg.rs`, `liascape-player scene-loudness`).**
 What the learner above would measure, computed from the scene's files before it plays — so a scene can be
