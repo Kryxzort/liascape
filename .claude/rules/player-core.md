@@ -30,7 +30,8 @@ happen regardless of timing.
   none / empty / unloadable → every switch is a cut), `vram` (one sample of `vram::probe_from_env` — none →
   the VRAM limit and low-VRAM rule can't act; run once at serve start on the `lia-health` thread, `hello`
   never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
-  none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`). `hello.health` carries all four;
+  none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`), and in `hello.health` only `cover`
+  (`{ok, reason, source}` — the covered Signal's source, § Signals). `hello.health` carries all five;
   `liascape-player health` prints `{effects, vram}` (no render worker without a GL context) for when no player runs —
   the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
@@ -48,12 +49,15 @@ happen regardless of timing.
 - `src/wl.rs` — the Wayland backend: one wlr-layer-shell surface per `wl_output`
   (Task 13). § Wayland.
 - `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
+- `src/signal/` — Signals (Phase 3): `covered.rs` (the pure cover rules per source + the hold's
+  debounce), `hypr.rs` / `sway.rs` (the IPC cover sources on `lia-cover`), `mod.rs` (the feed, source
+  choice, the runtime's `cover_tick`, the `cover` probe). § Signals.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
   `handlers.rs` (the verbs), `capture.rs` (`capture`'s readback + encode off the loop). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
   and state paths. § Command API.
 - `src/probe/` — the probe registry (`mod.rs`: `list`, `sources`, `loop`; `frames.rs`:
   `frames`, Task 13; `audio.rs`: `bus`, `meter.window`, Task 14; Task 15 adds more;
-  `memory.rs`: `memory`, Task 20b; `workers.rs`: `workers`, Phase 2; `vram.rs`: `vram`, Task 8).
+  `memory.rs`: `memory`, Task 20b; `workers.rs`: `workers`, Phase 2; `vram.rs`: `vram`, Task 8; `cover`, Phase 3).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `loudness.rs` (scene
   loudness learned on first play and refined on every play, one measurement per path in the `Book` — § Scene
@@ -318,12 +322,16 @@ policy compares it with the revision an output last presented (§ Wayland).
 `scene_throttle` (bool, default true — the GPU budget), `scene_vram_limit_mib` (MiB, 0 = off —
 the per-scene VRAM guard), `vram_low_mode` (`stop`|`pause`|`off`, default `stop` — the low-VRAM
 rule), observed `vram_low_active` (Task 8; § Scene worker → "GPU budget and VRAM (Task 8)").
+**Phase 3:** `pause_when_covered` (`off`|`fullscreen`|`maximized`, default `off` — the backend asserts the
+user's setting, default `maximized`; live; kept by the snapshot) and observed `cover_hold_active` (§ Signals).
 
 **Output props.** `name`/`width`/`height`/`refresh_hz` (read-only; kept current with
 `set_observed` on a mode change), `layer` = `background|bottom|top|overlay` (live, §
 Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland),
 `scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at, 0–480, default 30,
-0 = the refresh; live — § Scene worker → "The `scene` Source kind").
+0 = the refresh; live — § Scene worker → "The `scene` Source kind"). Observed `covered`
+(`none|maximized|fullscreen|unavailable`) and `covered_by` (`{app_id, pid}` / `{}`) — the covered
+Signal (Phase 3 Task 6, § Signals).
 
 **Observed values and node accessors (Task 11).** `Graph::set_observed(path, v)` writes
 what a live source *reports* (`SourceHost` mirrors `ready`/`duration`/`time_pos`/`width`/
@@ -1837,8 +1845,8 @@ source; the transition recipe stays the one place a switch happens. The contract
     `Order::reorder` (the current item kept, or finishing without a replay; history `[current]`; play time and
     countdown kept), and an armed B that is no longer a playable item is cancelled (the abort restores A's loop)
     and re-planned; `defaults` / item `props` reach the next B only. An edit never resets the play time.
-  - **Pause, holds, parking** (Task 5): the clock is `Runtime::now`, so a user pause and the low-VRAM hold stop
-    play time and the countdown. Parked (no output, R60) the program's phase is `parked` and it follows
+  - **Pause, holds, parking** (Task 5): the clock is `Runtime::now`, so a user pause, the low-VRAM hold and the
+    cover hold (Task 6, `cover_hold_freezes_a_program`) stop play time and the countdown. Parked (no output, R60) the program's phase is `parked` and it follows
     `while_parked` (O2, a Program prop, live): `rotate` (default — today's backend) keeps both clocks counting,
     timer/max/scenes-after switches go through `transition_parked` (each replaces the parked wallpaper and commits at
     once; no sooner than `PARKED_MIN_PLAY_MS` = 1 s after the last commit, so an image at minimum 0 can't switch
@@ -1881,6 +1889,57 @@ source; the transition recipe stays the one place a switch happens. The contract
     VRAM/pause/every switch combo; Task 4's 18: the history contract through the verbs, prev at the start, next while
     armed / during an effect, the `next` storm, the keep_pause cut, 1-item next/random, every live edit, item edits)
     + `recipes::program` unit tests.
+
+## Signals (Phase 3; `src/signal/`)
+
+A Signal is an observed fact about the world outside the player that rules read (spec §4.2). The rules system
+itself is not built (`docs/superpowers/specs/2026-10-29-rules-recon.md`); the Signals are exposed generally so it
+can read them later, and one built-in rule uses the first.
+
+**Covered** (Task 6; designer call 9 as revised 2026-10-30 — "covered" means **visible**, never focused: wlr-ft's
+`activated` is keyboard focus, so a fullscreen game on DP-1 must keep covering when the user clicks DP-2).
+- **Source**, picked at serve start (`signal::choose`): Hyprland IPC if `HYPRLAND_INSTANCE_SIGNATURE`, else Sway
+  IPC if `SWAYSOCK`, else `zwlr_foreign_toplevel_manager_v1` v1–3 if advertised (bound in `wl.rs` only then),
+  else **unavailable** (GNOME has no layer-shell; KDE grants no protocol) — every `out:<c>.covered` reads
+  `unavailable`, `hello.health.cover.ok` false with the reason, and the rule never pauses. Headless: the
+  `headless.cover` verb. `LIASCAPE_PLAYER_COVER_SOURCE=hyprland|sway|wlr|headless|none` forces one (`hyprland`
+  headless = the end-to-end test against a fake socket).
+- **Hyprland** (`signal/hypr.rs`, thread `lia-cover`, read-only): `.socket2.sock` events `fullscreen`,
+  `workspace`, `focusedmon`, `activespecial`, `moveworkspace`, `openwindow`, `closewindow`, `movewindow`,
+  `changefloatingmode`, `minimized`, `monitoradded`, `monitorremoved` (+ `v2`s), `configreloaded`, and
+  `activewindowv2` only when the address changes (`hypr::Relevance`: `activewindow`/`v2` also fire on every title
+  change of the focused window, ~1/s from a terminal spinner, and focus never changes visibility) → 30 ms later one `[[BATCH]]j/monitors;j/clients` on `.socket.sock` (replies separated by blank lines), and a
+  confirm query 300 ms after. The `fullscreen` event names no window: state is always read back. Rule
+  (`covered::hypr_cover`): a monitor is covered by the highest `fullscreen` bits (1 maximized, 2 fullscreen, 3
+  both) among mapped, non-`hidden` clients on its open special workspace (`specialWorkspace.id` ≠ 0, negative)
+  or its `activeWorkspace`. The client `visible` field is not "on screen" and is never read. Socket dir:
+  `$XDG_RUNTIME_DIR/hypr/<sig>`, else `/run/user/<uid>/hypr/<sig>` (a private `XDG_RUNTIME_DIR` still finds it),
+  else `/tmp/hypr/<sig>`; re-resolved on reconnect (retry 2 s). Field names/values checked on 0.56.2:
+  `docs/player/spikes/cover-sources.md`.
+- **Sway** (`signal/sway.rs`): i3 IPC, `SUBSCRIBE ["window","workspace","output","shutdown"]` on one
+  connection, `GET_TREE` on another; a container with `fullscreen_mode` 1 that is `visible` (it or a view in it)
+  covers its output, 2 every output; no maximized state. Tested against a fake socket only.
+- **wlr-ft** (`wl.rs`): `app_id`/`state`/`output_enter`/`output_leave` apply on `done` into `Toplevels`; a
+  toplevel fullscreen/maximized and not minimized covers every output it entered, **any focus**. It can't see
+  workspaces, so a fullscreen window on a hidden workspace covers there (known false positive of the fallback).
+- **The Signal:** observed `out:<c>.covered` / `out:<c>.covered_by` (`{app_id, pid}`: Hyprland `class` + `pid`,
+  Sway `app_id`/X11 class + `pid`, wlr-ft `app_id` only), `cover.changed {output, covered, was, app_id, pid,
+  source}` (info) per change, `cover.source {source, ok, reason}` on a status change, the `cover` probe (source,
+  status, per output `covered/app_id/pid/showing/counts/since_ms`, monitors without an output node under
+  `unmatched`, the rule, the hold, its last 16 decisions with `t_ms` (base clock) + `unix_ms`), `state.cover`.
+- **The rule (pause when covered):** `player.pause_when_covered` ≠ `off` and **every** output showing content
+  (`srcs:<c>` non-empty) covered at the threshold (`fullscreen` = fullscreen only; `maximized` = either) →
+  `CoverHold` engages after `COVER_ENGAGE_MS` = 300 ms in a row (base clock, so the stepped clock tests it
+  exactly) and releases at the first tick it doesn't hold (uncovered, mode `off`, nothing shown). One covered
+  monitor of two leaves the wallpaper playing (audio follows the picture). `Runtime::cover_tick` runs at the top of
+  every tick/step, before `update_player_paused`, which composes `cover_held()` beside the low-VRAM hold — never
+  `player.paused`, so a user pause survives the release; the R88 pause gates ramp the audio; the player clock
+  (transitions, programs) is pause-excised. `cover.engaged {outputs, mode, pending_ms, covers}` /
+  `cover.released {held_ms, reason}`; `player.cover_hold_active` mirrors it; `probe sources.effective_paused`
+  counts the holds (`Runtime::held`).
+- Tests: `signal::*` unit tests (each source's rule on records, the hold, source choice, fake Hyprland/Sway
+  sockets); `tests/api.rs` `cover_*` (10, the fake source + a fake Hyprland end to end); `tests/program.rs`
+  `cover_hold_freezes_a_program`.
 
 ## Runtime
 
@@ -2249,6 +2308,7 @@ note on stderr and exits 0 (or stdout closes).
 | `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
 | `headless.pointer` | `{output, x, y, buttons? (0)}` — surface px from the top-left (Task 7) | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
+| `headless.cover` | `{output \| "*", state: none\|maximized\|fullscreen, app_id?, pid?}` — the fake cover source (Phase 3 Task 6, § Signals); read by the next tick | `{}` | `no_such_node`, `bad_request`, `unsupported` | `ctl headless.cover '{"output":"*","state":"fullscreen"}'` |
 
 **Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
 `cmd` / bad args), `no_such_verb` (hint lists every verb), `no_such_effect`,
@@ -2361,8 +2421,8 @@ due_in_ms, frozen, current (what would be saved now)}`. `sources` also has
 `probe/workers.rs`) — one entry per scene source's worker (§ Scene worker; `args: {"log_tail":
 true}` adds each one's `log_tail`, Task 13); `vram` (Phase 2
 Task 8, `probe/vram.rs`) — the VRAM sampler, the low-VRAM rule and its hold, each scene worker
-against the per-scene limit (§ Scene worker → "GPU budget and VRAM (Task 8)"). A new probe = a
-file here + one `PROBES` entry.
+against the per-scene limit (§ Scene worker → "GPU budget and VRAM (Task 8)"); `cover` (Phase 3
+Task 6) — the covered Signal (§ Signals). A new probe = a file here + one `PROBES` entry.
 
 **Isolation (`api/server.rs`).** Non-blocking, edge-triggered client sockets; per wake a
 client gets ≤ 256 KiB read and ≤ 32 requests handled (the rest next iteration, round
@@ -2403,7 +2463,8 @@ monitor of `$WAYLAND_DISPLAY` (a `wlr-layer-shell` compositor: Hyprland, Sway, �
 **Backend.** `Wayland::connect()` (sctk 0.21, `default-features = false, features =
 ["calloop"]` — no xkbcommon, a keyboard is never used) binds `wl_compositor`,
 `zwlr_layer_shell_v1` (missing → `Err` naming the compositors that have it and
-`--headless`), `wp_cursor_shape_manager_v1` (optional), sctk's `OutputState`/`SeatState`,
+`--headless`), `wp_cursor_shape_manager_v1` (optional), `zwlr_foreign_toplevel_manager_v1`
+(only as the cover fallback source, § Signals), sctk's `OutputState`/`SeatState`,
 then does two roundtrips (output info → surfaces created; first configures). Then
 `Gfx::new_wayland(display_ptr)` — **one EGL context for every output and every source**
 (R17 `Rc<Shared>`; mpv renders through it as before). The event queue goes into the loop as

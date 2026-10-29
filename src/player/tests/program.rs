@@ -2178,6 +2178,51 @@ fn vram_hold_freezes_the_rotation() {
     let _ = std::fs::remove_file(&file);
 }
 
+/// Task 6: the cover hold freezes a rotation like a pause — no switch while held, the
+/// countdown and play time stand still, and the switch comes at the remaining time after the
+/// release (stepped; the fake source is `headless.cover`).
+#[test]
+fn cover_hold_freezes_a_program() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "maximized"}));
+    let items = pngs("cv", 2);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    let mut t = 0;
+    while t < 1000 {
+        c.step(20);
+        t += 20;
+    }
+    c.ok("headless.cover", json!({"output": "*", "state": "fullscreen"}));
+    // The hold engages after COVER_ENGAGE_MS; the rotation runs on meanwhile.
+    while c.get("player.cover_hold_active") != json!(true) {
+        assert!(t < 2000, "the hold never engaged");
+        c.step(20);
+        t += 20;
+    }
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    let p0 = c.get("prog:main.played_ms").as_f64().unwrap();
+    close(r0, 3000.0 - t as f64, 60.0, "remaining at the engage");
+    for _ in 0..250 {
+        c.step(20);
+    }
+    assert_eq!(currents(&c).len(), 1, "no switch while held");
+    close(c.get("prog:main.remaining_ms").as_f64().unwrap(), r0, 1.0, "remaining");
+    close(c.get("prog:main.played_ms").as_f64().unwrap(), p0, 1.0, "played");
+    c.ok("headless.cover", json!({"output": "*", "state": "none"}));
+    let held_until = t + 5000;
+    t = held_until;
+    while currents(&c).len() < 2 {
+        assert!(t < 12_000, "never switched");
+        c.step(20);
+        t += 20;
+    }
+    close(t as f64, held_until as f64 + r0, 60.0, "the switch at the remaining time after the release");
+}
+
 #[test]
 fn parked_keeps_rotating_invisibly_by_default() {
     let Some(srv) = Serve::start() else { return };

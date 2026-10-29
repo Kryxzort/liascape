@@ -33,6 +33,12 @@
 //!   10/s per output, `suppressed` counts the rest). The cursor is set to the default
 //!   shape on enter (`wp_cursor_shape_v1` when the compositor has it).
 //!
+//! - **Cover (Phase 3 Task 6):** when the cover source is wlr-foreign-toplevel (neither
+//!   Hyprland nor Sway IPC — `crate::signal::choose_from_env`), `zwlr_foreign_toplevel_manager_v1`
+//!   v1–3 is bound if advertised. Each handle's `app_id`/`state`/`output_enter`/`output_leave`
+//!   accumulate and apply on `done` into a [`Toplevels`]; [`OutputBackend::take_cover`] hands the
+//!   per-connector map over when it changed. Not advertised → the source is unavailable.
+//!
 //! See `.claude/rules/player-core.md` § Wayland.
 
 use std::ffi::c_void;
@@ -64,6 +70,12 @@ use sctk::shell::wlr_layer::{
 use crate::gfx::{Fbo, Gfx, Tex, WindowTarget};
 use crate::headless::{FrameState, OutputBackend, OutputChange, OutputInfo, PointerSample};
 use crate::log::{self, Level};
+use crate::signal::covered::{CoverMap, Toplevel, Toplevels, ft_states};
+use sctk::dispatch2::Dispatch2;
+use sctk::reexports::client::backend::ObjectId;
+use sctk::reexports::protocols_wlr::foreign_toplevel::v1::client::{
+    zwlr_foreign_toplevel_handle_v1 as fth, zwlr_foreign_toplevel_manager_v1 as ftm,
+};
 
 /// The layer-shell namespace every liascape-player surface uses (`hyprctl layers`).
 pub const NAMESPACE: &str = "liascape-player";
@@ -310,6 +322,20 @@ pub struct WlState {
     changes: Vec<OutputChange>,
     pointers: Vec<(wl_pointer::WlPointer, Option<WpCursorShapeDeviceV1>)>,
     samples: Vec<PointerSample>,
+    /// Phase 3 Task 6: wlr-foreign-toplevel, when it is the cover source and advertised.
+    ft: Option<Ft>,
+}
+
+/// The wlr-foreign-toplevel tracker (the cover fallback source).
+struct Ft {
+    _manager: ftm::ZwlrForeignToplevelManagerV1,
+    /// Per handle, the state being accumulated until its `done`.
+    pending: std::collections::HashMap<ObjectId, Toplevel>,
+    committed: Toplevels,
+    /// The map changed (a `done`, a `closed`, an output added/removed) since `take_cover`.
+    dirty: bool,
+    /// The compositor sent `finished`: no more events.
+    finished: bool,
 }
 
 /// The Wayland [`OutputBackend`].
@@ -351,6 +377,17 @@ impl Wayland {
             )
         })?;
         let cursor_shape = CursorShapeManager::bind(&globals, &qh).ok();
+        // Task 6: wlr-ft only as the fallback cover source (Hyprland/Sway use their IPC).
+        let ft = (crate::signal::choose_from_env(false) == crate::signal::Choice::Foreign)
+            .then(|| globals.bind::<ftm::ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, FtManagerData))
+            .and_then(Result::ok)
+            .map(|m| Ft {
+                _manager: m,
+                pending: Default::default(),
+                committed: Toplevels::default(),
+                dirty: true,
+                finished: false,
+            });
         let mut state = WlState {
             registry: RegistryState::new(&globals),
             output_state: OutputState::new(&globals, &qh),
@@ -364,6 +401,7 @@ impl Wayland {
             changes: Vec::new(),
             pointers: Vec::new(),
             samples: Vec::new(),
+            ft,
         };
         for _ in 0..2 {
             queue
@@ -820,6 +858,24 @@ impl OutputBackend for Wayland {
         std::mem::take(&mut self.state.samples)
     }
 
+    fn cover_source(&self) -> Result<&'static str, String> {
+        if self.state.ft.is_some() {
+            return Ok("wlr-foreign-toplevel");
+        }
+        Err(
+            "the compositor has no zwlr_foreign_toplevel_manager_v1 and no Hyprland/Sway IPC \
+             (GNOME and KDE don't give a client window states)"
+                .into(),
+        )
+    }
+
+    fn take_cover(&mut self) -> Option<CoverMap> {
+        let st = &mut self.state;
+        let ft = st.ft.as_mut().filter(|ft| ft.dirty)?;
+        ft.dirty = false;
+        Some(ft.committed.cover_map(st.outs.iter().map(|o| o.info.name.as_str())))
+    }
+
     fn as_wayland_mut(&mut self) -> Option<&mut Wayland> {
         Some(self)
     }
@@ -901,6 +957,9 @@ impl OutputHandler for WlState {
         }
         let surface = self.make_surface(&output, Layer::Background);
         self.changes.push(OutputChange::Added(info.clone()));
+        if let Some(ft) = &mut self.ft {
+            ft.dirty = true;
+        }
         self.outs.push(WlOut {
             info,
             wl_output: output,
@@ -962,6 +1021,9 @@ impl OutputHandler for WlState {
         let mut o = self.outs.remove(i);
         self.changes
             .push(OutputChange::Removed(o.info.name.clone()));
+        if let Some(ft) = &mut self.ft {
+            ft.dirty = true;
+        }
         let (gl, surface) = (o.gl.take(), o.surface.take());
         self.bury(gl, surface);
     }
@@ -1127,6 +1189,107 @@ impl ProvidesRegistryState for WlState {
         &mut self.registry
     }
     sctk::registry_handlers![OutputState, SeatState];
+}
+
+// ------------------------------------------------------------------ wlr-foreign-toplevel (Task 6)
+
+/// User data of the `zwlr_foreign_toplevel_manager_v1` (its `toplevel` event creates handles).
+struct FtManagerData;
+/// User data of each `zwlr_foreign_toplevel_handle_v1`.
+#[derive(Default)]
+struct FtHandleData;
+
+impl WlState {
+    /// The connector name of a `wl_output` a toplevel entered/left.
+    fn connector_of(&self, output: &wl_output::WlOutput) -> String {
+        self.outs
+            .iter()
+            .find(|o| &o.wl_output == output)
+            .map(|o| o.info.name.clone())
+            .or_else(|| self.info_of(output).map(|(i, _)| i.name))
+            .unwrap_or_else(|| output_name(None, output.id().protocol_id()))
+    }
+}
+
+impl Dispatch2<ftm::ZwlrForeignToplevelManagerV1, WlState> for FtManagerData {
+    fn event(
+        &self,
+        state: &mut WlState,
+        _: &ftm::ZwlrForeignToplevelManagerV1,
+        event: ftm::Event,
+        _: &Connection,
+        _: &QueueHandle<WlState>,
+    ) {
+        let Some(ft) = &mut state.ft else { return };
+        match event {
+            ftm::Event::Toplevel { toplevel } => {
+                ft.pending.insert(toplevel.id(), Toplevel::default());
+            }
+            ftm::Event::Finished => {
+                ft.finished = true;
+                log::event("wl", Level::Warn, "wl.foreign_toplevel_finished", None, json!({}));
+            }
+            _ => {}
+        }
+    }
+
+    sctk::reexports::client::event_created_child!(WlState, ftm::ZwlrForeignToplevelManagerV1, [
+        ftm::EVT_TOPLEVEL_OPCODE => (fth::ZwlrForeignToplevelHandleV1, FtHandleData)
+    ]);
+}
+
+impl Dispatch2<fth::ZwlrForeignToplevelHandleV1, WlState> for FtHandleData {
+    fn event(
+        &self,
+        state: &mut WlState,
+        handle: &fth::ZwlrForeignToplevelHandleV1,
+        event: fth::Event,
+        _: &Connection,
+        _: &QueueHandle<WlState>,
+    ) {
+        let entered = match &event {
+            fth::Event::OutputEnter { output } | fth::Event::OutputLeave { output } => {
+                Some(state.connector_of(output))
+            }
+            _ => None,
+        };
+        let Some(ft) = &mut state.ft else { return };
+        let id = handle.id();
+        let key = id.protocol_id();
+        match event {
+            fth::Event::Closed => {
+                ft.pending.remove(&id);
+                ft.committed.remove(key);
+                ft.dirty = true;
+                handle.destroy();
+                return;
+            }
+            fth::Event::Done => {
+                if let Some(t) = ft.pending.get(&id) {
+                    ft.committed.upsert(key, t.clone());
+                    ft.dirty = true;
+                }
+                return;
+            }
+            _ => {}
+        }
+        let t = ft.pending.entry(id).or_default();
+        match event {
+            fth::Event::AppId { app_id } => t.app_id = app_id,
+            fth::Event::State { state } => {
+                (t.maximized, t.minimized, t.activated, t.fullscreen) = ft_states(&state);
+            }
+            fth::Event::OutputEnter { .. } => {
+                t.outputs.extend(entered);
+            }
+            fth::Event::OutputLeave { .. } => {
+                if let Some(c) = entered {
+                    t.outputs.remove(&c);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 sctk::delegate_registry!(WlState);

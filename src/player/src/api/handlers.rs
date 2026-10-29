@@ -117,6 +117,11 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
         headless_pointer,
         "a virtual pointer {output, x, y, buttons?} over a headless output (surface pixels)",
     ),
+    (
+        "headless.cover",
+        headless_cover,
+        "the fake cover source {output | \"*\", state: none|maximized|fullscreen, app_id?, pid?}",
+    ),
 ];
 
 fn verb_names() -> Vec<&'static str> {
@@ -165,6 +170,11 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.backend.kind() == "headless" {
         caps.push("headless");
     }
+    // Phase 3 Task 6: the covered Signal has a source here (whether it reads yet:
+    // `hello.health.cover`, `ok: null` until its first reading).
+    if rt.cover.source != "unavailable" {
+        caps.push("cover");
+    }
     if rt.stepped() {
         caps.push("stepped");
     }
@@ -189,6 +199,7 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
             "vram": crate::health::vram_cached(),
             "hwdec_interop": hwdec,
             "scenes": crate::health::scenes_json(rt.scenes_available()),
+            "cover": rt.cover.health(),
         },
     }))
 }
@@ -215,6 +226,8 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "parked": rt.parked.as_ref().map(|p| p.id.clone()),
         // Phase 2 Task 5: every scene source's worker (the `workers` probe's entries).
         "workers": rt.host.workers_info(),
+        // Phase 3 Task 6: the covered Signal's source, each output's cover, the hold.
+        "cover": rt.cover_state(),
     }))
 }
 
@@ -858,4 +871,18 @@ fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, Api
         .pointer(&name, x, y, buttons)?;
     let scenes = rt.pointer_events();
     Ok(json!({ "scenes": scenes }))
+}
+
+/// Phase 3 Task 6: the fake cover source — what Hyprland/Sway/wlr-ft report on Wayland. The
+/// next tick reads it (`Runtime::cover_tick`).
+fn headless_cover(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    let name = arg_str(args, "output")?.to_string();
+    let state = arg_str(args, "state")?.to_string();
+    let app_id = opt_str(args, "app_id")?.map(str::to_string);
+    let pid = opt_f64(args, "pid")?.filter(|p| *p > 0.0).map(|p| p as u32);
+    rt.backend
+        .as_headless_mut()
+        .ok_or_else(headless_err)?
+        .set_cover(&name, &state, app_id, pid)?;
+    Ok(json!({}))
 }
