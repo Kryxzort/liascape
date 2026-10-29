@@ -861,6 +861,12 @@ Two bug classes kept recurring; fix the class, not the instance:
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world (both still build the
       pre-rewrite Avalonia app).
+- [ ] **Scene sound peaks (owner 2026-10-29, for a later REA batch):** WE's sound `volume²` is unclamped, so a slider
+      above 1 pushes peaks over 0 dBFS (2375914945 at `musicvolume` 2 peaks at 2.04). Find out with REA what WE does at
+      its output — clip, soft-clip or limit (`we-sound-semantics.md` only infers a clip at ±1; no master limiter was
+      seen) — then decide: match it, or add a soft limiter on the player bus (normalisation lowers the level but can't
+      undo a clipped peak). Loudness normalisation itself is unaffected by the squared curve: the learner and the
+      estimator measure the real output.
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
@@ -875,9 +881,11 @@ Two bug classes kept recurring; fix the class, not the instance:
         the batches below, highest usage × impact first. After each batch, rerun the corpus and the batch's own
         smoke/capture check. The WE captures the owner can take on Windows are listed in the doc's "Needs the
         owner".
-    - [ ] **B1 Property scripts run.** quickjs-ng module namespace, not the Promise. Skip undefined returns,
+    - [x] **B1 Property scripts run.** quickjs-ng module namespace, not the Promise. Skip undefined returns,
           `init`, `thisLayer` per call. Load WE's `baseclasses.js` + jsmodules (S1–S7, S9, S33–S35, S38). 40 scenes,
-          25 visibly broken today. M.
+          25 visibly broken today. M. **Done 2026-10-29:** fork patches 0019 (solid layers' uninitialised debug
+          switch) + 0020 + 0021, pin `e78d94d`; WE's JS read at run time from the user's assets (never copied). Also S8,
+          S22 done; S15, S24, S25, S29, S30 partly. Result + corpus delta: the audit's "B1 result" (§ 5).
     - [ ] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
           `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M.
     - [ ] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
