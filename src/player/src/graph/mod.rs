@@ -602,6 +602,21 @@ impl Graph {
         Some(out)
     }
 
+    /// Every `Source` node's [`effective_gain_db`](Self::effective_gain_db), by id (no
+    /// allocation — the dropout probe samples it at 1 kHz during a ramp, F6b).
+    pub fn source_gains_db(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.nodes
+            .values()
+            .filter(|n| n.kind == NodeKind::Source)
+            .map(|n| {
+                let mut gains = Gains::new();
+                for (slot, db) in &n.gain_slots {
+                    gains.set(*slot, *db);
+                }
+                (n.id.as_str(), gains.effective_db())
+            })
+    }
+
     /// A `Source` node's summed gain in dB (`units::Gains::effective_db`, clamped to
     /// `[-96, 12]`) — the same number `snapshot()` reports as `gain_effective_db`. `None`
     /// for a missing or non-`Source` node.
@@ -628,7 +643,14 @@ impl Graph {
             if moves_demand(node.kind, prop) && node.props.get(prop) != Some(&value) {
                 self.demand_rev += 1;
             }
-            node.props.insert(prop.to_string(), value.clone());
+            // An existing key is overwritten in place (no key allocation: the mirror writes a
+            // scene's `time_pos` every frame — F6b).
+            match node.props.get_mut(prop) {
+                Some(v) => *v = value.clone(),
+                None => {
+                    node.props.insert(prop.to_string(), value.clone());
+                }
+            }
         }
         if record {
             if bump && !prop.starts_with("gain.") {

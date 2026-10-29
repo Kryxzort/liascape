@@ -1211,9 +1211,13 @@ impl GainHistory {
 
     /// Record one tick's readings — every live source's, so a track missing from them
     /// belongs to a source that is gone (dropped [`DEAD_LINGER`] after its last reading).
-    pub(crate) fn record(&mut self, t: Duration, readings: impl Iterator<Item = (String, f64)>) {
+    pub(crate) fn record<K: AsRef<str>>(&mut self, t: Duration, readings: impl Iterator<Item = (K, f64)>) {
         for (id, db) in readings {
-            let track = self.tracks.entry(id).or_default();
+            // F6b: sampled at 1 kHz during every ramp — no key allocation for a known track.
+            let track = match self.tracks.get_mut(id.as_ref()) {
+                Some(tr) => tr,
+                None => self.tracks.entry(id.as_ref().to_string()).or_default(),
+            };
             track.last_seen = t;
             let s = &mut track.samples;
             let n = s.len();
