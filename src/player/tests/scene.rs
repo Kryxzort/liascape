@@ -1944,3 +1944,133 @@ fn context_lost_is_a_restart() {
     );
     assert!(h.bool(&format!("{id}.broken")));
 }
+
+// ---- Scene loudness: the shared `Book` across sources (player-core.md § "Scene loudness") ----
+
+fn tone_spec() -> SyntheticSpec {
+    SyntheticSpec {
+        pattern: Pattern::Solid,
+        native: [640, 360],
+        has_audio: true,
+        tone_hz: 1000.0,
+        tone_dbfs: -20.0,
+        ..SyntheticSpec::default()
+    }
+}
+
+/// A learner state of `blocks` blocks at −20 LUFS (`Learner::state_json`'s shape).
+fn loud_state(blocks: u64) -> serde_json::Value {
+    serde_json::json!({"v": 1, "first": 500, "counts": [blocks], "peak_dbfs": -20.0})
+}
+
+fn open_loud(
+    gfx: &Gfx,
+    name: &str,
+    id: &str,
+    book: &liascape_player::audio::loudness::SharedBook,
+    tweak: impl FnOnce(&mut SceneOpts),
+) -> SceneSource {
+    open_with(gfx, name, &tone_spec(), |o| {
+        o.id = id.into();
+        o.tick_hz = 30.0;
+        o.max_size = [640, 360];
+        o.loudness_window_s = 2.0;
+        o.loudness_cap_s = 1e6;
+        o.loudness_book = Some(book.clone());
+        tweak(o);
+    })
+}
+
+/// Update every source until `f` says stop or `limit` passes.
+fn run_all(
+    gfx: &Gfx,
+    srcs: &mut [&mut SceneSource],
+    limit: Duration,
+    mut f: impl FnMut(&mut [&mut SceneSource]) -> bool,
+) -> bool {
+    let end = Instant::now() + limit;
+    while Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(2));
+        for s in srcs.iter_mut() {
+            s.update(gfx);
+            assert!(s.error().is_none(), "scene error: {:?}", s.error());
+        }
+        if f(srcs) {
+            return true;
+        }
+    }
+    false
+}
+
+fn loud(s: &SceneSource, k: &str) -> serde_json::Value {
+    s.worker_info()["loudness"][k].clone()
+}
+
+/// A source dropped without its teardown (`Drop`) still leaves its path: the older source of
+/// the path measures on (RED without the `Drop`: the dropped one stays the head and nothing is
+/// measured any more). Also: the newer source measures only from its first segment.
+#[test]
+fn dropped_scene_source_hands_its_loudness_over() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let book = liascape_player::audio::loudness::Book::shared();
+    let mut a = open_loud(&gfx, "loud-drop", "a", &book, |_| {});
+    assert!(run_all(&gfx, &mut [&mut a], Duration::from_secs(10), |s| {
+        loud(s[0], "seconds").as_f64().unwrap_or(0.0) >= 0.5
+    }), "a measures");
+    let mut b = open_loud(&gfx, "loud-drop", "b", &book, |_| {});
+    assert_eq!(loud(&b, "measuring"), serde_json::json!(false), "b pending until it sounds");
+    assert_eq!(loud(&a, "measuring"), serde_json::json!(true));
+    assert!(run_all(&gfx, &mut [&mut a, &mut b], Duration::from_secs(10), |s| {
+        loud(s[1], "measuring") == serde_json::json!(true)
+    }), "b takes over at its first segment");
+    assert!(b.worker_info()["loudness"]["received"].as_u64().unwrap() > 0);
+    assert_eq!(loud(&a, "measuring"), serde_json::json!(false));
+    drop(b);
+    assert_eq!(loud(&a, "measuring"), serde_json::json!(true), "a measures on after b's drop");
+    let s0 = loud(&a, "seconds").as_f64().unwrap();
+    assert!(run_all(&gfx, &mut [&mut a], Duration::from_secs(10), |s| {
+        loud(s[0], "seconds").as_f64().unwrap_or(0.0) >= s0 + 0.5
+    }), "a's segments count again");
+}
+
+/// A meter switched off at the cap comes back on once the path's measurement isn't capped
+/// any more (here: a second source adopts a seed with room under its own cap) — RED before:
+/// `update` never asked again, `a` stayed silent to the book for good.
+#[test]
+fn scene_meter_comes_back_on_when_the_path_is_no_longer_capped() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let book = liascape_player::audio::loudness::Book::shared();
+    // a: cap 1 s, seeded with 1 s → capped from the start: its worker never meters.
+    let mut a = open_loud(&gfx, "loud-meter", "a", &book, |o| {
+        o.loudness_window_s = 1.0;
+        o.loudness_cap_s = 1.0;
+        o.loudness_seed = Some(loud_state(10));
+    });
+    run_all(&gfx, &mut [&mut a], Duration::from_millis(1500), |_| false);
+    assert_eq!(loud(&a, "capped"), serde_json::json!(true));
+    assert_eq!(loud(&a, "meter"), serde_json::json!(false));
+    assert_eq!(loud(&a, "received"), serde_json::json!(0), "nothing metered while capped");
+    // b joins with a longer seed under a large cap: adopted, the path isn't capped any more.
+    let mut b = open_loud(&gfx, "loud-meter", "b", &book, |o| {
+        o.loudness_window_s = 1.0;
+        o.loudness_cap_s = 1e6;
+        o.loudness_seed = Some(loud_state(20));
+        o.paused = true;
+    });
+    assert_eq!(loud(&a, "capped"), serde_json::json!(false));
+    assert!(run_all(&gfx, &mut [&mut a, &mut b], Duration::from_secs(5), |s| {
+        loud(s[0], "received").as_u64().unwrap_or(0) > 0
+    }), "a meters again: {}", a.worker_info()["loudness"]);
+    assert_eq!(loud(&a, "meter"), serde_json::json!(true));
+    assert_eq!(loud(&a, "measuring"), serde_json::json!(true), "b (paused) is pending");
+    let s0 = loud(&a, "seconds").as_f64().unwrap();
+    assert!(run_all(&gfx, &mut [&mut a, &mut b], Duration::from_secs(5), |s| {
+        loud(s[0], "seconds").as_f64().unwrap_or(0.0) >= s0 + 0.5
+    }), "a measures");
+}

@@ -420,6 +420,8 @@ pub struct SceneSource {
     loudness_key: Option<String>,
     /// The worker meters (its last `Start.loudness` / `LoudnessMeter`).
     meter_on: bool,
+    /// When `update` last asked the book whether a meter that is off should be on again.
+    meter_checked: Instant,
     /// Loudness segments the worker sent (every one, measured or not): the cap's meter-off shows
     /// as this standing still (the `workers` probe `loudness.received`).
     loudness_received: u64,
@@ -435,6 +437,17 @@ pub fn hang_timeout(v: Option<&str>) -> Duration {
     v.and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|ms| *ms > 0)
         .map_or(HANG_TIMEOUT, Duration::from_millis)
+}
+
+/// How often a source whose meter is off asks the book whether it should meter again.
+const METER_RECHECK: Duration = Duration::from_millis(250);
+
+/// A scene folder's key in the loudness [`Book`]: canonical where it resolves, else as given.
+pub fn loudness_key(path: &std::path::Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The shared loudness book (a panic elsewhere never poisons it for good: its state is plain
@@ -686,6 +699,7 @@ impl SceneSource {
             loudness: opts.loudness_book.clone().unwrap_or_else(Book::shared),
             loudness_key: None,
             meter_on: true,
+            meter_checked: Instant::now(),
             loudness_received: 0,
             opts,
         };
@@ -1716,9 +1730,17 @@ impl SceneSource {
 
     /// Join the current path's measurement in the book: continue it (a reopen, a second source
     /// of a playing scene) unless the backend's seed covers more (`Book::join`).
+    /// The key is the canonical path (`/home` vs its physical path, a trailing slash, a
+    /// `local/<id>` symlink: one entry), else the path as given. Without a seed (the backend has
+    /// nothing for the item) an idle entry of the path is dropped first (`Book::forget_idle`).
     fn join_loudness(&mut self) {
-        let key = self.opts.path.to_string_lossy().into_owned();
-        lock_book(&self.loudness).join(&key, &self.opts.id, self.opts.learner());
+        let key = loudness_key(&self.opts.path);
+        let mut b = lock_book(&self.loudness);
+        if self.opts.loudness_seed.is_none() {
+            b.forget_idle(&key);
+        }
+        b.join(&key, &self.opts.id, self.opts.learner());
+        drop(b);
         self.loudness_key = Some(key);
     }
 
@@ -2075,6 +2097,7 @@ impl SceneSource {
         });
         lv["measuring"] = json!(measuring);
         lv["received"] = json!(self.loudness_received);
+        lv["meter"] = json!(self.meter_on);
         v["loudness"] = lv;
         v["preview"] = json!({
             "path": self.opts.preview,
@@ -2112,6 +2135,19 @@ impl Source for SceneSource {
         };
         for ev in evs {
             self.on_event(gfx, now, ev);
+        }
+        // A meter that is off (the path's measurement was capped) comes back on once the path's
+        // measurement isn't capped any more — another source of the path adopted a seed with
+        // more room, or this one now measures a path whose learner was replaced. Asked at most
+        // every `METER_RECHECK` (a capped scene would otherwise lock the book every frame).
+        if !self.meter_on
+            && self.loudness_key.is_some()
+            && now.duration_since(self.meter_checked) >= METER_RECHECK
+        {
+            self.meter_checked = now;
+            if !self.loudness_capped() {
+                self.send_loudness_meter();
+            }
         }
         let mut changed = false;
         if self.preview_wanted || self.preview.is_some() || self.preview_dying.is_some() {

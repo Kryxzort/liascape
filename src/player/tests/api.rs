@@ -8800,14 +8800,20 @@ fn scene_reopen_continues_the_end_of_play_measurement() {
         (audible_s(&mut c, &b2) >= s_end + 1.0).then_some(())
     });
     let cc = create_scene(&mut c, name, &tone, json!({"loudness_seed": end["state"].clone()}));
+    // C isn't shown (no worker, no sound): it is pending, B2 measures on.
     let p_c = loudness_progress(&mut c, &cc);
+    assert_eq!(p_c["measuring"], json!(false), "pending until it sounds: {p_c}");
+    assert_eq!(loudness_progress(&mut c, &b2)["measuring"], json!(true));
+    show_all(&mut c, &cc);
+    let p_c = wait_for(Duration::from_secs(10), "C's first sound", || {
+        let p = loudness_progress(&mut c, &cc);
+        (p["measuring"] == json!(true)).then_some(p)
+    });
     let p_b2 = loudness_progress(&mut c, &b2);
-    println!("C at open: {p_c}\nB2 then: {p_b2}");
+    println!("C at its first sound: {p_c}\nB2 then: {p_b2}");
     let s_join = secs(&p_c, "seed_s");
     assert!(s_join >= s_end + 1.0, "C continues B2's live measurement: {p_c}");
-    assert_eq!(p_c["measuring"], json!(true), "{p_c}");
     assert_eq!(p_b2["measuring"], json!(false), "{p_b2}");
-    show_all(&mut c, &cc);
     let ev = wait_for(Duration::from_secs(15), "C's report", || {
         loudness_events(&mut c, Some(&cc)).into_iter().next()
     });
@@ -8828,6 +8834,140 @@ fn scene_reopen_continues_the_end_of_play_measurement() {
         "B2 handed its measurement over: nothing at its end"
     );
     c.ok("destroy", json!({"id": cc}));
+}
+
+/// A second source of a playing scene that makes no sound yet (paused here; also: loading its
+/// worker, restored broken, past its restart budget) never silences the playing one: the
+/// first measures on until the second's first segment, then the second takes over (its
+/// session starting at everything measured so far). RED before: the second measured from its
+/// open, the first's sound — the only one playing — went unmeasured.
+#[test]
+fn scene_silent_second_source_leaves_the_playing_one_measuring() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let name = "api-loud-pending";
+    let tone = tone_scene(1000.0);
+    let secs = |v: &Value, k: &str| v[k].as_f64().unwrap_or(-1.0);
+    let a = create_scene(&mut c, name, &tone, json!({}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(10), "a measures 1 s", || {
+        (audible_s(&mut c, &a) >= 1.0).then_some(())
+    });
+    let a2 = create_scene(&mut c, name, &tone, json!({"paused": true}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": a2}));
+    wait_for(Duration::from_secs(10), "a2 ready (paused)", || {
+        (worker_of(&mut c, &a2)["ready"] == json!(true)).then_some(())
+    });
+    let p2 = loudness_progress(&mut c, &a2);
+    assert_eq!(p2["measuring"], json!(false), "a2 is pending: {p2}");
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(true));
+    let s1 = audible_s(&mut c, &a);
+    wait_for(Duration::from_secs(10), "a measures on while a2 is silent", || {
+        (audible_s(&mut c, &a) >= s1 + 1.0).then_some(())
+    });
+    assert_eq!(loudness_progress(&mut c, &a2)["received"], json!(0), "a2 paused: no sound");
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(true));
+    // a2 plays: it takes over at its first segment, continuing everything a measured.
+    let s2 = audible_s(&mut c, &a);
+    c.ok("set", json!({"path": format!("{a2}.paused"), "value": false}));
+    let p2 = wait_for(Duration::from_secs(10), "a2's first sound", || {
+        let p = loudness_progress(&mut c, &a2);
+        (p["measuring"] == json!(true)).then_some(p)
+    });
+    println!("a2 at its first sound: {p2}");
+    assert!(secs(&p2, "seed_s") >= s2 - 1e-6, "{p2}");
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(false));
+    // a2 goes: a (still playing) measures on.
+    c.ok("destroy", json!({"id": a2}));
+    wait_for(Duration::from_secs(3), "a measures again", || {
+        (loudness_progress(&mut c, &a)["measuring"] == json!(true)).then_some(())
+    });
+    c.ok("destroy", json!({"id": a}));
+}
+
+/// A live `loudness_seed` on one of two sources of a path follows the join's rule — adopted
+/// only when it covers more — and never moves the measurement to that source. RED before: the
+/// path's measurement dropped back to the (older, shorter) seed and the reseeded source measured.
+#[test]
+fn scene_live_seed_on_a_two_source_path_never_shrinks_it() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let name = "api-loud-reseed";
+    let tone = tone_scene(1000.0);
+    let a = create_scene(&mut c, name, &tone, json!({}));
+    show_all(&mut c, &a);
+    let first = wait_for(Duration::from_secs(15), "a's window report", || {
+        loudness_events(&mut c, Some(&a)).into_iter().next()
+    });
+    let s_first = first["seconds"].as_f64().unwrap();
+    wait_for(Duration::from_secs(10), "1 s more", || {
+        (audible_s(&mut c, &a) >= s_first + 1.0).then_some(())
+    });
+    let a2 = create_scene(&mut c, name, &tone, json!({}));
+    let before = audible_s(&mut c, &a);
+    c.ok("set", json!({"path": format!("{a2}.loudness_seed"), "value": first["state"].clone()}));
+    let p2 = loudness_progress(&mut c, &a2);
+    println!("after the reseed: {p2}");
+    assert!(p2["seconds"].as_f64().unwrap() >= before - 1e-6, "never shrunk to {s_first}: {p2}");
+    assert_eq!(p2["measuring"], json!(false), "{p2}");
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(true));
+    c.ok("destroy", json!({"id": a2}));
+    c.ok("destroy", json!({"id": a}));
+}
+
+/// `path` changes onto and away from a measured path, and the book's keys: a source moved onto
+/// a playing scene's folder joins its measurement (pending until it sounds), moving away hands
+/// it back to the one still playing; a source moved (with no seed) onto a folder no source plays
+/// starts that folder afresh (deleted and re-added, updated — its idle entry dropped); another
+/// spelling of a folder (a symlink, a trailing slash) is the same measurement. RED before: the
+/// moved source measured at once, the idle folder continued, the symlink read 0 s.
+#[test]
+fn scene_path_changes_and_folder_spellings_share_one_measurement() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let tone = tone_scene(1000.0);
+    let x = common::synthetic_scene("api-loud-px", &tone);
+    let y = common::synthetic_scene("api-loud-py", &tone);
+    let a = create_scene(&mut c, "api-loud-px", &tone, json!({}));
+    let b = create_scene(&mut c, "api-loud-py", &tone, json!({}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": a}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": b}));
+    wait_for(Duration::from_secs(10), "both measure 1.5 s", || {
+        (audible_s(&mut c, &a) >= 1.5 && audible_s(&mut c, &b) >= 1.5).then_some(())
+    });
+    // Another spelling of X: a symlink to it, with a trailing slash.
+    let link = std::env::temp_dir().join(format!("liascape-loud-link-{}", std::process::id()));
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&x, &link).unwrap();
+    let sa = audible_s(&mut c, &a);
+    let l = create_src(&mut c, json!({"kind": "scene", "path": format!("{}/", s(&link))}));
+    let pl = loudness_progress(&mut c, &l);
+    assert!(pl["seconds"].as_f64().unwrap() >= sa - 1e-6, "the symlink is X's measurement: {pl}");
+    assert_eq!(pl["measuring"], json!(false), "{pl}");
+    c.ok("destroy", json!({"id": l}));
+    // b onto X: pending, then measuring X from its first sound.
+    c.ok("set", json!({"path": format!("{b}.path"), "value": s(&x)}));
+    let pb = loudness_progress(&mut c, &b);
+    assert_eq!(pb["measuring"], json!(false), "pending on X: {pb}");
+    assert!(pb["seconds"].as_f64().unwrap() >= sa - 1e-6, "X's measurement: {pb}");
+    wait_for(Duration::from_secs(10), "b sounds on X", || {
+        (loudness_progress(&mut c, &b)["measuring"] == json!(true)).then_some(())
+    });
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(false));
+    // … and back onto Y: X goes back to a; Y (no live source, no seed) starts afresh.
+    c.ok("set", json!({"path": format!("{b}.path"), "value": s(&y)}));
+    assert_eq!(loudness_progress(&mut c, &a)["measuring"], json!(true), "X back to a");
+    let pb = loudness_progress(&mut c, &b);
+    assert!(pb["seconds"].as_f64().unwrap() < 1.0, "Y afresh, not its 1.5 s before: {pb}");
+    c.ok("destroy", json!({"id": b}));
+    c.ok("destroy", json!({"id": a}));
+    let _ = std::fs::remove_file(&link);
 }
 
 /// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once

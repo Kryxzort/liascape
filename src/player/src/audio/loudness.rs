@@ -497,16 +497,24 @@ pub const BOOK_IDLE_KEEP: usize = 64;
 ///   new source continues the path's live (or last left) learner — unless its seed covers MORE
 ///   audible play (another lineage — e.g. after a player restart, or the index edited — is then
 ///   adopted). Never both added: a seed is never merged into a learner, so no block is counted
-///   twice (every report the backend stored came from this lineage, or is the one adopted);
-/// - **only the newest live source of a path measures** ([`push`](Self::push)): a transition
-///   A → A' of one scene hands A's live measurement to A' at A''s open (A's segments are
-///   dropped from then on — the same sound, never counted twice); when the measuring source
-///   leaves while another of the path still plays, that one takes over;
+///   twice (every report the backend stored came from this lineage, or is the one adopted). A
+///   source opening with NO seed on a path no source plays starts afresh
+///   ([`forget_idle`](Self::forget_idle): the item was deleted and re-added, or updated);
+/// - **one source of a path measures — the head** ([`push`](Self::push)): a source joining a
+///   path that is playing is **pending** until its first segment, and only then takes over
+///   (a transition A → A' of one scene: A measures on while A' loads, waits or stays silent —
+///   A' paused, restored broken, past its restart budget — and A's segments are dropped from
+///   A''s first one on: the same sound, never counted twice). A member that joined before the
+///   head never takes over by sounding. When the head leaves, the newest member that joined
+///   before it measures on (it was playing), else the newest pending one; a pending member
+///   leaving changes nothing;
 /// - **the end of a play** ([`leave`](Self::leave)) reports what's left (`Learner::finish`) and
 ///   keeps the learner for the next source of the path (no wait, no index round trip).
 ///
-/// In memory only: a player crash/restart starts from the backend's seeds again (the
-/// documented bounded loss — player-core.md § "Scene loudness").
+/// Paths are keys as the caller gives them — `SceneSource` canonicalizes (`/home` vs its
+/// physical path, a trailing slash, a `local/<id>` symlink share one entry). In memory only: a
+/// player crash/restart starts from the backend's seeds again (the documented bounded loss —
+/// player-core.md § "Scene loudness").
 #[derive(Debug, Default)]
 pub struct Book {
     paths: HashMap<String, Measure>,
@@ -517,8 +525,16 @@ pub struct Book {
 #[derive(Debug)]
 struct Measure {
     learner: Learner,
-    /// Live sources of the path in the order they joined: the last one measures.
+    /// Live sources of the path in the order they joined.
     members: Vec<String>,
+    /// The measuring member (`Some` whenever `members` isn't empty).
+    head: Option<String>,
+}
+
+impl Measure {
+    fn pos(&self, id: &str) -> Option<usize> {
+        self.members.iter().position(|x| x == id)
+    }
 }
 
 /// The book the compositor's scene sources share (`SourceHost` owns one).
@@ -531,43 +547,59 @@ impl Book {
 
     /// Source `id` opens on `path`; `seeded` = the learner its `loudness_seed` (the backend's
     /// index) makes. It continues the path's measurement — or adopts `seeded` when that covers
-    /// more audible play — and measures from now (the newest source of the path).
+    /// more audible play. On a path no source plays it measures at once; else it is pending
+    /// until its first segment ([`push`](Self::push)).
     pub fn join(&mut self, path: &str, id: &str, seeded: Learner) {
         self.idle.retain(|p| p != path);
-        match self.paths.get_mut(path) {
-            None => {
-                self.paths.insert(
-                    path.to_string(),
-                    Measure {
-                        learner: seeded,
-                        members: vec![id.to_string()],
-                    },
-                );
-            }
-            Some(m) => {
-                m.members.retain(|x| x != id);
-                m.members.push(id.to_string());
-                if seeded.blocks > m.learner.blocks {
-                    m.learner = seeded;
-                } else {
-                    m.learner.begin_session();
-                }
+        let m = self.paths.entry(path.to_string()).or_insert_with(|| Measure {
+            learner: seeded.clone(),
+            members: Vec::new(),
+            head: None,
+        });
+        m.members.retain(|x| x != id);
+        if m.head.as_deref() == Some(id) {
+            m.head = None;
+        }
+        m.members.push(id.to_string());
+        let adopt = seeded.blocks > m.learner.blocks;
+        if adopt {
+            m.learner = seeded;
+        }
+        if m.head.is_none() {
+            m.head = Some(id.to_string());
+            if !adopt {
+                m.learner.begin_session();
             }
         }
     }
 
+    /// A source opens on `path` without a seed: if no source plays the path, its idle entry
+    /// goes (the backend has nothing for the item — deleted and re-added, or never reported —
+    /// so a measurement left from before isn't continued). `true` = something was dropped.
+    pub fn forget_idle(&mut self, path: &str) -> bool {
+        if self.paths.get(path).is_some_and(|m| m.members.is_empty()) {
+            self.paths.remove(path);
+            self.idle.retain(|p| p != path);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Source `id` stops playing `path` (destroyed, its path changed): if it was the measuring
-    /// one, the end's report of what's left (`Learner::finish`) — and the next newest source
-    /// still playing the path, if any, measures on. The learner stays for a reopen. Idempotent.
+    /// one, the end's report of what's left (`Learner::finish`) — and another live source of
+    /// the path, if any, measures on (the newest that joined before it, else the newest). The
+    /// learner stays for a reopen. Idempotent.
     pub fn leave(&mut self, path: &str, id: &str) -> Option<Learned> {
         let m = self.paths.get_mut(path)?;
-        let head = m.members.last().is_some_and(|x| x == id);
-        let n = m.members.len();
-        m.members.retain(|x| x != id);
-        if m.members.len() == n {
+        let at = m.pos(id)?;
+        let head = m.head.as_deref() == Some(id);
+        m.members.remove(at);
+        if !head {
             return None;
         }
-        let r = if head { m.learner.finish() } else { None };
+        let r = m.learner.finish();
+        m.head = None;
         if m.members.is_empty() {
             self.idle.push_back(path.to_string());
             while self.idle.len() > BOOK_IDLE_KEEP {
@@ -575,33 +607,45 @@ impl Book {
                     self.paths.remove(&p);
                 }
             }
-        } else if head {
+        } else {
+            // Members before `at` joined before the head: they were playing.
+            let next = if at > 0 { at - 1 } else { m.members.len() - 1 };
+            m.head = Some(m.members[next].clone());
             m.learner.begin_session();
         }
         r
     }
 
     /// A segment `id` played of `path`: measured if `id` is the path's measuring source
-    /// (`Learner::push` — `Some` when a report is due), else dropped.
+    /// (`Learner::push` — `Some` when a report is due); a pending member's first segment makes
+    /// it the measuring one (`Learner::begin_session`); anything else is dropped.
     pub fn push(&mut self, path: &str, id: &str, seg: Segment) -> Option<Learned> {
         let m = self.paths.get_mut(path)?;
-        if m.members.last().is_some_and(|x| x == id) {
-            m.learner.push(seg)
-        } else {
-            None
+        if m.head.as_deref() != Some(id) {
+            let (Some(me), Some(h)) = (m.pos(id), m.head.as_deref().and_then(|h| m.pos(h)))
+            else {
+                return None;
+            };
+            if me < h {
+                return None;
+            }
+            m.head = Some(id.to_string());
+            m.learner.begin_session();
         }
+        m.learner.push(seg)
     }
 
-    /// A live `loudness_seed` on source `id`: the path's measurement restarts from `seeded`
-    /// (what was measured since its last report is dropped — it may be in the seed already:
-    /// never counted twice), `id` measuring.
+    /// A live `loudness_seed` on source `id`: like a join's seed, adopted only when it covers
+    /// more audible play than the path's measurement (never counted twice, never less); who
+    /// measures is unchanged.
     pub fn reseed(&mut self, path: &str, id: &str, seeded: Learner) {
-        if let Some(m) = self.paths.get_mut(path) {
-            m.members.retain(|x| x != id);
-            m.members.push(id.to_string());
-            m.learner = seeded;
-        } else {
-            self.join(path, id, seeded);
+        match self.paths.get_mut(path) {
+            Some(m) if m.pos(id).is_some() => {
+                if seeded.blocks > m.learner.blocks {
+                    m.learner = seeded;
+                }
+            }
+            _ => self.join(path, id, seeded),
         }
     }
 
@@ -610,11 +654,11 @@ impl Book {
         self.paths.get(path).map(|m| &m.learner)
     }
 
-    /// `id` is the source measuring `path` (the newest of its live sources).
+    /// `id` is the source measuring `path`.
     pub fn measuring(&self, path: &str, id: &str) -> bool {
         self.paths
             .get(path)
-            .is_some_and(|m| m.members.last().is_some_and(|x| x == id))
+            .is_some_and(|m| m.head.as_deref() == Some(id))
     }
 }
 
@@ -986,45 +1030,146 @@ mod tests {
     }
 
     /// Two live sources of one path (a transition A → A'): A' continues A's live measurement
-    /// and only A' measures (A's segments — the same sound — are dropped); A leaving reports
-    /// nothing; A' leaving first hands the measurement back to A.
+    /// from its FIRST segment on (until then A measures — A' may be loading, paused or broken)
+    /// and only A' measures then (A's segments — the same sound — are dropped); A leaving
+    /// reports nothing; A' leaving first hands the measurement back to A.
     #[test]
-    fn book_hands_a_live_measurement_to_the_newest_source() {
+    fn book_hands_a_live_measurement_over_at_the_newest_sources_first_segment() {
         let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
         let fresh = || Learner::new(2.0).with_cap(1e9);
         let mut b = Book::default();
         b.join("p", "a", fresh());
-        for s in tone(1.5) {
+        for s in tone(1.0) {
             assert!(b.push("p", "a", s).is_none());
         }
-        let at_join = b.learner("p").unwrap().audible_s();
         b.join("p", "a2", fresh());
+        assert!(b.measuring("p", "a") && !b.measuring("p", "a2"), "a2 is pending");
+        // a2 silent for a while: a keeps measuring (its segments count).
+        let before = b.learner("p").unwrap().audible_s();
+        for s in tone(0.5) {
+            b.push("p", "a", s);
+        }
+        let at_join = b.learner("p").unwrap().audible_s();
+        assert!(at_join > before + 0.4, "a measured on: {before} → {at_join}");
+        assert!(b.measuring("p", "a"));
+        // a2's first segment: it takes over.
+        let mut r = Vec::new();
+        let segs = tone(2.0);
+        r.extend(b.push("p", "a2", segs[0]));
         assert!(b.measuring("p", "a2") && !b.measuring("p", "a"));
         let l = b.learner("p").unwrap();
-        assert_eq!((l.seed_s(), l.session_s()), (at_join, 0.0));
+        assert_eq!(l.seed_s(), at_join, "a2's session starts at the hand-over");
         // Both play the same sound: only a2's counts.
-        let mut r = Vec::new();
-        for s in tone(2.0) {
-            assert!(b.push("p", "a", s).is_none(), "a no longer measures");
-            r.extend(b.push("p", "a2", s));
+        for s in &segs[1..] {
+            assert!(b.push("p", "a", *s).is_none(), "a no longer measures");
+            r.extend(b.push("p", "a2", *s));
         }
         let l = b.learner("p").unwrap();
         assert!((l.session_s() - 1.7).abs() < 0.05, "a2's own play only: {}", l.session_s());
         assert_eq!(r.len(), 1, "the window (2 s) reached once: {r:?}");
         assert!(b.leave("p", "a").is_none(), "a handed its measurement over: no report");
         assert!(b.measuring("p", "a2"));
-        let before = b.learner("p").unwrap().audible_s();
-        // The other way round: the newest leaves first → the older one measures on.
+        // A pending member that leaves without a sound: no report, no new session.
+        let l = b.learner("p").unwrap().clone();
         b.join("p", "a3", fresh());
-        // a3 measured nothing itself, but it was the measuring one: the rest a2 left
-        // unreported is reported once now (and not again later).
-        let end = b.leave("p", "a3").expect("the unreported rest");
-        assert_eq!((end.seconds, end.session_s), (before, 0.0), "{end:?}");
+        assert!(b.leave("p", "a3").is_none(), "pending: no report");
+        let after = b.learner("p").unwrap();
+        assert!(b.measuring("p", "a2"));
+        assert_eq!((after.seed_s(), after.session_s()), (l.seed_s(), l.session_s()), "no begin_session");
+        // The newest leaves first (after taking over) → the older one measures on.
+        b.join("p", "a4", fresh());
+        b.push("p", "a4", tone(0.1)[0]);
+        assert!(b.measuring("p", "a4"));
+        let before = b.learner("p").unwrap().audible_s();
+        b.leave("p", "a4");
         assert!(b.measuring("p", "a2"));
         for s in tone(1.0) {
             b.push("p", "a2", s);
         }
         assert!(b.learner("p").unwrap().audible_s() > before + 0.5, "a2 measures again");
+    }
+
+    /// The head leaving while a newer member is still pending: that one measures on at once
+    /// (nothing older plays); a member that joined BEFORE the head never takes over by sounding.
+    #[test]
+    fn book_head_leaving_passes_to_an_older_member_first_then_a_pending_one() {
+        let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
+        let fresh = || Learner::new(2.0).with_cap(1e9);
+        let mut b = Book::default();
+        b.join("p", "a", fresh());
+        b.join("p", "b", fresh());
+        b.join("p", "c", fresh());
+        b.push("p", "b", tone(0.1)[0]);
+        assert!(b.measuring("p", "b"));
+        // a joined before the head: its sound is dropped.
+        assert!(b.push("p", "a", tone(0.1)[0]).is_none());
+        assert!(b.measuring("p", "b"));
+        // b leaves → a (older, playing) measures, c stays pending.
+        b.leave("p", "b");
+        assert!(b.measuring("p", "a"));
+        // c's first segment takes over from a.
+        b.push("p", "c", tone(0.1)[0]);
+        assert!(b.measuring("p", "c"));
+        // c leaves → a; a leaves with nobody older → the newest pending.
+        b.leave("p", "c");
+        assert!(b.measuring("p", "a"));
+        b.join("p", "d", fresh());
+        assert!(b.measuring("p", "a"), "d pending");
+        b.leave("p", "a");
+        assert!(b.measuring("p", "d"), "nothing older plays: the pending one at once");
+    }
+
+    /// `reseed` follows the join's rule — adopted only when the seed covers more — and never
+    /// changes who measures.
+    #[test]
+    fn book_reseed_adopts_only_more_and_keeps_the_head() {
+        let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
+        let seeded = |st: Option<&serde_json::Value>| Learner::new(2.0).with_cap(1e9).with_seed(st);
+        let mut b = Book::default();
+        b.join("p", "a", seeded(None));
+        for s in tone(3.0) {
+            b.push("p", "a", s);
+        }
+        b.join("p", "b", seeded(None));
+        let had = b.learner("p").unwrap().audible_s();
+        let short = {
+            let mut l = seeded(None);
+            feed(&mut l, &tone(1.0));
+            l.state_json()
+        };
+        b.reseed("p", "b", seeded(Some(&short)));
+        assert_eq!(b.learner("p").unwrap().audible_s(), had, "a shorter seed is ignored");
+        assert!(b.measuring("p", "a") && !b.measuring("p", "b"), "no reorder");
+        let long = {
+            let mut l = seeded(None);
+            feed(&mut l, &tone(10.0));
+            l.state_json()
+        };
+        b.reseed("p", "b", seeded(Some(&long)));
+        assert!(b.learner("p").unwrap().audible_s() > had + 5.0, "a longer one is adopted");
+        assert!(b.measuring("p", "a"), "still a");
+        // On a path the book doesn't have: a join.
+        b.reseed("q", "c", seeded(Some(&short)));
+        assert!(b.measuring("q", "c"));
+    }
+
+    /// No seed on a path no source plays: the idle entry goes (deleted and re-added, updated)
+    /// — never while a source plays it.
+    #[test]
+    fn book_forgets_an_idle_path_only_without_live_sources() {
+        let tone = |secs| sine_segments(1000.0, -20.0, secs, 2);
+        let fresh = || Learner::new(2.0).with_cap(1e9);
+        let mut b = Book::default();
+        b.join("p", "a", fresh());
+        for s in tone(1.0) {
+            b.push("p", "a", s);
+        }
+        assert!(!b.forget_idle("p"), "a plays it");
+        b.leave("p", "a");
+        assert!(b.forget_idle("p"));
+        assert!(b.learner("p").is_none() && !b.idle.iter().any(|x| x == "p"));
+        b.join("p", "b", fresh());
+        assert_eq!(b.learner("p").unwrap().audible_s(), 0.0, "starts afresh");
     }
 
     /// The book keeps at most [`BOOK_IDLE_KEEP`] idle paths (the least recently left go); a
@@ -1042,6 +1187,24 @@ mod tests {
         assert!(b.learner("p5").is_some() && b.learner(&format!("p{}", BOOK_IDLE_KEEP + 4)).is_some());
         assert!(b.learner("live").is_some());
         assert_eq!(b.paths.len(), BOOK_IDLE_KEEP + 1);
+    }
+
+    /// Rejoining an idle path refreshes its recency: the least recently LEFT goes first.
+    #[test]
+    fn book_idle_eviction_is_least_recently_left() {
+        let mut b = Book::default();
+        for i in 0..BOOK_IDLE_KEEP {
+            let p = format!("p{i}");
+            b.join(&p, "s", Learner::new(2.0));
+            b.leave(&p, "s");
+        }
+        b.join("p0", "s", Learner::new(2.0));
+        b.leave("p0", "s");
+        b.join("new", "s", Learner::new(2.0));
+        b.leave("new", "s");
+        assert!(b.learner("p0").is_some(), "p0 was left most recently but one");
+        assert!(b.learner("p1").is_none(), "p1 is now the least recently left");
+        assert_eq!(b.paths.len(), BOOK_IDLE_KEEP);
     }
 
     #[test]
