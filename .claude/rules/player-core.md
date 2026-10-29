@@ -1712,6 +1712,36 @@ state-machine rules (R44 seek, cut per-A ramps, video-is-never-a-still, held A d
 handoff) are unit-tested graph-only in `recipes/transition.rs` (synthetic events, no GPU).
 
 
+## Programs (Phase 3; plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md`)
+A rotation is a graph node `prog:<name>` (kind `program`, `recipes/program/`) — its settings are live properties,
+and the recipe turns them into `transition` requests on the player clock. It never renders and never touches a
+source; the transition recipe stays the one place a switch happens. The contract it reproduces is
+`player-adapter.md` § Rotation (the C# `PlayerHelper` rotation, each Rust function naming the C# it ports).
+- **Pure parts:** `rule.rs` (`item_rule` = `ItemPlayRule`, `max_reached`, `still_min_reached`, `min_reached`,
+  `retime_remaining` = `UpdateTimedSettings`' arithmetic), `order.rs` (`Order`: cycles, shuffle with a new cycle's
+  first ≠ the old one's last, history ≤ 100, random, `reorder` = `ReorderPlaylist`; a step is *planned* and only
+  *committed* when its B starts — no C# pre-fetch), `pick.rs` (`TransitionCfg`, `pick` = `PickEffect` +
+  `PickDuration`; params = the catalogue's uniform defaults, `Catalogue::defaults`). Seeded by the node's `seed`
+  (`Rng`, SplitMix64).
+- **Node schema** (`graph::props`, `NodeKind::Program`, auto-id `prog<n>`): settable `outputs` (Str `out:*`, fixed
+  after create), `items` (`PropValue::Items` — `[{path, props?, skip?}]`, ≤ 10 000, non-empty paths, `props` keys
+  checked as `Source` create props; errors name `items[i]`), `defaults` (Source create props), `order`
+  `sequential|shuffle`, `mode` `timer|on_end` (on_end), `interval_ms` / `max_ms` (0–359 999 000, 0), `separate_scenes`
+  (true), `scenes_after_ms` (1 800 000), `transition` (`{enabled, effects, shuffle, duration_ms, duration_max_ms,
+  method}`, `{enabled:false}`), `seed`; observed (read-only) `phase` (`idle|playing|holding|armed|switching|backoff|
+  parked|empty`), `index`, `path`, `next_path`, `played_ms`, `remaining_ms`. A program node never moves
+  `picture_rev`/`demand_rev` on create/destroy. `create`/`set` on it → `Programs::configure` (live); `destroy` stops
+  the rotation and leaves the picture (a pre-Running armed switch is cancelled).
+- **Verbs:** `program.play|next|prev|random` (Command API). `transition.scheduled` carries `origin: "api" |
+  "program:<id>"` (`TransitionReq::origin`; the `transition` verb always sets `api`). `state.programs`, the
+  `programs` probe (+ each item's `skip|broken|failed`), `hello.capabilities` + `program`.
+- **Events** (comp `program`): `program.created|destroyed {id}`, `program.current {id, index, path, from, reason,
+  corr}` (reason `play|timer|end|max|scenes_after|next|prev|random|broken|vram|failed_skip|items`), `program.armed`,
+  `program.held` (debug), `program.failed {id, path, reason, backoff_ms}` (warn), `program.skipped {id, path, why}`,
+  `program.empty {id}` (warn), `program.idle`, `program.requested` (debug).
+- **Transition events reach the programs** with the tick after `Transitions::tick` (R47): the `transition`/`cancel`
+  verbs and an output removal *stash* the outbox (`Runtime::stash_tr_events`) instead of dropping it.
+
 ## Runtime
 
 `src/runtime.rs` + `src/headless.rs` (spec §4.1/§4.2, §9 "headless deterministic mode";
@@ -2056,15 +2086,17 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs, health {effects, vram, hwdec_interop, scenes} (each `{ok, reason, …}`, `crate::health`)}` | — | `ctl hello` |
-| `create` | `{kind: source\|layer\|effect, id?, props?}` | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, program, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs, health {effects, vram, hwdec_interop, scenes} (each `{ok, reason, …}`, `crate::health`)}` | — | `ctl hello` |
+| `create` | `{kind: source\|layer\|effect\|program, id?, props?}` (a program without `seed` gets the wall clock's nanos) | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
 | `get` | `{path}` (must resolve to one node) | `{value}` | graph codes, `ambiguous` | `ctl get '{"path":"cur:DP-1.time_pos"}'` |
 | `animate` | `{path, to, duration_ms, curve?: linear\|smoothstep\|equal_power_out\|equal_power_in\|step, from?, unit?: scalar\|gain_linear}` — numbers + gain slots; starts now; `from` defaults to the current value and is range-checked like `to`; `gain_linear` only on `gain.*` | `{corr, targets}` (a broadcast alias matching nothing: `targets: []`, like `set` — M13); `anim.done {corr}` per finished animation | `bad_type` (non-numeric), `out_of_range` (`to`/`from`), `bad_request` (unit), graph codes | `ctl animate '{"path":"lay:DP-1:main.opacity","to":0,"duration_ms":500}'` |
 | `transition` | `TransitionReq` (§ Transition recipe): `{outputs, to, effect_id?, params?, duration_ms?, method?, align?}` | `{corr, to: B's id}` (`parked: true` when no output exists — § Runtime, I4) | `no_such_effect` (not in the catalogue — hint: `ctl effects`), recipe codes | `ctl transition '{"outputs":"out:*","to":{"path":"/w/b.mp4"},"effect_id":"fade","duration_ms":1000}'` |
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
-| `state` | — | `{graph (Graph::snapshot), transitions (status), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
+| `program.play` | `{id, index?: 0, keep_pause?: false}` (§ Programs) | `{corr, path, index}` | `no_such_node` (no such program), `unsupported` (empty program — hint: the `programs` probe), `out_of_range` (index) | `ctl program.play '{"id":"prog:main","index":2}'` |
+| `program.next` / `program.prev` / `program.random` | `{id, keep_pause?: false}` | `{corr, path, index}` — `corr`/`path` null = nothing to do (previous at the session's first item, nothing playable) | `no_such_node`, `unsupported` (empty) | `ctl program.next '{"id":"prog:main"}'` |
+| `state` | — | `{graph (Graph::snapshot), transitions (status), programs (§ Programs, `ProgramStatus`), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
 | `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` — deferred until the file is written (the client's later requests wait, like `step`'s); the picture is the one at the request | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |
 | `logs` | `{comp?, corr?, min_level?, kind_prefix?, limit? (200, ≤ 10000)}` | `{events: [records, oldest first]}` | — | `ctl logs '{"corr":"tr-12"}'` |
@@ -3282,6 +3314,29 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (WE pans by the object's x when set) not done. Each start opens the picked file on the render thread:
   measured 22 ms for 3289734539's 40 MB WAV from its `scene.pkg` (once per file, every ~4 min), 1–2 ms
   for an mp3. Also fixed: `decodeFrame`'s leftover-packet counter was a static shared by all streams.
+  **0019:** `Configuration` initialises `baseOnly`/`noSolidFinal`/`passLog` (heap garbage before: a non-zero
+  `noSolidFinal` dropped every solid layer's final draw, so solid layers came and went per process).
+  **0020 (2026-10-29, batch B1): property scripts run** (`docs/player/spikes/we-lwe-gap-audit.md` S1–S9,
+  S33–S35, S38). Module = `JS_EVAL_FLAG_COMPILE_ONLY` → `JS_EvalFunction` → `JS_GetModuleNamespace` (LWE
+  kept the Promise: nothing ran and `null` was written every frame). Queued modules evaluate on the next
+  `ScriptEngine::tick` (scene complete), in queue order, then `init(value)` each, then
+  `applyUserProperties(<all user properties>)` once, then `update(value)` every tick; undefined/null returns
+  write nothing; Vec3/Vec4 keep z/w; `thisLayer`/`thisObject` = a `const` prepended to each module's first
+  line (`globalThis.__thisLayerBinding` at evaluation). scale/angles/visible register the rendered values
+  (not `group*`); a text's `text` script runs only as the layer script. **The JS classes are WE's own, read
+  at run time from the assets dir** (`scripts/jsclasses/baseclasses.js` evaluated first as a global script,
+  `import 'WEMath'|'WEColor'|'WEVector'` → `scripts/jsmodules/<lowercase>.js`); never copy them into the repo
+  or the fork. Without them: bare `Vec2/3/4` constructors (logged), modules don't resolve. C++ only marshals
+  (`ScriptEngine::newVec` = `new VecN(…)` of WE's class); the native Vec/WEMath/WEColor adapters are gone.
+  `createScriptProperties` = WE's builder (defaults) with the stored values (`__storedScriptProperties`, live)
+  laid over it (builtins.js). The layer adapter reads/writes registered properties (+ `name`); engine
+  functions work (registration + `JS_CFUNC_generic_magic`); timer callbacks are owned. **0021:** a name the
+  layer lacks reads `undefined` without a log line (0020's getter logged per miss). Script errors log
+  `ScriptEngine [<prop>_<id>.<fn>]: …` + stack, ≤ 5 per script. Still missing (B10): layer methods
+  (`getTextureAnimation`, `getAnimation`, `size`), `registerAudioBuffers`, cursor/media events,
+  `engine.userProperties`, `createLayer`, sound layers. `host_api_test`: `update_moves_the_property`,
+  `init_runs_first_and_modules_load`, `undefined_leaves_the_property` (solid squares on a 64×32 scene, need
+  `LIASCAPE_WE_ASSETS_DIR`; RED on 45ed25c); `HOST_API_TEST_ONLY=<substring>` runs a subset.
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").
