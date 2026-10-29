@@ -113,3 +113,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Fans (side request):** `/etc/nixos/fans.nix` adds the writable `nct6687d` driver + CoolerControl (uncommitted in
   /etc/nixos; the rebuild compiled the CachyOS kernel locally — same kernel). fan6 = the splitter with the rattling
   fan; nothing slowed (owner: "its quiet rn").
+- **Scene loudness estimator wired in** (`bfee7c6`, `4134f72`, `b21d494`, `c60561f`): estimates on import/sync/start
+  (96 scenes in 9.8 s warm, 323 s cold, 0 errors), Settings → Playback under "Normalize audio": "Scene loudness"
+  Estimate / Recalculate all / Cancel, the card info shows "≈ … (estimated)" / "(measured, N min)". Loudness is now
+  stored per audio configuration — toggling a sound property (tested live on 2951169110's orchestral switch)
+  re-keys, ramps the normalisation in 500 ms and continues that configuration's own measurement. A one-off script
+  moved your 13 measured scenes to the new format (index backed up first). Adapter 281/0, UI matrix 780/0.
+  ⚠ An older installed liascape (the NixOS one) writing the index would drop the new fields — reinstall/bump.
+- **Next:** Phase 3 Task 7 (the backend hands rotation to the player program) — running beside Task 6.
