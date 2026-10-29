@@ -97,3 +97,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   thisLayer/thisObject, scale/angles/visible drive the layer; WE's own JS classes load at run time from the user's
   WE install (nothing copied). Also fixed: solid layers vanishing at random (uninitialised config). Corpus 92 ok,
   0 blank/broken/timeout (2 former timeouts now ok). Port now PARKED (B2+ wait).
+- **Phase 3 Tasks 1–3 done** (`7dfda3f`, `3f57ca9`, `52caea7`): rotation rules, the `program` node, the rotation
+  engine inside the player (timer, end-of-video with min/max, scene timing, failure ladder). 28 program tests.
+  Not wired to the backend yet (Task 7). Next: Tasks 4, 5, 5b (agent running).
