@@ -106,3 +106,10 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   the 0.6 % bound (machine was busy — worth a quiet re-run: `scenes.sh workers`). Audio unchanged (onset harness).
 - **Started:** the loudness estimator wiring (import + Settings → Audio "Scene loudness" Estimate / Recalculate
   all / Cancel, per-property-combination loudness, live re-seed on a property change).
+- **Phase 3 Tasks 4, 5, 5b done** (`ffb8eb2`, `c95982a`, `876deae`): user next/prev/random + live playlist edits
+  (re-arm, never reset the countdown), programs survive player restarts (`program.json`, snapshot), "hold until a
+  monitor returns" (`while_parked`), and the playlist "Start over / Resume where it left off" (player side).
+  65 program tests. **Next: Task 6** (pause when covered) — with the cover rule revised to "visible", not "focused".
+- **Fans (side request):** `/etc/nixos/fans.nix` adds the writable `nct6687d` driver + CoolerControl (uncommitted in
+  /etc/nixos; the rebuild compiled the CachyOS kernel locally — same kernel). fan6 = the splitter with the rattling
+  fan; nothing slowed (owner: "its quiet rn").
