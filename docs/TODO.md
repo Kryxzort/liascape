@@ -286,6 +286,79 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         the window's 2.0 s for the end's 3.0 s); the IT check now reads what the player continues (`workers` probe
         `seed_s` ≥ play 1's last report and ≈ its play time: the end report + a rest < window/12, or — a reopen during
         the stop's fade-out, seen in 1 of 4 runs — play 1's live measurement handed over), then the index catching up.
+  - [x] **Offline scene loudness estimate — the player half** (2026-10-29, player-core.md § "Scene loudness" →
+        "Offline estimate"): `scene::loudness_estimate` + `scene::pkg` + `liascape-player scene-loudness <dir>
+        [--props '<scene_props>'] [--model lwe|we]` — a scene's sound objects → a play plan → each audio file decoded
+        once (ffmpeg) to per-100 ms K-weighted powers (cached per file, `~/.cache/liascape/scene-loudness`) → mixed as
+        a power sum → the live `Learner` itself, so the estimate is the learner's own `state` (a seed it continues) +
+        `seed.state` scaled to 10 s, a `fingerprint` of the audio configuration and a `confidence`. **Validated**
+        against LWE's real output (`--lwe-smoke --audio-dump 45`, 53 scenes with sound of the owner's library): the
+        first 45 s estimated within ±0.10 LU in 46, ±0.25 in 51, median −0.03; outliers are flagged `low` and
+        bracketed (`lufs_if_coherent`): 3289734539 −2.6 (a vocal and an instrumental version of one song playing at
+        once — they add partly coherently), 3174556087 −0.75 (11 tracks at once). Against the live learner's stored
+        state (all three measured scenes): −16.59 vs −16.58, −5.11 vs −5.12, −14.57 vs −15.18 (that one's plays
+        were mostly shorter than its 167 s track, so the live histogram over-weights its quiet intro). The full-track
+        estimate differs from a scene's first minute by a median 1.1 LU (up to 10.7): an estimated seed is a better
+        start than the first 60 s report. **Found:** LWE plays every file of a sound object at once at unity gain and
+        ignores `volume` — 57 of the library's 79 sound objects carry a volume it drops (32 bound to a user property,
+        25 a literal ≠ 1), so no property changes a scene's sound under liascape-player today (next entry).
+  - [ ] **LWE ignores a sound object's `volume` (and its user property), `startsilent` and the playlist modes**
+        (found 2026-10-29 with the estimate; LWE `next-v2` `CSound::load`/`ObjectParser::parseSound` keep only
+        `sound` + `playbackmode`): e.g. 2951169110 plays its "believe in you" AND its "orchestral version"
+        (`volume` bound to a slider at 0) together; 3276522107's train music (slider default 0) plays at full;
+        3289734539 its vocal and instrumental mixes at once; `random` objects play all their files at once, once.
+        Fix = a fork patch: parse `volume` with `it.user(...)` (a `DynamicValue` → its listener sets the stream's
+        gain live, so `scene_props` reach it like any property), apply it in `HostAudioDriver::pull`, honour
+        `startsilent`, play a multi-file `loop`/`random` object as WE does (one file at a time; WE's exact rules —
+        volume law, `random` gaps from `mintime`/`maxtime` — are inferred, not confirmed: WE's binary wasn't
+        decompiled, no Ghidra here). Then flip `scene-loudness`'s default model to the patched rules (`we` today).
+  - [ ] **Offline scene loudness → integration** (design 2026-10-29, not wired — waits on the loudness race fix;
+        owner decisions folded in: estimate on import + a "recalculate all" button; property-aware loudness):
+    - **When the backend runs it.** (1) **On import**: every scene that enters the library (WE local import,
+          Workshop download, the auto-add sync) is queued once its folder is complete (`project.json` + `scene.pkg`/
+          `scene.json` present — a half-downloaded item fails `SceneDir::open` and is retried by the next sync).
+          (2) **Settings → Audio, under "Normalize audio"** (not Library's Clear Cache/Clear Settings rows: those are
+          destructive maintenance; this is a loudness action and only means something with normalization — shown
+          when the engine is liascape-player): a row "Scene loudness — estimate all" with **Estimate** (skips scenes
+          already estimated for their current fingerprint) and **Recalculate all** (force) + Cancel while running. The
+          owner's one-off backfill is simply that button. One `ScenePlanner` queue in the backend: one
+          `liascape-player scene-loudness <dir> --props '<item scene_props>'` child at a time under `nice -n 19
+          ionice -c3` (the per-file cache makes a repeat a re-mix, ~1 ms), never on a request thread, never touching
+          playback (the live player is not involved at all). **Cancel-safe**: each scene's result is written to its
+          index entry atomically (`SetMeta`) only when its child succeeded; cancel kills the running child and drops
+          the queue; a restart re-queues what has no estimate for its current fingerprint.
+    - **API + progress.** `POST /library/scene-loudness/estimate {paths?: [...], force?: bool}` → `{queued}`
+          (no paths = every scene); `POST /library/scene-loudness/cancel`; `GET /library/scene-loudness/status` →
+          `{running, done, total, current, failed: [{path, error}]}`. Event **`scene-loudness-progress {done, total,
+          currentId, finished?, cancelled?}`** (shaped like `unsub-progress`) → the topbar status (`s.status`, App.tsx:
+          "Estimating scene loudness 12 / 96…", cleared on `finished`); `library-item-changed` per stored scene so the
+          card's loudness line updates.
+    - **Storage per item** (`LibMeta`): `SceneLoudness {<fingerprint>: {estimate: {lufs, peak_dbfs, state (full),
+          confidence, model, v}, live: {state, seconds, lufs, peak_dbfs, partial}}}` + `SceneLoudnessFp` (the current
+          configuration's). The applied `LoudnessI`/`LoudnessTP` keep their meaning (the CURRENT fingerprint's value,
+          0.5 LU hysteresis): **live** once it has a report (≥ 20 s audible), else the **estimate**. Toggling a sound
+          off and back on returns to the measurement that configuration already had; a never-played combination
+          starts from its estimate at once (a re-mix — no decode). The existing flat `loudnessState`/`Seconds` of
+          the three measured scenes go to the fingerprint of their current props by a one-off script (no migration
+          code). A missing/failed estimate = today's behaviour (learn on first play).
+    - **Weighting.** The source's `loudness_seed` = the fingerprint's live `state` if any, else the estimate's
+          `seed.state` — the estimated histogram scaled to **10 s** of audible play (`--seed-seconds`): the first live
+          report (window 60 s) weighs it 1:6, the cap (1800 s) 1:180. An estimate never displaces live data (the
+          player's `Book` adopts a seed only when it covers more audible play — 10 s never does past the first 10 s),
+          and the backend never stores a report over a longer one (unchanged `MergeSceneLoudness`).
+    - **Property changes while playing** (`/library/scene-props` commit; the drag twin `/preview` changes nothing
+          here): the backend re-plans (`scene-loudness --props`, cached: ~1 ms + spawn) → the new fingerprint →
+          its target (live, else estimate) → one batch to the item's sources: `set <src>.scene_props`, `set
+          <src>.loudness_key <fp>` + `set <src>.loudness_seed <its state>`, `animate <src>.gain.normalize` 500 ms
+          (a ramp, never a jump). **Player half (to build):** a `loudness_key` source prop; the `Book` keyed by
+          (path, key); a key change on a live source = `leave` the old key (its rest reported with that key) +
+          `join` the new one (seeded), segments for 0.5 s after the change dropped (the worker applies the property
+          within a frame; the stream's buffers still carry the old mix) — so two configurations never share a
+          histogram; `scene.loudness` carries `key`, and the backend stores each report under it. Under today's LWE
+          no property changes the fingerprint (the entry above), so this flow is inert until LWE honours `volume`.
+    - **UI.** The card settings modal's loudness line / tooltip: "≈ −14.6 LUFS (estimated)" vs "−15.2 LUFS
+          (measured, 30 min)"; a `low` confidence adds its first note ("two versions of one song play at once — may be
+          up to +4.7 LU louder"); `/library` items gain `loudnessEstimated`.
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on
