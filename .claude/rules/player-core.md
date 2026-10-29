@@ -2936,9 +2936,39 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   once reaped, then the restart policy). No ticks flowing → `Ping` every `PING_INTERVAL`
   (1 s), **shortened to `hang_timeout / 2`** so a hang is always seen within 1.5 ×
   `hang_timeout` (the plan's 1 s ping could not meet `hang_after_ms 100, hang_timeout 300 →
-  Hung ≤ 600 ms`). No `Hello` within `HELLO_TIMEOUT` (5 s, or `hang_timeout` if longer) =
-  hung too. The worker keeps answering while LWE loads + builds (its `lia-scene-proto` thread
-  answers pings during a load, bounded — § "Real scenes (Task 7)").
+  Hung ≤ 600 ms`); the cadence counts from the last `Tick`/`Ping` sent (`last_beat`) — other
+  traffic (gains, the pointer) never postpones a ping. No `Hello` within `HELLO_TIMEOUT` (5 s,
+  or `hang_timeout` if longer) = hung too. The worker keeps answering while LWE loads + builds
+  (its `lia-scene-proto` thread answers pings during a load, bounded — § "Real scenes (Task 7)").
+  **"Hung" = the worker is the reason no frame comes** (2026-10-29, the suspend false-kills —
+  `docs/player/reports/phase2.md` § 8), so two waits are not counted:
+  - **Starved of slots.** The host tracks the worker's ring (the latest `Buffer` set — a new
+    size starts a new ring: a ring is exported whole before any frame of it, a `resize` always
+    changes the size) and the slots it holds (a `Frame` named it, no `Release` sent yet). While
+    it holds **every** slot, the worker can't render a tick (the renderer waits in `recv` for a
+    `Release`) — its outstanding ticks are re-stamped each poll (their age doesn't count) and
+    its liveness is the **ping** (sent while starved even with ticks outstanding; the idle
+    renderer answers it — and, robust, polls `glGetGraphicsResetStatus` on it, since a starved
+    renderer renders no frame to poll after). Bounded: starved with a tick waiting for more than
+    **`STARVE_LIMIT_FACTOR` (5) × `hang_timeout`** (10 s) = hung all the same (`worker.hung
+    {starved_ms}`) — slots that never come back (a fence that never signals: a dead GPU
+    timeline) are recovered by a restart's fresh ring. Paused (no ticks) holds slots freely.
+  - **The host's own stall.** A gap between two `poll`s longer than **`host_stall_gap` =
+    `hang_timeout / 2`** (1 s; production polls at the loop's tick rate, ≤ 17 ms apart) means the
+    compositor itself didn't run (blocked in the driver while the whole GPU was busy): every
+    outstanding tick/ping (and a pending `Hello`) gets a fresh `hang_timeout` from that poll,
+    `worker.host_stalled {gap_ms, outstanding, hello}` (info). A worker that freezes while the
+    host keeps polling is judged exactly as before. Suspend time itself never counted
+    (`Instant` = `CLOCK_MONOTONIC`, stopped in S3).
+  Tests (`tests/worker.rs`, stub `ring:3` / `freeze_*`): `starved_worker_is_not_hung` (4 ×
+  the timeout with every slot held: no `Hung`, the waiting tick framed into the released slot at
+  once — RED before: `Hung {waited_ms: 302}`), `starved_worker_that_hangs_is_still_killed`
+  (`hang_after_ms 600`: `Hung` within 900–1150 ms — the usual bound), `starved_forever_is_killed_after_the_starve_limit`,
+  `host_stall_is_not_a_hang` (no poll for 900 ms, the worker back 150 ms after the host — RED
+  before: `Hung {waited_ms: 900}`, incident 2's signature), `worker_freeze_while_the_host_polls_is_hung`
+  (< 400 ms); `tests/scene.rs::gpu_stall_that_starves_the_worker_is_not_a_hang` (the real
+  renderer, synthetic `gpu_stall: [500, 1500]` at a 300 ms timeout: a 1.5 s latch gap, 0
+  restarts, frames flow again from the same worker — RED before: 3 restarts).
 - **`send` while not connected** (before `Hello`, `Restarting`, `Broken`, `Stopped`):
   `Start`/`Paused`/`Resize`/`Route`/`SetProperty` are **folded into the restart's `Start`**
   and accepted (`Ok`) — a restart never resumes with a stale pause/size/route/property;
@@ -2982,7 +3012,10 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
 {features: [stub], sync: none}`, answers `ping`/`tick` (a slot-0 `frame` without fd), logs
 each `start`'s position (`stub: start position <p>`), scripted by `LIASCAPE_SCENE_WORKER_TEST`
 (comma-separated): `crash_after_ms:N` (`stub: crashing` to stderr, `RLIMIT_CORE` 1 —
-no systemd-coredump/DrKonqi —, `abort()`), `hang_after_ms:N` (stops answering), `exit_code:N`
+no systemd-coredump/DrKonqi —, `abort()`), `hang_after_ms:N` (stops answering), `ring:N` (N
+`buffer`s on `start` — 64×64, no fds —, each tick framed into a free slot, the newest tick held
+while the host has them all: slot starvation without a GPU), `freeze_after_ms:N` + `freeze_ms:M`
+(N ms after `hello` stops reading for M ms, then carries on), `exit_code:N`
 (exit N at `crash_after_ms`, else right after `hello`), `ignore_quit` (ignores `quit` **and**
 EOF — only SIGKILL ends it), `spam_stderr:N`. The worker sets its socket `CLOEXEC`
 (nothing it starts may hold it: EOF is the crash signal).
@@ -3067,7 +3100,7 @@ No flip (R25: image top at texture row 0). Slot ids are unique per worker lifeti
 2, then 3… for a re-export) so a later ring can't be confused with this one; `resize`
 re-exports the ring (Task 5, below). `gpu_ms` = the worker's `GL_TIME_ELAPSED` of an earlier
 frame, never waited for (Task 8, § "GPU budget and VRAM"). Synthetic and env knobs (`crash_after_ms`,
-`hang_after_ms`) both apply.
+`hang_after_ms`, `gpu_stall`) both apply.
 
 **Compositor side: `worker/dmabuf.rs` + `sources/scene.rs`.**
 - `validate_modifier(fourcc, modifier, table)`: refuses a modifier the display can't sample
@@ -3113,7 +3146,10 @@ frame, never waited for (Task 8, § "GPU budget and VRAM"). Synthetic and env kn
   right 16² = `grad_rgb(x, y, seq)`, rest grey 32) | `solid` | `split_tb` (top `rgb`, bottom
   `rgb2`) | `pointer_dot` | `input_level`; `native`, `alpha` (drawn with it; the worker forces
   1), `gpu_work` (a pixel-neutral loop: 2500 ≈ 3 ms, 4000 ≈ 6 ms per 1080p frame here),
-  `tone_*`/`has_audio` (Task 6), `crash_after_ms`, `hang_after_ms`, `fail: load|build`.
+  `tone_*`/`has_audio` (Task 6), `crash_after_ms`, `hang_after_ms`, `fail: load|build`,
+  `gpu_stall: [after_ms, for_ms]` (frames in that window carry a stand-in acquire fence — a pipe,
+  written when the window ends, after the real fence was waited for — as if the GPU finished
+  nothing: the compositor latches none and starves the worker; the 2026-10-29 suspend false-hang).
   `tests/common::synthetic_scene(name, &spec)` writes `target/test-media/scenes/<name>/`
   (`project.json` type scene, 16-byte `scene.pkg`, 1×1 `preview.png`, `liascape-synthetic.json`).
 
@@ -4129,7 +4165,17 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
   `HANG_TIMEOUT` 2 s — unit `hang_timeout_knob`). Tests run 300. `tests/api.rs::
   hang_is_killed_and_restarted` (`hang_after_ms` 1500: `worker.hung` after 304 ms — RED: 2005 —,
   `worker.restart {why: "hung, killed by signal 9"}`, the hung pid gone, frames from the new
-  worker past the held `t`).
+  worker past the held `t`; 303 ms after the 2026-10-29 heartbeat change — the same bound).
+- **A suspend is not a hang (2026-10-29).** Both on-machine suspends killed a live worker as hung
+  (`phase2.md` § 8): after the resume the compositor held every slot (latched + queued frames
+  whose fences hadn't signalled while the GPU woke) and the worker sat idle waiting for a
+  `Release` (incident 1, `waited_ms 2001`); and NVIDIA's kernel-notifier VRAM save blocked the
+  compositor's own loop for ~6.4 s, whose first heartbeat after the thaw found a tick that old
+  (incident 2, `waited_ms 6438`). The heartbeat now leaves out a **starved** worker's tick age
+  (pinged instead, bounded at 5 × the timeout) and the time of a **host stall** — § "WorkerHost"
+  → Heartbeat. A real hang keeps its bound (the api test above; `tests/worker.rs::
+  starved_worker_that_hangs_is_still_killed`). The robust renderer also polls the reset status on
+  every ping, so a purge it sees while starved is a `ContextLost` restart (on-machine only).
 - **Snapshot: a broken scene restores as its preview.** `SourceSnap.broken` (saved only when true,
   `skip_serializing_if`), `create_props` seeds `broken: true` (read-only, seeded by `create` like
   `of`); `SceneSource::open` sees it → `restored_broken`, `broken` set, **no worker is ever

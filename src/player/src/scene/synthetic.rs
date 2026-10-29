@@ -71,6 +71,12 @@ pub struct SyntheticSpec {
     /// its GL context had been lost (a GPU reset / `EGL_NV_robustness_video_memory_purge`),
     /// then renders nothing more — the compositor must treat it as a crash restart.
     pub context_lost_after_ms: Option<u64>,
+    /// Test-only: `[after_ms, for_ms]` — from `after_ms` after its start, for `for_ms`, every
+    /// frame goes out with a stand-in acquire fence (a pipe) that signals only when the window
+    /// ends, as if the GPU finished nothing meanwhile (NVIDIA saving VRAM before a suspend,
+    /// the GPU waking after one). The compositor latches nothing, soon holds every slot, and
+    /// the worker starves — the false-hang of the 2026-10-29 suspends, hermetically.
+    pub gpu_stall: Option<[u64; 2]>,
 }
 
 impl Default for SyntheticSpec {
@@ -91,6 +97,7 @@ impl Default for SyntheticSpec {
             load_ms: 0,
             report_gpu_ms: None,
             context_lost_after_ms: None,
+            gpu_stall: None,
         }
     }
 }

@@ -49,6 +49,16 @@ pub const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 /// Heartbeat period while no ticks flow (shortened to `hang_timeout / 2` for short timeouts,
 /// so a hang is always seen within `1.5 × hang_timeout`).
 pub const PING_INTERVAL: Duration = Duration::from_secs(1);
+/// A worker starved of slots (every one held by the host) with a tick waiting is hung after
+/// this many hang timeouts all the same — slots that never come back (fences that never
+/// signal: a dead GPU timeline) are recovered by a restart (a fresh ring).
+pub const STARVE_LIMIT_FACTOR: u32 = 5;
+/// A gap between two `poll`s longer than this = the host itself was stalled (see
+/// `WorkerHost::host_stall_grace`): half the hang timeout (1 s in production, where polls come
+/// at the loop's tick rate, ≤ 17 ms apart).
+pub fn host_stall_gap(hang_timeout: Duration) -> Duration {
+    hang_timeout / 2
+}
 /// The child's socket end.
 pub const CHILD_FD: RawFd = 3;
 /// After socket EOF, a process that still hasn't exited by then is killed.
@@ -166,7 +176,18 @@ struct Proc {
     /// Sent ticks not answered yet (`seq`, sent at); a `Frame {seq}` answers every tick ≤ it.
     ticks: VecDeque<(u64, Instant)>,
     ping: Option<(u64, Instant)>,
-    last_sent: Instant,
+    /// The last `Tick`/`Ping` sent (or the `Start`): the ping cadence. Other traffic (gains,
+    /// the pointer) proves nothing about the worker, so it never postpones a ping.
+    last_beat: Instant,
+    /// The worker's current ring (slot ids of its latest `Buffer` set, `ring_size` each) and
+    /// the slots the host holds (a `Frame` named it, no `Release` sent yet): when the host
+    /// holds the whole ring the worker can't render a tick — it is *starved*, waiting on us.
+    ring: Vec<u8>,
+    ring_size: (u32, u32),
+    held: Vec<u8>,
+    /// Since when a tick has been waiting while the worker was starved (bounded by
+    /// [`STARVE_LIMIT_FACTOR`] × the hang timeout).
+    starved_since: Option<Instant>,
     eof_at: Option<Instant>,
     killed: bool,
     hung: bool,
@@ -187,6 +208,8 @@ pub struct WorkerHost {
     ping_seq: u64,
     corr: CorrId,
     sync: Option<String>,
+    /// The previous `poll` (the host-stall grace).
+    last_poll: Option<Instant>,
 }
 
 impl WorkerHost {
@@ -208,6 +231,7 @@ impl WorkerHost {
             ping_seq: 0,
             corr: log::new_corr("wk"),
             sync: None,
+            last_poll: None,
         };
         host.proc_ = Some(host.spawn_proc(0)?);
         Ok(host)
@@ -245,10 +269,16 @@ impl WorkerHost {
         };
         proto::send(p.sock.as_ref().unwrap().as_fd(), m, fds)?;
         let now = Instant::now();
-        p.last_sent = now;
         match m {
-            ToWorker::Tick { seq, .. } => p.ticks.push_back((*seq, now)),
-            ToWorker::Ping { seq } => p.ping = Some((*seq, now)),
+            ToWorker::Tick { seq, .. } => {
+                p.ticks.push_back((*seq, now));
+                p.last_beat = now;
+            }
+            ToWorker::Ping { seq } => {
+                p.ping = Some((*seq, now));
+                p.last_beat = now;
+            }
+            ToWorker::Release { slot } => p.held.retain(|s| s != slot),
             _ => {}
         }
         Ok(())
@@ -261,6 +291,7 @@ impl WorkerHost {
         if self.proc_.is_none() {
             return out;
         }
+        self.host_stall_grace(now);
         self.drain_output(false);
         self.drain_socket(now, &mut out);
         self.heartbeat(now, &mut out);
@@ -521,7 +552,11 @@ impl WorkerHost {
             hello_at: None,
             ticks: VecDeque::new(),
             ping: None,
-            last_sent: now,
+            last_beat: now,
+            ring: Vec::new(),
+            ring_size: (0, 0),
+            held: Vec::new(),
+            starved_since: None,
             eof_at: None,
             killed: false,
             hung: false,
@@ -636,9 +671,23 @@ impl WorkerHost {
                 }
                 return;
             }
-            FromWorker::Frame { seq, .. } => {
+            FromWorker::Frame { seq, slot, .. } => {
                 while p.ticks.front().is_some_and(|(s, _)| s <= seq) {
                     p.ticks.pop_front();
+                }
+                if !p.held.contains(slot) {
+                    p.held.push(*slot);
+                }
+            }
+            FromWorker::Buffer { slot, w, h, .. } => {
+                // A ring is exported whole, before any frame of it, and a re-export (`resize`)
+                // is always a new size: a new size starts a new ring.
+                if p.ring_size != (*w, *h) {
+                    p.ring.clear();
+                    p.ring_size = (*w, *h);
+                }
+                if !p.ring.contains(slot) {
+                    p.ring.push(*slot);
                 }
             }
             FromWorker::Hello {
@@ -681,7 +730,7 @@ impl WorkerHost {
                 let p = self.proc_.as_mut().unwrap();
                 if let Some(s) = &p.sock {
                     let _ = proto::send(s.as_fd(), &start, &[]);
-                    p.last_sent = now;
+                    p.last_beat = now;
                 }
             }
             FromWorker::Log { level, line } => {
@@ -693,12 +742,71 @@ impl WorkerHost {
         out.push(WorkerEvent::Msg(m, fds));
     }
 
+    /// Time the host itself didn't run is not the worker's: a gap between two polls longer
+    /// than [`host_stall_gap`] (the loop was blocked — a driver call while the whole GPU is
+    /// busy, e.g. NVIDIA saving VRAM before a suspend) gives every outstanding tick/ping (and
+    /// a pending `Hello`) a fresh hang timeout from now. Polls come at the loop's tick rate,
+    /// so only a real stall reaches the gap; a worker that freezes while the host keeps
+    /// polling is judged exactly as before.
+    fn host_stall_grace(&mut self, now: Instant) {
+        let last = self.last_poll.replace(now);
+        let Some(gap) = last.map(|l| now.saturating_duration_since(l)) else {
+            return;
+        };
+        if gap <= host_stall_gap(self.spec.hang_timeout) {
+            return;
+        }
+        let Some(p) = self.proc_.as_mut().filter(|p| !p.killed) else {
+            return;
+        };
+        let outstanding = p.ticks.len() + p.ping.is_some() as usize;
+        for t in p.ticks.iter_mut() {
+            t.1 = now;
+        }
+        if let Some(ping) = p.ping.as_mut() {
+            ping.1 = now;
+        }
+        if p.hello_at.is_none() {
+            p.started = now;
+        }
+        if outstanding > 0 || p.hello_at.is_none() {
+            log::event(
+                "worker",
+                Level::Info,
+                "worker.host_stalled",
+                Some(self.corr.clone()),
+                json!({"id": self.spec.id, "pid": p.pid, "gap_ms": gap.as_secs_f64() * 1e3,
+                       "outstanding": outstanding, "hello": p.hello_at.is_some()}),
+            );
+        }
+    }
+
     fn heartbeat(&mut self, now: Instant, out: &mut Vec<WorkerEvent>) {
         let ping_every = PING_INTERVAL.min(self.spec.hang_timeout / 2);
         let hang = self.spec.hang_timeout;
         let Some(p) = self.proc_.as_mut() else { return };
         if p.killed {
             return;
+        }
+        // Starved = the host holds every slot of the worker's ring: it can't render a tick
+        // until we release one, so its ticks wait on us — their age doesn't count (they are
+        // re-stamped while it lasts) and its liveness is the ping instead (the renderer,
+        // idle waiting for a `Release`, answers it). Bounded: a tick starved past
+        // `STARVE_LIMIT_FACTOR` × the hang timeout is a hang all the same.
+        let starved = !p.ring.is_empty() && p.ring.iter().all(|s| p.held.contains(s));
+        let mut starved_ms = None;
+        if starved && !p.ticks.is_empty() {
+            let since = *p.starved_since.get_or_insert(now);
+            let w = now.saturating_duration_since(since);
+            if w > hang * STARVE_LIMIT_FACTOR {
+                starved_ms = Some(w);
+            } else {
+                for t in p.ticks.iter_mut() {
+                    t.1 = now;
+                }
+            }
+        } else {
+            p.starved_since = None;
         }
         let waited = match p.hello_at {
             None => {
@@ -713,6 +821,7 @@ impl WorkerHost {
                 oldest
                     .map(|t| now.saturating_duration_since(t))
                     .filter(|w| *w > hang)
+                    .or(starved_ms)
             }
         };
         if let Some(w) = waited {
@@ -726,7 +835,8 @@ impl WorkerHost {
                 "worker.hung",
                 Some(self.corr.clone()),
                 json!({"id": self.spec.id, "pid": p.pid, "waited_ms": waited_ms,
-                       "hello": p.hello_at.is_some()}),
+                       "hello": p.hello_at.is_some(),
+                       "starved_ms": starved_ms.map(|w| w.as_millis() as u64)}),
             );
             out.push(WorkerEvent::Hung { waited_ms });
             return;
@@ -741,14 +851,14 @@ impl WorkerHost {
         }
         if p.hello_at.is_some()
             && p.ping.is_none()
-            && p.ticks.is_empty()
-            && now.saturating_duration_since(p.last_sent) >= ping_every
+            && (p.ticks.is_empty() || starved)
+            && now.saturating_duration_since(p.last_beat) >= ping_every
             && let Some(s) = &p.sock
         {
             self.ping_seq += 1;
             if proto::send(s.as_fd(), &ToWorker::Ping { seq: self.ping_seq }, &[]).is_ok() {
                 p.ping = Some((self.ping_seq, now));
-                p.last_sent = now;
+                p.last_beat = now;
             }
         }
     }
@@ -1173,6 +1283,7 @@ mod tests {
             ping_seq: 0,
             corr: log::new_corr("wk"),
             sync: None,
+            last_poll: None,
         };
         host.send(&ToWorker::Paused { paused: true }, &[]).unwrap();
         host.send(
