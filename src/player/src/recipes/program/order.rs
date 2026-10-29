@@ -50,6 +50,13 @@ pub struct Step {
     rev: u64,
 }
 
+impl Step {
+    /// Committing it changes the play order itself (a shuffle cycle's end reshuffles).
+    pub fn reshuffles(&self) -> bool {
+        self.state.items.is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Order {
     /// The play order (`_timedPaths`): the bar order, or a cycle's shuffle.
@@ -80,6 +87,39 @@ impl Order {
             hist_idx: 0,
             rev: 0,
         }
+    }
+
+    /// A saved order brought back (`store`): `items` in play order with the cursor at `idx`,
+    /// `bar` the item list as given, the history and its cursor. Out-of-range cursors are
+    /// clamped; an empty or inconsistent history becomes `[items[idx]]`.
+    pub fn from_parts(
+        items: Vec<String>,
+        idx: usize,
+        shuffle: bool,
+        bar: Vec<String>,
+        history: Vec<String>,
+        hist_idx: usize,
+    ) -> Order {
+        let idx = idx.min(items.len().saturating_sub(1));
+        let (history, hist_idx) = if hist_idx < history.len() && history.len() <= HISTORY_MAX {
+            (history, hist_idx)
+        } else {
+            (items.get(idx).cloned().into_iter().collect(), 0)
+        };
+        Order {
+            items,
+            idx,
+            shuffle,
+            history,
+            hist_idx,
+            bar,
+            rev: 0,
+        }
+    }
+
+    /// The item list as last given (`items` in the playlist bar's order).
+    pub fn bar(&self) -> &[String] {
+        &self.bar
     }
 
     /// What plays (the history's cursor), `None` for an empty order.

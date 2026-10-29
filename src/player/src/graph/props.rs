@@ -442,6 +442,16 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 // the RNG seed (shuffles, random picks, effect picks); `create` mints one
                 // from the wall clock when none is given
                 ("seed", def(PropType::I64, false, PropValue::I64(0))),
+                // while no output shows its item (O2): keep rotating invisibly (today's
+                // behaviour) or hold both clocks until an output returns
+                (
+                    "while_parked",
+                    def(
+                        PropType::Enum(&["rotate", "hold"]),
+                        false,
+                        PropValue::Str("rotate".to_string()),
+                    ),
+                ),
                 // observed
                 (
                     "phase",
