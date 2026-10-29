@@ -3254,12 +3254,15 @@ fn wayland_serve_args_and_missing_compositor() {
 
 // ---------------------------------------------------------------- audio bus (Task 14)
 
-/// The bus fallback (spec §5.3): when the bus can't be created — here PipeWire is
+/// The bus fallback (spec §5.3): when the bus can't be set up — here PipeWire is
 /// unreachable (an empty `PIPEWIRE_RUNTIME_DIR` and a socket name that doesn't exist) —
-/// `serve` still runs, logs `audio.bus.down {reason}`, the `bus` probe says `down` with
-/// that reason, sources open on the default device (mpv `audio-device` `auto`, no
-/// `audio-delay` bias), and the meter reports itself unavailable instead of passing
-/// silently. Default AO (`pipewire`, not `null`): that's what would route through the bus.
+/// `serve` still runs, logs `audio.bus.down {reason}`, the `bus` probe says `down` with a
+/// reason and `connecting: true`, sources open on the default device (mpv `audio-device`
+/// `auto`, no `audio-delay` bias), and the meter reports itself unavailable instead of
+/// passing silently. Since the cold-boot fix (2026-10-29) the first failure isn't final:
+/// the bus keeps retrying with the I7 backoff (`audio.bus.reconnecting` /
+/// `.reconnect_failed`) — `bus_comes_up_when_pipewire_starts_after_the_player` shows it come
+/// up. Default AO (`pipewire`, not `null`): that's what would route through the bus.
 /// The source is an image (no audio track), so the run stays silent (R26's intent).
 #[test]
 fn bus_down_falls_back_to_default_device() {
@@ -3299,7 +3302,11 @@ fn bus_down_falls_back_to_default_device() {
 
     let bus = c.ok("probe", json!({"name": "bus"}));
     assert_eq!(bus["state"], "down", "{bus}");
-    assert_eq!(bus["reason"], json!(reason), "{bus}");
+    assert!(
+        bus["reason"].as_str().is_some_and(|r| r.contains("PipeWire")),
+        "{bus}"
+    );
+    assert_eq!(bus["connecting"], json!(true), "{bus}");
     assert_eq!(bus["meter"]["available"], json!(false), "{bus}");
 
     let e = c.err(
@@ -3328,6 +3335,25 @@ fn bus_down_falls_back_to_default_device() {
     assert_eq!(src["id"], json!(id), "{probe}");
     assert_eq!(src["mpv_audio_device"], "auto", "{probe}");
     assert_eq!(src["mpv_audio_delay"], json!(0.0), "{probe}");
+
+    // Not final: it retries (first after 0.5 s), still down, still on the default device.
+    let evs = wait_for(Duration::from_secs(5), "a reconnect attempt", || {
+        let evs = c.ok("logs", json!({"kind_prefix": "audio.bus."}))["events"]
+            .as_array()
+            .unwrap()
+            .clone();
+        evs.iter()
+            .any(|e| e["kind"] == "audio.bus.reconnect_failed")
+            .then_some(evs)
+    });
+    assert!(
+        evs.iter().any(|e| e["kind"] == "audio.bus.reconnecting"),
+        "{evs:?}"
+    );
+    assert!(!evs.iter().any(|e| e["kind"] == "audio.bus.up"), "{evs:?}");
+    let bus = c.ok("probe", json!({"name": "bus"}));
+    assert_eq!(bus["state"], "down", "{bus}");
+    assert_eq!(bus["connecting"], json!(true), "{bus}");
 }
 
 /// `--ao null` (every other test, R26): nothing would play through PipeWire, so no bus is
@@ -4829,6 +4855,18 @@ fn i7_bus_reconnects_after_pipewire_restart() {
         .clone();
     let kinds: Vec<&str> = evs.iter().map(|e| e["kind"].as_str().unwrap()).collect();
     println!("I7 bus events: {kinds:?}");
+    // A normal start: the first session is up within serve's startup wait (sources open
+    // straight onto the bus), `reconnected: false`; the later one is the reconnect.
+    let first = evs
+        .iter()
+        .find(|e| e["kind"] == "audio.bus.up" && e["generation"] == json!(1))
+        .unwrap_or_else(|| panic!("no first session up: {kinds:?}"));
+    println!(
+        "I7 first session: setup {} ms, up at t_mono {} ms",
+        first["setup_ms"], first["t_mono_ms"]
+    );
+    assert_eq!(first["reconnected"], json!(false), "{first}");
+    assert!(!kinds.contains(&"audio.bus.not_ready"), "{kinds:?}");
     let pos = |k: &str| kinds.iter().position(|x| *x == k);
     assert!(pos("audio.bus.down").is_some(), "{kinds:?}");
     assert!(
@@ -4842,6 +4880,175 @@ fn i7_bus_reconnects_after_pipewire_restart() {
     );
     // The re-routed source ramps back in on flowing audio (invariant #8).
     onset_after_flow(&mut c, &id, "pause", t_down);
+}
+
+/// Cold boot (2026-10-29): `serve` started before the audio server was ready. It must answer
+/// at once (never wait on PipeWire), play on mpv's default device meanwhile, and bring the
+/// bus up **on its own** once PipeWire is there — the sources moving onto it through the I7
+/// route tracking, ramped in on flowing audio. `session_manager_first`: false = nothing
+/// running at spawn (connect refused, then the daemon + WirePlumber start); true = the
+/// daemon runs but WirePlumber doesn't yet, so the loopback can't link (the owner's boot).
+fn bus_comes_up_after_a_late_audio_server(daemon_first: bool) {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    if daemon_first {
+        pw.start_daemon();
+    }
+    let run = pw.run_dir();
+    let spawned = Instant::now();
+    let srv = Serve::spawn_env(
+        root,
+        &[
+            "--ao",
+            "pipewire",
+            "--clock",
+            "real",
+            "--log-level",
+            "debug",
+        ],
+        &[("PIPEWIRE_RUNTIME_DIR", run.as_path())],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let hello = c.ok("hello", json!({}));
+    let hello_ms = spawned.elapsed().as_secs_f64() * 1000.0;
+    println!("late audio server (daemon first: {daemon_first}): hello {hello_ms:.0} ms after spawn");
+    assert!(
+        hello_ms < 2000.0,
+        "hello answered {hello_ms:.0} ms after spawn — serve waited on PipeWire: {hello}"
+    );
+    let bus = c.ok("probe", json!({"name": "bus"}));
+    assert_eq!(bus["state"], "down", "{bus}");
+    assert!(bus["reason"].as_str().is_some_and(|r| !r.is_empty()), "{bus}");
+    assert_eq!(bus["connecting"], json!(true), "{bus}");
+    assert_eq!(bus["meter"]["available"], json!(false), "{bus}");
+
+    let id = create_src(
+        &mut c,
+        json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}),
+    );
+    show_all(&mut c, &id);
+    if daemon_first {
+        // mpv's own stream on the daemon isn't linked either until WirePlumber runs, so its
+        // clock (the audio's) stands still: the first frame shows, playback waits for it.
+        wait_for(Duration::from_secs(5), "the video ready", || {
+            (get(&mut c, &format!("{id}.ready"))["result"]["value"] == json!(true)).then_some(())
+        });
+    } else {
+        wait_playing(&mut c, &id, 0.3);
+    }
+    let png = srv.path("late-bus.png");
+    wait_for(Duration::from_secs(3), "the video on screen", || {
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": png}));
+        let px = png_pixel(&png, 320, 180);
+        (px[..3].iter().zip([255u8, 0, 0]).all(|(a, b)| a.abs_diff(b) <= 3)).then_some(())
+    });
+    let device = |c: &mut Client, id: &str| {
+        let p = source_probe(c, id);
+        (p["mpv_audio_device"].clone(), p["mpv_current_ao"].clone())
+    };
+    assert_eq!(device(&mut c, &id).0, json!("auto"), "plays on mpv's default meanwhile");
+
+    let t_start = now_ms(&mut c);
+    if daemon_first {
+        pw.start_session_manager();
+    } else {
+        pw.start();
+    }
+    let up_at = Instant::now();
+    wait_for(Duration::from_secs(20), "the bus up on its own", || {
+        (c.ok("probe", json!({"name": "bus"}))["state"] == json!("up")).then_some(())
+    });
+    println!(
+        "late audio server: bus up {:.0} ms after the start call returned",
+        up_at.elapsed().as_secs_f64() * 1000.0
+    );
+    wait_for(Duration::from_secs(3), "re-routed to the bus", || {
+        let d = device(&mut c, &id);
+        (d.0 == json!("pipewire/liascape-player-bus") && d.1 == json!("pipewire")).then_some(())
+    });
+    let t = f64_of(&mut c, &format!("{id}.time_pos")).unwrap_or(0.0);
+    wait_playing(&mut c, &id, t + 0.3);
+    wait_for(Duration::from_secs(5), "the tone on the bus", || {
+        let r = c.call(
+            "probe",
+            json!({"name": "meter.window", "args": {"last_ms": 200, "samples": false}}),
+        );
+        r["result"]["median_db"]
+            .as_f64()
+            .is_some_and(|db| db > -40.0)
+            .then_some(())
+    });
+    let evs = c.ok("logs", json!({"kind_prefix": "audio.bus.", "limit": 1000}))["events"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let kinds: Vec<&str> = evs.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    println!("late audio server bus events: {kinds:?}");
+    let up = evs
+        .iter()
+        .find(|e| e["kind"] == "audio.bus.up" && !e["generation"].is_null())
+        .unwrap_or_else(|| panic!("no session audio.bus.up: {kinds:?}"));
+    assert_eq!(up["reconnected"], json!(true), "{up}");
+    assert!(up["generation"].as_u64().is_some_and(|g| g >= 1), "{up}");
+    // The re-routed source ramps in on flowing audio (invariant #8).
+    onset_after_flow(&mut c, &id, "pause", t_start);
+}
+
+#[test]
+fn bus_comes_up_when_pipewire_starts_after_the_player() {
+    bus_comes_up_after_a_late_audio_server(false);
+}
+
+#[test]
+fn serve_answers_at_once_while_wireplumber_isnt_up_yet() {
+    bus_comes_up_after_a_late_audio_server(true);
+}
+
+/// A quit while the bus's first session still waits for a session manager to link its
+/// loopback exits at once (the setup's waits end on the `Bus` drop), exit 0.
+#[test]
+fn quit_while_the_bus_waits_for_wireplumber_is_prompt() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    pw.start_daemon();
+    let run = pw.run_dir();
+    let mut srv = Serve::spawn_env(
+        root,
+        &["--ao", "pipewire", "--clock", "real"],
+        &[("PIPEWIRE_RUNTIME_DIR", run.as_path())],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let bus = c.ok("probe", json!({"name": "bus"}));
+    assert_eq!(bus["state"], "down", "{bus}");
+    assert!(
+        bus["reason"].as_str().is_some_and(|r| r.contains("session manager")),
+        "says what it waits for: {bus}"
+    );
+    let t = Instant::now();
+    c.ok("quit", json!({}));
+    let st = srv
+        .wait_exit(Duration::from_secs(3))
+        .expect("serve exits within 3 s of quit");
+    println!("quit during the bus setup: exited in {:?}", t.elapsed());
+    assert!(st.success(), "{st}");
 }
 
 /// M13 (final review): `animate` on a broadcast alias that matches nothing is a broadcast
@@ -7527,6 +7734,69 @@ fn scene_reroutes_after_pipewire_restart() {
     let name = format!("liascape-player-scene.{id}");
     assert!(pw_nodes(&pw).contains(&name), "the stream is back");
     onset_after_flow(&mut c, &id, "pause", t_down);
+    assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
+}
+
+/// Cold boot (2026-10-29), the scene half: a scene opened while the bus is down plays its
+/// worker stream on the default route (no PipeWire yet), and when the bus comes up on its
+/// own the worker is re-routed onto it (`ToWorker::Route`), same worker, its tone on the bus,
+/// the ramp-in held on flowing audio.
+#[test]
+fn scene_moves_onto_a_bus_that_comes_up_late() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    if !PrivatePw::available() {
+        println!("SKIP: no pipewire/wireplumber binaries for a private instance");
+        return;
+    }
+    let root = new_root();
+    let mut pw = PrivatePw::new(root.join("pw"));
+    let run = pw.run_dir();
+    let srv = Serve::spawn_env(
+        root,
+        &[
+            "--ao",
+            "pipewire",
+            "--clock",
+            "real",
+            "--log-level",
+            "debug",
+        ],
+        &[
+            ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-audio-late-bus", &tone_scene(1000.0), json!({}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(5), "the scene playing", || {
+        (f64_of(&mut c, &format!("{id}.time_pos")).unwrap_or(0.0) > 0.3).then_some(())
+    });
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["audio"]["route"], json!("default"), "{w}");
+    let pid = w["pid"].clone();
+    let t_start = now_ms(&mut c);
+    pw.start();
+    wait_for(Duration::from_secs(20), "the bus up on its own", || {
+        (c.ok("probe", json!({"name": "bus"}))["state"] == json!("up")).then_some(())
+    });
+    wait_for(Duration::from_secs(3), "the worker re-routed to the bus", || {
+        (worker_of(&mut c, &id)["audio"]["route"]
+            == json!({"device": "pipewire/liascape-player-bus"}))
+        .then_some(())
+    });
+    wait_for(Duration::from_secs(5), "the scene's tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -26.0).then_some(())
+    });
+    assert!(
+        pw_nodes(&pw).contains(&format!("liascape-player-scene.{id}")),
+        "the scene's stream is on the private PipeWire"
+    );
+    onset_after_flow(&mut c, &id, "pause", t_start);
     assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
 }
 

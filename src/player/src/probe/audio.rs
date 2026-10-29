@@ -1,9 +1,11 @@
 //! Audio probes (Task 14; spec §5.3 "the probes tap the bus monitor").
 //!
 //! - `bus` — `{state, device, latency_ms, latency_samples, quantum_ms, target,
-//!   default_sink, playback_node, sink_node, retargets, reason, now_ms, meter {available,
-//!   streaming, samples, last_ms, quantum_frames, dropped, error}}`; `state: "down"` with
-//!   `reason` when there's no bus (fallback / `--ao null`).
+//!   default_sink, playback_node, sink_node, retargets, connecting, generation, reason,
+//!   now_ms, meter {available, streaming, samples, last_ms, quantum_frames, dropped, error}}`;
+//!   `state: "down"` with `reason` while the bus isn't up — `connecting: true` while its
+//!   thread is still setting up or retrying (PipeWire not there yet / lost), `false` when
+//!   there's no bus at all (`--ao null`, `LIASCAPE_PLAYER_BUS=off`).
 //! - `meter.window` — args `{last_ms}` or `{from_ms, to_ms}` (the `t_mono_ms` clock), plus
 //!   `samples: false` to leave the list out → `{from_ms, to_ms, count, median_db, min_db,
 //!   max_db, max_gap_ms, first_ms, last_ms, samples: [[t_ms, dbfs], …]}`. A meter that
@@ -29,6 +31,7 @@ pub(super) fn bus(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         None => json!({
             "state": "down",
             "device": Value::Null,
+            "connecting": false,
             "reason": a.down_reason,
         }),
     };

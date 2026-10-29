@@ -3,14 +3,18 @@
 //! the bus meter ([`Meter`], `meter.rs`) on its monitor. See `.claude/rules/player-core.md`
 //! § Audio bus.
 //!
-//! [`Audio::start`] is what `serve` runs: the bus + its meter, or — when the bus can't or
-//! shouldn't exist — the reason, logged once as `audio.bus.down {reason}`. Sources then keep
-//! mpv's default device and the meter reports itself unavailable.
+//! [`Audio::start`] is what `serve` runs: the bus + its meter (the bus thread connects in
+//! the background — it never blocks `serve`, and retries until PipeWire is there), or — when
+//! the bus shouldn't exist (`--ao` ≠ pipewire, `LIASCAPE_PLAYER_BUS=off`) — the reason,
+//! logged once as `audio.bus.down {reason}`. Sources keep mpv's default device while the bus
+//! is down, and the meter reports itself unavailable.
 
 pub mod bus;
 pub mod loudness;
 pub mod meter;
 pub mod sysmon;
+
+use std::time::Instant;
 
 use serde_json::json;
 
@@ -28,9 +32,10 @@ pub struct Audio {
 }
 
 impl Audio {
-    /// Create the bus for sources playing through mpv's `ao` (`None` = liascape-player's default,
-    /// `pipewire`). Any other AO never reaches the bus (`--ao null` in tests — R26 — would
-    /// only add a sink to the owner's session for nothing), so none is created for it.
+    /// Start the bus for sources playing through mpv's `ao` (`None` = liascape-player's default,
+    /// `pipewire`) and ask for its meter — never blocks ([`Bus::start`]; [`Audio::wait_bus`]
+    /// is the bounded wait). Any other AO never reaches the bus (`--ao null` in tests — R26 —
+    /// would only add a sink to the owner's session for nothing), so none is created for it.
     pub fn start(ao: Option<&str>) -> Audio {
         let ao = ao.unwrap_or(crate::sources::mpv::DEFAULT_AO);
         if ao != "pipewire" {
@@ -39,22 +44,8 @@ impl Audio {
                  target the bus"
             ));
         }
-        match Bus::create() {
+        match Bus::start() {
             Ok(bus) => {
-                let info = bus.info();
-                log::event(
-                    "audio",
-                    Level::Info,
-                    "audio.bus.up",
-                    None,
-                    json!({
-                        "device": info.device,
-                        "latency_ms": info.latency_ms,
-                        "latency_samples": info.latency_samples,
-                        "quantum_ms": info.quantum_ms,
-                        "target": info.target,
-                    }),
-                );
                 let meter = Meter::start(&bus);
                 Audio {
                     bus: Some(bus),
@@ -64,6 +55,15 @@ impl Audio {
             }
             Err(reason) => Audio::down(reason),
         }
+    }
+
+    /// `serve`'s bounded wait for the bus's first session ([`Bus::wait_up`]): the route
+    /// sources open with (`Bus::route`, read once — `Runtime::bus_route` starts from it, so a
+    /// bus coming up right after still re-routes them), or `None` without a bus.
+    pub fn wait_bus(&self, started: Instant, deadline: Instant) -> Option<(bool, u64)> {
+        let bus = self.bus.as_ref()?;
+        bus.wait_up(started, deadline);
+        Some(bus.route())
     }
 
     /// No bus: log `audio.bus.down {reason}`.

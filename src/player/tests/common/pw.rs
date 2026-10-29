@@ -109,6 +109,13 @@ context.objects = [
     }
 
     pub fn start(&mut self) {
+        self.start_daemon();
+        self.start_session_manager();
+    }
+
+    /// Only the `pipewire` daemon, no session manager: clients connect, but nothing links
+    /// a stream to a sink (a boot where WirePlumber isn't up yet).
+    pub fn start_daemon(&mut self) {
         let conf = self.dir.join("pw.conf");
         let pw = self.spawn("pipewire", &["-c", conf.to_str().unwrap()]);
         let t = Instant::now();
@@ -119,8 +126,13 @@ context.objects = [
             );
             std::thread::sleep(Duration::from_millis(5));
         }
+        self.procs.push(pw);
+    }
+
+    /// WirePlumber on the running daemon ([`PrivatePw::start_daemon`] first).
+    pub fn start_session_manager(&mut self) {
         let wp = self.spawn("wireplumber", &["-p", "policy"]);
-        self.procs = vec![pw, wp];
+        self.procs.push(wp);
         std::thread::sleep(Duration::from_millis(700));
     }
 
