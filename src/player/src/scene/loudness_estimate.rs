@@ -22,14 +22,17 @@
 //!   ignores the object's `volume` (and so every user property bound to it), `visible`,
 //!   `startsilent`, `mintime`/`maxtime`. User properties therefore never change a scene's audio
 //!   under LWE.
-//! - [`Model::We`] (Wallpaper Engine's own semantics as far as they are established — the
-//!   inferences are marked in the report): `volume` is a linear amplitude (inferred), user
-//!   properties bound to it apply (a slider = its value, a bool = 1/0, a `{name, condition}`
-//!   binding = 1 iff the property equals the condition — LWE's `DynamicValue` rule), `loop`
-//!   plays its files as a repeating playlist, `random` one file at a time with a gap of the
-//!   mean of `mintime`/`maxtime`, `single` the first file once, `startsilent` contributes
-//!   nothing until something starts it. Kept for when LWE honours these (then it becomes the
-//!   live behaviour) and for the property-aware loudness design (docs/TODO.md).
+//! - [`Model::We`] (Wallpaper Engine 2.8.485's own rules, decompiled —
+//!   docs/player/spikes/we-sound-semantics.md): the stream's amplitude is `volume²` (WE
+//!   squares the field, × the wallpaper's own volume, 1 here), user properties bound to it apply
+//!   (a slider = its value, a bool = 1/0, a `{name, condition}` binding = 1 iff the property
+//!   equals the condition — LWE's `DynamicValue` rule; WE's conversion is not decompiled), an
+//!   absent `playbackmode` is `loop`, `loop` plays one file at a time picked at random
+//!   back-to-back (a single file loops), `random` one random file at a time with a uniform
+//!   `mintime`..`maxtime` gap (defaults 1 / 5 s) — both time-weighted like a playlist here —
+//!   `single` ONE random file once (the first stands in), `startsilent` contributes nothing
+//!   until a script starts it. Kept for when LWE honours these (then it becomes the live
+//!   behaviour) and for the property-aware loudness design (docs/TODO.md).
 //!
 //! **Fingerprint** ([`fingerprint`]): the active tracks + their effective gains (+ which files)
 //! — a property that doesn't touch audio never changes it; the backend keys a scene's loudness
@@ -175,8 +178,9 @@ pub fn parse_sounds(scene: &Value) -> Vec<SoundObject> {
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 volume: parse_volume(o.get("volume")),
-                mintime: o.get("mintime").and_then(num).unwrap_or(0.0),
-                maxtime: o.get("maxtime").and_then(num).unwrap_or(0.0),
+                // WE's defaults (its sound constructor): 1 s / 5 s
+                mintime: o.get("mintime").and_then(num).unwrap_or(1.0),
+                maxtime: o.get("maxtime").and_then(num).unwrap_or(5.0),
                 startsilent: o
                     .get("startsilent")
                     .and_then(Value::as_bool)
@@ -371,14 +375,17 @@ pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) ->
                     ));
                     continue;
                 }
-                let gain = eval_volume(&s.volume, props);
+                // WE sends volume² (× the wallpaper volume) to the stream
+                let v = eval_volume(&s.volume, props);
+                let gain = v * v;
                 if gain <= 0.0 {
                     p.silent
                         .push((s.id, format!("volume 0 ({})", describe_volume(&s.volume))));
                     continue;
                 }
                 let pattern = match mode {
-                    "loop" => Pattern::Loop(s.files.clone()),
+                    // absent = WE's default, loop
+                    "loop" | "" => Pattern::Loop(s.files.clone()),
                     "random" => {
                         p.notes.push((
                             1,
@@ -392,7 +399,15 @@ pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) ->
                     other => {
                         p.notes.push((
                             1,
-                            format!("sound {}: playbackmode {other:?} plays once", s.id),
+                            if other == "single" && s.files.len() > 1 {
+                                format!(
+                                    "sound {}: single — WE plays ONE of its {} files at random, once",
+                                    s.id,
+                                    s.files.len()
+                                )
+                            } else {
+                                format!("sound {}: playbackmode {other:?} plays once", s.id)
+                            },
                         ));
                         Pattern::Once(vec![s.files[0].clone()])
                     }
@@ -408,7 +423,7 @@ pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) ->
     if model == Model::We {
         p.notes.push((
             1,
-            "model we: volume as a linear amplitude and the playlist rules are inferred, not confirmed from WE's binary".into(),
+            "model we: WE 2.8.485's decompiled rules; a bound property's value conversion and the non-spatial level are inferred".into(),
         ));
     }
     p
@@ -1380,14 +1395,15 @@ mod tests {
         let (_, e) = est(&sounds, &Map::new(), Model::We, &st);
         let pa = st["a"].power[10];
         let pb = st["b"].power[10];
-        let want = lufs_of(pa + 0.25 * pb);
+        // volume 0.5 → amplitude 0.25 (WE squares it) → power 1/16
+        let want = lufs_of(pa + 0.0625 * pb);
         assert!(
             (e.lufs.unwrap() - want).abs() < 0.06,
             "{:?} vs {want}",
             e.lufs
         );
         // the real mix, measured like the live meter
-        let real: Vec<f32> = a.iter().zip(&b).map(|(x, y)| x + 0.5 * y).collect();
+        let real: Vec<f32> = a.iter().zip(&b).map(|(x, y)| x + 0.25 * y).collect();
         let real = stats_of(&real);
         let mut l = Learner::new(1e9).with_cap(1e9);
         for (p, k) in real.power.iter().zip(&real.peak) {
@@ -1601,6 +1617,26 @@ mod tests {
         // each file form a few quieter blocks)
         let mean = lufs_of((st["q"].power[10] + st["l"].power[10]) / 2.0);
         assert!((e.lufs.unwrap() - mean).abs() < 0.5);
+    }
+
+    /// WE's defaults: an absent `playbackmode` loops, absent `mintime`/`maxtime` are 1 / 5 s,
+    /// and the stream's amplitude is volume².
+    #[test]
+    fn we_defaults_and_squared_volume() {
+        let sounds = parse_sounds(&json!({"objects": [
+            {"id": 1, "sound": ["a", "b"], "volume": 0.5},
+            {"id": 2, "sound": ["c"], "playbackmode": "random"}]}));
+        let p = plan(&sounds, &Map::new(), Model::We);
+        assert_eq!(p.tracks[0].pattern, Pattern::Loop(vec!["a".into(), "b".into()]));
+        assert!((p.tracks[0].gain - 0.25).abs() < 1e-12);
+        assert_eq!(
+            p.tracks[1].pattern,
+            Pattern::Shuffle {
+                files: vec!["c".into()],
+                gap_s: 3.0
+            }
+        );
+        assert_eq!(p.tracks[1].gain, 1.0);
     }
 
     #[test]
