@@ -41,6 +41,44 @@ function WarnIcon({ k }: { k?: string }) {
   return <span className="s-warn" title={text} aria-label={text} data-feature-warn={k}><AlertTriangle size={13} /></span>;
 }
 
+// Settings → Playback (under "Normalize audio", liascape-player only): a scene's loudness can be ESTIMATED from its
+// files before it ever plays (`liascape-player scene-loudness`, a background queue in the backend — one nice'd child at
+// a time; also run on import). Estimate = every scene without an estimate for its current properties; Recalculate all
+// = every scene again; Cancel stops the queue (what's done stays). Progress from WS scene-loudness-progress (the store).
+function SceneLoudnessRow() {
+  const prog = useStore((s) => s.sceneLoudness);
+  const [failed, setFailed] = useState<{ path: string; error: string }[]>([]);
+  const [note, setNote] = useState("");
+  const running = prog != null;
+  useEffect(() => {
+    if (running) return;
+    let alive = true;
+    api.sceneLoudnessStatus().then((st) => {
+      if (!alive) return;
+      setFailed(st.failed);
+      if (st.running) useStore.getState().setSceneLoudness({ done: st.done, total: st.total, currentId: st.current?.split("/").pop() ?? "" });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [running]);
+  const start = (force: boolean) => {
+    setNote("");
+    api.sceneLoudnessEstimate(force).then((r) => { if (r.queued === 0) setNote("every scene is already estimated"); }).catch((e) => setNote(String(e)));
+  };
+  const hint = "a scene's loudness worked out from its sound files before it plays, so it is matched from its first second (then refined while it plays). New scenes are estimated when they're added; a property that changes a scene's sound gets its own estimate."
+    + (running ? ` — ${prog!.done} / ${prog!.total}${prog!.currentId ? ` (${prog!.currentId})` : ""}…`
+      : note ? ` — ${note}` : failed.length ? ` — ${failed.length} not estimated (not a scene / incomplete)` : "");
+  return (
+    <Row label="Scene loudness" hint={hint} wk="normalizeAudio">
+      {running
+        ? <button className="btn ghost" data-scene-loudness="cancel" onClick={() => api.sceneLoudnessCancel().catch(() => {})}>Cancel</button>
+        : <>
+          <button className="btn ghost" data-scene-loudness="estimate" title="estimate every scene not estimated yet for its current properties" onClick={() => start(false)}>Estimate</button>
+          <button className="btn ghost" data-scene-loudness="recalculate" title="estimate every scene again" onClick={() => start(true)}>Recalculate all</button>
+        </>}
+    </Row>
+  );
+}
+
 // `rk` (+ optional `def`) ties a row to a settings key: a reset icon appears ONLY when the current
 // value deviates from its default (SETTINGS_DEFAULTS), and resets that one setting. `onReset`/`deviated`
 // cover non-settings-backed rows (e.g. Theme, applied via applyTheme not setSetting). `wk` = the key whose
@@ -241,12 +279,13 @@ export const Settings = memo(function Settings() {
         {adv && <Row label="Disable cache" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>}
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}`} disabled={mute} rk="volume">
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
-        <Row label="Normalize audio" hint={"match perceived loudness across wallpapers (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." + (liascapeActive ? " A scene learns its loudness over its first minute of play, then is matched from that moment on." : "")} disabled={mute} rk="normalizeAudio">
+        <Row label="Normalize audio" hint={"match perceived loudness across wallpapers (EBU R128) so switching wallpapers doesn't jump in volume — per-video & global volume still apply on top. Each video is measured once (in the background) the first time it plays." + (liascapeActive ? " A scene is matched from its first second by an estimate from its files, then by its own measurement over its first minute of play (refined on every play)." : "")} disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
         {!mute && g("normalizeAudio", false) && <Row label="Target loudness" hint="LUFS (dB-referenced loudness); −14 = streaming standard, lower = quieter. Pick a preset or type your own. Every video is matched to this level." rk="normalizeTargetLufs">
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-100} max={0} step={1}
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
+        {liascapeActive && <SceneLoudnessRow />}
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
         {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="stayPausedWhenSwitching">
           <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>}

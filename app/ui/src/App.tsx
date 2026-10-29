@@ -48,7 +48,18 @@ export default function App() {
     else if (e.type === "unsub-progress")
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
     else if (e.type === "library-synced") s.loadLibrary();
-    else if (e.type === "library-item-changed") s.itemChangedByBackend(e.payload.path, { volumeOverride: e.payload.volumeOverride });
+    else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
+    // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
+    else if (e.type === "scene-loudness-progress") {
+      const p = e.payload;
+      if (p.finished) {
+        s.setSceneLoudness(null);
+        s.setStatus(p.cancelled ? "Scene loudness: cancelled" : `Scene loudness: estimated ${p.done} scene${p.done === 1 ? "" : "s"}`);
+      } else {
+        s.setSceneLoudness({ done: p.done, total: p.total, currentId: p.currentId });
+        s.setStatus(`Estimating scene loudness ${p.done} / ${p.total}…`, false);
+      }
+    }
     // liascape-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
     else if (e.type === "scene-vram-stopped") {
       const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();

@@ -87,7 +87,13 @@ export interface LibraryItem {
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;
   subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
+  // a scene's loudness under liascape-player (its current audio configuration): the applied LUFS, estimated (the
+  // offline estimate — not played in this configuration yet) or measured (loudnessSeconds of audible play), the
+  // estimate's confidence and, when low, its first note. null for a video / nothing known.
+  loudnessLufs?: number | null; loudnessEstimated?: boolean | null; loudnessSeconds?: number | null;
+  loudnessConfidence?: string | null; loudnessNote?: string | null;
 }
+export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
   // the rotation: switchWhenVideoEnds off → intervalSeconds is a timer; on → it is the minimum play time and
@@ -158,6 +164,11 @@ export const api = {
   resetSceneProp: (path: string, name?: string) => jpost<ScenePropsResp>("/library/scene-props", { path, name, reset: true }),
   previewSceneProp: (path: string, name: string, value: unknown) => jpost("/library/scene-props/preview", { path, name, value }),
   librarySync: () => jpost<{ added: string[] }>("/library/sync"),
+  // API: the offline scene loudness estimate (a background queue, one nice'd child at a time): queue every scene (or
+  // `paths`) — `force` recalculates what's already estimated for its current configuration —, cancel, status
+  sceneLoudnessEstimate: (force: boolean, paths?: string[]) => jpost<{ queued: number }>("/library/scene-loudness/estimate", { force, paths }),
+  sceneLoudnessCancel: () => jpost<{ cancelled: boolean }>("/library/scene-loudness/cancel"),
+  sceneLoudnessStatus: () => jget<SceneLoudnessStatus>("/library/scene-loudness/status"),
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),
   undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
