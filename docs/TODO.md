@@ -218,7 +218,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           scenes cost ≈ 0.8–1.1 ms CPU per frame (= legacy LWE), so < 5 % only up to ~30–45 fps — not a
           compositor bug. Open idea: a `no_audio` / paused stream still runs its callbacks (1.2 %); deactivating
           it costs a bus cycle sometimes (F7 residual) — only once that's solved.
-    - [ ] **F5b — a heavy single-draw worker still costs a 240 Hz output frames**: at 220–260 ms/s of worker GPU,
+    - [x] **F5b — a heavy single-draw worker still costs a 240 Hz output frames** — **DECIDED 2026-10-29 (owner):
+          keep the 400 ms/s guard** (on-machine `phase2-20261029T202428/budget.json`: ~3.7 ms/frame → DP-2 p95 7.24 ms,
+          39 missed, capped at 65 fps; ~6.2 ms → throttled to 50 fps in 1.4 s, still 80 missed — the throttle can't
+          save the 240 Hz output, so it isn't lowered). Revisit only with explicit sync / egl-wayland2 6235dd8.: at 220–260 ms/s of worker GPU,
           DP-2's 240 Hz clip missed 33–38 frames / 2 s (p95 6.9–9.1 ms); the throttle stops at its GPU-load guard
           (400 ms/s). NVIDIA doesn't preempt the low-priority context mid-draw and with explicit sync off each swap
           waits for the GPU on the loop. Options: a lower guard when another output misses, splitting LWE's frame
@@ -230,7 +233,8 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           throttle scenes for misses a game caused. **Waiting on owner:** keep the 400 ms/s guard, or trade a
           very heavy scene's fps for the 240 Hz output? Re-measure: `systemctl --user stop liascape-watch; bash
           src/player/tests/onmachine/scenes.sh budget` on a quiet machine.
-    - [ ] **F6b — compositor CPU per scene worker mid-transition 2.75–4.05 %** (steady state 0.1 % after F6a):
+    - [ ] **F6b** (on-machine 2026-10-29, `phase2-20261029T202428/workers.json`: 4 workers mid-fade **2.45 %** per
+          worker vs the 0.6 % bound — still FAIL; 2 workers steady within noise, PASS) — compositor CPU per scene worker mid-transition 2.75–4.05 %** (steady state 0.1 % after F6a):
           during an S→S fade the runtime recomputes `srcs:` / the scene demand on every sync (`Graph::get`,
           `srcs_for_connector`, `format!` of paths at the top of the profile). Cache per `picture_rev` / transition
           change. `perf`: `nix shell nixpkgs#perf -c perf record -g -p <compositor>`.
