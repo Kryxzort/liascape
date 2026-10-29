@@ -8746,6 +8746,90 @@ fn scene_loudness_accumulates_over_two_plays() {
     c.ok("destroy", json!({"id": b}));
 }
 
+/// TODO "A reopen right after a stop can seed with the previous report": the backend reads a
+/// new source's `loudness_seed` from its index, which may not hold the retired source's
+/// end-of-play report yet (stored off its event thread). The player continues ITS OWN
+/// measurement of that path whenever it holds more than the seed: a stop → reopen seeded with
+/// the play's window report (the race) continues the end of that play; seeded with the
+/// up-to-date state it's the same — never counted twice; and a second source of a playing scene
+/// (a transition A → A') continues the first one's live measurement, which stops measuring.
+/// RED before: the reopen continued the window report (the stretch after it lost).
+#[test]
+fn scene_reopen_continues_the_end_of_play_measurement() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let name = "api-loud-reopen";
+    let tone = tone_scene(1000.0);
+    let secs = |v: &Value, k: &str| v[k].as_f64().unwrap_or(-1.0);
+    // Play 1: its window's report, ≥ 1 s more, then the end's report.
+    let a = create_scene(&mut c, name, &tone, json!({}));
+    show_all(&mut c, &a);
+    let first = wait_for(Duration::from_secs(15), "play 1's window report", || {
+        loudness_events(&mut c, Some(&a)).into_iter().next()
+    });
+    let s_first = secs(&first, "seconds");
+    wait_for(Duration::from_secs(10), "1 s more", || {
+        (audible_s(&mut c, &a) >= s_first + 1.0).then_some(())
+    });
+    c.ok("destroy", json!({"id": a}));
+    let end = wait_for(Duration::from_secs(3), "the end's report", || {
+        let e = loudness_events(&mut c, Some(&a));
+        (e.len() == 2).then(|| e[1].clone())
+    });
+    let s_end = secs(&end, "seconds");
+    println!("play 1: window {s_first} s, end {s_end} s");
+    assert!(s_end >= s_first + 1.0, "{end}");
+    // The race: the backend read its index before it stored `end`.
+    let b = create_scene(&mut c, name, &tone, json!({"loudness_seed": first["state"].clone()}));
+    let p = loudness_progress(&mut c, &b);
+    assert!(
+        (secs(&p, "seconds") - s_end).abs() < 1e-6 && (secs(&p, "seed_s") - s_end).abs() < 1e-6,
+        "continues the end of play 1 ({s_end} s), not its window report ({s_first} s): {p}"
+    );
+    c.ok("destroy", json!({"id": b}));
+    // Up to date: the same measurement, never twice.
+    let b2 = create_scene(&mut c, name, &tone, json!({"loudness_seed": end["state"].clone()}));
+    let p = loudness_progress(&mut c, &b2);
+    assert!((secs(&p, "seconds") - s_end).abs() < 1e-6, "never counted twice: {p}");
+    // A transition to the same scene: B2 plays, C opens beside it and continues B2's live
+    // measurement (more than any seed the backend has); B2 stops measuring.
+    show_all(&mut c, &b2);
+    wait_for(Duration::from_secs(10), "B2 measures 1 s", || {
+        (audible_s(&mut c, &b2) >= s_end + 1.0).then_some(())
+    });
+    let cc = create_scene(&mut c, name, &tone, json!({"loudness_seed": end["state"].clone()}));
+    let p_c = loudness_progress(&mut c, &cc);
+    let p_b2 = loudness_progress(&mut c, &b2);
+    println!("C at open: {p_c}\nB2 then: {p_b2}");
+    let s_join = secs(&p_c, "seed_s");
+    assert!(s_join >= s_end + 1.0, "C continues B2's live measurement: {p_c}");
+    assert_eq!(p_c["measuring"], json!(true), "{p_c}");
+    assert_eq!(p_b2["measuring"], json!(false), "{p_b2}");
+    show_all(&mut c, &cc);
+    let ev = wait_for(Duration::from_secs(15), "C's report", || {
+        loudness_events(&mut c, Some(&cc)).into_iter().next()
+    });
+    println!("C: {ev}");
+    assert!((secs(&ev, "seed_s") - s_join).abs() < 1e-6, "{ev}");
+    assert!(
+        (secs(&ev, "seconds") - secs(&ev, "seed_s") - secs(&ev, "session_s")).abs() < 1e-6,
+        "{ev}"
+    );
+    // Only C's own play counted (B2's sound, still playing, is not added to it).
+    assert!(secs(&ev, "session_s") <= secs(&ev, "played_s") + 1e-6, "{ev}");
+    let n_b2 = loudness_events(&mut c, Some(&b2)).len();
+    c.ok("destroy", json!({"id": b2}));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        loudness_events(&mut c, Some(&b2)).len(),
+        n_b2,
+        "B2 handed its measurement over: nothing at its end"
+    );
+    c.ok("destroy", json!({"id": cc}));
+}
+
 /// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once
 /// the audible play over every session reaches it (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
 /// last report (`capped`) and the worker stops metering — no segment arrives any more, nothing

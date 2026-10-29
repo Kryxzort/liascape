@@ -251,6 +251,9 @@ pub struct SourceHost {
     /// Merged into every `MpvSource::open`'s opts (e.g. `{"ao": "null"}` in tests — R26 —
     /// or the player bus `audio_device`, Task 14). Node props win over these.
     base_opts: Map<String, Value>,
+    /// Every scene path's loudness measurement, shared by the scene sources of that path
+    /// (`audio::loudness::Book`: a reopen or a transition A → A' continues it).
+    loudness: crate::audio::loudness::SharedBook,
     sources: BTreeMap<String, Hosted>,
     /// Nodes whose source failed to open synchronously: not retried until the node goes.
     failed: BTreeSet<String>,
@@ -300,6 +303,7 @@ impl SourceHost {
     pub fn new(base_opts: Map<String, Value>) -> SourceHost {
         SourceHost {
             base_opts,
+            loudness: crate::audio::loudness::Book::shared(),
             sources: BTreeMap::new(),
             failed: BTreeSet::new(),
             events: Vec::new(),
@@ -893,8 +897,8 @@ impl SourceHost {
                 let mut n = node.to_vec();
                 n.retain(|(k, _)| k != "paused");
                 n.push(("paused".into(), PropValue::Bool(effective_paused)));
-                let src =
-                    SceneSource::open(gfx, id, &n, &self.base_opts).map_err(|e| e.to_string())?;
+                let src = SceneSource::open(gfx, id, &n, &self.base_opts, &self.loudness)
+                    .map_err(|e| e.to_string())?;
                 let wake = Some(src.wake_fd());
                 return Ok(Hosted {
                     src: Box::new(src),

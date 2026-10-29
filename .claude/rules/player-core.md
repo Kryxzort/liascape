@@ -55,7 +55,8 @@ happen regardless of timing.
   `memory.rs`: `memory`, Task 20b; `workers.rs`: `workers`, Phase 2; `vram.rs`: `vram`, Task 8).
   § Command API.
 - `src/audio/` — the player audio bus (`bus.rs`) + bus meter (`meter.rs`), `loudness.rs` (scene
-  loudness learned on first play and refined on every play — § Scene worker → "Scene loudness"), `Audio` (what
+  loudness learned on first play and refined on every play, one measurement per path in the `Book` — § Scene
+  worker → "Scene loudness"), `Audio` (what
   `serve` runs, `mod.rs`). § Audio bus. `sysmon.rs` — the scene visualiser's system-audio
   input (Phase 2 Task 7, § Scene worker → "Real scenes").
 - `src/supervise.rs` — the supervisor (`serve` without `--no-supervise`): spawns, waits
@@ -3733,8 +3734,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   count:** `plays` (not paused — the worker's `paused` is the effective one, player pause included —,
   not `no_audio`, not a fade-out, not quitting) and `real` (a PipeWire stream or the `--ao null` timer,
   never the PipeWire-down fallback). A stepped clock never plays sound, so it never measures. The
-  compositor's `Learner` (one per `SceneSource`, **kept across worker restarts**, started over by a
-  `path` change) forms the 400 ms gating blocks from 4 consecutive segments (75 % overlap), keeps
+  compositor's `Learner` (one per scene **path**, shared by its sources through the `Book` — "One
+  measurement per path" below —, **kept across worker restarts**) forms the 400 ms gating blocks from 4 consecutive segments (75 % overlap), keeps
   those above the absolute gate (−70 LUFS) and integrates with the relative gate (−10 LU):
   `lufs = −0.691 + 10·log10(mean of the gated blocks)`. A stereo 1 kHz sine at −20 dBFS peak reads
   −20.0 LUFS (EBU Tech 3341 case 1 −23 → −23.0; a 997 Hz 0 dBFS mono sine −3.01).
@@ -3746,13 +3747,36 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   bins at their centres (±0.05 LU per block), and two histograms simply add. The **state** = `{v: 1,
   first, counts: [the non-zero span], peak_dbfs}` (`Learner::state_json`, typically a few hundred
   numbers) — what the backend stores and hands the next play back.
-- **Seeded plays.** Source prop **`loudness_seed`** (Map; `{}` = none) = a stored state: the source's
-  `Learner` starts from it (`with_seed`: its counts, peak, audible seconds) and continues the SAME
-  integration. Read at open; a live set restarts the measurement from the new seed (what the source
-  measured since its last report is dropped — it may already be in that seed: never counted twice; the
-  backend only sets it at create); a `path` change drops it (the old folder's). A malformed seed is
-  ignored (measured from nothing). Each session forms its own first block (its first 3 segments start
-  none: 0.3 s less than one long run).
+- **Seeded plays.** Source prop **`loudness_seed`** (Map; `{}` = none) = a stored state: a `Learner`
+  starts from it (`with_seed`: its counts, peak, audible seconds) and continues the SAME integration.
+  Read at open — and used only when the player holds less of that path itself (next bullet); a live
+  set restarts the path's measurement from the new seed (what was measured since its last report is
+  dropped — it may already be in that seed: never counted twice; the backend only sets it at create);
+  a `path` change drops it (the old folder's). A malformed seed is ignored (measured from nothing).
+  Each session forms its own first block (its first 3 segments start none: 0.3 s less than one long
+  run).
+- **One measurement per path (`audio::loudness::Book`, 2026-10-29).** The backend reads the seed from
+  its index at create, which can lag the player: `stop_now` → `/apply` of the same scene created the new
+  source before the backend had stored the stopped one's end-of-play report (stored off its event
+  thread), so it continued the report before — the stretch between the two lost (adapter IT, 2 of 3
+  runs); a rest too short to report at the end (< a twelfth of the window) never reached the index at
+  all. So the compositor keeps its own: `SourceHost` owns one `Book` (path → `Learner` + the live
+  sources of the path, in open order), every `SceneSource` joins its path at open / `path` change and
+  leaves it at teardown / `path` change / drop. **A source continues the path's measurement** — live
+  (a transition A → A' of one scene: A''s open takes A's live state; also a reopen during a real-clock `stop`'s
+  fade-out, when the stopped source is still a node — then it makes no end report) or last left (a reopen: no wait,
+  no index round trip — the bound on a switch is 0 ms) — **unless its seed covers more audible play**
+  (another lineage: after a compositor restart, the index edited) — then the seed is adopted. A seed is
+  never merged into a learner, only one of the two kept, and every report the backend stored came from
+  the book's lineage (or the one adopted): **no block is ever counted twice**. **Only the newest live
+  source of a path measures** (`Book::push`): A's segments are dropped from A''s open on (the same
+  sound twice — A's leave then reports nothing); if the newest leaves first, the next newest measures
+  on. Joining starts a session (`Learner::begin_session`: `seed_s` = what's measured so far, the block
+  forming and `played_s` start over, the unreported rest stays unreported — the next report includes
+  it, once). The measuring source's leave reports what's left (`finish`, the thresholds below); the
+  learner stays for a reopen — up to `BOOK_IDLE_KEEP` (64) paths without a live source, the least
+  recently left dropped beyond (that one falls back to the backend's seed). In memory only: a
+  compositor crash/restart behaves as before (below).
 - **The window = audible play.** `LIASCAPE_PLAYER_LOUDNESS_WINDOW_S` (default 60; tests 1–6) seconds of
   blocks **above the absolute gate** — a silent stretch doesn't count, a paused or muted one isn't
   even measured. **Reports** (`scene.loudness {id, path, lufs, peak_dbfs, seconds, session_s, seed_s,
@@ -3762,7 +3786,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   retired, its `path` changed) for what's left unreported if ≥ a twelfth of the window (5 s — a quick
   switch costs no index write) and the total is ≥ a third of the window (20 s); and once **at the cap**.
   `seconds` = audible seconds over every play, `session_s` = this source's, `seed_s` = the seed's,
-  `played_s` = segments this source received (audible or not), `complete` = `seconds` ≥ the window
+  `played_s` = segments this source received (audible or not) — `seed_s`/`session_s`/`played_s` are of
+  the measuring source's session (since it joined or took over), `complete` = `seconds` ≥ the window
   (else a partial: switched away early on a first play), `peak_dbfs` = the sample peak over every play
   (≤ the true peak; null if none). So a first play normalizes after 60 s (as before) and keeps refining.
 - **The cap.** `LIASCAPE_PLAYER_LOUDNESS_CAP_S` (default **1800** = 30 min of audible play over every play;
@@ -3783,14 +3808,16 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   report (the restored source — its `loudness_seed` is the one it was created with — continues from
   that seed; the backend keeps whichever report covers more seconds, so until the restored one passes
   the stored one its reports are ignored, then it replaces it: bounded loss, never a double count).
-  Two sources of one scene at once (a transition to the same item) each continue the same seed; the
-  backend keeps the longer — the other's part is lost, never added twice. Paused/`no_audio`: not
+  Two sources of one scene at once (a transition to the same item): the newer continues the older's
+  live measurement and only it measures (the `Book` — the older one's part after the hand-over isn't
+  measured: the same sound; nothing is lost or added twice). Paused/`no_audio`: not
   measured (above); `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
 - **Applying it** is the backend's: the scene source's **`gain.normalize`** slot (the summed `Gains`
   → the worker's stream; § Units) — set at create from the stored value, live through `animate` (a
   setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too).
 - **Probe `workers` → `loudness`**: `{seconds (audible, every play), session_s, seed_s, played_s,
-  lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, received
+  lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, measuring
+  (this source is its path's measuring one — the `Book`; the other values are the path's), received
   (segments the worker sent, measured or not — stands still once the meter is off)}`.
 - **Tests.** Units `audio::loudness` (`stereo_1khz_sine_reads_its_level_in_lufs`,
   `k_weighting_shapes_the_spectrum`, `gating_excludes_silence_and_quiet_passages`,
@@ -3815,7 +3842,14 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   the energy mean of both within 0.3 LU), `scene_loudness_stops_at_the_cap` (window 1, cap 3: reports at
   1/2/3 s, `capped`, `received` stands still, nothing at the end; seeded at the cap → nothing metered) —
   RED by mutation: seed ignored + cap off → both fail; the meter-off message suppressed → the cap test
-  fails (`received` 36 → more).
+  fails (`received` 36 → more). **The book (2026-10-29):** units `book_reopen_continues_the_last_source_never_twice`
+  (seeded with the window's report → continues the end; the up-to-date seed → the same, not twice; a
+  rest too short to report kept and reported once; a longer seed adopted), `book_hands_a_live_measurement_to_the_newest_source`,
+  `book_keeps_a_bounded_number_of_idle_paths`; api `scene_reopen_continues_the_end_of_play_measurement`
+  (destroy → a create seeded with the window's report continues the end's 3.0 s, not 2.0; the up-to-date
+  seed doesn't double it; a second source beside a playing one continues its live 4.0 s, `measuring`
+  moves to it, its report = `seed_s` + `session_s`, the first reports nothing at its end) — RED before:
+  the reopen read 2.0 s.
 
 ### GPU budget and VRAM (Task 8)
 
