@@ -378,7 +378,14 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
         // Phase 3: a rotation (`recipes::program`). Settable props are the program's live
         // configuration; the observed ones are what it does now (read-only).
         NodeKind::Program => {
-            let ms = |d: f64| ranged(PropType::F64, (0.0, PROGRAM_MS_MAX), "0–359999000", PropValue::F64(d));
+            let ms = |d: f64| {
+                ranged(
+                    PropType::F64,
+                    (0.0, PROGRAM_MS_MAX),
+                    "0–359999000",
+                    PropValue::F64(d),
+                )
+            };
             let mut transition = Map::new();
             transition.insert("enabled".into(), Value::Bool(false));
             vec![
@@ -387,7 +394,10 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     "outputs",
                     def(PropType::Str, true, PropValue::Str("out:*".to_string())),
                 ),
-                ("items", def(PropType::Items, false, PropValue::Items(Vec::new()))),
+                (
+                    "items",
+                    def(PropType::Items, false, PropValue::Items(Vec::new())),
+                ),
                 (
                     "defaults",
                     def(PropType::SourceProps, false, PropValue::Map(Map::new())),
@@ -428,13 +438,19 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     def(PropType::Str, true, PropValue::Str("idle".to_string())),
                 ),
                 ("index", def(PropType::I64, true, PropValue::I64(-1))),
-                ("path", def(PropType::Str, true, PropValue::Str(String::new()))),
+                (
+                    "path",
+                    def(PropType::Str, true, PropValue::Str(String::new())),
+                ),
                 (
                     "next_path",
                     def(PropType::Str, true, PropValue::Str(String::new())),
                 ),
                 ("played_ms", def(PropType::F64, true, PropValue::F64(0.0))),
-                ("remaining_ms", def(PropType::F64, true, PropValue::F64(0.0))),
+                (
+                    "remaining_ms",
+                    def(PropType::F64, true, PropValue::F64(0.0)),
+                ),
             ]
         }
         NodeKind::Effect => vec![
@@ -687,7 +703,10 @@ pub fn from_json(prop: &str, ty: PropType, v: &Value) -> Result<PropValue, ApiEr
             let mut items = Vec::with_capacity(arr.len());
             for (i, it) in arr.iter().enumerate() {
                 if !it.is_object() {
-                    return Err(bad_type(&format!("{prop}[{i}]"), "an object {path, props?, skip?}"));
+                    return Err(bad_type(
+                        &format!("{prop}[{i}]"),
+                        "an object {path, props?, skip?}",
+                    ));
                 }
                 items.push(serde_json::from_value(it.clone()).map_err(|e| {
                     bad_type(

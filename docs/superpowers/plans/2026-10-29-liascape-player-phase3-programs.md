@@ -286,6 +286,13 @@ pub fn pick(cfg: &TransitionCfg, last_effect: Option<&str>, defaults_of: &dyn Fn
 - [ ] **Step 4:** `--test program` PASS; the full crate suite in both modes PASS.
 - [ ] **Step 5:** Commit `Add The Program Node To The Player Graph`.
 
+> **Implementer note 2026-10-29 (Task 2):**
+> - Verb replies always carry `index` (−1 with nothing to do); `program.play` with an index past the end is `out_of_range`. `state.programs[].items` is the item count, `order` the play order; the probe adds `item_flags`.
+> - A program node never moves `picture_rev`/`demand_rev` on create/destroy; a `set` on it still does (the `Graph::apply_set` lines are mid-edit by F6b — left alone).
+> - The `transition`/`cancel` verbs and an output removal used to drain-and-drop the transition outbox; they now stash it (`Runtime::stash_tr_events`) so the programs see every event with the next tick.
+> - No event field may be called `kind`: it overwrites the log record's own `kind` (the event name).
+> - The Task 2 docs (`player-core.md` § Programs + Command API rows) landed inside commit 7528abf — another agent committed the whole working-tree file.
+
 **Size: M.**
 
 ### Task 3: The rotation engine — timer, advance-on-end, limits, scenes, failures
@@ -346,6 +353,17 @@ pub const BACKOFF_MS: [u64; 6] = [1000, 2000, 4000, 8000, 16000, 30000];   // th
 - [ ] **Step 3: Implement.** The tick hook goes after `Transitions::tick` in `Runtime::tick` and after `begin_step`'s recipe tick in stepped mode. Actions run through the same `Transitions::start` the `transition` verb uses (no second code path).
 - [ ] **Step 4:** `--test program` PASS; `--test transition`, `--test api` and the full suite in both modes PASS.
 - [ ] **Step 5:** Commit `Run Rotation Inside The Player`.
+
+> **Implementer note 2026-10-29 (Task 3):**
+> - **End switches are armed after the current effect's handoff**, not "right after commit": a request while the effect is Running commits it early (invariant #6 — a 500 ms fade would be cut at once). The C# `DoVideoEndWait` waited for the overlay too. `on_end_switches_at_each_end_aligned` asserts the arm lands well before A's end and the commits are clip − fade apart (full-live ends at A's end).
+> - `max_beats_min`: a 10 s clip already reaches an 8 s minimum in its first loop, so its end is armed at once (as in C#); the 3 s cap then supersedes it and takes its B. The test asserts that, not "no arm".
+> - Failures: the failed path is marked and passed over until the items change; when every playable item has failed, `program.empty` is logged once, the marks are cleared and the ladder retries them (≤ 6 requests in 60 s with 3 garbage files). Only skip/broken items → `empty` and nothing more until an edit.
+> - Any `Error` from the current item's source other than a VRAM stop counts as `broken` (a video that dies mid-play too) and is marked.
+> - While another client's transition is in flight the program requests nothing by itself; afterwards it follows `cur:` (an item → reason `items`, anything else → `idle`).
+> - B gets `loop: true` under `on_end` with a minimum and > 1 item (so a short clip loops until the reaching loop even if its hold starts late).
+> - `while_parked` is Task 5's prop: only `rotate` exists so far (timer/max/scenes-after go through `transition_parked` and commit at once; end switches wait).
+> - `program.next|prev|random` already run (Task 4 owns their tests and the armed-B / running-effect rules); `keep_pause` while paused is a cut.
+> - `every_switch_combo` counts playing sources — a live `video`/`scene` not ramped to −96 — not reveal's snapshot or a grave waiting to be destroyed. `countdown_survives_player_pause` was added (the pause half of Review Focus 5); the suspend half stays `countdown_uses_the_monotonic_player_clock`.
 
 **Size: L** (≈ 2½ days; the align:end interplay is the risk — Risk 1).
 

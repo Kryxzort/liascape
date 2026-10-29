@@ -96,10 +96,7 @@ pub fn min_reached(played_ms: u64, loop_remaining_ms: Option<u64>, min_ms: u64) 
         return true;
     }
     match loop_remaining_ms {
-        Some(rem) => played_ms
-            .saturating_add(rem)
-            .saturating_add(MIN_SLACK_MS)
-            >= min_ms,
+        Some(rem) => played_ms.saturating_add(rem).saturating_add(MIN_SLACK_MS) >= min_ms,
         None => played_ms >= min_ms,
     }
 }
@@ -124,17 +121,41 @@ mod tests {
     fn item_rule_table() {
         let r = |min_ms, max_ms| ItemRule { min_ms, max_ms };
         // video: (min, max), whatever the scene timing
-        assert_eq!(item_rule(PlayKind::Video, 5000, 9000, true, 3000), r(5000, 9000));
-        assert_eq!(item_rule(PlayKind::Video, 5000, 9000, false, 3000), r(5000, 9000));
+        assert_eq!(
+            item_rule(PlayKind::Video, 5000, 9000, true, 3000),
+            r(5000, 9000)
+        );
+        assert_eq!(
+            item_rule(PlayKind::Video, 5000, 9000, false, 3000),
+            r(5000, 9000)
+        );
         assert_eq!(item_rule(PlayKind::Video, 0, 0, true, 0), r(0, 0));
         // separate on: scene / image (after or NEVER, 0)
-        assert_eq!(item_rule(PlayKind::Scene, 5000, 9000, true, 3000), r(3000, 0));
-        assert_eq!(item_rule(PlayKind::Image, 5000, 9000, true, 3000), r(3000, 0));
-        assert_eq!(item_rule(PlayKind::Scene, 5000, 9000, true, 0), r(NEVER_MS, 0));
-        assert_eq!(item_rule(PlayKind::Image, 5000, 9000, true, 0), r(NEVER_MS, 0));
+        assert_eq!(
+            item_rule(PlayKind::Scene, 5000, 9000, true, 3000),
+            r(3000, 0)
+        );
+        assert_eq!(
+            item_rule(PlayKind::Image, 5000, 9000, true, 3000),
+            r(3000, 0)
+        );
+        assert_eq!(
+            item_rule(PlayKind::Scene, 5000, 9000, true, 0),
+            r(NEVER_MS, 0)
+        );
+        assert_eq!(
+            item_rule(PlayKind::Image, 5000, 9000, true, 0),
+            r(NEVER_MS, 0)
+        );
         // separate off: scene (min or NEVER, max), image (min, max)
-        assert_eq!(item_rule(PlayKind::Scene, 0, 9000, false, 3000), r(NEVER_MS, 9000));
-        assert_eq!(item_rule(PlayKind::Scene, 5000, 9000, false, 3000), r(5000, 9000));
+        assert_eq!(
+            item_rule(PlayKind::Scene, 0, 9000, false, 3000),
+            r(NEVER_MS, 9000)
+        );
+        assert_eq!(
+            item_rule(PlayKind::Scene, 5000, 9000, false, 3000),
+            r(5000, 9000)
+        );
         assert_eq!(item_rule(PlayKind::Image, 0, 9000, false, 3000), r(0, 9000));
         assert_eq!(item_rule(PlayKind::Image, 5000, 0, false, 3000), r(5000, 0));
     }
@@ -154,14 +175,50 @@ mod tests {
         assert!(!min_reached(315_360_000_000, Some(3_600_000), NEVER_MS)); // 10 years played
         assert!(still_min_reached(true, true, PlayKind::Scene, 3000, 3000));
         assert!(!still_min_reached(true, true, PlayKind::Scene, 2999, 3000));
-        assert!(!still_min_reached(true, true, PlayKind::Scene, u64::MAX / 8, NEVER_MS));
-        assert!(!still_min_reached(true, true, PlayKind::Scene, 9_000_000, 0));
+        assert!(!still_min_reached(
+            true,
+            true,
+            PlayKind::Scene,
+            u64::MAX / 8,
+            NEVER_MS
+        ));
+        assert!(!still_min_reached(
+            true,
+            true,
+            PlayKind::Scene,
+            9_000_000,
+            0
+        ));
         assert!(still_min_reached(true, true, PlayKind::Image, 0, 0));
         assert!(still_min_reached(true, true, PlayKind::Image, 3000, 3000));
-        assert!(!still_min_reached(true, true, PlayKind::Image, u64::MAX / 8, NEVER_MS));
-        assert!(!still_min_reached(true, true, PlayKind::Video, 9_000_000, 3000));
-        assert!(!still_min_reached(false, true, PlayKind::Scene, 9_000_000, 3000));
-        assert!(!still_min_reached(true, false, PlayKind::Image, 9_000_000, 3000));
+        assert!(!still_min_reached(
+            true,
+            true,
+            PlayKind::Image,
+            u64::MAX / 8,
+            NEVER_MS
+        ));
+        assert!(!still_min_reached(
+            true,
+            true,
+            PlayKind::Video,
+            9_000_000,
+            3000
+        ));
+        assert!(!still_min_reached(
+            false,
+            true,
+            PlayKind::Scene,
+            9_000_000,
+            3000
+        ));
+        assert!(!still_min_reached(
+            true,
+            false,
+            PlayKind::Image,
+            9_000_000,
+            3000
+        ));
     }
 
     #[test]

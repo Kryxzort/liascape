@@ -1741,6 +1741,41 @@ source; the transition recipe stays the one place a switch happens. The contract
   `program.empty {id}` (warn), `program.idle`, `program.requested` (debug).
 - **Transition events reach the programs** with the tick after `Transitions::tick` (R47): the `transition`/`cancel`
   verbs and an output removal *stash* the outbox (`Runtime::stash_tr_events`) instead of dropping it.
+- **The engine** (`Programs::tick`, Task 3; `Runtime::tick_programs` in `finish_tick` right after
+  `Transitions::tick`, stepped and real clock alike; actions run by `Runtime::run_program_actions` through
+  `Transitions::start` — or `transition_parked` with no output — never a second code path):
+  - **Clock:** `PlayClock` adds the player clock's advance (`Runtime::now`: monotonic, pause-excised) — play time and
+    the countdown stop with the picture (user pause, low-VRAM hold) and never see a wall-clock jump. Play time is
+    wall clock (never speed-scaled); the timer countdown is scaled by the current source's `speed`.
+  - **Commit** at `transition.started` of the program's corr (B current: `Order::commit`, play time 0 from that
+    instant, `program.current` with `at_ms`); a `handoff` commits a step whose `started` was missed. Own supersedes
+    are ignored (the pending corr is already replaced); another client's `cancelled` drops the pending step.
+  - **Timer** (`mode: timer`): at `remaining ≤ 0` (`interval_ms > 0`) → `align: now`, mid-video; a 1-item program
+    only restarts its countdown.
+  - **On end** (`mode: on_end`, `interval_ms` = the minimum): the playing item's `item_rule`. Max reached → `align:
+    now` (an armed end switch's B is taken — the recipe supersedes it). A still/scene: `still_min_reached` → `align:
+    now` (`scenes_after` with separate timing, else `end`). A video: once its effect handed off, `min_reached(played,
+    loop remaining = (duration − time_pos)/speed)` → `align: end` (`program.armed`); else held (`program.held`, A's
+    `loop` set) and re-checked every tick, so the request goes in during the loop that reaches the minimum. The end
+    switch is armed only after the current effect's handoff (a request during a Running effect would commit it early
+    — the C# `DoVideoEndWait` waited for the overlay too) and never while parked (a parked A never ends).
+  - **B's props:** `defaults` ∪ the item's `props` (item wins) + `path`, + `loop: true` under `on_end` with a minimum
+    (a short clip loops until the reaching loop). The effect: `pick` (sequential/shuffle/duration range), `last_effect`
+    updated at the request (as `PickEffect`).
+  - **Breaks:** an `Error` from the current item's source → the next playable item at once, `align: now` — reason
+    `vram` for a VRAM stop (`(vram_exceeded)` in the reason; not marked), else `broken` (the path is marked and
+    passed over; `program.skipped`).
+  - **Failures never spin:** `transition.failed` (or a refused request) → `program.failed {backoff_ms}`, the ladder
+    `BACKOFF_MS` 1/2/4/8/16/30 s while failures continue (a handoff resets it), the path marked `failed` (passed over
+    until the items change), then the next playable item (`failed_skip`). Nothing playable → `program.empty` once
+    (until a commit); when every playable item has failed, the marks are cleared and they are retried at the ladder's
+    pace (≤ 6 requests a minute).
+  - **Another client's switch:** while a non-program transition is in flight the program requests nothing by itself;
+    if the outputs then show another source (`cur:<first output>`), an item's path becomes current (reason `items`),
+    anything else makes the program `idle` (until a verb).
+  - Tests: `tests/program.rs` (27 stepped/real-clock API tests: timer/speed/1-item/on-end/min-hold/max/0-off/scenes
+    after/separate off/images/commit at effect start/cut at A's end/effect pick/failures/all unplayable/skip/broken/
+    VRAM/pause/every switch combo) + `recipes::program` unit tests.
 
 ## Runtime
 
