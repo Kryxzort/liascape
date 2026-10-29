@@ -1,0 +1,37 @@
+From ac160dfd8b0a5027da627a1c941c42f72fbb3d14 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Thu, 29 Oct 2026 21:34:17 +0530
+Subject: [PATCH 19/21] config: start the debug switches off
+
+Configuration's constructor never initialised baseOnly, noSolidFinal and
+passLog, so each held whatever was on the heap. A non-zero noSolidFinal
+leaves out the final draw of every solid layer (CImage::shouldRenderFinalPass), so a
+scene's solid layers came and went with the heap layout: the same scene
+drew its squares in one process and nothing in another (found by the
+property-script tests of the next patch, which pass or fail depending on
+the tests run before them). A garbage passLog printed a line per render
+pass.
+
+Origin: ours
+Why: solid layers vanished at random in lp-player's scene worker (uninitialised CImage debug switch; found by the B1 property-script tests, docs/player/spikes/we-lwe-gap-audit.md)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4gecqrPRHLwoGGiWVa
+---
+ src/core/WallpaperEngine/Configuration.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Configuration.cpp b/src/core/WallpaperEngine/Configuration.cpp
+index 363fc67..fca2c37 100644
+--- a/src/core/WallpaperEngine/Configuration.cpp
++++ b/src/core/WallpaperEngine/Configuration.cpp
+@@ -39,7 +39,8 @@ std::filesystem::path detectHomedir () {
+ 
+ Configuration::Configuration (wp_rendering_pause_check* pause_check, wp_mute_check* mute_check) :
+     properties ({}), pause_check (pause_check), mute_check (mute_check), volume (15), enableAudio (true),
+-    disableParticles (false), disableParallax (false), web_fps (60) {
++    disableParticles (false), disableParallax (false), web_fps (60), baseOnly (false), noSolidFinal (false),
++    passLog (false) {
+     // setup logging so the library can write things to the output
+     sLog.addOutput (new std::ostream (std::cout.rdbuf ()));
+     sLog.addError (new std::ostream (std::cerr.rdbuf ()));

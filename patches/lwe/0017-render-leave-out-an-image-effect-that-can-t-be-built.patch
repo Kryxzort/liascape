@@ -1,7 +1,7 @@
 From 40eacc9a278738ba3fce5d4f1b030e543b4ca2e0 Mon Sep 17 00:00:00 2001
 From: Kryxzort <virajslko@gmail.com>
 Date: Wed, 28 Oct 2026 22:19:03 +0530
-Subject: [PATCH 17/18] render: leave out an image effect that can't be built,
+Subject: [PATCH 17/21] render: leave out an image effect that can't be built,
  not the image
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

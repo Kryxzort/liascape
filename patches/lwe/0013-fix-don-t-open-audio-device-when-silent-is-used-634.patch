@@ -1,7 +1,7 @@
 From cc090fa8490d16f3f37379dd1f14175065b66c6a Mon Sep 17 00:00:00 2001
 From: ElXreno <elxreno@gmail.com>
 Date: Wed, 28 Oct 2026 05:36:19 +0300
-Subject: [PATCH 13/18] fix: don't open audio device when --silent is used
+Subject: [PATCH 13/21] fix: don't open audio device when --silent is used
  (#634)
 
 (cherry picked from commit 1a856e80a083a8c4b07c9c4e3e537c450e0a6062)

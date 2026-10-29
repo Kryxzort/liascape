@@ -1,7 +1,7 @@
 From f5fea6aff2335533701c6fe204ab2c7258f05fdf Mon Sep 17 00:00:00 2001
 From: David Mireles <davidmirelesll@outlook.com>
 Date: Tue, 27 Oct 2026 19:59:20 -0600
-Subject: [PATCH 08/18] fix(scripting): release OpaqueScriptableObjectAdapter
+Subject: [PATCH 08/21] fix(scripting): release OpaqueScriptableObjectAdapter
  when the JS object is finalized (#619)
 
 ScriptableObjectAdapter::instantiate allocates an OpaqueScriptableObjectAdapter

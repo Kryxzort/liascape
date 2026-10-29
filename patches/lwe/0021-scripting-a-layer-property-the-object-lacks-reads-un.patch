@@ -1,0 +1,51 @@
+From e78d94d13f23755b48fda34cb3d0f1195d7e5096 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Thu, 29 Oct 2026 21:42:25 +0530
+Subject: [PATCH 21/21] scripting: a layer property the object lacks reads
+ undefined quietly
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The layer adapter's getter (installed by the previous patch) looked names
+up with ScriptableObject::getProperty, which logs "Property '…' not found"
+before it throws. A script that calls a layer method LWE doesn't have yet
+(thisLayer.getTextureAnimation(), every frame in 2325974975) logged that
+line 90 times a second next to its own TypeError. The getter now looks the
+name up in the registered properties and returns undefined on a miss.
+
+Origin: ours
+Why: log spam from property scripts in lp-player's scene worker after B1 (smoke of 2325974975: 273 lines in 3 s)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4gecqrPRHLwoGGiWVa
+---
+ .../Scripting/Adapters/ScriptableObjectAdapter.cpp   | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 8b70f66..c3d2be2 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -43,14 +43,16 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 	return JS_NewString (ctx, container->object.getObject ().name.c_str ());
+     }
+ 
+-    try {
+-	// find the property inside, otherwise return undefined
+-	auto& property = container->object.getProperty (name);
++    // a registered property, otherwise undefined (looked up, not getProperty: that logs an error per miss, and a
++    // script calling a method LWE lacks, e.g. getTextureAnimation(), misses every frame)
++    const auto& properties = container->object.getProperties ();
++    const auto it = properties.find (name);
+ 
+-	return container->adapter.getEngine ().dynamicToJs (property);
+-    } catch (const std::exception& e) {
++    if (it == properties.end ()) {
+ 	return JS_UNDEFINED;
+     }
++
++    return container->adapter.getEngine ().dynamicToJs (it->second.value);
+ }
+ 
+ int scriptableobject_property_set (

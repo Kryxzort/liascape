@@ -50,3 +50,6 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0016-filesystem-find-an-asset-whose-name-differs-only-in-.patch` | filesystem: find an asset whose name differs only in case | ours | Kryxzort <virajslko@gmail.com> |
 | lwe | `0017-render-leave-out-an-image-effect-that-can-t-be-built.patch` | render: leave out an image effect that can't be built, not the image | ours | Kryxzort <virajslko@gmail.com> |
 | lwe | `0018-audio-play-sound-objects-the-way-Wallpaper-Engine-do.patch` | audio: play sound objects the way Wallpaper Engine does | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0019-config-start-the-debug-switches-off.patch` | config: start the debug switches off | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0020-scripting-run-property-scripts-the-way-Wallpaper-Eng.patch` | scripting: run property scripts the way Wallpaper Engine does | ours | Kryxzort <virajslko@gmail.com> |
+| lwe | `0021-scripting-a-layer-property-the-object-lacks-reads-un.patch` | scripting: a layer property the object lacks reads undefined quietly | ours | Kryxzort <virajslko@gmail.com> |

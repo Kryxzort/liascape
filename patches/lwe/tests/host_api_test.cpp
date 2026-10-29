@@ -1,4 +1,4 @@
-// Tests of liascape's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016, 0018), run by
+// Tests of liascape's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016, 0018, 0019), run by
 // `bash scripts/lwe.sh test` against the built core. C++ only because LWE's public headers are:
 // they use `struct` tags as type names (`wp_mute_check*`), which C rejects.
 //
@@ -11,12 +11,13 @@
 //
 // Exit 0 = every test passed (or SKIPped, with the reason printed); 1 = a failure. Needs
 // SDL_AUDIODRIVER=dummy (the SDL test must not open a real device). The render tests need a
-// surfaceless EGL desktop-GL 3.3 context (SKIP without one); the audio-mix test needs WE's assets
-// (a scene only builds its renderer with them — SKIP without).
+// surfaceless EGL desktop-GL 3.3 context (SKIP without one); the audio-mix, sound and script tests need WE's
+// assets (a scene only builds its renderer with them; the scripts' classes and modules are WE's — SKIP without).
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -43,7 +44,11 @@ static int g_passes = 0;
         }                                                                                                              \
     } while (0)
 
+// HOST_API_TEST_ONLY=<substring>: run only the tests whose name contains it
 static void run (const char* name, bool (*fn) ()) {
+    if (const char* only = getenv ("HOST_API_TEST_ONLY"); only && !strstr (name, only)) {
+        return;
+    }
     printf ("  %s ...\n", name);
     fflush (stdout);
     if (fn ()) {
@@ -816,6 +821,240 @@ static bool startsilent_and_volume_rise () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// 0019: property scripts run the way Wallpaper Engine runs them (docs/player/spikes/we-lwe-gap-audit.md B1:
+// S1-S7, S9, S33-S35, S38). Solid-colour squares (WE's models/util/solidlayer.json, 8x8, on a blue clear) in a
+// 64x32 scene; a script on a property moves, hides or scales its square, read back from the centre row
+
+// a scene folder of the given objects (JSON array body) on a 0 0 0.5 clear colour
+static std::string script_scene (const std::string& objects) {
+    char tmpl[] = "/tmp/lwe-script-scene.XXXXXX";
+    const char* dir = mkdtemp (tmpl);
+    if (!dir) {
+        return {};
+    }
+    const std::string d = dir;
+    write_file (d + "/project.json", "{\"title\":\"scripts\",\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":"
+                                     "{\"speed\":{\"type\":\"slider\",\"value\":0.25,\"min\":0,\"max\":1,\"text\":\"s\"}}}}\n");
+    write_file (d + "/scene.json", "{\"camera\":{\"center\":\"0 0 -1\",\"eye\":\"0 0 0\",\"up\":\"0 1 0\"},"
+                                   "\"general\":{\"clearcolor\":\"0 0 0.5\",\"orthogonalprojection\":{\"width\":64,\"height\":32}},"
+                                   "\"objects\":["
+                                       + objects + "]}\n");
+    return d;
+}
+
+// one solid 8x8 square; `props` is the rest of the object's JSON members (each scripted property's object)
+static std::string square (int id, const std::string& props) {
+    return "{\"id\":" + std::to_string (id) + ",\"name\":\"sq" + std::to_string (id)
+         + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\"," + props + "}";
+}
+
+// a property value with a script, as the editor writes it: {"value": …, "script": …}
+static std::string scripted (const std::string& name, const std::string& value, const std::string& script) {
+    std::string escaped;
+    for (char c : script) {
+        if (c == '"' || c == '\\') {
+            escaped += '\\';
+        }
+        if (c == '\n') {
+            escaped += "\\n";
+            continue;
+        }
+        escaped += c;
+    }
+    return "\"" + name + "\":{\"value\":" + value + ",\"script\":\"" + escaped + "\"}";
+}
+
+struct ScriptRig {
+    wp_configuration* cfg = nullptr;
+    wp_context* ctx = nullptr;
+    wp_project* p = nullptr;
+    unsigned int fbo = 0;
+    int frames = 0;
+    std::string dir;
+
+    bool open (const std::string& sceneDir) {
+        dir = sceneDir;
+        g_now = 0.0f;
+        cfg = wp_config_create ();
+        if (!wp_config_set_assets_dir (cfg, g_assets.c_str ())) {
+            return false;
+        }
+        wp_config_set_audio_output (cfg, &kStereo48k);
+        ctx = wp_context_create (cfg);
+        wp_context_set_gl_proc_address (ctx, &g_proc);
+        wp_context_set_time_counter (ctx, &g_clock);
+        p = wp_project_load_folder (ctx, nullptr, dir.c_str ());
+        if (p == nullptr) {
+            return false;
+        }
+        wp_project_set_output_framebuffer (p, scratch_fbo ());
+        step ();
+        if (wp_project_get_width (p) != 64 || wp_project_get_height (p) != 32) {
+            return false;
+        }
+        fbo = scratch_fbo (64, 32);
+        wp_project_set_output_framebuffer (p, fbo);
+        return true;
+    }
+
+    void step () {
+        g_now += 1.0f / 30.0f;
+        wp_render_update_time (ctx);
+        wp_render_frame (p);
+        frames++;
+    }
+
+    // the columns of the centre row a square covers ("#" = covered, "." = the blue clear colour)
+    std::string row () {
+        if (getenv ("SCRIPT_TEST_DEBUG")) {
+            for (int y = 0; y < 32; y++) {
+                std::string line;
+                for (int x = 0; x < 64; x++) {
+                    unsigned char px[4] = { 0, 0, 0, 0 };
+                    read_pixel (fbo, x, y, px);
+                    line += px[2] < 64 ? '#' : '.';
+                }
+                printf ("    %2d %s\n", y, line.c_str ());
+            }
+        }
+        std::string out;
+        for (int x = 0; x < 64; x++) {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (fbo, x, 16, px);
+            out += px[2] < 64 ? '#' : '.';
+        }
+        return out;
+    }
+
+    ~ScriptRig () {
+        if (p) {
+            wp_project_destroy (p);
+        }
+        if (ctx) {
+            wp_context_destroy (ctx);
+        }
+        if (cfg) {
+            wp_config_destroy (cfg);
+        }
+        if (!dir.empty ()) {
+            unlink ((dir + "/project.json").c_str ());
+            unlink ((dir + "/scene.json").c_str ());
+            rmdir (dir.c_str ());
+        }
+    }
+};
+
+static bool script_tests_can_run () {
+    if (g_assets.empty ()) {
+        printf ("    SKIP: no WE assets dir given (solid layers, the flat shader and WE's script classes)\n");
+        return false;
+    }
+    if (!egl_up ()) {
+        printf ("    SKIP: %s\n", g_eglSkip.c_str ());
+        return false;
+    }
+    return true;
+}
+
+// a run of '#' from `from` to `to` inclusive, '.' elsewhere
+static std::string covered (int from, int to) {
+    std::string out (64, '.');
+    for (int x = std::max (from, 0); x <= std::min (to, 63); x++) {
+        out[x] = '#';
+    }
+    return out;
+}
+
+// update(value) returning value + 1 moves the property every tick (unpatched: the module was a Promise, update
+// was never found and the origin was written as null, (0,0)); a returned Vec3 keeps its z (S9); thisLayer is the
+// script's own layer, also in a second object's scripts (S7); `visible` drives the rendered value (S3)
+static bool update_moves_the_property () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (
+        square (1, scripted ("origin", "\"8 16 5\"", "export function update(value) {\n  return value.add(new Vec3(1, 0, 0));\n}")
+                       + ","
+                       + scripted ("visible", "true", "export function update(value) {\n  return thisLayer.origin.z == 5;\n}"))
+        + "," + square (2, scripted ("origin", "\"48 16 0\"", "export function update(value) {\n  return thisLayer.origin;\n}"))
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 9; i++) {
+        rig.step ();
+    }
+    // 10 ticks: square 1's centre 8 → 18 (columns 14..21), square 2 still at 48 (44..51)
+    std::string want = covered (4 + rig.frames, 11 + rig.frames);
+    for (int x = 44; x <= 51; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    after %d ticks: %s\n", rig.frames, got.c_str ());
+    CHECK (got == want, "want %s", want.c_str ());
+    return true;
+}
+
+// init(value) runs once, before the first update, and what it returns is written; WE's own script modules import
+// (WEMath from the assets' scripts/jsmodules); applyUserProperties gets the user properties once after init
+static bool init_runs_first_and_modules_load () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (
+        square (1, scripted ("origin", "\"8 16 0\"",
+                             "import * as WEMath from 'WEMath';\n"
+                             "let base, inits = 0, speed;\n"
+                             "export function init(value) {\n  inits++;\n  base = WEMath.mix(value.x, value.x + 64, 0.5);\n}\n"
+                             "export function applyUserProperties(p) {\n  speed = p.speed;\n}\n"
+                             "export function update(value) {\n  return new Vec3(inits == 1 && speed == 0.25 ? base : -100, value.y, value.z);\n}"))
+        + "," + square (2, scripted ("scale", "\"1 1 1\"", "export function init(value) {\n  return new Vec3(2, 2, 1);\n}")
+                               + ",\"origin\":\"56 16 0\"")
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 9; i++) {
+        rig.step ();
+    }
+    // square 1 at 8 + 32 = 40 (36..43); square 2 scaled by init's return to 16x16 around 56 (48..63)
+    std::string expect = covered (36, 43);
+    for (int x = 48; x <= 63; x++) {
+        expect[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    after %d ticks: %s\n", rig.frames, got.c_str ());
+    CHECK (got == expect, "want %s", expect.c_str ());
+    return true;
+}
+
+// an update without a return (undefined) or returning null leaves the property alone (unpatched: written as
+// null, the square at (0,0)); a script whose top level throws doesn't take its property down with it
+static bool undefined_leaves_the_property () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (
+        square (1, scripted ("origin", "\"8 16 0\"", "export function update(value) {\n}"))
+        + "," + square (2, scripted ("origin", "\"28 16 0\"", "export function update(value) {\n  return null;\n}"))
+        + "," + square (3, scripted ("origin", "\"48 16 0\"", "engine.noSuchFunction();\nexport function update(value) {\n  return new Vec3(0);\n}"))
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 9; i++) {
+        rig.step ();
+    }
+    std::string want = covered (4, 11);
+    for (int x : { 24, 44 }) {
+        for (int i = 0; i < 8; i++) {
+            want[x + i] = '#';
+        }
+    }
+    const std::string got = rig.row ();
+    printf ("    after %d ticks: %s\n", rig.frames, got.c_str ());
+    CHECK (got == want, "want %s", want.c_str ());
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -840,6 +1079,9 @@ int main (int argc, char** argv) {
     run ("random_waits_mintime_to_maxtime", random_waits_mintime_to_maxtime);
     run ("volume_is_squared_and_live", volume_is_squared_and_live);
     run ("startsilent_and_volume_rise", startsilent_and_volume_rise);
+    run ("update_moves_the_property", update_moves_the_property);
+    run ("init_runs_first_and_modules_load", init_runs_first_and_modules_load);
+    run ("undefined_leaves_the_property", undefined_leaves_the_property);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

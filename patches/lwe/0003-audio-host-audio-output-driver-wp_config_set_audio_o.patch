@@ -1,7 +1,7 @@
 From ccdf046853f4fb9fae9115f9e4ebaaf65c609681 Mon Sep 17 00:00:00 2001
 From: Kryxzort <virajslko@gmail.com>
 Date: Tue, 27 Oct 2026 20:52:06 +0530
-Subject: [PATCH 03/18] audio: host audio output driver
+Subject: [PATCH 03/21] audio: host audio output driver
  (wp_config_set_audio_output)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

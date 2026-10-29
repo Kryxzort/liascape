@@ -1,0 +1,2990 @@
+From 02475c81964c59acc7c55f70d5c75198c62b6442 Mon Sep 17 00:00:00 2001
+From: Kryxzort <virajslko@gmail.com>
+Date: Thu, 29 Oct 2026 21:34:17 +0530
+Subject: [PATCH 20/21] scripting: run property scripts the way Wallpaper
+ Engine does
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A property script (SceneScript attached to an object's property) never
+ran. queueScript kept what JS_Eval returns for a module, which in
+quickjs-ng is the evaluation's Promise, so `update`, `init` and every
+event handler were looked up on the Promise and never found; the
+"result" (undefined) was then written into the property as null every
+frame: scripted origins went to (0,0), scripted alpha/visible/scale to 0.
+Underneath, the runtime the scripts would have met was broken too.
+
+Property scripts now:
+
+- Compile with JS_EVAL_FLAG_COMPILE_ONLY, evaluate with JS_EvalFunction
+  (a rejected evaluation is a load error) and keep the module namespace
+  (JS_GetModuleNamespace), where update/init/the events are found.
+- Evaluate on the first tick after they were queued, when the whole scene
+  exists (objects queue them from their constructors), in queue order;
+  then init(value) once each, then applyUserProperties(<every user
+  property>) once (WE calls it on load; later changes don't reach it yet),
+  then update(value) every tick.
+- Write back only a value: undefined/null (no `return`) leave the property
+  alone, as WE documents. A returned Vec3/Vec4 keeps its z and w (they
+  were dropped to 0). A returned object without numeric x/y is ignored
+  (it used to throw a C++ exception into the frame).
+- See their own layer: `thisLayer` and `thisObject` are module-scope
+  bindings of the object the script is attached to (they were one global,
+  the last object that queued a script; thisObject didn't exist), so event
+  handlers and timer callbacks keep them.
+- Bind scale/angles/visible to the values the object renders with: the
+  ScriptableObject base registered the object's group* copies first and
+  the typed registration was dropped. A text object's angles stay the
+  group value (it has none of its own), and its text script runs only as
+  the text layer script (it ran a second time as a property script).
+- Log what they throw: once per error up to five per script, with the
+  module key, the function and the stack (they were silent).
+
+The JS they run against is Wallpaper Engine's own:
+
+- Before anything else the engine evaluates WE's
+  scripts/jsclasses/baseclasses.js (Vec2/Vec3/Vec4/Mat3/Mat4 with all
+  their methods, createScriptProperties, _Internal) as WE does, and
+  `import … from 'WEMath' | 'WEColor' | 'WEVector'` loads
+  scripts/jsmodules/<name>.js. Both are read at run time from the user's
+  WE assets (the assets dir LWE already mounts), never shipped. Without
+  them, bare Vec2/Vec3/Vec4 constructors stand in (written from the
+  documented API) and the modules don't resolve.
+- So the native vector adapters (only argv[0] used, so new Vec3(1,2,3)
+  was (1,1,1); new Vec3() threw; every method unreachable behind the
+  exotic getter; no reflect/Mat*) and the native WEMath/WEColor modules
+  (threw on any argument count but 3) are gone; the C++ side only
+  marshals: a DynamicValue vector becomes `new VecN(...)` of WE's class.
+- createScriptProperties() is WE's builder (every key gets its default; a
+  combo its first option) with the scene's stored values laid over it
+  live, a string for a vector default becoming that vector (WE's
+  _Internal.updateScriptProperties). The stored values are those of the
+  module being evaluated (they were the previous module's, or none).
+- thisLayer / getLayer() objects read their registered properties and
+  `name`, and writing a registered property sets it (the exotic get/set
+  were never installed: every read was undefined). Other names are
+  accepted and dropped.
+- engine.frametime/runtime/timeOfDay, setTimeout, setInterval and
+  createScriptProperties are JS_CFUNC_generic_magic functions (they were
+  registered as plain generic ones and read a garbage magic), and the
+  engine object registers itself (it never did, so every engine call
+  failed without an error). Timer callbacks are owned (JS_DupValue; they
+  were freed by whoever passed them), their results freed and exceptions
+  logged, a callback may clear or add timers, and the stop function
+  setTimeout/setInterval return works without arguments (it read its id
+  from argv[0]).
+- A text layer's `thisScene` and `engine` are the real objects behind its
+  own clock fields (getLayer, setInterval, … threw "not a function").
+- thisScene.getLayer() of a name it doesn't find is undefined (it was an
+  exception without an error).
+
+Not done (later batches): cursor and most media events, live
+applyUserProperties and engine.userProperties, registerAudioBuffers,
+layer methods (getTextureAnimation, getAnimation, size, …), sound layers,
+createLayer/sortLayer, scripts on effect/material/particle values and on
+group objects, persistent localStorage.
+
+Origin: ours
+Why: no property script ran in lp-player: scripted layers static, at (0,0), invisible or black in 40 of the owner's scenes (docs/player/spikes/we-lwe-gap-audit.md B1: S1-S7, S9, S33-S35, S38)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4gecqrPRHLwoGGiWVa
+---
+ src/core/CMakeLists.txt                       |    4 -
+ .../WallpaperEngine/Render/Objects/CText.cpp  |    6 +-
+ .../Adapters/ScriptableObjectAdapter.cpp      |   22 +-
+ .../Scripting/Adapters/VectorAdapter.cpp      | 1005 -----------------
+ .../Scripting/Adapters/VectorAdapter.h        |   34 -
+ .../Scripting/EngineObject.cpp                |  116 +-
+ .../WallpaperEngine/Scripting/EngineObject.h  |    3 +
+ .../WallpaperEngine/Scripting/InputObject.cpp |    9 +-
+ .../Scripting/Modules/ColorModule.cpp         |  266 -----
+ .../Scripting/Modules/ColorModule.h           |   16 -
+ .../Scripting/Modules/MathModule.cpp          |   94 --
+ .../Scripting/Modules/MathModule.h            |   16 -
+ .../Scripting/Modules/ScriptModule.cpp        |   12 -
+ .../Scripting/Modules/ScriptModule.h          |   26 -
+ .../WallpaperEngine/Scripting/SceneObject.cpp |   15 +-
+ .../Scripting/ScriptEngine.cpp                |  507 ++++++---
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |   58 +-
+ .../Scripting/ScriptPropertiesObject.cpp      |    6 +-
+ .../Scripting/ScriptableObject.cpp            |   10 +-
+ .../Scripting/ScriptableObject.h              |    6 +-
+ .../Scripting/resources/builtins.js           |   41 +
+ 21 files changed, 579 insertions(+), 1693 deletions(-)
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.cpp
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.h
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/ColorModule.cpp
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/ColorModule.h
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/MathModule.cpp
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/MathModule.h
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/ScriptModule.cpp
+ delete mode 100644 src/core/WallpaperEngine/Scripting/Modules/ScriptModule.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 5d6a977..5bb5b2b 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -89,12 +89,8 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+     WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp
+ 
+-    WallpaperEngine/Scripting/Adapters/VectorAdapter.cpp
+     WallpaperEngine/Scripting/Adapters/ObjectAdapter.cpp
+     WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+-    WallpaperEngine/Scripting/Modules/ColorModule.cpp
+-    WallpaperEngine/Scripting/Modules/MathModule.cpp
+-    WallpaperEngine/Scripting/Modules/ScriptModule.cpp
+     WallpaperEngine/Scripting/ConsoleObject.cpp
+     WallpaperEngine/Scripting/EngineObject.cpp
+     WallpaperEngine/Scripting/InputObject.cpp
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index df35ba7..d6600c4 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -81,8 +81,10 @@ CText::CText (Wallpapers::CScene& scene, const Text& text) :
+     this->registerProperty ("scale", *text.scale->value);
+     this->registerProperty ("visible", *text.visible->value);
+     this->registerProperty ("pointSize", *text.pointSize->value);
+-    this->registerProperty ("text", *text.text->value);
+-    this->registerProperty ("pointSize", *text.pointSize->value);
++    // a text object has no angles of its own: the object's (not rendered yet)
++    this->registerProperty ("angles", *text.groupAngles->value);
++    // the text's script runs as a layer script (initScriptLayer), not a second time as a property script
++    this->registerProperty ("text", *text.text->value, false);
+ }
+ 
+ CText::~CText () {
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 7ae679c..8b70f66 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -1,5 +1,6 @@
+ #include "ScriptableObjectAdapter.h"
+ 
++#include <cstring>
+ #include <utility>
+ 
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+@@ -37,6 +38,11 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 
+     ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
+ 
++    // ILayer.name (read-only)
++    if (strcmp (name, "name") == 0) {
++	return JS_NewString (ctx, container->object.getObject ().name.c_str ());
++    }
++
+     try {
+ 	// find the property inside, otherwise return undefined
+ 	auto& property = container->object.getProperty (name);
+@@ -64,11 +70,25 @@ int scriptableobject_property_set (
+ 	return -1;
+     }
+ 
+-    return 0;
++    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
++    const auto& properties = container->object.getProperties ();
++    const auto it = properties.find (name);
++
++    // a registered property (origin, scale, angles, visible, alpha, color, …) takes the value; other names are
++    // accepted and dropped (not an exception: a strict-mode script would abort on them)
++    if (it != properties.end ()) {
++	container->adapter.getEngine ().jsToDynamic (val, it->second.value);
++    }
++
++    return 1;
+ }
+ 
+ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::string name) :
+     ObjectAdapter (engine), m_exoticMethods (), m_name (std::move (name)) {
++    // the layer's registered properties, read and written live (these were never installed: every property of
++    // thisLayer / getLayer() read undefined)
++    this->m_exoticMethods.get_property = scriptableobject_property_get;
++    this->m_exoticMethods.set_property = scriptableobject_property_set;
+     this->registerType (
+ 	{
+ 	    .class_name = m_name.c_str (),
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.cpp
+deleted file mode 100644
+index a5a8e32..0000000
+--- a/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.cpp
++++ /dev/null
+@@ -1,1005 +0,0 @@
+-#include "VectorAdapter.h"
+-
+-#include "../ScriptEngine.h"
+-#include "WallpaperEngine/Data/Utils/SFINAE.h"
+-#include "WallpaperEngine/Utils/ScopeGuard.h"
+-
+-#include <variant>
+-
+-using namespace WallpaperEngine::Data::Utils;
+-using namespace WallpaperEngine::Data::Model;
+-using namespace WallpaperEngine::Scripting::Adapters;
+-
+-static uint32_t VectorInstanceId = 0;
+-static uint32_t VectorAdapterInstanceId = 0;
+-static constexpr int InvalidVectorInstanceId = 0;
+-
+-// magic value used to ensure the assigned opaque value we got back is valid
+-#define VEC_OPAQUE_MAGIC 0xdeadbee0
+-#define VEC_MAGIC_CHECK_EXCEPTION(container, components)                                                               \
+-    do {                                                                                                               \
+-	if (!container || container->magic != (int)(VEC_OPAQUE_MAGIC + components)) {                                  \
+-	    return JS_EXCEPTION;                                                                                       \
+-	}                                                                                                              \
+-    } while (0)
+-#define VEC_MAGIC_CHECK_ERROR(container, components)                                                                   \
+-    do {                                                                                                               \
+-	if (!container || container->magic != (int)(VEC_OPAQUE_MAGIC + components)) {                                  \
+-	    return -1;                                                                                                 \
+-	}                                                                                                              \
+-    } while (0)
+-
+-template <int components> std::map<uint32_t, VectorAdapter<components>&> vectorAdapterInstances;
+-
+-template <int components> struct VectorOpaqueContainer {
+-    int magic;
+-    VectorAdapter<components>& adapter;
+-    DynamicValue& value;
+-    uint32_t id;
+-};
+-
+-template <int components> auto vector_new () -> decltype (auto) {
+-    static_assert (components >= 2 && components <= 4, "Unsupported vector type");
+-
+-    if constexpr (components == 2) {
+-	return glm::vec2 {};
+-    } else if constexpr (components == 3) {
+-	return glm::vec3 {};
+-    } else if constexpr (components == 4) {
+-	return glm::vec4 {};
+-    }
+-}
+-
+-template auto vector_new<2> () -> decltype (auto);
+-template auto vector_new<3> () -> decltype (auto);
+-template auto vector_new<4> () -> decltype (auto);
+-
+-template <int components> auto vector_new (float value) -> decltype (auto) {
+-    static_assert (components >= 2 && components <= 4, "Unsupported vector type");
+-
+-    if constexpr (components == 2) {
+-	return glm::vec2 (value);
+-    } else if constexpr (components == 3) {
+-	return glm::vec3 (value);
+-    } else if constexpr (components == 4) {
+-	return glm::vec4 (value);
+-    }
+-}
+-
+-template auto vector_new<2> (float value) -> decltype (auto);
+-template auto vector_new<3> (float value) -> decltype (auto);
+-template auto vector_new<4> (float value) -> decltype (auto);
+-
+-template <int components> auto vector_get (DynamicValue& value) -> decltype (auto) {
+-    static_assert (components >= 2 && components <= 4, "Unsupported vector type");
+-
+-    if constexpr (components == 2) {
+-	return value.getVec2 ();
+-    } else if constexpr (components == 3) {
+-	return value.getVec3 ();
+-    } else if constexpr (components == 4) {
+-	return value.getVec4 ();
+-    }
+-}
+-
+-template <int components> auto vector_get (JSContext* ctx, JSValue source) -> decltype (auto) {
+-    static_assert (components >= 2 && components <= 4, "Unsupported vector type");
+-
+-    int tag = JS_VALUE_GET_TAG (source);
+-
+-    if (tag == JS_TAG_INT) {
+-	int32_t value = 0;
+-
+-	JS_ToInt32 (ctx, &value, source);
+-
+-	return vector_new<components> (value);
+-    }
+-
+-    if (JS_TAG_IS_FLOAT64 (tag)) {
+-	double value = 0.0f;
+-
+-	JS_ToFloat64 (ctx, &value, source);
+-
+-	return vector_new<components> (static_cast<float> (value));
+-    }
+-
+-    if (tag == JS_TAG_OBJECT) {
+-	// check components, extract x, y, z and w and create the appropriate vector
+-	JSValue x = JS_GetPropertyStr (ctx, source, "x");
+-	JSValue y = JS_GetPropertyStr (ctx, source, "y");
+-	JSValue z = JS_GetPropertyStr (ctx, source, "z");
+-	JSValue w = JS_GetPropertyStr (ctx, source, "w");
+-
+-	if (!JS_IsNumber (x) || !JS_IsNumber (y)) {
+-	    throw std::runtime_error ("Unsupported type conversion for VectorAdapter");
+-	}
+-
+-	// do not accept bigger vectors
+-	if (components <= 2 && JS_IsNumber (z)) {
+-	    throw std::runtime_error ("Unsupported type conversion for VectorAdapter");
+-	}
+-
+-	if (components <= 3 && JS_IsNumber (w)) {
+-	    throw std::runtime_error ("Unsupported type conversion for VectorAdapter");
+-	}
+-
+-	double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f, wVal = 0.0f;
+-
+-	JS_ToFloat64 (ctx, &xVal, x);
+-	JS_ToFloat64 (ctx, &yVal, y);
+-
+-	if (JS_IsNumber (z)) {
+-	    JS_ToFloat64 (ctx, &zVal, z);
+-	}
+-
+-	if (JS_IsNumber (w)) {
+-	    JS_ToFloat64 (ctx, &wVal, w);
+-	}
+-
+-	if constexpr (components == 2) {
+-	    return glm::vec2 (xVal, yVal);
+-	} else if constexpr (components == 3) {
+-	    return glm::vec3 (xVal, yVal, zVal);
+-	} else if constexpr (components == 4) {
+-	    return glm::vec4 (xVal, yVal, zVal, wVal);
+-	}
+-    }
+-
+-    throw std::runtime_error ("Unsupported type conversion for VectorAdapter");
+-}
+-
+-template auto vector_get<2> (JSContext* ctx, JSValue source) -> decltype (auto);
+-template auto vector_get<3> (JSContext* ctx, JSValue source) -> decltype (auto);
+-template auto vector_get<4> (JSContext* ctx, JSValue source) -> decltype (auto);
+-template auto vector_get<2> (DynamicValue& value) -> decltype (auto);
+-template auto vector_get<3> (DynamicValue& value) -> decltype (auto);
+-template auto vector_get<4> (DynamicValue& value) -> decltype (auto);
+-
+-template <int components>
+-JSValue vector_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
+-    JSClassID classId = 0;
+-
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (obj_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    const char* name = JS_AtomToCString (ctx, atom);
+-
+-    if (name == nullptr) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
+-    const auto value = vector_get<components> (container->value);
+-
+-    if (strcmp (name, "x") == 0) {
+-	return JS_NewFloat64 (ctx, value.x);
+-    }
+-    if (strcmp (name, "y") == 0) {
+-	return JS_NewFloat64 (ctx, value.y);
+-    }
+-    if constexpr (components >= 3) {
+-	if (strcmp (name, "z") == 0) {
+-	    return JS_NewFloat64 (ctx, value.z);
+-	}
+-
+-	if constexpr (components >= 4) {
+-	    if (strcmp (name, "w") == 0) {
+-		return JS_NewFloat64 (ctx, value.w);
+-	    }
+-	}
+-    }
+-
+-    return JS_EXCEPTION;
+-}
+-
+-template JSValue vector_property_get<2> (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver);
+-template JSValue vector_property_get<3> (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver);
+-template JSValue vector_property_get<4> (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver);
+-
+-template <int components>
+-int vector_property_set (
+-    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
+-) {
+-    JSClassID classId = 0;
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (obj_val, &classId));
+-
+-    VEC_MAGIC_CHECK_ERROR (container, components);
+-
+-    int tag = JS_VALUE_GET_TAG (val);
+-
+-    if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64 (tag)) {
+-	return -1;
+-    }
+-
+-    const char* name = JS_AtomToCString (ctx, atom);
+-
+-    if (name == nullptr) {
+-	return -1;
+-    }
+-
+-    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
+-    auto vec = vector_get<components> (container->value);
+-    void* into = nullptr;
+-
+-    if (strcmp (name, "x") == 0) {
+-	if constexpr (
+-	    std::is_same_v<decltype (vec), glm::vec2> || std::is_same_v<decltype (vec), glm::vec3>
+-	    || std::is_same_v<decltype (vec), glm::vec4>
+-	) {
+-	    into = &vec.x;
+-	} else if constexpr (std::is_same_v<decltype (vec), Color>) {
+-	    into = &vec.r;
+-	}
+-    } else if (strcmp (name, "y") == 0) {
+-	if constexpr (
+-	    std::is_same_v<decltype (vec), glm::vec2> || std::is_same_v<decltype (vec), glm::vec3>
+-	    || std::is_same_v<decltype (vec), glm::vec4>
+-	) {
+-	    into = &vec.y;
+-	} else if constexpr (std::is_same_v<decltype (vec), Color>) {
+-	    into = &vec.g;
+-	}
+-    } else if constexpr (components >= 3) {
+-	if (strcmp (name, "z") == 0) {
+-	    if constexpr (std::is_same_v<decltype (vec), glm::vec3> || std::is_same_v<decltype (vec), glm::vec4>) {
+-		into = &vec.z;
+-	    } else if constexpr (std::is_same_v<decltype (vec), Color>) {
+-		into = &vec.b;
+-	    }
+-	} else if constexpr (components >= 4) {
+-	    if (strcmp (name, "w") == 0) {
+-		if constexpr (std::is_same_v<decltype (vec), glm::vec4>) {
+-		    into = &vec.w;
+-		} else if constexpr (std::is_same_v<decltype (vec), Color>) {
+-		    into = &vec.a;
+-		}
+-	    }
+-	}
+-    }
+-
+-    if (into == nullptr) {
+-	return -1;
+-    }
+-
+-    double value = 0;
+-
+-    JS_ToFloat64 (ctx, &value, val);
+-
+-    *static_cast<float*> (into) = static_cast<float> (value);
+-
+-    container->value.update (vec, DynamicValue::UpdateSource::Script);
+-
+-    return 0;
+-}
+-
+-template int vector_property_set<2> (
+-    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
+-);
+-template int vector_property_set<3> (
+-    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
+-);
+-template int vector_property_set<4> (
+-    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
+-);
+-
+-template <int components> JSValue vector_copy (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    // create a new DynamicValue
+-    return container->adapter.instantiate (container->value, true);
+-}
+-
+-template JSValue vector_copy<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_copy<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_copy<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-bool vector_value_equals (JSContext* ctx, JSValue left, JSValue right) {
+-    if (JS_TAG_IS_FLOAT64 (JS_VALUE_GET_TAG (left)) || JS_TAG_IS_FLOAT64 (JS_VALUE_GET_TAG (right))) {
+-	double x1Val = 0.0f, x2Val = 0.0f;
+-
+-	JS_ToFloat64 (ctx, &x1Val, left);
+-	JS_ToFloat64 (ctx, &x2Val, right);
+-
+-	if (std::abs (x1Val - x2Val) > 0.00001) {
+-	    return false;
+-	}
+-    } else {
+-	if (!JS_IsEqual (ctx, left, right)) {
+-	    return false;
+-	}
+-    }
+-
+-    return true;
+-}
+-
+-template <int components> JSValue vector_equals (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc == 0) {
+-	return JS_FALSE;
+-    }
+-
+-    JSClassID classId = 0;
+-
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue other = argv[0];
+-    auto* otherContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (other, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (otherContainer, components);
+-
+-    const auto vector = vector_get<components> (container->value);
+-    const auto otherVector = vector_get<components> (otherContainer->value);
+-
+-    if constexpr (components == 2) {
+-	return vector.x == otherVector.x && vector.y == otherVector.y ? JS_TRUE : JS_FALSE;
+-    } else if constexpr (components == 3) {
+-	return vector.x == otherVector.x && vector.y == otherVector.y && vector.z == otherVector.z ? JS_TRUE : JS_FALSE;
+-    } else if constexpr (components == 4) {
+-	return vector.x == otherVector.x && vector.y == otherVector.y && vector.z == otherVector.z
+-		&& vector.w == otherVector.w
+-	    ? JS_TRUE
+-	    : JS_FALSE;
+-    }
+-
+-    return JS_FALSE;
+-}
+-
+-template JSValue vector_equals<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_equals<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_equals<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    return JS_NewFloat64 (ctx, glm::length (vector_get<components> (container->value)));
+-}
+-
+-template JSValue vector_length<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_length<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_length<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components>
+-JSValue vector_constructor (JSContext* ctx, JSValueConst new_target, int argc, JSValueConst* argv, int magic) {
+-    if (argc == 0) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    auto it = vectorAdapterInstances<components>.find (magic);
+-
+-    if (it == vectorAdapterInstances<components>.end ()) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    JSValue result = it->second.instantiate ();
+-    JSClassID classId = 0;
+-    auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (result, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    container->value.update (vector_get<components> (ctx, argv[0]), DynamicValue::UpdateSource::Initialization);
+-
+-    return result;
+-}
+-
+-template JSValue vector_constructor<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);
+-template JSValue vector_constructor<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);
+-template JSValue vector_constructor<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);
+-
+-template <int components> void vector_finalizer (JSRuntime* rt, JSValueConst val) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (val, &classId));
+-
+-    if (!container || container->magic != (int)(VEC_OPAQUE_MAGIC + components)) {
+-	return;
+-    }
+-
+-    // free container and the associated DynamicValue if temporal
+-    if (container->id != InvalidVectorInstanceId) {
+-	container->adapter.free (container->id);
+-    }
+-
+-    delete container;
+-}
+-
+-template void vector_finalizer<2> (JSRuntime* rt, JSValueConst val);
+-template void vector_finalizer<3> (JSRuntime* rt, JSValueConst val);
+-template void vector_finalizer<4> (JSRuntime* rt, JSValueConst val);
+-
+-template <int components>
+-JSValue vector_normalize (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate (container->value, true);
+-
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    newContainer->value.update (
+-	glm::normalize (vector_get<components> (container->value)), DynamicValue::UpdateSource::Script
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_normalize<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_normalize<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_normalize<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_add (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	vector_get<components> (ctx, argv[0]) + vector_get<components> (container->value),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_add<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_add<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_add<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components>
+-JSValue vector_subtract (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	vector_get<components> (ctx, argv[0]) - vector_get<components> (container->value),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_subtract<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_subtract<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_subtract<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components>
+-JSValue vector_multiply (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	vector_get<components> (ctx, argv[0]) * vector_get<components> (container->value),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_multiply<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_multiply<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_multiply<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_divide (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	vector_get<components> (ctx, argv[0]) / vector_get<components> (container->value),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_divide<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_divide<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_divide<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_dot (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::dot (vector_get<components> (ctx, argv[0]), vector_get<components> (container->value)),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_dot<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_dot<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_dot<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_cross (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::cross (vector_get<components> (ctx, argv[0]), vector_get<components> (container->value)),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_cross<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_mix (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 2) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (!JS_IsNumber (argv[1])) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    double amount = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &amount, argv[1]);
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::mix (vector_get<components> (ctx, argv[0]), vector_get<components> (container->value), amount),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_mix<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_mix<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_mix<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_min (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::min (vector_get<components> (ctx, argv[0]), vector_get<components> (container->value)),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_min<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_min<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_min<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_max (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::max (vector_get<components> (ctx, argv[0]), vector_get<components> (container->value)),
+-	DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_max<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_max<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_max<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_abs (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::abs (vector_get<components> (container->value)), DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_abs<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_abs<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_abs<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_sign (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::sign (vector_get<components> (container->value)), DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_sign<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_sign<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_sign<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_round (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::round (vector_get<components> (container->value)), DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_round<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_round<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_round<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_floor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (
+-	glm::floor (vector_get<components> (container->value)), DynamicValue::UpdateSource::Initialization
+-    );
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_floor<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_floor<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_floor<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components> JSValue vector_ceil (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    JSValue newVector = container->adapter.instantiate ();
+-    const auto* newContainer = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (newVector, &classId));
+-    const auto vector = vector_get<components> (container->value);
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (newContainer, components);
+-
+-    newContainer->value.update (glm::ceil (vector), DynamicValue::UpdateSource::Initialization);
+-
+-    return newVector;
+-}
+-
+-template JSValue vector_ceil<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_ceil<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_ceil<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components>
+-JSValue vector_toString (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    JSClassID classId = 0;
+-    const auto* container = static_cast<VectorOpaqueContainer<components>*> (JS_GetAnyOpaque (this_val, &classId));
+-
+-    VEC_MAGIC_CHECK_EXCEPTION (container, components);
+-
+-    return JS_NewString (ctx, container->value.toString ().c_str ());
+-}
+-
+-template JSValue vector_toString<2> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_toString<3> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-template JSValue vector_toString<4> (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+-
+-template <int components>
+-VectorAdapter<components>::VectorAdapter (ScriptEngine& engine) :
+-    ObjectAdapter (engine), m_instanceId (++VectorAdapterInstanceId), m_name ("Vec" + std::to_string (components)),
+-    m_exoticMethods (
+-	{
+-	    .get_property = vector_property_get<components>,
+-	    .set_property = vector_property_set<components>,
+-	}
+-    ) {
+-    vectorAdapterInstances<components>.emplace (this->m_instanceId, *this);
+-    this->registerType (
+-	{
+-	    .class_name = this->m_name.c_str (),
+-	    .finalizer = vector_finalizer<components>,
+-	    .exotic = &this->m_exoticMethods,
+-	}
+-    );
+-
+-    // build the prototype for the Vector and assign the required methods
+-    m_prototype = JS_NewObject (this->m_engine.getContext ());
+-
+-    JS_DupValue (this->m_engine.getContext (), m_prototype);
+-
+-    JSValue ctor = JS_NewCFunctionMagic (
+-	this->m_engine.getContext (), vector_constructor<components>, this->m_name.c_str (), 1,
+-	JS_CFUNC_constructor_magic, this->m_instanceId
+-    );
+-
+-    JS_SetConstructor (this->m_engine.getContext (), ctor, m_prototype);
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "copy",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_copy<components>, "copy", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "equals",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_equals<components>, "equals", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "length",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_length<components>, "length", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "lengthSqr",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_length<components>, "lengthSqr", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "normalize",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_normalize<components>, "normalize", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "add",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_add<components>, "add", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "subtract",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_subtract<components>, "subtract", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "multiply",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_multiply<components>, "multiply", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "divide",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_divide<components>, "divide", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "dot",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_dot<components>, "dot", 1), JS_PROP_ENUMERABLE
+-    );
+-    if constexpr (components == 3) {
+-	JS_DefinePropertyValueStr (
+-	    this->m_engine.getContext (), m_prototype, "cross",
+-	    JS_NewCFunction (this->m_engine.getContext (), vector_cross<components>, "cross", 1), JS_PROP_ENUMERABLE
+-	);
+-    }
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "mix",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_mix<components>, "mix", 2), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "min",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_min<components>, "min", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "max",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_max<components>, "max", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "abs",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_abs<components>, "abs", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "sign",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_sign<components>, "sign", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "round",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_round<components>, "round", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "floor",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_floor<components>, "floor", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "ceil",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_ceil<components>, "ceil", 0), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), m_prototype, "toString",
+-	JS_NewCFunction (this->m_engine.getContext (), vector_toString<components>, "toString", 0), JS_PROP_ENUMERABLE
+-    );
+-
+-    JS_SetClassProto (this->m_engine.getContext (), this->m_classId, m_prototype);
+-    JS_FreeValue (this->m_engine.getContext (), ctor);
+-}
+-
+-template <int components> VectorAdapter<components>::~VectorAdapter () {
+-    vectorAdapterInstances<components>.erase (this->m_instanceId);
+-
+-    JS_FreeValue (this->m_engine.getContext (), m_prototype);
+-}
+-
+-template <int components> JSValue VectorAdapter<components>::instantiate (ScriptableObject& object) {
+-    throw new std::runtime_error ("Cannot create a Vector4 instance from a ScriptableObject");
+-}
+-
+-template <int components> JSValue VectorAdapter<components>::instantiate (DynamicValue& value) {
+-    JSValue result = this->ObjectAdapter::instantiate (value);
+-    JS_SetOpaque (
+-	result,
+-	new VectorOpaqueContainer<components> {
+-	    .magic = VEC_OPAQUE_MAGIC + components,
+-	    .adapter = *this,
+-	    .value = value,
+-	    .id = InvalidVectorInstanceId,
+-	}
+-    );
+-
+-    return result;
+-}
+-
+-template <int components> JSValue VectorAdapter<components>::instantiate (DynamicValue& source, bool temporal) {
+-    auto value = std::make_unique<DynamicValue> (source);
+-    uint32_t id = ++VectorInstanceId;
+-    JSValue result = this->ObjectAdapter::instantiate (*value);
+-    JS_SetOpaque (
+-	result,
+-	new VectorOpaqueContainer<components> {
+-	    .magic = VEC_OPAQUE_MAGIC + components,
+-	    .adapter = *this,
+-	    .value = *value,
+-	    .id = id,
+-	}
+-    );
+-
+-    this->m_values.emplace (id, std::move (value));
+-
+-    return result;
+-}
+-
+-template <int components> JSValue VectorAdapter<components>::instantiate () {
+-    auto value = std::make_unique<DynamicValue> (vector_new<components> ());
+-    uint32_t id = ++VectorInstanceId;
+-    JSValue result = this->ObjectAdapter::instantiate (*value);
+-    JS_SetOpaque (
+-	result,
+-	new VectorOpaqueContainer<components> {
+-	    .magic = VEC_OPAQUE_MAGIC + components,
+-	    .adapter = *this,
+-	    .value = *value,
+-	    .id = id,
+-	}
+-    );
+-
+-    this->m_values.emplace (id, std::move (value));
+-
+-    return result;
+-}
+-
+-template <int components> void VectorAdapter<components>::free (uint32_t vectorId) {
+-    auto it = this->m_values.find (vectorId);
+-
+-    if (it != this->m_values.end ()) {
+-	this->m_values.erase (it);
+-    }
+-}
+-
+-namespace WallpaperEngine::Scripting::Adapters {
+-template class VectorAdapter<2>;
+-template class VectorAdapter<3>;
+-template class VectorAdapter<4>;
+-} // namespace WallpaperEngine::Scripting::Adapters
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.h b/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.h
+deleted file mode 100644
+index c5f6b46..0000000
+--- a/src/core/WallpaperEngine/Scripting/Adapters/VectorAdapter.h
++++ /dev/null
+@@ -1,34 +0,0 @@
+-#pragma once
+-
+-#include "../../Data/Model/Types.h"
+-#include "ObjectAdapter.h"
+-
+-namespace WallpaperEngine::Scripting::Adapters {
+-template <int components> class VectorAdapter : public ObjectAdapter {
+-public:
+-    explicit VectorAdapter (ScriptEngine& engine);
+-    ~VectorAdapter () override;
+-
+-    int length () { return components; }
+-    JSValue instantiate (Data::Model::DynamicValue& value) override;
+-    JSValue instantiate (ScriptableObject& object) override;
+-    /**
+-     * @return A new, anonymous JSValue representing the vector
+-     */
+-    JSValue instantiate (Data::Model::DynamicValue& source, bool temporal);
+-    JSValue instantiate ();
+-
+-    void free (uint32_t vectorId);
+-
+-private:
+-    JSValue m_prototype;
+-    uint32_t m_instanceId;
+-    std::string m_name;
+-    JSClassExoticMethods m_exoticMethods;
+-    std::map<uint32_t, Data::Model::DynamicValueUniquePtr> m_values;
+-};
+-
+-extern template class VectorAdapter<2>;
+-extern template class VectorAdapter<3>;
+-extern template class VectorAdapter<4>;
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index dec5d97..cc8277f 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -5,6 +5,7 @@
+ #include "WallpaperEngine/Render/Wallpapers/CScene.h"
+ 
+ #include <ranges>
++#include <vector>
+ 
+ using namespace WallpaperEngine::Scripting;
+ 
+@@ -51,44 +52,38 @@ JSValue engine_get_daytime (JSContext* ctx, JSValueConst this_val, int argc, JSV
+     return JS_NewFloat64 (ctx, it->second.getScene ().getContext ().getContext ().daytime);
+ }
+ 
++// the stop function setInterval/setTimeout return: called without arguments, the timer's id is its bound data
+ JSValue engine_stop_interval (
+     JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic, JSValueConst* func_data
+ ) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+     const auto it = engineInstances.find (magic);
+ 
+     if (it == engineInstances.end ()) {
+-	return JS_EXCEPTION;
++	return JS_UNDEFINED;
+     }
+ 
+     int id = 0;
+ 
+-    JS_ToInt32 (ctx, &id, argv[0]);
++    JS_ToInt32 (ctx, &id, func_data[0]);
+ 
+     it->second.clearInterval (id);
+ 
+     return JS_UNDEFINED;
+ }
+ 
++// the stop function setInterval/setTimeout return: called without arguments, the timer's id is its bound data
+ JSValue engine_stop_timeout (
+     JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic, JSValueConst* func_data
+ ) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+     const auto it = engineInstances.find (magic);
+ 
+     if (it == engineInstances.end ()) {
+-	return JS_EXCEPTION;
++	return JS_UNDEFINED;
+     }
+ 
+     int id = 0;
+ 
+-    JS_ToInt32 (ctx, &id, argv[0]);
++    JS_ToInt32 (ctx, &id, func_data[0]);
+ 
+     it->second.clearTimeout (id);
+ 
+@@ -157,6 +152,8 @@ JSValue engine_set_timeout (JSContext* ctx, JSValueConst this_val, int argc, JSV
+ 
+ EngineObject::EngineObject (ScriptEngine& engine, Render::Wallpapers::CScene& scene) :
+     m_scene (scene), m_engine (engine), m_instanceId (++EngineInstanceId), m_classId (0) {
++    // the native functions below find this object by their magic (the instance id)
++    engineInstances.emplace (this->m_instanceId, *this);
+     this->m_definition = { .class_name = "IEngine" };
+     JS_NewClassID (this->m_engine.getRuntime (), &this->m_classId);
+     JS_NewClass (this->m_engine.getRuntime (), this->m_classId, &this->m_definition);
+@@ -169,21 +166,21 @@ EngineObject::EngineObject (ScriptEngine& engine, Render::Wallpapers::CScene& sc
+     JS_DefinePropertyGetSet (
+ 	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "frametime"),
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), engine_get_frametime, "get", 0, JS_CFUNC_generic, this->m_instanceId
++	    this->m_engine.getContext (), engine_get_frametime, "get", 0, JS_CFUNC_generic_magic, this->m_instanceId
+ 	),
+ 	JS_NewCFunction (this->m_engine.getContext (), engine_set_value, "set", 1), JS_PROP_ENUMERABLE
+     );
+     JS_DefinePropertyGetSet (
+ 	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "runtime"),
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), engine_get_runtime, "get", 0, JS_CFUNC_generic, this->m_instanceId
++	    this->m_engine.getContext (), engine_get_runtime, "get", 0, JS_CFUNC_generic_magic, this->m_instanceId
+ 	),
+ 	JS_NewCFunction (this->m_engine.getContext (), engine_set_value, "set", 1), JS_PROP_ENUMERABLE
+     );
+     JS_DefinePropertyGetSet (
+ 	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "timeOfDay"),
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), engine_get_daytime, "get", 0, JS_CFUNC_generic, this->m_instanceId
++	    this->m_engine.getContext (), engine_get_daytime, "get", 0, JS_CFUNC_generic_magic, this->m_instanceId
+ 	),
+ 	JS_NewCFunction (this->m_engine.getContext (), engine_set_value, "set", 1), JS_PROP_ENUMERABLE
+     );
+@@ -202,14 +199,14 @@ EngineObject::EngineObject (ScriptEngine& engine, Render::Wallpapers::CScene& sc
+     JS_DefinePropertyValueStr (
+ 	this->m_engine.getContext (), this->m_instance, "setInterval",
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), engine_set_interval, "setInterval", 2, JS_CFUNC_generic, this->m_instanceId
++	    this->m_engine.getContext (), engine_set_interval, "setInterval", 2, JS_CFUNC_generic_magic, this->m_instanceId
+ 	),
+ 	JS_PROP_ENUMERABLE
+     );
+     JS_DefinePropertyValueStr (
+ 	this->m_engine.getContext (), this->m_instance, "setTimeout",
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), engine_set_timeout, "setTimeout", 2, JS_CFUNC_generic, this->m_instanceId
++	    this->m_engine.getContext (), engine_set_timeout, "setTimeout", 2, JS_CFUNC_generic_magic, this->m_instanceId
+ 	),
+ 	JS_PROP_ENUMERABLE
+     );
+@@ -243,7 +240,12 @@ uint32_t EngineObject::reserveNextTimeoutId (JSValue function, uint64_t duration
+     const auto id = ++this->m_nextTimeoutId;
+     const double seconds = static_cast<double> (duration) / 1000.0;
+ 
+-    this->m_timeouts[id] = Timeout { .callback = function, .duration = seconds, .next = this->now () + seconds };
++    // the callback outlives the call that registered it
++    this->m_timeouts[id] = Timeout {
++	.callback = JS_DupValue (this->m_engine.getContext (), function),
++	.duration = seconds,
++	.next = this->now () + seconds,
++    };
+ 
+     return id;
+ }
+@@ -252,7 +254,12 @@ uint32_t EngineObject::reserveNextIntervalId (JSValue function, uint64_t duratio
+     const auto id = ++this->m_nextIntervalId;
+     const double seconds = static_cast<double> (duration) / 1000.0;
+ 
+-    this->m_intervals[id] = Timeout { .callback = function, .duration = seconds, .next = this->now () + seconds };
++    // the callback outlives the call that registered it
++    this->m_intervals[id] = Timeout {
++	.callback = JS_DupValue (this->m_engine.getContext (), function),
++	.duration = seconds,
++	.next = this->now () + seconds,
++    };
+ 
+     return id;
+ }
+@@ -281,11 +288,43 @@ void EngineObject::clearTimeout (uint32_t id) {
+     this->m_timeouts.erase (id);
+ }
+ 
++void EngineObject::call (JSValue callback) {
++    JSContext* ctx = this->m_engine.getContext ();
++    // a callback may clear its own timer (freeing its stored reference): hold one for the call
++    JSValue function = JS_DupValue (ctx, callback);
++    JSValue result = JS_Call (ctx, function, JS_UNDEFINED, 0, nullptr);
++
++    if (JS_IsException (result)) {
++	JSValue exception = JS_GetException (ctx);
++	const char* message = JS_ToCString (ctx, exception);
++	sLog.error ("ScriptEngine [timer]: ", message ? message : "<exception>");
++	JS_FreeCString (ctx, message);
++	JS_FreeValue (ctx, exception);
++    }
++
++    JS_FreeValue (ctx, result);
++    JS_FreeValue (ctx, function);
++}
++
+ void EngineObject::tick () {
+     const double now = this->now ();
++    // callbacks may add or clear timers: walk a snapshot of the ids, re-finding each one
++    std::vector<uint32_t> ids;
+ 
+     // check any interval and run them if needed
+-    for (auto& timeout : this->m_intervals | std::views::values) {
++    for (const auto& id : this->m_intervals | std::views::keys) {
++	ids.push_back (id);
++    }
++
++    for (const auto id : ids) {
++	const auto it = this->m_intervals.find (id);
++
++	if (it == this->m_intervals.end ()) {
++	    continue;
++	}
++
++	auto& timeout = it->second;
++
+ 	// the host's clock went back (a seek): restart the interval from here instead of stalling
+ 	if (timeout.next - now > timeout.duration) {
+ 	    timeout.next = now + timeout.duration;
+@@ -296,30 +335,35 @@ void EngineObject::tick () {
+ 	}
+ 
+ 	timeout.next = now + timeout.duration;
+-
+-	JS_Call (this->m_engine.getContext (), timeout.callback, JS_NULL, 0, nullptr);
++	this->call (timeout.callback);
+     }
+ 
+-    std::vector<uint32_t> removeTimeouts;
++    ids.clear ();
++
++    for (const auto& id : this->m_timeouts | std::views::keys) {
++	ids.push_back (id);
++    }
+ 
+     // check any timeout and run them if needed
+-    for (auto& [id, timeout] : this->m_timeouts) {
+-	if (timeout.next - now > timeout.duration) {
+-	    timeout.next = now + timeout.duration;
+-	}
++    for (const auto id : ids) {
++	const auto it = this->m_timeouts.find (id);
+ 
+-	if (timeout.next > now) {
++	if (it == this->m_timeouts.end ()) {
+ 	    continue;
+ 	}
+ 
+-	JS_Call (this->m_engine.getContext (), timeout.callback, JS_NULL, 0, nullptr);
+-
+-	JS_FreeValue (this->m_engine.getContext (), timeout.callback);
++	if (it->second.next - now > it->second.duration) {
++	    it->second.next = now + it->second.duration;
++	}
+ 
+-	removeTimeouts.push_back (id);
+-    }
++	if (it->second.next > now) {
++	    continue;
++	}
+ 
+-    for (auto id : removeTimeouts) {
+-	this->m_timeouts.erase (id);
++	// a timeout fires once: off the list before its callback runs
++	JSValue callback = it->second.callback;
++	this->m_timeouts.erase (it);
++	this->call (callback);
++	JS_FreeValue (this->m_engine.getContext (), callback);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.h b/src/core/WallpaperEngine/Scripting/EngineObject.h
+index 4c2ba53..11215fa 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.h
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.h
+@@ -35,6 +35,9 @@ protected:
+ 	double next;
+     };
+ 
++    /** runs a timer callback, logging what it throws */
++    void call (JSValue callback);
++
+     /** @return The scene's current time in seconds (what engine.runtime reports) */
+     [[nodiscard]] double now () const;
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/InputObject.cpp b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+index 771d8c9..00de7ea 100644
+--- a/src/core/WallpaperEngine/Scripting/InputObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+@@ -11,7 +11,7 @@ JSValue get_cursor_world_position (JSContext* ctx, JSValueConst this_val, int ar
+     auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
+ 
+     // TODO: PROPERLY IMPLEMENT THIS
+-    return input->getScene ().getScriptEngine ().getAdapters ().vec3->instantiate ();
++    return input->getScene ().getScriptEngine ().newVec (glm::vec3 (0.0f));
+ }
+ 
+ JSValue get_cursor_screen_position (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+@@ -19,12 +19,7 @@ JSValue get_cursor_screen_position (JSContext* ctx, JSValueConst this_val, int a
+     auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
+     auto position = input->getScene ().getMousePositionNormalized ();
+ 
+-    JSValue result = input->getScene ().getScriptEngine ().getAdapters ().vec2->instantiate ();
+-
+-    JS_SetPropertyStr (ctx, result, "x", JS_NewFloat64 (ctx, position->x));
+-    JS_SetPropertyStr (ctx, result, "y", JS_NewFloat64 (ctx, position->y));
+-
+-    return result;
++    return input->getScene ().getScriptEngine ().newVec (*position);
+ }
+ 
+ JSValue get_cursor_left_down (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/ColorModule.cpp b/src/core/WallpaperEngine/Scripting/Modules/ColorModule.cpp
+deleted file mode 100644
+index 09412df..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/ColorModule.cpp
++++ /dev/null
+@@ -1,266 +0,0 @@
+-#include "ColorModule.h"
+-
+-#include "WallpaperEngine/Scripting/ScriptEngine.h"
+-
+-using namespace WallpaperEngine::Scripting::Modules;
+-
+-#define min_f(a, b, c) (fminf (a, fminf (b, c)))
+-#define max_f(a, b, c) (fmaxf (a, fmaxf (b, c)))
+-
+-static uint32_t ColorModuleInstanceId = 0;
+-std::map<uint32_t, ColorModule&> colorModules;
+-
+-int wecolor_init (JSContext* ctx, JSModuleDef* m) {
+-
+-    JS_AddModuleExport (ctx, m, "rgb2hsv");
+-    JS_AddModuleExport (ctx, m, "hsv2rgb");
+-    JS_AddModuleExport (ctx, m, "normalizeColor");
+-    JS_AddModuleExport (ctx, m, "expandColor");
+-
+-    return 0;
+-}
+-
+-JSValue wecolor_rgb2hsv (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (JS_VALUE_GET_TAG (argv[0]) != JS_TAG_OBJECT) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    JSValue x = JS_GetPropertyStr (ctx, argv[0], "x");
+-    JSValue y = JS_GetPropertyStr (ctx, argv[0], "y");
+-    JSValue z = JS_GetPropertyStr (ctx, argv[0], "z");
+-
+-    double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &xVal, x);
+-    JS_ToFloat64 (ctx, &yVal, y);
+-    JS_ToFloat64 (ctx, &zVal, z);
+-
+-    // conversion code from https://gist.github.com/yoggy/8999625
+-    float h, s, v; // h:0-360.0, s:0.0-1.0, v:0.0-1.0
+-
+-    float max = max_f (xVal, yVal, zVal);
+-    float min = min_f (xVal, yVal, zVal);
+-
+-    v = max;
+-
+-    if (max == 0.0f) {
+-	s = 0;
+-	h = 0;
+-    } else if (max - min == 0.0f) {
+-	s = 0;
+-	h = 0;
+-    } else {
+-	s = (max - min) / max;
+-
+-	if (max == xVal) {
+-	    h = 60 * ((yVal - zVal) / (max - min)) + 0;
+-	} else if (max == yVal) {
+-	    h = 60 * ((zVal - xVal) / (max - min)) + 120;
+-	} else {
+-	    h = 60 * ((xVal - yVal) / (max - min)) + 240;
+-	}
+-    }
+-
+-    if (h < 0) {
+-	h += 360.0f;
+-    }
+-
+-    const auto it = colorModules.find (magic);
+-
+-    if (it == colorModules.end ()) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSValue value = it->second.getEngine ().getAdapters ().vec3->instantiate ();
+-
+-    JS_SetPropertyStr (ctx, value, "x", JS_NewFloat64 (ctx, h));
+-    JS_SetPropertyStr (ctx, value, "y", JS_NewFloat64 (ctx, s));
+-    JS_SetPropertyStr (ctx, value, "z", JS_NewFloat64 (ctx, v));
+-
+-    return value;
+-}
+-
+-JSValue wecolor_hsv2rgb (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (JS_VALUE_GET_TAG (argv[0]) != JS_TAG_OBJECT) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    JSValue x = JS_GetPropertyStr (ctx, argv[0], "x");
+-    JSValue y = JS_GetPropertyStr (ctx, argv[0], "y");
+-    JSValue z = JS_GetPropertyStr (ctx, argv[0], "z");
+-
+-    double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &xVal, x);
+-    JS_ToFloat64 (ctx, &yVal, y);
+-    JS_ToFloat64 (ctx, &zVal, z);
+-
+-    // conversion code from https://gist.github.com/yoggy/8999625
+-    float r, g, b; // 0.0-1.0
+-
+-    int hi = (int)(xVal / 60.0f) % 6;
+-    float f = (xVal / 60.0f) - hi;
+-    float p = zVal * (1.0f - yVal);
+-    float q = zVal * (1.0f - yVal * f);
+-    float t = zVal * (1.0f - yVal * (1.0f - f));
+-
+-    switch (hi) {
+-	case 0:
+-	    r = zVal, g = t, b = p;
+-	    break;
+-	case 1:
+-	    r = q, g = zVal, b = p;
+-	    break;
+-	case 2:
+-	    r = p, g = zVal, b = t;
+-	    break;
+-	case 3:
+-	    r = p, g = q, b = zVal;
+-	    break;
+-	case 4:
+-	    r = t, g = p, b = zVal;
+-	    break;
+-	case 5:
+-	    r = zVal, g = p, b = q;
+-	    break;
+-	default:
+-	    r = 0, g = 0, b = 0;
+-	    break;
+-    }
+-
+-    const auto it = colorModules.find (magic);
+-
+-    if (it == colorModules.end ()) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSValue value = it->second.getEngine ().getAdapters ().vec3->instantiate ();
+-
+-    JS_SetPropertyStr (ctx, value, "x", JS_NewFloat64 (ctx, r));
+-    JS_SetPropertyStr (ctx, value, "y", JS_NewFloat64 (ctx, g));
+-    JS_SetPropertyStr (ctx, value, "z", JS_NewFloat64 (ctx, b));
+-
+-    return value;
+-}
+-
+-JSValue wecolor_normalizecolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (JS_VALUE_GET_TAG (argv[0]) != JS_TAG_OBJECT) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    const auto it = colorModules.find (magic);
+-
+-    if (it == colorModules.end ()) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSValue x = JS_GetPropertyStr (ctx, argv[0], "x");
+-    JSValue y = JS_GetPropertyStr (ctx, argv[0], "y");
+-    JSValue z = JS_GetPropertyStr (ctx, argv[0], "z");
+-
+-    if (!JS_IsNumber (x) || !JS_IsNumber (y) || !JS_IsNumber (z)) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &xVal, x);
+-    JS_ToFloat64 (ctx, &yVal, y);
+-    JS_ToFloat64 (ctx, &zVal, z);
+-
+-    JSValue value = it->second.getEngine ().getAdapters ().vec3->instantiate ();
+-
+-    JS_SetPropertyStr (ctx, value, "x", JS_NewFloat64 (ctx, xVal / 255.0f));
+-    JS_SetPropertyStr (ctx, value, "y", JS_NewFloat64 (ctx, yVal / 255.0f));
+-    JS_SetPropertyStr (ctx, value, "z", JS_NewFloat64 (ctx, zVal / 255.0f));
+-
+-    return value;
+-}
+-
+-JSValue wecolor_expandcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (JS_VALUE_GET_TAG (argv[0]) != JS_TAG_OBJECT) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    const auto it = colorModules.find (magic);
+-
+-    if (it == colorModules.end ()) {
+-	return JS_UNDEFINED;
+-    }
+-
+-    JSValue x = JS_GetPropertyStr (ctx, argv[0], "x");
+-    JSValue y = JS_GetPropertyStr (ctx, argv[0], "y");
+-    JSValue z = JS_GetPropertyStr (ctx, argv[0], "z");
+-
+-    if (!JS_IsNumber (x) || !JS_IsNumber (y) || !JS_IsNumber (z)) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &xVal, x);
+-    JS_ToFloat64 (ctx, &yVal, y);
+-    JS_ToFloat64 (ctx, &zVal, z);
+-
+-    JSValue value = it->second.getEngine ().getAdapters ().vec3->instantiate ();
+-
+-    JS_SetPropertyStr (ctx, value, "x", JS_NewFloat64 (ctx, xVal * 255.0f));
+-    JS_SetPropertyStr (ctx, value, "y", JS_NewFloat64 (ctx, yVal * 255.0f));
+-    JS_SetPropertyStr (ctx, value, "z", JS_NewFloat64 (ctx, zVal * 255.0f));
+-
+-    return value;
+-}
+-
+-ColorModule::ColorModule (ScriptEngine& engine) : ScriptModule (engine, "WEColor", wecolor_init) {
+-    this->m_instanceId = ++ColorModuleInstanceId;
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "rgb2hsv",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wecolor_rgb2hsv, "rgb2hsv", 1, JS_CFUNC_generic_magic, this->m_instanceId
+-	)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "hsv2rgb",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wecolor_hsv2rgb, "hsv2rgb", 1, JS_CFUNC_generic_magic, this->m_instanceId
+-	)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "normalizeColor",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wecolor_normalizecolor, "normalizeColor", 1, JS_CFUNC_generic_magic,
+-	    this->m_instanceId
+-	)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "expandColor",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wecolor_expandcolor, "expandColor", 1, JS_CFUNC_generic_magic,
+-	    this->m_instanceId
+-	)
+-    );
+-
+-    colorModules.emplace (this->m_instanceId, *this);
+-}
+-
+-ColorModule::~ColorModule () { colorModules.erase (this->m_instanceId); }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/ColorModule.h b/src/core/WallpaperEngine/Scripting/Modules/ColorModule.h
+deleted file mode 100644
+index 92e9e2c..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/ColorModule.h
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#pragma once
+-#include "ScriptModule.h"
+-
+-namespace WallpaperEngine::Scripting {
+-class ScriptEngine;
+-}
+-namespace WallpaperEngine::Scripting::Modules {
+-class ColorModule : public ScriptModule {
+-public:
+-    ColorModule (ScriptEngine& engine);
+-    ~ColorModule () override;
+-
+-protected:
+-    uint32_t m_instanceId;
+-};
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/MathModule.cpp b/src/core/WallpaperEngine/Scripting/Modules/MathModule.cpp
+deleted file mode 100644
+index b3f5a82..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/MathModule.cpp
++++ /dev/null
+@@ -1,94 +0,0 @@
+-#include "MathModule.h"
+-
+-#include "WallpaperEngine/Scripting/ScriptEngine.h"
+-
+-using namespace WallpaperEngine::Scripting::Modules;
+-
+-#define min_f(a, b, c) (fminf (a, fminf (b, c)))
+-#define max_f(a, b, c) (fmaxf (a, fmaxf (b, c)))
+-
+-static uint32_t MathModuleInstanceId = 0;
+-std::map<uint32_t, MathModule&> mathModules;
+-
+-int wemath_init (JSContext* ctx, JSModuleDef* m) {
+-
+-    JS_AddModuleExport (ctx, m, "smoothStep");
+-    JS_AddModuleExport (ctx, m, "mix");
+-    JS_AddModuleExport (ctx, m, "deg2rad");
+-    JS_AddModuleExport (ctx, m, "rad2deg");
+-
+-    return 0;
+-}
+-
+-JSValue wemath_smoothstep (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 3) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (!JS_IsNumber (argv[0]) || !JS_IsNumber (argv[1]) || !JS_IsNumber (argv[2])) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    double edge0 = 0.0f;
+-    double edge1 = 1.0f;
+-    double x = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &edge0, argv[0]);
+-    JS_ToFloat64 (ctx, &edge1, argv[1]);
+-    JS_ToFloat64 (ctx, &x, argv[2]);
+-
+-    return JS_NewFloat64 (ctx, glm::smoothstep (edge0, edge1, x));
+-}
+-
+-JSValue wemath_mix (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+-    if (argc != 3) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    if (!JS_IsNumber (argv[0]) || !JS_IsNumber (argv[1]) || !JS_IsNumber (argv[2])) {
+-	return JS_EXCEPTION;
+-    }
+-
+-    double a = 0.0f;
+-    double b = 1.0f;
+-    double value = 0.0f;
+-
+-    JS_ToFloat64 (ctx, &a, argv[0]);
+-    JS_ToFloat64 (ctx, &b, argv[1]);
+-    JS_ToFloat64 (ctx, &value, argv[2]);
+-
+-    return JS_NewFloat64 (ctx, glm::mix (a, b, value));
+-}
+-
+-MathModule::MathModule (ScriptEngine& engine) : ScriptModule (engine, "WEMath", wemath_init) {
+-    this->m_instanceId = ++MathModuleInstanceId;
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "smoothStep",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wemath_smoothstep, "smoothStep", 3, JS_CFUNC_generic_magic,
+-	    this->m_instanceId
+-	)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "mix",
+-	JS_NewCFunctionMagic (
+-	    this->getEngine ().getContext (), wemath_mix, "mix", 1, JS_CFUNC_generic_magic, this->m_instanceId
+-	)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "deg2rad",
+-	JS_NewFloat64 (this->getEngine ().getContext (), 0.01745329251994329576923690768489)
+-    );
+-
+-    JS_SetModuleExport (
+-	this->getEngine ().getContext (), this->getDefinition (), "rad2deg",
+-	JS_NewFloat64 (this->getEngine ().getContext (), 57.295779513082320876798154814105)
+-    );
+-
+-    mathModules.emplace (this->m_instanceId, *this);
+-}
+-
+-MathModule::~MathModule () { mathModules.erase (this->m_instanceId); }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/MathModule.h b/src/core/WallpaperEngine/Scripting/Modules/MathModule.h
+deleted file mode 100644
+index 11b8d86..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/MathModule.h
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#pragma once
+-#include "ScriptModule.h"
+-
+-namespace WallpaperEngine::Scripting {
+-class ScriptEngine;
+-}
+-namespace WallpaperEngine::Scripting::Modules {
+-class MathModule : public ScriptModule {
+-public:
+-    MathModule (ScriptEngine& engine);
+-    ~MathModule () override;
+-
+-protected:
+-    uint32_t m_instanceId;
+-};
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.cpp b/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.cpp
+deleted file mode 100644
+index 5db3daa..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.cpp
++++ /dev/null
+@@ -1,12 +0,0 @@
+-#include "ScriptModule.h"
+-
+-#include "WallpaperEngine/Scripting/ScriptEngine.h"
+-
+-using namespace WallpaperEngine::Scripting::Modules;
+-
+-ScriptModule::ScriptModule (ScriptEngine& engine, const std::string& name, JSModuleInitFunc* init) :
+-    m_name (name), m_engine (engine) {
+-    this->m_definition = JS_NewCModule (this->m_engine.getContext (), this->m_name.c_str (), init);
+-}
+-
+-ScriptModule::~ScriptModule () { }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.h b/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.h
+deleted file mode 100644
+index 96309ce..0000000
+--- a/src/core/WallpaperEngine/Scripting/Modules/ScriptModule.h
++++ /dev/null
+@@ -1,26 +0,0 @@
+-#pragma once
+-
+-#include "quickjs.h"
+-
+-#include <string>
+-
+-namespace WallpaperEngine::Scripting {
+-class ScriptEngine;
+-}
+-namespace WallpaperEngine::Scripting::Modules {
+-class ScriptModule {
+-public:
+-    virtual ~ScriptModule ();
+-
+-    ScriptEngine& getEngine () const { return m_engine; }
+-    const std::string& getName () const { return m_name; }
+-    JSModuleDef* getDefinition () const { return m_definition; }
+-
+-protected:
+-    ScriptModule (ScriptEngine& engine, const std::string& name, JSModuleInitFunc* init);
+-
+-    const std::string m_name;
+-    ScriptEngine& m_engine;
+-    JSModuleDef* m_definition;
+-};
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index a9dbdc9..0953003 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -40,25 +40,19 @@ JSValue get_clearenabled (JSContext* ctx, JSValueConst this_val, int argc, JSVal
+ JSValue get_clearcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return container->getEngine ().getAdapters ().vec3->instantiate (
+-	*container->getScene ().getScene ().colors.clear->value
+-    );
++    return container->getEngine ().newVec (container->getScene ().getScene ().colors.clear->value->getVec3 ());
+ }
+ 
+ JSValue get_ambientcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return container->getEngine ().getAdapters ().vec3->instantiate (
+-	*container->getScene ().getScene ().colors.ambient->value
+-    );
++    return container->getEngine ().newVec (container->getScene ().getScene ().colors.ambient->value->getVec3 ());
+ }
+ 
+ JSValue get_skylightcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return container->getEngine ().getAdapters ().vec3->instantiate (
+-	*container->getScene ().getScene ().colors.ambient->value
+-    );
++    return container->getEngine ().newVec (container->getScene ().getScene ().colors.ambient->value->getVec3 ());
+ }
+ 
+ JSValue get_fov (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+@@ -184,7 +178,8 @@ JSValue get_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst
+ 	}
+     }
+ 
+-    return JS_EXCEPTION;
++    // no such layer (or not one scripts can reach yet): undefined, not an exception without an error
++    return JS_UNDEFINED;
+ }
+ 
+ JSValue scene_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_EXCEPTION; }
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 6d9f4b7..4c050c9 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1,12 +1,11 @@
+ #include "ScriptEngine.h"
+ 
+ #include "Adapters/ScriptableObjectAdapter.h"
+-#include "Modules/ColorModule.h"
+-#include "Modules/MathModule.h"
+-#include "Modules/ScriptModule.h"
+ #include "ScriptPropertiesObject.h"
+ #include "ScriptableObject.h"
+ #include "WallpaperEngine/Audio/AudioContext.h"
++#include "WallpaperEngine/Data/Model/Project.h"
++#include "WallpaperEngine/Data/Model/Property.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ #include "WallpaperEngine/Render/CObject.h"
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+@@ -69,17 +68,38 @@ void scriptengine_dump (JSContext* ctx, JSValueConst obj) {
+     js_free (ctx, props);
+ }
+ 
++// `import … from 'WEMath'`: Wallpaper Engine's own script modules, `scripts/jsmodules/<lowercase name>.js` of its
++// assets (wemath.js, wecolor.js, wevector.js), loaded from the user's install at run time (never shipped here)
+ JSModuleDef* scriptengine_module_loader (JSContext* ctx, const char* module, void* opaque) {
+     const auto* scriptEngine = static_cast<ScriptEngine*> (opaque);
++    std::string name = module;
+ 
+-    const auto& modules = scriptEngine->getModules ();
+-    const auto it = modules.find (module);
++    if (name.empty () || name.find_first_of ("/\\.") != std::string::npos) {
++	JS_ThrowReferenceError (ctx, "could not load module '%s'", module);
++	return nullptr;
++    }
++
++    std::ranges::transform (name, name.begin (), [] (unsigned char c) { return std::tolower (c); });
++    const std::string path = "scripts/jsmodules/" + name + ".js";
++    const std::string source = scriptEngine->readScriptAsset (path);
+ 
+-    if (it == modules.end ()) {
++    if (source.empty ()) {
++	JS_ThrowReferenceError (ctx, "could not load module '%s' (no %s in the assets)", module, path.c_str ());
+ 	return nullptr;
+     }
+ 
+-    return it->second->getDefinition ();
++    JSValue function = JS_Eval (
++	ctx, source.c_str (), source.size (), module, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
++    );
++
++    if (JS_IsException (function)) {
++	return nullptr;
++    }
++
++    // the context keeps the module; the compiled function value is only a handle to it
++    auto* definition = static_cast<JSModuleDef*> (JS_VALUE_GET_PTR (function));
++    JS_FreeValue (ctx, function);
++    return definition;
+ }
+ 
+ JSValue ScriptEngine::dynamicToJs (DynamicValue& value) const {
+@@ -95,83 +115,116 @@ JSValue ScriptEngine::dynamicToJs (DynamicValue& value) const {
+ 	case DynamicValue::Boolean:
+ 	    return JS_NewBool (this->m_context, value.getBool ());
+ 	case DynamicValue::Vec2:
+-	    return this->m_adapters.vec2->instantiate (value);
++	    return this->newVec (value.getVec2 ());
+ 	case DynamicValue::Vec3:
+-	    return this->m_adapters.vec3->instantiate (value);
++	    return this->newVec (value.getVec3 ());
+ 	case DynamicValue::Vec4:
+-	    return this->m_adapters.vec4->instantiate (value);
++	    return this->newVec (value.getVec4 ());
+ 	default:
+ 	    return JS_UNDEFINED;
+     }
+ }
+ 
+-static void jsToDynamicValue (JSContext* ctx, JSValue val, DynamicValue& source) {
+-    if (JS_IsException (val)) {
+-	return;
++static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target);
++
++bool ScriptEngine::jsToDynamic (JSValueConst value, DynamicValue& target) const {
++    return jsToDynamicValue (this->m_context, value, target);
++}
++
++JSValue ScriptEngine::newVec (int components, const float* values) const {
++    JSValue ctor = this->m_vecCtors[components - 2];
++
++    if (!JS_IsFunction (this->m_context, ctor)) {
++	return JS_UNDEFINED;
+     }
+ 
+-    // scalar types returned directly
+-    int tag = JS_VALUE_GET_TAG (val);
++    JSValue args[4];
+ 
+-    if (tag == JS_TAG_UNDEFINED || tag == JS_TAG_UNINITIALIZED || tag == JS_TAG_NULL) {
+-	source.update (DynamicValue::UpdateSource::Script);
+-	return;
++    for (int i = 0; i < components; i++) {
++	args[i] = JS_NewFloat64 (this->m_context, values[i]);
+     }
+ 
++    return JS_CallConstructor (this->m_context, ctor, components, args);
++}
++
++JSValue ScriptEngine::newVec (const glm::vec2& value) const { return this->newVec (2, &value.x); }
++JSValue ScriptEngine::newVec (const glm::vec3& value) const { return this->newVec (3, &value.x); }
++JSValue ScriptEngine::newVec (const glm::vec4& value) const { return this->newVec (4, &value.x); }
++
++std::string ScriptEngine::readScriptAsset (const std::string& path) const {
++    try {
++	return this->m_scene.getAssetLocator ().readString (path);
++    } catch (const std::exception&) {
++	return {};
++    }
++}
++
++/**
++ * Writes a script's return value into the property. `undefined`/`null` (no `return`) leave it as it is: "you can
++ * choose to not return any value, then the property will not be modified" (WE's SceneScript docs, `update`).
++ *
++ * @return false when nothing was written
++ */
++static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target) {
++    const int tag = JS_VALUE_GET_TAG (val);
++
+     if (tag == JS_TAG_INT) {
+-	source.update (JS_VALUE_GET_INT (val), DynamicValue::UpdateSource::Script);
+-	return;
++	target.update (JS_VALUE_GET_INT (val), DynamicValue::UpdateSource::Script);
++	return true;
+     }
+ 
+     if (tag == JS_TAG_BOOL) {
+-	source.update (static_cast<bool> (JS_VALUE_GET_BOOL (val)), DynamicValue::UpdateSource::Script);
++	target.update (static_cast<bool> (JS_VALUE_GET_BOOL (val)), DynamicValue::UpdateSource::Script);
++	return true;
+     }
+ 
+     if (JS_TAG_IS_FLOAT64 (tag)) {
+-	source.update (static_cast<float> (JS_VALUE_GET_FLOAT64 (val)), DynamicValue::UpdateSource::Script);
+-	return;
++	target.update (static_cast<float> (JS_VALUE_GET_FLOAT64 (val)), DynamicValue::UpdateSource::Script);
++	return true;
+     }
+ 
+     if (tag == JS_TAG_STRING) {
+ 	const char* str = JS_ToCString (ctx, val);
+-	source.update (str == nullptr ? "" : str, DynamicValue::UpdateSource::Script);
++	target.update (std::string (str == nullptr ? "" : str), DynamicValue::UpdateSource::Script);
+ 	JS_FreeCString (ctx, str);
+-	return;
++	return true;
+     }
+ 
+-    // look into the object and extract x/y/z/w properties
+-    if (tag == JS_TAG_OBJECT) {
+-	JSValue x = JS_GetPropertyStr (ctx, val, "x");
+-	JSValue y = JS_GetPropertyStr (ctx, val, "y");
+-	JSValue z = JS_GetPropertyStr (ctx, val, "z");
+-	JSValue w = JS_GetPropertyStr (ctx, val, "w");
+-	ScopeGuard guard ([=] {
+-	    JS_FreeValue (ctx, x);
+-	    JS_FreeValue (ctx, y);
+-	    JS_FreeValue (ctx, z);
+-	    JS_FreeValue (ctx, w);
+-	});
+-
+-	if (!JS_IsNumber (x) || !JS_IsNumber (y)) {
+-	    sLog.exception ("Vector's x and y components must be numbers");
+-	}
+-
+-	double xVal = 0.0f, yVal = 0.0f, zVal = 0.0f, wVal = 0.0f;
++    if (tag != JS_TAG_OBJECT) {
++	return false;
++    }
+ 
+-	JS_ToFloat64 (ctx, &xVal, x);
+-	JS_ToFloat64 (ctx, &yVal, y);
++    // a Vec2/Vec3/Vec4 (or any object with numeric x, y[, z[, w]]): as many components as it has
++    JSValue components[4] = {
++	JS_GetPropertyStr (ctx, val, "x"),
++	JS_GetPropertyStr (ctx, val, "y"),
++	JS_GetPropertyStr (ctx, val, "z"),
++	JS_GetPropertyStr (ctx, val, "w"),
++    };
++    double v[4] = { 0.0, 0.0, 0.0, 0.0 };
++    int count = 0;
+ 
+-	if (!JS_IsNumber (z)) {
+-	    source.update (glm::vec2 (xVal, yVal), DynamicValue::UpdateSource::Script);
+-	    return;
+-	}
++    while (count < 4 && JS_IsNumber (components[count])) {
++	JS_ToFloat64 (ctx, &v[count], components[count]);
++	count++;
++    }
+ 
+-	if (!JS_IsNumber (w)) {
+-	    source.update (glm::vec3 (xVal, yVal, zVal), DynamicValue::UpdateSource::Script);
+-	    return;
+-	}
++    for (auto& component : components) {
++	JS_FreeValue (ctx, component);
++    }
+ 
+-	source.update (glm::vec4 (xVal, yVal, zVal, wVal), DynamicValue::UpdateSource::Script);
++    switch (count) {
++	case 2:
++	    target.update (glm::vec2 (v[0], v[1]), DynamicValue::UpdateSource::Script);
++	    return true;
++	case 3:
++	    target.update (glm::vec3 (v[0], v[1], v[2]), DynamicValue::UpdateSource::Script);
++	    return true;
++	case 4:
++	    target.update (glm::vec4 (v[0], v[1], v[2], v[3]), DynamicValue::UpdateSource::Script);
++	    return true;
++	default:
++	    return false;
+     }
+ }
+ 
+@@ -195,26 +248,20 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+     this->m_globalThis = JS_GetGlobalObject (this->m_context);
+ 
+     this->m_adapters = {
+-	.vec4 = std::unique_ptr<Adapters::VectorAdapter<4>> (new Adapters::VectorAdapter<4> (*this)),
+-	.vec3 = std::unique_ptr<Adapters::VectorAdapter<3>> (new Adapters::VectorAdapter<3> (*this)),
+-	.vec2 = std::unique_ptr<Adapters::VectorAdapter<2>> (new Adapters::VectorAdapter<2> (*this)),
+ 	.object
+ 	= std::unique_ptr<Adapters::ScriptableObjectAdapter> (new Adapters::ScriptableObjectAdapter (*this, "ILayer")),
+     };
+ 
++    JS_SetModuleLoaderFunc (this->m_runtime, nullptr, scriptengine_module_loader, this);
++    // Wallpaper Engine's script classes (Vec2/3/4, Mat3/4, createScriptProperties, …) before anything else
++    this->installPrelude ();
++
+     this->m_engineObject = std::make_unique<EngineObject> (*this, scene);
+     this->m_inputObject = std::make_unique<InputObject> (*this, scene);
+     this->m_sceneObject = std::make_unique<SceneObject> (*this, scene);
+     this->m_consoleObject = std::make_unique<ConsoleObject> (*this, scene);
+     this->m_scriptPropertiesObject = std::make_unique<ScriptPropertiesObject> (*this, scene);
+ 
+-    auto wemath = std::make_unique<Modules::MathModule> (*this);
+-    auto wecolor = std::make_unique<Modules::ColorModule> (*this);
+-
+-    this->m_modules.emplace (wemath->getName (), std::move (wemath));
+-    this->m_modules.emplace (wecolor->getName (), std::move (wecolor));
+-
+-    JS_SetModuleLoaderFunc (this->m_runtime, nullptr, scriptengine_module_loader, this);
+     // setup scene objects and other things
+     this->installBuiltins ();
+     // add engine to the global
+@@ -236,8 +283,12 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+ }
+ 
+ ScriptEngine::~ScriptEngine () {
+-    for (const auto& module : this->m_scriptModules | std::views::values) {
+-	JS_FreeValue (this->m_context, module.module);
++    for (const auto& module : this->m_scriptModules) {
++	JS_FreeValue (this->m_context, module->ns);
++    }
++
++    for (auto& ctor : this->m_vecCtors) {
++	JS_FreeValue (this->m_context, ctor);
+     }
+ 
+     for (const auto& events : this->m_queuedEvents | std::views::values) {
+@@ -246,9 +297,6 @@ ScriptEngine::~ScriptEngine () {
+ 
+     JS_FreeValue (this->m_context, this->m_globalThis);
+ 
+-    this->m_adapters.vec4.reset ();
+-    this->m_adapters.vec3.reset ();
+-    this->m_adapters.vec2.reset ();
+     this->m_adapters.object.reset ();
+ 
+     this->m_consoleObject.reset ();
+@@ -256,7 +304,6 @@ ScriptEngine::~ScriptEngine () {
+     this->m_inputObject.reset ();
+     this->m_sceneObject.reset ();
+     this->m_scriptPropertiesObject.reset ();
+-    this->m_modules.clear ();
+     this->m_scriptModules.clear ();
+ 
+     if (this->m_context) {
+@@ -296,6 +343,77 @@ void ScriptEngine::installBuiltins () {
+     this->m_builtinsInstalled = true;
+ }
+ 
++// Used only when the assets have no scripts/jsclasses/baseclasses.js: enough of Vec2/Vec3/Vec4 to pass values in and
++// out of scripts (constructors as SceneScript documents them), none of their methods
++static constexpr const char* FALLBACK_VECTOR_CLASSES = R"JS(
++globalThis.Vec2 = class Vec2 {
++  constructor (x, y) {
++    if (typeof x === 'string') { [x, y] = x.split (' ').map (parseFloat); }
++    else if (typeof x === 'object' && x !== null) { [x, y] = [x.x, x.y]; }
++    this.x = x ?? 0; this.y = y ?? this.x;
++  }
++};
++globalThis.Vec3 = class Vec3 {
++  constructor (x, y, z) {
++    if (typeof x === 'string') { [x, y, z] = x.split (' ').map (parseFloat); }
++    else if (typeof x === 'object' && x !== null) { [x, y, z] = [x.x, x.y, x.z ?? 0]; }
++    this.x = x ?? 0; this.y = y ?? this.x; this.z = z ?? (y === undefined ? this.x : 0);
++  }
++};
++globalThis.Vec4 = class Vec4 {
++  constructor (x, y, z, w) {
++    if (typeof x === 'string') { [x, y, z, w] = x.split (' ').map (parseFloat); }
++    else if (typeof x === 'object' && x !== null) { [x, y, z, w] = [x.x, x.y, x.z ?? 0, x.w ?? 0]; }
++    this.x = x ?? 0; this.y = y ?? this.x; this.z = z ?? (y === undefined ? this.x : 0); this.w = w ?? (y === undefined ? this.x : 0);
++  }
++};
++)JS";
++
++void ScriptEngine::installPrelude () {
++    JSContext* ctx = this->m_context;
++    // what Wallpaper Engine evaluates before any script: its own JS classes, read from the user's WE assets
++    const std::string path = "scripts/jsclasses/baseclasses.js";
++    const std::string prelude = this->readScriptAsset (path);
++    bool ok = false;
++
++    if (prelude.empty ()) {
++	sLog.error ("ScriptEngine: no ", path, " in the assets; scripts get bare Vec2/Vec3/Vec4 classes");
++    } else {
++	JSValue result = JS_Eval (ctx, prelude.c_str (), prelude.size (), path.c_str (), JS_EVAL_TYPE_GLOBAL);
++	ok = !JS_IsException (result);
++
++	if (!ok) {
++	    logJSException (ctx, path.c_str ());
++	}
++
++	JS_FreeValue (ctx, result);
++    }
++
++    if (!ok) {
++	JSValue result = JS_Eval (
++	    ctx, FALLBACK_VECTOR_CLASSES, strlen (FALLBACK_VECTOR_CLASSES), "<vector-classes>", JS_EVAL_TYPE_GLOBAL
++	);
++
++	if (JS_IsException (result)) {
++	    logJSException (ctx, "vector-classes");
++	}
++
++	JS_FreeValue (ctx, result);
++    }
++
++    // the class bindings are global lexical declarations (not properties of globalThis): look them up by name
++    const char* names[] = { "Vec2", "Vec3", "Vec4" };
++
++    for (int i = 0; i < 3; i++) {
++	this->m_vecCtors[i] = JS_Eval (ctx, names[i], strlen (names[i]), "<vector-class>", JS_EVAL_TYPE_GLOBAL);
++
++	if (JS_IsException (this->m_vecCtors[i])) {
++	    logJSException (ctx, names[i]);
++	    this->m_vecCtors[i] = JS_UNDEFINED;
++	}
++    }
++}
++
+ // ---------------------------------------------------------------------------
+ // Layer-script API (Phase 2)
+ // ---------------------------------------------------------------------------
+@@ -363,20 +481,27 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	<< "  var __id = " << id << ";\n"
+ 	<< "  var __props = Object.assign({}, globalThis.__layerSeedProps || {});\n"
+ 	<< "  var thisLayer = { text: String(globalThis.__layerSeedText || '') };\n"
+-	<< "  var thisScene = {\n"
++	// `thisScene` and `engine` are the real objects (getLayer, setInterval, …) seen through a layer of the text
++	// layer's own clock: time/currentTime/dt/fps and `frametime` (the per-frame delta in seconds, what
++	// InsertFPS reads) come from the text object's tick
++	<< "  function __withClock(real, own) {\n"
++	<< "    if (real === undefined || real === null) { return own; }\n"
++	<< "    return new Proxy(own, { get: function(t, k) {\n"
++	<< "      if (k in t) { return t[k]; }\n"
++	<< "      var v = real[k];\n"
++	<< "      return typeof v === 'function' ? v.bind(real) : v;\n"
++	<< "    } });\n"
++	<< "  }\n"
++	<< "  var thisScene = __withClock(globalThis.thisScene, {\n"
+ 	<< "    get time()        { var c = globalThis.__sceneCtx; return c ? c.time : 0; },\n"
+ 	<< "    get currentTime() { var c = globalThis.__sceneCtx; return c ? c.time : 0; },\n"
+ 	<< "    get dt()          { var c = globalThis.__sceneCtx; return c ? c.dt   : 0; },\n"
+ 	<< "    get fps()         { var c = globalThis.__sceneCtx; return c ? c.fps  : 60; },\n"
+-	<< "  };\n"
+-	// Minimal WE `engine` shim. Real Wallpaper Engine exposes a broad API
+-	// (media events, audio buffer, user input); we provide just enough for
+-	// the common built-in text scripts to run without ReferenceError.
+-	// `frametime` is the per-frame delta in seconds (what InsertFPS reads).
+-	<< "  var engine = {\n"
++	<< "  });\n"
++	<< "  var engine = __withClock(globalThis.engine, {\n"
+ 	<< "    get frametime() { var c = globalThis.__sceneCtx; return c ? c.dt : 0; },\n"
+ 	<< "    get time()      { var c = globalThis.__sceneCtx; return c ? c.time : 0; },\n"
+-	<< "  };\n"
++	<< "  });\n"
+ 	<< "  function createScriptProperties() {\n"
+ 	<< "    var builder = {\n"
+ 	<< "      addSlider:   function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+@@ -541,68 +666,185 @@ void ScriptEngine::destroyLayer (ScriptLayerHandle handle) {
+     this->m_layerInitialized.erase (handle);
+ }
+ 
+-JSValue ScriptEngine::call (JSValue module, int argc, JSValue argv[], const char* name) {
+-    // check if there's an update method and run it
+-    JSValue function = JS_GetPropertyStr (this->m_context, module, name);
+-    ScopeGuard guard ([&] () { JS_FreeValue (this->m_context, function); });
++void ScriptEngine::queueScript (const std::string& key, DynamicValue& currentValue, ScriptableObject& object) {
++    const auto source = currentValue.getScriptSource ();
++
++    if (!source.has_value () || !this->m_scriptKeys.insert (key).second) {
++	return;
++    }
++
++    // evaluated on the next tick: objects queue their scripts while the scene is still being built, and a script's
++    // top level may already look up other layers (thisScene.getLayer) or this layer's other properties
++    this->m_scriptModules.emplace_back (
++	new LoadedModule { .key = key, .source = *source, .value = currentValue, .object = object }
++    );
++    this->m_pendingModules = true;
++}
++
++void ScriptEngine::logModuleError (LoadedModule& module, const char* what) {
++    JSValue exception = JS_GetException (this->m_context);
++    // a script that throws every frame would flood the log: its first few errors are enough
++    constexpr int kMaxErrors = 5;
+ 
+-    if (!JS_IsFunction (this->m_context, function)) {
+-	return JS_UNDEFINED;
++    if (++module.errors <= kMaxErrors) {
++	const char* message = JS_ToCString (this->m_context, exception);
++	std::string stack;
++
++	if (JS_IsError (exception)) {
++	    JSValue stackValue = JS_GetPropertyStr (this->m_context, exception, "stack");
++	    if (const char* str = JS_IsString (stackValue) ? JS_ToCString (this->m_context, stackValue) : nullptr) {
++		stack = str;
++		JS_FreeCString (this->m_context, str);
++	    }
++	    JS_FreeValue (this->m_context, stackValue);
++	}
++
++	// a native call that returned JS_EXCEPTION without throwing leaves no error object behind
++	const bool silent = JS_VALUE_GET_TAG (exception) == JS_TAG_UNINITIALIZED;
++	sLog.error (
++	    "ScriptEngine [", module.key, ".", what, "]: ",
++	    silent ? "a native call failed without an error (an API LWE doesn't implement?)"
++		   : (message ? message : "<exception>"),
++	    stack.empty () ? "" : "\n", stack,
++	    module.errors == kMaxErrors ? " (further errors of this script are not logged)" : ""
++	);
++	JS_FreeCString (this->m_context, message);
+     }
+ 
+-    return JS_Call (this->m_context, function, module, argc, argv);
++    JS_FreeValue (this->m_context, exception);
+ }
+ 
+-void ScriptEngine::queueScript (const std::string& key, DynamicValue& currentValue, ScriptableObject& object) {
+-    const auto source = currentValue.getScriptSource ();
++void ScriptEngine::runPendingJobs () {
++    JSContext* jobContext = nullptr;
+ 
+-    if (!source.has_value ()) {
+-	return;
++    // promise reactions (async functions, .then); bounded so a job that keeps queueing jobs can't hang a frame
++    for (int i = 0; i < 1024 && JS_IsJobPending (this->m_runtime); i++) {
++	if (JS_ExecutePendingJob (this->m_runtime, &jobContext) < 0) {
++	    logJSException (jobContext, "job");
++	}
+     }
++}
++
++void ScriptEngine::evaluateModule (LoadedModule& module) {
++    JSContext* ctx = this->m_context;
++    module.evaluated = true;
++
++    // `thisLayer` and `thisObject` are the object the script is attached to, for this module alone: module-scope
++    // bindings, so its event handlers and timer callbacks see them too. Prepended on the first line so that
++    // error line numbers stay those of the script
++    const std::string source = "const thisLayer = globalThis.__thisLayerBinding, thisObject = thisLayer; " + module.source;
+ 
+-    auto it = this->m_scriptModules.find (key);
++    JSValue function = JS_Eval (
++	ctx, source.c_str (), source.size (), module.key.c_str (), JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
++    );
+ 
+-    if (it != this->m_scriptModules.end ()) {
++    if (JS_IsException (function)) {
++	this->logModuleError (module, "compile");
+ 	return;
+     }
+ 
+-    // load the script and store it
+-    JSValue module = JS_Eval (this->m_context, source->c_str (), source->size (), key.c_str (), JS_EVAL_TYPE_MODULE);
++    auto* definition = static_cast<JSModuleDef*> (JS_VALUE_GET_PTR (function));
+ 
+-    auto inserted = this->m_scriptModules.emplace (
+-	key,
+-	LoadedModule {
+-	    .value = currentValue,
+-	    .module = module,
+-	}
+-    );
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding", this->m_adapters.object->instantiate (module.object));
++    // createScriptProperties().finish() binds the stored script properties of the module being evaluated
++    this->m_runningModule = &module;
++    JSValue promise = JS_EvalFunction (ctx, function);
++    this->runPendingJobs ();
++    this->m_runningModule = nullptr;
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding", JS_UNDEFINED);
++
++    if (JS_IsException (promise)) {
++	this->logModuleError (module, "load");
++	return;
++    }
+ 
+-    if (!inserted.second) {
++    // a module evaluation is a promise (top-level await); a throw at the top level rejects it
++    if (JS_PromiseState (ctx, promise) == JS_PROMISE_REJECTED) {
++	JS_Throw (ctx, JS_PromiseResult (ctx, promise));
++	this->logModuleError (module, "load");
++	JS_FreeValue (ctx, promise);
+ 	return;
+     }
+ 
+-    JS_SetPropertyStr (this->m_context, this->m_globalThis, "thisLayer", this->m_adapters.object->instantiate (object));
++    JS_FreeValue (ctx, promise);
++    module.ns = JS_GetModuleNamespace (ctx, definition);
++}
+ 
+-    // script properties do not need update as they're connected directly to the source data
+-    this->m_runningModule = &inserted.first->second;
++void ScriptEngine::callModule (LoadedModule& module, const char* name, int argc, JSValueConst argv[], bool writeBack) {
++    JSContext* ctx = this->m_context;
+ 
+-    // check if there's an update method and run it
+-    JSValue args[] = { this->dynamicToJs (currentValue) };
+-    JSValue result = this->call (module, 1, args, "update");
++    if (!JS_IsObject (module.ns)) {
++	return;
++    }
+ 
+-    ScopeGuard guard2 ([this, args, result] () {
+-	JS_FreeValue (this->m_context, result);
+-	JS_FreeValue (this->m_context, args[0]);
+-    });
++    JSValue function = JS_GetPropertyStr (ctx, module.ns, name);
+ 
+-    if (JS_IsException (result)) {
++    if (!JS_IsFunction (ctx, function)) {
++	JS_FreeValue (ctx, function);
+ 	return;
+     }
+ 
+-    jsToDynamicValue (this->m_context, result, currentValue);
++    this->m_runningModule = &module;
++    JSValue result = JS_Call (ctx, function, JS_UNDEFINED, argc, argv);
++    this->m_runningModule = nullptr;
++    JS_FreeValue (ctx, function);
++
++    if (JS_IsException (result)) {
++	this->logModuleError (module, name);
++    } else if (writeBack) {
++	jsToDynamicValue (ctx, result, module.value);
++    }
++
++    JS_FreeValue (ctx, result);
+ }
+ 
+ void ScriptEngine::tick () {
++    // scripts queued since the last tick: evaluate every module first, then init(value) each, in the order the
++    // objects queued them (so one script's init sees the others' top-level state, e.g. `shared`)
++    if (this->m_pendingModules) {
++	this->m_pendingModules = false;
++
++	for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	    if (!this->m_scriptModules[i]->evaluated) {
++		this->evaluateModule (*this->m_scriptModules[i]);
++	    }
++	}
++
++	std::vector<LoadedModule*> started;
++
++	for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	    auto& module = *this->m_scriptModules[i];
++
++	    if (module.initialized) {
++		continue;
++	    }
++
++	    module.initialized = true;
++	    started.push_back (&module);
++	    JSValue args[] = { this->dynamicToJs (module.value) };
++	    this->callModule (module, "init", 1, args, true);
++	    JS_FreeValue (this->m_context, args[0]);
++	}
++
++	// WE calls applyUserProperties once on load, after init, with every user property (scripts set up state
++	// there that update relies on). Later changes don't reach it yet
++	if (!started.empty ()) {
++	    JSValue properties = JS_NewObject (this->m_context);
++
++	    for (const auto& [name, property] : this->m_scene.getScene ().project.properties) {
++		JSValue value = property->getType () == DynamicValue::Vec4 ? this->newVec (property->getVec3 ())
++									    : this->dynamicToJs (*property);
++		JS_SetPropertyStr (this->m_context, properties, name.c_str (), value);
++	    }
++
++	    for (auto* module : started) {
++		this->callModule (*module, "applyUserProperties", 1, &properties, false);
++	    }
++
++	    JS_FreeValue (this->m_context, properties);
++	}
++    }
++
+     // run intervals
+     this->m_engineObject->tick ();
+ 
+@@ -611,9 +853,8 @@ void ScriptEngine::tick () {
+ 	for (auto& event : this->m_queuedEvents) {
+ 	    JSValue args[] = { event.second };
+ 
+-	    for (auto& module : this->m_scriptModules | std::views::values) {
+-		JSValue result = this->call (module.module, 1, args, event.first.c_str ());
+-		JS_FreeValue (this->m_context, result);
++	    for (const auto& module : this->m_scriptModules) {
++		this->callModule (*module, event.first.c_str (), 1, args, false);
+ 	    }
+ 
+ 	    JS_FreeValue (this->m_context, event.second);
+@@ -623,22 +864,13 @@ void ScriptEngine::tick () {
+     }
+ 
+     // run all update methods
+-    for (auto& module : this->m_scriptModules | std::views::values) {
+-	this->m_runningModule = &module;
+-
+-	JSValue args[] = { this->dynamicToJs (module.value) };
+-	JSValue result = this->call (module.module, 1, args, "update");
+-	ScopeGuard guard ([result, args, this] () {
+-	    JS_FreeValue (this->m_context, result);
+-	    JS_FreeValue (this->m_context, args[0]);
+-	});
+-
+-	if (JS_IsException (result)) {
+-	    continue;
+-	}
+-
+-	jsToDynamicValue (this->m_context, result, module.value);
++    for (const auto& module : this->m_scriptModules) {
++	JSValue args[] = { this->dynamicToJs (module->value) };
++	this->callModule (*module, "update", 1, args, true);
++	JS_FreeValue (this->m_context, args[0]);
+     }
++
++    this->runPendingJobs ();
+ }
+ 
+ void ScriptEngine::notifyTrackMetadataChange (
+@@ -663,16 +895,11 @@ void ScriptEngine::notifyAlbumArtUrlChange (const std::optional<std::string>& ur
+ 
+     JSContext* ctx = this->m_context;
+ 
+-    DynamicValue primaryColorValue (glm::vec3 (0.12f, 0.12f, 0.12f));
+-    DynamicValue secondaryColorValue (glm::vec3 (0.0f, 0.0f, 0.0f));
+-    DynamicValue tertiaryColorValue (glm::vec3 (0.25f, 0.25f, 0.25f));
+-    DynamicValue highContrastColorValue (glm::vec3 (1.0f, 1.0f, 1.0f));
+-
+     // TODO: PROCESS THESE COLORS INSTEAD OF HARDCODING THEM
+-    JSValue primaryColor = this->m_adapters.vec3->instantiate (primaryColorValue, true);
+-    JSValue secondaryColor = this->m_adapters.vec3->instantiate (secondaryColorValue, true);
+-    JSValue tertiaryColor = this->m_adapters.vec3->instantiate (tertiaryColorValue, true);
+-    JSValue highContrastColor = this->m_adapters.vec3->instantiate (highContrastColorValue, true);
++    JSValue primaryColor = this->newVec (glm::vec3 (0.12f, 0.12f, 0.12f));
++    JSValue secondaryColor = this->newVec (glm::vec3 (0.0f, 0.0f, 0.0f));
++    JSValue tertiaryColor = this->newVec (glm::vec3 (0.25f, 0.25f, 0.25f));
++    JSValue highContrastColor = this->newVec (glm::vec3 (1.0f, 1.0f, 1.0f));
+ 
+     JSValue mediaThumbnailEvent = JS_NewObject (ctx);
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index c548487..71596b4 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -1,10 +1,8 @@
+ #pragma once
+ 
+-#include "Adapters/VectorAdapter.h"
+ #include "ConsoleObject.h"
+ #include "EngineObject.h"
+ #include "InputObject.h"
+-#include "Modules/ScriptModule.h"
+ #include "SceneObject.h"
+ 
+ #include <chrono>
+@@ -15,6 +13,7 @@
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
++#include <vector>
+ 
+ #include "../Data/Model/DynamicValue.h"
+ #include "WallpaperEngine/Data/Model/Types.h"
+@@ -33,6 +32,7 @@ class CScene;
+ 
+ namespace WallpaperEngine::Scripting {
+ class ScriptPropertiesObject;
++class ScriptableObject;
+ namespace Adapters {
+     class ScriptableObjectAdapter;
+ }
+@@ -44,14 +44,23 @@ static constexpr ScriptLayerHandle kInvalidLayerHandle = 0;
+ 
+ class ScriptEngine {
+ public:
++    /**
++     * A property script: an ES module attached to one property of one object. Compiled and evaluated on the
++     * first tick after it was queued (the whole scene exists by then), `init(value)` once, `update(value)` every
++     * tick; a return of `undefined`/`null` leaves the property as it is
++     */
+     struct LoadedModule {
++	std::string key;
++	std::string source;
+ 	DynamicValue& value;
+-	JSValue module;
++	ScriptableObject& object;
++	/** the module namespace once evaluated (JS_UNDEFINED before, or when it failed to load) */
++	JSValue ns = JS_UNDEFINED;
++	bool evaluated = false;
++	bool initialized = false;
++	int errors = 0;
+     };
+     struct JSObjectAdapters {
+-	std::unique_ptr<Adapters::VectorAdapter<4>> vec4;
+-	std::unique_ptr<Adapters::VectorAdapter<3>> vec3;
+-	std::unique_ptr<Adapters::VectorAdapter<2>> vec2;
+ 	std::unique_ptr<Adapters::ScriptableObjectAdapter> object;
+     };
+ 
+@@ -65,13 +74,23 @@ public:
+     JSValue getGlobalThis () const { return m_globalThis; }
+     LoadedModule* getRunningModule () const { return m_runningModule; }
+     JSValue dynamicToJs (DynamicValue& value) const;
++    /**
++     * Writes a script value into `target` (numbers, booleans, strings, Vec2/3/4); undefined/null write nothing
++     * @return false when nothing was written
++     */
++    bool jsToDynamic (JSValueConst value, DynamicValue& target) const;
++    /** A new instance of the scripts' own `Vec2`/`Vec3`/`Vec4` class (Wallpaper Engine's baseclasses.js) */
++    JSValue newVec (const glm::vec2& value) const;
++    JSValue newVec (const glm::vec3& value) const;
++    JSValue newVec (const glm::vec4& value) const;
++    /** Wallpaper Engine's script assets (`scripts/…`) as the scene's asset locator finds them; empty if absent */
++    std::string readScriptAsset (const std::string& path) const;
+ 
+     /**
+-     * Evaluate a WallpaperEngine script's update() function.
+-     *
+-     * @param key The full JS script text (ES6 module with export function update(value))
+-     * @param currentValue The current value to pass to update()
+-     * @return The modified value from update(), or a copy of currentValue on error
++     * Queue the property script of `currentValue` (its `getScriptSource`), once per key. The module is
++     * compiled and evaluated on the next tick, with `thisLayer`/`thisObject` bound to `object` for that
++     * module only; then `init(value)` runs once and `update(value)` every tick, their non-undefined
++     * returns written to `currentValue`
+      */
+     void queueScript (const std::string& key, DynamicValue& currentValue, ScriptableObject& object);
+ 
+@@ -136,7 +155,6 @@ public:
+ 
+     const JSObjectAdapters& getAdapters () const { return m_adapters; }
+     const Render::Wallpapers::CScene& getScene () const { return m_scene; }
+-    const std::map<std::string, std::unique_ptr<Modules::ScriptModule>>& getModules () const { return m_modules; }
+ 
+     void notifyTrackMetadataChange (
+ 	const std::optional<std::string>& title, const std::optional<std::string>& artist,
+@@ -147,9 +165,15 @@ public:
+     void notifyPlaybackPositionAndDurationChange (std::optional<double> position, std::optional<double> duration);
+ 
+ private:
+-    JSValue call (JSValue module, int argc, JSValueConst argv[], const char* name);
++    JSValue newVec (int components, const float* values) const;
+ 
++    void installPrelude ();
+     void installBuiltins ();
++    void evaluateModule (LoadedModule& module);
++    /** calls `name(argv…)` on the module if it exports it; a value other than undefined/null is written back */
++    void callModule (LoadedModule& module, const char* name, int argc, JSValueConst argv[], bool writeBack);
++    void logModuleError (LoadedModule& module, const char* what);
++    void runPendingJobs ();
+ 
+     // Installs globalThis.__layers and related helpers. Called lazily.
+     void ensureLayerRegistry ();
+@@ -166,8 +190,12 @@ private:
+     std::unique_ptr<ConsoleObject> m_consoleObject;
+     std::unique_ptr<ScriptPropertiesObject> m_scriptPropertiesObject;
+ 
+-    std::map<std::string, std::unique_ptr<Modules::ScriptModule>> m_modules = {};
+-    std::map<std::string, LoadedModule> m_scriptModules = {};
++    /** property scripts in the order they were queued (init runs in that order) */
++    std::vector<std::unique_ptr<LoadedModule>> m_scriptModules = {};
++    std::unordered_set<std::string> m_scriptKeys = {};
++    bool m_pendingModules = false;
++    /** the scripts' Vec2/Vec3/Vec4 constructors, [0] = Vec2 */
++    JSValue m_vecCtors[3] = { JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED };
+ 
+     LoadedModule* m_runningModule = nullptr;
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptPropertiesObject.cpp b/src/core/WallpaperEngine/Scripting/ScriptPropertiesObject.cpp
+index 209870c..884cc6b 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptPropertiesObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptPropertiesObject.cpp
+@@ -166,10 +166,12 @@ ScriptPropertiesObject::ScriptPropertiesObject (ScriptEngine& engine, Render::Wa
+ 	this->m_engine.getContext (), this->m_creatorPrototype, "finish",
+ 	JS_NewCFunction (this->m_engine.getContext (), scriptpropertiescreator_finish, "finish", 0), JS_PROP_ENUMERABLE
+     );
++    // the values the scene stores for a property script's scriptProperties (live: user-property bound); builtins.js
++    // lays them over the defaults of Wallpaper Engine's own createScriptProperties()
+     JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), this->m_engine.getGlobalThis (), "createScriptProperties",
++	this->m_engine.getContext (), this->m_engine.getGlobalThis (), "__storedScriptProperties",
+ 	JS_NewCFunctionMagic (
+-	    this->m_engine.getContext (), scriptpropertiescreator_create, "createScriptProperties", 0, JS_CFUNC_generic,
++	    this->m_engine.getContext (), scriptpropertiescreator_create, "createScriptProperties", 0, JS_CFUNC_generic_magic,
+ 	    m_instanceId
+ 	),
+ 	JS_PROP_ENUMERABLE
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp b/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
+index 9d5163a..7c1f9d1 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
+@@ -9,11 +9,9 @@ using namespace WallpaperEngine::Render;
+ using namespace WallpaperEngine::Scripting;
+ 
+ ScriptableObject::ScriptableObject (Wallpapers::CScene& scene, const Object& object) : CObject (scene, object) {
+-    // register common dynamic values
++    // register common dynamic values. scale/angles/visible are not common: an image, text or particle object
++    // registers its own (the values it renders with); a script on the group* copies would drive nothing
+     this->registerProperty ("origin", *object.origin->value);
+-    this->registerProperty ("scale", *object.groupScale->value);
+-    this->registerProperty ("angles", *object.groupAngles->value);
+-    this->registerProperty ("visible", *object.groupVisible->value);
+ }
+ 
+ DynamicValue& ScriptableObject::getProperty (const std::string& name) {
+@@ -30,12 +28,12 @@ const std::map<std::string, ScriptableObject::PropertyEntry>& ScriptableObject::
+     return this->m_properties;
+ }
+ 
+-void ScriptableObject::registerProperty (const std::string& name, DynamicValue& value) {
++void ScriptableObject::registerProperty (const std::string& name, DynamicValue& value, bool runScript) {
+     auto inserted = this->m_properties.emplace (
+ 	name, PropertyEntry { .key = name + "_" + std::to_string (this->getId ()), .value = value }
+     );
+ 
+-    if (!inserted.second) {
++    if (!inserted.second || !runScript) {
+ 	return;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptableObject.h b/src/core/WallpaperEngine/Scripting/ScriptableObject.h
+index dffe11b..8bb3413 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptableObject.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptableObject.h
+@@ -22,7 +22,11 @@ public:
+     const std::map<std::string, PropertyEntry>& getProperties () const;
+ 
+ protected:
+-    void registerProperty (const std::string& name, DynamicValue& value);
++    /**
++     * Makes `name` readable by scripts (thisLayer, getLayer). Its property script, if any, is queued unless
++     * `runScript` is false (an object that runs that script itself)
++     */
++    void registerProperty (const std::string& name, DynamicValue& value, bool runScript = true);
+ 
+ private:
+     std::map<std::string, PropertyEntry> m_properties;
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index fa05f40..64abd0e 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -14,3 +14,44 @@ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+   PLAYBACK_PLAYING: 1,
+   PLAYBACK_PAUSED: 2
+ };
++// A property script's createScriptProperties(): Wallpaper Engine's own builder (baseclasses.js) gives every key its
++// default (a combo: its first option); the values the scene stores for the module being evaluated (live, bound to
++// user properties: the native __storedScriptProperties) win over those, as WE's _Internal.updateScriptProperties
++// does (a string for a vector default becomes that vector)
++(function () {
++  const stored = globalThis.__storedScriptProperties;
++  const builder = globalThis.createScriptProperties;
++  if (typeof builder !== 'function') {
++    globalThis.createScriptProperties = stored;
++    return;
++  }
++  globalThis.createScriptProperties = function () {
++    const creator = builder();
++    const finish = creator.finish;
++    creator.finish = function () {
++      const defaults = finish.call(creator);
++      const values = stored().finish();
++      if (values === undefined || values === null) {
++        return defaults;
++      }
++      return new Proxy(defaults, {
++        get(target, key, receiver) {
++          const fallback = Reflect.get(target, key, receiver);
++          if (typeof key !== 'string') {
++            return fallback;
++          }
++          const value = values[key];
++          if (value === undefined) {
++            return fallback;
++          }
++          if (typeof value === 'string' && fallback !== null && typeof fallback === 'object'
++              && typeof fallback.constructor === 'function' && /^Vec[234]$/.test(fallback.constructor.name)) {
++            return new fallback.constructor(value);
++          }
++          return value;
++        }
++      });
++    };
++    return creator;
++  };
++})();
