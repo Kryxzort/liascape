@@ -718,14 +718,19 @@ Two bug classes kept recurring; fix the class, not the instance:
       while every reopen re-reads; only worth it if `resync` ever gets expensive.
 
 ## Follow-up projects (each gets its own brainstorm)
-- [ ] **PARKED (owner, 2026-10-28): in-player auto-mute rework** — the Phase 3 auto-mute Signal (per-stream
-      metering in the player, own bus excluded by ownership, ≤ 100 ms). Auto-mute stays `AudioMonitor` in the
-      backend for both engines until the owner un-parks it. Design: spec §4.4 / §11 4b.
+- [ ] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
+      upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Until it passes, `AudioMonitor` stays.
+- [ ] **Deferred (owner, 2026-10-29: "overengineering at this time"): the app's background vs the desktop for
+      scenes** — `WallpaperBg` can only play a video, so with a scene on the desktop the app shows the last video /
+      a random one (a different wallpaper entirely). Options: a transparent Electron window over the real desktop,
+      or the player streaming its output frames to the UI. A gif preview was rejected (360p).
+- [ ] **Draft: "Game running" signal** (mute / pause while a game runs) —
+      `docs/superpowers/plans/2026-10-29-game-running-signal-DRAFT.md`.
 - [ ] **Deferred from Phase 2** (not Phase 2 work): web wallpapers — WE `web` items via CEF / LWE's `webhelper`,
       an optional build module, **Phase 4**, gated on the NVIDIA LINEAR-dmabuf external-only risk (spec §12); the
       `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike `lwe-core.md` §4.2; needs a host-side
       clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below); the in-player auto-mute
-      Signal (**PARKED**, first item of this section).
+      Signal (Phase 3 Task 14, first item of this section).
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
