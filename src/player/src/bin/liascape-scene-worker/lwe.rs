@@ -359,7 +359,7 @@ impl Scene {
         }
     }
 
-    /// The next `out.len() / CHANNELS` frames of the scene's sound (unity gain).
+    /// The next `out.len() / CHANNELS` frames of the scene's sound (each sound object at its volume²).
     pub fn pull_audio(&self, out: &mut [f32]) -> usize {
         unsafe {
             wp_context_audio_pull(
@@ -430,12 +430,22 @@ impl Drop for Scene {
 /// as `<out>/lwe-smoke-1s.png` / `-<S>s.png` (upright, alpha forced to 1), pulls 0.5 s of its
 /// sound through the host driver, and prints one JSON line. Exit 0 = rendered and animating.
 /// A diagnostic for the build (Task 1) and the patches (Task 2); not used by liascape-player.
+/// `--prop name=value` (repeatable) sets a user property at load, like `scene_props` (the value as
+/// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
+/// `--audio-dump` (a live change, as the worker applies `SetProperty`).
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
     let mut out = None;
     let mut seconds = 3.0f32;
     let mut audio_dump = 0.0f32;
+    let mut props: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut props_at: Vec<(f32, String, serde_json::Value)> = Vec::new();
+    let prop = |kv: Option<&String>| -> Option<(String, serde_json::Value)> {
+        let (k, v) = kv?.split_once('=')?;
+        let v = serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.into()));
+        Some((k.to_string(), v))
+    };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -444,21 +454,31 @@ pub fn smoke(args: &[String]) -> ! {
             "--out" => out = it.next().cloned(),
             "--seconds" => seconds = it.next().and_then(|v| v.parse().ok()).unwrap_or(3.0),
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            "--prop" => props.extend(prop(it.next())),
+            "--prop-at" => {
+                let at = it.next().and_then(|v| v.parse().ok());
+                if let (Some(at), Some((k, v))) = (at, prop(it.next())) {
+                    props_at.push((at, k, v));
+                }
+            }
             _ => {}
         }
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--prop name=value]... [--prop-at T name=value]..."
         );
         std::process::exit(2)
     };
+    props_at.sort_by(|a, b| a.0.total_cmp(&b.0));
     match run_smoke(
         Path::new(&scene_dir),
         Path::new(&assets),
         Path::new(&out),
         seconds,
         audio_dump,
+        &props,
+        &props_at,
     ) {
         Ok(json) => {
             println!("{json}");
@@ -477,6 +497,8 @@ fn run_smoke(
     out: &Path,
     seconds: f32,
     audio_dump: f32,
+    props: &[(String, serde_json::Value)],
+    props_at: &[(f32, String, serde_json::Value)],
 ) -> Result<String, String> {
     use glow::HasContext;
     use liascape_player::gfx::Gfx;
@@ -485,6 +507,13 @@ fn run_smoke(
     let t0 = std::time::Instant::now();
     let mut scene = Scene::load(dir, assets)?;
     let load_ms = t0.elapsed().as_secs_f64() * 1e3;
+    // before the renderer build, like the worker's `Start.properties`
+    let mut prop_errors = Vec::new();
+    for (k, v) in props {
+        if let Err(e) = scene.set_property(k, v) {
+            prop_errors.push(e);
+        }
+    }
     let scratch = gfx.tex(1, 1);
     let scratch_fbo = gfx.fbo(&scratch);
     let t1 = std::time::Instant::now();
@@ -566,7 +595,14 @@ fn run_smoke(
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let dump = if audio_dump > 0.0 {
-        audio_dump_stretch(&scene, out, audio_dump)?
+        audio_dump_stretch(
+            &mut scene,
+            fbo_id,
+            frames as f32 / 30.0,
+            out,
+            audio_dump,
+            props_at,
+        )?
     } else {
         serde_json::Value::Null
     };
@@ -591,6 +627,7 @@ fn run_smoke(
         "audio_peak": peak,
         "shots": shots,
         "audio_dump": dump,
+        "prop_errors": prop_errors,
     });
     drop(scene);
     if changed == 0 || lit == 0 {
@@ -602,17 +639,39 @@ fn run_smoke(
 /// `--audio-dump S` (Task 6 diagnostic): `S` seconds of the scene's sound pulled at 1× in real
 /// time (64-frame pulls, like the stream's callbacks) → `<out>/audio-in.f32`, then that same
 /// input through the time stretch at 0.5× and 1.5× → `audio-out-0.5.f32` / `-1.5.f32`
-/// (interleaved stereo F32, 48 kHz). Reports each file's exact-silence 1 ms blocks.
-fn audio_dump_stretch(scene: &Scene, out: &Path, secs: f32) -> Result<serde_json::Value, String> {
+/// (interleaved stereo F32, 48 kHz). Reports each file's exact-silence 1 ms blocks. The scene
+/// keeps rendering at 30 fps of its clock meanwhile (from `t_scene`), as the worker does: LWE's
+/// sound objects advance their playlists on that clock (fork patch 0018). `props_at` (sorted)
+/// are set when the dump reaches their time.
+fn audio_dump_stretch(
+    scene: &mut Scene,
+    fbo: u32,
+    t_scene: f32,
+    out: &Path,
+    secs: f32,
+    props_at: &[(f32, String, serde_json::Value)],
+) -> Result<serde_json::Value, String> {
     use crate::stretch::{Pull, Stretch};
     let ch = CHANNELS as usize;
     let total = (secs * SAMPLE_RATE as f32) as usize;
     let mut input = vec![0f32; total * ch];
     let t0 = std::time::Instant::now();
+    let mut next_frame = 0.0f64;
+    let mut pending = props_at.iter().peekable();
+    let mut applied = Vec::new();
     for (i, chunk) in input.chunks_mut(64 * ch).enumerate() {
-        let due = std::time::Duration::from_secs_f64(i as f64 * 64.0 / SAMPLE_RATE as f64);
+        let at = i as f64 * 64.0 / SAMPLE_RATE as f64;
+        let due = std::time::Duration::from_secs_f64(at);
         if let Some(w) = due.checked_sub(t0.elapsed()) {
             std::thread::sleep(w);
+        }
+        while let Some((t, k, v)) = pending.next_if(|p| p.0 as f64 <= at) {
+            applied.push(serde_json::json!({"t": t, "name": k, "value": v,
+                "ok": scene.set_property(k, v).map_err(|e| e.to_string())}));
+        }
+        if at >= next_frame {
+            scene.render(t_scene + at as f32, fbo);
+            next_frame += 1.0 / 30.0;
         }
         scene.pull_audio(chunk);
     }
@@ -635,7 +694,8 @@ fn audio_dump_stretch(scene: &Scene, out: &Path, secs: f32) -> Result<serde_json
         std::fs::write(out.join(name), bytes).map_err(|e| e.to_string())
     };
     write("audio-in.f32", &input)?;
-    let mut report = serde_json::json!({"in_silent_1ms": silent_blocks(&input)});
+    let mut report =
+        serde_json::json!({"in_silent_1ms": silent_blocks(&input), "props_at": applied});
     for speed in [0.5f64, 1.5] {
         let n = ((total as f64 / speed) as usize).saturating_sub(4800);
         let mut st = Stretch::new();

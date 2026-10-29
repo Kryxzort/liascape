@@ -1,7 +1,7 @@
 From a3ab652c7c82d10d56e9e8e96c6ae0a55d521bbe Mon Sep 17 00:00:00 2001
 From: David Mireles <davidmirelesll@outlook.com>
 Date: Tue, 27 Oct 2026 19:57:46 -0600
-Subject: [PATCH 07/17] fix(scripting): correct inverted vector component
+Subject: [PATCH 07/18] fix(scripting): correct inverted vector component
  validation in jsToDynamicValue (#618)
 
 ScriptEngine::jsToDynamicValue guards the JS->glm::vec conversion with:

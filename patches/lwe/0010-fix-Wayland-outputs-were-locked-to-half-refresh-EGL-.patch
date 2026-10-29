@@ -1,7 +1,7 @@
 From 08865412f661d7d867023c93fabee35a6634bb32 Mon Sep 17 00:00:00 2001
 From: CoderNoveau <thomastpnguyen@gmail.com>
 Date: Wed, 28 Oct 2026 13:13:20 +1100
-Subject: [PATCH 10/17] fix: Wayland outputs were locked to half refresh (EGL
+Subject: [PATCH 10/18] fix: Wayland outputs were locked to half refresh (EGL
  swap interval + libmpv blocking) (#677)
 
 * fix: set EGL swap interval to 0 on Wayland outputs
