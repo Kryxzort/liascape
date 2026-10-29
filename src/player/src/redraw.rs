@@ -39,6 +39,59 @@ use std::time::{Duration, Instant};
 use crate::anim::{Animator, PropPath, is_gain_path};
 use crate::graph::{Graph, NodeKind, PropValue};
 
+/// F6b: what each output shows and at what scene rate, rebuilt only when the graph's routing
+/// moved ([`Graph::demand_rev`] — a layer's `content`, an effect's sides, an output's
+/// `refresh_hz`/`scene_fps`, a create/destroy). The redraw decisions run on every loop
+/// iteration (each worker frame is one) for every output; working [`shown_by`] /
+/// [`shown_nodes`] out of the graph each time (path `format!`s, alias resolution, cloned
+/// strings) cost the loop more with every worker.
+#[derive(Debug, Default)]
+pub struct Routes {
+    rev: Option<(u64, u64)>,
+    outs: BTreeMap<String, OutRoute>,
+}
+
+/// One output's entry in [`Routes`] (by connector name).
+#[derive(Debug, Default, Clone)]
+pub struct OutRoute {
+    /// [`shown_by`] its main layer.
+    pub shown: BTreeSet<String>,
+    /// [`shown_nodes`].
+    pub nodes: BTreeSet<String>,
+    pub scene_fps: f64,
+    pub refresh_hz: f64,
+}
+
+impl Routes {
+    /// Every output's route, as of `graph` now.
+    pub fn of(&mut self, graph: &Graph) -> &BTreeMap<String, OutRoute> {
+        let rev = graph.demand_rev();
+        if self.rev != Some(rev) {
+            let num = |id: &str, prop: &str| match graph.get(&PropPath(format!("{id}.{prop}"))) {
+                Ok(PropValue::F64(f)) => f,
+                Ok(PropValue::I64(i)) => i as f64,
+                _ => 0.0,
+            };
+            self.outs = graph
+                .ids_of(NodeKind::Output)
+                .into_iter()
+                .filter_map(|out| {
+                    let name = out.strip_prefix("out:")?.to_string();
+                    let route = OutRoute {
+                        shown: shown_by(graph, &format!("lay:{name}:main")),
+                        nodes: shown_nodes(graph, &name),
+                        scene_fps: num(&out, "scene_fps"),
+                        refresh_hz: num(&out, "refresh_hz"),
+                    };
+                    Some((name, route))
+                })
+                .collect();
+            self.rev = Some(rev);
+        }
+        &self.outs
+    }
+}
+
 /// Per-output "has the picture changed since its last present" bookkeeping.
 #[derive(Debug, Default)]
 pub struct Redraw {
@@ -104,25 +157,22 @@ impl Redraw {
     /// period; an early frame is deferred to its slot (`promote_due`).
     pub fn mark_shown_gated(
         &mut self,
-        graph: &Graph,
+        routes: &BTreeMap<String, OutRoute>,
         changed: &BTreeSet<String>,
         now: Instant,
-        period: impl Fn(&str, &str) -> Option<Duration>,
+        period: impl Fn(&str, &str, &OutRoute) -> Option<Duration>,
     ) {
         if changed.is_empty() {
             return;
         }
-        for out in graph.ids_of(NodeKind::Output) {
-            let Some(name) = out.strip_prefix("out:") else {
-                continue;
-            };
+        for (name, route) in routes {
             let mut gated: Option<Duration> = None;
             let mut ungated = false;
-            for s in shown_by(graph, &format!("lay:{name}:main")) {
-                if !changed.contains(&s) {
+            for s in &route.shown {
+                if !changed.contains(s) {
                     continue;
                 }
-                match period(&s, name) {
+                match period(s, name, route) {
                     Some(p) => gated = Some(gated.map_or(p, |g| g.min(p))),
                     None => ungated = true,
                 }
@@ -173,16 +223,13 @@ impl Redraw {
 
     /// The Animator just set values on `nodes` (`Graph::set_animated`): mark every output
     /// that shows one of them ([`shown_nodes`]).
-    pub fn mark_nodes(&mut self, graph: &Graph, nodes: &BTreeSet<String>) {
+    pub fn mark_nodes(&mut self, routes: &BTreeMap<String, OutRoute>, nodes: &BTreeSet<String>) {
         if nodes.is_empty() {
             return;
         }
-        for out in graph.ids_of(NodeKind::Output) {
-            let Some(name) = out.strip_prefix("out:") else {
-                continue;
-            };
-            if shown_nodes(graph, name).iter().any(|n| nodes.contains(n)) {
-                self.dirty.insert(name.to_string());
+        for (name, route) in routes {
+            if route.nodes.iter().any(|n| nodes.contains(n)) {
+                self.dirty.insert(name.clone());
             }
         }
     }
@@ -243,12 +290,14 @@ pub fn shown_nodes(graph: &Graph, name: &str) -> BTreeSet<String> {
 
 /// Something visible moves **on output `name`**: a started, unfinished, non-gain animation
 /// on one of its [`shown_nodes`].
-pub fn animating_on(anim: &Animator, now: Duration, graph: &Graph, name: &str) -> bool {
+pub fn animating_on(anim: &Animator, now: Duration, route: Option<&OutRoute>) -> bool {
     if !animating(anim, now) {
         return false; // cheap common case: nothing moves anywhere
     }
-    let nodes = shown_nodes(graph, name);
-    anim.any_live(now, |p| !audio_only(p) && nodes.contains(node_of(p)))
+    let Some(route) = route else {
+        return false;
+    };
+    anim.any_live(now, |p| !audio_only(p) && route.nodes.contains(node_of(p)))
 }
 
 /// The sources layer `layer` shows: its `content` if that is a source, or both sides of
@@ -414,7 +463,7 @@ mod tests {
             .unwrap();
         let mut r = Redraw::new();
         let rev = g.picture_rev();
-        let period = |_: &str, out: &str| {
+        let period = |_: &str, out: &str, _: &OutRoute| {
             Some(Duration::from_secs_f64(if out == "DP-1" { 1.0 / 60.0 } else { 1.0 / 15.0 }))
         };
         let t0 = Instant::now();
@@ -433,7 +482,7 @@ mod tests {
         // 1 s of 60 fps frames, with the loop's own jitter (±1 ms), a pass every 4 ms between.
         for i in 0..60u64 {
             let at = t0 + Duration::from_micros(i * 16_667 + (i % 3) * 1000);
-            r.mark_shown_gated(&g, &set(&["a"]), at, period);
+            r.mark_shown_gated(Routes::default().of(&g), &set(&["a"]), at, period);
             for k in 0..4 {
                 pass(&mut r, at + Duration::from_millis(k * 4), &mut presents);
             }
@@ -442,7 +491,7 @@ mod tests {
         assert!((14..=16).contains(&presents[1]), "DP-2 at 15: {presents:?}");
         // The last frame came early on DP-2: it is drawn at its slot, not lost.
         let last = t0 + Duration::from_millis(1100);
-        r.mark_shown_gated(&g, &set(&["a"]), last, period);
+        r.mark_shown_gated(Routes::default().of(&g), &set(&["a"]), last, period);
         let mut later = [0, 0];
         pass(&mut r, last, &mut later);
         pass(&mut r, last + Duration::from_millis(70), &mut later);
@@ -450,7 +499,12 @@ mod tests {
         // A non-scene source is never gated.
         r.drawn("DP-1", rev);
         r.drawn("DP-2", rev);
-        r.mark_shown_gated(&g, &set(&["a"]), last + Duration::from_millis(71), |_, _| None);
+        r.mark_shown_gated(
+            Routes::default().of(&g),
+            &set(&["a"]),
+            last + Duration::from_millis(71),
+            |_, _, _| None,
+        );
         assert!(r.wants("DP-2", rev, false), "ungated: marked at once");
     }
 
@@ -488,6 +542,28 @@ mod tests {
         }
     }
 
+    fn on(a: &Animator, now: Duration, g: &Graph, name: &str) -> bool {
+        animating_on(a, now, Routes::default().of(g).get(name))
+    }
+
+    /// F6b: the cached routes follow every routing change, and only those.
+    #[test]
+    fn routes_follow_routing_changes() {
+        let mut g = two_outputs();
+        let mut routes = Routes::default();
+        assert_eq!(routes.of(&g)["DP-2"].shown, set(&["b"]));
+        g.create(NodeKind::Source, Some("c".into()), Map::new())
+            .unwrap();
+        g.set(&p("lay:DP-2:main.content"), PropValue::Str("c".into()))
+            .unwrap();
+        assert_eq!(routes.of(&g)["DP-2"].shown, set(&["c"]));
+        g.set(&p("out:DP-2.scene_fps"), PropValue::F64(12.0)).unwrap();
+        assert_eq!(routes.of(&g)["DP-2"].scene_fps, 12.0);
+        g.set_animated(&p("lay:DP-2:main.opacity"), PropValue::F64(0.5))
+            .unwrap();
+        assert_eq!(routes.of(&g)["DP-2"].shown, set(&["c"]));
+    }
+
     /// Review item a: an animation counts only for the outputs that show its node.
     #[test]
     fn animating_is_scoped_per_output() {
@@ -495,9 +571,9 @@ mod tests {
         let mut g = two_outputs();
         let mut a = Animator::new();
         a.add(anim("lay:DP-1:main.opacity", 0, 1000));
-        assert!(animating_on(&a, ms(10), &g, "DP-1"));
+        assert!(on(&a, ms(10), &g, "DP-1"));
         assert!(
-            !animating_on(&a, ms(10), &g, "DP-2"),
+            !on(&a, ms(10), &g, "DP-2"),
             "DP-2 shows b, not DP-1's layer"
         );
 
@@ -514,8 +590,8 @@ mod tests {
             .unwrap();
         let mut a = Animator::new();
         a.add(anim("fx1.progress", 0, 1000));
-        assert!(animating_on(&a, ms(10), &g, "DP-2"));
-        assert!(!animating_on(&a, ms(10), &g, "DP-1"));
+        assert!(on(&a, ms(10), &g, "DP-2"));
+        assert!(!on(&a, ms(10), &g, "DP-1"));
         assert_eq!(
             shown_nodes(&g, "DP-2"),
             set(&["b", "c", "fx1", "lay:DP-2:main", "out:DP-2"])
@@ -524,15 +600,15 @@ mod tests {
         // A source's own (non-gain) animation: the outputs showing it; a gain never counts.
         let mut a = Animator::new();
         a.add(anim("a.speed", 0, 1000));
-        assert!(animating_on(&a, ms(10), &g, "DP-1"));
-        assert!(!animating_on(&a, ms(10), &g, "DP-2"));
+        assert!(on(&a, ms(10), &g, "DP-1"));
+        assert!(!on(&a, ms(10), &g, "DP-2"));
         let mut a = Animator::new();
         a.add(anim("c.gain.xfade", 0, 1000));
-        assert!(!animating_on(&a, ms(10), &g, "DP-2"), "audio only");
+        assert!(!on(&a, ms(10), &g, "DP-2"), "audio only");
         // A node no output shows: nobody animates.
         let mut a = Animator::new();
         a.add(anim("lay9.opacity", 0, 1000));
-        assert!(!animating_on(&a, ms(10), &g, "DP-1") && !animating_on(&a, ms(10), &g, "DP-2"));
+        assert!(!on(&a, ms(10), &g, "DP-1") && !on(&a, ms(10), &g, "DP-2"));
     }
 
     #[test]
@@ -545,13 +621,13 @@ mod tests {
         g.set_animated(&p("lay:DP-1:main.opacity"), PropValue::F64(0.5))
             .unwrap();
         assert_eq!(g.picture_rev(), rev);
-        r.mark_nodes(&g, &set(&["lay:DP-1:main"]));
+        r.mark_nodes(Routes::default().of(&g), &set(&["lay:DP-1:main"]));
         assert!(
             r.wants("DP-1", g.picture_rev(), false),
             "its final value gets drawn"
         );
         assert!(!r.wants("DP-2", g.picture_rev(), false), "DP-2 stays idle");
-        r.mark_nodes(&g, &set(&["b"]));
+        r.mark_nodes(Routes::default().of(&g), &set(&["b"]));
         assert!(r.wants("DP-2", g.picture_rev(), false));
     }
 
