@@ -869,7 +869,7 @@ Two bug classes kept recurring; fix the class, not the instance:
       `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
-  - [ ] **Owner-run `--ab-legacy`** (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
+  - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
         = 0, or each one below). Until then every non-ok scene counts as possibly newly failing.
