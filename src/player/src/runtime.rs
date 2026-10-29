@@ -64,6 +64,15 @@ pub const STEP_TIMEOUT: Duration = Duration::from_secs(2);
 pub const REAPER_WAIT: Duration = Duration::from_secs(2);
 /// Anti-click ramp used by `stop`/`quit` before sources are destroyed (invariant #4).
 const STOP_RAMP: Duration = Duration::from_millis(30);
+/// `serve`'s bounded wait (from the bus thread's start, after the bind and the compositor
+/// connection) for the audio bus's first session before the loop runs (cold boot,
+/// 2026-10-29: it waited up to 10 s, answering nothing). Long enough that a normal start opens its sources straight
+/// onto the bus — its setup measured ~0.2 s and runs beside EGL and the catalogue —,
+/// short enough that a boot whose PipeWire/WirePlumber isn't ready yet delays the first
+/// answer by at most this — under the backend's 1 s spawn probe (`LiascapePlayerClient.
+/// Reachable`'s `hello`, whose timeout opens its 3 s stall breaker: what failed the cold
+/// boot's restore). A bus that comes up later moves the sources onto it.
+pub const BUS_STARTUP_WAIT: Duration = Duration::from_millis(500);
 /// R90 (Task 16d): the fast gain-only timer's period — independent of the output
 /// refresh (which can be a single 60 Hz monitor), this is what turns a ≤ 30 ms
 /// anti-click ramp (invariant #4) into a genuinely smooth push sequence in the real
@@ -4081,8 +4090,20 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     // Wayland: connect first (EGL needs the wl_display), then the context on it. Both
     // failure classes here are "compositor/EGL not available yet" (Task 16b) — the
     // supervisor retries these with backoff, unlike `bind`'s "already running" above.
-    let (gfx, wl_source) = if opts.wayland {
-        let (wl, src) = crate::wl::Wayland::connect().map_err(ServeError::NoCompositor)?;
+    let wl = if opts.wayland {
+        Some(crate::wl::Wayland::connect().map_err(ServeError::NoCompositor)?)
+    } else {
+        None
+    };
+    // The bus comes after the socket (a second instance exits above without touching
+    // PipeWire) and the compositor connection (a start waiting for its compositor doesn't
+    // load and unload a sink in the user's session on every retry). Its thread connects in
+    // the background (never blocking serve on the audio server — cold boot, 2026-10-29)
+    // while EGL and the catalogue come up; sources play into it unless `--ao` routes them
+    // elsewhere (then there's none).
+    let audio_started = Instant::now();
+    let audio = Audio::start(opts.ao.as_deref());
+    let (gfx, wl_source) = if let Some((wl, src)) = wl {
         let gfx = Gfx::new_wayland(wl.display_ptr())
             .map_err(|e| ServeError::NoCompositor(format!("EGL on Wayland: {e}")))?;
         (gfx, Some((wl, src)))
@@ -4116,14 +4137,16 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     let tap = Arc::new(EventTap::new(ping));
     log::set_tap(Some(tap.clone()));
 
-    // The bus comes after the socket: a second instance exits above without touching
-    // PipeWire. Sources play into it unless `--ao` routes them elsewhere (then there's none).
-    let audio = Audio::start(opts.ao.as_deref());
+    // A bounded wait for the bus's first session, so a normal start (setup ~0.2 s, mostly
+    // overlapped with the startup above) opens its sources straight onto the bus; past
+    // `BUS_STARTUP_WAIT` from the start the loop runs anyway, sources open on mpv's default
+    // device and move onto the bus when it comes up (`track_bus_route`).
+    let bus_route = audio.wait_bus(audio_started, audio_started + BUS_STARTUP_WAIT);
     let mut base = Map::new();
     if let Some(ao) = &opts.ao {
         base.insert("ao".into(), json!(ao));
     }
-    if let Some(bus) = &audio.bus {
+    if let (Some(bus), Some((true, _))) = (&audio.bus, bus_route) {
         base.insert("audio_device".into(), json!(bus.device()));
         // Compensate what the bus adds; a source's own `audio_delay` adds to this.
         base.insert(
@@ -4206,7 +4229,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         setting_anim: Animator::new(),
         onsets: Onsets::new(),
         parked_req: None,
-        bus_route: (true, 1),
+        bus_route: bus_route.unwrap_or((false, 0)),
         quit_at: None,
         parked: None,
         warned: BTreeMap::new(),
@@ -4255,9 +4278,6 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     rt.update_scene_assets();
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
-    }
-    if let Some(bus) = &rt.audio.bus {
-        rt.bus_route = bus.route();
     }
     rt.apply_output_changes();
     if opts.restore {

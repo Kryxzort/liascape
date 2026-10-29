@@ -22,6 +22,13 @@
 //! this one thread — capture buffers carry their own cycle time, `pw_buffer.time`). The rest of
 //! the player only sees [`Bus`] (state behind a mutex) and [`super::Meter`].
 //!
+//! **Sessions** (I7; cold boot 2026-10-29): [`Bus::start`] never blocks — the thread runs the
+//! bus as sessions (connect, load, link, measure, watch); a setup that fails and a
+//! connection lost later are the same case: `audio.bus.down {reason}`, then the reconnect
+//! backoff until a session is up (`audio.bus.up {reconnected, generation}`). [`Bus::route`]
+//! is what the runtime polls to move sources onto it or off it; [`Bus::wait_up`] is
+//! `serve`'s bounded startup wait.
+//!
 //! **Latency** ([`Bus::latency`]): measured once at creation with an impulse — a probe
 //! stream plays one −60 dBFS sample into the bus while two captures watch the bus monitor
 //! (the loopback's input) and the bus playback stream's output; the difference of the two
@@ -35,7 +42,7 @@ use std::ffi::{CString, c_char, c_void};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -83,10 +90,9 @@ const MAX_QUANTUM_FRAMES: usize = 8192;
 /// never reallocates inside the RT process callback.
 pub(crate) const METER_SCRATCH_CAP: usize = MAX_QUANTUM_FRAMES * 2;
 
-/// `Bus::create` gives up after this long without a linked loopback.
+/// A session's setup gives up after this long without a linked loopback (then the bus
+/// retries with backoff — [`RECONNECT_INITIAL`]).
 const CREATE_TIMEOUT: Duration = Duration::from_secs(5);
-/// `Bus::create` returns `Err` if setup (roundtrips, link, latency) takes longer.
-const SETUP_LIMIT: Duration = Duration::from_secs(10);
 /// A retarget that hasn't linked the new sink by then is reported failed.
 const RETARGET_TIMEOUT: Duration = Duration::from_secs(3);
 /// Latency impulse amplitude (one sample per channel; −60 dBFS — inaudible).
@@ -126,6 +132,11 @@ pub struct BusInfo {
     pub playback_node: Option<u32>,
     pub sink_node: Option<u32>,
     pub retargets: u64,
+    /// Down, and the bus thread is (re)trying to bring it up: a first session still setting
+    /// up, or the reconnect backoff after a failed or lost one (cold boot 2026-10-29).
+    pub connecting: bool,
+    /// Sessions that came up so far (1 = the first, 2+ = reconnected) — [`Bus::route`]'s.
+    pub generation: u64,
     /// The sink the bus last asked for (creation default, then each retarget).
     pub requested: Option<String>,
     /// Another client re-pointed the playback away from `requested` (a session policy such
@@ -137,17 +148,59 @@ pub struct BusInfo {
 struct Shared {
     info: Mutex<BusInfo>,
     quit: AtomicBool,
-    /// I7: bumped every time the bus comes up (1 = created, 2+ = reconnected) — the
-    /// runtime re-targets every source's `audio-device` when it moves.
-    generation: AtomicU64,
-    /// I7: the bus is up (cheap to poll every tick, unlike `info`).
-    up: AtomicBool,
+    /// I7: `generation << 1 | up` in one word, so a reader never sees a half-made change.
+    /// The generation is bumped every time the bus comes up (1 = the first session, 2+ =
+    /// reconnected) — the runtime re-targets every source's `audio-device` when the route
+    /// moves; `up` is cheap to poll every tick, unlike `info`.
+    route: AtomicU64,
+    /// Whether `serve`'s bounded startup wait ([`Bus::wait_up`]) still waits for the first
+    /// session; settled once by whichever side gets there first.
+    startup: Mutex<Startup>,
+    startup_cv: Condvar,
+}
+
+/// The first session vs `serve`'s bounded startup wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Startup {
+    /// Nobody settled it yet: the first session is still setting up.
+    Pending,
+    /// The first session came up while the wait was on (sources open straight onto it).
+    Up,
+    /// The first session failed (the reconnect backoff runs).
+    Failed,
+    /// The wait ran out first (the session goes on; its `up` is then a re-route).
+    GaveUp,
 }
 
 impl Shared {
     fn update(&self, f: impl FnOnce(&mut BusInfo)) {
         let mut g = self.info.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut g);
+    }
+
+    /// The bus came up (bus thread only — the one writer): the next generation, up.
+    fn set_up(&self) -> u64 {
+        let generation = (self.route.load(Ordering::SeqCst) >> 1) + 1;
+        self.route.store(generation << 1 | 1, Ordering::SeqCst);
+        generation
+    }
+
+    fn set_down(&self) {
+        self.route.fetch_and(!1, Ordering::SeqCst);
+    }
+
+    /// Settle the startup wait from the bus thread; `true` = it was still pending.
+    fn settle_startup(&self, to: Startup) -> bool {
+        let mut g = self.startup.lock().unwrap_or_else(|e| e.into_inner());
+        let pending = *g == Startup::Pending;
+        if pending {
+            *g = to;
+        }
+        drop(g);
+        if pending {
+            self.startup_cv.notify_all();
+        }
+        pending
     }
 }
 
@@ -166,12 +219,17 @@ pub struct Bus {
 }
 
 impl Bus {
-    /// Load the loopback, wait until its playback is linked to the default sink, measure
-    /// the latency. Measured ~0.2 s; gives up after [`SETUP_LIMIT`] (the thread stops at
-    /// its next wait). `Err(reason)` → the caller falls back to direct streams
-    /// (sources keep mpv's default device) and logs `audio.bus.down {reason}`.
-    /// `LIASCAPE_PLAYER_BUS=off` disables it (reason says so).
-    pub fn create() -> Result<Bus, String> {
+    /// Start the bus thread — **never blocks** (cold boot, 2026-10-29: `serve` used to wait
+    /// up to 10 s here for a PipeWire/WirePlumber that wasn't up yet, answering nothing, and
+    /// a failed first setup left the process without a bus for good). The thread loads the
+    /// loopback, waits until its playback is linked to the default sink and measures the
+    /// latency (measured ~0.2 s); a setup that fails — PipeWire unreachable, no session
+    /// manager linking the loopback within [`CREATE_TIMEOUT`] — goes into the I7 reconnect
+    /// backoff like a lost connection, until a session is up. Every session that comes up
+    /// logs `audio.bus.up`; [`Bus::route`] says where sources should play meanwhile.
+    /// [`Bus::wait_up`] is `serve`'s bounded wait for the first one. `Err(reason)` only when
+    /// there is no bus at all: `LIASCAPE_PLAYER_BUS=off` (no retry), or no thread.
+    pub fn start() -> Result<Bus, String> {
         if std::env::var("LIASCAPE_PLAYER_BUS").is_ok_and(|v| v == "off") {
             return Err("disabled by LIASCAPE_PLAYER_BUS=off".into());
         }
@@ -187,42 +245,67 @@ impl Bus {
                 playback_node: None,
                 sink_node: None,
                 retargets: 0,
+                connecting: true,
+                generation: 0,
                 requested: None,
                 overridden: false,
-                reason: Some("starting".into()),
+                reason: Some("connecting to PipeWire".into()),
             }),
             quit: AtomicBool::new(false),
-            generation: AtomicU64::new(0),
-            up: AtomicBool::new(false),
+            route: AtomicU64::new(0),
+            startup: Mutex::new(Startup::Pending),
+            startup_cv: Condvar::new(),
         });
         let (tx, rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let sh = shared.clone();
         let thread = std::thread::Builder::new()
             .name("lia-bus".into())
-            .spawn(move || {
-                let r = run(&sh, rx, &ready_tx);
-                if let Err(e) = r {
-                    sh.update(|i| {
-                        i.state = BusState::Down;
-                        i.reason = Some(e.clone());
-                    });
-                    let _ = ready_tx.send(Err(e));
-                }
-            })
+            .spawn(move || run(&sh, rx))
             .map_err(|e| format!("can't start the PipeWire bus thread: {e}"))?;
-        let r = ready_rx
-            .recv_timeout(SETUP_LIMIT)
-            .unwrap_or_else(|_| Err("PipeWire bus setup timed out".into()));
-        let bus = Bus {
+        Ok(Bus {
             shared,
             tx,
             thread: Some(thread),
-        };
-        match r {
-            Ok(()) => Ok(bus),
-            Err(e) => Err(e), // `bus` drops: thread joined
+        })
+    }
+
+    /// Wait (bounded) for the first session: `true` = it is up by `deadline`. Returns at
+    /// once when it failed (the backoff runs) or anything settled it before. A wait that runs
+    /// out logs `audio.bus.not_ready {waited_ms, reason}` and settles it: the session goes on
+    /// in the background and its `audio.bus.up` is then `reconnected: true` (a re-route).
+    pub fn wait_up(&self, started: Instant, deadline: Instant) -> bool {
+        let mut g = self
+            .shared
+            .startup
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        while *g == Startup::Pending {
+            let now = Instant::now();
+            if now >= deadline {
+                *g = Startup::GaveUp;
+                drop(g);
+                log::event(
+                    "audio",
+                    Level::Warn,
+                    "audio.bus.not_ready",
+                    None,
+                    json!({
+                        "waited_ms": started.elapsed().as_millis() as u64,
+                        "reason": self.info().reason,
+                        "hint": "serve goes on: sources play on mpv's default device until the \
+                                 bus is up, then move onto it (`ctl probe '{\"name\":\"bus\"}'`)",
+                    }),
+                );
+                return false;
+            }
+            g = self
+                .shared
+                .startup_cv
+                .wait_timeout(g, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
+        *g == Startup::Up
     }
 
     /// mpv `audio-device` for sources (`ao=pipewire`): [`DEVICE`].
@@ -242,10 +325,8 @@ impl Bus {
     /// I7: `(up, generation)` — cheap; the runtime re-targets sources when it changes
     /// (down → mpv's default device; up again → the bus).
     pub fn route(&self) -> (bool, u64) {
-        (
-            self.shared.up.load(Ordering::SeqCst),
-            self.shared.generation.load(Ordering::SeqCst),
-        )
+        let r = self.shared.route.load(Ordering::SeqCst);
+        (r & 1 == 1, r >> 1)
     }
 
     pub fn info(&self) -> BusInfo {
@@ -324,7 +405,7 @@ struct Seen {
     meta_events: Vec<(u32, Option<String>)>,
     done_seq: Option<i32>,
     core_error: Option<String>,
-    /// Set while `Bus::create` may give up on us: setup waits end as soon as the `Bus`
+    /// Set while the `Bus` may drop under a setup: its waits end as soon as it does
     /// drops (its `quit`), so a timed-out create never blocks on the join.
     abort: Option<Arc<Shared>>,
 }
@@ -880,30 +961,30 @@ fn measure_latency(
     Ok((median, quantum))
 }
 
-/// The bus thread: setup (→ `ready`), then the watch loop until `Bus` drops.
-fn run(
-    shared: &Arc<Shared>,
-    rx: mpsc::Receiver<Cmd>,
-    ready: &mpsc::Sender<Result<(), String>>,
-) -> Result<(), String> {
+/// The bus thread: sessions until `Bus` drops. The first one's setup failing is no
+/// different from a connection lost later (cold boot, 2026-10-29: PipeWire or WirePlumber
+/// not up yet) — both go into the I7 reconnect backoff until a session is up.
+fn run(shared: &Arc<Shared>, rx: mpsc::Receiver<Cmd>) {
     pw::init();
     let mut meter_req: Option<Arc<MeterShared>> = None;
-    // The first session's setup failing is `Bus::create`'s error (the caller falls back
-    // to direct streams); a connection lost *later* is re-created (I7).
-    let mut lost = match session(shared, &rx, Some(ready), &mut meter_req)? {
-        End::Quit => return Ok(()),
-        End::Lost(reason) => reason,
+    let mut lost = match session(shared, &rx, &mut meter_req) {
+        Ok(End::Quit) => return,
+        Ok(End::Lost(reason)) => reason,
+        Err(_) if shared.quit.load(Ordering::SeqCst) => return,
+        Err(e) => e,
     };
     let mut delay = RECONNECT_INITIAL;
     let mut attempt = 0u32;
     loop {
         down(shared, &lost);
+        // A first session that failed: the startup wait stops waiting (after the event).
+        shared.settle_startup(Startup::Failed);
         if let Some(m) = &meter_req {
             m.set_error("audio bus down");
         }
         loop {
             if wait_or_quit(shared, &rx, &mut meter_req, delay) {
-                return Ok(());
+                return;
             }
             attempt += 1;
             log::event(
@@ -913,8 +994,8 @@ fn run(
                 None,
                 json!({ "attempt": attempt, "after_ms": delay.as_millis() as u64 }),
             );
-            match session(shared, &rx, None, &mut meter_req) {
-                Ok(End::Quit) => return Ok(()),
+            match session(shared, &rx, &mut meter_req) {
+                Ok(End::Quit) => return,
                 Ok(End::Lost(reason)) => {
                     lost = reason;
                     delay = RECONNECT_INITIAL;
@@ -923,7 +1004,7 @@ fn run(
                 }
                 Err(e) => {
                     if shared.quit.load(Ordering::SeqCst) {
-                        return Ok(());
+                        return;
                     }
                     shared.update(|i| i.reason = Some(e.clone()));
                     log::event(
@@ -976,13 +1057,13 @@ fn wait_or_quit(
 
 /// One bus session: connect, load the loopback, wait for it to link, measure the
 /// latency, then watch (retarget, meter commands) until the `Bus` drops or the connection
-/// fails. `ready` = the first session (its setup result goes to `Bus::create`).
+/// fails. `Err` = the setup failed (the caller retries with backoff).
 fn session(
     shared: &Arc<Shared>,
     rx: &mpsc::Receiver<Cmd>,
-    ready: Option<&mpsc::Sender<Result<(), String>>>,
     meter_req: &mut Option<Arc<MeterShared>>,
 ) -> Result<End, String> {
+    let setup_started = Instant::now();
     let ml = MainLoopRc::new(None).map_err(|e| format!("PipeWire main loop: {e}"))?;
     let context = ContextRc::new(
         &ml,
@@ -1062,6 +1143,17 @@ fn session(
     }
     let module = Module(module);
 
+    if shared.route.load(Ordering::SeqCst) & 1 == 0 {
+        // Truthful meanwhile (`bus` probe): connected, but nothing links the loopback until
+        // a session manager does (a boot where WirePlumber isn't up yet).
+        shared.update(|i| {
+            i.reason = Some(format!(
+                "PipeWire connected; waiting up to {} s for a session manager (WirePlumber) to \
+                 link the bus loopback",
+                CREATE_TIMEOUT.as_secs()
+            ));
+        });
+    }
     let deadline = Instant::now() + CREATE_TIMEOUT;
     wait_until(&ml, &seen, deadline, |s| {
         s.sink().is_some() && s.playback().is_some_and(|pb| !s.linked_targets(pb).is_empty())
@@ -1102,7 +1194,7 @@ fn session(
     // put it on the default before measuring.
     w.step(&seen);
     let until = Instant::now() + RETARGET_TIMEOUT + Duration::from_millis(500);
-    while w.retarget.is_some() && Instant::now() < until {
+    while w.retarget.is_some() && Instant::now() < until && !shared.quit.load(Ordering::SeqCst) {
         ml.loop_().iterate(pw::loop_::Timeout::Finite(TICK));
         w.step(&seen);
     }
@@ -1126,6 +1218,7 @@ fn session(
         shared.update(|i| {
             i.state = BusState::Up;
             i.reason = None;
+            i.connecting = false;
             i.latency_ms = lat_ns as f64 / 1e6;
             i.latency_samples = (lat_ns as f64 * RATE as f64 / 1e9).round() as u64;
             i.quantum_ms = quantum as f64 * 1000.0 / RATE as f64;
@@ -1135,34 +1228,41 @@ fn session(
             i.sink_node = s.sink();
         });
     }
-    shared.up.store(true, Ordering::SeqCst);
-    let generation = shared.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    match ready {
-        Some(r) => {
-            let _ = r.send(Ok(()));
-        }
-        None => {
-            // I7: re-created after a lost connection.
-            let info = shared
-                .info
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            log::event(
-                "audio",
-                Level::Info,
-                "audio.bus.up",
-                None,
-                json!({
-                    "device": info.device,
-                    "latency_ms": info.latency_ms,
-                    "target": info.target,
-                    "reconnected": true,
-                    "generation": generation,
-                }),
-            );
-        }
+    let generation = shared.set_up();
+    shared.update(|i| i.generation = generation);
+    // `reconnected` = not the up `serve`'s startup wait was waiting for: a session after a
+    // lost one, after a failed first one, or a first one that came up after the wait ran
+    // out — every source then moves onto it by the route (`Runtime::track_bus_route`).
+    // Settled under the lock held across the event, so the startup wait hears of it after
+    // the event and the field never disagrees with what the wait decided.
+    let mut startup = shared.startup.lock().unwrap_or_else(|e| e.into_inner());
+    let at_startup = *startup == Startup::Pending;
+    if at_startup {
+        *startup = Startup::Up;
     }
+    let info = shared
+        .info
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    log::event(
+        "audio",
+        Level::Info,
+        "audio.bus.up",
+        None,
+        json!({
+            "device": info.device,
+            "latency_ms": info.latency_ms,
+            "latency_samples": info.latency_samples,
+            "quantum_ms": info.quantum_ms,
+            "target": info.target,
+            "reconnected": !at_startup,
+            "generation": generation,
+            "setup_ms": setup_started.elapsed().as_secs_f64() * 1000.0,
+        }),
+    );
+    drop(startup);
+    shared.startup_cv.notify_all();
     // The meter (if one was asked for) comes back on the new connection.
     if let Some(m) = meter_req.clone() {
         m.clear_error();
@@ -1190,7 +1290,7 @@ fn session(
             // schedules its destroy), so destroying it here too is a double free
             // (measured: "double free or corruption" on a PipeWire kill) — leave it to
             // the context's teardown below.
-            shared.up.store(false, Ordering::SeqCst);
+            shared.set_down();
             w.meter = None;
             std::mem::forget(module);
             return Ok(End::Lost(format!("PipeWire connection error: {e}")));
@@ -1205,9 +1305,10 @@ fn session(
 }
 
 fn down(shared: &Shared, reason: &str) {
-    shared.up.store(false, Ordering::SeqCst);
+    shared.set_down();
     shared.update(|i| {
         i.state = BusState::Down;
+        i.connecting = true;
         i.reason = Some(reason.to_string());
     });
     log::event(

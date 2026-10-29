@@ -80,6 +80,19 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       owner's call.
 
 ## liascape-player (after design approval)
+- [x] **Cold boot: the player blocked 10 s on PipeWire and then had no bus for good** (owner's machine, 2026-10-29
+      05:59): Hyprland's `liascape restore` started `serve` before WirePlumber was up; `Bus::create` waited 10 s for
+      the loopback to link with the socket bound but the loop not running (every `hello` timed out → the backend
+      failed requests fast → the restore's switch failed, no wallpaper), and the first session's failure was final.
+      Now the bus thread starts right after the bind + compositor connection and never blocks `serve` (a bounded
+      500 ms wait from that start, overlapped with EGL — a normal start's bus is up inside it; the worst case stays under the backend's
+      1 s spawn-probe `hello`, whose timeout opens its 3 s stall breaker), a failed or late first session goes into
+      the I7 reconnect backoff, and sources/scene workers/the meter move onto the bus when it comes up
+      (`audio.bus.up {reconnected: true}`); the `bus` probe says `down`, `connecting: true` and what it waits for.
+      Measured: `hello` 5212 ms → 644–707 ms after spawn with a daemon but no WirePlumber (210–247 ms with no audio
+      server). `player-core.md` § Audio bus → Fallback. Guards `tests/api.rs::bus_comes_up_when_pipewire_starts_after_the_player`,
+      `serve_answers_at_once_while_wireplumber_isnt_up_yet`, `scene_moves_onto_a_bus_that_comes_up_late`,
+      `quit_while_the_bus_waits_for_wireplumber_is_prompt`.
 - [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),

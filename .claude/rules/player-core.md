@@ -1727,9 +1727,12 @@ gave up (either the crash budget or `EXIT_NO_COMPOSITOR`'s own backoff, § Super
 available *yet* — `ServeError::NoCompositor`; retried with backoff when supervised,
 exit 1 straight through with `--no-supervise`. **`--ao null` in
 every test (R26)**: it becomes `SourceHost`'s base opts, so every mpv source is silent —
-and no audio bus is created (§ Audio bus). With the default AO, `serve` creates the bus
-right after binding the socket (a second instance exits before touching PipeWire) and
-adds `audio_device` + `audio_delay_bias` to the base opts.
+and no audio bus is created (§ Audio bus). With the default AO, `serve` starts the bus
+thread right after binding the socket and connecting to the compositor (a second instance, and
+a start whose compositor isn't up yet, exit before touching PipeWire), never blocking on it: a bounded wait (`runtime::BUS_STARTUP_WAIT`, 500 ms from that start)
+before the loop runs, and only if the bus is up by then the base opts get `audio_device` +
+`audio_delay_bias` — else sources open on mpv's default device and move onto the bus when it
+comes up (§ Audio bus → Fallback).
 Without `--headless` it draws on the compositor's outputs (§ Wayland); `--outputs` is
 then refused (exit 2).
 
@@ -2096,7 +2099,7 @@ worker", "Hardware decoding"), `loop.long_busy {ms, open_ms}` (debug: a synchron
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
 `snapshot.restored|none|invalid|dropped|source_failed|prop_rejected|saved (debug)|
 write_failed|write_recovered`, `test.crash`,
-`audio.bus.up|down|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
+`audio.bus.up|down|not_ready|retargeting|retarget_failed|moved|latency_shots|latency_unmeasured|thread_panicked`,
 `audio.meter.started`, `audio.meter.scratch_exceeded` (T14 residual — a negotiated quantum
 exceeded the meter's RT scratch cap, chunked rather than reallocated), `probe.dropout`
 (Task 15 — `{corr, report}` or `{corr, skipped}`; review fix round: `report.fit` is
@@ -2458,8 +2461,8 @@ Wallpaper`; sink `node.name = liascape-player-bus`, `node.description = "liascap
 liascape-player` (`audio-client-name`) — auto-mute must exclude by ownership/target, not that name
 alone (spec §4.4).
 
-**`Bus::create()`** (serve startup only; measured ~0.2 s, `Err` after 10 s — the thread
-stops at its next wait): thread `lia-bus` runs its own
+**`Bus::start()`** (serve startup only; **never blocks** — `Err` only for
+`LIASCAPE_PLAYER_BUS=off` or no thread): thread `lia-bus` runs its own
 PipeWire main loop + context + core (nothing uses `RT_PROCESS`: every callback runs on that
 thread; capture buffers carry their cycle time, `pw_buffer.time`). Two roundtrips (globals,
 then the `default` metadata's properties) → `default.audio.sink` → `pw_context_load_module(
@@ -2467,9 +2470,16 @@ then the `default` metadata's properties) → `default.audio.sink` → `pw_conte
 `wrapper.h`) with `capture.props = {media.class = Audio/Sink, node.name = liascape-player-bus,
 node.description = "liascape-player bus", audio.position = [FL FR]}` and `playback.props =
 {node.target = target.object = <default>, identity…}` → waits until the playback is linked
-to a sink → **latency** → `Ok`. `Bus::device()` = `pipewire/liascape-player-bus`;
-`Bus::state()` = `Up | Retargeting | Down`; `Bus::info()` = everything the `bus` probe shows.
-`LIASCAPE_PLAYER_BUS=off` disables it.
+to a sink (≤ `CREATE_TIMEOUT` 5 s) → **latency** → up: `audio.bus.up {device, latency_ms,
+latency_samples, quantum_ms, target, reconnected, generation, setup_ms}` (logged by the bus
+thread for every session). `setup_ms` measured 83–93 ms on the private test PipeWire; on the
+owner's session the old startup's `wl.connected` → `audio.bus.up` (EGL + catalogue + the bus,
+in a row) was 176–300 ms in 45 of 50 starts since 2026-10-22 — and 963 ms – 13 s in the other 5
+(one the cold boot below). `Bus::wait_up(started, deadline)` is serve's bounded wait for the
+first session (below). `Bus::device()` = `pipewire/liascape-player-bus`;
+`Bus::state()` = `Up | Retargeting | Down`; `Bus::route()` = `(up, generation)` (one atomic
+word, so a reader never sees half a change); `Bus::info()` = everything the `bus` probe shows.
+`LIASCAPE_PLAYER_BUS=off` disables it (no thread, no retry).
 
 **Re-target.** The bus thread watches `default.audio.sink` (a default naming the bus itself
 is ignored — it would loop) and moves the playback the way pavucontrol does: default
@@ -2538,7 +2548,10 @@ call `unmeasured`. Guard `tests/api.rs::meter_capture_runs_on_the_rt_data_thread
 `Meter::available()` (streaming, newest sample ≤ 500 ms old, no error), `Meter::status()`.
 
 **Probes.** `bus` → `{state, device, latency_ms, latency_samples, quantum_ms, target,
-default_sink, requested, overridden, playback_node, sink_node, retargets, reason, now_ms,
+default_sink, requested, overridden, playback_node, sink_node, retargets, connecting (down and
+the thread still setting up / retrying; `false` with no bus at all), generation, reason (while
+down: what it waits for — "connecting to PipeWire", "PipeWire connected; waiting … for a
+session manager (WirePlumber) to link the bus loopback", or the last failure), now_ms,
 meter {available,
 streaming, samples, last_ms, quantum_frames, dropped, error, callback_thread, callback_policy
 (other|fifo|rr)}}` (`now_ms` on the `t_mono_ms`
@@ -2547,10 +2560,33 @@ count, median_db, min_db, max_db, max_gap_ms, first_ms, last_ms, samples: [[t_ms
 an unavailable meter is an **`unsupported` error saying why** (never an empty "all quiet").
 
 **Fallback.** `--ao <anything but pipewire>` → no bus (`--ao null` would only add a sink to
-the owner's session for nothing). `Bus::create` failing (PipeWire unreachable, module
-missing, never linked) → `audio.bus.down {reason}` (warn), sources keep mpv's default
-device (no `audio_device`, no bias), the meter is unavailable. Both are logged exactly
-once; `ctl probe '{"name":"bus"}'` says why. **A connection lost later is re-created (final
+the owner's session for nothing) and `LIASCAPE_PLAYER_BUS=off` → none either: logged once
+(`audio.bus.down {reason}`), never retried. Otherwise the bus is never given up on.
+**Cold boot (2026-10-29, the owner's machine):** Hyprland's `liascape restore` started the
+player before WirePlumber was up; `serve` blocked 10 s in the old `Bus::create` (the loopback
+never linked) with the socket bound but the loop not running — every `hello` timed out, the
+backend failed requests fast and the restore's switch failed (no wallpaper) — and that first
+failure was final: no bus for the whole process although PipeWire was up seconds later. Now:
+the bus thread starts right after the bind and the compositor connection (a start still waiting
+for its compositor never loads a sink into the session on every retry) and connects in the
+background while EGL and the catalogue come up; `serve` waits for its first session at most **`BUS_STARTUP_WAIT` = 500 ms**
+from that start (a normal start is up well inside it — the numbers above — so its sources open
+straight onto the bus; on a boot where the audio server isn't ready it delays the first answer
+by at most that — under the backend's 1 s spawn probe (`Reachable`'s `hello`; a timeout opens
+its 3 s stall breaker) —, measured `hello` 644–707 ms after spawn vs 210–247 ms when the server isn't
+there at all, 5212 ms before), then runs the loop regardless (`audio.bus.not_ready {waited_ms,
+reason}`, warn, if the session is still setting up). A first session that fails (PipeWire
+unreachable: at once; no session manager linking the loopback: after `CREATE_TIMEOUT`) is
+`audio.bus.down {reason}` (warn) and goes into the I7 backoff below like a lost connection; a
+first session that comes up after the wait ran out, or any later one, is `audio.bus.up
+{reconnected: true, generation}` and moves every source onto the bus by the route. Meanwhile
+sources play on mpv's default device (no `audio_device`, no bias) — under a daemon without a
+session manager mpv's own stream isn't linked either, so a video shows its first frame and its
+clock (the audio's) waits until WirePlumber links it —, scene workers' streams take the default
+route (`ToWorker::Route` onto the bus later), the meter is unavailable (`audio bus down
+(<reason>)`; its capture stream starts with the session), and `ctl probe '{"name":"bus"}'` says
+`down`, `connecting: true` and why. A quit during the setup exits at once (its waits end on the
+`Bus` drop; measured 70 ms). **A connection lost later is re-created (final
 review I7):** the `lia-bus` thread runs the bus as *sessions* (`bus::session`) — a core error ends
 one (`audio.bus.down {reason}`; the loopback module is *not* destroyed by us then: it unloads
 itself on a core error, and destroying it too was a measured double free), sources are re-routed
@@ -2560,15 +2596,27 @@ the bus retries with backoff (0.5 s, doubling ≤ 10 s; `audio.bus.reconnecting 
 `.reconnect_failed {reason}`) until a new session is up (`audio.bus.up {reconnected: true,
 generation}`; latency re-measured; the meter's capture stream re-created on the same
 `MeterShared`) — then every source goes back onto the bus with its ramp-in held on `gain.pause`
-until its rebuilt audio chain flows (invariant #8). The first session's setup failing is still
-`Bus::create`'s error (no bus for the process — the fallback above). Shutdown: `Runtime::shutdown` destroys every source first, then
+until its rebuilt audio chain flows (invariant #8). The first session's setup failing takes
+the same path (above). Shutdown: `Runtime::shutdown` destroys every source first, then
 `Audio::close` (`audio.bus.down {reason: "shutdown"}`), so no stream is moved to the default
 sink on the way out; a killed player's sink goes with its PipeWire connection.
 
 **Tests.** `tests/api.rs::bus_down_falls_back_to_default_device` (PipeWire made
 unreachable: empty `PIPEWIRE_RUNTIME_DIR` + bogus `PIPEWIRE_REMOTE`; image source, so
-silent), `ao_null_runs_without_bus`, **`i7_bus_reconnects_after_pipewire_restart`** — a
-*private, hermetic* PipeWire + WirePlumber (`PrivatePw`: own runtime/config/state dirs, no
+silent; down + `connecting`, then it keeps retrying — `reconnecting`/`reconnect_failed`, never
+up), `ao_null_runs_without_bus`, the cold boot (private PipeWire, `PrivatePw::start_daemon` /
+`start_session_manager` start the two daemons apart):
+`bus_comes_up_when_pipewire_starts_after_the_player` (nothing running at spawn; RED before: the
+bus never came up in 20 s), `serve_answers_at_once_while_wireplumber_isnt_up_yet` (the daemon
+without WirePlumber; RED before: `hello` 5212 ms after spawn) — both: `hello` < 2 s after spawn,
+the bus probe down + `connecting`, a looping video created and on screen on mpv's default
+device, then the audio server started → `audio.bus.up {reconnected: true}` on its own, the
+video on `pipewire/liascape-player-bus` with a live AO, its tone on the meter, the ramp-in
+`onset.started {slot: pause, reason: flowed}` —, `scene_moves_onto_a_bus_that_comes_up_late`
+(a tone scene's worker on the `default` route, then `{device: …bus}`, same pid, the tone on the
+bus), `quit_while_the_bus_waits_for_wireplumber_is_prompt`;
+**`i7_bus_reconnects_after_pipewire_restart`** (also: a normal start's first session is
+`reconnected: false`, no `not_ready`) — a *private, hermetic* PipeWire + WirePlumber (`PrivatePw`: own runtime/config/state dirs, no
 D-Bus, WirePlumber's `policy` profile so no ALSA/Bluetooth/V4L2 monitor ever opens a device,
 one null sink; skipped without the binaries; the owner's PipeWire is never touched): tone on
 the bus → both daemons killed → `down` + sources on `auto` → restarted → `up {reconnected}` +
