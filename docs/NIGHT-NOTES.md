@@ -77,3 +77,10 @@ Read this when the owner asks "anything I should know". Append during unattended
   items, 2 scene monitors, the 219-item "Full?" playlist, engine `liascape-player`, every feature healthy.
 - The Stop hook is off (owner). 37 merged agent branches + worktrees and 11 merged local branches removed.
 - Your steps are on the on-screen todo (NixOS module + keybinds + the VT/suspend check).
+
+## Night of 2026-10-29 → 30
+
+Plan (owner: "do whatever you want tonight … continue with our project"; switch to Windows for WE screenshots tomorrow):
+- LWE scene port, one batch at a time (they all patch the same fork branch): B1 property scripts (running), then B2 alpha/colour + keyframes, B3 particle core, B4 text, … per `docs/player/spikes/we-lwe-gap-audit.md`.
+- F6b (compositor CPU per worker mid-transition, 2.45 % vs 0.6 % on-machine) — agent running.
+- ≤ 2 big agents at once; model/effort chosen per agent.
