@@ -69,3 +69,11 @@ Read this when the owner asks "anything I should know". Append during unattended
   lp-player (legacy crashes or shows black on them).
 - **For you:** the VT-switch / suspend check (`phase2.md` § 8) — listed under "Waiting on owner".
 - Your wallpaper was taken over for the runs (blank between them); `livepaper-watch` is started again at the end.
+
+## 2026-10-29 morning
+- **Liascape merged + pushed** (`93cf2d4`); the GitHub repo is now `Kryxzort/liascape` (origin updated). Your data is
+  migrated to `~/.config/liascape` etc. (old dirs untouched; tar backup `~/livepaper-backup-20261029-0542.tar`); the dev
+  units are now `liascape-vite` / `liascape-watch` (the old ones disabled). Verified on the new backend: 315 library
+  items, 2 scene monitors, the 219-item "Full?" playlist, engine `liascape-player`, every feature healthy.
+- The Stop hook is off (owner). 37 merged agent branches + worktrees and 11 merged local branches removed.
+- Your steps are on the on-screen todo (NixOS module + keybinds + the VT/suspend check).
